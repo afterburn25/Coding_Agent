@@ -174,6 +174,7 @@ class RuntimeManager:
                 size = path.stat().st_size
             except OSError:
                 continue
+            issues = list(dict.fromkeys(issues))
             rows.append({
                 "name": path.name,
                 "path": str(path),
@@ -504,8 +505,11 @@ class RuntimeManager:
                     model_ok = path.is_file()
                     if not model_ok:
                         issues.append(f"GGUF model file is missing: {path}")
-                if not fits:
-                    issues.append(fit_reason)
+                if not fits and fit_reason:
+                    # resource_fit also reports availability. Avoid repeating the same
+                    # missing-model condition in a second, slightly different sentence.
+                    if model_ok or "GGUF" not in fit_reason:
+                        issues.append(fit_reason)
                 runnable = bool(executable and model_ok and fits)
             else:
                 runnable = False
