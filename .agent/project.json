@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 157,
-  "next_milestone": "Dogfood ethical temperature 1.0 with generic-refusal retry, then continue real conversation/model-growth testing and harden any remaining model-level refusal or transport failures.",
+  "test_checkpoint": 160,
+  "next_milestone": "Dogfood deterministic chat-image routing and the 160-test build; verify ordinary image generation reaches the image subsystem without chat-model refusal, then harden any remaining ComfyUI/model runtime failures.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -198,5 +198,19 @@
     "sampling_temperature_default": 0.2,
     "generic_refusal_retry": true,
     "generic_refusal_retry_limit": 1
+  },
+  "direct_image_routing": {
+    "auto_text_to_image": true,
+    "bypasses_chat_model": true,
+    "permission_aware": true,
+    "approval_model_free": true,
+    "policy_source": "ImageSafetyPolicy",
+    "naked_term_explicit": true,
+    "specialized_edit_paths_preserved": true,
+    "commits": [
+      "d2959c9",
+      "55715dc",
+      "66170a4"
+    ]
   }
 }

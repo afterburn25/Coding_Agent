@@ -144,6 +144,12 @@ playwright install chromium
 
 See `docs/WEB_RESEARCH.md`.
 
+## Deterministic chat image routing
+
+Text-to-image generation intent is routed directly to the image subsystem in Auto mode. Requests such as `generate a picture of a woman`, `draw a cat`, or `make a portrait` do not ask the chat model to decide whether image generation is allowed. Chat Nexus creates the image job through the existing `generate_image` tool and lets `ImageSafetyPolicy` make the actual policy decision.
+
+This prevents chat-model false positives from turning ordinary image prompts into generic explicit-content refusals. Adult-only synthetic requests are evaluated by the image policy itself; minor/ambiguous-age sexual imagery and other narrow blocked image workflows remain blocked there. Specialized edit/inpaint/outpaint/upscale requests are not forced through the text-to-image shortcut and keep their dedicated tool-selection path.
+
 ## Local image generation/editing
 
 The image system is intentionally backend/model modular:
@@ -265,7 +271,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **157 tests passing**.
+Current expected result: **160 tests passing**.
 
 ## API highlights
 
@@ -425,7 +431,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **157 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **160 passing tests**.
 
 ## Development state
 

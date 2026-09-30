@@ -76,6 +76,8 @@ The orchestrator keeps the live model/tool continuation state in memory while `T
 
 Conversation-policy posture is prompt-layer configuration (`permissive`, `balanced`, `strict`). It changes refusal sensitivity/tone but does not replace the narrow hard policies enforced by specific tool/action modules.
 
+Text-to-image generation is a deterministic intent route in Auto mode: recognized generation requests bypass the chat model and execute the registered `generate_image` tool directly. This keeps the image subsystem's router, permissions, queue/history, and `ImageSafetyPolicy` authoritative. Edit/inpaint/outpaint/upscale operations remain on specialized image-tool selection paths.
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.

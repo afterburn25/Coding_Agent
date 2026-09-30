@@ -73,7 +73,7 @@
 
 ### Tests
 
-`157` automated tests passing.
+`160` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 157 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 160 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -136,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **157 tests passing**.
+- Current automated checkpoint: **160 tests passing**.
 
 
 
@@ -169,6 +169,11 @@
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.
 - At high ethical temperature, generic topic-based refusal responses are detected and retried once under the configured permissive policy. The UI clears the canned refusal before the retry.
+
+- Auto-mode text-to-image generation now bypasses the chat model and calls the image subsystem directly, preventing normal image prompts from being mislabeled as explicit by the chat model.
+- Direct generation respects the existing `image.generate` permission and supports approval without constructing a chat-model session.
+- `ImageSafetyPolicy` is the policy source of truth for direct generation; `naked` is treated consistently with `nude` by the explicit-image policy.
+- Specialized edit/inpaint/outpaint/upscale requests remain on their dedicated image-tool flow instead of being forced through text-to-image generation.
 
 ## Next milestone
 

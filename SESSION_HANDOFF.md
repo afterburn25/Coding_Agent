@@ -312,6 +312,21 @@
 - Unit checkpoint: **157/157 tests passing**.
 - Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, in-place Update, state preservation, and Windows artifacts all passed.
 
+## v0.6 deterministic chat-image routing checkpoint
+
+- Dogfood showed ordinary image requests such as **“generate a picture of a woman”** being falsely answered with generic explicit-content refusal boilerplate by the chat model.
+- Root cause: image intent was only advisory context; the chat model still had to choose/call the image tool and could refuse before reaching the actual image subsystem.
+- Auto-mode text-to-image generation is now deterministic and model-free: recognized generation intent calls `generate_image` directly.
+- Direct image generation respects the existing `image.generate` permission. If approval is required, approval/resume remains model-free end to end.
+- Successful direct generation produces normal image tool events/job cards, so ComfyUI/model routing/history remain unchanged.
+- The Conversation Manager recognizes generation phrasing including `generate/create/make/draw/render/paint/illustrate` plus visual subjects/terms.
+- Specialized `edit image`, `inpaint`, `outpaint`, `upscale`, background replacement/removal, and variations are excluded from the text-to-image shortcut and retain their dedicated tool path.
+- `ImageSafetyPolicy` remains the policy source of truth. `naked` now follows the same explicit-image checks as `nude`.
+- Adult-only synthetic naked/nude prompts are allowed by the image policy; minor/ambiguous-age sexual imagery remains blocked.
+- Feature commit: `d2959c9`; approval correction: `55715dc`; direct-generation scoping: `66170a4`.
+- Unit checkpoint: **160/160 tests passing**.
+- Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, in-place Update, state preservation, and Windows artifacts all passed.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -484,4 +499,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `157 tests` passing.
+Expected at this checkpoint: `160 tests` passing.
