@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 166,
-  "next_milestone": "Dogfood the verified 166-test permissive-conversation build with real local Qwen responses; if model weights still exhaust three refusal retries, add an explicitly configured alternate conversation-model fallback without silently loading the 30B deep coder.",
+  "test_checkpoint": 173,
+  "next_milestone": "Dogfood the verified 173-test build on Windows: confirm live host-local date/time grounding, permissive conversation retry behavior, and the new ComfyUI/image bootstrap together.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -230,5 +230,34 @@
     "natural_request_prefixes": true,
     "source_image_edit_exclusion": true,
     "verified_code_checkpoint": "fbf328c"
+  },
+  "live_clock": {
+    "source": "host OS local clock via datetime.now().astimezone()",
+    "refreshed_each_user_turn": true,
+    "recovered_tasks_refresh": true,
+    "builtin_time_date_day_answers": true,
+    "timezone_aware": true,
+    "fields": [
+      "iso",
+      "date",
+      "time",
+      "weekday",
+      "timezone",
+      "utc_offset",
+      "human_date",
+      "human_time"
+    ],
+    "api": "GET /api/time",
+    "status_field": "clock",
+    "relative_time_grounding": [
+      "today",
+      "now",
+      "yesterday",
+      "tomorrow",
+      "this morning",
+      "this afternoon",
+      "tonight"
+    ],
+    "verified_code_checkpoint": "948bec1"
   }
 }

@@ -101,6 +101,12 @@ Chat Nexus now has a durable Conversation Manager with searchable/restorable con
 
 The Model Growth Lab keeps the live base model intact. Learned behavior, corrections, feedback, and sourced knowledge can become reviewable candidates; approved items can be exported into versioned datasets and training-job manifests for LoRA/QLoRA/full fine-tuning, then evaluated/promoted/rolled back explicitly.
 
+## Live local date/time grounding
+
+Chat Nexus reads the **host operating system clock** with timezone information at runtime instead of relying on model training knowledge for the current date or time. At the start of every user turn it injects a fresh local timestamp (weekday, calendar date, clock time, timezone name, UTC offset, and ISO timestamp) into model context. Recovered tasks receive a fresh clock context as well.
+
+Simple clock questions such as `what time is it?`, `what day is it?`, and `what's today's date?` are answered locally without loading a coding model. The same authoritative clock is available through `GET /api/time` and appears as `clock` in `GET /api/status`. Relative references such as **today**, **tomorrow**, **yesterday**, **tonight**, and **now** are instructed to use this runtime clock unless the user explicitly specifies another timezone.
+
 ## Conversation policy modes
 
 Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, explicit, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.” Adult-only consensual text conversation may use direct explicit language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction.
@@ -271,7 +277,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **166 tests passing**.
+Current expected result: **173 tests passing**.
 
 ## API highlights
 
@@ -431,7 +437,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **166 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **173 passing tests**.
 
 ## Development state
 

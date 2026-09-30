@@ -356,6 +356,20 @@
 - Windows validation for `dd34284`: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, state preservation, installer artifact upload, and portable desktop artifact upload all passed.
 - Next: install/update to this dogfood build and test real local-model adult conversation. If the underlying Qwen weights still exhaust all three retries, add an explicitly configured alternate conversation-model fallback rather than silently loading the 30B deep coder for ordinary chat.
 
+## v0.6 live host-clock grounding checkpoint
+
+- User required Chat Nexus to know the **actual current time**, current day, and current calendar date rather than relying on model training knowledge or a startup timestamp.
+- `AgentOrchestrator.current_time_snapshot()` reads `datetime.now().astimezone()` from the host OS each time it is called, so the active machine timezone and UTC offset are used rather than a hard-coded location.
+- Every new user turn receives a freshly generated clock system context containing weekday, human date, 24-hour time, human clock time with seconds, timezone name, UTC offset, and ISO local timestamp.
+- The prompt explicitly treats that runtime clock as authoritative for **today / now / yesterday / tomorrow / this morning / this afternoon / tonight** unless the user names another timezone.
+- Recovered/interrupted tasks also receive a fresh clock context when their session is reconstructed.
+- Simple clock/date questions (`what time is it?`, `what day is it?`, `what's today's date?`, combined date+time variants) use the built-in local utility route and therefore do not start a coding model.
+- Backend API: `GET /api/time`; `GET /api/status` now includes the same live `clock` snapshot.
+- Clock feature commit: `634a053`. The inherited image-bootstrap test-root regression was corrected in `948bec1`.
+- Unit checkpoint: **173/173 tests passing**.
+- Windows validation for `948bec1`: **green** — native build, installer compile, fresh install, in-place Update/preservation smoke, installer artifact, portable desktop artifact, and dogfood source artifact all passed.
+- Next: update the dogfood Windows install and verify real host-local clock behavior alongside the new ComfyUI/image bootstrap and permissive-conversation behavior.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -528,4 +542,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `166 tests` passing.
+Expected at this checkpoint: `173 tests` passing.
