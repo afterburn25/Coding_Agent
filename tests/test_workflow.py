@@ -111,6 +111,15 @@ class _FinishedProvider:
         return ProviderResponse(message={"role": "assistant", "content": "finished after recovery"}, raw={})
 
 
+class _CaptureProvider:
+    def __init__(self):
+        self.messages = []
+
+    def complete(self, *, messages, tools=None):
+        self.messages = list(messages)
+        return ProviderResponse(message={"role": "assistant", "content": "done"}, raw={})
+
+
 class ApprovalResumeTests(unittest.TestCase):
     def test_approval_resumes_exact_tool_call(self):
         with tempfile.TemporaryDirectory() as td:
@@ -288,6 +297,42 @@ class VerificationRepairLoopTests(unittest.TestCase):
             self.assertEqual(len(shell_calls), 2)
             self.assertTrue(any(e.get("type") == "verification_repair" for e in result.model_events))
             self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "new\n")
+
+
+class SelfHostingContextTests(unittest.TestCase):
+    def test_fresh_self_development_task_gets_guardrail_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "localcodeagent").mkdir()
+            (root / "localcodeagent" / "server.py").write_text("# marker\n", encoding="utf-8")
+            (root / "web").mkdir()
+            (root / "web" / "index.html").write_text("Chat Nexus\n", encoding="utf-8")
+            (root / "SESSION_HANDOFF.md").write_text("# handoff\n", encoding="utf-8")
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(models=[profile], permissions={}, research_enabled=False, auto_verify_after_changes=False, review_after_changes=False)
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: provider
+            result = agent.run("improve Chat Nexus")
+            self.assertEqual(result.content, "done")
+            system_text = "\n".join(str(m.get("content", "")) for m in provider.messages if m.get("role") == "system")
+            self.assertIn("SELF-HOSTING MODE", system_text)
+            self.assertIn("isolated second-instance selftest", system_text)
+            self.assertIn("Do not create Git commits", system_text)
+
+    def test_ui_self_development_launcher_prefills_without_autosubmit(self):
+        app = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("startSelfDevelopment", app)
+        self.assertIn("prepareSelfDevelopmentTask", app)
+        self.assertIn("Do not commit or push unless I explicitly ask", app)
 
 
 if __name__ == "__main__":
