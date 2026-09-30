@@ -51,7 +51,7 @@
 - Local image model/LoRA asset library with install verification and explicit repair/remove operations.
 - Operation-specific ComfyUI workflow selection per image model.
 - Safe upload of source/reference/mask images into ComfyUI input storage.
-- Generated ComfyUI `extra_model_paths.yaml` for Local Code Agent model directories.
+- Generated ComfyUI `extra_model_paths.yaml` for Chat Nexus model directories.
 - Image Model Manager UI for verify/install/repair/remove plus install progress.
 - LoRA discovery/metadata display foundation.
 - ComfyUI API-workflow validation before model loading.
@@ -84,6 +84,20 @@
 - LoRA file import and richer version/compatibility metadata editing, dedicated upscaler/background-removal adapters, and richer comparison controls remain upcoming.
 - Browser automation is optional and requires Playwright + Chromium.
 
+## v0.6 UI checkpoint
+
+- Product renamed to **Chat Nexus** while preserving the existing Python package/repository structure for compatibility.
+- Official orbital CN emblem is stored locally under `web/assets/`.
+- Approved chat-first shell is implemented: slim left rail, center conversation/composer, right Code Diff / Tasks / Terminal utility rail.
+- Existing task approvals, undo, runtime controls, research/image links, model routing, image-job cards, and repository-index controls remain wired to their existing APIs.
+- `chat-nexus` CLI entry point added while retaining `local-code-agent` as a compatibility alias.
+
 ## Next milestone
 
-Complete v0.5 by importing/testing real Qwen/FLUX API workflows through the new workflow manager, completing LoRA injection/management, adding richer progress streaming, mask/before-after UX, persistent browser sessions, and research telemetry/source presentation in the UI.
+Move directly toward **v0.6 self-hosting/dogfooding**:
+1. add SSE/WebSocket streaming for model tokens, tool output, task/research/image progress
+2. add persistent task recovery/resume after process restart or model failure
+3. add first-class GitHub coding actions (branch/commit/push/PR/CI) behind explicit permissions
+4. launch an isolated second Chat Nexus instance for self-update smoke tests before accepting self-modifications
+5. run real dogfood tasks against the Chat Nexus repository and harden failures found there
+6. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
