@@ -114,7 +114,7 @@
 - Dogfood app defaults its workspace to bundled `Source` when present. The Windows ZIP packaging explicitly preserves `Source/.git` so it remains a real Git working tree.
 - Windows package guard rejects any pythonnet / `Python.Runtime.dll` / pywebview path before producing an artifact.
 - Official logo asset was replaced with byte-verified valid PNG data after CI caught a corrupt/truncated prior asset.
-- Unit checkpoint: **102/102 tests passing**. The .NET native desktop build, hidden backend build, package CRC checks, bundled llama.cpp discovery, and native host self-test all pass in CI.
+- Native desktop checkpoint was **102/102 tests passing**; the current overall installer/upgrade checkpoint is **107/107 tests passing**.
 - Next: install/download the 14B and 30B GGUFs on the target machine and begin real Chat Nexus-on-Chat Nexus dogfood development.
 
 ## v0.6 installer/upgrade checkpoint

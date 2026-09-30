@@ -357,7 +357,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **67 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **107 passing tests**.
 
 ## Development state
 

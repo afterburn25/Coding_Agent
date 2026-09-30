@@ -105,7 +105,7 @@
 - Windows product delivery is now a real **`ChatNexus.exe` desktop app**, not a browser-launch workflow.
 - Native host is a self-contained .NET 8 WinForms application using Microsoft WebView2. It launches the Python agent as hidden `backend/ChatNexus.Backend.exe`; pywebview/pythonnet are no longer part of the desktop runtime.
 - The internal backend binds to loopback and is owned/shut down by the desktop process.
-- PyInstaller produces a windowed portable application folder; no console window is shown on normal launch.
+- The Python agent backend is packaged with PyInstaller while the user-facing `ChatNexus.exe` is the self-contained .NET 8 WinForms/WebView2 desktop host; no console window is shown on normal launch.
 - Official Chat Nexus logo is used for the app/UI and its repository bytes are verified.
 - Windows CI builds and smoke-tests the packaged executable before artifact upload.
 - The package bundles a pinned official llama.cpp **Vulkan x64** runtime under `runtime/llama`, so users no longer need a separate llama.cpp install for the portable build.
@@ -114,7 +114,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **102 tests passing**.
+- Current automated checkpoint: **107 tests passing**.
 
 
 
