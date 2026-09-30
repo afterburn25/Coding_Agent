@@ -14,6 +14,7 @@ from .image.manager import ImageManager
 from .config import AgentConfig
 from .models.router import ModelRouter
 from .runtime.manager import RuntimeManager
+from .runtime.setup import suggest_model_profiles, write_suggested_models
 from .research import ResearchCoordinator
 from .tools.base import ToolRegistry
 from .tools.filesystem import register_filesystem_tools
@@ -34,9 +35,10 @@ VERSION = "0.6.0-dev"
 
 
 class AppState:
-    def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path) -> None:
+    def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None) -> None:
         self.config = config
         self.workspace = workspace.resolve()
+        self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
         self.router = ModelRouter(config.models, resource_advisor=self.runtime.resource_fit)
         self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
@@ -87,9 +89,11 @@ class AppState:
         git_repo = (self.workspace / ".git").exists()
         payload.update({
             "workspace": str(self.workspace),
+            "config_path": str(self.config_path),
             "self_hosting_tree": self_tree,
             "git_repository": git_repo,
             "isolated_selftest_available": (self.workspace / "localcodeagent" / "selftest.py").is_file(),
+            "suggested_models": suggest_model_profiles(payload.get("inventory") or []),
         })
         payload["self_hosting_ready"] = bool(
             payload.get("ready_to_code")
@@ -286,6 +290,23 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == "/api/readiness/configure":
+                if body.get("apply") is not True:
+                    self._json({"error": "apply=true is required to change the Chat Nexus config"}, 400)
+                    return
+                readiness = self.state.readiness_payload(probe_external=False)
+                suggestions = list(readiness.get("suggested_models") or [])
+                if not suggestions:
+                    self._json({"error": "No local GGUF models were discovered to configure."}, 400)
+                    return
+                saved = write_suggested_models(self.state.config_path, suggestions)
+                self._json({
+                    "ok": True,
+                    "saved": saved,
+                    "suggested_models": suggestions,
+                    "message": "Model roles were written to config. Restart Chat Nexus to load them.",
+                })
+                return
             if path == "/api/research/plan":
                 task = str(body.get("task", "")).strip()
                 if not task:
@@ -548,8 +569,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path) -> None:
-    state = AppState(config, workspace, runtime_root)
+def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
+    state = AppState(config, workspace, runtime_root, config_path=config_path)
     handler = type("LocalCodeAgentHandler", (Handler,), {"state": state, "web_root": web_root})
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Chat Nexus v{VERSION}")
