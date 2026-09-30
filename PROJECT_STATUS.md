@@ -73,7 +73,7 @@
 
 ### Tests
 
-`140` automated tests passing.
+`154` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 140 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 154 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -136,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **140 tests passing**.
+- Current automated checkpoint: **154 tests passing**.
 
 
 
@@ -159,6 +159,12 @@
 - Completed tasks now persist `final_content`, and the UI can recover the finished response from durable task state if the final SSE event is lost.
 - Short non-coding conversation uses the lightweight utility route; the primary 14B model pre-warms in the background.
 - Local system now exposes Memory & training counts.
+
+- Conversation Manager now supports durable/searchable/restorable chats, personality controls, scoped memory, feedback, and the Trainer / Model Growth UI.
+- Sourced knowledge memory stores researched answers with provenance/freshness and can refresh current-sensitive knowledge.
+- Model Growth Lab supports review candidates, dataset export, versioned offline training-job manifests, evaluation, promotion, and rollback without mutating the live base model in-place.
+- Conversation policy modes are live-configurable: Permissive / Balanced / Strict. Default Permissive suppresses generic adult/sensitive-topic moralizing; narrow hard tool/action safety remains separate and enforced.
+- Policy mode is persisted in `config.json`, surfaced in `/api/status`, and changeable through `POST /api/policy/mode`.
 
 ## Next milestone
 

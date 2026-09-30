@@ -4,11 +4,12 @@
 
 1. **UI** — local ChatGPT-style interface plus runtime and task workflow panels.
 2. **Agent Core** — conversation/tool loop, durable task state, approval pauses, verification, and reviewer handoff.
-3. **Workflow Services** — checkpoints, task ledger, project memory, persistent conversation memory, repository index, verification detection.
+3. **Workflow Services** — checkpoints, task ledger, project memory, persistent/scoped conversation memory, Conversation Manager, sourced knowledge memory, repository index, verification detection.
 4. **Tool System** — permissioned filesystem, transactional patch, shell, Git, and repository-index tools.
 5. **Model Orchestrator** — maps task scope/phase to model roles and resource-fit candidates.
 6. **Runtime Manager** — managed inference processes, health/recovery, hardware telemetry, and residency.
-7. **Providers** — normalize OpenAI-compatible inference APIs.
+7. **Model Growth Lab** — review candidates, dataset export, offline training manifests, evaluation, promotion, and rollback.
+8. **Providers** — normalize OpenAI-compatible inference APIs.
 
 ```text
 UI
@@ -70,6 +71,10 @@ done
 The orchestrator keeps the live model/tool continuation state in memory while `TaskStore` durably records task status, files, verification, review, and summary.
 
 `ConversationMemory` is app-wide and stored under the preserved `data/` area. It keeps bounded recent chat plus explicit preferences/rules and correction examples. Prompt-time rules affect behavior immediately; model-weight training remains a separate explicit offline workflow.
+
+`ConversationManager` owns durable conversation sessions, search/restore, summaries, personality, and feedback. `KnowledgeMemory` stores sourced learned answers with provenance and expiration/freshness metadata. `ModelGrowthLab` turns reviewed behavior/correction/knowledge candidates into versioned offline training datasets/jobs and only promotes evaluated artifacts explicitly.
+
+Conversation-policy posture is prompt-layer configuration (`permissive`, `balanced`, `strict`). It changes refusal sensitivity/tone but does not replace the narrow hard policies enforced by specific tool/action modules.
 
 ## Transactional mutation model
 

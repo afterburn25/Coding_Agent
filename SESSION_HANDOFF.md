@@ -280,6 +280,24 @@
 - Windows native desktop/installer validation: **green**.
 - Next: dogfood continuous conversation across restart, teach preferences/rules and corrections through chat, verify real final-result recovery, then build the reviewed offline training/export workflow.
 
+## v0.6 Conversation Manager / Model Growth / permissive-policy checkpoint
+
+- Conversation Manager and Model Growth Lab are now part of the main Windows app.
+- Durable/searchable/restorable conversation history, personality controls, scoped memory, feedback capture, sourced knowledge memory, and Trainer / Model Growth UI are present.
+- Sourced knowledge keeps provenance and freshness metadata; current-sensitive/expired knowledge can be refreshed rather than treated as permanent truth.
+- Model Growth keeps the live base model intact while collecting reviewable candidates, exporting approved datasets, creating versioned offline LoRA/QLoRA/full-finetune job manifests, and supporting evaluation/promotion/rollback.
+- Conversation policy modes added: **Permissive / Balanced / Strict**.
+- Default **Permissive** explicitly suppresses generic moralizing/refusals merely because a topic is adult, sexual, vulgar, controversial, embarrassing, or otherwise sensitive.
+- Generic boilerplate such as “ethical guidelines” / “something more constructive” is specifically discouraged.
+- Narrow hard tool/action safety remains independently enforced; there is no hard-safety Off mode.
+- Live API: `GET /api/policy`, `POST /api/policy/mode`; active mode also appears in `/api/status`.
+- UI: **Local system → Conversation policy**.
+- Conversation-manager/model-growth feature commit: `aac161f`.
+- Permissive-policy feature commit: `a6d739e`.
+- Unit checkpoint: **154/154 tests passing**.
+- Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, preservation checks, and artifacts all passed.
+- Next: dogfood permissive conversation + sourced learning + reviewed model growth, then harden observed model/training/runtime failures.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -452,4 +470,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `140 tests` passing.
+Expected at this checkpoint: `154 tests` passing.

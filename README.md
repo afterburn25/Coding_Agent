@@ -95,6 +95,18 @@ Chat Nexus now stores bounded conversation history, user-taught preferences/rule
 
 Completed tasks also persist bounded `final_content`. If the final stream event is lost after a task finishes, the UI can recover the actual answer from durable task state instead of reporting a completed-task error.
 
+## Conversation Manager, sourced learning, and Model Growth
+
+Chat Nexus now has a durable Conversation Manager with searchable/restorable conversations, personality controls, feedback capture, persistent scoped memory, and a dedicated Trainer / Model Growth workspace. Sourced research can be remembered with provenance and freshness metadata, and expired/current-sensitive knowledge can be refreshed instead of silently reused forever.
+
+The Model Growth Lab keeps the live base model intact. Learned behavior, corrections, feedback, and sourced knowledge can become reviewable candidates; approved items can be exported into versioned datasets and training-job manifests for LoRA/QLoRA/full fine-tuning, then evaluated/promoted/rolled back explicitly.
+
+## Conversation policy modes
+
+Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.”
+
+This setting controls conversational refusal sensitivity only. Narrow hard safety checks remain enforced by the relevant tool/action layer; there is intentionally no hard-safety **Off** mode. The active policy can be changed live under **Local system → Conversation policy** and is preserved in `config.json`.
+
 ## Outcome-aware model routing
 
 Chat Nexus now learns a bounded routing preference from completed local tasks. The history is stored under `.agent/model_performance.json` by default and deliberately excludes prompts, source code, retrieved pages, credentials, and conversation text.
@@ -247,7 +259,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **140 tests passing**.
+Current expected result: **154 tests passing**.
 
 ## API highlights
 
@@ -407,7 +419,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **140 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **154 passing tests**.
 
 ## Development state
 

@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 140,
-  "next_milestone": "Dogfood persistent conversation across restart, teach preferences/rules and corrections through chat, verify completed-result recovery on real model tasks, then build reviewed offline training/export.",
+  "test_checkpoint": 154,
+  "next_milestone": "Dogfood permissive conversation, sourced learning, and reviewed model growth; harden observed model/training/runtime failures.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -147,5 +147,48 @@
   "routing": {
     "short_non_coding_conversation": "utility",
     "primary_14b_background_prewarm": true
+  },
+  "conversation_manager": {
+    "durable_sessions": true,
+    "search_restore": true,
+    "summaries": true,
+    "personality": true,
+    "scoped_memory": true,
+    "feedback": true,
+    "trainer_ui": "/trainer.html"
+  },
+  "knowledge_memory": {
+    "enabled": true,
+    "provenance": true,
+    "freshness": true,
+    "refresh_current_sensitive": true
+  },
+  "model_growth": {
+    "base_model_preserved": true,
+    "review_candidates": true,
+    "dataset_export": true,
+    "offline_training_jobs": [
+      "lora",
+      "qlora",
+      "full_finetune"
+    ],
+    "evaluation": true,
+    "promotion": true,
+    "rollback": true
+  },
+  "conversation_policy": {
+    "default": "permissive",
+    "modes": [
+      "permissive",
+      "balanced",
+      "strict"
+    ],
+    "hard_safety_off_mode": false,
+    "live_api": [
+      "GET /api/policy",
+      "POST /api/policy/mode"
+    ],
+    "ui": "Local system → Conversation policy",
+    "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety"
   }
 }
