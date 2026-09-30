@@ -96,16 +96,40 @@ jobs:
       - name: Smoke-test fresh install and upgrade preservation
         shell: pwsh
         run: |
+          function Invoke-WithTimeout {
+            param(
+              [string]$FilePath,
+              [string[]]$ArgumentList,
+              [string]$WorkingDirectory = "",
+              [int]$TimeoutSeconds = 180
+            )
+            $Start = @{
+              FilePath = $FilePath
+              ArgumentList = $ArgumentList
+              PassThru = $true
+            }
+            if ($WorkingDirectory) { $Start.WorkingDirectory = $WorkingDirectory }
+            $Process = Start-Process @Start
+            try {
+              Wait-Process -Id $Process.Id -Timeout $TimeoutSeconds -ErrorAction Stop
+            } catch {
+              try { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw "$FilePath timed out after $TimeoutSeconds seconds"
+            }
+            $Process.Refresh()
+            return $Process.ExitCode
+          }
+
           $Setup = (Resolve-Path "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe").Path
           $InstallDir = Join-Path $env:RUNNER_TEMP "Chat Nexus Installer Test"
 
-          $First = Start-Process -FilePath $Setup -ArgumentList @(
+          $FirstExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
             "/VERYSILENT",
             "/SUPPRESSMSGBOXES",
             "/NORESTART",
             "/DIR=`"$InstallDir`""
-          ) -PassThru -Wait
-          if ($First.ExitCode -ne 0) { throw "Fresh installer run failed with exit code $($First.ExitCode)" }
+          ) -TimeoutSeconds 180
+          if ($FirstExit -ne 0) { throw "Fresh installer run failed with exit code $FirstExit" }
 
           $App = Join-Path $InstallDir "ChatNexus.exe"
           if (-not (Test-Path $App)) { throw "Installed ChatNexus.exe is missing" }
@@ -115,8 +139,8 @@ jobs:
           if (-not (Test-Path (Join-Path $InstallDir "Source\localcodeagent\server.py"))) { throw "Installed Source workspace is incomplete" }
           if (-not (Test-Path (Join-Path $InstallDir "config.json"))) { throw "Installer did not seed config.json" }
 
-          $Smoke = Start-Process -FilePath $App -ArgumentList "--self-test" -WorkingDirectory $InstallDir -PassThru -Wait
-          if ($Smoke.ExitCode -ne 0) { throw "Installed ChatNexus.exe self-test failed with exit code $($Smoke.ExitCode)" }
+          $SmokeExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
+          if ($SmokeExit -ne 0) { throw "Installed ChatNexus.exe self-test failed with exit code $SmokeExit" }
 
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "models") | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "data") | Out-Null
@@ -133,12 +157,12 @@ jobs:
 
           # The second run intentionally omits /DIR. The stable AppId and
           # UsePreviousAppDir must rediscover the existing installation.
-          $Upgrade = Start-Process -FilePath $Setup -ArgumentList @(
+          $UpgradeExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
             "/VERYSILENT",
             "/SUPPRESSMSGBOXES",
             "/NORESTART"
-          ) -PassThru -Wait
-          if ($Upgrade.ExitCode -ne 0) { throw "Upgrade installer run failed with exit code $($Upgrade.ExitCode)" }
+          ) -TimeoutSeconds 180
+          if ($UpgradeExit -ne 0) { throw "Upgrade installer run failed with exit code $UpgradeExit" }
 
           if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed downloaded model state" }
           if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed application data" }
@@ -148,8 +172,8 @@ jobs:
           $ConfigAfter = Get-Content -Raw $ConfigPath | ConvertFrom-Json
           if ($ConfigAfter.upgrade_preserve_marker -ne "keep-config") { throw "Upgrade overwrote config.json" }
 
-          $SmokeAfter = Start-Process -FilePath $App -ArgumentList "--self-test" -WorkingDirectory $InstallDir -PassThru -Wait
-          if ($SmokeAfter.ExitCode -ne 0) { throw "Upgraded ChatNexus.exe self-test failed with exit code $($SmokeAfter.ExitCode)" }
+          $SmokeAfterExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
+          if ($SmokeAfterExit -ne 0) { throw "Upgraded ChatNexus.exe self-test failed with exit code $SmokeAfterExit" }
 
       - name: Upload Chat Nexus installer
         uses: actions/upload-artifact@v4
