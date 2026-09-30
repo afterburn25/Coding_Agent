@@ -57,8 +57,8 @@ class RuntimeManagerTests(unittest.TestCase):
 
     def test_resource_aware_router_avoids_model_that_does_not_fit(self):
         with tempfile.TemporaryDirectory() as td:
-            big = self._profile(id="big", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)
-            small = self._profile(id="small", priority=50, estimated_vram_gb=8, estimated_ram_gb=16)
+            big = self._profile(id="big", runtime="external", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)
+            small = self._profile(id="small", runtime="external", priority=50, estimated_vram_gb=8, estimated_ram_gb=16)
             cfg = AgentConfig(models=[big, small])
             manager = RuntimeManager(cfg, base_dir=Path(td))
             manager.hardware = HardwareSnapshot(
@@ -72,6 +72,52 @@ class RuntimeManagerTests(unittest.TestCase):
             decision = router.choose("Implement the backend and frontend for this feature")
             self.assertEqual(decision.model_id, "small")
             self.assertTrue(any("free VRAM" in reason or "CPU offload" in reason for reason in decision.reasons))
+
+
+    @unittest.skipIf(os.name == "nt", "fake executable uses POSIX permissions")
+    def test_missing_deep_model_falls_back_to_available_primary(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "fast.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_server.chmod(0o755)
+            fast = self._profile(
+                id="fast",
+                endpoint="",
+                executable=str(fake_server),
+                model_path="models/fast.gguf",
+                roles=["utility", "fast_coder", "primary_coder"],
+                estimated_vram_gb=8,
+                estimated_ram_gb=16,
+            )
+            deep = self._profile(
+                id="deep",
+                endpoint="",
+                executable=str(fake_server),
+                model_path="models/missing-30b.gguf",
+                roles=["deep_reasoner", "reviewer"],
+                estimated_vram_gb=18,
+                estimated_ram_gb=30,
+                priority=100,
+            )
+            cfg = AgentConfig(models=[fast, deep])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.hardware = HardwareSnapshot(
+                platform="test",
+                total_ram_gb=64,
+                available_ram_gb=48,
+                gpus=[GPUInfo(0, "GPU", 12288, 2048, 10240)],
+                nvidia_smi_available=True,
+            )
+            router = ModelRouter(cfg.models, resource_advisor=manager.resource_fit)
+            decision = router.choose("Investigate a race condition and refactor the architecture")
+            self.assertEqual(decision.role, "deep_reasoner")
+            self.assertEqual(decision.model_id, "fast")
+            self.assertTrue(any("runnable primary-coder fallback" in reason for reason in decision.reasons))
+
 
 
     @unittest.skipIf(os.name == "nt", "fake executable test uses a POSIX shebang")
