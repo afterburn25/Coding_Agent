@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 71,
-  "next_milestone": "Self-host Chat Nexus: event streaming, isolated self-update validation, and dogfood tasks",
+  "test_checkpoint": 75,
+  "next_milestone": "Self-host Chat Nexus: isolated self-update validation, dogfood tasks, and broader workflow streaming",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo"
 }
