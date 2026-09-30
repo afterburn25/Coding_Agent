@@ -81,6 +81,7 @@ var
   ExistingVersion: String;
   ExistingInstallDir: String;
   UpgradeInfoPage: TOutputMsgWizardPage;
+  InstallBundledSource: Boolean;
 
 function InstalledUninstallKey(): String;
 begin
@@ -173,7 +174,19 @@ end;
 
 function ShouldInstallBundledSource(): Boolean;
 begin
-  Result := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
+  Result := InstallBundledSource;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  InstallBundledSource := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
+
+  if InstallBundledSource then
+    Log('No existing Source Git workspace detected; installing the bundled workspace.')
+  else
+    Log('Existing Source Git workspace detected; preserving it unchanged during upgrade.');
+
+  Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
