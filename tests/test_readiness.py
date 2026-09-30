@@ -204,5 +204,16 @@ class ModelSetupPlannerTests(unittest.TestCase):
         self.assertIn("apply:true", app)
 
 
+class LiveFirstRunSetupTests(unittest.TestCase):
+    def test_first_run_setup_activates_models_without_restart(self):
+        server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("reload_model_configuration", server)
+        self.assertIn('saved["restart_required"] = False', server)
+        self.assertIn("Coding models configured and activated.", server)
+        self.assertIn("ready to use without restarting", app)
+        self.assertNotIn("Restart Chat Nexus once to activate", app)
+
+
 if __name__ == "__main__":
     unittest.main()
