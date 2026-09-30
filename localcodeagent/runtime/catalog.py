@@ -58,7 +58,7 @@ CODING_MODEL_CATALOG: tuple[CodingModelAsset, ...] = (
         license="Apache-2.0 base model",
         source_repo="lm-kit/qwen3-coder-30b-a3b-instruct-gguf",
         source_type="community quantization of Qwen/Qwen3-Coder-30B-A3B-Instruct",
-        roles=("primary_coder", "deep_reasoner", "reviewer"),
+        roles=("deep_reasoner", "reviewer"),
         hardware_note="For 12 GB VRAM, expect llama.cpp CPU/GPU offload; 64 GB system RAM is useful.",
         description="Code-focused Qwen3-Coder MoE quantization for stronger repository work and review.",
     ),
