@@ -144,5 +144,56 @@ class ApprovalResumeTests(unittest.TestCase):
             self.assertEqual(second.task["status"], "completed")
 
 
+class _RepairProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, *, messages, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ProviderResponse(message={
+                "role": "assistant", "content": "", "tool_calls": [{
+                    "id": "patch1", "type": "function",
+                    "function": {"name": "apply_patch", "arguments": json.dumps({"changes": [{"path": "a.txt", "replacements": [{"old": "old", "new": "new"}]}]})},
+                }],
+            }, raw={})
+        if self.calls == 2:
+            return ProviderResponse(message={"role": "assistant", "content": "first implementation"}, raw={})
+        return ProviderResponse(message={"role": "assistant", "content": "repaired after verification research"}, raw={})
+
+
+class VerificationRepairLoopTests(unittest.TestCase):
+    def test_failed_verification_reenters_agent_then_retests(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.txt").write_text("old\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+            (root / "tests").mkdir()
+            profile = ModelProfile(id="local", endpoint="http://unused/v1", model="x", roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external")
+            config = AgentConfig(
+                models=[profile], permissions={"filesystem.read": "allow", "filesystem.write": "allow", "shell.execute": "allow"},
+                auto_verify_after_changes=True, review_after_changes=False, max_auto_repair_cycles=1,
+            )
+            router = ModelRouter(config.models)
+            tools = ToolRegistry(config.permissions)
+            tasks = TaskStore(root); checkpoints = CheckpointManager(root)
+            register_filesystem_tools(tools, root, checkpoints=checkpoints, tasks=tasks)
+            shell_calls = []
+            def fake_shell(args):
+                shell_calls.append(args["command"])
+                return ("OUTPUT:\nfailed\nEXIT_CODE=1" if len(shell_calls) == 1 else "OUTPUT:\npassed\nEXIT_CODE=0")
+            tools.register(ToolSpec("run_shell", "test shell", {"type": "object", "properties": {"command": {"type": "string"}}}, "shell.execute", fake_shell))
+            memory = ProjectMemory(root); index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(config, router, tools, _FakeRuntime(), tasks=tasks, checkpoints=checkpoints, memory=memory, repository_index=index)
+            provider = _RepairProvider(); agent._provider_for = lambda _: provider
+
+            result = agent.run("change the file and make tests pass")
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(provider.calls, 3)
+            self.assertEqual(len(shell_calls), 2)
+            self.assertTrue(any(e.get("type") == "verification_repair" for e in result.model_events))
+            self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "new\n")
+
+
 if __name__ == "__main__":
     unittest.main()

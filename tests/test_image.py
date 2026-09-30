@@ -7,6 +7,7 @@ from pathlib import Path
 
 from localcodeagent.image.catalog import discover_image_models
 from localcodeagent.image.policy import ConsentStore, ImageSafetyPolicy
+from localcodeagent.image.library import ImageAssetLibrary
 from localcodeagent.image.router import ImageRouter
 from localcodeagent.image.types import ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
@@ -72,6 +73,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(rendered["1"]["inputs"]["seed"], 42)
         self.assertEqual(rendered["1"]["inputs"]["label"], "hello cat")
 
+    def test_api_workflow_validation_rejects_ui_export(self):
+        ui_workflow = {"nodes": [{"id": 1, "type": "KSampler"}], "links": []}
+        status = WorkflowManager.validate_api(ui_workflow)
+        self.assertFalse(status["valid"])
+        self.assertEqual(status["format"], "ui")
+        self.assertTrue(any("API format" in message for message in status["errors"]))
+
+    def test_api_workflow_validation_tracks_template_variables(self):
+        api_workflow = {
+            "1": {"class_type": "ExampleNode", "inputs": {"prompt": "${prompt}", "seed": "${seed}"}},
+            "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}},
+        }
+        status = WorkflowManager.validate_api(api_workflow)
+        self.assertTrue(status["valid"])
+        self.assertEqual(status["node_count"], 2)
+        self.assertEqual(status["unresolved_tokens"], ["prompt", "seed"])
+
     def test_catalog_discovery(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -80,6 +98,61 @@ class WorkflowTests(unittest.TestCase):
             rows = discover_image_models(root)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["family"], "qwen-image")
+
+
+class ImageLibraryTests(unittest.TestCase):
+    def test_per_operation_workflow_selection(self):
+        profile = ImageModelProfile(
+            id="qwen", family="qwen-image", workflow="default.json",
+            workflows={"image_edit": "edit.json", "inpaint": "inpaint.json"},
+        )
+        self.assertEqual(profile.workflow_for("image_edit"), "edit.json")
+        self.assertEqual(profile.workflow_for("text_to_image"), "default.json")
+
+    def test_model_verification_and_lora_metadata(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models" / "image"
+            workflows = root / "workflows" / "image"
+            model_path = models / "qwen" / "model.gguf"
+            model_path.parent.mkdir(parents=True)
+            model_path.write_bytes(b"model")
+            workflows.mkdir(parents=True)
+            (workflows / "generate.json").write_text("{}", encoding="utf-8")
+            lib = ImageAssetLibrary(base_dir=root, models_dir=models, workflows_dir=workflows)
+            profile = ImageModelProfile(
+                id="qwen", family="qwen-image",
+                components=[{"key": "model", "path": "models/image/qwen/model.gguf", "required": True}],
+                workflows={"text_to_image": "generate.json"},
+            )
+            status = lib.verify_model(profile)
+            self.assertTrue(status["installed"])
+            self.assertTrue(status["workflows"][0]["exists"])
+
+            lora = models / "loras" / "portrait.safetensors"
+            lora.write_bytes(b"lora")
+            saved = lib.save_lora_metadata(str(lora), {"name": "Portrait", "version": "1"})
+            self.assertEqual(saved["name"], "Portrait")
+            rows = lib.list_loras()
+            self.assertEqual(rows[0]["name"], "Portrait")
+
+    def test_existing_verified_model_is_not_replaced_without_repair(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models" / "image"
+            workflows = root / "workflows" / "image"
+            target = models / "qwen" / "model.gguf"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"existing")
+            lib = ImageAssetLibrary(base_dir=root, models_dir=models, workflows_dir=workflows)
+            spec = {
+                "path": "models/image/qwen/model.gguf",
+                "url": "https://example.invalid/model.gguf",
+                "size_bytes": len(b"existing"),
+            }
+            result = lib._download_component(spec, repair=False, progress=lambda *_: None)
+            self.assertEqual(result["status"], "existing")
+            self.assertEqual(target.read_bytes(), b"existing")
 
 
 if __name__ == "__main__":

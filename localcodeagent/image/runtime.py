@@ -37,10 +37,11 @@ class ComfyRuntimeStatus:
 class ComfyUIRuntime:
     """Optionally owns a local ComfyUI process while also supporting external ComfyUI."""
 
-    def __init__(self, *, base_dir: Path, backend: ComfyUIBackend, config) -> None:
+    def __init__(self, *, base_dir: Path, backend: ComfyUIBackend, config, extra_model_paths_config: Path | None = None) -> None:
         self.base_dir = base_dir.resolve()
         self.backend = backend
         self.config = config
+        self.extra_model_paths_config = extra_model_paths_config.resolve() if extra_model_paths_config else None
         self._process: subprocess.Popen | None = None
         self._log_handle = None
         self._lock = threading.RLock()
@@ -72,6 +73,8 @@ class ComfyUIRuntime:
         host = parts.hostname or "127.0.0.1"
         port = parts.port or 8188
         cmd = [python, "main.py", "--listen", host, "--port", str(port)]
+        if self.extra_model_paths_config and self.extra_model_paths_config.is_file():
+            cmd.extend(["--extra-model-paths-config", str(self.extra_model_paths_config)])
         extra = list(getattr(self.config, "comfyui_extra_args", []) or [])
         cmd.extend(str(x) for x in extra)
         return cmd, directory

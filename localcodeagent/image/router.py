@@ -96,7 +96,7 @@ class ImageRouter:
         return ImageRoutingDecision(
             model_id=chosen.id,
             operation=operation,
-            workflow=chosen.workflow,
+            workflow=chosen.workflow_for(operation),
             reasons=reasons,
             required_capabilities=required,
         )

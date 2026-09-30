@@ -11,6 +11,11 @@ class ImageModelProfile:
     backend: str = "comfyui"
     model_path: str = ""
     workflow: str = ""
+    workflows: dict[str, str] = field(default_factory=dict)
+    components: list[dict[str, Any]] = field(default_factory=list)
+    required_nodes: list[str] = field(default_factory=list)
+    homepage: str = ""
+    license_name: str = ""
     capabilities: list[str] = field(default_factory=lambda: ["text_to_image"])
     priority: int = 50
     enabled: bool = True
@@ -22,6 +27,9 @@ class ImageModelProfile:
     speed_tier: str = "balanced"
     quality_tier: str = "balanced"
     notes: str = ""
+
+    def workflow_for(self, operation: str) -> str:
+        return self.workflows.get(operation) or self.workflows.get("default") or self.workflow
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -36,6 +44,8 @@ class ImageRequest:
     height: int = 1024
     count: int = 1
     seed: int | None = None
+    steps: int | None = None
+    guidance: float | None = None
     quality: str = "balanced"
     reference_images: list[str] = field(default_factory=list)
     mask_path: str = ""

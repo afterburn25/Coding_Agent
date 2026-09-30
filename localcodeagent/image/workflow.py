@@ -27,6 +27,67 @@ class WorkflowManager:
             raise ValueError("ComfyUI API workflow must be a JSON object")
         return data
 
+
+    @staticmethod
+    def validate_api(workflow: dict[str, Any]) -> dict[str, Any]:
+        """Validate the subset of ComfyUI API workflow structure we depend on.
+
+        ComfyUI's normal UI/workflow export contains a top-level ``nodes`` list,
+        while the prompt API expects a mapping of node ids to objects containing
+        ``class_type`` and ``inputs``. This catches the common wrong-export case
+        before a multi-gigabyte model is loaded.
+        """
+        errors: list[str] = []
+        if not isinstance(workflow, dict):
+            return {"valid": False, "format": "unknown", "node_count": 0, "errors": ["workflow must be a JSON object"], "unresolved_tokens": []}
+        if isinstance(workflow.get("nodes"), list):
+            errors.append("workflow is ComfyUI UI format; export/save it in API format for /prompt")
+            fmt = "ui"
+        else:
+            fmt = "api"
+
+        nodes: list[tuple[str, dict[str, Any]]] = []
+        for node_id, node in workflow.items():
+            if not isinstance(node, dict):
+                continue
+            if "class_type" in node or "inputs" in node:
+                nodes.append((str(node_id), node))
+                if not isinstance(node.get("class_type"), str) or not str(node.get("class_type", "")).strip():
+                    errors.append(f"node {node_id} is missing class_type")
+                if not isinstance(node.get("inputs"), dict):
+                    errors.append(f"node {node_id} is missing inputs")
+        if not nodes and fmt == "api":
+            errors.append("workflow contains no ComfyUI API nodes")
+
+        unresolved: set[str] = set()
+        def scan(value: Any) -> None:
+            if isinstance(value, dict):
+                for item in value.values():
+                    scan(item)
+            elif isinstance(value, list):
+                for item in value:
+                    scan(item)
+            elif isinstance(value, str):
+                unresolved.update(TOKEN.findall(value))
+        scan(workflow)
+        return {
+            "valid": not errors,
+            "format": fmt,
+            "node_count": len(nodes),
+            "errors": errors,
+            "unresolved_tokens": sorted(unresolved),
+            "class_types": sorted({str(node.get("class_type")) for _, node in nodes if node.get("class_type")}),
+        }
+
+    def inspect(self, name: str) -> dict[str, Any]:
+        try:
+            workflow = self.load(name)
+        except Exception as exc:
+            return {"name": name, "exists": False, "valid": False, "format": "unknown", "node_count": 0, "errors": [f"{type(exc).__name__}: {exc}"], "unresolved_tokens": []}
+        result = self.validate_api(workflow)
+        result.update({"name": name, "exists": True})
+        return result
+
     @staticmethod
     def render(workflow: dict[str, Any], variables: dict[str, Any]) -> dict[str, Any]:
         def convert(value: Any) -> Any:

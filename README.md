@@ -8,9 +8,9 @@ Future development sessions should begin with `README.md`, `PROJECT_STATUS.md`, 
 
 ## Current development version
 
-`0.4.0-dev`
+`0.5.0-dev`
 
-The stable v0.3 coding workflow remains intact while v0.4 adds internet and local-image capabilities.
+The stable coding workflow remains intact while v0.5 adds repository-first research intelligence, automatic verification repair/retest cycles, and hardens the local-image workflow.
 
 ## Core coding-agent capabilities
 
@@ -29,13 +29,15 @@ The stable v0.3 coding workflow remains intact while v0.4 adds internet and loca
 
 ## Internet access
 
-The agent can research current information instead of relying only on model training data:
+The agent can research current information instead of relying only on model training data. The v0.5 research coordinator performs a local repository/environment preflight, identifies version-sensitive knowledge gaps, ranks evidence by source authority/version relevance, caches research, and exposes dedicated documentation/GitHub/error-research tools. Failed verification can automatically return the agent to a diagnose → research → patch → retest loop.
+
+Lower-level tools remain available:
 
 - `web_search`
 - `fetch_url`
 - optional real Chromium automation through `browser_run`
 
-`network.read` and `browser.control` are separate permissions. Browser automation is optional so the core remains lightweight.
+`network.read` and `browser.control` are separate permissions. Likely secrets are redacted from research queries, retrieved pages are treated as untrusted information, and browser automation remains optional. See `docs/RESEARCH_SYSTEM.md` and `docs/WEB_RESEARCH.md`.
 
 Install browser support:
 
@@ -69,7 +71,7 @@ The initial model profiles are:
 - **Qwen-Image-2.1** — preferred quality/editing route.
 - **FLUX.2 Klein 4B** — preferred fast preview/draft route.
 
-Weights are not bundled or silently downloaded. Configure installed paths/workflows in `config.json`.
+Weights are not bundled or silently downloaded. The Image Model Manager can explicitly verify/install/repair/remove configured components; already-valid large files are reused. Configure or import API-format ComfyUI workflows separately.
 
 Supported tool surfaces already include:
 
@@ -92,6 +94,9 @@ http://127.0.0.1:8765/image.html
 It provides drag/drop references, conversational prompting, Auto/manual model selection, operation/quality/resolution/count/seed controls, advanced edit controls, queue progress/cancellation, and an image gallery.
 
 The complete requested image specification is preserved at `docs/IMAGE_MODULE_SPEC.md`.
+
+The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
+
 
 ## Shared GPU management
 
@@ -152,7 +157,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **27 tests passing**.
+Current expected result: **43 tests passing**.
 
 ## API highlights
 
@@ -162,14 +167,18 @@ GET  /api/models
 GET  /api/runtime
 GET  /api/tasks
 GET  /api/index
+GET  /api/research
 GET  /api/image
 GET  /api/image/history
+GET  /api/image/job/<id>
 POST /api/chat
 POST /api/tasks/resume
 POST /api/tasks/undo
 POST /api/runtime/start
 POST /api/runtime/stop
 POST /api/index/rebuild
+POST /api/research/plan
+POST /api/research/run
 POST /api/image/upload
 POST /api/image/generate
 POST /api/image/cancel
@@ -178,6 +187,10 @@ POST /api/image/consent
 POST /api/image/backend/start
 POST /api/image/backend/stop
 POST /api/image/backend/inspect
+POST /api/image/models/verify
+POST /api/image/models/install
+POST /api/image/models/remove
+POST /api/image/loras/metadata
 ```
 
 ## Development state

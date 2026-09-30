@@ -14,8 +14,14 @@
     <a class="workspace-link" href="/">← Coding chat</a>
     <div class="section-title">Backend</div>
     <div id="imageBackend" class="inventory">Checking ComfyUI…</div>
+    <div class="side-actions"><button id="startImageBackend" class="mini-button">Start</button><button id="stopImageBackend" class="mini-button">Stop</button></div>
     <div class="section-title">Image models</div>
+    <div class="side-actions"><button id="verifyImageModels" class="mini-button">Verify all</button></div>
     <div id="imageModels" class="models"></div>
+    <div class="section-title">Installs</div>
+    <div id="imageInstalls" class="inventory"></div>
+    <div class="section-title">LoRA library</div>
+    <div id="loraLibrary" class="inventory"></div>
     <div class="section-title">Model inventory</div>
     <div id="imageInventory" class="inventory"></div>
     <div class="section-title">Subject profiles</div>
@@ -57,6 +63,8 @@
         <summary>Advanced controls</summary>
         <div class="image-controls-grid">
           <label class="wide">Negative prompt<textarea id="negativePrompt" rows="2"></textarea></label>
+          <label>Steps<input id="imageSteps" type="number" min="1" max="200" placeholder="Auto" /></label>
+          <label>Guidance / CFG<input id="imageGuidance" type="number" min="0" max="30" step="0.1" placeholder="Auto" /></label>
           <label>Image strength<input id="imageStrength" type="number" min="0" max="1" step="0.05" placeholder="Auto" /></label>
           <label>Denoise strength<input id="denoiseStrength" type="number" min="0" max="1" step="0.05" placeholder="Auto" /></label>
           <label>LoRA(s)<input id="loras" placeholder="name:0.8, style:0.5" /></label>

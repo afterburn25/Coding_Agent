@@ -50,6 +50,7 @@ class AgentConfig:
         "git.execute": "ask",
         "image.read": "allow",
         "image.generate": "allow",
+        "image.manage": "ask",
         "network.read": "allow",
         "browser.control": "ask",
     })
@@ -84,6 +85,18 @@ class AgentConfig:
     image_auto_run_jobs: bool = True
     image_job_timeout: int = 900
 
+    # v0.5 research/documentation subsystem settings.
+    research_enabled: bool = True
+    research_mode: str = "auto"  # auto | local_only | official | balanced | deep | offline | none
+    research_data_dir: str = ".agent/research"
+    research_cache_ttl_hours: int = 168
+    research_max_queries: int = 6
+    research_max_pages: int = 8
+    research_max_chars_per_source: int = 20000
+    research_trusted_domains: list[str] = field(default_factory=list)
+    research_blocked_domains: list[str] = field(default_factory=list)
+    max_auto_repair_cycles: int = 2
+
 
 def default_config() -> AgentConfig:
     return AgentConfig(
@@ -103,18 +116,48 @@ def default_config() -> AgentConfig:
             ImageModelProfile(
                 id="qwen-image-2.1",
                 family="qwen-image-2.1",
+                model_path="models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+                workflows={
+                    "text_to_image":"qwen/qwen-image-2.1-t2i-api.json",
+                    "edit_image":"qwen/qwen-image-2.1-edit-api.json",
+                    "variation":"qwen/qwen-image-2.1-edit-api.json",
+                    "inpaint":"qwen/qwen-image-2.1-inpaint-api.json",
+                    "outpaint":"qwen/qwen-image-2.1-edit-api.json",
+                    "background_removal":"qwen/qwen-image-2.1-background-removal-api.json",
+                },
+                components=[
+                    {"key":"diffusion_model","path":"models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors","url":"https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors","required":True},
+                    {"key":"text_encoder","path":"models/image/qwen/text_encoders/qwen3vl_8b_int8_convrot.safetensors","url":"https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors","required":True},
+                    {"key":"prompt_encoder","path":"models/image/qwen/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors","url":"https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors","required":False},
+                    {"key":"vae","path":"models/image/qwen/vae/qwen_image_2.1_vae_bf16.safetensors","url":"https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors","required":True},
+                ],
+                required_nodes=["TextEncodeQwenImage21","QwenImage21Cache"],
                 capabilities=["text_to_image", "image_edit", "inpaint", "outpaint", "background_removal", "multi_reference"],
                 priority=80, quality_tier="high", speed_tier="balanced", max_reference_images=10, supports_transparency=True,
-                estimated_vram_gb=11.0, estimated_ram_gb=24.0,
-                notes="Preferred quality/editing model. Configure model_path and a ComfyUI API workflow before use.",
+                quantization="official int8 convrot; GGUF profiles/workflows can be added without changing the router",
+                estimated_vram_gb=11.0, estimated_ram_gb=28.0,
+                homepage="https://huggingface.co/Comfy-Org/Qwen-Image-2.1",
+                notes="Preferred quality/editing path. API-format workflows are verified separately from model files.",
             ),
             ImageModelProfile(
                 id="flux2-klein-4b",
                 family="flux.2-klein",
+                model_path="models/image/flux/diffusion_models/flux-2-klein-4b.safetensors",
+                workflows={
+                    "text_to_image":"flux/flux2-klein-4b-t2i-api.json",
+                    "edit_image":"flux/flux2-klein-4b-edit-api.json",
+                    "variation":"flux/flux2-klein-4b-edit-api.json",
+                },
+                components=[
+                    {"key":"diffusion_model","path":"models/image/flux/diffusion_models/flux-2-klein-4b.safetensors","url":"https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors","required":True},
+                    {"key":"text_encoder","path":"models/image/flux/text_encoders/qwen_3_4b.safetensors","url":"https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors","required":True},
+                    {"key":"vae","path":"models/image/flux/vae/flux2-vae.safetensors","url":"https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors","required":True},
+                ],
                 capabilities=["text_to_image", "image_edit", "multi_reference"],
                 priority=70, quality_tier="balanced", speed_tier="fast", max_reference_images=4,
-                estimated_vram_gb=12.5, estimated_ram_gb=16.0,
-                notes="Fast preview/draft model. Configure model_path and a ComfyUI API workflow before use.",
+                quantization="4B distilled", estimated_vram_gb=9.0, estimated_ram_gb=16.0,
+                homepage="https://huggingface.co/Comfy-Org/flux2-klein",
+                notes="Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing.",
             ),
         ],
     )
@@ -155,4 +198,14 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_restore_chat_model = bool(raw.get("image_restore_chat_model", cfg.image_restore_chat_model))
     cfg.image_auto_run_jobs = bool(raw.get("image_auto_run_jobs", cfg.image_auto_run_jobs))
     cfg.image_job_timeout = max(30, int(raw.get("image_job_timeout", cfg.image_job_timeout)))
+    cfg.research_enabled = bool(raw.get("research_enabled", cfg.research_enabled))
+    cfg.research_mode = str(raw.get("research_mode", cfg.research_mode))
+    cfg.research_data_dir = str(raw.get("research_data_dir", cfg.research_data_dir))
+    cfg.research_cache_ttl_hours = max(1, int(raw.get("research_cache_ttl_hours", cfg.research_cache_ttl_hours)))
+    cfg.research_max_queries = max(1, int(raw.get("research_max_queries", cfg.research_max_queries)))
+    cfg.research_max_pages = max(1, int(raw.get("research_max_pages", cfg.research_max_pages)))
+    cfg.research_max_chars_per_source = max(1000, int(raw.get("research_max_chars_per_source", cfg.research_max_chars_per_source)))
+    cfg.research_trusted_domains = [str(x) for x in raw.get("research_trusted_domains", cfg.research_trusted_domains)]
+    cfg.research_blocked_domains = [str(x) for x in raw.get("research_blocked_domains", cfg.research_blocked_domains)]
+    cfg.max_auto_repair_cycles = max(0, int(raw.get("max_auto_repair_cycles", cfg.max_auto_repair_cycles)))
     return cfg

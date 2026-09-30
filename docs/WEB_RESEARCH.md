@@ -41,3 +41,7 @@ The core application remains usable without Playwright.
 - login/session vault integration
 - source-quality scoring and research bundles
 - streaming browser events into the chat UI
+
+## Research coordinator
+
+For complex/version-sensitive technical work, the higher-level research coordinator in `docs/RESEARCH_SYSTEM.md` should normally be preferred over raw web search. It performs repository/environment preflight, source ranking, cache/provenance handling, and keeps network retrieval as an explicit tool action.

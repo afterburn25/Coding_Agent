@@ -7,18 +7,20 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig
 from .models.router import ModelRouter
 from .runtime.manager import RuntimeManager
+from .research import ResearchCoordinator
 from .tools.base import ToolRegistry
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.image import register_image_tools
 from .tools.repository import register_repository_tools
+from .tools.research import register_research_tools
 from .tools.shell import register_shell_tools
 from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
@@ -27,7 +29,7 @@ from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 
 
-VERSION = "0.4.0-dev"
+VERSION = "0.5.0-dev"
 
 
 class AppState:
@@ -36,16 +38,19 @@ class AppState:
         self.workspace = workspace.resolve()
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
         self.router = ModelRouter(config.models, resource_advisor=self.runtime.resource_fit)
-        self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config)
+        self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
         self.tasks = TaskStore(self.workspace)
         self.checkpoints = CheckpointManager(self.workspace)
         self.memory = ProjectMemory(self.workspace)
         self.repository_index = RepositoryIndex(self.workspace)
+        self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
         register_repository_tools(self.tools, self.repository_index)
+        if config.research_enabled:
+            register_research_tools(self.tools, self.research)
         register_web_tools(self.tools, runtime_root=runtime_root)
         if config.image_enabled:
             register_image_tools(self.tools, self.images)
@@ -58,6 +63,7 @@ class AppState:
             checkpoints=self.checkpoints,
             memory=self.memory,
             repository_index=self.repository_index,
+            research=self.research,
         )
         self.history: list[dict] = []
 
@@ -85,6 +91,37 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         return json.loads(self.rfile.read(length) or b"{}")
 
+    def _image_job_payload(self, job) -> dict:
+        row = job.as_dict()
+        urls: list[str] = []
+        root = self.state.images.generations_dir.resolve()
+        for output in job.outputs:
+            try:
+                rel = Path(output).resolve().relative_to(root).as_posix()
+            except (ValueError, OSError):
+                continue
+            urls.append("/api/image/output/" + quote(rel, safe="/"))
+        row["output_urls"] = urls
+        return row
+
+    def _agent_image_jobs(self, result) -> list[dict]:
+        image_tools = {"generate_image", "edit_image", "inpaint_image", "outpaint_image", "remove_background", "upscale_image", "create_image_variations"}
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for event in result.tool_events:
+            if event.get("name") not in image_tools:
+                continue
+            try:
+                payload = json.loads(str(event.get("result") or "{}"))
+                job_id = str((payload.get("job") or {}).get("id") or "")
+                if not job_id or job_id in seen:
+                    continue
+                rows.append(self._image_job_payload(self.state.images.get_job(job_id)))
+                seen.add(job_id)
+            except Exception:
+                continue
+        return rows
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/status":
@@ -107,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
+                "research": self.state.research.summary(),
                 "image": self.state.images.summary(),
             })
             return
@@ -123,8 +161,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/index":
             self._json(self.state.repository_index.summary())
             return
+        if path == "/api/research":
+            from urllib.parse import parse_qs
+            q = parse_qs(urlparse(self.path).query).get("q", [""])[0]
+            payload = self.state.research.cached(q) if q else self.state.research.summary()
+            self._json(payload)
+            return
         if path == "/api/image":
             self._json(self.state.images.summary())
+            return
+        if path.startswith("/api/image/job/"):
+            job_id = unquote(path[len("/api/image/job/"):]).strip("/")
+            if not job_id:
+                self._json({"error": "job id is required"}, 400)
+                return
+            try:
+                job = self.state.images.get_job(job_id)
+            except KeyError:
+                self._json({"error": "image job not found"}, 404)
+                return
+            self._json({"job": self._image_job_payload(job)})
             return
         if path == "/api/image/history":
             query = urlparse(self.path).query
@@ -133,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"history": self.state.images.history(query=q)})
             return
         if path.startswith("/api/image/output/"):
-            rel = path[len("/api/image/output/"):].strip("/")
+            rel = unquote(path[len("/api/image/output/"):].strip("/"))
             target = (self.state.images.generations_dir / rel).resolve()
             root = self.state.images.generations_dir.resolve()
             if not target.is_relative_to(root) or not target.is_file():
@@ -173,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
             "pending_approval": result.pending_approval,
             "verification": result.verification,
             "review": result.review,
+            "research": result.research,
+            "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         })
 
@@ -180,6 +238,24 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == "/api/research/plan":
+                task = str(body.get("task", "")).strip()
+                if not task:
+                    self._json({"error": "task is required"}, 400)
+                    return
+                plan = self.state.research.prepare_task(task, mode=str(body.get("mode", "auto")))
+                self._json({"ok": True, **plan})
+                return
+
+            if path == "/api/research/run":
+                query = str(body.get("query", "")).strip()
+                if not query:
+                    self._json({"error": "query is required"}, 400)
+                    return
+                session = self.state.research.research_topic(query, mode=str(body.get("mode", "auto")), version=str(body.get("version", "")))
+                self._json({"ok": True, "session": session})
+                return
+
             if path == "/api/image/upload":
                 filename = str(body.get("filename", "reference.png"))
                 encoded = str(body.get("data_base64", ""))
@@ -216,6 +292,38 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/image/backend/inspect":
                 self._json({"ok": True, "backend": self.state.images.backend.inspect()})
+                return
+
+            if path == "/api/image/models/verify":
+                self._json({"ok": True, "models": self.state.images.verify_models(deep_hash=bool(body.get("deep_hash", False)))})
+                return
+
+            if path == "/api/image/models/install":
+                model_id = str(body.get("model_id", "")).strip()
+                if not model_id:
+                    self._json({"error": "model_id is required"}, 400)
+                    return
+                job = self.state.images.start_model_install(model_id, repair=bool(body.get("repair", False)))
+                self._json({"ok": True, "install": job})
+                return
+
+            if path == "/api/image/models/remove":
+                model_id = str(body.get("model_id", "")).strip()
+                if not model_id:
+                    self._json({"error": "model_id is required"}, 400)
+                    return
+                removed = self.state.images.remove_model(model_id)
+                self._json({"ok": True, "removed": removed})
+                return
+
+            if path == "/api/image/loras/metadata":
+                lora_path = str(body.get("path", "")).strip()
+                metadata = body.get("metadata")
+                if not lora_path or not isinstance(metadata, dict):
+                    self._json({"error": "path and metadata object are required"}, 400)
+                    return
+                saved = self.state.images.save_lora_metadata(lora_path, metadata)
+                self._json({"ok": True, "metadata": saved})
                 return
 
             if path == "/api/image/cancel":

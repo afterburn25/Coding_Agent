@@ -27,6 +27,7 @@ class TaskRecord:
     pending_approval: dict[str, Any] | None = None
     summary: str = ""
     error: str = ""
+    research: dict[str, Any] = field(default_factory=dict)
     reverted: bool = False
 
     def as_dict(self) -> dict[str, Any]:

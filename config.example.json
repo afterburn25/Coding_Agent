@@ -86,7 +86,8 @@
     "image.read": "allow",
     "image.generate": "allow",
     "network.read": "allow",
-    "browser.control": "ask"
+    "browser.control": "ask",
+    "image.manage": "ask"
   },
   "max_agent_steps": 12,
   "review_after_changes": true,
@@ -113,8 +114,48 @@
       "id": "qwen-image-2.1",
       "family": "qwen-image-2.1",
       "backend": "comfyui",
-      "model_path": "models/image/qwen/Qwen-Image-2.1.gguf",
-      "workflow": "qwen/qwen-image-2.1.json",
+      "model_path": "models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+      "workflow": "",
+      "workflows": {
+        "text_to_image": "qwen/qwen-image-2.1-t2i-api.json",
+        "edit_image": "qwen/qwen-image-2.1-edit-api.json",
+        "variation": "qwen/qwen-image-2.1-edit-api.json",
+        "inpaint": "qwen/qwen-image-2.1-inpaint-api.json",
+        "outpaint": "qwen/qwen-image-2.1-edit-api.json",
+        "background_removal": "qwen/qwen-image-2.1-background-removal-api.json"
+      },
+      "components": [
+        {
+          "key": "diffusion_model",
+          "path": "models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+          "required": true
+        },
+        {
+          "key": "text_encoder",
+          "path": "models/image/qwen/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "required": true
+        },
+        {
+          "key": "prompt_encoder",
+          "path": "models/image/qwen/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+          "required": false
+        },
+        {
+          "key": "vae",
+          "path": "models/image/qwen/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+          "required": true
+        }
+      ],
+      "required_nodes": [
+        "TextEncodeQwenImage21",
+        "QwenImage21Cache"
+      ],
+      "homepage": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1",
+      "license_name": "",
       "capabilities": [
         "text_to_image",
         "image_edit",
@@ -125,21 +166,49 @@
       ],
       "priority": 80,
       "enabled": true,
-      "quantization": "Q4/Q5 recommended for 12 GB-class systems",
+      "quantization": "official int8 convrot; GGUF profiles/workflows can be added without changing the router",
       "estimated_vram_gb": 11.0,
-      "estimated_ram_gb": 24.0,
+      "estimated_ram_gb": 28.0,
       "max_reference_images": 10,
       "supports_transparency": true,
       "speed_tier": "balanced",
       "quality_tier": "high",
-      "notes": "Preferred quality/editing path. Replace workflow/model path with the installed variant."
+      "notes": "Preferred quality/editing path. API-format workflows are verified separately from model files."
     },
     {
       "id": "flux2-klein-4b",
       "family": "flux.2-klein",
       "backend": "comfyui",
-      "model_path": "models/image/flux/FLUX.2-klein-4b.safetensors",
-      "workflow": "flux/flux2-klein-4b.json",
+      "model_path": "models/image/flux/diffusion_models/flux-2-klein-4b.safetensors",
+      "workflow": "",
+      "workflows": {
+        "text_to_image": "flux/flux2-klein-4b-t2i-api.json",
+        "edit_image": "flux/flux2-klein-4b-edit-api.json",
+        "variation": "flux/flux2-klein-4b-edit-api.json"
+      },
+      "components": [
+        {
+          "key": "diffusion_model",
+          "path": "models/image/flux/diffusion_models/flux-2-klein-4b.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors",
+          "required": true
+        },
+        {
+          "key": "text_encoder",
+          "path": "models/image/flux/text_encoders/qwen_3_4b.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+          "required": true
+        },
+        {
+          "key": "vae",
+          "path": "models/image/flux/vae/flux2-vae.safetensors",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+          "required": true
+        }
+      ],
+      "required_nodes": [],
+      "homepage": "https://huggingface.co/Comfy-Org/flux2-klein",
+      "license_name": "",
       "capabilities": [
         "text_to_image",
         "image_edit",
@@ -147,14 +216,24 @@
       ],
       "priority": 70,
       "enabled": true,
-      "quantization": "implementation dependent",
-      "estimated_vram_gb": 12.5,
+      "quantization": "4B distilled",
+      "estimated_vram_gb": 9.0,
       "estimated_ram_gb": 16.0,
       "max_reference_images": 4,
       "supports_transparency": false,
       "speed_tier": "fast",
       "quality_tier": "balanced",
-      "notes": "Fast preview/draft path; may require quantization/offload on 12 GB VRAM."
+      "notes": "Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing."
     }
-  ]
+  ],
+  "research_enabled": true,
+  "research_mode": "auto",
+  "research_data_dir": ".agent/research",
+  "research_cache_ttl_hours": 168,
+  "research_max_queries": 6,
+  "research_max_pages": 8,
+  "research_max_chars_per_source": 20000,
+  "research_trusted_domains": [],
+  "research_blocked_domains": [],
+  "max_auto_repair_cycles": 2
 }

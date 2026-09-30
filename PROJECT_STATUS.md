@@ -1,6 +1,6 @@
 # Project Status
 
-## Active version: 0.4.0-dev — Web + Local Image Foundation
+## Active version: 0.5.0-dev — Research Intelligence + Local Image Workflow
 
 ### Stable capabilities retained from v0.1–v0.3
 
@@ -16,7 +16,7 @@
 - Persistent task ledger and project memory.
 - Lightweight repository index.
 
-### Added in v0.4 development
+### Added through v0.5 development
 
 #### Internet/research
 
@@ -24,6 +24,11 @@
 - `fetch_url` readable page/JSON extraction.
 - Optional Playwright/Chromium `browser_run` automation.
 - Separate `network.read` and `browser.control` permissions.
+- Repository-first research coordinator with environment/package inspection.
+- Knowledge-gap detection for current/version-sensitive/error-driven tasks.
+- Ranked local/official/upstream/community evidence with provenance and local cache.
+- Prompt-injection-resistant untrusted-source wrapping and likely-secret query redaction.
+- Automatic verification failure → diagnose/research/fix/retest loop with bounded repair cycles.
 
 #### Local images
 
@@ -42,10 +47,19 @@
 - Shared VRAM coordination with coding LLM runtimes.
 - Agent image tools for generate/edit/inpaint/outpaint/background removal/upscale/variations.
 - Dedicated Image workspace (`/image.html`).
+- Local image model/LoRA asset library with install verification and explicit repair/remove operations.
+- Operation-specific ComfyUI workflow selection per image model.
+- Safe upload of source/reference/mask images into ComfyUI input storage.
+- Generated ComfyUI `extra_model_paths.yaml` for Local Code Agent model directories.
+- Image Model Manager UI for verify/install/repair/remove plus install progress.
+- LoRA discovery/metadata display foundation.
+- ComfyUI API-workflow validation before model loading.
+- Required ComfyUI node checks before generation.
+- Main-chat inline image job cards with polling and Edit/Variation/Upscale/Save controls.
 
 ### Tests
 
-`27` automated tests passing.
+`43` automated tests passing.
 
 ### Important current limitations
 
@@ -53,10 +67,9 @@
 - Real Qwen/FLUX ComfyUI API workflow templates still need to be added/tested against the chosen local node implementations.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
 - Image progress is currently polling-based; ComfyUI WebSocket progress events are not wired into the app yet.
-- Main chat can call image tools, but finished images are not yet automatically rendered inline in chat.
-- Mask painting UI, advanced before/after viewer, LoRA library manager, model download/repair UI, and dedicated upscaler/background-removal adapters remain upcoming.
+- Mask painting UI, advanced before/after viewer, full LoRA import/version/compatibility management, and dedicated upscaler/background-removal adapters remain upcoming.
 - Browser automation is optional and requires Playwright + Chromium.
 
 ## Next milestone
 
-Complete v0.4 by implementing and testing real image workflows, model/LoRA management, inline chat image results, richer progress streaming, mask/before-after UX, and persistent browser sessions.
+Complete v0.5 by importing/testing real Qwen/FLUX API workflows, completing LoRA injection/management, adding richer progress streaming, mask/before-after UX, persistent browser sessions, and research telemetry/source presentation in the UI.

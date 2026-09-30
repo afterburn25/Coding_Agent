@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,6 +50,39 @@ class ComfyUIBackend(ImageBackend):
             except Exception as exc:
                 result[name] = {"error": str(exc)}
         return result
+
+
+    def upload_image(self, path: Path, *, subfolder: str = "local-code-agent", overwrite: bool = True) -> dict[str, Any]:
+        """Upload a local input image to ComfyUI using its multipart image endpoint."""
+        path=Path(path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        boundary="----LocalCodeAgent"+uuid.uuid4().hex
+        mime=mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        parts=[]
+        def field(name: str, value: str) -> None:
+            parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").encode("utf-8"))
+        field("type","input")
+        field("overwrite","true" if overwrite else "false")
+        field("subfolder",subfolder)
+        head=(f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{path.name}\"\r\nContent-Type: {mime}\r\n\r\n").encode("utf-8")
+        tail=(f"\r\n--{boundary}--\r\n").encode("utf-8")
+        body=b"".join(parts)+head+path.read_bytes()+tail
+        last=None
+        for endpoint_path in ("/upload/image","/api/upload/image"):
+            req=urllib.request.Request(self.endpoint+endpoint_path,data=body,method="POST",headers={"Content-Type":f"multipart/form-data; boundary={boundary}"})
+            try:
+                with urllib.request.urlopen(req,timeout=max(self.timeout,30.0)) as resp:
+                    raw=resp.read()
+                result=json.loads(raw.decode("utf-8")) if raw else {}
+                if result.get("name"):
+                    return result
+                last=RuntimeError(f"Unexpected ComfyUI upload response: {result}")
+            except urllib.error.HTTPError as exc:
+                last=exc
+                if exc.code not in {404,405}:
+                    raise
+        raise RuntimeError(f"ComfyUI image upload failed: {last}")
 
     def submit(self, workflow: dict[str, Any]) -> str:
         response = self._json("/prompt", method="POST", payload={"prompt": workflow, "client_id": self.client_id})

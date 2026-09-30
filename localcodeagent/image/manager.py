@@ -11,6 +11,7 @@ from typing import Any
 from .catalog import discover_image_models
 from .comfyui import ComfyUIBackend
 from .policy import ConsentStore, ImageSafetyPolicy
+from .library import ImageAssetLibrary
 from .profiles import SubjectProfileStore
 from .router import ImageRouter
 from .runtime import ComfyUIRuntime
@@ -21,10 +22,11 @@ from .workflow import WorkflowManager
 class ImageManager:
     """Coordinates image routing, queue/history, workflows, profiles and the local backend."""
 
-    def __init__(self, *, base_dir: Path, models: list[ImageModelProfile], runtime=None, config=None) -> None:
+    def __init__(self, *, base_dir: Path, models: list[ImageModelProfile], runtime=None, config=None, workspace: Path | None = None) -> None:
         self.base_dir = base_dir.resolve()
         self.config = config
         self.runtime = runtime
+        self.workspace = workspace.resolve() if workspace else None
         self.models_dir = self._resolve(getattr(config, "image_models_dir", "models/image"))
         self.data_dir = self._resolve(getattr(config, "image_data_dir", "data/image"))
         self.workflows_dir = self._resolve(getattr(config, "image_workflows_dir", "workflows/image"))
@@ -36,11 +38,13 @@ class ImageManager:
         for p in (self.models_dir, self.generations_dir, self.references_dir, self.characters_dir, self.workflows_dir):
             p.mkdir(parents=True, exist_ok=True)
         self.workflows = WorkflowManager(self.workflows_dir)
+        self.library = ImageAssetLibrary(base_dir=self.base_dir, models_dir=self.models_dir, workflows_dir=self.workflows_dir)
+        self.comfy_extra_paths = self.library.write_comfy_extra_paths(self.base_dir / ".agent" / "runtime" / "comfyui_extra_model_paths.yaml")
         self.profiles = SubjectProfileStore(self.characters_dir)
         self.consents = ConsentStore(self.data_dir / "consent_records.json")
         self.policy = ImageSafetyPolicy(self.consents)
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
-        self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config)
+        self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
@@ -93,11 +97,30 @@ class ImageManager:
             "backend": {"type": "comfyui", "endpoint": self.backend.endpoint, "healthy": healthy, "detail": detail[:300], "runtime": backend_runtime},
             "models": [m.as_dict() for m in self.router.models],
             "inventory": discover_image_models(self.models_dir),
+            "model_status": self.library.verify_all(self.router.models),
+            "loras": self.library.list_loras(),
+            "installs": self.library.install_jobs(),
             "workflows": self.workflows.list(),
+            "comfy_extra_model_paths": str(self.comfy_extra_paths),
             "jobs": [j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:25]],
             "profiles": self.profiles.list(),
             "resource_mode": getattr(self.config, "image_resource_mode", "balanced"),
         }
+
+
+    def verify_models(self, *, deep_hash: bool = False) -> list[dict[str, Any]]:
+        return self.library.verify_all(self.router.models, deep_hash=deep_hash)
+
+    def start_model_install(self, model_id: str, *, repair: bool = False) -> dict[str, Any]:
+        profile=self.router.get_profile(model_id)
+        return self.library.start_install(profile, repair=repair)
+
+    def remove_model(self, model_id: str) -> list[str]:
+        profile=self.router.get_profile(model_id)
+        return self.library.remove_model(profile)
+
+    def save_lora_metadata(self, lora_path: str, metadata: dict[str, Any]) -> dict[str, Any]:
+        return self.library.save_lora_metadata(lora_path, metadata)
 
     def save_reference(self, filename: str, data: bytes) -> str:
         safe=Path(filename or "reference.png").name
@@ -124,14 +147,53 @@ class ImageManager:
             threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
         return job
 
+    def _safe_input_path(self, value: str) -> Path:
+        path=Path(value).expanduser().resolve()
+        roots=[self.references_dir.resolve(), self.generations_dir.resolve(), self.characters_dir.resolve()]
+        if self.workspace is not None:
+            roots.append(self.workspace.resolve())
+        if not any(path.is_relative_to(root) for root in roots):
+            raise PermissionError("Image inputs must come from the workspace or Local Code Agent image data directories.")
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        return path
+
+    def _upload_backend_input(self, value: str) -> str:
+        if not value:
+            return ""
+        path=self._safe_input_path(value)
+        result=self.backend.upload_image(path)
+        name=str(result.get("name") or path.name)
+        sub=str(result.get("subfolder") or "").strip("/\\")
+        return f"{sub}/{name}" if sub else name
+
     def _workflow_variables(self, request: ImageRequest, profile: ImageModelProfile) -> dict[str, Any]:
-        return {
+        source=self._upload_backend_input(request.source_image) if request.source_image else ""
+        refs=[self._upload_backend_input(x) for x in request.reference_images]
+        mask=self._upload_backend_input(request.mask_path) if request.mask_path else ""
+        variables: dict[str, Any] = {
             "prompt": request.prompt, "negative_prompt": request.negative_prompt,
             "width": request.width, "height": request.height, "count": request.count,
             "seed": request.seed if request.seed is not None else random.randint(0, 2**31-1),
-            "model_path": profile.model_path, "source_image": request.source_image,
-            "mask_path": request.mask_path, "references": request.reference_images,
+            "steps": request.steps if request.steps is not None else (4 if profile.speed_tier == "fast" else 25),
+            "guidance": request.guidance if request.guidance is not None else 1.0,
+            "model_path": Path(profile.model_path).name if profile.model_path else "",
+            "source_image": source, "mask_path": mask, "references": refs,
+            "image_strength": request.image_strength if request.image_strength is not None else 1.0,
+            "denoise_strength": request.denoise_strength if request.denoise_strength is not None else 1.0,
         }
+        for spec in profile.components:
+            key=str(spec.get("key") or "").strip()
+            raw=str(spec.get("path") or "")
+            if key and raw:
+                variables[key]=Path(raw).name
+                variables[f"component_{key}"]=Path(raw).name
+        for idx,ref in enumerate(refs,1):
+            variables[f"reference_{idx}"]=ref
+        for idx,lora in enumerate(request.loras,1):
+            variables[f"lora_{idx}_name"]=str(lora.get("name") or "")
+            variables[f"lora_{idx}_strength"]=float(lora.get("strength",1.0))
+        return variables
 
     def _run_job(self, job_id: str) -> None:
         job=self._jobs[job_id]
@@ -139,7 +201,23 @@ class ImageManager:
         profile=self.router.get_profile(job.model_id)
         stopped=[]
         try:
-            job.started_at=time.time(); job.state="loading_model"; job.stage="loading model"; job.progress=0.05
+            job.started_at=time.time(); job.state="loading_model"; job.stage="validating workflow"; job.progress=0.03
+            workflow_name=profile.workflow_for(job.operation)
+            if not workflow_name:
+                raise RuntimeError(f"Image model '{profile.id}' has no ComfyUI API workflow configured for {job.operation}.")
+            workflow_status=self.workflows.inspect(workflow_name)
+            if not workflow_status.get("exists"):
+                raise RuntimeError(f"ComfyUI workflow is missing: {workflow_name}")
+            if not workflow_status.get("valid"):
+                detail="; ".join(str(x) for x in workflow_status.get("errors",[])[:4]) or "invalid API workflow"
+                raise RuntimeError(f"ComfyUI workflow '{workflow_name}' is not executable: {detail}")
+
+            verification=self.library.verify_model(profile)
+            if not verification.get("installed"):
+                missing=[c["key"] for c in verification.get("components",[]) if c.get("required") and not c.get("ok")]
+                raise RuntimeError(f"Image model '{profile.id}' is not fully installed. Missing/invalid: {', '.join(missing) or 'required components'}")
+
+            job.stage="loading model"; job.progress=0.05
             if self.runtime is not None:
                 self.runtime.refresh_hardware(); job.vram_before_gb=self.runtime.hardware.free_vram_gb
                 required=max(0.0, profile.estimated_vram_gb)
@@ -147,9 +225,19 @@ class ImageManager:
                     stopped=self.runtime.release_managed_models_for_vram(required_vram_gb=required, mode=getattr(self.config,"image_resource_mode","balanced"))
             self._save_jobs()
             self.backend_runtime.ensure_ready()
-            if not profile.workflow:
-                raise RuntimeError(f"Image model '{profile.id}' has no ComfyUI API workflow configured.")
-            workflow=self.workflows.render(self.workflows.load(profile.workflow), self._workflow_variables(request, profile))
+            if profile.required_nodes:
+                info=self.backend.inspect().get("object_info", {})
+                available=set(info) if isinstance(info, dict) else set()
+                missing_nodes=[name for name in profile.required_nodes if name not in available]
+                if missing_nodes:
+                    raise RuntimeError("ComfyUI is missing required node(s): " + ", ".join(missing_nodes) + ". Update ComfyUI or install the required node implementation.")
+            workflow=self.workflows.render(self.workflows.load(workflow_name), self._workflow_variables(request, profile))
+            rendered_status=self.workflows.validate_api(workflow)
+            if not rendered_status.get("valid"):
+                raise RuntimeError("Rendered ComfyUI workflow failed validation: " + "; ".join(rendered_status.get("errors",[])[:4]))
+            unresolved=rendered_status.get("unresolved_tokens",[])
+            if unresolved:
+                raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
             job.state="generating"; job.stage="generating"; job.progress=0.15
             job.backend_job_id=self.backend.submit(workflow); self._save_jobs()
             deadline=time.monotonic()+max(30, int(getattr(self.config,"image_job_timeout",900)))
@@ -193,6 +281,12 @@ class ImageManager:
         if job.backend_job_id:
             self.backend.cancel(job.backend_job_id)
         job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(); return job
+
+    def get_job(self, job_id: str) -> ImageJob:
+        try:
+            return self._jobs[job_id]
+        except KeyError as exc:
+            raise KeyError(f"Unknown image job {job_id}") from exc
 
     def history(self, *, query: str = "") -> list[dict[str, Any]]:
         if not self.history_path.exists(): return []

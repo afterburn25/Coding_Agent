@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Research · Local Code Agent</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/research.css" />
+</head>
+<body>
+  <div class="research-shell">
+    <aside class="research-side">
+      <div class="brand">Research Agent <span>v0.5</span></div>
+      <a class="workspace-link" href="/">← Coding chat</a>
+      <a class="workspace-link" href="/image.html">Image workspace</a>
+      <div class="section-title">Mode</div>
+      <select id="researchMode" class="full-select">
+        <option value="auto">Auto Research</option>
+        <option value="official">Official Sources</option>
+        <option value="balanced">Balanced</option>
+        <option value="deep">Deep Research</option>
+        <option value="local_only">Local Only</option>
+        <option value="offline">Offline</option>
+      </select>
+      <div class="section-title">Research cache</div>
+      <div id="researchStats" class="inventory">Loading…</div>
+      <div class="section-title">Recent sessions</div>
+      <div id="recentResearch" class="research-recent muted">No research sessions yet.</div>
+    </aside>
+
+    <main class="research-main">
+      <header class="research-header">
+        <div>
+          <h1>Research & Documentation</h1>
+          <p>Repository first → versions → official docs → upstream → community only when needed.</p>
+        </div>
+      </header>
+
+      <section class="research-query-card">
+        <label>What should the agent investigate?
+          <textarea id="researchQuery" rows="4" placeholder="Example: Why does this CUDA error happen with the PyTorch version installed in this project?"></textarea>
+        </label>
+        <div class="research-row">
+          <label>Version / constraint <input id="researchVersion" placeholder="Optional, e.g. PyTorch 2.8" /></label>
+          <div class="research-buttons">
+            <button id="planResearch" class="mini-button">Plan only</button>
+            <button id="runResearch" class="research-primary">Research</button>
+          </div>
+        </div>
+        <div id="researchStatus" class="muted"></div>
+      </section>
+
+      <section class="research-grid">
+        <div class="research-card">
+          <h2>Research plan</h2>
+          <div id="researchPlan" class="research-content muted">No plan yet.</div>
+        </div>
+        <div class="research-card">
+          <h2>Findings</h2>
+          <div id="researchFindings" class="research-content muted">No findings yet.</div>
+        </div>
+      </section>
+
+      <section class="research-card sources-card">
+        <h2>Sources</h2>
+        <div id="researchSources" class="source-list muted">No sources yet.</div>
+      </section>
+    </main>
+  </div>
+  <script src="/research.js"></script>
+</body>
+</html>
