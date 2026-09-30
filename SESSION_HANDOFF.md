@@ -44,7 +44,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **56 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **61 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -143,6 +143,7 @@ No image weights are downloaded automatically yet.
 
 - ComfyUI workflows are now validated as API-format before loading large models.
 - Image Model Manager can import API-format workflows into configured operation slots.
+- Image jobs now expose structured friendly error messages plus collapsed technical diagnostics.
 - Required ComfyUI nodes are checked before generation.
 - Main chat renders/polls image jobs inline and exposes Edit/Variation/Upscale/Save actions.
 - `config.example.json` is synchronized with the current Qwen/FLUX component layouts and research settings.
@@ -153,6 +154,7 @@ No image weights are downloaded automatically yet.
 - Selected LoRAs require explicit workflow template slots before generation, preventing a UI selection from being silently ignored.
 - Subject profiles now apply saved references, preferred model, generation defaults, and assigned LoRAs automatically.
 - Image workspace can filter/use/enable/disable discovered LoRAs.
+- Image job errors are classified into stable codes with user-facing messages and collapsed technical details instead of raw exception strings.
 
 ## Known gaps / next executable steps
 
@@ -171,4 +173,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `56 tests` passing.
+Expected at this checkpoint: `61 tests` passing.
