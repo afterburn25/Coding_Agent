@@ -63,6 +63,10 @@ class AgentConfig:
     max_review_chars: int = 16000
     task_history_limit: int = 100
 
+    # Conversation-policy posture. This controls tone/refusal sensitivity only;
+    # narrow hard safety checks remain enforced in the relevant tool/policy layer.
+    conversation_policy_mode: str = "permissive"  # permissive | balanced | strict
+
     # Persistent conversational memory/training. These records stay local and
     # affect prompts immediately; actual weight training remains an explicit
     # offline/reviewed workflow.
@@ -252,6 +256,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.auto_verify_after_changes = bool(raw.get("auto_verify_after_changes", cfg.auto_verify_after_changes))
     cfg.max_review_chars = max(2000, int(raw.get("max_review_chars", cfg.max_review_chars)))
     cfg.task_history_limit = max(10, int(raw.get("task_history_limit", cfg.task_history_limit)))
+    policy_mode = str(raw.get("conversation_policy_mode", cfg.conversation_policy_mode)).strip().lower()
+    cfg.conversation_policy_mode = policy_mode if policy_mode in {"permissive", "balanced", "strict"} else "permissive"
     cfg.conversation_memory_enabled = bool(raw.get("conversation_memory_enabled", cfg.conversation_memory_enabled))
     cfg.conversation_memory_path = str(raw.get("conversation_memory_path", cfg.conversation_memory_path))
     cfg.conversation_history_limit = max(20, int(raw.get("conversation_history_limit", cfg.conversation_history_limit)))

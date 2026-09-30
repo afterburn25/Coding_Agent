@@ -356,6 +356,32 @@ class AppState:
             pass
         return {"restored": True, "base_model_id": base_id, "applied": applied}
 
+    def set_conversation_policy_mode(self, mode: str) -> dict:
+        mode = str(mode or "").strip().lower()
+        if mode not in {"permissive", "balanced", "strict"}:
+            raise ValueError("policy mode must be permissive, balanced, or strict")
+
+        if self.config_path.exists():
+            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        else:
+            raw = asdict(self.config)
+        raw["conversation_policy_mode"] = mode
+        tmp = self.config_path.with_suffix(self.config_path.suffix + ".policy.tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.config_path)
+
+        self.config.conversation_policy_mode = mode
+        self.agent.config.conversation_policy_mode = mode
+        return {
+            "mode": mode,
+            "hard_tool_safety": True,
+            "message": (
+                "Permissive reduces generic topic-based refusals while narrow hard tool safety remains enforced."
+                if mode == "permissive"
+                else "Conversation policy updated."
+            ),
+        }
+
     def task_payload(self) -> dict:
         current = self.tasks.current()
         return {
@@ -498,6 +524,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
             return
 
+        if path == "/api/policy":
+            self._json({
+                "mode": self.state.config.conversation_policy_mode,
+                "available_modes": ["permissive", "balanced", "strict"],
+                "hard_tool_safety": True,
+            })
+            return
+
         if path == "/api/status":
             runtime = self.state.runtime.summary(probe_external=False)
             self._json({
@@ -515,6 +549,7 @@ class Handler(BaseHTTPRequestHandler):
                     for m in self.state.config.models
                 ],
                 "permissions": self.state.config.permissions,
+                "policy_mode": self.state.config.conversation_policy_mode,
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
@@ -643,6 +678,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == "/api/policy/mode":
+                saved = self.state.set_conversation_policy_mode(str(body.get("mode", "")))
+                self._json({"ok": True, **saved})
+                return
+
             if path == "/api/models/install":
                 catalog_id = str(body.get("catalog_id", "")).strip()
                 if not catalog_id:

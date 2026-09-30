@@ -257,5 +257,6 @@
   "model_growth_enabled": true,
   "model_growth_dir": "data/model_growth",
   "trainer_backend": "external",
-  "trainer_command": ""
+  "trainer_command": "",
+  "conversation_policy_mode": "permissive"
 }

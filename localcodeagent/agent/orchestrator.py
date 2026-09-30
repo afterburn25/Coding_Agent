@@ -30,6 +30,20 @@ You can explain that Chat Nexus can inspect/edit code, run tools with permission
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
 """
 
+POLICY_PROMPTS = {
+    "permissive": """Conversation policy: permissive.
+Do not refuse, moralize, or redirect merely because a topic is adult, sexual, vulgar, controversial, embarrassing, or otherwise sensitive.
+Answer allowed discussion, analysis, fiction, relationships, education, and ordinary adult topics directly and neutrally.
+Do not use generic refusal language about "ethical guidelines", "something more constructive", or similar boilerplate.
+Hard safety/tool policies are enforced separately by the relevant action layer. If a specific hard policy blocks an action, identify that concrete restriction and still help with the allowed portions. Do not invent additional restrictions.""",
+    "balanced": """Conversation policy: balanced.
+Treat sensitive or adult topics neutrally and avoid moralizing or generic boilerplate refusals.
+Follow specific hard tool/action restrictions when they actually apply, and state the concrete reason rather than inventing a broad policy.""",
+    "strict": """Conversation policy: strict.
+Use a cautious tone for sensitive requests and follow all configured hard tool/action restrictions.
+Even in strict mode, avoid vague moralizing. If something is blocked, state the specific applicable restriction and help with allowed alternatives.""",
+}
+
 SYSTEM_PROMPT = """You are Chat Nexus, a local-first software engineering agent.
 Work carefully inside the selected workspace. Inspect before editing. Prefer small, verifiable changes.
 Use tools when they are needed. Prefer apply_patch over whole-file replacement when editing existing files.
@@ -129,6 +143,10 @@ class AgentOrchestrator:
         self.knowledge_memory = knowledge_memory
         self.model_growth = model_growth
         self._sessions: dict[str, _AgentSession] = {}
+
+    def policy_prompt(self) -> str:
+        mode = str(getattr(self.config, "conversation_policy_mode", "permissive") or "permissive").strip().lower()
+        return POLICY_PROMPTS.get(mode, POLICY_PROMPTS["permissive"])
 
     @staticmethod
     def builtin_utility_response(user_text: str) -> str | None:
@@ -1111,6 +1129,7 @@ class AgentOrchestrator:
             if self.knowledge_memory is not None
             else ""
         )
+        policy_context = self.policy_prompt()
         research_context: dict[str, Any] = {}
         if (
             self.config.auto_research_unknown
@@ -1138,6 +1157,8 @@ class AgentOrchestrator:
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": UTILITY_PROMPT},
             ]
+            if policy_context:
+                messages.append({"role": "system", "content": policy_context})
             if persistent_context:
                 messages.append({"role": "system", "content": persistent_context})
             if personality_context:
@@ -1180,6 +1201,8 @@ class AgentOrchestrator:
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
                 },
             ]
+            if policy_context:
+                messages.append({"role": "system", "content": policy_context})
             if persistent_context:
                 messages.append({"role": "system", "content": persistent_context})
             if personality_context:

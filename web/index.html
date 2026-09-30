@@ -57,6 +57,15 @@
           <div id="repoIndex" class="inventory">Not indexed</div>
         </div>
         <div class="system-block">
+          <div class="section-title">Conversation policy</div>
+          <select id="policyMode" class="policy-select">
+            <option value="permissive">Permissive</option>
+            <option value="balanced">Balanced</option>
+            <option value="strict">Strict</option>
+          </select>
+          <small id="policyNote" class="policy-note">Permissive avoids generic adult/sensitive-topic refusals. Narrow hard tool safety remains enforced.</small>
+        </div>
+        <div class="system-block">
           <div class="section-row"><span class="section-title">Memory & training</span><button id="refreshMemory" class="mini-button" type="button">Refresh</button></div>
           <div id="memoryStatus" class="inventory">Loading persistent memory…</div>
           <a class="mini-button trainer-link" href="/trainer.html">Open Trainer / Model Growth</a>
