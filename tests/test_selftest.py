@@ -39,6 +39,7 @@ class SelfUpdateValidationTests(unittest.TestCase):
         self.assertTrue(checks["main_ui"]["ok"])
         self.assertTrue(checks["image_ui"]["ok"])
         self.assertTrue(checks["research_ui"]["ok"])
+        self.assertTrue(checks["trainer_ui"]["ok"])
 
 
 if __name__ == "__main__":

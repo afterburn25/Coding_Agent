@@ -245,5 +245,17 @@
   "conversation_history_limit": 200,
   "conversation_rule_limit": 300,
   "conversation_fact_limit": 500,
-  "conversation_training_limit": 500
+  "conversation_training_limit": 500,
+  "conversations_path": "data/conversations.json",
+  "conversation_summary_after_messages": 24,
+  "knowledge_memory_enabled": true,
+  "knowledge_memory_path": "data/knowledge_memory.json",
+  "knowledge_default_ttl_hours": 720,
+  "knowledge_current_ttl_hours": 12,
+  "knowledge_max_records": 1000,
+  "auto_research_unknown": true,
+  "model_growth_enabled": true,
+  "model_growth_dir": "data/model_growth",
+  "trainer_backend": "external",
+  "trainer_command": ""
 }

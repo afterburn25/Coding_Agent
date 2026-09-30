@@ -22,8 +22,15 @@
         <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
         <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
         <a class="nav-item" href="#systemBlock"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
         <a class="nav-item" href="#systemBlock"><span class="nav-icon">⚙</span><span>Settings</span></a>
       </nav>
+
+      <div class="sidebar-history">
+        <div class="section-row"><span class="section-title">Conversations</span><button id="newChatSmall" class="mini-button" type="button">New</button></div>
+        <input id="conversationSearch" class="history-search" placeholder="Search chats…" />
+        <div id="conversationList" class="conversation-list"><span class="muted">Loading chats…</span></div>
+      </div>
 
       <div class="sidebar-spacer"></div>
 
@@ -52,6 +59,7 @@
         <div class="system-block">
           <div class="section-row"><span class="section-title">Memory & training</span><button id="refreshMemory" class="mini-button" type="button">Refresh</button></div>
           <div id="memoryStatus" class="inventory">Loading persistent memory…</div>
+          <a class="mini-button trainer-link" href="/trainer.html">Open Trainer / Model Growth</a>
         </div>
         <div class="system-block">
           <div class="section-title">Local GGUF inventory</div>

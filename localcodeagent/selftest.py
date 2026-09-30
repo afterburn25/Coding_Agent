@@ -176,6 +176,7 @@ def validate_self_update(
                     ("main_ui", "/", "Chat Nexus"),
                     ("image_ui", "/image.html", "Chat Nexus"),
                     ("research_ui", "/research.html", "Chat Nexus"),
+                    ("trainer_ui", "/trainer.html", "Trainer"),
                 ):
                     try:
                         code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")

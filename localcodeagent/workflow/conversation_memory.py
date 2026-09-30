@@ -4,6 +4,7 @@ import json
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,18 @@ class ConversationMemory:
                     value = raw.get(key)
                     if isinstance(value, list) or key == "version":
                         self._data[key] = value
+                changed = False
+                for key in ("facts", "behavior_rules"):
+                    for row in self._data.get(key, []):
+                        if isinstance(row, dict):
+                            if not row.get("id"):
+                                row["id"] = uuid.uuid4().hex[:12]
+                                changed = True
+                            if not row.get("scope"):
+                                row["scope"] = "global"
+                                changed = True
+                if changed:
+                    self._save()
         except (OSError, ValueError, TypeError):
             pass
 
@@ -70,7 +83,15 @@ class ConversationMemory:
     def _same(a: str, b: str) -> bool:
         return a.casefold().strip() == b.casefold().strip()
 
-    def _append_unique(self, key: str, text: str, limit: int) -> bool:
+    def _append_unique(
+        self,
+        key: str,
+        text: str,
+        limit: int,
+        *,
+        scope: str = "global",
+        scope_id: str = "",
+    ) -> bool:
         clean = self._clean(text)
         if not clean:
             return False
@@ -80,7 +101,14 @@ class ConversationMemory:
             for row in rows
         ):
             return False
-        rows.append({"text": clean, "created_at": time.time(), "active": True})
+        rows.append({
+            "id": uuid.uuid4().hex[:12],
+            "text": clean,
+            "created_at": time.time(),
+            "active": True,
+            "scope": scope,
+            "scope_id": scope_id,
+        })
         self._data[key] = rows[-limit:]
         return True
 
@@ -143,18 +171,44 @@ class ConversationMemory:
                 break
         return previous_user, previous_assistant
 
-    def learn_from_user(self, user_text: str) -> dict[str, list[Any]]:
+    def learn_from_user(
+        self,
+        user_text: str,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> dict[str, list[Any]]:
         """Capture explicit facts, operating rules, and corrections from chat."""
         result: dict[str, list[Any]] = {
             "facts": [],
             "behavior_rules": [],
             "training_examples": [],
+            "forgotten": [],
         }
         if not self.enabled:
             return result
 
         raw = self._clean(user_text, 12000)
         if not raw:
+            return result
+
+        scope = "global"
+        scope_id = ""
+        project_match = re.match(r"^for\s+this\s+project[,:]?\s*(.+)$", raw, flags=re.IGNORECASE)
+        conversation_match = re.match(r"^for\s+this\s+conversation[,:]?\s*(.+)$", raw, flags=re.IGNORECASE)
+        if project_match:
+            scope = "project"
+            scope_id = project_id
+            raw = project_match.group(1).strip()
+        elif conversation_match:
+            scope = "conversation"
+            scope_id = conversation_id
+            raw = conversation_match.group(1).strip()
+
+        forget_match = re.match(r"^forget(?:\s+that)?[,:]?\s*(.+)$", raw, flags=re.IGNORECASE)
+        if forget_match:
+            forgotten = self.forget(forget_match.group(1))
+            result["forgotten"].extend(forgotten)
             return result
 
         with self._lock:
@@ -172,7 +226,7 @@ class ConversationMemory:
                 if match:
                     fact = match.group(1).strip() if match.lastindex else raw
                     break
-            if fact and self._append_unique("facts", fact, self.fact_limit):
+            if fact and self._append_unique("facts", fact, self.fact_limit, scope=scope, scope_id=scope_id):
                 result["facts"].append(fact)
 
             rule: str | None = None
@@ -206,7 +260,7 @@ class ConversationMemory:
                 if correction_rule:
                     rule = correction_rule.group(1).strip()
 
-            if rule and self._append_unique("behavior_rules", rule, self.rule_limit):
+            if rule and self._append_unique("behavior_rules", rule, self.rule_limit, scope=scope, scope_id=scope_id):
                 result["behavior_rules"].append(rule)
 
             correction = bool(re.match(
@@ -224,6 +278,8 @@ class ConversationMemory:
                         "correction": raw[:6000],
                         "created_at": time.time(),
                         "approved": False,
+                        "scope": scope,
+                        "scope_id": scope_id,
                     }
                     self._data.setdefault("training_examples", []).append(example)
                     self._data["training_examples"] = self._data["training_examples"][-self.training_limit:]
@@ -233,19 +289,91 @@ class ConversationMemory:
                 self._save()
         return result
 
-    def prompt_context(self) -> str:
+    def update_item(
+        self,
+        kind: str,
+        item_id: str,
+        *,
+        text: str | None = None,
+        active: bool | None = None,
+        scope: str | None = None,
+        scope_id: str | None = None,
+    ) -> dict[str, Any]:
+        key = "facts" if kind in {"fact", "facts"} else "behavior_rules" if kind in {"rule", "behavior_rule", "behavior_rules"} else ""
+        if not key:
+            raise ValueError("kind must be fact or rule")
+        with self._lock:
+            for row in self._data.get(key, []):
+                if isinstance(row, dict) and str(row.get("id", "")) == item_id:
+                    if text is not None:
+                        clean = self._clean(text)
+                        if not clean:
+                            raise ValueError("text cannot be empty")
+                        row["text"] = clean
+                    if active is not None:
+                        row["active"] = bool(active)
+                    if scope is not None:
+                        if scope not in {"global", "project", "conversation"}:
+                            raise ValueError("scope must be global, project, or conversation")
+                        row["scope"] = scope
+                    if scope_id is not None:
+                        row["scope_id"] = scope_id
+                    row["updated_at"] = time.time()
+                    self._save()
+                    return dict(row)
+        raise KeyError(item_id)
+
+    def forget(self, query: str) -> list[dict[str, Any]]:
+        target = self._clean(query).casefold()
+        if not target:
+            return []
+        forgotten: list[dict[str, Any]] = []
+        with self._lock:
+            for key in ("facts", "behavior_rules"):
+                for row in self._data.get(key, []):
+                    if not isinstance(row, dict) or not row.get("active", True):
+                        continue
+                    text = str(row.get("text", ""))
+                    if target in text.casefold() or text.casefold() in target:
+                        row["active"] = False
+                        row["updated_at"] = time.time()
+                        forgotten.append(dict(row))
+            if forgotten:
+                self._save()
+        return forgotten
+
+    def prompt_context(
+        self,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> str:
         if not self.enabled:
             return ""
+
+        def applies(row: dict[str, Any]) -> bool:
+            if not row.get("active", True):
+                return False
+            scope = str(row.get("scope") or "global")
+            scope_id = str(row.get("scope_id") or "")
+            if scope == "global":
+                return True
+            if scope == "project":
+                return bool(project_id) and scope_id == project_id
+            if scope == "conversation":
+                return bool(conversation_id) and scope_id == conversation_id
+            return False
+
         with self._lock:
             facts = [
                 str(row.get("text", ""))
                 for row in self._data.get("facts", [])
-                if isinstance(row, dict) and row.get("active", True)
+                if isinstance(row, dict) and applies(row)
             ][-40:]
             rules = [
                 str(row.get("text", ""))
                 for row in self._data.get("behavior_rules", [])
-                if isinstance(row, dict) and row.get("active", True)
+                if isinstance(row, dict) and applies(row)
             ][-40:]
         if not facts and not rules:
             return ""

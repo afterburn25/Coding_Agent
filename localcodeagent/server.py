@@ -32,6 +32,9 @@ from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
 from .workflow.memory import ProjectMemory
 from .workflow.conversation_memory import ConversationMemory
+from .workflow.conversation_manager import ConversationManager
+from .workflow.knowledge_memory import KnowledgeMemory
+from .training import ModelGrowthLab
 from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 
@@ -73,6 +76,27 @@ class AppState:
             fact_limit=config.conversation_fact_limit,
             training_limit=config.conversation_training_limit,
         )
+        conversations_path = Path(config.conversations_path).expanduser()
+        if not conversations_path.is_absolute():
+            conversations_path = runtime_root / conversations_path
+        self.conversation_manager = ConversationManager(
+            conversations_path,
+            summarize_after_messages=config.conversation_summary_after_messages,
+        )
+        knowledge_path = Path(config.knowledge_memory_path).expanduser()
+        if not knowledge_path.is_absolute():
+            knowledge_path = runtime_root / knowledge_path
+        self.knowledge_memory = KnowledgeMemory(
+            knowledge_path,
+            enabled=config.knowledge_memory_enabled,
+            default_ttl_hours=config.knowledge_default_ttl_hours,
+            current_ttl_hours=config.knowledge_current_ttl_hours,
+            max_records=config.knowledge_max_records,
+        )
+        growth_dir = Path(config.model_growth_dir).expanduser()
+        if not growth_dir.is_absolute():
+            growth_dir = runtime_root / growth_dir
+        self.model_growth = ModelGrowthLab(growth_dir)
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
@@ -99,8 +123,11 @@ class AppState:
             research=self.research,
             telemetry=self.model_telemetry,
             conversation_memory=self.conversation_memory,
+            conversation_manager=self.conversation_manager,
+            knowledge_memory=self.knowledge_memory,
+            model_growth=self.model_growth,
         )
-        self.history: list[dict] = self.conversation_memory.history(24)
+        self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._prewarm_thread: threading.Thread | None = None
         self._start_primary_prewarm()
 
@@ -170,8 +197,32 @@ class AppState:
             fact_limit=config.conversation_fact_limit,
             training_limit=config.conversation_training_limit,
         )
+        conversations_path = Path(config.conversations_path).expanduser()
+        if not conversations_path.is_absolute():
+            conversations_path = self.runtime.base_dir / conversations_path
+        self.conversation_manager = ConversationManager(
+            conversations_path,
+            summarize_after_messages=config.conversation_summary_after_messages,
+        )
+        knowledge_path = Path(config.knowledge_memory_path).expanduser()
+        if not knowledge_path.is_absolute():
+            knowledge_path = self.runtime.base_dir / knowledge_path
+        self.knowledge_memory = KnowledgeMemory(
+            knowledge_path,
+            enabled=config.knowledge_memory_enabled,
+            default_ttl_hours=config.knowledge_default_ttl_hours,
+            current_ttl_hours=config.knowledge_current_ttl_hours,
+            max_records=config.knowledge_max_records,
+        )
+        growth_dir = Path(config.model_growth_dir).expanduser()
+        if not growth_dir.is_absolute():
+            growth_dir = self.runtime.base_dir / growth_dir
+        self.model_growth = ModelGrowthLab(growth_dir)
         self.agent.conversation_memory = self.conversation_memory
-        self.history = self.conversation_memory.history(24)
+        self.agent.conversation_manager = self.conversation_manager
+        self.agent.knowledge_memory = self.knowledge_memory
+        self.agent.model_growth = self.model_growth
+        self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
 
         starter = next(
@@ -200,6 +251,110 @@ class AppState:
             "start_error": start_error,
             "readiness": self.readiness_payload(probe_external=True),
         }
+
+    @staticmethod
+    def _remove_lora_args(args: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        skip = False
+        for item in args:
+            if skip:
+                skip = False
+                continue
+            text = str(item)
+            if text == "--lora":
+                skip = True
+                continue
+            if text.startswith("--lora="):
+                continue
+            cleaned.append(text)
+        return cleaned
+
+    def activate_growth_candidate(self, candidate_id: str) -> dict:
+        candidate = self.model_growth.candidate_model(candidate_id)
+        if candidate.get("status") != "evaluated" or not candidate.get("evaluation_passed"):
+            raise ValueError("Candidate must pass evaluation before activation")
+        artifact = Path(str(candidate.get("artifact_path") or "")).expanduser()
+        if not artifact.is_absolute():
+            artifact = (self.runtime.base_dir / artifact).resolve()
+        else:
+            artifact = artifact.resolve()
+        if not artifact.is_file():
+            raise FileNotFoundError(f"Candidate artifact does not exist: {artifact}")
+        if artifact.suffix.lower() != ".gguf":
+            raise ValueError("Active llama.cpp growth artifacts must be GGUF files")
+
+        if self.config_path.exists():
+            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        else:
+            raw = asdict(self.config)
+        models = list(raw.get("models") or [])
+        base_id = str(candidate.get("base_model_id") or "")
+        target = next((m for m in models if str(m.get("id")) == base_id), None)
+        if target is None:
+            raise KeyError(f"Base model profile not found: {base_id}")
+
+        backup = {
+            "candidate_id": candidate_id,
+            "base_model_id": base_id,
+            "model_path": str(target.get("model_path") or ""),
+            "extra_args": list(target.get("extra_args") or []),
+            "created_at": time.time(),
+        }
+        backup_path = self.model_growth.root / "activation_backup.json"
+        backup_path.write_text(json.dumps(backup, indent=2), encoding="utf-8")
+
+        method = str(candidate.get("method") or "lora")
+        extra_args = self._remove_lora_args([str(x) for x in target.get("extra_args") or []])
+        if method in {"lora", "qlora"}:
+            target["extra_args"] = [*extra_args, "--lora", str(artifact)]
+        elif method == "full_finetune":
+            target["model_path"] = str(artifact)
+            target["extra_args"] = extra_args
+        else:
+            raise ValueError(f"Unsupported growth method for activation: {method}")
+
+        raw["models"] = models
+        tmp = self.config_path.with_suffix(self.config_path.suffix + ".growth.tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.config_path)
+        try:
+            applied = self.reload_model_configuration()
+        except Exception:
+            self.restore_growth_activation()
+            raise
+        return {
+            "candidate": candidate,
+            "artifact_path": str(artifact),
+            "method": method,
+            "applied": applied,
+        }
+
+    def restore_growth_activation(self) -> dict:
+        backup_path = self.model_growth.root / "activation_backup.json"
+        if not backup_path.is_file():
+            return {"restored": False, "reason": "no activation backup"}
+        backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        if self.config_path.exists():
+            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        else:
+            raw = asdict(self.config)
+        models = list(raw.get("models") or [])
+        base_id = str(backup.get("base_model_id") or "")
+        target = next((m for m in models if str(m.get("id")) == base_id), None)
+        if target is None:
+            raise KeyError(f"Base model profile not found during rollback: {base_id}")
+        target["model_path"] = str(backup.get("model_path") or "")
+        target["extra_args"] = list(backup.get("extra_args") or [])
+        raw["models"] = models
+        tmp = self.config_path.with_suffix(self.config_path.suffix + ".rollback.tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.config_path)
+        applied = self.reload_model_configuration()
+        try:
+            backup_path.unlink()
+        except OSError:
+            pass
+        return {"restored": True, "base_model_id": base_id, "applied": applied}
 
     def task_payload(self) -> dict:
         current = self.tasks.current()
@@ -302,6 +457,47 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
+        if path == "/api/conversations":
+            from urllib.parse import parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            query = str((q.get("q") or [""])[0]).strip()
+            if query:
+                self._json({"results": self.state.conversation_manager.search(query)})
+            else:
+                self._json(self.state.conversation_manager.snapshot())
+            return
+        if path == "/api/knowledge-memory":
+            from urllib.parse import parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            query = str((q.get("q") or [""])[0]).strip()
+            payload = self.state.knowledge_memory.snapshot()
+            if query:
+                payload["results"] = self.state.knowledge_memory.search(query)
+            self._json(payload)
+            return
+        if path == "/api/model-growth":
+            from urllib.parse import parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            status = str((q.get("status") or [""])[0]).strip()
+            payload = self.state.model_growth.summary()
+            payload["candidates"] = self.state.model_growth.candidates(status=status, limit=500)
+            self._json(payload)
+            return
+        if path.startswith("/api/model-growth/job/"):
+            job_id = unquote(path[len("/api/model-growth/job/"):]).strip("/")
+            try:
+                jobs = {str(row.get("id")): row for row in self.state.model_growth.jobs()}
+                if job_id not in jobs:
+                    self._json({"error": "training job not found"}, 404)
+                    return
+                self._json({
+                    "job": jobs[job_id],
+                    "log": self.state.model_growth.training_log(job_id),
+                })
+            except Exception as exc:
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            return
+
         if path == "/api/status":
             runtime = self.state.runtime.summary(probe_external=False)
             self._json({
@@ -521,6 +717,22 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "query is required"}, 400)
                     return
                 session = self.state.research.research_topic(query, mode=str(body.get("mode", "auto")), version=str(body.get("version", "")))
+                if session.get("summary") and session.get("sources"):
+                    record = self.state.knowledge_memory.remember_research(
+                        query,
+                        str(session.get("summary") or ""),
+                        list(session.get("sources") or []),
+                        current_sensitive=self.state.knowledge_memory.is_current_sensitive(query),
+                        metadata={"research_session_id": session.get("id", ""), "manual": True},
+                    )
+                    if record is not None:
+                        self.state.model_growth.collect(
+                            kind="sourced_knowledge",
+                            instruction=query,
+                            response=str(session.get("summary") or ""),
+                            source="manual_research",
+                            metadata={"knowledge_id": record.get("id"), "sources": record.get("sources", [])},
+                        )
                 self._json({"ok": True, "session": session})
                 return
 
@@ -646,20 +858,193 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "consent": record.as_dict()})
                 return
 
+            if path == "/api/conversation-memory/update":
+                kind = str(body.get("kind", "")).strip()
+                item_id = str(body.get("item_id", "")).strip()
+                if not kind or not item_id:
+                    self._json({"error": "kind and item_id are required"}, 400)
+                    return
+                kwargs = {}
+                if "text" in body:
+                    kwargs["text"] = str(body.get("text", ""))
+                if "active" in body:
+                    kwargs["active"] = bool(body.get("active"))
+                if "scope" in body:
+                    scope = str(body.get("scope", "global")).strip().lower()
+                    kwargs["scope"] = scope
+                    if scope == "project":
+                        kwargs["scope_id"] = str(self.state.workspace)
+                    elif scope == "conversation":
+                        kwargs["scope_id"] = str(self.state.conversation_manager.active().get("id") or "")
+                    else:
+                        kwargs["scope_id"] = ""
+                saved = self.state.conversation_memory.update_item(kind, item_id, **kwargs)
+                self._json({"ok": True, "item": saved, "memory": self.state.conversation_memory.snapshot()})
+                return
+
+            if path == "/api/conversation-memory/forget":
+                query = str(body.get("query", "")).strip()
+                if not query:
+                    self._json({"error": "query is required"}, 400)
+                    return
+                forgotten = self.state.conversation_memory.forget(query)
+                self._json({"ok": True, "forgotten": forgotten, "memory": self.state.conversation_memory.snapshot()})
+                return
+
             if path == "/api/conversation-memory/exchange":
                 user_text = str(body.get("user", "")).strip()
                 assistant_text = str(body.get("assistant", "")).strip()
                 if not user_text or not assistant_text:
                     self._json({"error": "user and assistant are required"}, 400)
                     return
-                self.state.conversation_memory.learn_from_user(user_text)
+                self.state.conversation_memory.learn_from_user(
+                    user_text,
+                    project_id=str(self.state.workspace),
+                    conversation_id=str(self.state.conversation_manager.active().get("id") or ""),
+                )
                 self.state.conversation_memory.record_exchange(user_text, assistant_text)
-                self.state.history.extend([
-                    {"role": "user", "content": user_text},
-                    {"role": "assistant", "content": assistant_text},
-                ])
-                self.state.history = self.state.history[-48:]
-                self._json({"ok": True, "memory": self.state.conversation_memory.snapshot()})
+                self.state.conversation_manager.record_exchange(
+                    user_text,
+                    assistant_text,
+                    intent="utility",
+                    model_id="builtin-local",
+                )
+                self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
+                self.state.history = self.state.conversation_manager.history(limit=32)
+                self._json({
+                    "ok": True,
+                    "memory": self.state.conversation_memory.snapshot(),
+                    "conversation": self.state.conversation_manager.active(),
+                })
+                return
+
+            if path == "/api/conversations/new":
+                title = str(body.get("title", "New chat"))
+                row = self.state.conversation_manager.create(title)
+                self.state.history = []
+                self._json({"ok": True, "conversation": row})
+                return
+
+            if path == "/api/conversations/select":
+                conversation_id = str(body.get("conversation_id", "")).strip()
+                if not conversation_id:
+                    self._json({"error": "conversation_id is required"}, 400)
+                    return
+                row = self.state.conversation_manager.set_active(conversation_id)
+                self.state.history = self.state.conversation_manager.history(limit=32)
+                self._json({"ok": True, "conversation": row, "history": self.state.history})
+                return
+
+            if path == "/api/conversations/personality":
+                values = body.get("personality")
+                if not isinstance(values, dict):
+                    self._json({"error": "personality object is required"}, 400)
+                    return
+                saved = self.state.conversation_manager.update_personality(values)
+                self._json({"ok": True, "personality": saved})
+                return
+
+            if path == "/api/conversations/feedback":
+                saved = self.state.conversation_manager.add_feedback(
+                    message_id=str(body.get("message_id", "")),
+                    rating=str(body.get("rating", "")),
+                    note=str(body.get("note", "")),
+                    conversation_id=str(body.get("conversation_id", "")) or None,
+                )
+                note = str(body.get("note", "")).strip()
+                if note:
+                    self.state.model_growth.collect(
+                        kind="feedback",
+                        instruction="Improve future responses using this user feedback.",
+                        response=note,
+                        source="conversation_feedback",
+                        metadata=saved,
+                    )
+                self._json({"ok": True, "feedback": saved})
+                return
+
+            if path == "/api/model-growth/sync":
+                c = self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
+                k = self.state.model_growth.import_knowledge_memory(self.state.knowledge_memory.snapshot())
+                self._json({"ok": True, "conversation_candidates": c, "knowledge_candidates": k, "growth": self.state.model_growth.summary()})
+                return
+
+            if path == "/api/model-growth/review":
+                candidate_id = str(body.get("candidate_id", "")).strip()
+                status = str(body.get("status", "")).strip()
+                if not candidate_id:
+                    self._json({"error": "candidate_id is required"}, 400)
+                    return
+                item = self.state.model_growth.review(candidate_id, status=status, note=str(body.get("note", "")))
+                self._json({"ok": True, "candidate": item})
+                return
+
+            if path == "/api/model-growth/export":
+                manifest = self.state.model_growth.export_dataset(
+                    name=str(body.get("name", "")),
+                    include_knowledge=bool(body.get("include_knowledge", False)),
+                )
+                self._json({"ok": True, "dataset": manifest})
+                return
+
+            if path == "/api/model-growth/job":
+                job = self.state.model_growth.create_training_job(
+                    base_model_id=str(body.get("base_model_id", "qwen3-14b")).strip(),
+                    dataset_path=str(body.get("dataset_path", "")).strip(),
+                    method=str(body.get("method", "lora")).strip(),
+                    output_name=str(body.get("output_name", "")).strip(),
+                    trainer_backend=str(body.get("trainer_backend", self.state.config.trainer_backend)).strip(),
+                    trainer_command=str(body.get("trainer_command", self.state.config.trainer_command)).strip(),
+                    hyperparameters=dict(body.get("hyperparameters") or {}),
+                )
+                self._json({"ok": True, "job": job})
+                return
+
+            if path == "/api/model-growth/job/start":
+                job_id = str(body.get("job_id", "")).strip()
+                if not job_id:
+                    self._json({"error": "job_id is required"}, 400)
+                    return
+                job = self.state.model_growth.start_training_job(job_id)
+                self._json({"ok": True, "job": job})
+                return
+
+            if path == "/api/model-growth/evaluate":
+                candidate_id = str(body.get("candidate_id", "")).strip()
+                if not candidate_id:
+                    self._json({"error": "candidate_id is required"}, 400)
+                    return
+                candidate = self.state.model_growth.evaluate(
+                    candidate_id,
+                    passed=bool(body.get("passed", False)),
+                    metrics=dict(body.get("metrics") or {}),
+                )
+                self._json({"ok": True, "candidate_model": candidate})
+                return
+
+            if path == "/api/model-growth/register":
+                candidate = self.state.model_growth.register_candidate(
+                    job_id=str(body.get("job_id", "")).strip(),
+                    base_model_id=str(body.get("base_model_id", "")).strip(),
+                    artifact_path=str(body.get("artifact_path", "")).strip(),
+                    metrics=dict(body.get("metrics") or {}),
+                )
+                self._json({"ok": True, "candidate_model": candidate})
+                return
+
+            if path == "/api/model-growth/promote":
+                candidate_id = str(body.get("candidate_id", "")).strip()
+                if not candidate_id:
+                    self._json({"error": "candidate_id is required"}, 400)
+                    return
+                activation = self.state.activate_growth_candidate(candidate_id)
+                candidate = self.state.model_growth.promote(candidate_id)
+                self._json({"ok": True, "candidate_model": candidate, "activation": activation})
+                return
+
+            if path == "/api/model-growth/rollback":
+                restored = self.state.restore_growth_activation()
+                self._json({"ok": True, "restored": restored, "registry": self.state.model_growth.rollback()})
                 return
 
             if path == "/api/chat/stream":
@@ -705,11 +1090,7 @@ class Handler(BaseHTTPRequestHandler):
                             mode=mode,
                             event_callback=emit,
                         )
-                        self.state.history.extend([
-                            {"role": "user", "content": message},
-                            {"role": "assistant", "content": result.content},
-                        ])
-                        self.state.history = self.state.history[-48:]
+                        self.state.history = self.state.conversation_manager.history(limit=32)
                         events.put({"type": "result", **self._agent_payload(result)})
                     except Exception as exc:
                         events.put({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
@@ -766,11 +1147,7 @@ class Handler(BaseHTTPRequestHandler):
                         }, 409)
                         return
                 result = self.state.agent.run(message, history=self.state.history, mode=mode)
-                self.state.history.extend([
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": result.content},
-                ])
-                self.state.history = self.state.history[-48:]
+                self.state.history = self.state.conversation_manager.history(limit=32)
                 self._agent_response(result)
                 return
 
@@ -837,8 +1214,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/chat/reset":
-                self.state.history.clear()
-                self._json({"ok": True})
+                row = self.state.conversation_manager.create("New chat")
+                self.state.history = []
+                self._json({"ok": True, "conversation": row})
                 return
 
             self.send_error(HTTPStatus.NOT_FOUND)

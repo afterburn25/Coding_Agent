@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat Nexus · Trainer</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/trainer.css" />
+</head>
+<body>
+  <div class="trainer-shell">
+    <aside class="trainer-side">
+      <div class="brand-lockup">
+        <img src="/assets/chat-nexus-emblem.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Chat <strong>Nexus</strong><small>Trainer / Model Growth</small></div>
+      </div>
+      <a class="workspace-link" href="/">← Chat</a>
+      <a class="workspace-link" href="/research.html">Research Hub</a>
+      <div class="section-title">Growth pipeline</div>
+      <div class="pipeline">
+        <span>Learn</span><b>→</b><span>Review</span><b>→</b><span>Dataset</span><b>→</b><span>Train</span><b>→</b><span>Evaluate</span><b>→</b><span>Promote</span>
+      </div>
+      <p class="muted small">Live conversations update memory immediately. Model weights only change through an explicit offline/versioned training workflow.</p>
+    </aside>
+
+    <main class="trainer-main">
+      <header class="trainer-header">
+        <div><h1>Trainer & Model Growth</h1><p>Teach Chat Nexus through normal conversation, inspect what it learned, and curate what becomes model training data.</p></div>
+        <button id="syncGrowth" class="trainer-primary" type="button">Sync learned items</button>
+      </header>
+
+      <section class="stat-grid">
+        <div class="trainer-card"><small>Remembered facts</small><strong id="factCount">0</strong></div>
+        <div class="trainer-card"><small>Operating rules</small><strong id="ruleCount">0</strong></div>
+        <div class="trainer-card"><small>Training examples</small><strong id="exampleCount">0</strong></div>
+        <div class="trainer-card"><small>Sourced knowledge</small><strong id="knowledgeCount">0</strong></div>
+        <div class="trainer-card"><small>Pending candidates</small><strong id="pendingCount">0</strong></div>
+        <div class="trainer-card"><small>Approved candidates</small><strong id="approvedCount">0</strong></div>
+      </section>
+
+      <section class="trainer-grid">
+        <article class="trainer-card">
+          <div class="card-head"><div><h2>Conversation personality</h2><p>Soft preferences applied to ordinary conversation.</p></div><button id="savePersonality" class="mini-button">Save</button></div>
+          <div id="personalityControls" class="personality-controls"></div>
+        </article>
+
+        <article class="trainer-card">
+          <div class="card-head"><div><h2>Learned rules & preferences</h2><p>Immediate prompt-time behavior.</p></div></div>
+          <div id="rulesList" class="trainer-list muted">No learned rules yet.</div>
+        </article>
+      </section>
+
+      <section class="trainer-card">
+        <div class="card-head">
+          <div><h2>Trainer review queue</h2><p>Only approved candidates are exported into training datasets.</p></div>
+          <select id="candidateFilter"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="">All</option></select>
+        </div>
+        <div id="candidateList" class="candidate-list muted">No candidates.</div>
+      </section>
+
+      <section class="trainer-grid">
+        <article class="trainer-card">
+          <h2>Sourced knowledge memory</h2>
+          <p>Internet/research learning keeps source URLs and expiry timestamps. Current information is refreshed instead of treated as permanent truth.</p>
+          <div id="knowledgeList" class="trainer-list muted">No sourced knowledge yet.</div>
+        </article>
+
+        <article class="trainer-card">
+          <h2>Dataset export</h2>
+          <label>Dataset name <input id="datasetName" placeholder="chat-nexus-personal-v1" /></label>
+          <label class="check-row"><input id="includeKnowledge" type="checkbox" /> Include approved sourced knowledge</label>
+          <button id="exportDataset" class="trainer-primary" type="button">Export approved dataset</button>
+          <div id="datasetResult" class="trainer-result muted">No dataset exported yet.</div>
+        </article>
+      </section>
+
+      <section class="trainer-grid">
+        <article class="trainer-card">
+          <h2>Create training plan</h2>
+          <label>Base model
+            <select id="growthBase"><option value="qwen3-14b">Qwen3 14B</option><option value="qwen3-coder-30b">Qwen3-Coder 30B</option></select>
+          </label>
+          <label>Method
+            <select id="growthMethod"><option value="lora">LoRA</option><option value="qlora">QLoRA</option><option value="full_finetune">Full fine-tune</option></select>
+          </label>
+          <label>Dataset path <input id="growthDataset" placeholder="Export a dataset first" /></label>
+          <label>Output/version name <input id="growthName" placeholder="ChatNexus-Personal-v1" /></label>
+          <label>Trainer command template <input id="trainerCommand" placeholder="External trainer command using {dataset}, {output}, {base_model}, {method}" /></label>
+          <small class="muted">Training never runs automatically. The command is only executed after you explicitly click Run on a planned job.</small>
+          <button id="createGrowthJob" class="trainer-primary" type="button">Create versioned training job</button>
+          <div id="growthJobResult" class="trainer-result muted">No job planned.</div>
+        </article>
+
+        <article class="trainer-card">
+          <h2>Model versions</h2>
+          <label>Finished training job ID <input id="registerJobId" placeholder="job id" /></label>
+          <label>Trained artifact path <input id="registerArtifact" placeholder="Path to LoRA GGUF / model artifact" /></label>
+          <button id="registerCandidate" class="mini-button" type="button">Register trained candidate</button>
+          <p>Training artifacts remain candidates until evaluated and explicitly promoted. Rollback keeps the base model intact.</p>
+          <div id="registryList" class="trainer-list muted">No candidate model versions yet.</div>
+          <button id="rollbackGrowth" class="mini-button" type="button">Rollback active candidate</button>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/trainer.js"></script>
+</body>
+</html>

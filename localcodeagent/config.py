@@ -73,6 +73,24 @@ class AgentConfig:
     conversation_fact_limit: int = 500
     conversation_training_limit: int = 500
 
+    # Conversation manager / persistent sessions.
+    conversations_path: str = "data/conversations.json"
+    conversation_summary_after_messages: int = 24
+
+    # Sourced web/research knowledge memory.
+    knowledge_memory_enabled: bool = True
+    knowledge_memory_path: str = "data/knowledge_memory.json"
+    knowledge_default_ttl_hours: int = 720
+    knowledge_current_ttl_hours: int = 12
+    knowledge_max_records: int = 1000
+    auto_research_unknown: bool = True
+
+    # Model Growth Lab: review/export/versioned offline training.
+    model_growth_enabled: bool = True
+    model_growth_dir: str = "data/model_growth"
+    trainer_backend: str = "external"
+    trainer_command: str = ""
+
     # Outcome-aware automatic model routing. Telemetry stores only coarse local
     # metrics (no prompts/source text) and never overrides resource-fit checks.
     model_telemetry_enabled: bool = True
@@ -240,6 +258,18 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.conversation_rule_limit = max(20, int(raw.get("conversation_rule_limit", cfg.conversation_rule_limit)))
     cfg.conversation_fact_limit = max(20, int(raw.get("conversation_fact_limit", cfg.conversation_fact_limit)))
     cfg.conversation_training_limit = max(20, int(raw.get("conversation_training_limit", cfg.conversation_training_limit)))
+    cfg.conversations_path = str(raw.get("conversations_path", cfg.conversations_path))
+    cfg.conversation_summary_after_messages = max(8, int(raw.get("conversation_summary_after_messages", cfg.conversation_summary_after_messages)))
+    cfg.knowledge_memory_enabled = bool(raw.get("knowledge_memory_enabled", cfg.knowledge_memory_enabled))
+    cfg.knowledge_memory_path = str(raw.get("knowledge_memory_path", cfg.knowledge_memory_path))
+    cfg.knowledge_default_ttl_hours = max(1, int(raw.get("knowledge_default_ttl_hours", cfg.knowledge_default_ttl_hours)))
+    cfg.knowledge_current_ttl_hours = max(1, int(raw.get("knowledge_current_ttl_hours", cfg.knowledge_current_ttl_hours)))
+    cfg.knowledge_max_records = max(50, int(raw.get("knowledge_max_records", cfg.knowledge_max_records)))
+    cfg.auto_research_unknown = bool(raw.get("auto_research_unknown", cfg.auto_research_unknown))
+    cfg.model_growth_enabled = bool(raw.get("model_growth_enabled", cfg.model_growth_enabled))
+    cfg.model_growth_dir = str(raw.get("model_growth_dir", cfg.model_growth_dir))
+    cfg.trainer_backend = str(raw.get("trainer_backend", cfg.trainer_backend))
+    cfg.trainer_command = str(raw.get("trainer_command", cfg.trainer_command))
     cfg.model_telemetry_enabled = bool(raw.get("model_telemetry_enabled", cfg.model_telemetry_enabled))
     cfg.model_telemetry_path = str(raw.get("model_telemetry_path", cfg.model_telemetry_path))
     cfg.model_telemetry_min_samples = max(1, int(raw.get("model_telemetry_min_samples", cfg.model_telemetry_min_samples)))

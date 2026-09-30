@@ -51,3 +51,12 @@
 .setup-details>summary{cursor:pointer;font-size:8.5px;color:#7f91ae;user-select:none}
 .setup-details[open]>summary{margin-bottom:7px;color:#a8b8d1}
 .setup-details .readiness-model{margin-top:5px}
+
+.sidebar-history{padding:12px 10px 4px;border-top:1px solid #18263a;margin-top:8px}
+.history-search{width:100%;box-sizing:border-box;background:#081321;border:1px solid #263954;color:#e8f1ff;border-radius:8px;padding:8px;margin:8px 0}
+.conversation-list{display:grid;gap:5px;max-height:230px;overflow:auto}
+.conversation-row{display:flex;flex-direction:column;gap:3px;text-align:left;background:transparent;border:1px solid transparent;color:#dce8fb;border-radius:8px;padding:8px;cursor:pointer}
+.conversation-row:hover,.conversation-row.active{background:#0f1d31;border-color:#263b5b}
+.conversation-row small{color:#7789a6;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trainer-link{display:inline-block;margin-top:8px;text-decoration:none}
+.message-feedback{display:flex;gap:5px;margin-top:6px}.message-feedback button{border:0;background:transparent;color:#7385a1;cursor:pointer;padding:3px 5px;border-radius:5px}.message-feedback button:hover{background:#142139;color:#bcd1f0}
