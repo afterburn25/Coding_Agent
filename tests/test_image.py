@@ -7,12 +7,40 @@ import unittest
 from pathlib import Path
 
 from localcodeagent.image.catalog import discover_image_models
+from localcodeagent.image.errors import describe_image_error
 from localcodeagent.image.policy import ConsentStore, ImageSafetyPolicy
 from localcodeagent.image.library import ImageAssetLibrary
 from localcodeagent.image.manager import ImageManager
 from localcodeagent.image.router import ImageRouter
 from localcodeagent.image.types import ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
+
+
+class ImageErrorTests(unittest.TestCase):
+    def test_error_classifier_maps_common_failures(self):
+        cases = [
+            (RuntimeError("CUDA out of memory while allocating tensor"), "cuda_out_of_memory"),
+            (RuntimeError("ComfyUI backend is offline: connection refused"), "backend_offline"),
+            (RuntimeError("VAE not found"), "missing_vae"),
+            (ValueError("LoRA Alice is not marked compatible with flux"), "incompatible_lora"),
+            (RuntimeError("Image model is not fully installed. Missing/invalid: diffusion_model"), "missing_model"),
+            (RuntimeError("ComfyUI workflow is missing: qwen.json"), "unsupported_workflow"),
+            (RuntimeError("ComfyUI is missing required node(s): Foo"), "failed_dependency"),
+            (OSError("No space left on device"), "insufficient_disk_space"),
+            (TimeoutError("Timed out waiting for ComfyUI"), "timeout"),
+        ]
+        for exc, code in cases:
+            with self.subTest(code=code):
+                row = describe_image_error(exc)
+                self.assertEqual(row["code"], code)
+                self.assertTrue(row["message"])
+                self.assertIn(type(exc).__name__, row["technical_details"])
+
+    def test_unknown_error_keeps_short_message_and_separate_details(self):
+        row = describe_image_error(RuntimeError("unexpected backend response"))
+        self.assertEqual(row["code"], "generation_failed")
+        self.assertEqual(row["message"], "unexpected backend response")
+        self.assertEqual(row["technical_details"], "RuntimeError: unexpected backend response")
 
 
 class ImageRouterTests(unittest.TestCase):
@@ -222,7 +250,7 @@ class ImageLibraryTests(unittest.TestCase):
             manager.profiles.save({
                 "id":"alice", "display_name":"Alice", "preferred_model":"qwen",
                 "reference_images":[str(root / "data/image/references/a.png")],
-                "loras":["Alice"],
+                "assigned_lora":"Alice", "lora_version":"2", "lora_strength":0.8,
                 "generation_defaults":{"quality":"high", "width":768, "height":1152},
             })
             req = ImageRequest(prompt="portrait", subject_profile="alice")
@@ -234,12 +262,34 @@ class ImageLibraryTests(unittest.TestCase):
             self.assertEqual(saved["height"], 1152)
             self.assertEqual(saved["reference_images"], [str(root / "data/image/references/a.png")])
             self.assertEqual(saved["loras"][0]["name"], "Alice")
+            self.assertEqual(saved["loras"][0]["version"], "2")
+            self.assertEqual(saved["loras"][0]["strength"], 0.8)
 
     def test_lora_workflow_slots_are_required_for_selected_loras(self):
         status = {"unresolved_tokens": ["prompt", "lora_1_name", "lora_1_strength"]}
         ImageManager._validate_lora_slots("generate.json", status, [{"name":"a.safetensors"}])
         with self.assertRaisesRegex(RuntimeError, "LoRA slot 2"):
             ImageManager._validate_lora_slots("generate.json", status, [{"name":"a.safetensors"},{"name":"b.safetensors"}])
+        with self.assertRaisesRegex(RuntimeError, "lora_1_strength"):
+            ImageManager._validate_lora_slots("generate.json", {"unresolved_tokens":["lora_1_name"]}, [{"name":"a.safetensors"}])
+
+    def test_image_errors_are_user_friendly_and_keep_technical_details(self):
+        row = describe_image_error(RuntimeError("CUDA out of memory while allocating tensor"))
+        self.assertEqual(row["code"], "cuda_out_of_memory")
+        self.assertIn("GPU ran out of memory", row["message"])
+        self.assertIn("RuntimeError", row["technical_details"])
+
+    def test_image_error_maps_lora_and_backend_failures(self):
+        lora = describe_image_error(ValueError("LoRA Alice is not marked compatible with flux.2-klein"))
+        self.assertEqual(lora["code"], "incompatible_lora")
+        backend = describe_image_error(ConnectionError("connection refused by ComfyUI backend"))
+        self.assertEqual(backend["code"], "backend_offline")
+
+    def test_unknown_image_error_is_bounded_for_normal_ui(self):
+        row = describe_image_error(RuntimeError("x" * 800))
+        self.assertEqual(row["code"], "generation_failed")
+        self.assertLessEqual(len(row["message"]), 360)
+        self.assertTrue(row["technical_details"].startswith("RuntimeError:"))
 
     def test_existing_verified_model_is_not_replaced_without_repair(self):
         with tempfile.TemporaryDirectory() as td:
