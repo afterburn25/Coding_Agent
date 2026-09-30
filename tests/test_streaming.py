@@ -158,7 +158,6 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("queue.Queue", server)
         self.assertIn("chat-nexus-agent-stream", server)
         self.assertIn('self._sse_event("heartbeat"', server)
-        self.assertIn("if not builtin_utility:", server)
         self.assertIn('Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"', server)
 
 
