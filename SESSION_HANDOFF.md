@@ -224,6 +224,20 @@
 - Windows native desktop/installer validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
 - Next: update the dogfood Windows install, verify immediate utility replies and visible heartbeat status, then measure real 14B/30B first-token and throughput.
 
+## v0.6 llama.cpp near-RAM auto-fit checkpoint
+
+- Dogfood readiness still rejected Qwen3-Coder 30B at **30.0 GB estimated RAM vs 29.8 GB effective available**, even after resident-model reclamation was fixed.
+- The old rule treated any estimate above 92% of available RAM as a hard failure. That is too rigid for llama.cpp CPU/GPU offload because the profile values are planning estimates and llama.cpp determines actual placement at startup.
+- Managed llama.cpp profiles with `allow_cpu_offload=true` now use two bands:
+  - comfortable fit: existing normal resource score;
+  - bounded near fit: allow the runtime to try auto-fit with a routing penalty.
+- The near-fit margin scales with host RAM and is capped at 6 GB (64 GB host => ~5.1 GB). Clearly oversized estimates are still rejected.
+- The observed **30.0 vs 29.8 GB** case now routes as a tight CPU-offload fit and reaches llama.cpp; if real startup fails, the existing automatic 30B→14B activation fallback handles it.
+- Feature commit: `1a5b03e` — Allow llama.cpp near-RAM auto-fit.
+- Unit checkpoint: **131/131 tests passing**.
+- Windows installer/native desktop validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
+- Next: update the dogfood install and observe real 30B load/offload behavior, then record measured first-token/tokens-per-second and actual memory use.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -396,4 +410,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `129 tests` passing.
+Expected at this checkpoint: `131 tests` passing.

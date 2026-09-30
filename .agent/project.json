@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 129,
-  "next_milestone": "Dogfood immediate utility chat and SSE heartbeats on Windows, measure real 14B/30B first-token and throughput, then harden remaining runtime latency",
+  "test_checkpoint": 131,
+  "next_milestone": "Update dogfood build, verify real Qwen3-Coder 30B auto-fit on the 64 GB / 12 GB machine, then record measured first-token, tokens/sec, and memory use",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -72,7 +72,10 @@
     "accounts_for_reclaimable_resident_memory": true,
     "auto_activation_fallback": true,
     "reviewer_activation_fallback": true,
-    "durable_stream_error_recovery": true
+    "durable_stream_error_recovery": true,
+    "managed_llama_near_ram_autofit": true,
+    "near_ram_margin": "max(2 GB, min(6 GB, 8% total system RAM))",
+    "observed_case": "30.0 GB estimated vs 29.8 GB available is allowed to runtime auto-fit"
   },
   "local_chat_latency": {
     "lightweight_utility_route": true,

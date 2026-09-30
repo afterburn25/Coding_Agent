@@ -65,6 +65,8 @@ The intended two-model coding setup is:
 
 The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. Routing accounts for memory that will be freed when the resident 14B process is stopped before a 30B switch, so temporary RAM pressure from 14B does not incorrectly disqualify 30B. If 30B still cannot start, Auto mode falls back to the runnable 14B primary coder instead of terminating the task; the same fallback applies to reviewer activation. The everyday Qwen3 14B route starts llama.cpp with `--reasoning off` unless explicitly overridden and defaults to a 2,048-token output cap; the 30B deep/reviewer route defaults to 8,192 output tokens.
 
+RAM estimates are now treated as planning estimates rather than absolute byte-perfect limits. Managed llama.cpp profiles that allow CPU offload may enter a bounded near-fit band (up to a small host-RAM margin) and try llama.cpp auto-fit. For example, a 30.0 GB estimate with 29.8 GB currently available is allowed with a routing penalty instead of being rejected; clearly oversized estimates are still blocked.
+
 The Windows package bundles llama.cpp itself but not the GGUF bytes inside the installer EXE. The installer downloads the default 14B + 30B coding stack during setup/update when those verified files are missing, keeping the setup EXE small while leaving the installed application ready for coding.
 
 ## Core coding-agent capabilities
@@ -237,7 +239,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **129 tests passing**.
+Current expected result: **131 tests passing**.
 
 ## API highlights
 
@@ -393,7 +395,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **129 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **131 passing tests**.
 
 ## Development state
 
