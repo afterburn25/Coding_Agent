@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **86 tests passing**.
+Current expected result: **90 tests passing**.
 
 ## API highlights
 
@@ -236,6 +236,19 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - approval state
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+## Explicit coding-model catalog
+
+The Local system drawer now contains a small auditable coding-model catalog. Downloads are never automatic.
+
+Initial entries:
+
+- **Qwen3 14B Q4_K_M** — official Qwen GGUF, 9.0 GB, Apache-2.0; starter roles for utility/fast/general coding.
+- **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — community GGUF quantization of the Apache-2.0 Qwen base, 18.56 GB; primary/deep/reviewer roles and expected CPU/GPU offload on 12 GB VRAM.
+
+Each catalog entry records a direct source URL, exact byte size and SHA256. Downloads use a temporary `.part` file, stream progress, support cancellation, verify exact size + SHA256, and atomically install only after verification. An existing untrusted file is never silently replaced; **Repair** must be selected explicitly.
+
+After installation, **Use discovered models** turns the verified local GGUF inventory into role profiles.
 
 ## Coding-model readiness and local GGUF setup
 
