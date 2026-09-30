@@ -145,6 +145,70 @@ class _RepeatedRefusalProvider:
 
 
 class LightweightUtilityRouteTests(unittest.TestCase):
+    def test_live_clock_questions_are_answered_without_model_activation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(
+                AssertionError("clock questions should use the host clock without loading a model")
+            )
+
+            time_result = agent.run("what time is it?")
+            date_result = agent.run("what day is it?")
+
+            self.assertEqual(time_result.routing.model_id, "builtin-local")
+            self.assertIn("current local time", time_result.content.lower())
+            self.assertEqual(date_result.routing.model_id, "builtin-local")
+            self.assertIn("today is", date_result.content.lower())
+            snapshot = AgentOrchestrator.current_time_snapshot()
+            self.assertRegex(snapshot["date"], r"^\d{4}-\d{2}-\d{2}$")
+            self.assertRegex(snapshot["time"], r"^\d{2}:\d{2}:\d{2}$")
+            self.assertTrue(snapshot["weekday"])
+            self.assertTrue(snapshot["timezone"])
+            self.assertIn("Current local date/time from the host system clock", agent.current_time_context())
+
+    def test_model_conversation_receives_current_clock_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_research_unknown=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: provider
+
+            agent.run("how is your day going?")
+
+            system_text = "\n".join(
+                str(m.get("content", "")) for m in provider.messages if m.get("role") == "system"
+            )
+            self.assertIn("Current local date/time from the host system clock", system_text)
+            self.assertIn("refreshed at the start of every user turn", system_text)
+
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

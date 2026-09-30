@@ -190,6 +190,8 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("/api/conversation-memory/exchange", server)
         self.assertIn("/api/conversation-memory/update", server)
         self.assertIn("/api/conversation-memory/forget", server)
+        self.assertIn('path == "/api/time"', server)
+        self.assertIn('"clock": self.state.agent.current_time_snapshot()', server)
         self.assertIn('path == "/api/conversation-memory"', server)
         self.assertIn('path == "/api/conversations"', server)
         self.assertIn('path == "/api/knowledge-memory"', server)

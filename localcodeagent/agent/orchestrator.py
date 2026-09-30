@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -212,8 +213,75 @@ class AgentOrchestrator:
         return any(marker in normalized for marker in generic)
 
     @staticmethod
-    def builtin_utility_response(user_text: str) -> str | None:
-        normalized = user_text.strip().lower().rstrip("!?.,")
+    def current_time_snapshot() -> dict[str, str]:
+        now = datetime.now().astimezone()
+        offset = now.strftime("%z")
+        if len(offset) == 5:
+            offset = offset[:3] + ":" + offset[3:]
+        timezone_name = now.tzname() or str(now.tzinfo or "local")
+        hour = now.strftime("%I").lstrip("0") or "0"
+        human_time = f"{hour}:{now.strftime('%M:%S')} {now.strftime('%p')}"
+        return {
+            "iso": now.isoformat(timespec="seconds"),
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M:%S"),
+            "weekday": now.strftime("%A"),
+            "timezone": timezone_name,
+            "utc_offset": offset,
+            "human_date": now.strftime("%A, %B %d, %Y"),
+            "human_time": human_time,
+        }
+
+    @classmethod
+    def current_time_context(cls) -> str:
+        clock = cls.current_time_snapshot()
+        offset = clock["utc_offset"]
+        utc = f"UTC{offset}" if offset else "local UTC offset unavailable"
+        return (
+            "Current local date/time from the host system clock: "
+            f"{clock['human_date']} at {clock['human_time']} {clock['timezone']} ({utc}). "
+            f"ISO local timestamp: {clock['iso']}. "
+            "This value is refreshed at the start of every user turn. Treat it as authoritative for "
+            "today, now, yesterday, tomorrow, this morning, this afternoon, tonight, and other relative "
+            "date/time references unless the user explicitly specifies another timezone."
+        )
+
+    @classmethod
+    def builtin_utility_response(cls, user_text: str) -> str | None:
+        normalized = re.sub(r"\s+", " ", user_text.strip().lower()).strip("!?., ")
+        clock = cls.current_time_snapshot()
+        time_queries = {
+            "what time is it", "what is the time", "what's the time",
+            "what's the current time", "what is the current time", "current time",
+            "time now", "what time is it now",
+        }
+        date_queries = {
+            "what is today's date", "what's today's date", "todays date", "today's date",
+            "what is the date", "what's the date", "what date is it", "current date",
+        }
+        day_queries = {
+            "what day is it", "what day is today", "what day is it today",
+            "what is today", "what's today",
+        }
+        combined_queries = {
+            "what date and time is it", "what is the date and time",
+            "what day and time is it", "what's the date and time",
+            "what is the current date and time", "current date and time",
+        }
+        if normalized in combined_queries:
+            offset = clock["utc_offset"]
+            utc = f"UTC{offset}" if offset else "local time"
+            return (
+                f"It is {clock['human_date']} at {clock['human_time']} "
+                f"{clock['timezone']} ({utc})."
+            )
+        if normalized in time_queries:
+            offset = clock["utc_offset"]
+            utc = f"UTC{offset}" if offset else "local time"
+            return f"The current local time is {clock['human_time']} {clock['timezone']} ({utc})."
+        if normalized in date_queries or normalized in day_queries:
+            return f"Today is {clock['human_date']}."
+
         greetings = {
             "hi", "hello", "hey", "hey there", "good morning",
             "good afternoon", "good evening",
@@ -551,6 +619,7 @@ class AgentOrchestrator:
         recovered_self_hosting = self._self_hosting_context()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.current_time_context()},
             {
                 "role": "system",
                 "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
@@ -1504,6 +1573,7 @@ class AgentOrchestrator:
             else ""
         )
         policy_context = self.policy_prompt()
+        clock_context = self.current_time_context()
         research_context: dict[str, Any] = {}
         if (
             self.config.auto_research_unknown
@@ -1530,6 +1600,7 @@ class AgentOrchestrator:
         if lightweight:
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": UTILITY_PROMPT},
+                {"role": "system", "content": clock_context},
             ]
             if policy_context:
                 messages.append({"role": "system", "content": policy_context})
@@ -1570,6 +1641,7 @@ class AgentOrchestrator:
                 self.tasks.update(task.id, research=research_context)
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": clock_context},
                 {
                     "role": "system",
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",

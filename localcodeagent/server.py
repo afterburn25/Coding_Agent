@@ -538,6 +538,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
             return
 
+        if path == "/api/time":
+            self._json(self.state.agent.current_time_snapshot())
+            return
+
         if path == "/api/policy":
             self._json({
                 "mode": self.state.config.conversation_policy_mode,
@@ -566,6 +570,7 @@ class Handler(BaseHTTPRequestHandler):
                 "permissions": self.state.config.permissions,
                 "policy_mode": self.state.config.conversation_policy_mode,
                 "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
+                "clock": self.state.agent.current_time_snapshot(),
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
