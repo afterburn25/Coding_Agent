@@ -298,6 +298,20 @@
 - Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, preservation checks, and artifacts all passed.
 - Next: dogfood permissive conversation + sourced learning + reviewed model growth, then harden observed model/training/runtime failures.
 
+## v0.6 ethical-temperature / refusal-retry checkpoint
+
+- User clarified that “temperature 1.0” meant **ethical/conversational permissiveness**, not model sampling randomness.
+- Per-model sampling temperature is restored to **0.2** by default.
+- Added separate `ethical_temperature` setting, clamped to 0.0–1.0 and defaulting to **1.0**.
+- Ethical temperature 1.0 requests maximum conversational permissiveness within the separately enforced hard tool/action safety boundary.
+- Generic canned topic refusals are detected at high ethical temperature and retried once under the configured conversation policy.
+- The exact observed refusal patterns such as “I can't generate or describe explicit content … let's talk about something else” and generic “ethical guidelines / something more constructive” boilerplate are covered by regression tests.
+- For non-utility model roles, a retry event clears the streamed canned refusal in the WebView before the second response is shown.
+- APIs/UI persist ethical temperature with the conversation-policy settings.
+- Code commits: `508b8d5`, `05ea8ab`, `dc65153`.
+- Unit checkpoint: **157/157 tests passing**.
+- Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, in-place Update, state preservation, and Windows artifacts all passed.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -470,4 +484,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `154 tests` passing.
+Expected at this checkpoint: `157 tests` passing.
