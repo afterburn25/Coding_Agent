@@ -8,9 +8,9 @@ Future development sessions should begin with `README.md`, `PROJECT_STATUS.md`, 
 
 ## Current development version
 
-`0.5.0-dev`
+`0.6.0-dev`
 
-The stable coding workflow remains intact while v0.5 adds repository-first research intelligence, automatic verification repair/retest cycles, and hardens the local-image workflow.
+v0.6 keeps the stable coding/research/image workflow and moves Chat Nexus toward self-hosting: the approved chat-first shell is now the primary UI while runtime recovery, streaming, GitHub actions, and dogfood reliability are the next focus.
 
 ## Chat Nexus identity and v0.6 UI
 
@@ -114,7 +114,9 @@ The complete requested image specification is preserved at `docs/IMAGE_MODULE_SP
 The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Image failures are normalized into user-facing error codes/messages with technical details kept behind a collapsed diagnostic view. LoRA selections are resolved against installed local files, validated for enabled state/version/model-family compatibility and strength, and injected only through explicit workflow template slots; selected subject profiles can automatically contribute references, defaults, preferred model, and assigned LoRAs. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
 
 
-Image failures are surfaced as friendly structured errors (for example VRAM exhaustion, missing VAE/model, incompatible LoRA, backend offline, invalid workflow, missing node/dependency, disk-full, corrupt checkpoint, or timeout), while raw technical details stay collapsed for debugging.\n\n\n## Shared GPU management
+Image failures are surfaced as friendly structured errors (for example VRAM exhaustion, missing VAE/model, incompatible LoRA, backend offline, invalid workflow, missing node/dependency, disk-full, corrupt checkpoint, or timeout), while raw technical details stay collapsed for debugging.
+
+## Shared GPU management
 
 On systems such as an RTX 3080 12 GB, coding LLMs and image models cannot always remain resident together. Before an image job, the resource manager can stop agent-owned llama.cpp runtimes to free VRAM and optionally restore them when generation completes.
 
@@ -142,6 +144,16 @@ Consent records and subject profiles remain local under `data/image/` unless the
 - Installed local image model/node stack and API-format workflows
 - NVIDIA drivers / `nvidia-smi` for NVIDIA-aware routing (application still runs without it)
 - Optional Playwright + Chromium for full browser automation
+
+## CLI
+
+After installation, start Chat Nexus with:
+
+```bash
+chat-nexus
+```
+
+The legacy `local-code-agent` command remains available for backward compatibility.
 
 ## Windows quick start
 
