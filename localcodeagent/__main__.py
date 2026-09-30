@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from .config import load_config
+from .desktop import run_desktop, smoke_test_desktop_backend
 from .server import serve
 
 
@@ -29,8 +31,9 @@ def main() -> None:
     parser.add_argument("--config", default="", help="Path to agent config JSON. Bundled builds default to config.json beside ChatNexus.exe.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--open-browser", action="store_true", help="Open the Chat Nexus UI in the default browser after startup.")
-    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically.")
+    parser.add_argument("--desktop", action="store_true", help="Run in the native desktop application window.")
+    parser.add_argument("--server", action="store_true", help="Run only the loopback web server for development/debugging.")
+    parser.add_argument("--smoke-test", action="store_true", help="Smoke-test the packaged backend/UI and exit.")
     args = parser.parse_args()
 
     app_dir = _application_dir()
@@ -41,11 +44,14 @@ def main() -> None:
     runtime_root = config_path.parent
     web_root = _web_root()
 
-    # Double-clicked Windows executable builds should visibly open the product.
-    # Source/CLI runs remain non-intrusive unless --open-browser is requested.
-    open_browser = bool(args.open_browser or (_frozen() and not args.no_browser))
-    if args.no_browser:
-        open_browser = False
+    if args.smoke_test:
+        result = smoke_test_desktop_backend(config, workspace, web_root, runtime_root, config_path)
+        print(json.dumps(result, indent=2))
+        raise SystemExit(0 if result.get("ok") else 1)
+
+    if (_frozen() and not args.server) or args.desktop:
+        run_desktop(config, workspace, web_root, runtime_root, config_path)
+        return
 
     serve(
         config,
@@ -55,7 +61,6 @@ def main() -> None:
         web_root,
         runtime_root,
         config_path=config_path,
-        open_browser=open_browser,
     )
 
 
