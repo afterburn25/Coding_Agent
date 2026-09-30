@@ -23,3 +23,16 @@ jobs:
           python-version: "3.11"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: Build dogfood source archive
+        if: github.event_name != 'pull_request'
+        run: git archive --format=zip --output=chat-nexus-v0.6-dogfood.zip HEAD
+
+      - name: Upload dogfood source archive
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-nexus-v0.6-dogfood
+          path: chat-nexus-v0.6-dogfood.zip
+          if-no-files-found: error
+          retention-days: 14
