@@ -81,6 +81,34 @@ class RuntimeManager:
                 managed=model.runtime != "external",
             )
 
+    def reconfigure_models(self, config: AgentConfig) -> None:
+        """Apply a new coding-model configuration without restarting Chat Nexus."""
+        with self._lock:
+            for model_id in list(self._managed):
+                self._stop_managed(model_id)
+
+            self.config = config
+            new_models_dir = self._resolve(config.models_dir)
+            new_logs_dir = self._resolve(config.runtime_logs_dir)
+            new_models_dir.mkdir(parents=True, exist_ok=True)
+            new_logs_dir.mkdir(parents=True, exist_ok=True)
+
+            if new_models_dir != self.models_dir:
+                self.models_dir = new_models_dir
+                self.model_catalog = CodingModelCatalogManager(self.models_dir)
+            self.logs_dir = new_logs_dir
+
+            self._status = {}
+            self._last_used = {}
+            for model in config.models:
+                endpoint = self._profile_endpoint(model)
+                self._status[model.id] = RuntimeStatus(
+                    model_id=model.id,
+                    state="external" if model.runtime == "external" else "stopped",
+                    endpoint=endpoint,
+                    managed=model.runtime != "external",
+                )
+
     def _resolve(self, value: str) -> Path:
         path = Path(value).expanduser()
         return path.resolve() if path.is_absolute() else (self.base_dir / path).resolve()
