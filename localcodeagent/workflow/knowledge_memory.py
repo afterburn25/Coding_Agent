@@ -211,6 +211,10 @@ class KnowledgeMemory:
             lines.extend(f"- {s.get('title')}: {s.get('url')}" for s in sources[:8])
         return "\n".join(lines)[:20000]
 
+    def records(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(row) for row in self._data.get("records", []) if isinstance(row, dict)]
+
     def snapshot(self) -> dict[str, Any]:
         now = time.time()
         with self._lock:

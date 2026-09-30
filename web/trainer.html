@@ -29,6 +29,54 @@
         <button id="syncGrowth" class="trainer-primary" type="button">Sync learned items</button>
       </header>
 
+      <section class="trainer-card brain-card">
+        <div class="card-head">
+          <div>
+            <h2>Nexus Brain</h2>
+            <p>Creator-locked long-term memory, behavior subroutines, simulated emotional profile, and self-model that survive model replacement.</p>
+          </div>
+          <span id="brainState" class="brain-state">uninitialized</span>
+        </div>
+        <div id="brainSummary" class="brain-summary muted">Loading Brain status…</div>
+        <div class="brain-auth-grid">
+          <label>Creator name <input id="brainCreator" autocomplete="username" placeholder="Creator name" /></label>
+          <label>Creator passcode <input id="brainPasscode" type="password" autocomplete="current-password" placeholder="Passcode" /></label>
+        </div>
+        <div class="candidate-actions brain-actions">
+          <button id="brainInitialize" type="button">Initialize creator lock</button>
+          <button id="brainUnlock" type="button">Unlock</button>
+          <button id="brainLock" type="button">Lock changes</button>
+          <button id="brainSync" type="button">Sync staged learning</button>
+          <button id="brainExport" type="button">Export locked Brain</button>
+          <label class="brain-import-button">Import locked Brain <input id="brainImportFile" type="file" accept=".json,application/json" /></label>
+        </div>
+        <small class="muted">The passcode is entered locally and is never stored in plaintext. A locked export carries the creator lock and signed settings; it cannot be edited and re-unlocked without the original creator credential.</small>
+
+        <div class="brain-grid">
+          <div>
+            <h3>Signed subroutines</h3>
+            <div id="brainSubroutines" class="brain-toggle-grid"></div>
+            <button id="saveBrainSubroutines" class="mini-button" type="button">Save subroutines</button>
+          </div>
+          <div>
+            <h3>Self-model</h3>
+            <label>Name <input id="brainSelfName" placeholder="Nexus" /></label>
+            <label>Identity <input id="brainIdentityType" value="AI system" disabled /></label>
+            <label class="check-row"><input id="brainHumanLike" type="checkbox" /> Human-like conversational behavior</label>
+            <label class="check-row"><input id="brainAutobiography" type="checkbox" /> Autobiographical continuity</label>
+            <label class="check-row"><input id="brainStablePreferences" type="checkbox" /> Stable preferences</label>
+            <label class="check-row"><input id="brainGrowthEnabled" type="checkbox" /> Self-model growth</label>
+            <button id="saveBrainSelfModel" class="mini-button" type="button">Save self-model</button>
+            <small class="muted">Nexus may become highly person-like, but the protected identity invariant remains “AI system,” not biological human.</small>
+          </div>
+        </div>
+
+        <div class="brain-emotion-section">
+          <div class="card-head"><div><h3>Emotional profile</h3><p>Signed affect baselines. Live mood changes during conversation without rewriting the protected Brain.</p></div><button id="saveBrainEmotions" class="mini-button" type="button">Save emotions</button></div>
+          <div id="brainEmotionControls" class="personality-controls"></div>
+        </div>
+      </section>
+
       <section class="stat-grid">
         <div class="trainer-card"><small>Remembered facts</small><strong id="factCount">0</strong></div>
         <div class="trainer-card"><small>Operating rules</small><strong id="ruleCount">0</strong></div>

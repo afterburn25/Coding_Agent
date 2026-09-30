@@ -6,3 +6,5 @@ from .repository import RepositoryIndex
 from .tasks import TaskRecord, TaskStore
 
 __all__ = ["CheckpointManager", "ProjectMemory", "RepositoryIndex", "TaskRecord", "TaskStore"]
+
+from .nexus_brain import NexusBrain

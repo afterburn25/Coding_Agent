@@ -264,7 +264,36 @@ class LightweightUtilityRouteTests(unittest.TestCase):
 
             self.assertEqual(result.routing.model_id, "builtin-local")
             self.assertIn("inspect and edit code", result.content)
+            self.assertIn("general-knowledge", result.content)
+            self.assertIn("Nexus Brain", result.content)
             self.assertEqual(result.task["status"], "completed")
+
+    def test_self_learning_question_includes_general_and_conversation_learning(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=True,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(AssertionError("self-learning question should not load a model"))
+
+            result = agent.run("can you learn and adapt?")
+
+            self.assertEqual(result.routing.model_id, "builtin-local")
+            self.assertIn("verified general knowledge", result.content)
+            self.assertIn("conversational patterns", result.content)
+            self.assertIn("across model replacements", result.content)
+            self.assertNotIn("focused on coding", result.content.lower())
 
 
 class PermissiveConversationRetryTests(unittest.TestCase):

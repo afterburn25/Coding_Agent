@@ -1,7 +1,7 @@
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-let memoryState=null, knowledgeState=null, growthState=null, conversationState=null;
+let memoryState=null, knowledgeState=null, growthState=null, conversationState=null, brainState=null, brainCreatorToken='';
 
 async function getJson(path){
   const r=await fetch(path); const d=await r.json();
@@ -29,6 +29,47 @@ function renderStats(){
     '<div class="trainer-row '+(x.active===false?'disabled-memory':'')+'"><span class="tag fact">FACT</span><div><strong>'+esc(x.text||'')+'</strong><small>'+esc(x.scope||'global')+' · '+(x.active===false?'disabled':'active')+'</small></div><button data-memory-edit="fact" data-id="'+esc(x.id||'')+'">Edit</button><button data-memory-toggle="fact" data-id="'+esc(x.id||'')+'" data-active="'+(x.active!==false)+'">'+(x.active===false?'Enable':'Disable')+'</button><button data-memory-scope="fact" data-id="'+esc(x.id||'')+'">Scope</button></div>'
   );
   $('#rulesList').innerHTML=(ruleRows.length||factRows.length)?ruleRows.concat(factRows).join(''):'<span class="muted">No learned rules or facts yet.</span>';
+}
+
+function renderBrain(){
+  if(!brainState)return;
+  const initialized=!!brainState.initialized,unlocked=!!brainState.unlocked,verified=!!brainState.verified_for_session;
+  $('#brainState').textContent=!initialized?'uninitialized':unlocked?'unlocked':verified?'locked · verified':'locked · verify required';
+  $('#brainState').className='brain-state '+(unlocked?'unlocked':initialized?'locked':'');
+  if(brainState.creator_name&&!$('#brainCreator').value)$('#brainCreator').value=brainState.creator_name;
+  const c=brainState.counts||{};
+  $('#brainSummary').innerHTML='<strong>'+Number(brainState.records||0)+' protected records</strong><small>'+
+    Number(c.fact||0)+' facts · '+Number(c.rule||0)+' rules · '+Number(c.knowledge||0)+' knowledge · '+Number(c.training_signal||0)+' training signals · '+Number(c.autobiographical||0)+' autobiographical · integrity '+esc(brainState.integrity||'unknown')+'</small>';
+
+  const subs=brainState.subroutines||{};
+  $('#brainSubroutines').innerHTML=Object.keys(subs).map(k=>
+    '<label class="brain-toggle"><input type="checkbox" data-brain-subroutine="'+esc(k)+'" '+(subs[k]?'checked':'')+' '+(!unlocked?'disabled':'')+'><span>'+esc(k.replaceAll('_',' '))+'</span></label>'
+  ).join('');
+
+  const emotions=brainState.emotion_profile||{};
+  $('#brainEmotionControls').innerHTML=Object.keys(emotions).map(k=>
+    '<label class="range-row"><span>'+esc(k.replaceAll('_',' '))+'</span><input type="range" min="0" max="100" value="'+Math.round(Number(emotions[k]||0)*100)+'" data-brain-emotion="'+esc(k)+'" '+(!unlocked?'disabled':'')+'><output>'+Math.round(Number(emotions[k]||0)*100)+'</output></label>'
+  ).join('');
+  $('#brainEmotionControls').querySelectorAll('input[type=range]').forEach(i=>i.addEventListener('input',()=>i.nextElementSibling.textContent=i.value));
+
+  const self=brainState.self_model||{};
+  $('#brainSelfName').value=self.name||'Nexus';
+  $('#brainIdentityType').value=self.identity_type||'AI system';
+  $('#brainHumanLike').checked=self.human_like_behavior!==false;
+  $('#brainAutobiography').checked=self.autobiographical_continuity!==false;
+  $('#brainStablePreferences').checked=self.stable_preferences!==false;
+  $('#brainGrowthEnabled').checked=self.growth_enabled!==false;
+  ['brainSelfName','brainHumanLike','brainAutobiography','brainStablePreferences','brainGrowthEnabled'].forEach(id=>$('#'+id).disabled=!unlocked);
+
+  $('#brainInitialize').disabled=initialized;
+  $('#brainUnlock').disabled=!initialized||(unlocked&&!!brainCreatorToken);
+  $('#brainUnlock').textContent=unlocked&&!brainCreatorToken?'Re-authenticate':'Unlock';
+  $('#brainLock').disabled=!unlocked;
+  $('#brainSync').disabled=!unlocked;
+  $('#brainExport').disabled=!unlocked;
+  $('#saveBrainSubroutines').disabled=!unlocked;
+  $('#saveBrainEmotions').disabled=!unlocked;
+  $('#saveBrainSelfModel').disabled=!unlocked;
 }
 
 function renderPersonality(){
@@ -77,15 +118,61 @@ function renderRegistry(){
 
 async function refresh(){
   try{
-    [memoryState,knowledgeState,growthState,conversationState]=await Promise.all([
+    [memoryState,knowledgeState,growthState,conversationState,brainState]=await Promise.all([
       getJson('/api/conversation-memory'),
       getJson('/api/knowledge-memory'),
       getJson('/api/model-growth'),
-      getJson('/api/conversations')
+      getJson('/api/conversations'),
+      getJson('/api/nexus-brain')
     ]);
-    renderStats(); renderPersonality(); renderCandidates(); renderKnowledge(); renderRegistry();
+    renderStats(); renderPersonality(); renderCandidates(); renderKnowledge(); renderRegistry(); renderBrain();
   }catch(e){ document.body.dataset.error=e.message; }
 }
+
+function brainCredentials(){return {creator_name:$('#brainCreator').value.trim(),passcode:$('#brainPasscode').value};}
+$('#brainInitialize').addEventListener('click',async()=>{
+  try{const out=await postJson('/api/nexus-brain/initialize',brainCredentials());brainCreatorToken=out.creator_token||'';$('#brainPasscode').value='';await refresh();}catch(e){alert(e.message);}
+});
+$('#brainUnlock').addEventListener('click',async()=>{
+  try{const out=await postJson('/api/nexus-brain/unlock',brainCredentials());brainCreatorToken=out.creator_token||'';$('#brainPasscode').value='';await refresh();}catch(e){alert(e.message);}
+});
+$('#brainLock').addEventListener('click',async()=>{try{await postJson('/api/nexus-brain/lock',{creator_token:brainCreatorToken});brainCreatorToken='';await refresh();}catch(e){alert(e.message);}});
+$('#brainSync').addEventListener('click',async()=>{try{await postJson('/api/nexus-brain/sync',{creator_token:brainCreatorToken});await refresh();}catch(e){alert(e.message);}});
+$('#saveBrainSubroutines').addEventListener('click',async()=>{
+  const subroutines={};document.querySelectorAll('[data-brain-subroutine]').forEach(i=>subroutines[i.dataset.brainSubroutine]=i.checked);
+  try{await postJson('/api/nexus-brain/subroutines',{subroutines,creator_token:brainCreatorToken});await refresh();}catch(e){alert(e.message);}
+});
+$('#saveBrainEmotions').addEventListener('click',async()=>{
+  const emotion_profile={};document.querySelectorAll('[data-brain-emotion]').forEach(i=>emotion_profile[i.dataset.brainEmotion]=Number(i.value)/100);
+  try{await postJson('/api/nexus-brain/emotions',{emotion_profile,creator_token:brainCreatorToken});await refresh();}catch(e){alert(e.message);}
+});
+$('#saveBrainSelfModel').addEventListener('click',async()=>{
+  const self_model={
+    name:$('#brainSelfName').value.trim()||'Nexus',
+    human_like_behavior:$('#brainHumanLike').checked,
+    autobiographical_continuity:$('#brainAutobiography').checked,
+    stable_preferences:$('#brainStablePreferences').checked,
+    growth_enabled:$('#brainGrowthEnabled').checked,
+  };
+  try{await postJson('/api/nexus-brain/self-model',{self_model,creator_token:brainCreatorToken});await refresh();}catch(e){alert(e.message);}
+});
+$('#brainExport').addEventListener('click',async()=>{
+  try{
+    const out=await postJson('/api/nexus-brain/export',{creator_token:brainCreatorToken});
+    const blob=new Blob([JSON.stringify(out.brain,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='chat-nexus-brain-locked.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert(e.message);}
+});
+$('#brainImportFile').addEventListener('change',async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  try{
+    const payload=JSON.parse(await file.text());
+    await postJson('/api/nexus-brain/import',{brain:payload});
+    await refresh();
+    alert('Locked Nexus Brain imported. Unlock it with the original creator credential to verify and activate it.');
+  }catch(err){alert(err.message);}finally{e.target.value='';}
+});
 
 $('#rulesList').addEventListener('click',async e=>{
   const toggle=e.target.closest('[data-memory-toggle]');

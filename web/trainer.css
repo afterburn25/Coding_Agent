@@ -27,3 +27,12 @@ body{margin:0;background:#07101f;color:#eef4ff;font-family:Inter,Segoe UI,system
 .job-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;border:1px solid #223553;background:#0d1b2d;border-radius:9px;padding:9px;margin:7px 0}.job-row>div{display:flex;flex-direction:column;min-width:0}.job-row small{color:#8494af;word-break:break-word}.job-row button{border:1px solid #33527f;background:#142743;color:#eaf2ff;border-radius:7px;padding:6px 10px;cursor:pointer}
 
 .disabled-memory{opacity:.55}.disabled-memory strong{text-decoration:line-through}.trainer-row button{white-space:nowrap}
+
+.brain-card{margin-bottom:16px;border-color:#2c5179;background:linear-gradient(135deg,#081b2d,#141733);box-shadow:inset 0 0 28px rgba(17,207,255,.04)}
+.brain-state{font-size:10px;text-transform:uppercase;letter-spacing:.08em;border:1px solid #62542d;color:#e2c87b;border-radius:999px;padding:5px 8px}.brain-state.unlocked{border-color:#2e7a57;color:#79edb5}.brain-state.locked{border-color:#74414e;color:#f0a6b1}
+.brain-summary{display:flex;flex-direction:column;gap:4px;margin:10px 0}.brain-summary strong{color:#dff6ff}.brain-summary small{color:#7f97b7}
+.brain-auth-grid,.brain-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.brain-grid{margin-top:14px;border-top:1px solid #203754;padding-top:14px}.brain-grid h3,.brain-emotion-section h3{margin:0 0 6px;font-size:14px}.brain-actions{flex-wrap:wrap}.brain-actions button:disabled,.brain-card button:disabled{opacity:.45;cursor:not-allowed}
+.brain-toggle-grid{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:7px;margin:10px 0}.brain-toggle{display:flex!important;align-items:center;gap:8px!important;margin:0!important;border:1px solid #243a56;background:#091727;border-radius:8px;padding:8px}.brain-toggle input{width:auto}
+.brain-import-button{display:inline-flex!important;align-items:center;margin:0!important;border:1px solid #33527f;background:#142743;color:#eaf2ff;border-radius:8px;padding:7px 10px;cursor:pointer}.brain-import-button input{display:none}
+.brain-emotion-section{margin-top:14px;border-top:1px solid #203754;padding-top:14px}
+@media(max-width:800px){.brain-auth-grid,.brain-grid{grid-template-columns:1fr}.brain-toggle-grid{grid-template-columns:1fr}}

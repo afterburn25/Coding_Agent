@@ -80,6 +80,11 @@ class AgentConfig:
     conversation_fact_limit: int = 500
     conversation_training_limit: int = 500
 
+    # Nexus Brain: creator-locked model-independent long-term memory.
+    nexus_brain_enabled: bool = True
+    nexus_brain_path: str = "data/nexus_brain.json"
+    nexus_brain_record_limit: int = 10000
+
     # Conversation manager / persistent sessions.
     conversations_path: str = "data/conversations.json"
     conversation_summary_after_messages: int = 24
@@ -270,6 +275,9 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.conversation_rule_limit = max(20, int(raw.get("conversation_rule_limit", cfg.conversation_rule_limit)))
     cfg.conversation_fact_limit = max(20, int(raw.get("conversation_fact_limit", cfg.conversation_fact_limit)))
     cfg.conversation_training_limit = max(20, int(raw.get("conversation_training_limit", cfg.conversation_training_limit)))
+    cfg.nexus_brain_enabled = bool(raw.get("nexus_brain_enabled", cfg.nexus_brain_enabled))
+    cfg.nexus_brain_path = str(raw.get("nexus_brain_path", cfg.nexus_brain_path))
+    cfg.nexus_brain_record_limit = max(100, int(raw.get("nexus_brain_record_limit", cfg.nexus_brain_record_limit)))
     cfg.conversations_path = str(raw.get("conversations_path", cfg.conversations_path))
     cfg.conversation_summary_after_messages = max(8, int(raw.get("conversation_summary_after_messages", cfg.conversation_summary_after_messages)))
     cfg.knowledge_memory_enabled = bool(raw.get("knowledge_memory_enabled", cfg.knowledge_memory_enabled))

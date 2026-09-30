@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import queue
+import secrets
 import threading
 import time
 from dataclasses import asdict
@@ -11,6 +12,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
+from typing import Any
 
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
@@ -34,6 +36,7 @@ from .workflow.memory import ProjectMemory
 from .workflow.conversation_memory import ConversationMemory
 from .workflow.conversation_manager import ConversationManager
 from .workflow.knowledge_memory import KnowledgeMemory
+from .workflow.nexus_brain import NexusBrain
 from .training import ModelGrowthLab
 from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
@@ -97,6 +100,14 @@ class AppState:
         if not growth_dir.is_absolute():
             growth_dir = runtime_root / growth_dir
         self.model_growth = ModelGrowthLab(growth_dir)
+        brain_path = Path(config.nexus_brain_path).expanduser()
+        if not brain_path.is_absolute():
+            brain_path = runtime_root / brain_path
+        self.nexus_brain = NexusBrain(
+            brain_path,
+            enabled=config.nexus_brain_enabled,
+            max_records=config.nexus_brain_record_limit,
+        )
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
@@ -126,8 +137,10 @@ class AppState:
             conversation_manager=self.conversation_manager,
             knowledge_memory=self.knowledge_memory,
             model_growth=self.model_growth,
+            nexus_brain=self.nexus_brain,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
+        self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
         self._start_primary_prewarm()
 
@@ -218,10 +231,23 @@ class AppState:
         if not growth_dir.is_absolute():
             growth_dir = self.runtime.base_dir / growth_dir
         self.model_growth = ModelGrowthLab(growth_dir)
+        brain_path = Path(config.nexus_brain_path).expanduser()
+        if not brain_path.is_absolute():
+            brain_path = self.runtime.base_dir / brain_path
+        if getattr(self.nexus_brain, "path", None) != brain_path.resolve():
+            self.nexus_brain = NexusBrain(
+                brain_path,
+                enabled=config.nexus_brain_enabled,
+                max_records=config.nexus_brain_record_limit,
+            )
+        else:
+            self.nexus_brain.enabled = bool(config.nexus_brain_enabled)
+            self.nexus_brain.max_records = max(100, int(config.nexus_brain_record_limit))
         self.agent.conversation_memory = self.conversation_memory
         self.agent.conversation_manager = self.conversation_manager
         self.agent.knowledge_memory = self.knowledge_memory
         self.agent.model_growth = self.model_growth
+        self.agent.nexus_brain = self.nexus_brain
         self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
 
@@ -250,6 +276,35 @@ class AppState:
             "started": started,
             "start_error": start_error,
             "readiness": self.readiness_payload(probe_external=True),
+        }
+
+    def open_brain_creator_session(self) -> str:
+        self._brain_creator_token = secrets.token_urlsafe(32)
+        return self._brain_creator_token
+
+    def require_brain_creator_session(self, token: str) -> None:
+        supplied = str(token or "")
+        if not self._brain_creator_token or not supplied or not secrets.compare_digest(supplied, self._brain_creator_token):
+            raise PermissionError("Creator authentication session is required")
+
+    def close_brain_creator_session(self) -> None:
+        self._brain_creator_token = ""
+
+    def brain_allows(self, name: str, default: bool = True) -> bool:
+        if not self.nexus_brain.initialized:
+            return default
+        if not self.nexus_brain.verified_for_session:
+            return False
+        return self.nexus_brain.subroutine(name, default)
+
+    def sync_nexus_brain(self) -> dict[str, Any]:
+        if not self.nexus_brain.unlocked:
+            raise PermissionError("Nexus Brain is creator-locked")
+        return {
+            "conversation_records": self.nexus_brain.sync_conversation_memory(self.conversation_memory.snapshot()),
+            "knowledge_records": self.nexus_brain.sync_knowledge_records(self.knowledge_memory.records()),
+            "training_records": self.nexus_brain.sync_model_growth(self.model_growth.candidates(limit=5000)),
+            "brain": self.nexus_brain.summary(),
         }
 
     @staticmethod
@@ -497,6 +552,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
+        if path == "/api/nexus-brain":
+            self._json(self.state.nexus_brain.summary())
+            return
         if path == "/api/conversations":
             from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)
@@ -571,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
                 "policy_mode": self.state.config.conversation_policy_mode,
                 "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
                 "clock": self.state.agent.current_time_snapshot(),
+                "nexus_brain": self.state.nexus_brain.summary(),
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
@@ -699,6 +758,92 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == "/api/nexus-brain/initialize":
+                state = self.state.nexus_brain.initialize_creator(
+                    str(body.get("creator_name", "")).strip(),
+                    str(body.get("passcode", "")),
+                )
+                synced = self.state.sync_nexus_brain()
+                token = self.state.open_brain_creator_session()
+                self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
+                return
+
+            if path == "/api/nexus-brain/unlock":
+                state = self.state.nexus_brain.unlock(
+                    str(body.get("creator_name", "")).strip(),
+                    str(body.get("passcode", "")),
+                )
+                synced = self.state.sync_nexus_brain()
+                token = self.state.open_brain_creator_session()
+                self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
+                return
+
+            if path == "/api/nexus-brain/lock":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                brain = self.state.nexus_brain.lock()
+                self.state.close_brain_creator_session()
+                self._json({"ok": True, "brain": brain})
+                return
+
+            if path == "/api/nexus-brain/sync":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                self._json({"ok": True, **self.state.sync_nexus_brain()})
+                return
+
+            if path == "/api/nexus-brain/subroutines":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                values = body.get("subroutines")
+                if not isinstance(values, dict):
+                    self._json({"error": "subroutines object is required"}, 400)
+                    return
+                saved = self.state.nexus_brain.set_subroutines(values)
+                self._json({"ok": True, "subroutines": saved, "brain": self.state.nexus_brain.summary()})
+                return
+
+            if path == "/api/nexus-brain/emotions":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                values = body.get("emotion_profile")
+                if not isinstance(values, dict):
+                    self._json({"error": "emotion_profile object is required"}, 400)
+                    return
+                saved = self.state.nexus_brain.set_emotion_profile(values)
+                self._json({"ok": True, "emotion_profile": saved, "brain": self.state.nexus_brain.summary()})
+                return
+
+            if path == "/api/nexus-brain/self-model":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                values = body.get("self_model")
+                if not isinstance(values, dict):
+                    self._json({"error": "self_model object is required"}, 400)
+                    return
+                saved = self.state.nexus_brain.set_self_model(values)
+                self._json({"ok": True, "self_model": saved, "brain": self.state.nexus_brain.summary()})
+                return
+
+            if path == "/api/nexus-brain/export":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                self._json({"ok": True, "brain": self.state.nexus_brain.export_payload()})
+                return
+
+            if path == "/api/nexus-brain/import":
+                payload = body.get("brain")
+                if not isinstance(payload, dict):
+                    self._json({"error": "brain object is required"}, 400)
+                    return
+                installed = self.state.nexus_brain.install_locked_export(payload)
+                self._json({"ok": True, "brain": installed})
+                return
+
+            if path.startswith("/api/model-growth/") and not self.state.brain_allows("model_growth", True):
+                self._json({"error": "Model Growth is disabled by the creator-locked Nexus Brain.", "code": "brain_subroutine_disabled"}, 403)
+                return
+            if path in {"/api/research/plan", "/api/research/run"} and not self.state.brain_allows("web_research", True):
+                self._json({"error": "Web research is disabled by the creator-locked Nexus Brain.", "code": "brain_subroutine_disabled"}, 403)
+                return
+            if path == "/api/image/generate" and not self.state.brain_allows("image_generation", True):
+                self._json({"error": "Image generation is disabled by the creator-locked Nexus Brain.", "code": "brain_subroutine_disabled"}, 403)
+                return
+
             if path == "/api/policy/mode":
                 saved = self.state.set_conversation_policy_mode(
                     str(body.get("mode", "")),
@@ -805,6 +950,8 @@ class Handler(BaseHTTPRequestHandler):
                             source="manual_research",
                             metadata={"knowledge_id": record.get("id"), "sources": record.get("sources", [])},
                         )
+                if self.state.nexus_brain.unlocked:
+                    self.state.sync_nexus_brain()
                 self._json({"ok": True, "session": session})
                 return
 
@@ -969,12 +1116,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not user_text or not assistant_text:
                     self._json({"error": "user and assistant are required"}, 400)
                     return
-                self.state.conversation_memory.learn_from_user(
-                    user_text,
-                    project_id=str(self.state.workspace),
-                    conversation_id=str(self.state.conversation_manager.active().get("id") or ""),
-                )
-                self.state.conversation_memory.record_exchange(user_text, assistant_text)
+                if self.state.brain_allows("long_term_memory", True):
+                    self.state.conversation_memory.learn_from_user(
+                        user_text,
+                        project_id=str(self.state.workspace),
+                        conversation_id=str(self.state.conversation_manager.active().get("id") or ""),
+                    )
+                    self.state.conversation_memory.record_exchange(user_text, assistant_text)
                 self.state.conversation_manager.record_exchange(
                     user_text,
                     assistant_text,
@@ -982,6 +1130,8 @@ class Handler(BaseHTTPRequestHandler):
                     model_id="builtin-local",
                 )
                 self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
+                if self.state.nexus_brain.unlocked:
+                    self.state.sync_nexus_brain()
                 self.state.history = self.state.conversation_manager.history(limit=32)
                 self._json({
                     "ok": True,
@@ -1032,6 +1182,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
+                if self.state.nexus_brain.unlocked:
+                    self.state.sync_nexus_brain()
                 self._json({"ok": True, "feedback": saved})
                 return
 
@@ -1039,7 +1191,8 @@ class Handler(BaseHTTPRequestHandler):
                 c = self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
                 f = self.state.model_growth.import_conversation_feedback(self.state.conversation_manager.snapshot())
                 k = self.state.model_growth.import_knowledge_memory(self.state.knowledge_memory.snapshot())
-                self._json({"ok": True, "conversation_candidates": c, "feedback_candidates": f, "knowledge_candidates": k, "growth": self.state.model_growth.summary()})
+                brain = self.state.sync_nexus_brain() if self.state.nexus_brain.unlocked else {"brain": self.state.nexus_brain.summary()}
+                self._json({"ok": True, "conversation_candidates": c, "feedback_candidates": f, "knowledge_candidates": k, "growth": self.state.model_growth.summary(), "nexus_brain": brain})
                 return
 
             if path == "/api/model-growth/review":

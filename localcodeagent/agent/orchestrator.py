@@ -19,6 +19,7 @@ from ..workflow.memory import ProjectMemory
 from ..workflow.conversation_memory import ConversationMemory
 from ..workflow.conversation_manager import ConversationManager
 from ..workflow.knowledge_memory import KnowledgeMemory
+from ..workflow.nexus_brain import NexusBrain
 from ..training.model_growth import ModelGrowthLab
 from ..workflow.repository import RepositoryIndex
 from ..workflow.tasks import TaskStore
@@ -28,7 +29,7 @@ from ..workflow.verify import detect_verification_commands
 UTILITY_PROMPT = """You are Chat Nexus, a local-first AI coding workstation.
 For greetings, capability questions, and casual conversation, answer directly and naturally.
 In ordinary conversation, sound like a capable adult rather than a scripted help bot. Track what the user has already said, carry references forward, notice relevant time gaps, vary phrasing, and avoid repetitive stock closings. Do not force a follow-up question onto every reply.
-You can explain that Chat Nexus can inspect/edit code, run tools with permission gates, test changes, research technical issues, use Git/GitHub workflows when authorized, and work with local image tools when configured.
+You can explain that Chat Nexus can inspect/edit code, run tools with permission gates, test changes, research technical and general-knowledge questions, use Git/GitHub workflows when authorized, work with local image tools when configured, and adapt conversational behavior through Nexus Brain memory/feedback/training signals.
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
 """
 
@@ -143,6 +144,7 @@ class AgentOrchestrator:
         conversation_manager: ConversationManager | None = None,
         knowledge_memory: KnowledgeMemory | None = None,
         model_growth: ModelGrowthLab | None = None,
+        nexus_brain: NexusBrain | None = None,
     ) -> None:
         self.config = config
         self.router = router
@@ -158,11 +160,58 @@ class AgentOrchestrator:
         self.conversation_manager = conversation_manager
         self.knowledge_memory = knowledge_memory
         self.model_growth = model_growth
+        self.nexus_brain = nexus_brain
         self._sessions: dict[str, _AgentSession] = {}
+
+    def _brain_subroutine_enabled(self, name: str, default: bool = True) -> bool:
+        if self.nexus_brain is None or not self.nexus_brain.initialized:
+            return default
+        # A protected Brain must be verified once after process start before its
+        # signed settings/memory are trusted. Until then configurable subroutines
+        # fail closed rather than falling back to editable config.json.
+        if not self.nexus_brain.verified_for_session:
+            return False
+        return self.nexus_brain.subroutine(name, default)
+
+    def _sync_nexus_brain(self) -> None:
+        if self.nexus_brain is None or not self.nexus_brain.unlocked:
+            return
+        try:
+            if self.conversation_memory is not None:
+                self.nexus_brain.sync_conversation_memory(self.conversation_memory.snapshot())
+            if self.knowledge_memory is not None:
+                self.nexus_brain.sync_knowledge_records(self.knowledge_memory.records())
+            if self.model_growth is not None:
+                self.nexus_brain.sync_model_growth(self.model_growth.candidates(limit=5000))
+        except PermissionError:
+            pass
+
+    def _tool_blocked_by_brain(self, name: str) -> str:
+        if name in IMAGE_TOOL_NAMES and not self._brain_subroutine_enabled("image_generation", True):
+            return "BRAIN_SUBROUTINE_DISABLED: image_generation is disabled by the creator-locked Nexus Brain."
+        research_tools = {
+            "research_topic", "search_documentation", "search_github", "search_errors",
+            "lookup_api", "read_release_notes", "web_search", "fetch_url", "browser_run",
+        }
+        if name in research_tools and not self._brain_subroutine_enabled("web_research", True):
+            return "BRAIN_SUBROUTINE_DISABLED: web_research is disabled by the creator-locked Nexus Brain."
+        return ""
 
     def policy_prompt(self) -> str:
         mode = str(getattr(self.config, "conversation_policy_mode", "permissive") or "permissive").strip().lower()
         base = POLICY_PROMPTS.get(mode, POLICY_PROMPTS["permissive"])
+        if self.nexus_brain is not None and self.nexus_brain.initialized:
+            if not self.nexus_brain.verified_for_session:
+                base += (
+                    "\nNexus Brain is creator-locked and has not been verified for this process. "
+                    "Creator-configurable adult/sexual explicit behavior fails closed until Brain verification; "
+                    "keep such conversation non-explicit."
+                )
+            elif not self.nexus_brain.subroutine("adult_content", True):
+                base += (
+                    "\nCreator-locked Nexus Brain setting: adult_content is disabled. "
+                    "Keep adult/sexual conversation non-explicit even if the general conversation policy is permissive."
+                )
         ethical_temperature = max(0.0, min(1.0, float(getattr(self.config, "ethical_temperature", 1.0))))
         if ethical_temperature >= 0.8:
             posture = (
@@ -299,10 +348,24 @@ class AgentOrchestrator:
         )
         if any(phrase in normalized for phrase in capability_phrases):
             return (
-                "I can inspect and edit code, build features, debug errors, run tests and commands with "
-                "permission gates, research technical issues, work with Git/GitHub when authorized, "
-                "manage local coding models, remember things you explicitly teach me, and use configured "
-                "local image tools. For coding work I can inspect the repository and carry the task through verification."
+                "I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, "
+                "research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local "
+                "models, use configured local image tools, and learn across conversations through Nexus Brain. That learning "
+                "can include verified general knowledge, facts/preferences you teach me, conversation style, corrections, "
+                "feedback, and approved training examples, depending on the creator-locked Brain subroutines."
+            )
+
+        self_learning_phrases = (
+            "can you be self learning", "can you be self-learning", "can you self learn",
+            "can you learn and adapt", "can you adapt and learn", "are you self learning",
+            "are you self-learning", "can you learn general knowledge", "can you learn conversational skills",
+        )
+        if any(phrase in normalized for phrase in self_learning_phrases):
+            return (
+                "Yes. With Nexus Brain enabled, I can adapt beyond coding: I can bank verified general knowledge, remember "
+                "facts and preferences, learn conversational patterns from feedback and corrections, retain approved training "
+                "examples, and carry those learned behaviors across model replacements. The creator-locked Brain decides which "
+                "learning channels are enabled; model weights only change through the separate reviewed training pipeline."
             )
 
         if normalized in {
@@ -413,9 +476,14 @@ class AgentOrchestrator:
                     "expires_at": record.get("expires_at", 0),
                 },
             )
+        self._sync_nexus_brain()
 
     def _auto_research(self, query: str) -> dict[str, Any]:
-        if self.research is None or not self.config.research_enabled:
+        if (
+            self.research is None
+            or not self.config.research_enabled
+            or not self._brain_subroutine_enabled("web_research", True)
+        ):
             return {}
         session = self.research.research_topic(query, mode=self.config.research_mode)
         self._remember_research(query, session)
@@ -893,6 +961,11 @@ class AgentOrchestrator:
         while session.pending_call_index < len(session.pending_calls):
             call = session.pending_calls[session.pending_call_index]
             name, args = self._parse_call(call)
+            brain_block = self._tool_blocked_by_brain(name)
+            if brain_block:
+                self._append_tool_result(session, call, name, args, brain_block)
+                session.pending_call_index += 1
+                continue
             requires, permission = self.tools.requires_approval(name)
             if requires:
                 return self._pause_for_approval(
@@ -1102,8 +1175,13 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
             )
-        if self.model_growth is not None and self.conversation_memory is not None:
+        if (
+            self.model_growth is not None
+            and self.conversation_memory is not None
+            and self._brain_subroutine_enabled("model_growth", True)
+        ):
             self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
+        self._sync_nexus_brain()
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -1120,7 +1198,11 @@ class AgentOrchestrator:
 
             ethical_temperature = max(0.0, min(1.0, float(getattr(self.config, "ethical_temperature", 1.0))))
             refusal_retry_limit = max(0, min(5, int(getattr(self.config, "generic_refusal_retry_limit", 3))))
-            refusal_retry_enabled = ethical_temperature >= 0.8 and refusal_retry_limit > 0
+            refusal_retry_enabled = (
+                ethical_temperature >= 0.8
+                and refusal_retry_limit > 0
+                and self._brain_subroutine_enabled("adult_content", True)
+            )
             refusal_check_intent = ConversationManager.classify_intent(session.user_text)
             buffer_for_refusal_check = (
                 refusal_retry_enabled
@@ -1471,17 +1553,24 @@ class AgentOrchestrator:
             else "conversation"
         )
         learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": [], "forgotten": []}
-        if self.conversation_memory is not None:
+        if (
+            self.conversation_memory is not None
+            and self._brain_subroutine_enabled("long_term_memory", True)
+            and self._brain_subroutine_enabled("self_learning", True)
+            and self._brain_subroutine_enabled("conversation_learning", True)
+        ):
             learned = self.conversation_memory.learn_from_user(
                 user_text,
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
+        self._sync_nexus_brain()
 
         if (
             mode == "auto"
             and conversation_intent == "image"
             and self.direct_image_generation_intent(user_text)
+            and self._brain_subroutine_enabled("image_generation", True)
         ):
             return self._direct_image_result(
                 task_id=task.id,
@@ -1491,8 +1580,18 @@ class AgentOrchestrator:
 
         decision = self.router.choose(user_text, override=mode)
         builtin_response = self.builtin_utility_response(user_text) if mode == "auto" else None
+        brain_blocked_response = (
+            "Image generation is disabled by the creator-locked Nexus Brain."
+            if (
+                mode == "auto"
+                and conversation_intent == "image"
+                and self.direct_image_generation_intent(user_text)
+                and not self._brain_subroutine_enabled("image_generation", True)
+            )
+            else None
+        )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
-        local_response = training_response or builtin_response
+        local_response = training_response or brain_blocked_response or builtin_response
         if local_response is not None:
             builtin_decision = RoutingDecision(
                 role="utility",
@@ -1528,8 +1627,13 @@ class AgentOrchestrator:
                     intent=conversation_intent,
                     model_id="builtin-local",
                 )
-            if self.model_growth is not None and self.conversation_memory is not None:
+            if (
+                self.model_growth is not None
+                and self.conversation_memory is not None
+                and self._brain_subroutine_enabled("model_growth", True)
+            ):
                 self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
+            self._sync_nexus_brain()
             return AgentResult(
                 content=local_response,
                 routing=builtin_decision,
@@ -1564,14 +1668,22 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "error", "error": error_task.error})
             raise
         lightweight = decision.role == "utility"
-        persistent_context = (
-            self.conversation_memory.prompt_context(
+        if self.nexus_brain is not None and self.nexus_brain.initialized:
+            persistent_context = self.nexus_brain.prompt_context(
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
-            if self.conversation_memory is not None
-            else ""
-        )
+            brain_behavior_context = self.nexus_brain.behavior_context(user_text)
+        else:
+            persistent_context = (
+                self.conversation_memory.prompt_context(
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                )
+                if self.conversation_memory is not None
+                else ""
+            )
+            brain_behavior_context = ""
         personality_context = (
             self.conversation_manager.personality_prompt()
             if self.conversation_manager is not None
@@ -1604,6 +1716,7 @@ class AgentOrchestrator:
             self.config.auto_research_unknown
             and self.research is not None
             and self.config.research_enabled
+            and self._brain_subroutine_enabled("web_research", True)
             and not knowledge_context
         ):
             try:
@@ -1627,7 +1740,7 @@ class AgentOrchestrator:
                 {"role": "system", "content": UTILITY_PROMPT},
                 {"role": "system", "content": clock_context},
             ]
-            if timing_context:
+            if timing_context and self._brain_subroutine_enabled("temporal_context", True):
                 messages.append({"role": "system", "content": timing_context})
             if conversation_quality_context:
                 messages.append({"role": "system", "content": conversation_quality_context})
@@ -1639,6 +1752,8 @@ class AgentOrchestrator:
                 messages.append({"role": "system", "content": personality_context})
             if intent_context:
                 messages.append({"role": "system", "content": intent_context})
+            if brain_behavior_context:
+                messages.append({"role": "system", "content": brain_behavior_context})
             if knowledge_context:
                 messages.append({"role": "system", "content": knowledge_context})
             if research_context.get("summary"):
@@ -1657,7 +1772,12 @@ class AgentOrchestrator:
             project_memory = self.memory.context()
             index_summary = self.repository_index.ensure()
             self_hosting = self._self_hosting_context()
-            if self.research is not None and self.config.research_enabled and not research_context:
+            if (
+                self.research is not None
+                and self.config.research_enabled
+                and self._brain_subroutine_enabled("web_research", True)
+                and not research_context
+            ):
                 try:
                     research_context = self.research.prepare_task(user_text, mode=self.config.research_mode)
                     self.tasks.update(task.id, research=research_context)
@@ -1676,7 +1796,7 @@ class AgentOrchestrator:
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
                 },
             ]
-            if timing_context:
+            if timing_context and self._brain_subroutine_enabled("temporal_context", True):
                 messages.append({"role": "system", "content": timing_context})
             if conversation_quality_context:
                 messages.append({"role": "system", "content": conversation_quality_context})
@@ -1688,6 +1808,8 @@ class AgentOrchestrator:
                 messages.append({"role": "system", "content": personality_context})
             if intent_context:
                 messages.append({"role": "system", "content": intent_context})
+            if brain_behavior_context:
+                messages.append({"role": "system", "content": brain_behavior_context})
             if knowledge_context:
                 messages.append({"role": "system", "content": knowledge_context})
             if self_hosting:
