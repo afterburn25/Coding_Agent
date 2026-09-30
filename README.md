@@ -241,7 +241,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **133 tests passing**.
+Current expected result: **134 tests passing**.
 
 ## API highlights
 
@@ -295,6 +295,8 @@ The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. A
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat events update the assistant bubble with phase/model/elapsed seconds instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
 Basic greetings and capability questions are now answered by a built-in local utility response and do **not** require llama.cpp, model readiness, repository context, or tool-schema construction. The native desktop host also captures hidden backend stdout/stderr to `data/logs/backend-host.log` and will attempt a bounded automatic backend restart if the backend process exits unexpectedly.
+
+Task selection now always treats the newest task record as current; older interrupted tasks remain recoverable in Recent tasks but cannot overshadow a newer completed request. Stream-disconnect diagnosis only consults task state created during the current request, and static UI assets are served with `Cache-Control: no-store` so an Update cannot leave an obsolete `app.js` active in WebView2. The WebView also answers the simplest greeting/capability prompts locally before opening an SSE request.
 
 ## Self-development mode
 
@@ -399,7 +401,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **133 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **134 passing tests**.
 
 ## Development state
 

@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 133,
-  "next_milestone": "Dogfood the resilient-greeting/backend-watchdog build; confirm instant built-in hi and stable backend, then measure real 14B/30B first-token and throughput",
+  "test_checkpoint": 134,
+  "next_milestone": "Install the stale-task/UI-cache fix, verify immediate local greeting, then test a real 14B request and inspect backend-host.log only if the backend exits",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -117,5 +117,14 @@
     "unexpected_exit_restart": true,
     "max_restart_attempts": 3,
     "interrupted_tasks_remain_recoverable": true
+  },
+  "task_state": {
+    "newest_task_is_current": true,
+    "older_interrupted_remains_recent": true,
+    "stream_disconnect_request_scoped": true
+  },
+  "ui_cache": {
+    "static_assets_no_store": true,
+    "client_builtin_greeting_before_sse": true
   }
 }

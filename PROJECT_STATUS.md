@@ -73,7 +73,7 @@
 
 ### Tests
 
-`133` automated tests passing.
+`134` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 133 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 134 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -118,6 +118,9 @@
 - The native desktop captures hidden backend output to `data/logs/backend-host.log` and performs a bounded automatic backend restart on unexpected backend exit.
 - Windows Update no longer depends on Inno Restart Manager for the Chat Nexus process tree. Setup owns shutdown/cleanup of the desktop, backend, and llama.cpp child processes before file replacement.
 - CI now launches a deliberate long-running executable named `ChatNexus.exe` before the second installer run and fails unless the updater closes it successfully.
+- `TaskStore.current()` now returns the newest record rather than searching backward for any interrupted task; old interrupted work remains in Recent tasks but cannot replace a newer completed request.
+- Stream-close diagnosis is request-scoped: it prefers the task event observed by the current stream and only accepts global task state if its creation time matches the current request.
+- The WebView short-circuits the most basic greeting/capability prompts locally before SSE, and the backend serves UI assets with `Cache-Control: no-store` to eliminate stale post-Update JavaScript.
 
 ### Native desktop dogfood checkpoint
 
@@ -133,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **133 tests passing**.
+- Current automated checkpoint: **134 tests passing**.
 
 
 

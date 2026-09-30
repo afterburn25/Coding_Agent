@@ -252,6 +252,19 @@
 - Windows native desktop/installer validation: **green** — native host compiled, installer compiled, the running-`ChatNexus.exe` shutdown reproduction passed, fresh-install/update preservation passed, and Windows artifacts uploaded.
 - Next: install this dogfood build, verify `hi` responds instantly without model startup, then use `data/logs/backend-host.log` if any further unexpected backend exit occurs; after stability, measure real 14B/30B first-token and throughput.
 
+## v0.6 stale interrupted-task / UI cache checkpoint
+
+- After the resilient-greeting build, `hi` could still immediately show **“Chat Nexus stopped before this task completed.”**
+- Root cause found in durable task selection: `TaskStore.current()` scanned backward for any active/interrupted task. A previous interrupted task could therefore outrank a newer completed greeting and its saved error could be reused by stream-disconnect handling.
+- `TaskStore.current()` now returns the newest task record. Older interrupted tasks remain in Recent tasks and are still recoverable, but cannot become the current request once newer work exists.
+- Stream disconnect handling now binds diagnostics to the task observed by the current stream. It only falls back to global `/api/tasks` current state when that task was created during the current request.
+- The WebView now answers basic greetings/capability questions locally before calling `/api/chat/stream`, creating a clean diagnostic boundary that does not require backend/model activity for `hi`.
+- Static Web UI files now send `Cache-Control: no-store, no-cache, must-revalidate` plus `Pragma: no-cache` and `Expires: 0`, preventing a post-Update WebView from running an obsolete `app.js`.
+- Feature commit: `4a0b044` — Bind stream errors to the current task.
+- Unit checkpoint: **134/134 tests passing**.
+- Windows native desktop/installer validation: pending until current CI completes.
+- Next: install this exact updater, verify `hi` returns the local greeting immediately, then test a real model request and use `data/logs/backend-host.log` if the backend exits.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -424,4 +437,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `133 tests` passing.
+Expected at this checkpoint: `134 tests` passing.
