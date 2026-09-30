@@ -427,6 +427,95 @@ class RuntimeManager:
                     status.error = "" if healthy else detail[:300]
             return [self._status[m.id].as_dict() for m in self.config.models]
 
+    def readiness(self, *, probe_external: bool = True) -> dict:
+        """Describe whether configured coding models can actually serve agent work."""
+        self.refresh_hardware()
+        statuses = {row["model_id"]: row for row in self.statuses(probe_external=probe_external)}
+        rows: list[dict] = []
+        covered_roles: set[str] = set()
+        recommendations: list[str] = []
+
+        for profile in self.config.models:
+            if not profile.enabled:
+                continue
+            status = statuses.get(profile.id, {})
+            fits, _score, fit_reason = self.resource_fit(profile)
+            issues: list[str] = []
+            healthy = bool(status.get("healthy"))
+            model_file = ""
+            executable = ""
+            if profile.runtime == "external":
+                runnable = healthy
+                if not profile.endpoint:
+                    issues.append("endpoint is not configured")
+                elif not healthy:
+                    issues.append("external endpoint is not reachable")
+            elif profile.runtime == "llama_cpp":
+                executable = self.discover_llama_server(profile) or ""
+                if not executable:
+                    issues.append("llama-server was not found")
+                if not profile.model_path:
+                    issues.append("GGUF model path is not configured")
+                    model_ok = False
+                else:
+                    path = self._resolve(profile.model_path)
+                    model_file = str(path)
+                    model_ok = path.is_file()
+                    if not model_ok:
+                        issues.append(f"GGUF model file is missing: {path}")
+                if not fits:
+                    issues.append(fit_reason)
+                runnable = bool(executable and model_ok and fits)
+            else:
+                runnable = False
+                issues.append(f"unsupported runtime: {profile.runtime}")
+
+            if healthy or runnable:
+                covered_roles.update(profile.roles)
+            rows.append({
+                "id": profile.id,
+                "runtime": profile.runtime,
+                "roles": list(profile.roles),
+                "healthy": healthy,
+                "runnable": runnable,
+                "state": status.get("state", ""),
+                "endpoint": status.get("endpoint") or profile.endpoint,
+                "model_file": model_file,
+                "llama_server": executable,
+                "resource_fit": fits,
+                "resource_reason": fit_reason,
+                "issues": issues,
+            })
+
+        coding_roles = {"fast_coder", "primary_coder", "deep_reasoner"}
+        ready_to_code = any(row["runnable"] or row["healthy"] for row in rows) and bool(covered_roles & coding_roles)
+        auto_routing_ready = {"primary_coder", "deep_reasoner", "reviewer"}.issubset(covered_roles)
+
+        if not rows:
+            recommendations.append("Configure at least one enabled coding model profile.")
+        managed = [row for row in rows if row["runtime"] == "llama_cpp"]
+        if managed and not any(row["llama_server"] for row in managed):
+            recommendations.append("Install llama.cpp and put llama-server on PATH, or set llama_cpp_executable.")
+        if managed and not any(row["runnable"] or row["healthy"] for row in managed):
+            recommendations.append("Point a managed model profile at an existing GGUF file in the models directory.")
+        external = [row for row in rows if row["runtime"] == "external"]
+        if external and not any(row["healthy"] for row in external):
+            recommendations.append("Start the configured OpenAI-compatible local endpoint, or switch to a managed llama.cpp profile.")
+        if ready_to_code and not auto_routing_ready:
+            recommendations.append("Coding is available now; add dedicated deep-reasoner/reviewer roles later for stronger automatic routing.")
+
+        return {
+            "ready_to_code": ready_to_code,
+            "auto_routing_ready": auto_routing_ready,
+            "covered_roles": sorted(covered_roles),
+            "models": rows,
+            "hardware": self.hardware.as_dict(),
+            "llama_server": self.discover_llama_server(),
+            "models_dir": str(self.models_dir),
+            "inventory": self.inventory(),
+            "recommendations": recommendations,
+        }
+
     def summary(self, *, probe_external: bool = False) -> dict:
         return {
             "hardware": self.hardware.as_dict(),
