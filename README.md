@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **75 tests passing**.
+Current expected result: **78 tests passing**.
 
 ## API highlights
 
@@ -236,6 +236,25 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - approval state
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+## Isolated self-update validation
+
+When the selected workspace is the Chat Nexus source tree, automatic verification upgrades from a plain unit-test command to:
+
+```bash
+python -m localcodeagent.selftest --workspace . --json
+```
+
+That validator:
+
+1. runs the full unit suite
+2. creates a resource-safe temporary configuration
+3. launches a **second Chat Nexus process** from the edited working tree on a free loopback port
+4. probes `/api/status`, the main Chat UI, Image Studio, and Research Hub
+5. terminates the second process
+6. fails verification if any stage is unhealthy
+
+The currently running Chat Nexus instance is never replaced during this validation.
 
 ## Native GitHub delivery tools
 
