@@ -53,6 +53,8 @@ class AgentConfig:
         "image.manage": "ask",
         "network.read": "allow",
         "browser.control": "ask",
+        "github.read": "allow",
+        "github.write": "ask",
     })
     max_agent_steps: int = 12
     review_after_changes: bool = True
@@ -101,6 +103,14 @@ class AgentConfig:
     research_github_token_env: str = "GITHUB_TOKEN"
     research_github_timeout: int = 15
     max_auto_repair_cycles: int = 2
+
+    # v0.6 native GitHub coding/action integration.
+    github_enabled: bool = True
+    github_api_url: str = "https://api.github.com"
+    github_api_version: str = "2026-03-10"
+    github_token_env: str = "GITHUB_TOKEN"
+    github_timeout: int = 15
+    github_default_remote: str = "origin"
 
 
 def default_config() -> AgentConfig:
@@ -218,4 +228,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.research_github_token_env = str(raw.get("research_github_token_env", cfg.research_github_token_env))
     cfg.research_github_timeout = max(3, int(raw.get("research_github_timeout", cfg.research_github_timeout)))
     cfg.max_auto_repair_cycles = max(0, int(raw.get("max_auto_repair_cycles", cfg.max_auto_repair_cycles)))
+    cfg.github_enabled = bool(raw.get("github_enabled", cfg.github_enabled))
+    cfg.github_api_url = str(raw.get("github_api_url", cfg.github_api_url))
+    cfg.github_api_version = str(raw.get("github_api_version", cfg.github_api_version))
+    cfg.github_token_env = str(raw.get("github_token_env", cfg.github_token_env))
+    cfg.github_timeout = max(3, int(raw.get("github_timeout", cfg.github_timeout)))
+    cfg.github_default_remote = str(raw.get("github_default_remote", cfg.github_default_remote)) or "origin"
     return cfg
