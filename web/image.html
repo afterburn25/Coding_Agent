@@ -46,6 +46,42 @@
       </div>
       <div id="referenceStrip" class="reference-strip"></div>
 
+      <section class="edit-workbench">
+        <div class="edit-heading">
+          <div><strong>Edit workbench</strong><small>Source, result, and local inpainting mask</small></div>
+          <span id="maskState" class="mask-state">No source selected</span>
+        </div>
+        <div class="compare-grid">
+          <figure class="compare-pane">
+            <figcaption>Before</figcaption>
+            <div class="compare-image"><img id="beforeImage" alt="Source image" /><span id="beforeEmpty">Choose a source/reference image</span></div>
+          </figure>
+          <figure class="compare-pane">
+            <figcaption>After</figcaption>
+            <div class="compare-image"><img id="afterImage" alt="Generated result" /><span id="afterEmpty">Finished edits appear here</span></div>
+          </figure>
+        </div>
+
+        <details class="mask-panel">
+          <summary>Mask editor <span>White = edit, black = keep</span></summary>
+          <div class="mask-toolbar">
+            <button id="maskPaint" class="mini-button active" type="button">Paint</button>
+            <button id="maskErase" class="mini-button" type="button">Erase</button>
+            <label>Brush <input id="maskBrush" type="range" min="4" max="160" value="48" /></label>
+            <button id="maskFill" class="mini-button" type="button">Fill</button>
+            <button id="maskInvert" class="mini-button" type="button">Invert</button>
+            <button id="maskClear" class="mini-button" type="button">Clear</button>
+            <button id="saveMask" class="mini-button" type="button">Save mask</button>
+          </div>
+          <div class="mask-stage">
+            <img id="maskSource" alt="" />
+            <canvas id="maskCanvas"></canvas>
+            <span id="maskEmpty">Choose a source image to begin masking.</span>
+          </div>
+          <small class="mask-help">Masks stay local. Inpaint automatically saves a dirty mask before queueing the job.</small>
+        </details>
+      </section>
+
       <textarea id="imagePrompt" rows="4" placeholder="Describe the image you want, or tell the agent how to edit the uploaded image…"></textarea>
 
       <div class="image-controls-grid">
