@@ -84,6 +84,14 @@
 - CI checkpoint: **90/90 tests passing**.
 - Next: first-run `llama-server` bootstrap guidance, then real Chat Nexus dogfood development.
 
+## v0.6 llama.cpp bootstrap checkpoint
+
+- Runtime discovery recognizes legacy `llama-server(.exe)` and the newer unified `llama(.exe)`; unified launches insert the `serve` subcommand automatically.
+- Readiness provides platform-specific install guidance, including Winget on Windows, but never executes package-manager commands automatically.
+- The verified coding-model catalog + discovered-GGUF role writer + runtime bootstrap now form a complete first-run path from no models to managed local coding.
+- CI checkpoint: **93/93 tests passing**.
+- The project is ready to begin real Chat Nexus-on-Chat Nexus dogfood tasks once a local model/runtime is installed on the user's machine.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -128,7 +136,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **90 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **93 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -256,4 +264,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `90 tests` passing.
+Expected at this checkpoint: `93 tests` passing.
