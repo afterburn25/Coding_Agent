@@ -9,7 +9,8 @@ from localcodeagent.research.cache import ResearchCache
 from localcodeagent.research.coordinator import ResearchCoordinator
 from localcodeagent.research.environment import EnvironmentInspector
 from localcodeagent.research.planner import KnowledgeGapDetector
-from localcodeagent.research.providers import GitHubResearchProvider
+from localcodeagent.research.providers import GitHubApiResearchProvider, GitHubResearchProvider
+from localcodeagent.research.github_api import GitHubApiClient, GitHubApiError
 from localcodeagent.research.ranking import SourceRanker
 from localcodeagent.research.types import ResearchSource
 from localcodeagent.workflow.repository import RepositoryIndex
@@ -126,12 +127,88 @@ class ResearchCacheTests(unittest.TestCase):
             self.assertIsNone(cache.get("web", "query", "2.0"))
 
 
+class GitHubApiTests(unittest.TestCase):
+    def test_client_uses_versioned_headers_and_reports_rate_metadata(self):
+        class Response:
+            headers = {
+                "X-RateLimit-Limit": "5000", "X-RateLimit-Remaining": "4999",
+                "X-RateLimit-Reset": "123456", "X-RateLimit-Resource": "search",
+            }
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return b'{"items": [{"full_name": "owner/repo", "html_url": "https://github.com/owner/repo"}]}'
+
+        captured = {}
+        def opener(request, timeout):
+            captured["authorization"] = request.get_header("Authorization")
+            captured["version"] = request.get_header("X-github-api-version")
+            captured["url"] = request.full_url
+            return Response()
+
+        client = GitHubApiClient(token="TEST_TOKEN", opener=opener)
+        rows, rate = client.search_repositories("library", limit=1)
+        self.assertEqual(rows[0]["full_name"], "owner/repo")
+        self.assertEqual(captured["authorization"], "Bearer TEST_TOKEN")
+        self.assertEqual(captured["version"], "2026-03-10")
+        self.assertEqual(rate["remaining"], 4999)
+        self.assertNotIn("TEST_TOKEN", str(rate))
+
+    def test_api_provider_maps_repo_scoped_issue_as_upstream_evidence(self):
+        class Client:
+            authenticated = False
+            def search_issues(self, query, repo="", limit=8):
+                return ([{
+                    "title": "Known regression", "html_url": "https://github.com/org/lib/issues/7",
+                    "body": "Fixed on main", "number": 7, "state": "open",
+                    "updated_at": "2026-09-01T00:00:00Z",
+                }], {"remaining": 28})
+            def search_repositories(self, query, limit=8): return ([], {})
+
+        provider = GitHubApiResearchProvider(Client())
+        rows = provider.search("exact error", repo="org/lib", kind="issues", limit=3)
+        self.assertEqual(rows[0].authority, "upstream_issue")
+        self.assertEqual(rows[0].metadata["repository"], "org/lib")
+        self.assertTrue(rows[0].untrusted)
+
+    def test_coordinator_falls_back_to_web_github_provider(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); (root / "README.md").write_text("example", encoding="utf-8")
+            idx = RepositoryIndex(root); idx.build()
+            cfg = AgentConfig(research_data_dir=".agent/research-test", research_github_api_enabled=False)
+            coord = ResearchCoordinator(root, idx, cfg)
+            fake = FakeWeb()
+            coord.github = fake
+            rows = coord.search_github("library issue", limit=2)
+            self.assertEqual(fake.calls, 1)
+            self.assertTrue(rows)
+
+    def test_github_api_results_are_cached(self):
+        class ApiProvider:
+            name = "github_api"
+            client = type("Client", (), {"authenticated": False})()
+            def __init__(self): self.calls = 0
+            def search(self, query, *, limit=8, version="", repo="", kind="auto"):
+                self.calls += 1
+                return [ResearchSource(title="Issue", url="https://github.com/org/lib/issues/1", source_type="github_issue", authority="upstream_issue", provider=self.name)]
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); (root / "README.md").write_text("example", encoding="utf-8")
+            idx = RepositoryIndex(root); idx.build()
+            cfg = AgentConfig(research_data_dir=".agent/research-test", research_github_api_enabled=False)
+            coord = ResearchCoordinator(root, idx, cfg)
+            api = ApiProvider(); coord.github_api = api
+            first = coord.search_github("exact error", repo="org/lib", kind="issues")
+            second = coord.search_github("exact error", repo="org/lib", kind="issues")
+            self.assertTrue(first and second)
+            self.assertEqual(api.calls, 1)
+
+
 class ResearchCoordinatorTests(unittest.TestCase):
     def make(self, root: Path):
         (root / "README.md").write_text("This project uses Python APIs.", encoding="utf-8")
         idx = RepositoryIndex(root)
         idx.build()
-        cfg = AgentConfig(research_data_dir=".agent/research-test", research_max_queries=2, research_max_pages=2)
+        cfg = AgentConfig(research_data_dir=".agent/research-test", research_max_queries=2, research_max_pages=2, research_github_api_enabled=False)
         coord = ResearchCoordinator(root, idx, cfg)
         fake = FakeWeb()
         coord.web = fake
@@ -160,7 +237,7 @@ class ResearchCoordinatorTests(unittest.TestCase):
             root = Path(td)
             (root / "README.md").write_text("local evidence", encoding="utf-8")
             idx = RepositoryIndex(root); idx.build()
-            cfg = AgentConfig(research_data_dir=".agent/research-test", research_max_queries=1, research_max_pages=1)
+            cfg = AgentConfig(research_data_dir=".agent/research-test", research_max_queries=1, research_max_pages=1, research_github_api_enabled=False)
             coord = ResearchCoordinator(root, idx, cfg)
             failing = FakeWeb(fail=True)
             coord.web = failing; coord.github = failing

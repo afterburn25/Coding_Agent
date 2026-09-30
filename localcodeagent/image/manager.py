@@ -146,7 +146,34 @@ class ImageManager:
         path.write_bytes(data)
         return str(path)
 
+    def _apply_subject_profile(self, request: ImageRequest) -> dict[str, Any] | None:
+        if not request.subject_profile:
+            return None
+        subject = self.profiles.get(request.subject_profile)
+        saved_refs=list(subject.get("reference_images") or [])
+        for key in ("face_reference", "body_reference"):
+            value=str(subject.get(key) or "").strip()
+            if value:
+                saved_refs.append(value)
+        request.reference_images=list(dict.fromkeys([*request.reference_images, *saved_refs]))
+        preferred=str(subject.get("preferred_model") or "").strip()
+        if preferred and request.model_override in {"", "auto"}:
+            request.model_override=preferred
+        assigned=[]
+        for item in list(subject.get("loras") or []):
+            assigned.append({"name": item} if isinstance(item, str) else item)
+        if assigned:
+            request.loras=[*assigned, *request.loras]
+        defaults=subject.get("generation_defaults") or {}
+        if isinstance(defaults, dict):
+            defaults_map={"quality":"balanced","width":1024,"height":1024,"count":1,"steps":None,"guidance":None,"image_strength":None,"denoise_strength":None}
+            for key,default in defaults_map.items():
+                if key in defaults and getattr(request,key)==default:
+                    setattr(request,key,defaults[key])
+        return subject
+
     def create_job(self, request: ImageRequest, *, real_person: bool = False) -> ImageJob:
+        self._apply_subject_profile(request)
         allowed, reason = self.policy.check(request.prompt, real_person=real_person, subject=request.subject_profile)
         if not allowed:
             raise PermissionError(reason)
@@ -185,7 +212,7 @@ class ImageManager:
         sub=str(result.get("subfolder") or "").strip("/\\")
         return f"{sub}/{name}" if sub else name
 
-    def _workflow_variables(self, request: ImageRequest, profile: ImageModelProfile) -> dict[str, Any]:
+    def _workflow_variables(self, request: ImageRequest, profile: ImageModelProfile, resolved_loras: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         source=self._upload_backend_input(request.source_image) if request.source_image else ""
         refs=[self._upload_backend_input(x) for x in request.reference_images]
         mask=self._upload_backend_input(request.mask_path) if request.mask_path else ""
@@ -208,10 +235,23 @@ class ImageManager:
                 variables[f"component_{key}"]=Path(raw).name
         for idx,ref in enumerate(refs,1):
             variables[f"reference_{idx}"]=ref
-        for idx,lora in enumerate(request.loras,1):
+        for idx,lora in enumerate(resolved_loras or [],1):
             variables[f"lora_{idx}_name"]=str(lora.get("name") or "")
             variables[f"lora_{idx}_strength"]=float(lora.get("strength",1.0))
         return variables
+
+    @staticmethod
+    def _validate_lora_slots(workflow_name: str, workflow_status: dict[str, Any], resolved_loras: list[dict[str, Any]]) -> None:
+        if not resolved_loras:
+            return
+        tokens=set(workflow_status.get("unresolved_tokens") or [])
+        for idx,_lora in enumerate(resolved_loras,1):
+            required_token=f"lora_{idx}_name"
+            if required_token not in tokens:
+                raise RuntimeError(
+                    f"Workflow '{workflow_name}' does not expose LoRA slot {idx} (${{{required_token}}}). "
+                    "Import an API workflow with enough LoRA template slots or remove that LoRA selection."
+                )
 
     def _run_job(self, job_id: str) -> None:
         job=self._jobs[job_id]
@@ -229,6 +269,11 @@ class ImageManager:
             if not workflow_status.get("valid"):
                 detail="; ".join(str(x) for x in workflow_status.get("errors",[])[:4]) or "invalid API workflow"
                 raise RuntimeError(f"ComfyUI workflow '{workflow_name}' is not executable: {detail}")
+
+            resolved_loras=self.library.resolve_loras(request.loras, profile)
+            self._validate_lora_slots(workflow_name, workflow_status, resolved_loras)
+            if resolved_loras:
+                job.resolved_loras=resolved_loras
 
             verification=self.library.verify_model(profile)
             if not verification.get("installed"):
@@ -249,7 +294,7 @@ class ImageManager:
                 missing_nodes=[name for name in profile.required_nodes if name not in available]
                 if missing_nodes:
                     raise RuntimeError("ComfyUI is missing required node(s): " + ", ".join(missing_nodes) + ". Update ComfyUI or install the required node implementation.")
-            workflow=self.workflows.render(self.workflows.load(workflow_name), self._workflow_variables(request, profile))
+            workflow=self.workflows.render(self.workflows.load(workflow_name), self._workflow_variables(request, profile, resolved_loras))
             rendered_status=self.workflows.validate_api(workflow)
             if not rendered_status.get("valid"):
                 raise RuntimeError("Rendered ComfyUI workflow failed validation: " + "; ".join(rendered_status.get("errors",[])[:4]))

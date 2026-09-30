@@ -133,13 +133,60 @@ class ImageAssetLibrary:
                         pass
             rows.append({
                 "id":str(meta.get("id") or path.stem),"name":str(meta.get("name") or path.stem),
-                "path":str(path.resolve()),"size_gb":round(path.stat().st_size/(1024**3),3),
+                "path":str(path.resolve()),"backend_name":path.relative_to(self.lora_dir).as_posix(),"size_gb":round(path.stat().st_size/(1024**3),3),
                 "enabled":bool(meta.get("enabled", True)),"strength":float(meta.get("strength",1.0)),
                 "version":str(meta.get("version") or ""),"compatible_families":list(meta.get("compatible_families") or []),
                 "preview_image":str(meta.get("preview_image") or ""),"tags":list(meta.get("tags") or []),
                 "notes":str(meta.get("notes") or ""),
             })
         return rows
+
+    def resolve_loras(self, selections: list[dict[str, Any]], profile: ImageModelProfile) -> list[dict[str, Any]]:
+        if not selections:
+            return []
+        if len(selections) > max(0, int(profile.max_loras)):
+            raise ValueError(f"{profile.id} supports at most {profile.max_loras} selected LoRA(s)")
+        installed = self.list_loras()
+        resolved=[]
+        used=set()
+        for selection in selections:
+            if not isinstance(selection, dict):
+                raise ValueError("LoRA selections must be objects")
+            wanted=str(selection.get("id") or selection.get("name") or selection.get("path") or "").strip()
+            if not wanted:
+                raise ValueError("Each LoRA selection requires a name or id")
+            wanted_lower=wanted.lower().replace("\\", "/")
+            matches=[]
+            for row in installed:
+                keys={str(row.get("id") or "").lower(),str(row.get("name") or "").lower(),str(row.get("backend_name") or "").lower(),Path(str(row.get("path") or "")).name.lower()}
+                if wanted_lower in keys:
+                    matches.append(row)
+            if not matches:
+                raise ValueError(f"LoRA is not installed: {wanted}")
+            if len(matches) > 1:
+                raise ValueError(f"LoRA selection is ambiguous: {wanted}; use its id or relative filename")
+            row=dict(matches[0])
+            if not row.get("enabled", True):
+                raise ValueError(f"LoRA is disabled: {row.get('name')}")
+            compat=[str(x).lower() for x in row.get("compatible_families",[]) if str(x).strip()]
+            if compat and "*" not in compat and profile.family.lower() not in compat and profile.id.lower() not in compat:
+                raise ValueError(f"LoRA {row.get('name')} is not marked compatible with {profile.family}")
+            requested_version=str(selection.get("version") or "").strip()
+            if requested_version and requested_version != str(row.get("version") or ""):
+                raise ValueError(f"LoRA {row.get('name')} version {requested_version} was requested but installed version is {row.get('version') or 'unversioned'}")
+            key=str(row.get("path") or "")
+            if key in used:
+                raise ValueError(f"LoRA selected more than once: {row.get('name')}")
+            used.add(key)
+            strength=float(selection.get("strength", row.get("strength",1.0)))
+            if not -4.0 <= strength <= 4.0:
+                raise ValueError(f"LoRA strength for {row.get('name')} must be between -4 and 4")
+            resolved.append({
+                "id":row.get("id"),"display_name":row.get("name"),"name":row.get("backend_name"),
+                "path":row.get("path"),"version":row.get("version"),"strength":strength,
+                "compatible_families":row.get("compatible_families",[]),
+            })
+        return resolved
 
     def save_lora_metadata(self, lora_path: str, metadata: dict[str, Any]) -> dict[str, Any]:
         path=self.resolve(lora_path)

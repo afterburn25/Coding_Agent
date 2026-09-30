@@ -31,9 +31,9 @@ def register_research_tools(registry: ToolRegistry, research: ResearchCoordinato
     registry.register(ToolSpec(
         "search_github",
         "Search GitHub/upstream source, issues, discussions, examples, releases, and changelogs for technical evidence.",
-        {"type": "object", "properties": {"query": {"type": "string"}, "version": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": ["query"]},
+        {"type": "object", "properties": {"query": {"type": "string"}, "repo": {"type": "string", "description": "Optional owner/name upstream repository."}, "kind": {"type": "string", "enum": ["auto", "issues", "prs", "repositories", "code", "releases", "release_notes"]}, "version": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": ["query"]},
         "network.read",
-        lambda args: json.dumps(research.search_github(str(args["query"]), version=str(args.get("version", "")), limit=int(args.get("limit", 8))), ensure_ascii=False),
+        lambda args: json.dumps(research.search_github(str(args["query"]), version=str(args.get("version", "")), limit=int(args.get("limit", 8)), repo=str(args.get("repo", "")), kind=str(args.get("kind", "auto"))), ensure_ascii=False),
     ))
     registry.register(ToolSpec(
         "search_errors",

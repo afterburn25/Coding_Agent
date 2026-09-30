@@ -17,6 +17,9 @@ def _schema(extra: dict[str, Any] | None = None, required: list[str] | None = No
         "width":{"type":"integer","minimum":64}, "height":{"type":"integer","minimum":64},
         "count":{"type":"integer","minimum":1,"maximum":8}, "seed":{"type":"integer"},
         "steps":{"type":"integer","minimum":1,"maximum":200}, "guidance":{"type":"number","minimum":0,"maximum":30},
+        "loras":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"version":{"type":"string"},"strength":{"type":"number","minimum":-4,"maximum":4}}}},
+        "image_strength":{"type":"number","minimum":0,"maximum":1}, "denoise_strength":{"type":"number","minimum":0,"maximum":1},
+        "transparent_background":{"type":"boolean"}, "upscale":{"type":"boolean"}, "refine_details":{"type":"boolean"},
         "real_person":{"type":"boolean","description":"True only when source/reference depicts an identifiable real person."},
     }
     if extra: props.update(extra)

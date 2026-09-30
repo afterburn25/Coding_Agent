@@ -180,6 +180,67 @@ class ImageLibraryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no configured workflow"):
                 manager.import_workflow("qwen", "inpaint", valid)
 
+    def test_lora_resolution_enforces_compatibility_version_and_strength(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models" / "image"
+            workflows = root / "workflows" / "image"
+            lora = models / "loras" / "characters" / "alice.safetensors"
+            lora.parent.mkdir(parents=True)
+            lora.write_bytes(b"lora")
+            lib = ImageAssetLibrary(base_dir=root, models_dir=models, workflows_dir=workflows)
+            lib.save_lora_metadata(str(lora), {
+                "id": "alice-v2", "name": "Alice", "version": "2",
+                "compatible_families": ["qwen-image-2.1"], "strength": 0.75,
+            })
+            profile = ImageModelProfile(id="qwen", family="qwen-image-2.1", max_loras=2)
+            rows = lib.resolve_loras([{"id": "alice-v2"}], profile)
+            self.assertEqual(rows[0]["name"], "characters/alice.safetensors")
+            self.assertEqual(rows[0]["strength"], 0.75)
+            rows = lib.resolve_loras([{"name": "Alice", "version": "2", "strength": 1.2}], profile)
+            self.assertEqual(rows[0]["strength"], 1.2)
+            with self.assertRaisesRegex(ValueError, "not marked compatible"):
+                lib.resolve_loras([{"name": "Alice"}], ImageModelProfile(id="flux", family="flux.2-klein"))
+            with self.assertRaisesRegex(ValueError, "installed version"):
+                lib.resolve_loras([{"name": "Alice", "version": "1"}], profile)
+            with self.assertRaisesRegex(ValueError, "between -4 and 4"):
+                lib.resolve_loras([{"name": "Alice", "strength": 9}], profile)
+
+    def test_subject_profile_applies_references_loras_model_and_defaults(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ImageModelProfile(
+                id="qwen", family="qwen-image-2.1", capabilities=["image_edit", "text_to_image"],
+                max_reference_images=10,
+            )
+            config = SimpleNamespace(
+                image_models_dir="models/image", image_data_dir="data/image", image_workflows_dir="workflows/image",
+                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
+                image_auto_run_jobs=False,
+            )
+            manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
+            manager.profiles.save({
+                "id":"alice", "display_name":"Alice", "preferred_model":"qwen",
+                "reference_images":[str(root / "data/image/references/a.png")],
+                "loras":["Alice"],
+                "generation_defaults":{"quality":"high", "width":768, "height":1152},
+            })
+            req = ImageRequest(prompt="portrait", subject_profile="alice")
+            job = manager.create_job(req)
+            saved = job.request
+            self.assertEqual(saved["model_override"], "qwen")
+            self.assertEqual(saved["quality"], "high")
+            self.assertEqual(saved["width"], 768)
+            self.assertEqual(saved["height"], 1152)
+            self.assertEqual(saved["reference_images"], [str(root / "data/image/references/a.png")])
+            self.assertEqual(saved["loras"][0]["name"], "Alice")
+
+    def test_lora_workflow_slots_are_required_for_selected_loras(self):
+        status = {"unresolved_tokens": ["prompt", "lora_1_name", "lora_1_strength"]}
+        ImageManager._validate_lora_slots("generate.json", status, [{"name":"a.safetensors"}])
+        with self.assertRaisesRegex(RuntimeError, "LoRA slot 2"):
+            ImageManager._validate_lora_slots("generate.json", status, [{"name":"a.safetensors"},{"name":"b.safetensors"}])
+
     def test_existing_verified_model_is_not_replaced_without_repair(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

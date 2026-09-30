@@ -19,6 +19,9 @@ Do not reconstruct project state from chat memory when the repository can answer
 
 ## Local Git checkpoints
 
+- `2fa1304` — Add LoRA resolution and subject profile application.
+- `ac3f663` — Show GitHub research provider status.
+- `9288676` — Add GitHub REST research provider.
 - `935145c` — Add validated image workflow import manager documentation/version checkpoint.
 - `2e4a194` — Normalize background-removal workflow routing.
 - `e6f5012` — Add validated ComfyUI workflow importer.
@@ -41,7 +44,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **49 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **56 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -70,6 +73,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - System prompt tells the agent to research when current/version-specific facts matter and to cite source URLs actually used.
 - `localcodeagent/research/` adds repository-first preflight, environment/package inspection, knowledge-gap planning, source ranking, cache/session history, official-domain mapping, and untrusted-source handling.
 - Research tools cover technical topics, docs, GitHub/upstream issues, exact errors, API lookup, release notes, package versions, and cached summaries.
+- GitHub research prefers the versioned REST API, reads optional auth from `GITHUB_TOKEN` (configurable env-var name), caches API evidence, and falls back to web search.
 - Verification failures can re-enter a bounded diagnose/research/fix/retest loop.
 
 ### Image architecture
@@ -145,6 +149,10 @@ No image weights are downloaded automatically yet.
 - Image workspace now imports and assigns API-format ComfyUI workflow JSON per model/operation.
 - Import rejects normal ComfyUI UI exports with an explicit Export (API) instruction, validates before write, writes atomically, confines paths to `workflows/image`, and limits imports to 10 MB.
 - `remove_background` now resolves both the new canonical workflow key and legacy `background_removal` configs.
+- LoRA selections are resolved only from installed local files, respect enabled state/version/family compatibility/max-count/strength bounds, and are recorded on image jobs.
+- Selected LoRAs require explicit workflow template slots before generation, preventing a UI selection from being silently ignored.
+- Subject profiles now apply saved references, preferred model, generation defaults, and assigned LoRAs automatically.
+- Image workspace can filter/use/enable/disable discovered LoRAs.
 
 ## Known gaps / next executable steps
 
@@ -163,4 +171,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `49 tests` passing.
+Expected at this checkpoint: `56 tests` passing.

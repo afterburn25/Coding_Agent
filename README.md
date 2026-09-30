@@ -39,6 +39,8 @@ Lower-level tools remain available:
 
 `network.read` and `browser.control` are separate permissions. Likely secrets are redacted from research queries, retrieved pages are treated as untrusted information, and browser automation remains optional. See `docs/RESEARCH_SYSTEM.md` and `docs/WEB_RESEARCH.md`.
 
+GitHub research now prefers the versioned GitHub REST API for repository/issue/PR/release/source metadata and falls back to normal web research when needed. Public research works without a token at lower rate limits; for higher limits set the environment variable named by `research_github_token_env` (default `GITHUB_TOKEN`). The token itself is never stored in `config.json`.
+
 Install browser support:
 
 ```bash
@@ -95,7 +97,7 @@ It provides drag/drop references, conversational prompting, Auto/manual model se
 
 The complete requested image specification is preserved at `docs/IMAGE_MODULE_SPEC.md`.
 
-The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
+The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. LoRA selections are resolved against installed local files, validated for enabled state/version/model-family compatibility and strength, and injected only through explicit workflow template slots; selected subject profiles can automatically contribute references, defaults, preferred model, and assigned LoRAs. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
 
 
 ## Shared GPU management
@@ -157,7 +159,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **49 tests passing**.
+Current expected result: **56 tests passing**.
 
 ## API highlights
 

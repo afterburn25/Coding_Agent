@@ -55,3 +55,8 @@ Research cache/session data lives under `.agent/research` by default and is loca
 The preflight reads project manifests plus Python distribution metadata from the agent runtime without importing package modules or executing project code. Runtime package evidence is labeled separately because a project-specific virtual environment may differ.
 
 Generic GitHub search results are deliberately not assumed to be official upstream repositories; authority is promoted only when stronger project-specific evidence establishes that relationship.
+## Direct GitHub research
+
+The coordinator has a dependency-free GitHub REST provider for repository discovery, issues/pull requests, releases, and authenticated code search. It uses GitHub's versioned REST headers and stores rate-limit metadata with results. Public research can run without authentication; setting the environment variable named by `research_github_token_env` (default `GITHUB_TOKEN`) enables authenticated requests without writing the token to project configuration or research logs. API results use the normal research cache, and failures/rate limits fall back to GitHub web research.
+
+Generic repositories discovered by search are not automatically treated as official upstream projects. Repo-scoped issue evidence is promoted only when the coding/research agent has explicitly selected that `owner/name` repository.

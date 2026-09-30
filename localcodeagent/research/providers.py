@@ -9,6 +9,7 @@ from typing import Any
 from ..webtools.research import WebResearchClient
 from ..workflow.repository import RepositoryIndex
 from .environment import EnvironmentInspector
+from .github_api import GitHubApiClient, GitHubApiError
 from .official import host_for, looks_official
 from .types import ResearchSource
 
@@ -136,3 +137,104 @@ class GitHubResearchProvider(WebSearchProvider):
             source.authority = "upstream_issue" if "/issues/" in source.url or "/discussions/" in source.url else "technical_docs"
             source.source_type = "github"
         return rows
+
+
+class GitHubApiResearchProvider(ResearchProvider):
+    name = "github_api"
+    network = True
+
+    def __init__(self, client: GitHubApiClient) -> None:
+        self.client = client
+
+    @staticmethod
+    def _repo_from_item(item: dict[str, Any]) -> str:
+        repository = item.get("repository") or {}
+        full = repository.get("full_name") if isinstance(repository, dict) else ""
+        if full:
+            return str(full)
+        url = str(item.get("repository_url") or "")
+        marker = "/repos/"
+        return url.split(marker, 1)[1] if marker in url else ""
+
+    @staticmethod
+    def _rate_metadata(rate: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        return {"api_rate": rate, **extra}
+
+    @staticmethod
+    def _version_relevance(version: str, *texts: Any) -> str:
+        version = str(version or "").strip().lower().lstrip("v")
+        if not version:
+            return "unknown"
+        haystack = " ".join(str(x or "") for x in texts).lower()
+        normalized = haystack.replace("v" + version, version)
+        return "exact" if version in normalized else "unknown"
+
+    def search(
+        self, query: str, *, limit: int = 8, version: str = "", repo: str = "", kind: str = "auto"
+    ) -> list[ResearchSource]:
+        kind = (kind or "auto").lower()
+        rows: list[ResearchSource] = []
+        per_kind = max(1, min(limit, 8))
+
+        if kind in {"auto", "issues", "prs"}:
+            items, rate = self.client.search_issues(query, repo=repo, limit=per_kind)
+            for item in items:
+                is_pr = bool(item.get("pull_request"))
+                if kind == "prs" and not is_pr:
+                    continue
+                repository = repo or self._repo_from_item(item)
+                rows.append(ResearchSource(
+                    title=str(item.get("title") or item.get("html_url") or "GitHub issue"),
+                    url=str(item.get("html_url") or ""),
+                    source_type="github_pr" if is_pr else "github_issue",
+                    authority="upstream_issue" if repo else "technical_docs",
+                    excerpt=str(item.get("body") or "")[:12000],
+                    provider=self.name,
+                    software_version=version,
+                    version_relevance=self._version_relevance(version, item.get("title"), item.get("body")),
+                    published_at=str(item.get("updated_at") or item.get("created_at") or ""),
+                    metadata=self._rate_metadata(rate, repository=repository, number=item.get("number"), state=item.get("state"), kind="pull_request" if is_pr else "issue"),
+                ))
+
+        if kind in {"auto", "repositories"} and not repo:
+            items, rate = self.client.search_repositories(query, limit=per_kind)
+            for item in items:
+                rows.append(ResearchSource(
+                    title=str(item.get("full_name") or item.get("name") or "GitHub repository"),
+                    url=str(item.get("html_url") or ""),
+                    source_type="github_repository", authority="technical_docs",
+                    excerpt=str(item.get("description") or ""), provider=self.name,
+                    software_version=version, version_relevance=self._version_relevance(version, item.get("description"), item.get("name")),
+                    published_at=str(item.get("updated_at") or ""),
+                    metadata=self._rate_metadata(rate, repository=item.get("full_name"), stars=item.get("stargazers_count"), fork=item.get("fork"), kind="repository"),
+                ))
+
+        if kind in {"code", "auto"} and repo and self.client.authenticated:
+            try:
+                items, rate = self.client.search_code(query, repo=repo, limit=per_kind)
+            except GitHubApiError:
+                items, rate = [], {}
+            for item in items:
+                rows.append(ResearchSource(
+                    title=f"{repo}: {item.get('path') or item.get('name') or 'source'}",
+                    url=str(item.get("html_url") or ""), source_type="github_code",
+                    authority="technical_docs", provider=self.name, software_version=version,
+                    version_relevance=self._version_relevance(version, item.get("path"), item.get("name")),
+                    metadata=self._rate_metadata(rate, repository=repo, path=item.get("path"), kind="code"),
+                ))
+
+        if kind in {"releases", "release_notes"}:
+            if not repo:
+                raise ValueError("repo is required for GitHub release research")
+            items, rate = self.client.releases(repo, limit=per_kind)
+            for item in items:
+                rows.append(ResearchSource(
+                    title=str(item.get("name") or item.get("tag_name") or f"{repo} release"),
+                    url=str(item.get("html_url") or ""), source_type="release_notes",
+                    authority="release_notes", excerpt=str(item.get("body") or "")[:16000],
+                    provider=self.name, software_version=str(item.get("tag_name") or version or ""),
+                    version_relevance=self._version_relevance(version, item.get("tag_name"), item.get("name"), item.get("body")), published_at=str(item.get("published_at") or item.get("created_at") or ""),
+                    metadata=self._rate_metadata(rate, repository=repo, tag=item.get("tag_name"), prerelease=item.get("prerelease"), kind="release"),
+                ))
+
+        return rows[:limit]

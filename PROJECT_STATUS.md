@@ -27,6 +27,7 @@
 - Repository-first research coordinator with environment/package inspection.
 - Knowledge-gap detection for current/version-sensitive/error-driven tasks.
 - Ranked local/official/upstream/community evidence with provenance and local cache.
+- Direct versioned GitHub REST research for repositories, issues/PRs, releases, and authenticated code search with cached web fallback.
 - Prompt-injection-resistant untrusted-source wrapping and likely-secret query redaction.
 - Automatic verification failure → diagnose/research/fix/retest loop with bounded repair cycles.
 
@@ -61,10 +62,14 @@
 - Atomic workflow replacement: invalid/UI-format imports never overwrite the last valid API workflow.
 - Workflow import path confinement and a 10 MB workflow JSON limit.
 - Backward-compatible `remove_background` / `background_removal` workflow aliasing.
+- LoRA resolution against the local library with enabled/version/model-family/strength validation.
+- Explicit multi-LoRA workflow slots (`${lora_N_name}` / `${lora_N_strength}`) with early validation before GPU loading.
+- Subject profiles now automatically apply saved references, preferred model, generation defaults, and assigned LoRAs.
+- Image workspace LoRA filter, one-click selection, and enable/disable controls.
 
 ### Tests
 
-`49` automated tests passing.
+`56` automated tests passing.
 
 ### Important current limitations
 
@@ -72,7 +77,7 @@
 - Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
 - Image progress is currently polling-based; ComfyUI WebSocket progress events are not wired into the app yet.
-- Mask painting UI, advanced before/after viewer, full LoRA import/version/compatibility management, and dedicated upscaler/background-removal adapters remain upcoming.
+- Mask painting UI, advanced before/after viewer, LoRA file import and richer version/compatibility metadata editing, and dedicated upscaler/background-removal adapters remain upcoming.
 - Browser automation is optional and requires Playwright + Chromium.
 
 ## Next milestone

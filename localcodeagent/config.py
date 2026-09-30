@@ -95,6 +95,11 @@ class AgentConfig:
     research_max_chars_per_source: int = 20000
     research_trusted_domains: list[str] = field(default_factory=list)
     research_blocked_domains: list[str] = field(default_factory=list)
+    research_github_api_enabled: bool = True
+    research_github_api_url: str = "https://api.github.com"
+    research_github_api_version: str = "2026-03-10"
+    research_github_token_env: str = "GITHUB_TOKEN"
+    research_github_timeout: int = 15
     max_auto_repair_cycles: int = 2
 
 
@@ -135,7 +140,7 @@ def default_config() -> AgentConfig:
                 capabilities=["text_to_image", "image_edit", "inpaint", "outpaint", "background_removal", "multi_reference"],
                 priority=80, quality_tier="high", speed_tier="balanced", max_reference_images=10, supports_transparency=True,
                 quantization="official int8 convrot; GGUF profiles/workflows can be added without changing the router",
-                estimated_vram_gb=11.0, estimated_ram_gb=28.0,
+                estimated_vram_gb=11.0, estimated_ram_gb=28.0, max_loras=4,
                 homepage="https://huggingface.co/Comfy-Org/Qwen-Image-2.1",
                 notes="Preferred quality/editing path. API-format workflows are verified separately from model files.",
             ),
@@ -155,7 +160,7 @@ def default_config() -> AgentConfig:
                 ],
                 capabilities=["text_to_image", "image_edit", "multi_reference"],
                 priority=70, quality_tier="balanced", speed_tier="fast", max_reference_images=4,
-                quantization="4B distilled", estimated_vram_gb=9.0, estimated_ram_gb=16.0,
+                quantization="4B distilled", estimated_vram_gb=9.0, estimated_ram_gb=16.0, max_loras=4,
                 homepage="https://huggingface.co/Comfy-Org/flux2-klein",
                 notes="Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing.",
             ),
@@ -207,5 +212,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.research_max_chars_per_source = max(1000, int(raw.get("research_max_chars_per_source", cfg.research_max_chars_per_source)))
     cfg.research_trusted_domains = [str(x) for x in raw.get("research_trusted_domains", cfg.research_trusted_domains)]
     cfg.research_blocked_domains = [str(x) for x in raw.get("research_blocked_domains", cfg.research_blocked_domains)]
+    cfg.research_github_api_enabled = bool(raw.get("research_github_api_enabled", cfg.research_github_api_enabled))
+    cfg.research_github_api_url = str(raw.get("research_github_api_url", cfg.research_github_api_url))
+    cfg.research_github_api_version = str(raw.get("research_github_api_version", cfg.research_github_api_version))
+    cfg.research_github_token_env = str(raw.get("research_github_token_env", cfg.research_github_token_env))
+    cfg.research_github_timeout = max(3, int(raw.get("research_github_timeout", cfg.research_github_timeout)))
     cfg.max_auto_repair_cycles = max(0, int(raw.get("max_auto_repair_cycles", cfg.max_auto_repair_cycles)))
     return cfg

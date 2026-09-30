@@ -11,7 +11,8 @@ from .cache import ResearchCache
 from .environment import EnvironmentInspector
 from .official import domains_for, host_for, looks_official
 from .planner import KnowledgeGapDetector
-from .providers import GitHubResearchProvider, LocalDocumentationProvider, PackageMetadataProvider, RepositoryResearchProvider, WebSearchProvider
+from .providers import GitHubApiResearchProvider, GitHubResearchProvider, LocalDocumentationProvider, PackageMetadataProvider, RepositoryResearchProvider, WebSearchProvider
+from .github_api import GitHubApiClient, GitHubApiError
 from .ranking import SourceRanker
 from .types import ResearchPlan, ResearchSession, ResearchSource
 
@@ -39,6 +40,14 @@ class ResearchCoordinator:
         self.packages = PackageMetadataProvider(self.inspector)
         self.web = web_provider or WebSearchProvider()
         self.github = GitHubResearchProvider(self.web.client)
+        self.github_api = None
+        if bool(getattr(config, "research_github_api_enabled", True)):
+            self.github_api = GitHubApiResearchProvider(GitHubApiClient(
+                base_url=str(getattr(config, "research_github_api_url", "https://api.github.com")),
+                api_version=str(getattr(config, "research_github_api_version", "2026-03-10")),
+                token_env=str(getattr(config, "research_github_token_env", "GITHUB_TOKEN")),
+                timeout=int(getattr(config, "research_github_timeout", 15)),
+            ))
         self.ranker = SourceRanker(
             trusted_domains=list(getattr(config, "research_trusted_domains", []) or []),
             blocked_domains=list(getattr(config, "research_blocked_domains", []) or []),
@@ -113,6 +122,33 @@ class ResearchCoordinator:
             fetched.append(source)
         return self.ranker.rank(fetched, query)
 
+    def _github_sources(self, query: str, *, limit: int = 8, version: str = "", repo: str = "", kind: str = "auto") -> list[ResearchSource]:
+        errors: list[Exception] = []
+        if self.github_api is not None:
+            try:
+                cache_query = f"{kind}|{repo}|{query}"
+                cached = self.cache.get(self.github_api.name, cache_query, version)
+                if isinstance(cached, list):
+                    try:
+                        rows = [ResearchSource(**row) for row in cached]
+                    except Exception:
+                        rows = []
+                else:
+                    rows = self.github_api.search(query, limit=limit, version=version, repo=repo, kind=kind)
+                    self.cache.put(self.github_api.name, cache_query, [row.as_dict() for row in rows], version)
+                if rows:
+                    return rows
+            except (GitHubApiError, ValueError) as exc:
+                errors.append(exc)
+        try:
+            fallback_query = f"repo:{repo} {query}".strip() if repo else query
+            return self._cached_search(self.github, fallback_query, limit=limit, version=version)
+        except Exception as exc:
+            errors.append(exc)
+            if errors:
+                raise RuntimeError("; ".join(f"{type(e).__name__}: {e}" for e in errors)) from exc
+            raise
+
     def research_topic(self, query: str, *, mode: str = "auto", version: str = "") -> dict[str, Any]:
         safe_query = self.redact_query(query)
         plan = self.plan(safe_query, mode)
@@ -143,7 +179,7 @@ class ResearchCoordinator:
                             session.errors.append(f"web search: {type(exc).__name__}: {exc}")
                     if plan.mode == "deep" or "error" in question.lower():
                         try:
-                            sources.extend(self._cached_search(self.github, q, limit=6, version=version))
+                            sources.extend(self._github_sources(q, limit=6, version=version))
                         except Exception as exc:
                             session.errors.append(f"github search: {type(exc).__name__}: {exc}")
             ranked = self.ranker.rank(self._dedupe(sources), safe_query)
@@ -208,9 +244,10 @@ class ResearchCoordinator:
                 pass
         return [s.as_dict() for s in self.ranker.rank(self._dedupe(rows), q)[:limit]]
 
-    def search_github(self, query: str, *, version: str = "", limit: int = 8) -> list[dict[str, Any]]:
-        rows = self._cached_search(self.github, self.redact_query(query), limit=limit, version=version)
-        return [s.as_dict() for s in self.ranker.rank(rows, query)[:limit]]
+    def search_github(self, query: str, *, version: str = "", limit: int = 8, repo: str = "", kind: str = "auto") -> list[dict[str, Any]]:
+        safe = self.redact_query(query)
+        rows = self._github_sources(safe, limit=limit, version=version, repo=repo, kind=kind)
+        return [s.as_dict() for s in self.ranker.rank(rows, safe)[:limit]]
 
     def search_errors(self, error: str, *, version: str = "", limit: int = 10) -> dict[str, Any]:
         query = self.redact_query(error)
@@ -227,4 +264,5 @@ class ResearchCoordinator:
         return {"cache": self.cache.stats(), "sessions": sessions}
 
     def summary(self) -> dict[str, Any]:
-        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, **self.cache.stats(), "recent": self.cache.recent_sessions(8)}
+        github = {"api_enabled": self.github_api is not None, "authenticated": bool(self.github_api and self.github_api.client.authenticated), "token_env": str(getattr(self.config, "research_github_token_env", "GITHUB_TOKEN"))}
+        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, "github": github, **self.cache.stats(), "recent": self.cache.recent_sessions(8)}

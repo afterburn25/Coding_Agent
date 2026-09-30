@@ -27,6 +27,7 @@ class ImageModelProfile:
     speed_tier: str = "balanced"
     quality_tier: str = "balanced"
     notes: str = ""
+    max_loras: int = 4
 
     def workflow_for(self, operation: str) -> str:
         aliases = {"remove_background": "background_removal", "background_removal": "remove_background"}
@@ -98,6 +99,7 @@ class ImageJob:
     vram_before_gb: float = 0.0
     vram_after_gb: float = 0.0
     backend_job_id: str = ""
+    resolved_loras: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
