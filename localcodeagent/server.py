@@ -1120,11 +1120,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                local_conversation = (
+                coding_model_optional = (
                     mode == "auto"
-                    and self.state.agent.can_answer_locally(message)
+                    and self.state.agent.can_run_without_coding_model(message)
                 )
-                if not local_conversation:
+                if not coding_model_optional:
                     readiness = self.state.runtime.readiness(probe_external=True)
                     if not readiness.get("ready_to_code"):
                         self._json({
@@ -1200,11 +1200,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                local_conversation = (
+                coding_model_optional = (
                     mode == "auto"
-                    and self.state.agent.can_answer_locally(message)
+                    and self.state.agent.can_run_without_coding_model(message)
                 )
-                if not local_conversation:
+                if not coding_model_optional:
                     readiness = self.state.runtime.readiness(probe_external=True)
                     if not readiness.get("ready_to_code"):
                         self._json({
