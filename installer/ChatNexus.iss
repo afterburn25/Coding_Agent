@@ -112,7 +112,7 @@ begin
     Exit;
   end;
 
-  ; Also recognize an unpacked/older install at the normal installer location.
+  // Also recognize an unpacked/older install at the normal installer location.
   DefaultPath := ExpandConstant('{localappdata}\Programs\Chat Nexus');
   if FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
   begin
@@ -199,8 +199,8 @@ begin
     ExampleConfig := ExpandConstant('{app}\config.example.json');
     UserConfig := ExpandConstant('{app}\config.json');
 
-    ; config.json is created by installer code rather than [Files], so upgrades and
-    ; uninstall bookkeeping never overwrite/delete the user's customized config.
+    // config.json is created by installer code rather than [Files], so upgrades and
+    // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
   end;
