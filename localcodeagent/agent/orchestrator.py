@@ -251,16 +251,7 @@ class AgentOrchestrator:
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:
-        text = " ".join(str(user_text or "").lower().strip().split())
-        if any(term in text for term in (
-            "edit image", "edit photo", "edit picture", "inpaint", "outpaint",
-            "upscale", "remove background", "replace background", "variation of",
-        )):
-            return False
-        return any(
-            text.startswith(verb + " ")
-            for verb in ("generate", "create", "make", "draw", "render", "paint", "illustrate")
-        )
+        return ConversationManager.image_generation_intent(user_text)
 
     @classmethod
     def can_run_without_coding_model(cls, user_text: str) -> bool:

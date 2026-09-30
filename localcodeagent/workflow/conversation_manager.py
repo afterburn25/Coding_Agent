@@ -178,30 +178,71 @@ class ConversationManager:
             return [{"id": row.get("id"), "title": row.get("title"), "summary": row.get("summary", ""), "updated_at": row.get("updated_at"), "score": score} for score, _updated, row in hits[:max(1, int(limit))]]
 
     @staticmethod
+    def image_generation_intent(text: str) -> bool:
+        t = re.sub(r"\\s+", " ", str(text or "").lower()).strip()
+        if not t:
+            return False
+
+        # Keep edits and other source-image operations on their specialized tool path.
+        if any(term in t for term in (
+            "edit image", "edit photo", "edit picture", "inpaint", "outpaint",
+            "upscale", "remove background", "replace background", "variation of",
+        )):
+            return False
+        if re.search(r"\\b(?:this|my|attached|uploaded|existing|source)\\s+(?:image|photo|picture)\\b", t):
+            return False
+
+        # Natural requests often put politeness before the actual generation verb.
+        request_prefix = re.compile(
+            r"^(?:hey(?:,)?\\s+|please(?:,)?\\s+|"
+            r"(?:can|could|would|will)\\s+you\\s+|"
+            r"i\\s+want\\s+you\\s+to\\s+|"
+            r"i\\s+would\\s+like\\s+you\\s+to\\s+|"
+            r"i'd\\s+like\\s+you\\s+to\\s+)"
+        )
+        while True:
+            stripped = request_prefix.sub("", t, count=1).strip()
+            if stripped == t:
+                break
+            t = stripped
+
+        strong_visual_verbs = ("draw", "paint", "illustrate", "sketch")
+        visual_verbs = ("generate", "create", "make", "render", "design")
+        visual_terms = (
+            "image", "picture", "photo", "photograph", "portrait", "illustration",
+            "drawing", "artwork", "wallpaper", "logo", "icon", "scene",
+            "landscape", "poster", "banner", "avatar", "selfie", "concept art",
+            "nude", "naked", "photorealistic",
+        )
+        non_image_outputs = (
+            "code", "function", "class", "component", "script", "report", "email",
+            "essay", "document", "spreadsheet", "presentation", "website", "webpage",
+            "api", "query", "command", "uuid", "json",
+        )
+
+        def contains_any(terms: tuple[str, ...]) -> bool:
+            return any(re.search(rf"\\b{re.escape(term)}\\b", t) for term in terms)
+
+        if contains_any(non_image_outputs):
+            return False
+        if any(re.match(rf"^{verb}\\b", t) for verb in strong_visual_verbs):
+            return True
+        return (
+            any(re.match(rf"^{verb}\\b", t) for verb in visual_verbs)
+            and contains_any(visual_terms)
+        )
+
+    @staticmethod
     def classify_intent(text: str) -> str:
         t = str(text or "").lower().strip()
-        image_terms = (
-            "image", "picture", "photo", "portrait", "illustration", "drawing",
-            "artwork", "wallpaper", "logo", "icon", "render", "scene",
-            "woman", "man", "person", "girl", "boy", "cat", "dog", "landscape",
-            "nude", "naked",
-        )
-        image_verbs = ("generate", "create", "make", "draw", "render", "paint", "illustrate")
-        non_image_outputs = (
-            "code", "function", "class", "script", "report", "email", "essay",
-            "document", "spreadsheet", "presentation", "website", "webpage", "api",
-        )
-        generated_visual_subject = (
-            any(t.startswith(verb + " ") for verb in image_verbs)
-            and any(term in t for term in image_terms)
-            and not any(term in t for term in non_image_outputs)
-        )
-        if generated_visual_subject or any(
+        image_operation = any(
             x in t for x in (
-                "generate image", "create image", "make an image", "make a picture",
-                "edit image", "edit photo", "inpaint", "outpaint", "upscale image",
+                "edit image", "edit photo", "edit picture", "inpaint", "outpaint",
+                "upscale image", "upscale photo", "remove background", "replace background",
+                "variation of",
             )
-        ):
+        )
+        if ConversationManager.image_generation_intent(t) or image_operation:
             return "image"
         if any(x in t for x in ("search the web", "look up", "research", "latest", "current version", "today's news", "source this")):
             return "research"
