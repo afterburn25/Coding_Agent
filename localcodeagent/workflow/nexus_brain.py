@@ -18,6 +18,7 @@ SCRYPT_N = 1 << 15
 SCRYPT_R = 8
 SCRYPT_P = 1
 SCRYPT_DKLEN = 32
+SCRYPT_MAXMEM = 128 * 1024 * 1024
 
 DEFAULT_SUBROUTINES = {
     "adult_content": True,
@@ -133,6 +134,7 @@ class NexusBrain:
             r=SCRYPT_R,
             p=SCRYPT_P,
             dklen=SCRYPT_DKLEN,
+            maxmem=SCRYPT_MAXMEM,
         )
 
     @staticmethod
