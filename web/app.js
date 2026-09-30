@@ -232,7 +232,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
   if(name==='model'){
     const e=data.event||{};
-    if(e.type==='generic_refusal_retry'){state.receivedToken=false;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Discarding canned refusal and retrying','policy-retry');}
+    if(e.type==='generic_refusal_retry'){state.receivedToken=false;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
     else if(e.type==='switch'||e.type==='activation_fallback')nexusThinkingStep(state,'Routing matrix updated',(e.from||'model')+' → '+(e.to||e.model_id||''),'model-switch');
     else nexusThinkingStep(state,'Model route locked',(e.model_id||e.to||'local model')+(e.role?' · '+e.role:''),'model');
     appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;
