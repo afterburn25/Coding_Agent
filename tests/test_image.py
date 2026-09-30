@@ -152,8 +152,55 @@ class ComfyRuntimeOnDemandTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "no local ComfyUI checkout"):
                 runtime.ensure_ready()
 
+    def test_discovers_bundled_comfyui_portable_python(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            comfy = root / "ComfyUI_windows_portable" / "ComfyUI"
+            python = root / "ComfyUI_windows_portable" / "python_embeded" / "python.exe"
+            comfy.mkdir(parents=True)
+            python.parent.mkdir(parents=True)
+            (comfy / "main.py").write_text("# test", encoding="utf-8")
+            python.write_bytes(b"MZ")
+            config = SimpleNamespace(
+                comfyui_auto_start=False,
+                comfyui_start_on_image_request=True,
+                comfyui_dir="ComfyUI",
+                comfyui_python="",
+            )
+            runtime = ComfyUIRuntime(base_dir=root, backend=self._Backend(), config=config)
+            directory, executable = runtime.discover()
+            self.assertEqual(directory, comfy.resolve())
+            self.assertEqual(Path(executable), python.resolve())
+
 
 class WorkflowTests(unittest.TestCase):
+    def test_bundled_default_image_workflows_are_api_format(self):
+        manager = WorkflowManager(ROOT / "workflows" / "image")
+        expected = (
+            "qwen/qwen-image-2.1-t2i-api.json",
+            "qwen/qwen-image-2.1-edit-api.json",
+            "qwen/qwen-image-2.1-inpaint-api.json",
+            "qwen/qwen-image-2.1-background-removal-api.json",
+            "flux/flux2-klein-4b-t2i-api.json",
+            "flux/flux2-klein-4b-edit-api.json",
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                status = manager.inspect(name)
+                self.assertTrue(status["exists"])
+                self.assertTrue(status["valid"], status["errors"])
+                self.assertGreater(status["node_count"], 0)
+
+    def test_default_image_component_catalog_has_sizes_and_hashes(self):
+        config = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        models = {row["id"]: row for row in config["image_models"]}
+        for model_id in ("qwen-image-2.1", "flux2-klein-4b"):
+            required = [row for row in models[model_id]["components"] if row.get("required", True)]
+            self.assertEqual(len(required), 3)
+            for component in required:
+                self.assertGreater(int(component.get("size_bytes", 0)), 0)
+                self.assertEqual(len(str(component.get("sha256", ""))), 64)
+
     def test_workflow_render_preserves_types(self):
         wf = {"1": {"inputs": {"text": "${prompt}", "seed": "${seed}", "label": "hello ${prompt}"}}}
         rendered = WorkflowManager.render(wf, {"prompt": "cat", "seed": 42})

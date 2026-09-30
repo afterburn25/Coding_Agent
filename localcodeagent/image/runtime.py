@@ -58,11 +58,23 @@ class ComfyUIRuntime:
         dirs = []
         if configured:
             dirs.append(self._resolve(configured))
-        dirs.extend([self.base_dir / "ComfyUI", self.base_dir / "comfyui"])
+        dirs.extend([
+            self.base_dir / "ComfyUI",
+            self.base_dir / "comfyui",
+            self.base_dir / "ComfyUI_windows_portable" / "ComfyUI",
+        ])
+        configured_python = str(getattr(self.config, "comfyui_python", "")).strip()
         for d in dirs:
-            if (d / "main.py").is_file():
-                py = str(getattr(self.config, "comfyui_python", "")).strip() or shutil.which("python") or shutil.which("python3")
-                return d.resolve(), py
+            if not (d / "main.py").is_file():
+                continue
+            py = configured_python
+            if not py:
+                portable_python = d.parent / "python_embeded" / "python.exe"
+                if portable_python.is_file():
+                    py = str(portable_python.resolve())
+                else:
+                    py = shutil.which("python") or shutil.which("python3") or ""
+            return d.resolve(), py or None
         return None, None
 
     def _command(self) -> tuple[list[str], Path]:

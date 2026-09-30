@@ -78,7 +78,7 @@ jobs:
           Commit: ${{ github.sha }}
           Native desktop: .NET 8 WinForms / Microsoft WebView2
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
-          Installer: Inno Setup LZMA2 solid-compressed update-aware bootstrap EXE with verified coding-model downloads
+          Installer: Inno Setup LZMA2 update-aware bootstrap with verified coding + ComfyUI/image-stack downloads
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
       - name: Build single-file Chat Nexus installer
@@ -142,6 +142,19 @@ jobs:
           if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Installed Source Git workspace is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\localcodeagent\server.py"))) { throw "Installed Source workspace is incomplete" }
           if (-not (Test-Path (Join-Path $InstallDir "config.json"))) { throw "Installer did not seed config.json" }
+          $BundledImageWorkflows = @(
+            "workflows\image\qwen\qwen-image-2.1-t2i-api.json",
+            "workflows\image\qwen\qwen-image-2.1-edit-api.json",
+            "workflows\image\qwen\qwen-image-2.1-inpaint-api.json",
+            "workflows\image\qwen\qwen-image-2.1-background-removal-api.json",
+            "workflows\image\flux\flux2-klein-4b-t2i-api.json",
+            "workflows\image\flux\flux2-klein-4b-edit-api.json"
+          )
+          foreach ($RelativeWorkflow in $BundledImageWorkflows) {
+            if (-not (Test-Path (Join-Path $InstallDir $RelativeWorkflow))) {
+              throw "Installer did not seed bundled image workflow: $RelativeWorkflow"
+            }
+          }
 
           $SmokeExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
           if ($SmokeExit -ne 0) { throw "Installed ChatNexus.exe self-test failed with exit code $SmokeExit" }
