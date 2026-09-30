@@ -95,6 +95,9 @@ class ImageJob:
     finished_at: float | None = None
     outputs: list[str] = field(default_factory=list)
     error: str = ""
+    error_code: str = ""
+    error_message: str = ""
+    technical_details: str = ""
     routing_reasons: list[str] = field(default_factory=list)
     vram_before_gb: float = 0.0
     vram_after_gb: float = 0.0
