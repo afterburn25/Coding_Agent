@@ -94,6 +94,23 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         return json.loads(self.rfile.read(length) or b"{}")
 
+    def _sse_begin(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+    def _sse_event(self, event: str, payload: dict) -> bool:
+        try:
+            data = json.dumps(payload, ensure_ascii=False, default=str)
+            self.wfile.write(f"event: {event}\\ndata: {data}\\n\\n".encode("utf-8"))
+            self.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return False
+
     def _image_job_payload(self, job) -> dict:
         row = job.as_dict()
         urls: list[str] = []
