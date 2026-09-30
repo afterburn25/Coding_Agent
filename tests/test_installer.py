@@ -32,6 +32,8 @@ class InstallerContractTests(unittest.TestCase):
     def test_upgrade_contract_preserves_mutable_user_state(self):
         self.assertIn(r'Excludes: "Source\*;models\*;data\*;config.json"', self.installer)
         self.assertIn("ShouldInstallBundledSource", self.installer)
+        self.assertIn("PrepareToInstall", self.installer)
+        self.assertIn("InstallBundledSource", self.installer)
         self.assertIn(r"{app}\Source\.git\HEAD", self.installer)
         self.assertIn("if (not FileExists(UserConfig))", self.installer)
         self.assertIn("FileCopy(ExampleConfig, UserConfig, False)", self.installer)
@@ -44,6 +46,9 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("upgrade_preserve_marker", self.workflow)
         self.assertIn("second run intentionally omits /DIR", self.workflow)
         self.assertIn("Upgrade installer run failed", self.workflow)
+        self.assertIn("Build native Chat Nexus desktop app", self.workflow)
+        self.assertIn("Installed Source workspace is incomplete", self.workflow)
+        self.assertNotIn("Chat-Nexus-Setup-v0.6.0-dev.exe", self.workflow)
 
     def test_legacy_duplicate_installer_definition_is_removed(self):
         self.assertFalse((ROOT / "packaging" / "ChatNexus.iss").exists())
