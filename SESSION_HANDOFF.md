@@ -182,6 +182,21 @@
 - Windows native desktop/package validation: green.
 - Next: complete the local 14B/30B installation on the dogfood machine and run real Chat Nexus-on-Chat Nexus coding tasks.
 
+## v0.6 installer model-bootstrap / Update checkpoint
+
+- The canonical Windows installer now bootstraps the default coding stack during setup instead of leaving model installation as a post-install requirement.
+- Fresh install behavior: download **Qwen3 14B Q4_K_M** then **Qwen3-Coder 30B-A3B Instruct Q4_K_M** directly into `{app}\models` while Inno Setup displays its normal install/download progress.
+- Both downloads use pinned HTTPS URLs, exact external sizes, and SHA-256 verification before the destination filenames are committed.
+- Existing-install behavior: Setup detects the prior stable `ChatNexus.Afterburn25` installation, uses its existing directory, checks each canonical model, preserves trusted/verified files, and downloads only missing/untrusted model files.
+- Installer-written `.catalog/*.json` metadata keeps models recognized as verified by Chat Nexus immediately after setup.
+- The visible existing-install flow is now **Update Chat Nexus** / **Update now?** and the Ready-page action button changes to **Update** instead of Install.
+- The installer EXE remains small; the ~25.66 GiB model stack is fetched during setup and is not embedded in the EXE.
+- CI sets `CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1` only for installer smoke tests so CI does not consume ~25.7 GB. Normal installers keep model downloads enabled.
+- Feature commit: `960c3f0` — Bootstrap coding models during Windows setup.
+- Unit checkpoint: **119/119 tests passing**.
+- Windows native desktop/installer fresh-install + update-preservation validation: **green**.
+- Next: run this installer interactively on the dogfood Windows machine, confirm real 14B/30B download progress and model readiness, then start the first real Chat Nexus-on-Chat Nexus development task.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -354,4 +369,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `118 tests` passing.
+Expected at this checkpoint: `119 tests` passing.

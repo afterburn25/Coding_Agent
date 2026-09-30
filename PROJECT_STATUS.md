@@ -73,7 +73,7 @@
 
 ### Tests
 
-`118` automated tests passing.
+`119` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 118 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 119 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -103,6 +103,8 @@
 - `GET /api/model-telemetry` exposes aggregate model/role/complexity statistics; default local history is `.agent/model_performance.json`.
 - First-run model setup now exposes the exact model install directory and free disk space, shows live progress in the primary setup card, keeps quick-install controls disabled while a plan is running, and preflights disk capacity before starting large downloads.
 - Backend model installation also rejects a new download when the target volume cannot hold the model plus working space; manual/discovered-model configuration is now consistently marked no-restart.
+- The canonical Windows installer is now a model bootstrapper: fresh installs download and SHA-256 verify Qwen3 14B + Qwen3-Coder 30B-A3B during setup, while updates skip verified existing models and fetch only missing/untrusted canonical model files.
+- Existing-install UI now says **Update Chat Nexus**, asks **Update now?**, and changes the Ready-page action from Install to **Update**. The setup EXE stays small because GGUF bytes are downloaded directly into the final `models` directory instead of being bundled.
 
 ### Native desktop dogfood checkpoint
 
@@ -118,7 +120,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **118 tests passing**.
+- Current automated checkpoint: **119 tests passing**.
 
 
 

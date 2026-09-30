@@ -32,14 +32,14 @@ The **primary Windows deliverable is now a single compressed installer EXE**:
 
 `Chat-Nexus-Setup-<version>-Windows-x64.exe`
 
-The installer uses a stable application identity so a later installer can detect an existing Chat Nexus installation. On an interactive upgrade it shows the installed version and new version and asks whether to upgrade. The upgrade replaces application/backend/runtime files while preserving mutable local state:
+The installer uses a stable application identity so a later installer can detect an existing Chat Nexus installation. On an existing installation the wizard becomes **Update Chat Nexus** and the final action button says **Update**. The update replaces application/backend/runtime files while preserving mutable local state:
 
 - downloaded `models\`
 - `config.json`
 - generated `data\`
 - the existing self-development `Source\.git` workspace and local edits/task state
 
-The installer is per-user under Local AppData, creates Start Menu shortcuts, optionally creates a desktop shortcut, uses LZMA2 solid compression, and extracts the application during setup. CI performs a real fresh install, launches the installed app self-test, writes preservation markers, runs the **same installer a second time without an install path override**, verifies the stable AppId rediscovers the previous install, and confirms all mutable state survives the upgrade.
+The installer is per-user under Local AppData, creates Start Menu shortcuts, optionally creates a desktop shortcut, uses LZMA2 solid compression, and acts as a small bootstrapper for the default coding stack. During a normal fresh install it downloads Qwen3 14B and Qwen3-Coder 30B-A3B directly into `models\` using the installer progress UI and verifies each file with its pinned SHA-256 before setup completes. During an update it checks the canonical model files first and downloads only the missing or untrusted one(s). CI performs a real fresh install and in-place update with model downloading disabled only for the smoke-test process, launches the installed app self-test, and confirms mutable state survives.
 
 The portable ZIP remains a secondary development/recovery artifact.
 
@@ -65,7 +65,7 @@ The intended two-model coding setup is:
 
 The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. If the 30B GGUF is not installed or cannot run, deep tasks can fall back to the runnable 14B primary coder instead of failing the task.
 
-The Windows package bundles llama.cpp itself; large GGUF model files remain explicit downloads from the Coding readiness/model catalog so the application package does not silently ship or download tens of gigabytes.
+The Windows package bundles llama.cpp itself but not the GGUF bytes inside the installer EXE. The installer downloads the default 14B + 30B coding stack during setup/update when those verified files are missing, keeping the setup EXE small while leaving the installed application ready for coding.
 
 ## Core coding-agent capabilities
 
@@ -236,7 +236,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **118 tests passing**.
+Current expected result: **119 tests passing**.
 
 ## API highlights
 
@@ -304,7 +304,7 @@ After installation, Refresh re-runs discovery. Download/install a catalog GGUF a
 
 ## Explicit coding-model catalog
 
-The Local system drawer now contains a small auditable coding-model catalog. Downloads are never automatic.
+The Local system drawer contains the same auditable coding-model catalog for repair, replacement, and portable/development setups. In-app catalog downloads remain explicit; the normal Windows installer automatically bootstraps the default 14B + 30B stack when verified model files are missing.
 
 Initial entries:
 
@@ -317,7 +317,7 @@ After installation, **Use discovered models** turns the verified local GGUF inve
 
 ## First-run coding model setup
 
-A fresh installed Chat Nexus no longer leaves users at raw missing-GGUF paths. **Coding readiness** now exposes direct setup actions:
+Normally the Windows installer now finishes with both default coding models already present and verified. **Coding readiness** remains the recovery/portable setup surface and exposes direct setup actions when a model was skipped, removed, or needs repair:
 
 - **Install recommended 14B** — downloads and checksum-verifies Qwen3 14B for utility/fast/primary coding, then writes the discovered model routing config.
 - **Install full 14B + 30B stack** — installs both Qwen3 14B and Qwen3-Coder 30B-A3B, verifies them, and configures 14B for everyday coding plus 30B for deep reasoning/review.
@@ -391,7 +391,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **118 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **119 passing tests**.
 
 ## Development state
 

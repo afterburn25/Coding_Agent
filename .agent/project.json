@@ -4,10 +4,10 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 118,
-  "next_milestone": "Install/dogfood the real Qwen3 14B + Qwen3-Coder 30B stack, harden observed task failures, then add research/throughput routing telemetry",
+  "test_checkpoint": 119,
+  "next_milestone": "Run the new installer/update on the dogfood Windows machine, confirm 14B+30B bootstrap downloads and first real self-development task, then harden observed failures",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
-  "delivery_target": "Single compressed upgrade-aware Windows installer EXE; portable ZIP secondary",
+  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
     "fast_primary": "Qwen3 14B Q4_K_M",
     "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
@@ -16,14 +16,19 @@
     "canonical_script": "installer/ChatNexus.iss",
     "app_id": "ChatNexus.Afterburn25",
     "default_dir": "%LOCALAPPDATA%\\\\Programs\\\\Chat Nexus",
-    "preserves_on_upgrade": [
+    "interactive_existing_install_action": "Update",
+    "preserves_on_update": [
       "models",
       "data",
       "config.json",
       "Source Git workspace/task state",
       "workflows/"
     ],
-    "interactive_existing_install_action": "Prompt to upgrade"
+    "downloads_default_coding_models_when_missing": true,
+    "model_download_progress": "Inno Setup native install progress",
+    "model_download_hash_verification": "SHA-256",
+    "default_model_download_bytes": 27558441344,
+    "default_model_download_gib": 25.66
   },
   "first_run_model_setup": {
     "starter": "Install recommended 14B",
@@ -39,7 +44,10 @@
     "free_disk_visible": true,
     "top_level_progress": true,
     "disk_preflight": true,
-    "active_plan_controls_locked": true
+    "active_plan_controls_locked": true,
+    "normal_windows_flow": "Installer bootstraps both 14B and 30B before setup completes",
+    "in_app_flow": "Recovery/portable/manual repair path",
+    "installer_skips_verified_models": true
   },
   "ci_hardening": "Installer/app smoke processes have explicit timeouts so hung setup/self-test runs fail deterministically.",
   "routing_telemetry": {
