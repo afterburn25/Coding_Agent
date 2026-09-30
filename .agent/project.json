@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 107,
-  "next_milestone": "Improve first-run coding-model installation UX, then begin installed Chat Nexus dogfood with Qwen3 14B + Qwen3-Coder 30B",
+  "test_checkpoint": 109,
+  "next_milestone": "Dogfood the installed Chat Nexus with Qwen3 14B + Qwen3-Coder 30B and harden real model/task behavior",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Single compressed upgrade-aware Windows installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -23,5 +23,13 @@
       "Source Git workspace/task state"
     ],
     "interactive_existing_install_action": "Prompt to upgrade"
+  },
+  "first_run_model_setup": {
+    "starter": "Install recommended 14B",
+    "full_stack": "Install full 14B + 30B stack",
+    "deep_upgrade": "Add 30B deep coder",
+    "checksum_verified": true,
+    "auto_configure_after_download": true,
+    "restart_after_configure": true
   }
 }

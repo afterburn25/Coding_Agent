@@ -227,7 +227,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **107 tests passing**.
+Current expected result: **109 tests passing**.
 
 ## API highlights
 
@@ -305,6 +305,18 @@ Each catalog entry records a direct source URL, exact byte size and SHA256. Down
 
 After installation, **Use discovered models** turns the verified local GGUF inventory into role profiles.
 
+## First-run coding model setup
+
+A fresh installed Chat Nexus no longer leaves users at raw missing-GGUF paths. **Coding readiness** now exposes direct setup actions:
+
+- **Install recommended 14B** — downloads and checksum-verifies Qwen3 14B for utility/fast/primary coding, then writes the discovered model routing config.
+- **Install full 14B + 30B stack** — installs both Qwen3 14B and Qwen3-Coder 30B-A3B, verifies them, and configures 14B for everyday coding plus 30B for deep reasoning/review.
+- If 14B is installed first, **Add 30B deep coder** remains visible until the full stack is available.
+
+Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After model configuration changes, Chat Nexus asks for one restart so the backend/router reload the new profiles.
+
+Missing-model readiness diagnostics are deduplicated: each unavailable GGUF is reported once instead of as two near-identical runtime errors.
+
 ## Coding-model readiness and local GGUF setup
 
 `GET /api/readiness` reports whether Chat Nexus can actually perform coding work, rather than merely whether the web app is running. It checks:
@@ -357,7 +369,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **107 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **109 passing tests**.
 
 ## Development state
 
