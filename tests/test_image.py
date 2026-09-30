@@ -19,6 +19,9 @@ from localcodeagent.image.types import ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class ImageErrorTests(unittest.TestCase):
     def test_error_classifier_maps_common_failures(self):
         cases = [
