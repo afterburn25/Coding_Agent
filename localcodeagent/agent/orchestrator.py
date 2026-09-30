@@ -262,6 +262,15 @@ class AgentOrchestrator:
             for verb in ("generate", "create", "make", "draw", "render", "paint", "illustrate")
         )
 
+    @classmethod
+    def can_run_without_coding_model(cls, user_text: str) -> bool:
+        if cls.can_answer_locally(user_text):
+            return True
+        return (
+            ConversationManager.classify_intent(user_text) == "image"
+            and cls.direct_image_generation_intent(user_text)
+        )
+
     @staticmethod
     def training_acknowledgement(learned: dict[str, list[Any]]) -> str | None:
         facts = learned.get("facts") or []
