@@ -73,7 +73,7 @@
 
 ### Tests
 
-`93` automated tests passing.
+`95` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 93 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 95 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -97,6 +97,8 @@
 - Catalog distinguishes official source weights from community quantizations and records source/license/hardware notes.
 - Runtime discovery supports both `llama-server` and the 2026 unified `llama serve` command.
 - Coding-readiness UI gives safe copyable OS-specific install guidance; system package installers are never executed automatically.
+- Fresh/recovered self-development tasks automatically receive Chat Nexus self-hosting guardrails.
+- Self-development launcher pre-fills a safe dogfood task but never starts edits automatically.
 
 ### Important current limitations
 
@@ -117,7 +119,7 @@
 
 ## Next milestone
 
-Move directly toward **v0.6 self-hosting/dogfooding**:
+**First dogfood-ready checkpoint reached.** Move directly into real self-hosting/dogfooding:
 1. extend live streaming to dedicated long-running image/browser workflows where useful
 2. run real dogfood tasks against the Chat Nexus repository and harden failures found there
 4. add model-performance/research-outcome telemetry to improve automatic routing
