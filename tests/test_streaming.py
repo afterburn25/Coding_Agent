@@ -198,7 +198,7 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn('"--lora", str(artifact)', server)
         self.assertIn("activation_backup.json", server)
         self.assertIn("restore_growth_activation", server)
-        self.assertIn("can_answer_locally(message)", server)
+        self.assertIn("can_run_without_coding_model(message)", server)
         self.assertIn("Trainer / Model Growth", (ROOT / "web" / "trainer.html").read_text(encoding="utf-8"))
         trainer_js = (ROOT / "web" / "trainer.js").read_text(encoding="utf-8")
         self.assertIn("/api/model-growth/review", trainer_js)
