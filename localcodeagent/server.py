@@ -432,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "model_id": model_id, "endpoint": endpoint, "runtime": self.state.runtime.summary()})
                 else:
                     if profile.runtime == "external":
-                        self._json({"error": "External runtimes are not controlled by Local Code Agent."}, 400)
+                        self._json({"error": "External runtimes are not controlled by Chat Nexus."}, 400)
                     else:
                         status = self.state.runtime.stop_model(model_id)
                         self._json({"ok": True, "status": status.as_dict(), "runtime": self.state.runtime.summary()})
@@ -462,7 +462,7 @@ def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: 
     state = AppState(config, workspace, runtime_root)
     handler = type("LocalCodeAgentHandler", (Handler,), {"state": state, "web_root": web_root})
     server = ThreadingHTTPServer((host, port), handler)
-    print(f"Local Code Agent v{VERSION}")
+    print(f"Chat Nexus v{VERSION}")
     print(f"Workspace: {workspace.resolve()}")
     print(f"UI: http://{host}:{port}")
     print(f"Models: {state.runtime.models_dir}")
