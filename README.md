@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **78 tests passing**.
+Current expected result: **86 tests passing**.
 
 ## API highlights
 
@@ -236,6 +236,22 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - approval state
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+## Coding-model readiness and local GGUF setup
+
+`GET /api/readiness` reports whether Chat Nexus can actually perform coding work, rather than merely whether the web app is running. It checks:
+
+- local endpoint health
+- `llama-server` discovery
+- configured GGUF paths
+- local GGUF inventory
+- estimated RAM/VRAM fit and CPU-offload allowance
+- coding-role coverage
+- whether the current workspace is the Chat Nexus source tree with Git + isolated selftest available
+
+The main UI distinguishes **Setup required**, **Ready to code**, and **Self-host ready**.
+
+If GGUF files already exist locally, Chat Nexus proposes conservative role assignments. Clicking **Use discovered models** explicitly writes those model profiles into the selected config and preserves unrelated settings; a restart is required. No model is downloaded or replaced silently.
 
 ## Isolated self-update validation
 
