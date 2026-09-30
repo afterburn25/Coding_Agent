@@ -302,25 +302,64 @@ class RuntimeManager:
         if required_vram <= 0 and required_ram <= 0:
             return True, 0, "no resource estimate; runtime auto-fit allowed"
 
-        if required_ram > 0 and avail_ram > 0 and required_ram > avail_ram * 0.92:
+        # RAM estimates are planning guidance, not exact runtime allocations.
+        # llama.cpp can change GPU/CPU placement and KV/cache residency at launch.
+        # Keep a strict comfortable band, but allow a modest near-fit margin for
+        # managed models that explicitly permit CPU offload. The real runtime is
+        # still authoritative: activation fallback handles an actual load failure.
+        ram_comfortable = (
+            required_ram <= 0
+            or avail_ram <= 0
+            or required_ram <= avail_ram * 0.92
+        )
+        if h.total_ram_gb > 0:
+            ram_near_margin = max(2.0, min(6.0, h.total_ram_gb * 0.08))
+        else:
+            ram_near_margin = 4.0
+        ram_near_fit = (
+            required_ram > 0
+            and avail_ram > 0
+            and required_ram <= avail_ram + ram_near_margin
+        )
+        ram_runtime_fit = ram_comfortable or (
+            profile.runtime == "llama_cpp"
+            and profile.allow_cpu_offload
+            and ram_near_fit
+        )
+
+        if required_ram > 0 and avail_ram > 0 and not ram_runtime_fit:
             return False, -100, (
                 f"estimated RAM need {required_ram:.1f} GB exceeds effective available "
-                f"{avail_ram:.1f} GB{switch_note}"
+                f"{avail_ram:.1f} GB plus {ram_near_margin:.1f} GB auto-fit margin"
+                f"{switch_note}"
             )
+
+        ram_note = ""
+        ram_penalty = 0
+        if not ram_comfortable and ram_near_fit:
+            ram_note = (
+                f"; tight estimated RAM fit {required_ram:.1f} GB vs "
+                f"{avail_ram:.1f} GB available, runtime auto-fit allowed"
+            )
+            ram_penalty = -10
 
         if required_vram > 0:
             if free_vram >= required_vram:
-                return True, 25, f"fits effective free VRAM ({free_vram:.1f} GB){switch_note}"
-            if profile.allow_cpu_offload and (avail_ram <= 0 or required_ram <= avail_ram * 0.92):
-                return True, -5, (
+                return True, 25 + ram_penalty, (
+                    f"fits effective free VRAM ({free_vram:.1f} GB){switch_note}{ram_note}"
+                )
+            if profile.allow_cpu_offload and ram_runtime_fit:
+                return True, -5 + ram_penalty, (
                     f"requires CPU offload; effective free VRAM {free_vram:.1f} GB"
-                    f"{switch_note}"
+                    f"{switch_note}{ram_note}"
                 )
             return False, -100, (
                 f"estimated VRAM need {required_vram:.1f} GB exceeds effective free "
                 f"{free_vram:.1f} GB{switch_note}"
             )
-        return True, 5, f"fits effective available RAM{switch_note}"
+        return True, 5 + ram_penalty, (
+            f"fits effective available RAM{switch_note}{ram_note}"
+        )
 
     def _build_command(self, profile: ModelProfile, port: int) -> list[str]:
         exe = self.discover_llama_server(profile)

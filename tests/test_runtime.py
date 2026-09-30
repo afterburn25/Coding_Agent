@@ -129,6 +129,75 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertTrue(any("free VRAM" in reason or "CPU offload" in reason for reason in decision.reasons))
 
 
+    def test_managed_cpu_offload_near_ram_fit_is_allowed_to_try_runtime_autofit(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "deep.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            deep = self._profile(
+                id="qwen3-coder-30b",
+                endpoint="",
+                executable=str(fake_server),
+                model="Qwen3-Coder-30B-A3B-Instruct-Q4_K_M",
+                model_path="models/deep.gguf",
+                roles=["deep_reasoner", "reviewer"],
+                estimated_vram_gb=18.6,
+                estimated_ram_gb=30.0,
+                allow_cpu_offload=True,
+            )
+            manager = RuntimeManager(AgentConfig(models=[deep]), base_dir=root)
+            manager.hardware = HardwareSnapshot(
+                platform="test",
+                total_ram_gb=64.0,
+                available_ram_gb=29.8,
+                gpus=[GPUInfo(0, "RTX 3080", 12288, 3072, 9216)],
+                nvidia_smi_available=True,
+            )
+
+            fits, score, reason = manager.resource_fit(deep)
+
+            self.assertTrue(fits)
+            self.assertLess(score, 0)
+            self.assertIn("CPU offload", reason)
+            self.assertIn("tight estimated RAM fit 30.0 GB vs 29.8 GB available", reason)
+            self.assertIn("runtime auto-fit allowed", reason)
+
+    def test_managed_cpu_offload_still_rejects_clearly_oversized_ram_need(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "huge.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            huge = self._profile(
+                id="huge",
+                endpoint="",
+                executable=str(fake_server),
+                model_path="models/huge.gguf",
+                roles=["deep_reasoner"],
+                estimated_vram_gb=24.0,
+                estimated_ram_gb=42.0,
+                allow_cpu_offload=True,
+            )
+            manager = RuntimeManager(AgentConfig(models=[huge]), base_dir=root)
+            manager.hardware = HardwareSnapshot(
+                platform="test",
+                total_ram_gb=64.0,
+                available_ram_gb=29.8,
+                gpus=[GPUInfo(0, "RTX 3080", 12288, 3072, 9216)],
+                nvidia_smi_available=True,
+            )
+
+            fits, score, reason = manager.resource_fit(huge)
+
+            self.assertFalse(fits)
+            self.assertEqual(score, -100)
+            self.assertIn("auto-fit margin", reason)
+
     def test_resource_fit_counts_memory_released_by_resident_model_switch(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
