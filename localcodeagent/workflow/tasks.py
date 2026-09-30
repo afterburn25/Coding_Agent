@@ -116,11 +116,13 @@ class TaskStore:
             return task
 
     def current(self) -> TaskRecord | None:
+        """Return the newest task record, regardless of status.
+
+        Chat Nexus runs one foreground chat task at a time. Older interrupted tasks
+        remain recoverable in recent history, but they must not overshadow a newer
+        completed/error task and get misreported as the current request.
+        """
         with self._lock:
-            for task_id in reversed(self._order):
-                task = self._tasks[task_id]
-                if task.status in {"running", "waiting_approval", "reviewing", "verifying", "interrupted"}:
-                    return task
             return self._tasks[self._order[-1]] if self._order else None
 
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:

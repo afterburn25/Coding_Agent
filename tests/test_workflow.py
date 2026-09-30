@@ -276,6 +276,26 @@ class TaskRecoveryTests(unittest.TestCase):
             self.assertIn("stopped before", recovered.error.lower())
             self.assertEqual(reloaded.current().id, task.id)
 
+    def test_newer_completed_task_replaces_old_interrupted_as_current(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tasks = TaskStore(root)
+            old = tasks.create("old task", "auto")
+            tasks.update(old.id, status="running", phase="working")
+
+            # Simulate restart: old active task becomes interrupted.
+            tasks = TaskStore(root)
+            self.assertEqual(tasks.current().id, old.id)
+            self.assertEqual(tasks.current().status, "interrupted")
+
+            new = tasks.create("hi", "auto")
+            tasks.update(new.id, status="completed", phase="done", summary="Hi!")
+
+            current = tasks.current()
+            self.assertEqual(current.id, new.id)
+            self.assertEqual(current.status, "completed")
+            self.assertEqual(tasks.get(old.id).status, "interrupted")
+
     def test_interrupted_task_can_recover_from_durable_state(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

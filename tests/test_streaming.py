@@ -145,6 +145,7 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn('self._sse_event("heartbeat"', server)
         self.assertIn("builtin_utility_response(message)", server)
         self.assertIn("if not builtin_utility:", server)
+        self.assertIn('Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"', server)
 
 
 if __name__ == "__main__":

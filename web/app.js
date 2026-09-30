@@ -147,7 +147,7 @@ function beginAssistantStream(){
   const wrap=document.createElement('div');wrap.className='message assistant streaming';
   wrap.innerHTML='<div class="role">assistant</div><div class="bubble">Thinking…</div>';
   chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
-  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null};
+  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000};
 }
 function appendLiveActivity(text){
   const existing=activity.textContent.trim();
@@ -190,7 +190,9 @@ async function streamAgent(message){
       const statusRes=await fetch('/api/tasks');
       if(statusRes.ok){
         const statusData=await statusRes.json();
-        const task=statusData.current||state.lastTask;
+        const current=statusData.current;
+        const currentIsThisRequest=current&&Number(current.created_at||0)>=state.startedAt-1;
+        const task=state.lastTask||(currentIsThisRequest?current:null);
         if(task?.error)detail=task.error;
         else if(task?.status==='interrupted')detail='Chat Nexus restarted while this task was running. Use Resume interrupted task to continue from the saved checkpoint.';
         else if(task?.status==='waiting_approval')detail='The task is waiting for approval. Open the Tasks panel to continue.';
@@ -208,7 +210,17 @@ $('#models').addEventListener('click',async e=>{const btn=e.target.closest('.run
 $('#readinessPanel').addEventListener('click',e=>{const plan=e.target.closest('[data-model-plan]');if(plan){installModelPlan(plan.dataset.modelPlan);return;}if(e.target.closest('#startSelfDevelopment')){prepareSelfDevelopmentTask();return;}if(e.target.closest('#applyModelSetup')){applySuggestedModelSetup();return;}const copy=e.target.closest('.copy-runtime-command'),install=e.target.closest('.catalog-install'),repair=e.target.closest('.catalog-repair'),cancel=e.target.closest('.catalog-cancel');if(copy)copyText(copy.dataset.command);else if(install)startCatalogInstall(install.dataset.catalog,false);else if(repair)startCatalogInstall(repair.dataset.catalog,true);else if(cancel)cancelCatalogInstall(cancel.dataset.job);});
 $('#refreshRuntime').addEventListener('click',async()=>{await loadStatus(true);await loadReadiness();});
 $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex');b.disabled=true;try{const res=await fetch('/api/index/rebuild',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await res.json();if(!res.ok)throw new Error(data.error||'Index rebuild failed');await loadStatus(false);}catch(e){addMessage('assistant',`Index error: ${e.message}`);}finally{b.disabled=false;}});
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+function builtinClientReply(message){
+  const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
+  if(['hi','hello','hey','hey there','good morning','good afternoon','good evening'].includes(normalized)){
+    return 'Hi! Chat Nexus is ready. What would you like to work on?';
+  }
+  if(['what can you do','what all can you do','what are your capabilities','what do you do','how can you help'].some(x=>normalized.includes(x))){
+    return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical issues, work with Git/GitHub when authorized, manage local coding models, and use configured local image tools.';
+  }
+  return '';
+}
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';const builtin=builtinClientReply(message);if(builtin){addMessage('assistant',builtin);input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',e=>{const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',async()=>{await fetch('/api/chat/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});chat.innerHTML=welcomeHtml();activity.innerHTML='<span class="muted">Tool calls, model switches, and command output will appear here.</span>';renderTask(null);input.focus();});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
