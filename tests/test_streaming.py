@@ -151,6 +151,11 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertEqual(result.message["content"], "fallback works")
         self.assertEqual(deltas, ["fallback works"])
 
+    def test_chat_preflight_uses_no_coding_model_guard_for_direct_images(self):
+        server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        self.assertEqual(server.count("can_run_without_coding_model(message)"), 2)
+        self.assertNotIn("and self.state.agent.can_answer_locally(message)", server)
+
     def test_main_ui_uses_agent_sse_endpoint(self):
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
