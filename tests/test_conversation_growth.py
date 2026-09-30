@@ -64,6 +64,46 @@ class ConversationManagerTests(unittest.TestCase):
             reloaded = ConversationManager(path)
             self.assertEqual(reloaded.snapshot()["feedback_count"], 1)
 
+    def test_timing_context_describes_elapsed_time_and_previous_conversations(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = ConversationManager(Path(td) / "conversations.json")
+            active = manager._get()
+            now = 1_800_000_000.0
+            active["messages"] = [
+                {"id": "u1", "role": "user", "content": "Remember the blue folder.", "timestamp": now - 7200},
+                {"id": "a1", "role": "assistant", "content": "I will remember the blue folder.", "timestamp": now - 7190},
+                {"id": "u2", "role": "user", "content": "What did I say earlier?", "timestamp": now - 300},
+            ]
+            active["updated_at"] = now - 300
+            previous = manager.create("Yesterday topic")
+            previous_row = manager._get(previous["id"])
+            previous_row["messages"] = [
+                {"id": "p1", "role": "user", "content": "We talked about the generator.", "timestamp": now - 90000},
+            ]
+            previous_row["updated_at"] = now - 90000
+            manager.set_active(active["id"])
+
+            context = manager.timing_context(now=now)
+
+            self.assertIn("2 hours ago", context)
+            self.assertIn("5 minutes ago", context)
+            self.assertIn("Remember the blue folder", context)
+            self.assertIn("Yesterday topic", context)
+            self.assertIn("1 day", context)
+
+    def test_feedback_captures_prompt_and_answer_for_training(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = ConversationManager(Path(td) / "conversations.json")
+            manager.record_exchange("Tell me something interesting.", "Here is an interesting answer.")
+            assistant = manager.active()["messages"][-1]
+
+            saved = manager.add_feedback(message_id=assistant["id"], rating="up")
+
+            self.assertEqual(saved["user_prompt"], "Tell me something interesting.")
+            self.assertEqual(saved["assistant_response"], "Here is an interesting answer.")
+            self.assertEqual(saved["message_id"], assistant["id"])
+            self.assertTrue(manager.snapshot()["feedback"])
+
 
 class ScopedConversationMemoryTests(unittest.TestCase):
     def test_project_and_conversation_scopes_are_isolated_and_forgettable(self):
@@ -164,6 +204,42 @@ class KnowledgeMemoryTests(unittest.TestCase):
 
 
 class ModelGrowthLabTests(unittest.TestCase):
+    def test_feedback_import_keeps_positive_examples_and_excludes_negative_sft_targets(self):
+        with tempfile.TemporaryDirectory() as td:
+            lab = ModelGrowthLab(Path(td) / "growth")
+            snapshot = {
+                "feedback": [
+                    {
+                        "rating": "up",
+                        "user_prompt": "Tell me a story.",
+                        "assistant_response": "A good conversational story.",
+                        "conversation_id": "c1",
+                        "message_id": "a1",
+                    },
+                    {
+                        "rating": "down",
+                        "user_prompt": "Tell me a joke.",
+                        "assistant_response": "A bad repetitive joke.",
+                        "conversation_id": "c1",
+                        "message_id": "a2",
+                    },
+                ]
+            }
+
+            imported = lab.import_conversation_feedback(snapshot)
+            self.assertEqual(imported, 2)
+            positive = next(x for x in lab.candidates() if x["kind"] == "conversation_example")
+            negative = next(x for x in lab.candidates() if x["kind"] == "negative_feedback")
+            self.assertEqual(positive["status"], "approved")
+            self.assertEqual(negative["status"], "pending")
+
+            # Even if a negative signal were manually approved later, never use the bad answer as an SFT target.
+            lab.review(negative["id"], status="approved")
+            dataset = lab.export_dataset(name="feedback-test")
+            rows = [json.loads(line) for line in Path(dataset["path"]).read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertTrue(any(row["messages"][0]["content"] == "Tell me a story." for row in rows))
+            self.assertFalse(any(row["messages"][0]["content"] == "Tell me a joke." for row in rows))
+
     def test_review_export_job_registry_and_rollback(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "growth"

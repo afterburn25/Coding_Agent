@@ -1023,22 +1023,17 @@ class Handler(BaseHTTPRequestHandler):
                     note=str(body.get("note", "")),
                     conversation_id=str(body.get("conversation_id", "")) or None,
                 )
-                note = str(body.get("note", "")).strip()
-                if note:
-                    self.state.model_growth.collect(
-                        kind="feedback",
-                        instruction="Improve future responses using this user feedback.",
-                        response=note,
-                        source="conversation_feedback",
-                        metadata=saved,
-                    )
+                self.state.model_growth.import_conversation_feedback(
+                    self.state.conversation_manager.snapshot()
+                )
                 self._json({"ok": True, "feedback": saved})
                 return
 
             if path == "/api/model-growth/sync":
                 c = self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
+                f = self.state.model_growth.import_conversation_feedback(self.state.conversation_manager.snapshot())
                 k = self.state.model_growth.import_knowledge_memory(self.state.knowledge_memory.snapshot())
-                self._json({"ok": True, "conversation_candidates": c, "knowledge_candidates": k, "growth": self.state.model_growth.summary()})
+                self._json({"ok": True, "conversation_candidates": c, "feedback_candidates": f, "knowledge_candidates": k, "growth": self.state.model_growth.summary()})
                 return
 
             if path == "/api/model-growth/review":

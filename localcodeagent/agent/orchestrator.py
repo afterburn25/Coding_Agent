@@ -26,7 +26,8 @@ from ..workflow.verify import detect_verification_commands
 
 
 UTILITY_PROMPT = """You are Chat Nexus, a local-first AI coding workstation.
-For greetings, capability questions, and casual conversation, answer directly and concisely.
+For greetings, capability questions, and casual conversation, answer directly and naturally.
+In ordinary conversation, sound like a capable adult rather than a scripted help bot. Track what the user has already said, carry references forward, notice relevant time gaps, vary phrasing, and avoid repetitive stock closings. Do not force a follow-up question onto every reply.
 You can explain that Chat Nexus can inspect/edit code, run tools with permission gates, test changes, research technical issues, use Git/GitHub workflows when authorized, and work with local image tools when configured.
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
 """
@@ -617,6 +618,16 @@ class AgentOrchestrator:
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
         recovered_self_hosting = self._self_hosting_context()
+        recovered_timing_context = (
+            self.conversation_manager.timing_context()
+            if self.conversation_manager is not None
+            else ""
+        )
+        recovered_quality_context = (
+            self.conversation_manager.conversation_quality_prompt()
+            if self.conversation_manager is not None
+            else ""
+        )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "system", "content": self.current_time_context()},
@@ -633,6 +644,10 @@ class AgentOrchestrator:
                 ),
             },
         ]
+        if recovered_timing_context:
+            messages.append({"role": "system", "content": recovered_timing_context})
+        if recovered_quality_context:
+            messages.append({"role": "system", "content": recovered_quality_context})
         if recovered_self_hosting:
             messages.append({"role": "system", "content": recovered_self_hosting})
         if task.research.get("guidance"):
@@ -1574,6 +1589,16 @@ class AgentOrchestrator:
         )
         policy_context = self.policy_prompt()
         clock_context = self.current_time_context()
+        timing_context = (
+            self.conversation_manager.timing_context()
+            if self.conversation_manager is not None
+            else ""
+        )
+        conversation_quality_context = (
+            self.conversation_manager.conversation_quality_prompt()
+            if self.conversation_manager is not None
+            else ""
+        )
         research_context: dict[str, Any] = {}
         if (
             self.config.auto_research_unknown
@@ -1602,6 +1627,10 @@ class AgentOrchestrator:
                 {"role": "system", "content": UTILITY_PROMPT},
                 {"role": "system", "content": clock_context},
             ]
+            if timing_context:
+                messages.append({"role": "system", "content": timing_context})
+            if conversation_quality_context:
+                messages.append({"role": "system", "content": conversation_quality_context})
             if policy_context:
                 messages.append({"role": "system", "content": policy_context})
             if persistent_context:
@@ -1647,6 +1676,10 @@ class AgentOrchestrator:
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
                 },
             ]
+            if timing_context:
+                messages.append({"role": "system", "content": timing_context})
+            if conversation_quality_context:
+                messages.append({"role": "system", "content": conversation_quality_context})
             if policy_context:
                 messages.append({"role": "system", "content": policy_context})
             if persistent_context:

@@ -5,6 +5,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,115 @@ class ConversationManager:
                 for m in messages
                 if m.get("role") in {"user", "assistant"} and str(m.get("content", "")).strip()
             ]
+
+    @staticmethod
+    def _duration_text(seconds: float) -> str:
+        seconds = max(0, int(seconds))
+        if seconds < 45:
+            return "less than a minute"
+        if seconds < 3600:
+            minutes = max(1, round(seconds / 60))
+            return f"{minutes} minute" + ("" if minutes == 1 else "s")
+        if seconds < 86400:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours} hour" + ("" if hours == 1 else "s") + (f" {minutes} min" if minutes else "")
+        days = seconds // 86400
+        hours = (seconds % 86400) // 3600
+        return f"{days} day" + ("" if days == 1 else "s") + (f" {hours} hr" if hours else "")
+
+    @staticmethod
+    def _local_timestamp(timestamp: float) -> str:
+        try:
+            dt = datetime.fromtimestamp(float(timestamp)).astimezone()
+        except (ValueError, TypeError, OSError, OverflowError):
+            return "unknown local time"
+        hour = dt.strftime("%I").lstrip("0") or "0"
+        return f"{dt.strftime('%a %b %d, %Y')} {hour}:{dt.strftime('%M:%S %p %Z')}"
+
+    def timing_context(
+        self,
+        *,
+        now: float | None = None,
+        message_limit: int = 12,
+        conversation_limit: int = 4,
+    ) -> str:
+        """Summarize durable message timestamps into model-friendly temporal context."""
+        now_ts = float(time.time() if now is None else now)
+        with self._lock:
+            active = self._get()
+            active_id = str(active.get("id") or "")
+            messages = [
+                m for m in active.get("messages", [])
+                if m.get("role") in {"user", "assistant"} and str(m.get("content", "")).strip()
+            ][-max(1, int(message_limit)):]
+
+            lines = [
+                "Conversation timing context from durable message timestamps:",
+                "Use these timestamps when the user asks when something was said, how long ago it happened, "
+                "or whether hours/days passed between exchanges. Do not invent timing for messages that lack timestamps.",
+            ]
+            if messages:
+                lines.append("Recent messages in the active conversation:")
+                previous_ts: float | None = None
+                for message in messages:
+                    ts = float(message.get("timestamp") or 0)
+                    role = "User" if message.get("role") == "user" else "Assistant"
+                    content = re.sub(r"\s+", " ", str(message.get("content", ""))).strip()[:180]
+                    when = self._local_timestamp(ts) if ts else "timestamp unavailable"
+                    age = f"{self._duration_text(now_ts - ts)} ago" if ts else "age unavailable"
+                    gap = ""
+                    if ts and previous_ts and ts >= previous_ts:
+                        delta = ts - previous_ts
+                        if delta >= 60:
+                            gap = f"; {self._duration_text(delta)} after the previous stored message"
+                    lines.append(f'- {role} — {when} ({age}{gap}): "{content}"')
+                    if ts:
+                        previous_ts = ts
+            else:
+                lines.append("The active conversation has no earlier stored messages.")
+
+            previous_conversations = sorted(
+                [
+                    row for row in self._data.get("conversations", [])
+                    if str(row.get("id") or "") != active_id and float(row.get("updated_at") or 0) > 0
+                ],
+                key=lambda row: float(row.get("updated_at") or 0),
+                reverse=True,
+            )[:max(0, int(conversation_limit))]
+            if previous_conversations:
+                lines.append("Recent previous conversations:")
+                for row in previous_conversations:
+                    updated = float(row.get("updated_at") or 0)
+                    last_user = next(
+                        (
+                            re.sub(r"\s+", " ", str(m.get("content", ""))).strip()[:160]
+                            for m in reversed(row.get("messages", []))
+                            if m.get("role") == "user" and str(m.get("content", "")).strip()
+                        ),
+                        "",
+                    )
+                    title = str(row.get("title") or "Previous chat")[:80]
+                    detail = f'; last user topic: "{last_user}"' if last_user else ""
+                    lines.append(
+                        f"- {title} — last active {self._local_timestamp(updated)} "
+                        f"({self._duration_text(now_ts - updated)} ago){detail}"
+                    )
+            return "\n".join(lines)[:6000]
+
+    @staticmethod
+    def conversation_quality_prompt() -> str:
+        return (
+            "Conversation quality rules: speak like a capable adult conversational partner, not a tutorial bot or "
+            "childlike assistant. Respond to the substance first. Maintain continuity with what the user already said, "
+            "including names, preferences, prior answers, corrections, and relevant elapsed time. Do not ask the same "
+            "question twice. Avoid parroting the user's message, canned empathy, repetitive disclaimers, and stock endings "
+            "such as 'What would you like to discuss?' or 'Is there anything else I can help with?'. Do not end every "
+            "response with a question. Ask a follow-up only when it naturally advances the conversation or is genuinely "
+            "needed. Match the user's tone and desired depth, vary phrasing, and allow relaxed back-and-forth when the "
+            "user is chatting casually. Acknowledge long time gaps only when relevant. Do not invent human experiences "
+            "or claim feelings you do not have."
+        )
 
     def record_exchange(self, user: str, assistant: str, *, intent: str = "conversation", model_id: str = "") -> dict[str, Any]:
         user = self._clean(user)
@@ -261,7 +371,7 @@ class ConversationManager:
     @staticmethod
     def intent_prompt(intent: str) -> str:
         prompts = {
-            "conversation": "Conversation mode: respond naturally, use context, and maintain continuity.",
+            "conversation": "Conversation mode: carry on a mature, natural back-and-forth. Answer what the user actually said, preserve continuity across turns and time gaps, avoid repetitive assistant clichés, and ask follow-ups only when they add value.",
             "writing": "Writing mode: focus on clear reusable prose and preserve the user's requested tone.",
             "tutoring": "Tutoring mode: explain progressively, check assumptions, and adapt depth to the user.",
             "planning": "Planning mode: structure options, dependencies, and next actions without pretending actions were performed.",
@@ -299,12 +409,44 @@ class ConversationManager:
         if rating not in {"up", "down", "better", "worse"}:
             raise ValueError("rating must be up, down, better, or worse")
         with self._lock:
+            target_conversation_id = conversation_id or str(self._data.get("active_conversation_id") or "")
+            conversation = self._get(target_conversation_id)
+            messages = list(conversation.get("messages", []))
+            target_index = -1
+            if message_id:
+                target_index = next(
+                    (
+                        i for i, message in enumerate(messages)
+                        if str(message.get("id") or "") == str(message_id)
+                        and message.get("role") == "assistant"
+                    ),
+                    -1,
+                )
+            if target_index < 0:
+                target_index = next(
+                    (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+                    -1,
+                )
+            assistant_message = messages[target_index] if target_index >= 0 else {}
+            preceding_user = ""
+            if target_index >= 0:
+                preceding_user = next(
+                    (
+                        str(messages[i].get("content", "")).strip()
+                        for i in range(target_index - 1, -1, -1)
+                        if messages[i].get("role") == "user" and str(messages[i].get("content", "")).strip()
+                    ),
+                    "",
+                )
             row = {
                 "id": uuid.uuid4().hex[:12],
-                "conversation_id": conversation_id or self._data.get("active_conversation_id", ""),
-                "message_id": str(message_id or ""),
+                "conversation_id": target_conversation_id,
+                "message_id": str(assistant_message.get("id") or message_id or ""),
                 "rating": rating,
                 "note": self._clean(note, 4000),
+                "user_prompt": self._clean(preceding_user, 12000),
+                "assistant_response": self._clean(str(assistant_message.get("content", "")), 20000),
+                "assistant_timestamp": float(assistant_message.get("timestamp") or 0),
                 "created_at": time.time(),
             }
             self._data.setdefault("feedback", []).append(row)
@@ -318,5 +460,6 @@ class ConversationManager:
                 "active": dict(self._get()),
                 "conversations": self.list(30),
                 "personality": self.personality(),
+                "feedback": [dict(x) for x in self._data.get("feedback", [])[-200:] if isinstance(x, dict)],
                 "feedback_count": len(self._data.get("feedback", [])),
             }

@@ -123,6 +123,36 @@ class ModelGrowthLab:
                     count += int(result is not None)
         return count
 
+    def import_conversation_feedback(self, snapshot: dict[str, Any]) -> int:
+        """Turn explicit user feedback into contextual training signals."""
+        count = 0
+        for row in snapshot.get("feedback", []):
+            if not isinstance(row, dict):
+                continue
+            prompt = str(row.get("user_prompt", "")).strip()
+            response = str(row.get("assistant_response", "")).strip()
+            rating = str(row.get("rating", "")).strip().lower()
+            if not prompt or not response or rating not in {"up", "down", "better", "worse"}:
+                continue
+            positive = rating in {"up", "better"}
+            result = self.collect(
+                kind="conversation_example" if positive else "negative_feedback",
+                instruction=prompt,
+                response=response,
+                source="conversation_feedback_positive" if positive else "conversation_feedback_negative",
+                metadata={
+                    "rating": rating,
+                    "note": str(row.get("note", ""))[:4000],
+                    "conversation_id": row.get("conversation_id", ""),
+                    "message_id": row.get("message_id", ""),
+                    "assistant_timestamp": row.get("assistant_timestamp", 0),
+                },
+                # A thumbs-up/better rating is already an explicit human approval signal.
+                auto_approved=positive,
+            )
+            count += int(result is not None)
+        return count
+
     def import_knowledge_memory(self, snapshot: dict[str, Any]) -> int:
         count = 0
         for row in snapshot.get("recent", []):
@@ -170,6 +200,7 @@ class ModelGrowthLab:
         approved = [
             item for item in self._candidates.get("items", [])
             if item.get("status") == "approved"
+            and item.get("kind") != "negative_feedback"
             and (include_knowledge or item.get("kind") != "sourced_knowledge")
         ]
         stamp = time.strftime("%Y%m%d-%H%M%S")

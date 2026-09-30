@@ -208,6 +208,8 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             )
             self.assertIn("Current local date/time from the host system clock", system_text)
             self.assertIn("refreshed at the start of every user turn", system_text)
+            self.assertIn("Conversation timing context from durable message timestamps", system_text)
+            self.assertIn("Conversation quality rules: speak like a capable adult conversational partner", system_text)
 
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
