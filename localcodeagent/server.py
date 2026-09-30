@@ -197,6 +197,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/models":
             self._json({"models": [asdict(m) for m in self.state.config.models]})
             return
+        if path == "/api/models/catalog":
+            self._json({
+                "models": self.state.runtime.model_catalog.catalog(),
+                "jobs": self.state.runtime.model_catalog.jobs(),
+            })
+            return
+        if path.startswith("/api/models/install/"):
+            job_id = unquote(path[len("/api/models/install/"):]).strip("/")
+            if not job_id:
+                self._json({"error": "install job id is required"}, 400)
+                return
+            try:
+                job = self.state.runtime.model_catalog.get_job(job_id)
+            except KeyError:
+                self._json({"error": "model install job not found"}, 404)
+                return
+            self._json({"job": job})
+            return
         if path == "/api/runtime":
             self.state.runtime.refresh_hardware()
             self._json(self.state.runtime.summary(probe_external=True))
@@ -290,6 +308,36 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path == "/api/models/install":
+                catalog_id = str(body.get("catalog_id", "")).strip()
+                if not catalog_id:
+                    self._json({"error": "catalog_id is required"}, 400)
+                    return
+                try:
+                    job = self.state.runtime.model_catalog.start_install(catalog_id, repair=bool(body.get("repair", False)))
+                except FileExistsError as exc:
+                    self._json({"error": str(exc), "repair_available": True}, 409)
+                    return
+                self._json({"ok": True, "job": job})
+                return
+
+            if path == "/api/models/install/cancel":
+                job_id = str(body.get("job_id", "")).strip()
+                if not job_id:
+                    self._json({"error": "job_id is required"}, 400)
+                    return
+                job = self.state.runtime.model_catalog.cancel(job_id)
+                self._json({"ok": True, "job": job})
+                return
+
+            if path == "/api/models/verify":
+                catalog_id = str(body.get("catalog_id", "")).strip()
+                if not catalog_id:
+                    self._json({"error": "catalog_id is required"}, 400)
+                    return
+                result = self.state.runtime.model_catalog.verify(catalog_id, deep_hash=bool(body.get("deep_hash", True)))
+                self._json({"ok": True, "model": result})
+                return
             if path == "/api/readiness/configure":
                 if body.get("apply") is not True:
                     self._json({"error": "apply=true is required to change the Chat Nexus config"}, 400)
