@@ -341,6 +341,21 @@
 - Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, state preservation, installer artifact, and portable desktop artifact all passed for `fbf328c`.
 - Next: dogfood this 162-test build against real local Qwen/ComfyUI workflows, then harden observed runtime/progress failures and extend dedicated long-running workflow streaming where useful.
 
+## v0.6 repeated-refusal enforcement checkpoint
+
+- Dogfood reproduced three unacceptable canned responses around adult conversation: **“I can't generate explicit or nudity-related content”**, **“I can't engage in explicit or inappropriate content”**, and the **“safe and respectful environment / ethical guidelines / within those boundaries”** pattern.
+- Permissive mode now explicitly permits **adult-only consensual explicit text conversation** in direct language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction. Profanity by itself is not treated as sexual content.
+- Generic-refusal detection now recognizes the reproduced wording plus “safe and respectful environment”, “helpful and constructive interactions”, “within those boundaries”, and “my programming is designed to” boilerplate while preserving concrete hard-policy responses such as minor/non-consensual restrictions.
+- The previous one-retry behavior was insufficient: if the model refused again, the second refusal was accepted. Default `generic_refusal_retry_limit` is now **3** (configurable 0–5).
+- Before each retry, Chat Nexus removes the rejected assistant refusal from the model context so instruction-tuned models do not imitate their own previous refusal.
+- Conversation/writing/tutoring/planning responses are buffered during the refusal check. Rejected refusal tokens are discarded, including on exhaustion, so the UI does not flash canned refusal text before the corrected response/diagnostic.
+- If all configured retries still fail, Chat Nexus reports that the **selected local model** is refusing the prompt and explicitly states that Chat Nexus policy is not blocking adult-only consensual explicit text. It suggests switching/installing a less-restrictive conversation model or tuning the model in Model Growth instead of inventing a policy ban.
+- Regression tests simulate repeated refusals and verify two refusals are discarded before a third direct answer; a separate exhaustion test verifies the model-level diagnostic.
+- Feature commit: `593364d`; refusal-stream suppression: `dd34284`.
+- Unit checkpoint: **166/166 tests passing**.
+- Windows validation for `dd34284`: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, state preservation, installer artifact upload, and portable desktop artifact upload all passed.
+- Next: install/update to this dogfood build and test real local-model adult conversation. If the underlying Qwen weights still exhaust all three retries, add an explicitly configured alternate conversation-model fallback rather than silently loading the 30B deep coder for ordinary chat.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -513,4 +528,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `162 tests` passing.
+Expected at this checkpoint: `166 tests` passing.

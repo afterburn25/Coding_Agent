@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 162,
-  "next_milestone": "Dogfood the verified 162-test direct-image preflight build against real local Qwen/ComfyUI workflows; harden remaining model/runtime and image-progress failures, then extend measured routing telemetry and long-running workflow streaming.",
+  "test_checkpoint": 166,
+  "next_milestone": "Dogfood the verified 166-test permissive-conversation build with real local Qwen responses; if model weights still exhaust three refusal retries, add an explicitly configured alternate conversation-model fallback without silently loading the 30B deep coder.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -197,7 +197,17 @@
     ],
     "sampling_temperature_default": 0.2,
     "generic_refusal_retry": true,
-    "generic_refusal_retry_limit": 1
+    "generic_refusal_retry_limit": 3,
+    "adult_only_consensual_explicit_text": true,
+    "profanity_is_not_sexual_content": true,
+    "generic_refusal_retry_limit_range": [
+      0,
+      5
+    ],
+    "rejected_refusal_removed_from_context": true,
+    "refusal_stream_buffering": true,
+    "refusal_exhaustion_reports_model_blocker": true,
+    "verified_code_checkpoint": "dd34284"
   },
   "direct_image_routing": {
     "auto_text_to_image": true,

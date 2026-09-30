@@ -103,7 +103,7 @@ The Model Growth Lab keeps the live base model intact. Learned behavior, correct
 
 ## Conversation policy modes
 
-Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.”
+Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, explicit, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.” Adult-only consensual text conversation may use direct explicit language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction.
 
 This setting controls conversational refusal sensitivity only. Narrow hard safety checks remain enforced by the relevant tool/action layer; there is intentionally no hard-safety **Off** mode. The active policy can be changed live under **Local system → Conversation policy** and is preserved in `config.json`.
 
@@ -111,7 +111,7 @@ This setting controls conversational refusal sensitivity only. Narrow hard safet
 
 These are separate controls. Model sampling temperature remains per-model and defaults to **0.2**. **Ethical temperature** is a conversation-policy control from 0.0 to 1.0 and defaults to **1.0**.
 
-At ethical temperature 1.0, Chat Nexus requests the most permissive normal conversation posture within the separately enforced hard tool/action policies. Generic topic-based refusal boilerplate is detected and retried once under the configured permissive policy; the UI clears the canned response before the retry.
+At ethical temperature 1.0, Chat Nexus requests the most permissive normal conversation posture within the separately enforced hard tool/action policies. Generic topic-based refusal boilerplate is detected and retried up to three times under the configured permissive policy. Rejected refusal messages are removed from model context before each retry so the model does not anchor on its own refusal; conversation/writing/tutoring/planning responses are buffered while this check runs.
 
 ## Outcome-aware model routing
 
@@ -271,7 +271,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **162 tests passing**.
+Current expected result: **166 tests passing**.
 
 ## API highlights
 
@@ -431,7 +431,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **162 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **166 passing tests**.
 
 ## Development state
 

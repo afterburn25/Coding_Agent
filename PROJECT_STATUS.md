@@ -73,7 +73,7 @@
 
 ### Tests
 
-`162` automated tests passing.
+`166` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 162 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 166 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -136,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **162 tests passing**.
+- Current automated checkpoint: **166 tests passing**.
 
 
 
@@ -165,10 +165,12 @@
 - Model Growth Lab supports review candidates, dataset export, versioned offline training-job manifests, evaluation, promotion, and rollback without mutating the live base model in-place.
 - Conversation policy modes are live-configurable: Permissive / Balanced / Strict. Default Permissive suppresses generic adult/sensitive-topic moralizing; narrow hard tool/action safety remains separate and enforced.
 - Policy mode is persisted in `config.json`, surfaced in `/api/status`, and changeable through `POST /api/policy/mode`.
+- Permissive adult-only consensual text conversation explicitly allows direct sexual language, including anatomy, acts, fantasies, preferences, and adult erotic fiction; profanity alone is never treated as sexual content.
+- If the selected local model still returns a generic topic refusal after the configured retry limit, Chat Nexus reports a **model-level refusal** rather than falsely claiming Chat Nexus policy blocks the topic. Default `generic_refusal_retry_limit` is 3 (bounded 0–5).
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.
-- At high ethical temperature, generic topic-based refusal responses are detected and retried once under the configured permissive policy. The UI clears the canned refusal before the retry.
+- At high ethical temperature, generic topic-based refusal responses are detected and retried up to three times. Rejected refusals are removed from context before retrying, and conversational output is buffered so canned refusal text is not flashed to the user.
 
 - Auto-mode text-to-image generation now bypasses the chat model and calls the image subsystem directly, preventing normal image prompts from being mislabeled as explicit by the chat model.
 - Direct generation respects the existing `image.generate` permission and supports approval without constructing a chat-model session.
