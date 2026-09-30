@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
 from ..models.openai_compat import OpenAICompatibleProvider
@@ -78,6 +78,7 @@ class _AgentSession:
     repair_cycles: int = 0
     verification_round_start: int = 0
     research_context: dict[str, Any] = field(default_factory=dict)
+    event_callback: Callable[[dict[str, Any]], None] | None = None
 
 
 class AgentOrchestrator:
@@ -117,10 +118,14 @@ class AgentOrchestrator:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         model_events: list[dict[str, Any]],
+        on_delta: Callable[[str], None] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
     ):
         attempts = 0
         while True:
             try:
+                if on_delta is not None and hasattr(provider, "complete_stream"):
+                    return provider.complete_stream(messages=messages, tools=tools, on_delta=on_delta)
                 return provider.complete(messages=messages, tools=tools)
             except RuntimeError as exc:
                 if profile.runtime != "llama_cpp" or attempts >= self.config.runtime_recovery_attempts:
@@ -128,12 +133,14 @@ class AgentOrchestrator:
                 attempts += 1
                 endpoint = self.runtime.recover(profile)
                 provider = OpenAICompatibleProvider(profile, endpoint=endpoint)
-                model_events.append({
+                recovery_event = {
                     "type": "runtime_recovery",
                     "model_id": profile.id,
                     "attempt": attempts,
                     "reason": str(exc),
-                })
+                }
+                model_events.append(recovery_event)
+                self._safe_emit(event_callback, {"type": "model", "event": recovery_event})
 
     @staticmethod
     def _parse_call(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -150,6 +157,19 @@ class AgentOrchestrator:
 
     def _task_context(self, task_id: str) -> None:
         self.tools.context["task_id"] = task_id
+
+    @staticmethod
+    def _safe_emit(callback: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
+        if callback is None:
+            return
+        try:
+            callback(event)
+        except Exception:
+            # Streaming/UI listeners must never be able to break the agent loop.
+            pass
+
+    def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
+        self._safe_emit(session.event_callback, {"type": event_type, **payload})
 
     def _restore_session(self, task_id: str, *, reason: str) -> _AgentSession:
         """Rebuild enough agent context to safely continue a persisted task.
@@ -330,7 +350,8 @@ class AgentOrchestrator:
             "detail": detail,
         }
         session.pending_approval = pending
-        self.tasks.update(session.task_id, status="waiting_approval", phase="waiting_approval", pending_approval=pending)
+        task = self.tasks.update(session.task_id, status="waiting_approval", phase="waiting_approval", pending_approval=pending)
+        self._emit(session, "approval", approval=pending, task=task.as_dict())
         return self._result(
             session,
             f"Approval required to run {name} ({permission}). Approve or deny the pending action to continue this task.",
@@ -339,7 +360,9 @@ class AgentOrchestrator:
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
-        session.tool_events.append({"name": name, "arguments": args, "result": result})
+        event = {"name": name, "arguments": args, "result": result}
+        session.tool_events.append(event)
+        self._emit(session, "tool", tool={**event, "result": result[-12000:]})
         session.messages.append({
             "role": "tool",
             "tool_call_id": call.get("id", name),
@@ -347,7 +370,8 @@ class AgentOrchestrator:
             "content": result,
         })
         task = self.tasks.get(session.task_id)
-        self.tasks.update(session.task_id, steps=session.steps, files_changed=list(task.files_changed))
+        updated = self.tasks.update(session.task_id, steps=session.steps, files_changed=list(task.files_changed))
+        self._emit(session, "task", task=updated.as_dict())
 
     def _maybe_escalate(self, session: _AgentSession) -> None:
         if session.mode != "auto" or session.failures < 2 or session.decision.role == "deep_reasoner":
@@ -364,13 +388,15 @@ class AgentOrchestrator:
         session.decision = escalated
         session.profile = self.router.get_profile(escalated.model_id)
         session.provider = self._provider_for(session.profile)
-        session.model_events.append({
+        switch_event = {
             "type": "switch",
             "from": previous,
             "to": escalated.model_id,
             "role": escalated.role,
             "reason": "repeated tool failures",
-        })
+        }
+        session.model_events.append(switch_event)
+        self._emit(session, "model", event=switch_event)
         session.messages.append({
             "role": "system",
             "content": "The previous model encountered repeated tool failures. Re-evaluate the problem carefully before continuing.",
@@ -410,7 +436,8 @@ class AgentOrchestrator:
             session.verification_done = True
             return None
 
-        self.tasks.update(session.task_id, status="verifying", phase="verifying")
+        verifying_task = self.tasks.update(session.task_id, status="verifying", phase="verifying")
+        self._emit(session, "task", task=verifying_task.as_dict())
         if session.verification_index == 0:
             session.verification_round_start = len(task.verification)
         while session.verification_index < len(session.verification_commands):
@@ -430,7 +457,9 @@ class AgentOrchestrator:
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(session.task_id)
             self.tasks.update(session.task_id, verification=[*task.verification, entry])
-            session.tool_events.append({"name": "run_shell", "arguments": args, "result": result, "phase": "verification"})
+            verification_event = {"name": "run_shell", "arguments": args, "result": result, "phase": "verification"}
+            session.tool_events.append(verification_event)
+            self._emit(session, "tool", tool={**verification_event, "result": result[-12000:]})
             session.verification_index += 1
         session.verification_done = True
         return None
@@ -447,7 +476,8 @@ class AgentOrchestrator:
             session.review_done = True
             return
 
-        self.tasks.update(session.task_id, status="reviewing", phase="reviewing")
+        reviewing_task = self.tasks.update(session.task_id, status="reviewing", phase="reviewing")
+        self._emit(session, "task", task=reviewing_task.as_dict())
         review_decision = self.router.choose(
             session.user_text,
             phase="review",
@@ -456,20 +486,24 @@ class AgentOrchestrator:
         review_profile = self.router.get_profile(review_decision.model_id)
         review_provider = self._provider_for(review_profile)
         if review_decision.model_id != session.decision.model_id:
-            session.model_events.append({
+            review_event = {
                 "type": "switch",
                 "from": session.decision.model_id,
                 "to": review_decision.model_id,
                 "role": "reviewer",
                 "reason": "post-change review",
-            })
+            }
+            session.model_events.append(review_event)
+            self._emit(session, "model", event=review_event)
         else:
-            session.model_events.append({
+            review_event = {
                 "type": "review",
                 "model_id": review_decision.model_id,
                 "role": "reviewer",
                 "reason": "post-change review",
-            })
+            }
+            session.model_events.append(review_event)
+            self._emit(session, "model", event=review_event)
         try:
             response = self._complete_with_recovery(
                 review_provider,
@@ -483,6 +517,7 @@ class AgentOrchestrator:
                 ],
                 tools=None,
                 model_events=session.model_events,
+                event_callback=session.event_callback,
             )
             session.review_content = str(response.message.get("content") or "")
         except Exception as exc:
@@ -518,22 +553,25 @@ class AgentOrchestrator:
                     "Patch the root cause, then finish so verification can run again.\n\n" + failure_text
                 ),
             })
-            session.model_events.append({
+            repair_event = {
                 "type": "verification_repair",
                 "round": session.repair_cycles,
                 "reason": "automatic diagnose/research/fix/retest loop",
-            })
+            }
+            session.model_events.append(repair_event)
+            self._emit(session, "model", event=repair_event)
             session.verification_done = False
             session.verification_index = 0
             session.review_done = False
             session.main_content = ""
-            self.tasks.update(session.task_id, status="running", phase="researching_failure")
+            repair_task = self.tasks.update(session.task_id, status="running", phase="researching_failure")
+            self._emit(session, "task", task=repair_task.as_dict())
             return None
 
         self._run_review(session)
         task = self.tasks.get(session.task_id)
         status = "completed_with_warnings" if verification_failed else "completed"
-        self.tasks.update(
+        final_task = self.tasks.update(
             session.task_id,
             status=status,
             phase="done",
@@ -543,6 +581,7 @@ class AgentOrchestrator:
             steps=session.steps,
         )
         task = self.tasks.get(session.task_id)
+        self._emit(session, "task", task=task.as_dict())
         self.memory.remember_task(
             task_id=task.id,
             prompt=task.prompt,
@@ -560,7 +599,8 @@ class AgentOrchestrator:
 
     def _drive(self, session: _AgentSession) -> AgentResult:
         self._task_context(session.task_id)
-        self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
+        working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
+        self._emit(session, "task", task=working_task.as_dict())
         session.pending_approval = None
 
         while session.steps < self.config.max_agent_steps:
@@ -574,6 +614,8 @@ class AgentOrchestrator:
                 messages=session.messages,
                 tools=self.tools.schemas(),
                 model_events=session.model_events,
+                on_delta=lambda piece: self._emit(session, "token", text=piece, model_id=session.profile.id),
+                event_callback=session.event_callback,
             )
             session.steps += 1
             message = response.message
@@ -601,7 +643,14 @@ class AgentOrchestrator:
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
-    def run(self, user_text: str, *, history: list[dict[str, Any]] | None = None, mode: str = "auto") -> AgentResult:
+    def run(
+        self,
+        user_text: str,
+        *,
+        history: list[dict[str, Any]] | None = None,
+        mode: str = "auto",
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         self.runtime.refresh_hardware()
         task = self.tasks.create(user_text, mode)
         self._task_context(task.id)
@@ -617,9 +666,11 @@ class AgentOrchestrator:
             try:
                 research_context = self.research.prepare_task(user_text, mode=self.config.research_mode)
                 self.tasks.update(task.id, research=research_context)
+                self._safe_emit(event_callback, {"type": "research", "research": research_context})
             except Exception as exc:
                 research_context = {"error": f"{type(exc).__name__}: {exc}"}
                 self.tasks.update(task.id, research=research_context)
+                self._safe_emit(event_callback, {"type": "research", "research": research_context})
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -647,13 +698,18 @@ class AgentOrchestrator:
                 "reasons": decision.reasons,
             }],
             research_context=research_context,
+            event_callback=event_callback,
         )
         self._sessions[task.id] = session
-        self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)
+        routed_task = self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)
+        self._safe_emit(event_callback, {"type": "model", "event": session.model_events[0]})
+        self._safe_emit(event_callback, {"type": "task", "task": routed_task.as_dict()})
         try:
             return self._drive(session)
         except Exception as exc:
-            self.tasks.update(task.id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
+            error_task = self.tasks.update(task.id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
+            self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
+            self._safe_emit(event_callback, {"type": "error", "error": f"{type(exc).__name__}: {exc}"})
             self._sessions.pop(task.id, None)
             raise
 
