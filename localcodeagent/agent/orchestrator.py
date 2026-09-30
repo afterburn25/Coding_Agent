@@ -1037,7 +1037,11 @@ class AgentOrchestrator:
             ethical_temperature = max(0.0, min(1.0, float(getattr(self.config, "ethical_temperature", 1.0))))
             refusal_retry_limit = max(0, min(5, int(getattr(self.config, "generic_refusal_retry_limit", 3))))
             refusal_retry_enabled = ethical_temperature >= 0.8 and refusal_retry_limit > 0
-            buffer_for_refusal_check = session.decision.role == "utility" and refusal_retry_enabled
+            refusal_check_intent = ConversationManager.classify_intent(session.user_text)
+            buffer_for_refusal_check = (
+                refusal_retry_enabled
+                and refusal_check_intent in {"conversation", "writing", "tutoring", "planning"}
+            )
             buffered_deltas: list[str] = []
             on_delta = (
                 buffered_deltas.append
@@ -1111,6 +1115,7 @@ class AgentOrchestrator:
                         "consensual explicit text conversation. The model itself is refusing this prompt; switch or install "
                         "a less-restrictive conversation model, or tune this model in Model Growth."
                     )
+                    buffered_deltas.clear()
                 if buffer_for_refusal_check and buffered_deltas:
                     self._emit(
                         session,
