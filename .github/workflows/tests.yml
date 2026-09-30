@@ -144,9 +144,11 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "models") | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "data") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "workflows\image") | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "Source\.agent") | Out-Null
           Set-Content -Encoding UTF8 (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker") "keep-models"
           Set-Content -Encoding UTF8 (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker") "keep-data"
+          Set-Content -Encoding UTF8 (Join-Path $InstallDir "workflows\image\UPGRADE_PRESERVE.marker") "keep-workflows"
           Set-Content -Encoding UTF8 (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker") "keep-source"
           Set-Content -Encoding UTF8 (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker") "keep-task-state"
 
@@ -166,6 +168,7 @@ jobs:
 
           if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed downloaded model state" }
           if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed application data" }
+          if (-not (Test-Path (Join-Path $InstallDir "workflows\image\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed imported workflows" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker"))) { throw "Upgrade overwrote the Source workspace" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed task/project state" }
 
