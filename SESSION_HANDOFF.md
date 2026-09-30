@@ -19,6 +19,13 @@ Do not reconstruct project state from chat memory when the repository can answer
 
 ## Local Git checkpoints
 
+- `935145c` — Add validated image workflow import manager documentation/version checkpoint.
+- `2e4a194` — Normalize background-removal workflow routing.
+- `e6f5012` — Add validated ComfyUI workflow importer.
+- `997cf92` — Test conservative GitHub research authority.
+- `573bf9e` — Refresh tracked project metadata for v0.5.
+- `ac3d91f` — Record v0.5 45-test checkpoint.
+- `441ac4d` — Add v0.5 research intelligence and workflow hardening.
 - `f208b0c` — Add v0.5 research intelligence and harden image workflows.
 - `7ccc6c9` — Add image model manager controls.
 - `549f23e` — Add image model and LoRA asset management.
@@ -34,7 +41,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **46 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **49 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -131,13 +138,17 @@ No image weights are downloaded automatically yet.
 ## Current additions after the original v0.4 handoff
 
 - ComfyUI workflows are now validated as API-format before loading large models.
+- Image Model Manager can import API-format workflows into configured operation slots.
 - Required ComfyUI nodes are checked before generation.
 - Main chat renders/polls image jobs inline and exposes Edit/Variation/Upscale/Save actions.
 - `config.example.json` is synchronized with the current Qwen/FLUX component layouts and research settings.
+- Image workspace now imports and assigns API-format ComfyUI workflow JSON per model/operation.
+- Import rejects normal ComfyUI UI exports with an explicit Export (API) instruction, validates before write, writes atomically, confines paths to `workflows/image`, and limits imports to 10 MB.
+- `remove_background` now resolves both the new canonical workflow key and legacy `background_removal` configs.
 
 ## Known gaps / next executable steps
 
-1. Import and test real ComfyUI API-format workflows for the selected Qwen-Image-2.1 and FLUX.2 Klein local node stacks.
+1. Use the Image workspace workflow manager to import and test real ComfyUI API-format workflows for the selected Qwen-Image-2.1 and FLUX.2 Klein local node stacks.
 2. Complete LoRA compatibility/version checks and inject selected multiple LoRAs into model-specific workflows.
 3. Add mask editor and dedicated before/after comparison UI.
 4. Add dedicated background-removal and upscaler adapters/workflows.
@@ -152,4 +163,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `46 tests` passing.
+Expected at this checkpoint: `49 tests` passing.

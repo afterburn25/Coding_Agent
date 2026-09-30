@@ -1,6 +1,6 @@
 [project]
 name = "local-code-agent"
-version = "0.4.0.dev0"
+version = "0.5.0.dev0"
 description = "Local-first coding agent with automatic model routing, web research/browser tooling, local image generation/editing, transactional workflows, and modular tools."
 requires-python = ">=3.11"
 license = {text = "MIT"}

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import tempfile
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 
 from localcodeagent.image.catalog import discover_image_models
 from localcodeagent.image.policy import ConsentStore, ImageSafetyPolicy
 from localcodeagent.image.library import ImageAssetLibrary
+from localcodeagent.image.manager import ImageManager
 from localcodeagent.image.router import ImageRouter
 from localcodeagent.image.types import ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
@@ -90,6 +92,25 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(status["node_count"], 2)
         self.assertEqual(status["unresolved_tokens"], ["prompt", "seed"])
 
+    def test_save_api_workflow_is_atomic_and_rejects_ui_export(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = WorkflowManager(Path(td))
+            valid = {"1": {"class_type": "KSampler", "inputs": {"seed": "${seed}"}}}
+            saved = manager.save_api("qwen/generate.json", valid)
+            self.assertTrue(saved["valid"])
+            target = Path(td) / "qwen" / "generate.json"
+            original = target.read_text(encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, r"Export \(API\)"):
+                manager.save_api("qwen/generate.json", {"nodes": [{"id": 1, "type": "KSampler"}]})
+            self.assertEqual(target.read_text(encoding="utf-8"), original)
+
+    def test_save_api_workflow_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = WorkflowManager(Path(td) / "workflows")
+            valid = {"1": {"class_type": "KSampler", "inputs": {}}}
+            with self.assertRaises(PermissionError):
+                manager.save_api("../escape.json", valid)
+
     def test_catalog_discovery(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -108,6 +129,8 @@ class ImageLibraryTests(unittest.TestCase):
         )
         self.assertEqual(profile.workflow_for("image_edit"), "edit.json")
         self.assertEqual(profile.workflow_for("text_to_image"), "default.json")
+        legacy = ImageModelProfile(id="legacy", family="qwen-image", workflows={"background_removal": "bg.json"})
+        self.assertEqual(legacy.workflow_for("remove_background"), "bg.json")
 
     def test_model_verification_and_lora_metadata(self):
         with tempfile.TemporaryDirectory() as td:
@@ -135,6 +158,27 @@ class ImageLibraryTests(unittest.TestCase):
             self.assertEqual(saved["name"], "Portrait")
             rows = lib.list_loras()
             self.assertEqual(rows[0]["name"], "Portrait")
+
+    def test_image_manager_imports_only_configured_operation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ImageModelProfile(
+                id="qwen", family="qwen-image",
+                workflows={"text_to_image": "qwen/generate.json"},
+                capabilities=["text_to_image"],
+            )
+            config = SimpleNamespace(
+                image_models_dir="models/image", image_data_dir="data/image",
+                image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188",
+                comfyui_auto_start=False, image_resource_mode="balanced",
+            )
+            manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
+            valid = {"1": {"class_type": "KSampler", "inputs": {"seed": "${seed}"}}}
+            result = manager.import_workflow("qwen", "text_to_image", valid)
+            self.assertTrue(result["workflow"]["valid"])
+            self.assertTrue((root / "workflows/image/qwen/generate.json").is_file())
+            with self.assertRaisesRegex(ValueError, "no configured workflow"):
+                manager.import_workflow("qwen", "inpaint", valid)
 
     def test_existing_verified_model_is_not_replaced_without_repair(self):
         with tempfile.TemporaryDirectory() as td:

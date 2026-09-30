@@ -16,4 +16,5 @@ models/image/
 data/image/
 ComfyUI/
 .agent/browser/
+
 .agent/research/

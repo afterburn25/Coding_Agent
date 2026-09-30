@@ -55,16 +55,21 @@
 - LoRA discovery/metadata display foundation.
 - ComfyUI API-workflow validation before model loading.
 - Required ComfyUI node checks before generation.
+- Safe Image Model Manager import of validated ComfyUI API workflows.
 - Main-chat inline image job cards with polling and Edit/Variation/Upscale/Save controls.
+- Validated per-operation ComfyUI API-workflow import from the Image workspace.
+- Atomic workflow replacement: invalid/UI-format imports never overwrite the last valid API workflow.
+- Workflow import path confinement and a 10 MB workflow JSON limit.
+- Backward-compatible `remove_background` / `background_removal` workflow aliasing.
 
 ### Tests
 
-`46` automated tests passing.
+`49` automated tests passing.
 
 ### Important current limitations
 
 - Model files are not bundled and large image models are not silently downloaded.
-- Real Qwen/FLUX ComfyUI API workflow templates still need to be added/tested against the chosen local node implementations.
+- Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
 - Image progress is currently polling-based; ComfyUI WebSocket progress events are not wired into the app yet.
 - Mask painting UI, advanced before/after viewer, full LoRA import/version/compatibility management, and dedicated upscaler/background-removal adapters remain upcoming.
@@ -72,4 +77,4 @@
 
 ## Next milestone
 
-Complete v0.5 by importing/testing real Qwen/FLUX API workflows, completing LoRA injection/management, adding richer progress streaming, mask/before-after UX, persistent browser sessions, and research telemetry/source presentation in the UI.
+Complete v0.5 by importing/testing real Qwen/FLUX API workflows through the new workflow manager, completing LoRA injection/management, adding richer progress streaming, mask/before-after UX, persistent browser sessions, and research telemetry/source presentation in the UI.

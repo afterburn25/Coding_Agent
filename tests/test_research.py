@@ -48,6 +48,7 @@ class ResearchRankingTests(unittest.TestCase):
         self.assertGreater(exact.score, mismatch.score)
         self.assertIn(exact.reliability, {"Strong", "Confirmed"})
 
+
     def test_generic_github_result_is_not_assumed_official_upstream(self):
         class Client:
             def search(self, query, count=8):

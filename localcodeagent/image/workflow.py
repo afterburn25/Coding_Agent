@@ -80,6 +80,7 @@ class WorkflowManager:
             "class_types": sorted({str(node.get("class_type")) for _, node in nodes if node.get("class_type")}),
         }
 
+
     def save_api(self, name: str, workflow: dict[str, Any]) -> dict[str, Any]:
         """Validate and atomically save a ComfyUI prompt-API workflow.
 

@@ -95,7 +95,7 @@ It provides drag/drop references, conversational prompting, Auto/manual model se
 
 The complete requested image specification is preserved at `docs/IMAGE_MODULE_SPEC.md`.
 
-The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
+The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
 
 
 ## Shared GPU management
@@ -157,7 +157,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **46 tests passing**.
+Current expected result: **49 tests passing**.
 
 ## API highlights
 
@@ -187,6 +187,7 @@ POST /api/image/consent
 POST /api/image/backend/start
 POST /api/image/backend/stop
 POST /api/image/backend/inspect
+POST /api/image/workflows/import
 POST /api/image/models/verify
 POST /api/image/models/install
 POST /api/image/models/remove
