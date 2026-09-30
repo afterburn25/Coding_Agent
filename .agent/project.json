@@ -210,7 +210,15 @@
     "commits": [
       "d2959c9",
       "55715dc",
-      "66170a4"
-    ]
+      "66170a4",
+      "0d0d0fc",
+      "45a34f8",
+      "cb1ae4c",
+      "fbf328c"
+    ],
+    "coding_model_preflight_bypass": true,
+    "natural_request_prefixes": true,
+    "source_image_edit_exclusion": true,
+    "verified_code_checkpoint": "fbf328c"
   }
 }
