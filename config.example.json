@@ -1,5 +1,5 @@
 {
-  "llama_cpp_executable": "llama-server",
+  "llama_cpp_executable": "",
   "models_dir": "models",
   "runtime_logs_dir": ".agent/runtime",
   "runtime_auto_start": true,
@@ -7,39 +7,17 @@
   "max_resident_models": 1,
   "models": [
     {
-      "id": "fast-coder",
+      "id": "qwen3-14b",
       "runtime": "llama_cpp",
       "endpoint": "http://127.0.0.1:8081/v1",
-      "model": "fast-coder",
-      "model_path": "models/fast-coder.gguf",
+      "model": "Qwen3-14B-Q4_K_M",
+      "model_path": "models/Qwen3-14B-Q4_K_M.gguf",
       "roles": [
         "utility",
-        "fast_coder"
-      ],
-      "context_window": 32768,
-      "tool_calling": true,
-      "vision": false,
-      "priority": 80,
-      "enabled": true,
-      "api_key": "local",
-      "gpu_layers": "auto",
-      "fit_target_mb": 1024,
-      "keep_loaded": false,
-      "allow_cpu_offload": true,
-      "estimated_vram_gb": 6,
-      "estimated_ram_gb": 10,
-      "notes": "Small fast coding model. Replace model_path with your actual GGUF."
-    },
-    {
-      "id": "primary-coder",
-      "runtime": "llama_cpp",
-      "endpoint": "http://127.0.0.1:8082/v1",
-      "model": "primary-coder",
-      "model_path": "models/primary-coder.gguf",
-      "roles": [
+        "fast_coder",
         "primary_coder"
       ],
-      "context_window": 65536,
+      "context_window": 32768,
       "tool_calling": true,
       "vision": false,
       "priority": 90,
@@ -49,21 +27,21 @@
       "fit_target_mb": 1024,
       "keep_loaded": false,
       "allow_cpu_offload": true,
-      "estimated_vram_gb": 11,
-      "estimated_ram_gb": 28,
-      "notes": "Default software-engineering model. Replace model_path with your actual GGUF."
+      "estimated_vram_gb": 10,
+      "estimated_ram_gb": 16,
+      "notes": "Official Qwen3 14B Q4_K_M starter for fast/general coding."
     },
     {
-      "id": "deep-reasoner",
+      "id": "qwen3-coder-30b",
       "runtime": "llama_cpp",
-      "endpoint": "http://127.0.0.1:8083/v1",
-      "model": "deep-reasoner",
-      "model_path": "models/deep-reasoner.gguf",
+      "endpoint": "http://127.0.0.1:8082/v1",
+      "model": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M",
+      "model_path": "models/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
       "roles": [
         "deep_reasoner",
         "reviewer"
       ],
-      "context_window": 65536,
+      "context_window": 32768,
       "tool_calling": true,
       "vision": false,
       "priority": 100,
@@ -73,9 +51,9 @@
       "fit_target_mb": 1024,
       "keep_loaded": false,
       "allow_cpu_offload": true,
-      "estimated_vram_gb": 12,
-      "estimated_ram_gb": 40,
-      "notes": "Large reasoning/coding model intended for hard debugging and review."
+      "estimated_vram_gb": 18.6,
+      "estimated_ram_gb": 30,
+      "notes": "Heavier code/reasoning model; expected to use CPU/GPU offload on 12 GB VRAM."
     }
   ],
   "permissions": {
