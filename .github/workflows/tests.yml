@@ -147,14 +147,6 @@ jobs:
         shell: pwsh
         run: python packaging/make_windows_zip.py dist/ChatNexus Chat-Nexus-v0.6.0-dev-Windows-x64.zip
 
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: Chat-Nexus-Setup-v0.6.0-dev
-          path: dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload Windows desktop app
         uses: actions/upload-artifact@v4
         with:
