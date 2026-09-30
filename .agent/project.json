@@ -4,12 +4,24 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 102,
-  "next_milestone": "Run corrected native .NET ChatNexus.exe dogfood with Qwen3 14B + Qwen3-Coder 30B, then harden observed self-development failures",
+  "test_checkpoint": 107,
+  "next_milestone": "Improve first-run coding-model installation UX, then begin installed Chat Nexus dogfood with Qwen3 14B + Qwen3-Coder 30B",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
-  "delivery_target": "Self-contained .NET 8 WinForms/WebView2 ChatNexus.exe + hidden Python backend; source ZIP secondary",
+  "delivery_target": "Single compressed upgrade-aware Windows installer EXE; portable ZIP secondary",
   "default_coding_models": {
     "fast_primary": "Qwen3 14B Q4_K_M",
     "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
+  },
+  "installer": {
+    "canonical_script": "installer/ChatNexus.iss",
+    "app_id": "ChatNexus.Afterburn25",
+    "default_dir": "%LOCALAPPDATA%\\\\Programs\\\\Chat Nexus",
+    "preserves_on_upgrade": [
+      "models",
+      "data",
+      "config.json",
+      "Source Git workspace/task state"
+    ],
+    "interactive_existing_install_action": "Prompt to upgrade"
   }
 }

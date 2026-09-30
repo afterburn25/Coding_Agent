@@ -26,6 +26,23 @@ The canonical v0.6 **native desktop application** is chat-first:
 
 See `docs/UI_DIRECTION.md` before changing the primary application shell.
 
+## Windows installer and upgrades
+
+The **primary Windows deliverable is now a single compressed installer EXE**:
+
+`Chat-Nexus-Setup-<version>-Windows-x64.exe`
+
+The installer uses a stable application identity so a later installer can detect an existing Chat Nexus installation. On an interactive upgrade it shows the installed version and new version and asks whether to upgrade. The upgrade replaces application/backend/runtime files while preserving mutable local state:
+
+- downloaded `models\`
+- `config.json`
+- generated `data\`
+- the existing self-development `Source\.git` workspace and local edits/task state
+
+The installer is per-user under Local AppData, creates Start Menu shortcuts, optionally creates a desktop shortcut, uses LZMA2 solid compression, and extracts the application during setup. CI performs a real fresh install, launches the installed app self-test, writes preservation markers, runs the **same installer a second time without an install path override**, verifies the stable AppId rediscovers the previous install, and confirms all mutable state survives the upgrade.
+
+The portable ZIP remains a secondary development/recovery artifact.
+
 ## Native Windows desktop application
 
 The normal Windows deliverable is **`ChatNexus.exe`**, not a browser launcher. `ChatNexus.exe` is a self-contained **.NET 8 WinForms** application using **Microsoft WebView2**. It starts `backend/ChatNexus.Backend.exe` as a hidden child process and connects the desktop UI to that backend over loopback only. The HTTP service is private implementation plumbing, not the user-facing product.
@@ -210,7 +227,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **102 tests passing**.
+Current expected result: **107 tests passing**.
 
 ## API highlights
 

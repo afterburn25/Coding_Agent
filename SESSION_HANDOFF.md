@@ -117,6 +117,20 @@
 - Unit checkpoint: **102/102 tests passing**. The .NET native desktop build, hidden backend build, package CRC checks, bundled llama.cpp discovery, and native host self-test all pass in CI.
 - Next: install/download the 14B and 30B GGUFs on the target machine and begin real Chat Nexus-on-Chat Nexus dogfood development.
 
+## v0.6 installer/upgrade checkpoint
+
+- **Canonical Windows deliverable is now the installer EXE**: `Chat-Nexus-Setup-<version>-Windows-x64.exe`. Portable ZIPs are secondary.
+- Canonical installer definition: `installer/ChatNexus.iss`; do not recreate a duplicate installer under `packaging/`.
+- Stable installer identity: `ChatNexus.Afterburn25`.
+- Default per-user location: `%LOCALAPPDATA%\Programs\Chat Nexus`.
+- Interactive reinstall detects the existing version/location and asks whether to **Upgrade now?**; silent mode continues the upgrade for CI.
+- Upgrade replaces immutable app/backend/runtime files but preserves downloaded `models\`, `data\`, customized `config.json`, and the existing `Source\.git` workspace/local task state.
+- First install explicitly embeds both `Source\*` and hidden `Source\.git\*`. A deterministic pre-install flag decides once whether Source should be seeded; upgrades do not overwrite it.
+- Inno `Excludes` patterns are comma-separated: `Source\*,models\*,data\*,config.json`.
+- CI builds the native .NET app first, compiles the LZMA2 solid-compressed installer, performs a fresh install, runs `ChatNexus.exe --self-test`, writes preservation markers/config state, runs the same installer a second time without `/DIR`, verifies the existing path is rediscovered and mutable state survives, then runs the self-test again.
+- Current unit checkpoint: **107/107 tests passing**. The installer fresh-install + upgrade preservation smoke test is green.
+- Future Windows releases should publish the installer EXE first and may also publish the portable ZIP.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -289,4 +303,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `102 tests` passing.
+Expected at this checkpoint: `107 tests` passing.
