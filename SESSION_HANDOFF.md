@@ -40,6 +40,17 @@
 - GitHub Actions checkpoint: **71/71 tests passing**.
 - Next self-hosting blocker: event/token streaming, then isolated second-instance self-update validation.
 
+## v0.6 live streaming checkpoint
+
+- Main chat posts to `/api/chat/stream` and consumes Server-Sent Events.
+- `OpenAICompatibleProvider.complete_stream()` streams content and reconstructs fragmented tool calls by index.
+- Local endpoints that return ordinary JSON despite `stream:true` fall back transparently.
+- Live agent callback events: `token`, `model`, `tool`, `task`, `research`, `approval`, plus final `result`.
+- The UI updates its Tasks/Terminal rails during the run instead of appearing frozen.
+- Legacy `POST /api/chat` remains supported.
+- CI checkpoint: **75/75 tests passing**.
+- Next priority: isolated second-instance self-update validation, followed by real dogfood tasks.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -84,7 +95,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **71 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **75 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -212,4 +223,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `71 tests` passing.
+Expected at this checkpoint: `75 tests` passing.
