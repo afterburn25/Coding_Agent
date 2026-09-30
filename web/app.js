@@ -22,12 +22,53 @@ function renderImageJobs(jobs=[]){for(const job of jobs){let el=imageJobEls.get(
 function renderAgentResult(data,{addAssistant=true}={}){if(addAssistant)addMessage('assistant',data.content);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
 async function resumeTask(approved){if(!lastTask)return;send.disabled=true;try{const res=await fetch('/api/tasks/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:lastTask.id,approved})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not resume task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Resume error: ${err.message}`);}finally{send.disabled=false;}}
 async function recoverTask(taskId){send.disabled=true;try{addMessage('assistant','Recovering the interrupted task from its saved workspace/checkpoint state…');const res=await fetch('/api/tasks/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not recover task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Recovery error: ${err.message}`);}finally{send.disabled=false;}}
+function beginAssistantStream(){
+  const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();
+  const wrap=document.createElement('div');wrap.className='message assistant streaming';
+  wrap.innerHTML='<div class="role">assistant</div><div class="bubble">Thinking…</div>';
+  chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
+  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null};
+}
+function appendLiveActivity(text){
+  const existing=activity.textContent.trim();
+  if(!existing||activity.querySelector('.muted'))activity.textContent='';
+  activity.textContent+=(activity.textContent?'\n':'')+text;
+  if(activity.textContent.length>30000)activity.textContent=activity.textContent.slice(-30000);
+  setUtilityPanel('terminal');
+}
+function handleAgentStreamEvent(name,data,state){
+  if(name==='token'){if(!state.receivedToken){state.bubble.textContent='';state.receivedToken=true;}state.bubble.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='task'&&data.task){renderTask(data.task);return;}
+  if(name==='approval'){if(data.task)renderTask(data.task);setUtilityPanel('tasks');return;}
+  if(name==='model'){const e=data.event||{};appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}
+  if(name==='research'){const p=data.research?.plan||data.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
+  if(name==='tool'){const t=data.tool||{};appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
+  if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='error')throw new Error(data.error||'Agent stream failed');
+}
+function parseSseBlock(block,state){
+  const lines=block.split(/\r?\n/);let name='message';const data=[];
+  for(const line of lines){if(line.startsWith('event:'))name=line.slice(6).trim();else if(line.startsWith('data:'))data.push(line.slice(5).trimStart());}
+  if(!data.length)return;let payload;const raw=data.join('\n');try{payload=JSON.parse(raw);}catch{payload={text:raw};}
+  handleAgentStreamEvent(name,payload,state);
+}
+async function streamAgent(message){
+  const state=beginAssistantStream();
+  const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message,mode:mode.value})});
+  if(!res.ok){let detail='Request failed';try{const d=await res.json();detail=d.error||detail;}catch{}throw new Error(detail);}
+  if(!res.body)throw new Error('Streaming response body is unavailable in this browser.');
+  const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
+  while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});let split;while((split=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,split);buffer=buffer.slice(split+2);if(block.trim())parseSseBlock(block,state);}if(done)break;}
+  if(buffer.trim())parseSseBlock(buffer,state);
+  if(!state.result)throw new Error('Chat Nexus stream ended before a final result was received.');
+  return state.result;
+}
 async function undoTask(taskId){if(!confirm('Restore files to their state before this task?'))return;const res=await fetch('/api/tasks/undo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok){addMessage('assistant',`Undo error: ${data.error||'failed'}`);return;}addMessage('assistant',`Restored ${data.restored.length} file(s) from the task checkpoint.`);await loadStatus(false);}
 $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-approve]');if(a){resumeTask(a.dataset.approve==='1');return;}const r=e.target.closest('[data-recover]');if(r){recoverTask(r.dataset.recover);return;}const u=e.target.closest('[data-undo]');if(u)undoTask(u.dataset.undo);});
 $('#models').addEventListener('click',async e=>{const btn=e.target.closest('.runtime-action');if(!btn)return;btn.disabled=true;try{await runtimeAction(btn.dataset.action,btn.dataset.model);}catch(err){addMessage('assistant',`Runtime error: ${err.message}`);}finally{btn.disabled=false;}});
 $('#refreshRuntime').addEventListener('click',()=>loadStatus(true));
 $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex');b.disabled=true;try{const res=await fetch('/api/index/rebuild',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await res.json();if(!res.ok)throw new Error(data.error||'Index rebuild failed');await loadStatus(false);}catch(e){addMessage('assistant',`Index error: ${e.message}`);}finally{b.disabled=false;}});
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';send.disabled=true;send.textContent='…';try{const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,mode:mode.value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Request failed');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);}catch(err){addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',e=>{const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',async()=>{await fetch('/api/chat/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});chat.innerHTML=welcomeHtml();activity.innerHTML='<span class="muted">Tool calls, model switches, and command output will appear here.</span>';renderTask(null);input.focus();});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
