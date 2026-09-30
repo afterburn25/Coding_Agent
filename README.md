@@ -1,6 +1,6 @@
 # Chat Nexus
 
-Chat Nexus is a local-first ChatGPT-style coding workstation with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
+Chat Nexus is a native local-first AI coding workstation for Windows with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
 
 **GitHub source of truth:** `afterburn25/Coding_Agent`
 
@@ -16,7 +16,7 @@ v0.6 keeps the stable coding/research/image workflow and moves Chat Nexus toward
 
 The product name is **Chat Nexus**. The GitHub repository remains `afterburn25/Coding_Agent` as the development source of truth.
 
-The canonical v0.6 desktop/web shell is chat-first:
+The canonical v0.6 **native desktop application** is chat-first:
 - slim left navigation for Chat / Projects / Models / Research / Images / Tools / Settings
 - center conversation workspace with automatic model routing
 - right utility rail with **Code Diff / Tasks / Terminal** tabs
@@ -25,6 +25,30 @@ The canonical v0.6 desktop/web shell is chat-first:
 - local-system details remain available without dominating the chat experience
 
 See `docs/UI_DIRECTION.md` before changing the primary application shell.
+
+## Native Windows desktop application
+
+The normal Windows deliverable is **`ChatNexus.exe`**, not a browser launcher. The application opens its own native Windows window using WebView2. A loopback-only HTTP service is still used internally to connect the UI to the Python agent backend, but it is implementation plumbing and is not the user-facing application.
+
+The portable Windows dogfood bundle includes:
+- `ChatNexus.exe` with the official Chat Nexus icon
+- embedded Chat / Image Studio / Research Hub UI
+- pinned llama.cpp Vulkan x64 runtime under `runtime/llama`
+- a real `Source` working copy of `afterburn25/Coding_Agent` for self-development
+- config/example and build metadata
+
+Packaged builds default to native desktop mode. `--server` remains available only as a low-level development/debugging mode.
+
+### Default coding models
+
+The intended two-model coding setup is:
+
+- **Qwen3 14B Q4_K_M** — utility, fast coder, and normal primary coding.
+- **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — deep reasoning and reviewer work.
+
+The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. If the 30B GGUF is not installed or cannot run, deep tasks can fall back to the runnable 14B primary coder instead of failing the task.
+
+The Windows package bundles llama.cpp itself; large GGUF model files remain explicit downloads from the Coding readiness/model catalog so the application package does not silently ship or download tens of gigabytes.
 
 ## Core coding-agent capabilities
 
@@ -186,7 +210,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **95 tests passing**.
+Current expected result: **99 tests passing**.
 
 ## API highlights
 
