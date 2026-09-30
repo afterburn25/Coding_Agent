@@ -147,7 +147,7 @@ function beginAssistantStream(){
   const wrap=document.createElement('div');wrap.className='message assistant streaming';
   wrap.innerHTML='<div class="role">assistant</div><div class="bubble">Thinking…</div>';
   chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
-  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null};
+  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null};
 }
 function appendLiveActivity(text){
   const existing=activity.textContent.trim();
@@ -158,13 +158,13 @@ function appendLiveActivity(text){
 }
 function handleAgentStreamEvent(name,data,state){
   if(name==='token'){if(!state.receivedToken){state.bubble.textContent='';state.receivedToken=true;}state.bubble.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='task'&&data.task){renderTask(data.task);return;}
+  if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);return;}
   if(name==='approval'){if(data.task)renderTask(data.task);setUtilityPanel('tasks');return;}
   if(name==='model'){const e=data.event||{};appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}
   if(name==='research'){const p=data.research?.plan||data.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
   if(name==='tool'){const t=data.tool||{};appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
   if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='error')throw new Error(data.error||'Agent stream failed');
+  if(name==='error'){state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
 }
 function parseSseBlock(block,state){
   const lines=block.split(/\r?\n/);let name='message';const data=[];
@@ -180,7 +180,25 @@ async function streamAgent(message){
   const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
   while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});let split;while((split=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,split);buffer=buffer.slice(split+2);if(block.trim())parseSseBlock(block,state);}if(done)break;}
   if(buffer.trim())parseSseBlock(buffer,state);
-  if(!state.result)throw new Error('Chat Nexus stream ended before a final result was received.');
+  if(state.error){
+    const err=new Error(state.error);err.displayed=true;throw err;
+  }
+  if(!state.result){
+    let detail='Chat Nexus connection closed before the task returned a final result.';
+    try{
+      const statusRes=await fetch('/api/tasks');
+      if(statusRes.ok){
+        const statusData=await statusRes.json();
+        const task=statusData.current||state.lastTask;
+        if(task?.error)detail=task.error;
+        else if(task?.status==='interrupted')detail='Chat Nexus restarted while this task was running. Use Resume interrupted task to continue from the saved checkpoint.';
+        else if(task?.status==='waiting_approval')detail='The task is waiting for approval. Open the Tasks panel to continue.';
+        else if(task?.status)detail+=' Current task status: '+task.status+'.';
+      }
+    }catch{}
+    state.bubble.textContent=detail;state.wrap.classList.remove('streaming');
+    const err=new Error(detail);err.displayed=true;throw err;
+  }
   return state.result;
 }
 async function undoTask(taskId){if(!confirm('Restore files to their state before this task?'))return;const res=await fetch('/api/tasks/undo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok){addMessage('assistant',`Undo error: ${data.error||'failed'}`);return;}addMessage('assistant',`Restored ${data.restored.length} file(s) from the task checkpoint.`);await loadStatus(false);}

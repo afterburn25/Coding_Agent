@@ -299,6 +299,118 @@ class VerificationRepairLoopTests(unittest.TestCase):
             self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "new\n")
 
 
+class _PatchThenReviewProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, *, messages, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ProviderResponse(message={
+                "role": "assistant", "content": "", "tool_calls": [{
+                    "id": "patch-fallback", "type": "function",
+                    "function": {"name": "apply_patch", "arguments": json.dumps({
+                        "changes": [{"path": "a.txt", "replacements": [{"old": "old", "new": "new"}]}],
+                    })},
+                }],
+            }, raw={})
+        if self.calls == 2:
+            return ProviderResponse(message={"role": "assistant", "content": "implementation complete"}, raw={})
+        return ProviderResponse(message={"role": "assistant", "content": "PASS reviewer fallback"}, raw={})
+
+
+class ModelActivationFallbackTests(unittest.TestCase):
+    def test_auto_mode_falls_back_when_deep_model_cannot_start(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            primary = ModelProfile(
+                id="primary", endpoint="http://primary/v1", model="primary",
+                roles=["fast_coder", "primary_coder"], runtime="external", priority=50,
+            )
+            deep = ModelProfile(
+                id="deep", endpoint="http://deep/v1", model="deep",
+                roles=["deep_reasoner", "reviewer"], runtime="external", priority=100,
+            )
+            config = AgentConfig(
+                models=[primary, deep], permissions={}, research_enabled=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            provider = _FinishedProvider()
+
+            def provider_for(profile):
+                if profile.id == "deep":
+                    raise RuntimeError("deep model could not start")
+                return provider
+
+            agent._provider_for = provider_for
+            result = agent.run("Investigate the root cause of this race condition and refactor the architecture")
+
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(result.routing.model_id, "primary")
+            self.assertTrue(any(
+                event.get("type") == "activation_fallback"
+                and event.get("from") == "deep"
+                and event.get("to") == "primary"
+                for event in result.model_events
+            ))
+
+    def test_review_model_start_failure_falls_back_and_still_returns_final_result(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.txt").write_text("old\n", encoding="utf-8")
+            primary = ModelProfile(
+                id="primary", endpoint="http://primary/v1", model="primary",
+                roles=["fast_coder", "primary_coder"], runtime="external", priority=50,
+            )
+            deep = ModelProfile(
+                id="deep", endpoint="http://deep/v1", model="deep",
+                roles=["deep_reasoner", "reviewer"], runtime="external", priority=100,
+            )
+            config = AgentConfig(
+                models=[primary, deep],
+                permissions={"filesystem.read": "allow", "filesystem.write": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=True,
+            )
+            tasks = TaskStore(root)
+            checkpoints = CheckpointManager(root)
+            tools = ToolRegistry(config.permissions)
+            register_filesystem_tools(tools, root, checkpoints=checkpoints, tasks=tasks)
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=tasks, checkpoints=checkpoints,
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            provider = _PatchThenReviewProvider()
+
+            def provider_for(profile):
+                if profile.id == "deep":
+                    raise RuntimeError("review model could not start")
+                return provider
+
+            agent._provider_for = provider_for
+            result = agent.run("change the file")
+
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(result.content, "implementation complete")
+            self.assertTrue(result.review.startswith("PASS"))
+            self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "new\n")
+            self.assertTrue(any(
+                event.get("type") == "activation_fallback"
+                and event.get("from") == "deep"
+                and event.get("to") == "primary"
+                for event in result.model_events
+            ))
+
+
 class SelfHostingContextTests(unittest.TestCase):
     def test_fresh_self_development_task_gets_guardrail_context(self):
         with tempfile.TemporaryDirectory() as td:

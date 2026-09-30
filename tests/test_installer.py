@@ -57,6 +57,16 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WriteCatalogMetadata", self.installer)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.installer)
 
+    def test_installer_shows_overall_and_per_model_download_progress(self):
+        self.assertIn("WizardForm.ProgressGauge", self.installer)
+        self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
+        self.assertIn("procedure CurInstallProgressChanged", self.installer)
+        self.assertIn("Downloading coding model ' + IntToStr(ModelNumber) + ' of 2", self.installer)
+        self.assertIn("LargestModelTemporaryFileSize", self.installer)
+        self.assertIn(r"{app}\models\*.tmp", self.installer)
+        self.assertIn("CurrentModelProgressNumber <> ModelNumber", self.installer)
+        self.assertIn("Coding model downloads complete", self.installer)
+
     def test_ci_compiles_real_installer_and_runs_update_twice(self):
         self.assertIn('installer\\ChatNexus.iss', self.workflow)
         self.assertIn("Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe", self.workflow)

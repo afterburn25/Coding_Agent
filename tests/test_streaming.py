@@ -111,6 +111,9 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("name==='token'", app)
         self.assertIn("name==='tool'", app)
         self.assertIn("name==='task'", app)
+        self.assertIn("state.error=String(data.error", app)
+        self.assertIn("fetch('/api/tasks')", app)
+        self.assertNotIn("stream ended before a final result was received", app)
 
 
 if __name__ == "__main__":

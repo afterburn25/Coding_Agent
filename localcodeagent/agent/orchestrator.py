@@ -115,6 +115,50 @@ class AgentOrchestrator:
         endpoint = self.runtime.ensure_ready(profile)
         return OpenAICompatibleProvider(profile, endpoint=endpoint)
 
+    def _activate_with_fallback(
+        self,
+        decision: RoutingDecision,
+        *,
+        user_text: str,
+        mode: str,
+        phase: str = "work",
+        changed_files: int = 0,
+        failures: int = 0,
+        model_events: list[dict[str, Any]] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> tuple[RoutingDecision, ModelProfile, OpenAICompatibleProvider]:
+        """Start the routed model, falling back in Auto mode if activation fails."""
+        profile = self.router.get_profile(decision.model_id)
+        try:
+            return decision, profile, self._provider_for(profile)
+        except Exception as exc:
+            if mode != "auto":
+                raise
+            fallback = self.router.choose(
+                user_text,
+                phase=phase,
+                changed_files=changed_files,
+                failures=failures,
+                exclude_model_ids={decision.model_id},
+            )
+            fallback_profile = self.router.get_profile(fallback.model_id)
+            fallback_provider = self._provider_for(fallback_profile)
+            fallback.reasons.insert(
+                0,
+                f"{decision.model_id} activation failed; fell back automatically: {type(exc).__name__}: {exc}",
+            )
+            event = {
+                "type": "activation_fallback",
+                "from": decision.model_id,
+                "to": fallback.model_id,
+                "role": fallback.role,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+            if model_events is not None:
+                model_events.append(event)
+            self._safe_emit(event_callback, {"type": "model", "event": event})
+            return fallback, fallback_profile, fallback_provider
+
     def _complete_with_recovery(
         self,
         provider: OpenAICompatibleProvider,
@@ -450,9 +494,30 @@ class AgentOrchestrator:
         if escalated.model_id == session.decision.model_id:
             return
         previous = session.decision.model_id
+        try:
+            escalated, next_profile, next_provider = self._activate_with_fallback(
+                escalated,
+                user_text=session.user_text,
+                mode=session.mode,
+                changed_files=len(task.files_changed),
+                failures=session.failures,
+                model_events=session.model_events,
+                event_callback=session.event_callback,
+            )
+        except Exception as exc:
+            unavailable_event = {
+                "type": "escalation_unavailable",
+                "model_id": escalated.model_id,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+            session.model_events.append(unavailable_event)
+            self._emit(session, "model", event=unavailable_event)
+            return
+        if escalated.model_id == session.decision.model_id:
+            return
         session.decision = escalated
-        session.profile = self.router.get_profile(escalated.model_id)
-        session.provider = self._provider_for(session.profile)
+        session.profile = next_profile
+        session.provider = next_provider
         switch_event = {
             "type": "switch",
             "from": previous,
@@ -548,28 +613,35 @@ class AgentOrchestrator:
             phase="review",
             changed_files=len(task.files_changed),
         )
-        review_profile = self.router.get_profile(review_decision.model_id)
-        review_provider = self._provider_for(review_profile)
-        if review_decision.model_id != session.decision.model_id:
-            review_event = {
-                "type": "switch",
-                "from": session.decision.model_id,
-                "to": review_decision.model_id,
-                "role": "reviewer",
-                "reason": "post-change review",
-            }
-            session.model_events.append(review_event)
-            self._emit(session, "model", event=review_event)
-        else:
-            review_event = {
-                "type": "review",
-                "model_id": review_decision.model_id,
-                "role": "reviewer",
-                "reason": "post-change review",
-            }
-            session.model_events.append(review_event)
-            self._emit(session, "model", event=review_event)
         try:
+            review_decision, review_profile, review_provider = self._activate_with_fallback(
+                review_decision,
+                user_text=session.user_text,
+                mode="auto",
+                phase="review",
+                changed_files=len(task.files_changed),
+                model_events=session.model_events,
+                event_callback=session.event_callback,
+            )
+            if review_decision.model_id != session.decision.model_id:
+                review_event = {
+                    "type": "switch",
+                    "from": session.decision.model_id,
+                    "to": review_decision.model_id,
+                    "role": "reviewer",
+                    "reason": "post-change review",
+                }
+                session.model_events.append(review_event)
+                self._emit(session, "model", event=review_event)
+            else:
+                review_event = {
+                    "type": "review",
+                    "model_id": review_decision.model_id,
+                    "role": "reviewer",
+                    "reason": "post-change review",
+                }
+                session.model_events.append(review_event)
+                self._emit(session, "model", event=review_event)
             response = self._complete_with_recovery(
                 review_provider,
                 review_profile,
@@ -728,8 +800,31 @@ class AgentOrchestrator:
         self.tasks.update(task.id, phase="planning")
 
         decision = self.router.choose(user_text, override=mode)
-        profile = self.router.get_profile(decision.model_id)
-        provider = self._provider_for(profile)
+        model_events = [{
+            "type": "selected",
+            "model_id": decision.model_id,
+            "role": decision.role,
+            "reasons": decision.reasons,
+        }]
+        self._safe_emit(event_callback, {"type": "model", "event": model_events[0]})
+        try:
+            decision, profile, provider = self._activate_with_fallback(
+                decision,
+                user_text=user_text,
+                mode=mode,
+                model_events=model_events,
+                event_callback=event_callback,
+            )
+        except Exception as exc:
+            error_task = self.tasks.update(
+                task.id,
+                status="error",
+                phase="done",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
+            self._safe_emit(event_callback, {"type": "error", "error": error_task.error})
+            raise
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
         self_hosting = self._self_hosting_context()
@@ -765,18 +860,12 @@ class AgentOrchestrator:
             decision=decision,
             profile=profile,
             provider=provider,
-            model_events=[{
-                "type": "selected",
-                "model_id": decision.model_id,
-                "role": decision.role,
-                "reasons": decision.reasons,
-            }],
+            model_events=model_events,
             research_context=research_context,
             event_callback=event_callback,
         )
         self._sessions[task.id] = session
         routed_task = self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)
-        self._safe_emit(event_callback, {"type": "model", "event": session.model_events[0]})
         self._safe_emit(event_callback, {"type": "task", "task": routed_task.as_dict()})
         try:
             return self._drive(session)

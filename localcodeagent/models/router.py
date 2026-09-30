@@ -82,7 +82,21 @@ class ModelRouter:
             return "deep_reasoner", score, reasons or ["high-complexity task"]
         return "primary_coder", score, reasons or ["general coding task"]
 
-    def choose(self, text: str, *, phase: str = "work", changed_files: int = 0, failures: int = 0, override: str | None = None) -> RoutingDecision:
+    def choose(
+        self,
+        text: str,
+        *,
+        phase: str = "work",
+        changed_files: int = 0,
+        failures: int = 0,
+        override: str | None = None,
+        exclude_model_ids: set[str] | None = None,
+    ) -> RoutingDecision:
+        excluded = set(exclude_model_ids or ())
+        available_models = [model for model in self.models if model.id not in excluded]
+        if not available_models:
+            raise ValueError("No enabled model remains after excluding failed candidates")
+
         if override and override != "auto":
             role = override if override in ROLES else "primary_coder"
             complexity = 0
@@ -90,9 +104,9 @@ class ModelRouter:
         else:
             role, complexity, reasons = self.classify_role(text, phase=phase, changed_files=changed_files, failures=failures)
 
-        candidates = [m for m in self.models if role in m.roles]
+        candidates = [m for m in available_models if role in m.roles]
         if not candidates:
-            candidates = [m for m in self.models if "primary_coder" in m.roles] or self.models
+            candidates = [m for m in available_models if "primary_coder" in m.roles] or available_models
             reasons.append(f"no dedicated {role} model configured; using fallback")
 
         ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
@@ -111,7 +125,7 @@ class ModelRouter:
         if fitting:
             pool = fitting
         else:
-            fallback_candidates = [m for m in self.models if "primary_coder" in m.roles and m not in candidates]
+            fallback_candidates = [m for m in available_models if "primary_coder" in m.roles and m not in candidates]
             fallback_ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
             for model in fallback_candidates:
                 if self.resource_advisor:

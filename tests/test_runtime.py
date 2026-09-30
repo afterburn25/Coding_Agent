@@ -85,6 +85,53 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertTrue(any("free VRAM" in reason or "CPU offload" in reason for reason in decision.reasons))
 
 
+    def test_resource_fit_counts_memory_released_by_resident_model_switch(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "fast.gguf").write_bytes(b"GGUF")
+            (models / "deep.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            fast = self._profile(
+                id="fast",
+                endpoint="",
+                executable=str(fake_server),
+                model_path="models/fast.gguf",
+                roles=["primary_coder"],
+                estimated_vram_gb=10,
+                estimated_ram_gb=16,
+            )
+            deep = self._profile(
+                id="deep",
+                endpoint="",
+                executable=str(fake_server),
+                model_path="models/deep.gguf",
+                roles=["deep_reasoner", "reviewer"],
+                estimated_vram_gb=18.6,
+                estimated_ram_gb=30,
+                allow_cpu_offload=True,
+            )
+            cfg = AgentConfig(models=[fast, deep], max_resident_models=1)
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.hardware = HardwareSnapshot(
+                platform="test",
+                total_ram_gb=64,
+                available_ram_gb=29.3,
+                gpus=[GPUInfo(0, "GPU", 12288, 10240, 2048)],
+                nvidia_smi_available=True,
+            )
+            manager.resident_model_ids = lambda: ["fast"]
+            manager._last_used["fast"] = 1.0
+
+            fits, score, reason = manager.resource_fit(deep)
+
+            self.assertTrue(fits)
+            self.assertLess(score, 0)
+            self.assertIn("after releasing resident fast", reason)
+            self.assertIn("CPU offload", reason)
+
     @unittest.skipIf(os.name == "nt", "fake executable uses POSIX permissions")
     def test_missing_deep_model_falls_back_to_available_primary(self):
         with tempfile.TemporaryDirectory() as td:

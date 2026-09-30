@@ -231,6 +231,43 @@ class RuntimeManager:
             })
         return rows
 
+    def _reclaimable_resources(self, target: ModelProfile) -> tuple[float, float, list[str]]:
+        """Estimate RAM/VRAM released before a managed model switch.
+
+        Routing happens before ensure_ready(), while the currently resident model may
+        still own most of the memory. With a residency limit, _enforce_residency()
+        will stop older managed models before the target starts. Account for those
+        imminent releases so Auto routing does not reject the next model using stale
+        memory pressure from the model it is about to replace.
+        """
+        if target.runtime != "llama_cpp":
+            return 0.0, 0.0, []
+
+        active = [model_id for model_id in self.resident_model_ids() if model_id != target.id]
+        max_resident = max(1, int(self.config.max_resident_models))
+        if len(active) < max_resident:
+            return 0.0, 0.0, []
+
+        profiles = {model.id: model for model in self.config.models}
+        stoppable = [
+            model_id for model_id in active
+            if model_id in profiles and not profiles[model_id].keep_loaded
+        ]
+        stoppable.sort(key=lambda model_id: self._last_used.get(model_id, 0.0))
+
+        reclaim_ram = 0.0
+        reclaim_vram = 0.0
+        victims: list[str] = []
+        remaining = len(active)
+        while remaining >= max_resident and stoppable:
+            victim = stoppable.pop(0)
+            victim_profile = profiles[victim]
+            victims.append(victim)
+            reclaim_ram += max(0.0, float(victim_profile.estimated_ram_gb))
+            reclaim_vram += max(0.0, float(victim_profile.estimated_vram_gb))
+            remaining -= 1
+        return reclaim_ram, reclaim_vram, victims
+
     def resource_fit(self, profile: ModelProfile) -> tuple[bool, int, str]:
         """Return availability/resource fit for routing before a model is selected."""
         if profile.runtime == "llama_cpp":
@@ -247,20 +284,43 @@ class RuntimeManager:
         required_vram = max(0.0, float(profile.estimated_vram_gb))
         required_ram = max(0.0, float(profile.estimated_ram_gb))
 
+        reclaim_ram, reclaim_vram, victims = self._reclaimable_resources(profile)
+        if reclaim_ram > 0 and h.total_ram_gb > 0:
+            avail_ram = min(h.total_ram_gb, avail_ram + reclaim_ram)
+        elif reclaim_ram > 0:
+            avail_ram += reclaim_ram
+        if reclaim_vram > 0 and h.total_vram_gb > 0:
+            free_vram = min(h.total_vram_gb, free_vram + reclaim_vram)
+        elif reclaim_vram > 0:
+            free_vram += reclaim_vram
+        switch_note = (
+            f" after releasing resident {', '.join(victims)}"
+            if victims else ""
+        )
+
         # No estimates means we cannot reject it; let llama.cpp auto-fit decide.
         if required_vram <= 0 and required_ram <= 0:
             return True, 0, "no resource estimate; runtime auto-fit allowed"
 
         if required_ram > 0 and avail_ram > 0 and required_ram > avail_ram * 0.92:
-            return False, -100, f"estimated RAM need {required_ram:.1f} GB exceeds available {avail_ram:.1f} GB"
+            return False, -100, (
+                f"estimated RAM need {required_ram:.1f} GB exceeds effective available "
+                f"{avail_ram:.1f} GB{switch_note}"
+            )
 
         if required_vram > 0:
             if free_vram >= required_vram:
-                return True, 25, f"fits free VRAM ({free_vram:.1f} GB)"
+                return True, 25, f"fits effective free VRAM ({free_vram:.1f} GB){switch_note}"
             if profile.allow_cpu_offload and (avail_ram <= 0 or required_ram <= avail_ram * 0.92):
-                return True, -5, f"requires CPU offload; free VRAM {free_vram:.1f} GB"
-            return False, -100, f"estimated VRAM need {required_vram:.1f} GB exceeds free {free_vram:.1f} GB"
-        return True, 5, "fits available RAM"
+                return True, -5, (
+                    f"requires CPU offload; effective free VRAM {free_vram:.1f} GB"
+                    f"{switch_note}"
+                )
+            return False, -100, (
+                f"estimated VRAM need {required_vram:.1f} GB exceeds effective free "
+                f"{free_vram:.1f} GB{switch_note}"
+            )
+        return True, 5, f"fits effective available RAM{switch_note}"
 
     def _build_command(self, profile: ModelProfile, port: int) -> list[str]:
         exe = self.discover_llama_server(profile)

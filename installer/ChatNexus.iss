@@ -108,6 +108,125 @@ var
   UpgradeInfoPage: TOutputMsgWizardPage;
   InstallBundledSource: Boolean;
   SkipModelDownloads: Boolean;
+  ModelProgressLabel: TNewStaticText;
+  ModelProgressBar: TNewProgressBar;
+  ModelBytesLabel: TNewStaticText;
+  ModelProgressActive: Boolean;
+  CurrentModelProgressNumber: Integer;
+  LastModelBytesDone: Int64;
+
+procedure InitializeModelProgressControls();
+begin
+  ModelProgressLabel := TNewStaticText.Create(WizardForm);
+  ModelProgressLabel.Parent := WizardForm.InstallingPage;
+  ModelProgressLabel.Left := WizardForm.ProgressGauge.Left;
+  ModelProgressLabel.Top :=
+    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(14);
+  ModelProgressLabel.Width := WizardForm.ProgressGauge.Width;
+  ModelProgressLabel.Caption := 'Coding model download';
+  ModelProgressLabel.Visible := False;
+
+  ModelProgressBar := TNewProgressBar.Create(WizardForm);
+  ModelProgressBar.Parent := WizardForm.InstallingPage;
+  ModelProgressBar.Left := WizardForm.ProgressGauge.Left;
+  ModelProgressBar.Top :=
+    ModelProgressLabel.Top + ModelProgressLabel.Height + ScaleY(4);
+  ModelProgressBar.Width := WizardForm.ProgressGauge.Width;
+  ModelProgressBar.Height := WizardForm.ProgressGauge.Height;
+  ModelProgressBar.Min := 0;
+  ModelProgressBar.Max := 1000;
+  ModelProgressBar.Position := 0;
+  ModelProgressBar.Visible := False;
+
+  ModelBytesLabel := TNewStaticText.Create(WizardForm);
+  ModelBytesLabel.Parent := WizardForm.InstallingPage;
+  ModelBytesLabel.Left := WizardForm.ProgressGauge.Left;
+  ModelBytesLabel.Top :=
+    ModelProgressBar.Top + ModelProgressBar.Height + ScaleY(4);
+  ModelBytesLabel.Width := WizardForm.ProgressGauge.Width;
+  ModelBytesLabel.Caption := '';
+  ModelBytesLabel.Visible := False;
+
+  ModelProgressActive := False;
+  CurrentModelProgressNumber := 0;
+  LastModelBytesDone := 0;
+end;
+
+function LargestModelTemporaryFileSize(): Int64;
+var
+  FindRec: TFindRec;
+  Candidate: String;
+  Size: Int64;
+begin
+  Result := 0;
+  if FindFirst(ExpandConstant('{app}\models\*.tmp'), FindRec) then
+  begin
+    try
+      repeat
+        Candidate := ExpandConstant('{app}\models\') + FindRec.Name;
+        if FileSize64(Candidate, Size) and (Size > Result) then
+          Result := Size;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure ShowModelDownloadProgress(
+  const DisplayName, FileName: String;
+  const ModelNumber: Integer;
+  const ExpectedSize: Int64);
+var
+  BytesDone: Int64;
+  Position: Integer;
+begin
+  if CurrentModelProgressNumber <> ModelNumber then
+  begin
+    CurrentModelProgressNumber := ModelNumber;
+    LastModelBytesDone := 0;
+    ModelProgressBar.Position := 0;
+  end;
+
+  ModelProgressActive := True;
+  ModelProgressLabel.Visible := True;
+  ModelProgressBar.Visible := True;
+  ModelBytesLabel.Visible := True;
+
+  ModelProgressLabel.Caption :=
+    'Downloading coding model ' + IntToStr(ModelNumber) + ' of 2 - ' + DisplayName;
+
+  BytesDone := LargestModelTemporaryFileSize();
+  if BytesDone < LastModelBytesDone then
+    BytesDone := LastModelBytesDone;
+  if BytesDone < 0 then
+    BytesDone := 0;
+  if BytesDone > ExpectedSize then
+    BytesDone := ExpectedSize;
+  LastModelBytesDone := BytesDone;
+
+  if ExpectedSize > 0 then
+    Position := (BytesDone * 1000) div ExpectedSize
+  else
+    Position := 0;
+
+  ModelProgressBar.Position := Position;
+  ModelBytesLabel.Caption :=
+    IntToStr(BytesDone div 1048576) + ' MB / ' +
+    IntToStr(ExpectedSize div 1048576) + ' MB';
+end;
+
+procedure MarkModelDownloadsComplete();
+begin
+  if not ModelProgressActive then
+    Exit;
+
+  ModelProgressLabel.Caption := 'Coding model downloads complete';
+  ModelProgressBar.Position := ModelProgressBar.Max;
+  ModelBytesLabel.Caption := '2 of 2 default coding models ready';
+  LastModelBytesDone := 0;
+  CurrentModelProgressNumber := 0;
+end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
 begin
@@ -300,6 +419,8 @@ procedure InitializeWizard();
 var
   MessageText: String;
 begin
+  InitializeModelProgressControls();
+
   if UpgradeDetected then
   begin
     WizardForm.Caption := 'Update Chat Nexus';
@@ -342,6 +463,30 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if UpgradeDetected and (CurPageID = wpReady) then
     WizardForm.NextButton.Caption := '&Update';
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  CurrentFile: String;
+begin
+  CurrentFile := WizardForm.FilenameLabel.Caption;
+
+  if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
+    ShowModelDownloadProgress(
+      'Qwen3 14B Q4_K_M',
+      '{#Qwen14FileName}',
+      1,
+      {#Qwen14Size})
+  else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
+    ShowModelDownloadProgress(
+      'Qwen3-Coder 30B-A3B Instruct Q4_K_M',
+      '{#Qwen30FileName}',
+      2,
+      {#Qwen30Size})
+  else if ModelProgressActive and
+    FileExists(ExpandConstant('{app}\models\{#Qwen14FileName}')) and
+    FileExists(ExpandConstant('{app}\models\{#Qwen30FileName}')) then
+    MarkModelDownloadsComplete();
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
