@@ -28,8 +28,8 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
     if len(rows) == 1:
         assignments.append((rows[0], ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "primary-local"))
     elif len(rows) == 2:
-        assignments.append((rows[0], ["utility", "fast_coder"], "fast-coder"))
-        assignments.append((rows[1], ["primary_coder", "deep_reasoner", "reviewer"], "primary-coder"))
+        assignments.append((rows[0], ["utility", "fast_coder", "primary_coder"], "fast-primary"))
+        assignments.append((rows[1], ["deep_reasoner", "reviewer"], "deep-reasoner"))
     else:
         assignments.append((rows[0], ["utility", "fast_coder"], "fast-coder"))
         assignments.append((rows[len(rows) // 2], ["primary_coder"], "primary-coder"))
@@ -60,7 +60,7 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "context_window": 32768,
             "tool_calling": True,
             "vision": "vision" in roles,
-            "priority": {"fast-coder": 80, "primary-coder": 90, "deep-reasoner": 100}.get(profile_id, 80),
+            "priority": {"fast-coder": 80, "fast-primary": 90, "primary-coder": 90, "deep-reasoner": 100}.get(profile_id, 80),
             "enabled": True,
             "api_key": "local",
             "gpu_layers": "auto",
