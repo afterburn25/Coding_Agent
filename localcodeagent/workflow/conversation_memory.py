@@ -229,6 +229,8 @@ class ConversationMemory:
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",
+                r"^learn\s+that\s+(.+)$",
+                r"^fact\s*:\s*(.+)$",
                 r"^i\s+prefer\s+.+$",
                 r"^i\s+like\s+.+$",
                 r"^i\s+use\s+.+$",

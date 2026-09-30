@@ -60,6 +60,18 @@ class ConversationManagerTests(unittest.TestCase):
             self.assertEqual(reloaded.active()["id"], first["id"])
             self.assertEqual(reloaded.personality()["humor"], 81)
 
+    def test_explicit_general_fact_learning_commands_are_durable(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "conversation_memory.json"
+            memory = ConversationMemory(path)
+            learned = memory.learn_from_user("Learn that Europa has a subsurface ocean")
+            self.assertIn("Europa has a subsurface ocean", learned["facts"])
+            learned2 = memory.learn_from_user("Fact: the project codename is Orion")
+            self.assertIn("the project codename is Orion", learned2["facts"])
+            context = memory.prompt_context()
+            self.assertIn("Europa has a subsurface ocean", context)
+            self.assertIn("project codename is Orion", context)
+
     def test_feedback_is_durable(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "conversations.json"
