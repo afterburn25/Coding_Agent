@@ -122,7 +122,7 @@
         "variation": "qwen/qwen-image-2.1-edit-api.json",
         "inpaint": "qwen/qwen-image-2.1-inpaint-api.json",
         "outpaint": "qwen/qwen-image-2.1-edit-api.json",
-        "background_removal": "qwen/qwen-image-2.1-background-removal-api.json"
+        "remove_background": "qwen/qwen-image-2.1-background-removal-api.json"
       },
       "components": [
         {
