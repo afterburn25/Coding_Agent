@@ -9,6 +9,16 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## v0.6 Chat Nexus UI checkpoint
+
+- The approved primary UI is implemented in `web/index.html` / `web/styles.css` / `web/app.js`.
+- Chat remains the control surface; existing backend IDs/APIs were preserved during the redesign.
+- Right rail maps task state into Code Diff / Tasks / Terminal activity instead of inventing separate fake state.
+- Official Chat Nexus emblem is served locally from `web/assets/chat-nexus-emblem.png`.
+- Image Studio and Research Hub now use Chat Nexus branding.
+- Runtime/CLI identity is now Chat Nexus v0.6; the old `local-code-agent` CLI remains as a compatibility alias.
+- Next development priority is self-hosting reliability: streaming, resume/recovery, GitHub actions, isolated self-test instance, and dogfood tasks.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
