@@ -51,6 +51,16 @@
 - CI checkpoint: **75/75 tests passing**.
 - Next priority: isolated second-instance self-update validation, followed by real dogfood tasks.
 
+## v0.6 isolated self-update checkpoint
+
+- `localcodeagent/selftest.py` implements the self-hosting smoke validator.
+- For the Chat Nexus source tree, `detect_verification_commands()` now selects one approval-gated selftest command that runs unit tests **and** an isolated second-instance smoke test.
+- The second instance uses a temporary resource-safe config, a free 127.0.0.1 port, and never loads coding/image models.
+- Smoke probes: `/api/status`, `/`, `/image.html`, `/research.html`.
+- CI includes a real second-process regression test.
+- Checkpoint: **78/78 tests passing**.
+- Core self-hosting safeguards are now present. Next practical step is local model/setup readiness and then real dogfood development tasks inside Chat Nexus.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -95,7 +105,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **75 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **78 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -223,4 +233,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `75 tests` passing.
+Expected at this checkpoint: `78 tests` passing.
