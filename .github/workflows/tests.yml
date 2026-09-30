@@ -72,7 +72,7 @@ jobs:
           @"
           Chat Nexus v0.6.0-dev
           Commit: ${{ github.sha }}
-          Native desktop: pywebview / Windows WebView2
+          Native desktop: .NET 8 WinForms / Microsoft WebView2
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
