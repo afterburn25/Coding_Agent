@@ -77,6 +77,28 @@ class AppState:
             "recent": self.tasks.recent(12),
         }
 
+    def readiness_payload(self, *, probe_external: bool = True) -> dict:
+        payload = self.runtime.readiness(probe_external=probe_external)
+        self_tree = (
+            (self.workspace / "localcodeagent" / "server.py").is_file()
+            and (self.workspace / "web" / "index.html").is_file()
+            and (self.workspace / "pyproject.toml").is_file()
+        )
+        git_repo = (self.workspace / ".git").exists()
+        payload.update({
+            "workspace": str(self.workspace),
+            "self_hosting_tree": self_tree,
+            "git_repository": git_repo,
+            "isolated_selftest_available": (self.workspace / "localcodeagent" / "selftest.py").is_file(),
+        })
+        payload["self_hosting_ready"] = bool(
+            payload.get("ready_to_code")
+            and self_tree
+            and git_repo
+            and payload["isolated_selftest_available"]
+        )
+        return payload
+
 
 class Handler(BaseHTTPRequestHandler):
     state: AppState
@@ -174,6 +196,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/runtime":
             self.state.runtime.refresh_hardware()
             self._json(self.state.runtime.summary(probe_external=True))
+            return
+        if path == "/api/readiness":
+            self._json(self.state.readiness_payload(probe_external=True))
             return
         if path == "/api/tasks":
             self._json(self.state.task_payload())
