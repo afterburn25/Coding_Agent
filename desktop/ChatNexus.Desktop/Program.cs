@@ -82,14 +82,20 @@ internal sealed class BackendProcess : IDisposable
         var start = new ProcessStartInfo
         {
             FileName = backendExe,
-            Arguments =
-                $"--server --host 127.0.0.1 --port {port} " +
-                $"--workspace {Quote(workspace)} --config {Quote(config)}",
             WorkingDirectory = appDir,
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
         };
+        start.ArgumentList.Add("--server");
+        start.ArgumentList.Add("--host");
+        start.ArgumentList.Add("127.0.0.1");
+        start.ArgumentList.Add("--port");
+        start.ArgumentList.Add(port.ToString());
+        start.ArgumentList.Add("--workspace");
+        start.ArgumentList.Add(workspace);
+        start.ArgumentList.Add("--config");
+        start.ArgumentList.Add(config);
 
         var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start Chat Nexus backend.");
@@ -178,8 +184,6 @@ internal sealed class BackendProcess : IDisposable
             listener.Stop();
         }
     }
-
-    private static string Quote(string value) => $""{value.Replace(""", "\"")}"";
 }
 
 internal sealed class MainForm : Form
