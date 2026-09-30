@@ -97,7 +97,23 @@ class ModelRouter:
             ranked.append((fits, resource_score, model, resource_reason))
 
         fitting = [item for item in ranked if item[0]]
-        pool = fitting or ranked
+        if fitting:
+            pool = fitting
+        else:
+            fallback_candidates = [m for m in self.models if "primary_coder" in m.roles and m not in candidates]
+            fallback_ranked: list[tuple[bool, int, ModelProfile, str]] = []
+            for model in fallback_candidates:
+                if self.resource_advisor:
+                    fits, resource_score, resource_reason = self.resource_advisor(model)
+                else:
+                    fits, resource_score, resource_reason = True, 0, ""
+                fallback_ranked.append((fits, resource_score, model, resource_reason))
+            fallback_fitting = [item for item in fallback_ranked if item[0]]
+            if fallback_fitting:
+                pool = fallback_fitting
+                reasons.append(f"no runnable dedicated {role} model; using runnable primary-coder fallback")
+            else:
+                pool = ranked
         pool.sort(key=lambda item: (-item[1], -item[2].priority, -item[2].context_window, item[2].id))
         fits, _, chosen, resource_reason = pool[0]
         if resource_reason:
