@@ -61,6 +61,17 @@
 - Checkpoint: **78/78 tests passing**.
 - Core self-hosting safeguards are now present. Next practical step is local model/setup readiness and then real dogfood development tasks inside Chat Nexus.
 
+## v0.6 coding readiness/setup checkpoint
+
+- `RuntimeManager.readiness()` evaluates the actual coding stack: endpoints, managed runtime executable/model files, RAM/VRAM fit, role coverage, and recommendations.
+- `GET /api/readiness` adds self-hosting workspace/Git/selftest state.
+- Main UI shows **Setup required**, **Ready to code**, or **Self-host ready** instead of a misleading generic GPU-ready label.
+- `localcodeagent/runtime/setup.py` suggests role assignments from already-present GGUF files.
+- `POST /api/readiness/configure` requires `apply=true`; the UI also asks for confirmation. It preserves non-model config and requires restart after changing model profiles.
+- No coding model is silently downloaded or replaced.
+- CI checkpoint: **86/86 tests passing**.
+- Next practical blocker: an explicit model catalog/downloader, then first real Chat Nexus-on-Chat Nexus dogfood task.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -105,7 +116,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **78 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **86 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -233,4 +244,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `78 tests` passing.
+Expected at this checkpoint: `86 tests` passing.
