@@ -12,6 +12,14 @@ def build_zip(source: Path, output: Path) -> None:
         raise SystemExit("ChatNexus.exe is missing from the package directory.")
     if not (source / "Source" / ".git" / "HEAD").is_file():
         raise SystemExit("Bundled Source/.git metadata is missing.")
+    if not (source / "backend" / "ChatNexus.Backend.exe").is_file():
+        raise SystemExit("ChatNexus.Backend.exe is missing from the package.")
+
+    forbidden = ("pythonnet", "python.runtime.dll", "pywebview")
+    for path in source.rglob("*"):
+        relative_lower = path.relative_to(source).as_posix().lower()
+        if any(token in relative_lower for token in forbidden):
+            raise SystemExit(f"Forbidden legacy desktop dependency found in package: {relative_lower}")
 
     output.unlink(missing_ok=True)
     with zipfile.ZipFile(
@@ -48,6 +56,7 @@ def build_zip(source: Path, output: Path) -> None:
         required = {
             "ChatNexus/ChatNexus.exe",
             "ChatNexus/runtime/llama/llama-server.exe",
+            "ChatNexus/backend/ChatNexus.Backend.exe",
             "ChatNexus/Source/.git/HEAD",
         }
         missing = required.difference(archive.namelist())
