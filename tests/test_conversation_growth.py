@@ -106,6 +106,10 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertEqual(ConversationManager.classify_intent("generate a picture of a woman"), "image")
         self.assertEqual(ConversationManager.classify_intent("generate a naked woman"), "image")
         self.assertEqual(ConversationManager.classify_intent("draw a cat in a garden"), "image")
+        self.assertTrue(AgentOrchestrator.direct_image_generation_intent("generate a picture of a woman"))
+        self.assertTrue(AgentOrchestrator.direct_image_generation_intent("draw a cat in a garden"))
+        self.assertFalse(AgentOrchestrator.direct_image_generation_intent("edit image C:/tmp/source.png"))
+        self.assertFalse(AgentOrchestrator.direct_image_generation_intent("upscale this picture"))
         self.assertEqual(ConversationManager.classify_intent("how was your day?"), "conversation")
 
 

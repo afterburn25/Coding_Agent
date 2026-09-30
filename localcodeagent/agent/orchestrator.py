@@ -250,6 +250,19 @@ class AgentOrchestrator:
         return cls.builtin_utility_response(user_text) is not None or cls.looks_like_training_command(user_text)
 
     @staticmethod
+    def direct_image_generation_intent(user_text: str) -> bool:
+        text = " ".join(str(user_text or "").lower().strip().split())
+        if any(term in text for term in (
+            "edit image", "edit photo", "edit picture", "inpaint", "outpaint",
+            "upscale", "remove background", "replace background", "variation of",
+        )):
+            return False
+        return any(
+            text.startswith(verb + " ")
+            for verb in ("generate", "create", "make", "draw", "render", "paint", "illustrate")
+        )
+
+    @staticmethod
     def training_acknowledgement(learned: dict[str, list[Any]]) -> str | None:
         facts = learned.get("facts") or []
         rules = learned.get("behavior_rules") or []
@@ -1308,7 +1321,11 @@ class AgentOrchestrator:
                 conversation_id=conversation_id,
             )
 
-        if mode == "auto" and conversation_intent == "image":
+        if (
+            mode == "auto"
+            and conversation_intent == "image"
+            and self.direct_image_generation_intent(user_text)
+        ):
             return self._direct_image_result(
                 task_id=task.id,
                 user_text=user_text,
