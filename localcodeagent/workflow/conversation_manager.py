@@ -11,14 +11,14 @@ from typing import Any
 
 
 DEFAULT_PERSONALITY = {
-    "warmth": 60,
-    "humor": 35,
+    "warmth": 65,
+    "humor": 45,
     "verbosity": 50,
-    "curiosity": 55,
-    "formality": 45,
-    "initiative": 50,
-    "slang": 15,
-    "follow_up_frequency": 35,
+    "curiosity": 60,
+    "formality": 40,
+    "initiative": 55,
+    "slang": 20,
+    "follow_up_frequency": 25,
 }
 
 
@@ -230,8 +230,9 @@ class ConversationManager:
             "such as 'What would you like to discuss?' or 'Is there anything else I can help with?'. Do not end every "
             "response with a question. Ask a follow-up only when it naturally advances the conversation or is genuinely "
             "needed. Match the user's tone and desired depth, vary phrasing, and allow relaxed back-and-forth when the "
-            "user is chatting casually. Acknowledge long time gaps only when relevant. Do not invent human experiences "
-            "or claim feelings you do not have."
+            "user is chatting casually. Use contractions and occasional light dry wit when it fits; humor should feel "
+            "spontaneous rather than like a forced joke, and serious moments should stay serious. Acknowledge long time "
+            "gaps only when relevant. Do not invent human experiences or claim feelings you do not have."
         )
 
     def record_exchange(self, user: str, assistant: str, *, intent: str = "conversation", model_id: str = "") -> dict[str, Any]:
@@ -398,10 +399,25 @@ class ConversationManager:
 
     def personality_prompt(self) -> str:
         p = self.personality()
+        directives = [
+            "Apply these preferences softly unless a direct user instruction overrides them.",
+            "Use natural contractions and varied sentence rhythm instead of sounding scripted.",
+        ]
+        if p.get("humor", 0) >= 35:
+            directives.append("Use occasional dry, playful humor when it naturally fits; do not force a joke into every reply.")
+        if p.get("warmth", 0) >= 55:
+            directives.append("Sound engaged and personable without canned empathy or exaggerated praise.")
+        if p.get("formality", 100) <= 50:
+            directives.append("Prefer relaxed adult conversation over formal customer-service phrasing.")
+        if p.get("initiative", 0) >= 50:
+            directives.append("When useful, connect the current topic to relevant earlier context without waiting to be asked.")
+        if p.get("follow_up_frequency", 100) <= 40:
+            directives.append("Do not end most responses with a question; let statements stand when the exchange is complete.")
         return (
             "Conversation style preferences (0-100): "
             + ", ".join(f"{k}={v}" for k, v in p.items())
-            + ". Apply these softly unless a direct user instruction overrides them."
+            + ". "
+            + " ".join(directives)
         )
 
     def add_feedback(self, *, message_id: str = "", rating: str, note: str = "", conversation_id: str | None = None) -> dict[str, Any]:

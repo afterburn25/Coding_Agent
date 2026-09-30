@@ -174,12 +174,45 @@ function renderImageJobs(jobs=[]){for(const job of jobs){let el=imageJobEls.get(
 function renderAgentResult(data,{addAssistant=true}={}){if(addAssistant)addMessage('assistant',data.content);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
 async function resumeTask(approved){if(!lastTask)return;send.disabled=true;try{const res=await fetch('/api/tasks/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:lastTask.id,approved})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not resume task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Resume error: ${err.message}`);}finally{send.disabled=false;}}
 async function recoverTask(taskId){send.disabled=true;try{addMessage('assistant','Recovering the interrupted task from its saved workspace/checkpoint state…');const res=await fetch('/api/tasks/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not recover task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Recovery error: ${err.message}`);}finally{send.disabled=false;}}
+const nexusPhaseCopy={
+  planning:'Plotting response course',
+  working:'Processing request',
+  researching_failure:'Investigating anomaly',
+  waiting_approval:'Awaiting command authorization',
+  verifying:'Running diagnostics',
+  reviewing:'Cross-checking output',
+  interrupted:'Recovering task state',
+  done:'Sequence complete',
+};
+function nexusThinkingMarkup(){
+  return '<div class="nexus-thinking-hud"><div class="nexus-core-orbit"><span></span><i></i></div><div class="nexus-thinking-main"><div class="nexus-thinking-title">NEXUS CORE // ACTIVE</div><div class="nexus-thinking-summary">Establishing context link…</div><div class="nexus-thinking-list"></div></div><div class="nexus-thinking-telemetry">00s</div></div><div class="nexus-response-text"></div>';
+}
+function nexusThinkingStep(state,label,detail='',key=''){
+  if(!state?.hud)return;
+  const id=key||label;
+  const existing=state.steps.find(x=>x.id===id);
+  if(existing){existing.label=label;existing.detail=detail;existing.time=Math.max(0,Math.round(Date.now()/1000-state.startedAt));}
+  else{state.steps.push({id,label,detail,time:Math.max(0,Math.round(Date.now()/1000-state.startedAt))});if(state.steps.length>6)state.steps.shift();}
+  state.list.innerHTML=state.steps.map((x,i)=>'<div class="nexus-thinking-step '+(i===state.steps.length-1?'active':'done')+'"><span class="nexus-step-dot"></span><div><strong>'+esc(x.label)+'</strong>'+(x.detail?'<small>'+esc(x.detail)+'</small>':'')+'</div><em>'+x.time+'s</em></div>').join('');
+  state.summary.textContent=detail||label;
+}
+function nexusThinkingPhase(state,phase,model='',elapsed=0){
+  const normalized=String(phase||'working').replaceAll('_',' ');
+  const label=nexusPhaseCopy[phase]||('Processing · '+normalized);
+  const detail=model?model+' online':normalized;
+  if(state.lastPhase!==phase){state.lastPhase=phase;nexusThinkingStep(state,label,detail,'phase:'+phase);}
+  else if(state.summary&&!state.receivedToken)state.summary.textContent=label+(model?' · '+model:'');
+  if(state.telemetry)state.telemetry.textContent=String(Math.max(0,Number(elapsed||0))).padStart(2,'0')+'s';
+}
 function beginAssistantStream(){
   const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();
   const wrap=document.createElement('div');wrap.className='message assistant streaming';
-  wrap.innerHTML='<div class="role">assistant</div><div class="bubble">Thinking…</div>';
+  wrap.innerHTML='<div class="role">assistant</div><div class="bubble">'+nexusThinkingMarkup()+'</div>';
   chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
-  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000,requestMessage:''};
+  const bubble=wrap.querySelector('.bubble');
+  const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000,requestMessage:''};
+  nexusThinkingStep(state,'Context link established','Reading conversation state','context');
+  return state;
 }
 function appendLiveActivity(text){
   const existing=activity.textContent.trim();
@@ -189,14 +222,24 @@ function appendLiveActivity(text){
   setUtilityPanel('terminal');
 }
 function handleAgentStreamEvent(name,data,state){
-  if(name==='token'){if(!state.receivedToken){state.bubble.textContent='';state.receivedToken=true;}state.bubble.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='heartbeat'){if(!state.receivedToken&&!state.error){const phase=String(data.phase||'working').replaceAll('_',' ');const model=data.model_id?' · '+data.model_id:'';const elapsed=Number(data.elapsed_seconds||0);state.bubble.textContent='Thinking… · '+phase+model+(elapsed?' · '+elapsed+'s':'');chat.scrollTop=chat.scrollHeight;}return;}
-  if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);return;}
-  if(name==='approval'){if(data.task)renderTask(data.task);setUtilityPanel('tasks');return;}
-  if(name==='model'){const e=data.event||{};if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.bubble.textContent='Retrying under permissive conversation policy…';chat.scrollTop=chat.scrollHeight;}appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}
-  if(name==='research'){const p=data.research?.plan||data.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
-  if(name==='tool'){const t=data.tool||{};appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
-  if(name==='image_job'&&data.job){renderImageJobs([data.job]);if(!state.receivedToken){state.bubble.textContent='Generating image…';}state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
+  if(name==='token'){
+    if(!state.receivedToken){state.receivedToken=true;state.hud?.classList.add('compact');nexusThinkingStep(state,'Synthesis stream online','Composing response','synthesis');}
+    state.text.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;
+  }
+  if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
+  if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
+  if(name==='model'){
+    const e=data.event||{};
+    if(e.type==='generic_refusal_retry'){state.receivedToken=false;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Discarding canned refusal and retrying','policy-retry');}
+    else if(e.type==='switch'||e.type==='activation_fallback')nexusThinkingStep(state,'Routing matrix updated',(e.from||'model')+' → '+(e.to||e.model_id||''),'model-switch');
+    else nexusThinkingStep(state,'Model route locked',(e.model_id||e.to||'local model')+(e.role?' · '+e.role:''),'model');
+    appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;
+  }
+  if(name==='research'){const p=data.research?.plan||data.research||{};nexusThinkingStep(state,'Sensor sweep',p.mode||'Researching external evidence','research');appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
+  if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' '),'tool:'+String(t.name||'unknown'));appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
+  if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
   if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
   if(name==='error'){state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
 }

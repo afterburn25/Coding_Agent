@@ -50,6 +50,11 @@ class ConversationManagerTests(unittest.TestCase):
             personality = manager.update_personality({"humor": 81, "verbosity": 22})
             self.assertEqual(personality["humor"], 81)
             self.assertIn("humor=81", manager.personality_prompt())
+            prompt = manager.personality_prompt()
+            self.assertIn("dry, playful humor", prompt)
+            self.assertIn("natural contractions", prompt)
+            self.assertIn("Do not end most responses with a question", prompt)
+            self.assertIn("capable adult conversational partner", manager.conversation_quality_prompt())
 
             reloaded = ConversationManager(path)
             self.assertEqual(reloaded.active()["id"], first["id"])
