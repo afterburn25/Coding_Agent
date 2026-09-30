@@ -97,10 +97,10 @@ It provides drag/drop references, conversational prompting, Auto/manual model se
 
 The complete requested image specification is preserved at `docs/IMAGE_MODULE_SPEC.md`.
 
-The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. LoRA selections are resolved against installed local files, validated for enabled state/version/model-family compatibility and strength, and injected only through explicit workflow template slots; selected subject profiles can automatically contribute references, defaults, preferred model, and assigned LoRAs. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
+The image asset library now verifies required model components and API-format workflows, supports explicit install/repair/remove operations, tracks LoRA sidecar metadata, and never silently re-downloads an already-valid large model. Image failures are normalized into user-facing error codes/messages with technical details kept behind a collapsed diagnostic view. LoRA selections are resolved against installed local files, validated for enabled state/version/model-family compatibility and strength, and injected only through explicit workflow template slots; selected subject profiles can automatically contribute references, defaults, preferred model, and assigned LoRAs. Workflow validation catches accidental ComfyUI UI-format exports before a large model is loaded, and the Image Model Manager can import validated API-format workflow JSON directly into the configured model/operation slot. The main chat also renders image jobs inline with live polling and Edit / Variation / Upscale / Save controls.
 
 
-## Shared GPU management
+Image failures are surfaced as friendly structured errors (for example VRAM exhaustion, missing VAE/model, incompatible LoRA, backend offline, invalid workflow, missing node/dependency, disk-full, corrupt checkpoint, or timeout), while raw technical details stay collapsed for debugging.\n\n\n## Shared GPU management
 
 On systems such as an RTX 3080 12 GB, coding LLMs and image models cannot always remain resident together. Before an image job, the resource manager can stop agent-owned llama.cpp runtimes to free VRAM and optionally restore them when generation completes.
 
@@ -159,7 +159,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **56 tests passing**.
+Current expected result: **61 tests passing**.
 
 ## API highlights
 
