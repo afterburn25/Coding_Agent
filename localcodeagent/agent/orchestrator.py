@@ -574,22 +574,28 @@ class AgentOrchestrator:
         if task.status != "waiting_approval" or not pending:
             raise KeyError(f"No resumable approval is pending for task {task_id}")
 
-        session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
-        self._sessions[task_id] = session
         self._task_context(task_id)
-        self.tasks.update(
-            task_id,
-            recovery_count=task.recovery_count + 1,
-            error="",
-        )
 
         if pending["kind"] == "direct_image":
+            self.tasks.update(
+                task_id,
+                recovery_count=task.recovery_count + 1,
+                error="",
+            )
             return self._direct_image_result(
                 task_id=task_id,
                 user_text=task.prompt,
                 event_callback=None,
                 approved=approved,
             )
+
+        session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
+        self._sessions[task_id] = session
+        self.tasks.update(
+            task_id,
+            recovery_count=task.recovery_count + 1,
+            error="",
+        )
 
         if pending["kind"] == "tool":
             name = str(pending.get("name", ""))
