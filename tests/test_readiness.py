@@ -152,7 +152,7 @@ class ModelSetupPlannerTests(unittest.TestCase):
             {"name": "Qwen3-14B-Q4_K_M.gguf", "path": "/models/qwen14.gguf", "size_gb": 9.0},
             {"name": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "path": "/models/qwen30.gguf", "size_gb": 18.6},
         ])
-        self.assertEqual([row["id"] for row in suggestions], ["fast-primary", "deep-reasoner"])
+        self.assertEqual([row["id"] for row in suggestions], ["qwen3-14b", "qwen3-coder-30b"])
         self.assertTrue({"utility", "fast_coder", "primary_coder"}.issubset(set(suggestions[0]["roles"])))
         self.assertEqual(set(suggestions[1]["roles"]), {"deep_reasoner", "reviewer"})
 
