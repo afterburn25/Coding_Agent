@@ -124,7 +124,14 @@ class RuntimeManager:
             candidates.append(profile.executable)
         if self.config.llama_cpp_executable:
             candidates.append(self.config.llama_cpp_executable)
-        candidates.extend(["llama-server.exe", "llama-server", "llama.exe", "llama"])
+        bundled = self.base_dir / "runtime" / "llama"
+        candidates.extend([
+            str(bundled / "llama-server.exe"),
+            str(bundled / "llama.exe"),
+            str(bundled / "llama-server"),
+            str(bundled / "llama"),
+            "llama-server.exe", "llama-server", "llama.exe", "llama",
+        ])
         for item in candidates:
             expanded = str(Path(item).expanduser())
             if os.path.isabs(expanded) and Path(expanded).is_file():
