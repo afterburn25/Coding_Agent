@@ -46,3 +46,7 @@ The default profiles reserve operation-specific paths under:
 - `workflows/image/flux/`
 
 Weights are managed independently under `models/image/`; importing a workflow does not download or overwrite model weights.
+
+## Error reporting
+
+Backend/runtime failures are normalized into stable error codes and concise user-facing messages. The normal chat and Image workspace show the friendly message; the raw exception type/message is kept in `technical_details` and rendered only inside an expandable diagnostic section. Recognized cases include CUDA out-of-memory, missing model/VAE, incompatible LoRA, backend offline, corrupt checkpoints, missing dependencies, unsupported workflows, disk exhaustion, and timeouts.
