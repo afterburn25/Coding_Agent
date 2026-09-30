@@ -59,7 +59,7 @@
 
 ### Tests
 
-`43` automated tests passing.
+`46` automated tests passing.
 
 ### Important current limitations
 
