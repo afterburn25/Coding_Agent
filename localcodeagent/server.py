@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import threading
+import webbrowser
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -617,13 +619,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
+def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None, open_browser: bool = False) -> None:
     state = AppState(config, workspace, runtime_root, config_path=config_path)
     handler = type("LocalCodeAgentHandler", (Handler,), {"state": state, "web_root": web_root})
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Chat Nexus v{VERSION}")
     print(f"Workspace: {workspace.resolve()}")
     print(f"UI: http://{host}:{port}")
+    if open_browser:
+        browser_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+        timer = threading.Timer(0.6, lambda: webbrowser.open(f"http://{browser_host}:{port}"))
+        timer.daemon = True
+        timer.start()
     print(f"Models: {state.runtime.models_dir}")
     if state.runtime.hardware.gpus:
         for gpu in state.runtime.hardware.gpus:
