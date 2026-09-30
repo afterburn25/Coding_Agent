@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Code Agent · Image Workspace</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/image.css" />
+</head>
+<body>
+<div class="image-shell">
+  <aside class="image-side">
+    <div class="brand">Local Code Agent <span>Image</span></div>
+    <a class="workspace-link" href="/">← Coding chat</a>
+    <div class="section-title">Backend</div>
+    <div id="imageBackend" class="inventory">Checking ComfyUI…</div>
+    <div class="section-title">Image models</div>
+    <div id="imageModels" class="models"></div>
+    <div class="section-title">Model inventory</div>
+    <div id="imageInventory" class="inventory"></div>
+    <div class="section-title">Subject profiles</div>
+    <div id="subjectProfiles" class="inventory"></div>
+  </aside>
+
+  <main class="image-main">
+    <header class="topbar">
+      <div><strong>Image workspace</strong><span id="imageStatus">Local generation + editing</span></div>
+      <label>Model
+        <select id="imageModel"><option value="auto">Auto</option></select>
+      </label>
+    </header>
+
+    <section class="image-editor">
+      <div id="dropzone" class="dropzone">
+        <strong>Drop reference/source images here</strong>
+        <span>or click to browse</span>
+        <input id="imageFiles" type="file" accept="image/*" multiple hidden />
+      </div>
+      <div id="referenceStrip" class="reference-strip"></div>
+
+      <textarea id="imagePrompt" rows="4" placeholder="Describe the image you want, or tell the agent how to edit the uploaded image…"></textarea>
+
+      <div class="image-controls-grid">
+        <label>Operation<select id="imageOperation">
+          <option value="auto">Auto</option><option value="text_to_image">Generate</option><option value="edit_image">Edit</option>
+          <option value="inpaint">Inpaint</option><option value="outpaint">Outpaint</option><option value="remove_background">Remove background</option>
+          <option value="upscale">Upscale</option><option value="variation">Variations</option>
+        </select></label>
+        <label>Quality<select id="imageQuality"><option value="balanced">Balanced</option><option value="preview">Fast preview</option><option value="high">Maximum quality</option></select></label>
+        <label>Resolution<select id="imageResolution"><option>1024x1024</option><option>1024x1536</option><option>1536x1024</option><option>768x1344</option><option>1344x768</option></select></label>
+        <label>Count<input id="imageCount" type="number" min="1" max="8" value="1" /></label>
+        <label>Seed<div class="seed-row"><input id="imageSeed" type="number" placeholder="Random" /><button id="randomSeed" class="mini-button" type="button">Random</button></div></label>
+        <label>Subject<select id="subjectProfile"><option value="">None</option></select></label>
+      </div>
+
+      <details class="advanced-panel">
+        <summary>Advanced controls</summary>
+        <div class="image-controls-grid">
+          <label class="wide">Negative prompt<textarea id="negativePrompt" rows="2"></textarea></label>
+          <label>Image strength<input id="imageStrength" type="number" min="0" max="1" step="0.05" placeholder="Auto" /></label>
+          <label>Denoise strength<input id="denoiseStrength" type="number" min="0" max="1" step="0.05" placeholder="Auto" /></label>
+          <label>LoRA(s)<input id="loras" placeholder="name:0.8, style:0.5" /></label>
+          <label>Outpaint<input id="outpaint" placeholder="left:256,right:256" /></label>
+          <label><input id="transparentBg" type="checkbox" /> Transparent background</label>
+          <label><input id="upscale" type="checkbox" /> Upscale after generation</label>
+          <label><input id="refineDetails" type="checkbox" /> Face/detail refinement</label>
+          <label><input id="realPerson" type="checkbox" /> References depict a real person</label>
+        </div>
+      </details>
+
+      <div class="image-action-row">
+        <button id="generateImage" class="primary-image-action">Generate / Edit</button>
+        <span id="imageHint">Auto chooses the workflow and image model.</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-row"><h2>Jobs & gallery</h2><button id="refreshImages" class="mini-button">Refresh</button></div>
+      <div id="imageJobs" class="image-jobs"></div>
+      <div id="imageGallery" class="image-gallery"></div>
+    </section>
+  </main>
+</div>
+<script src="/image.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+from typing import Any
+
+from .backend import ImageBackend
+
+
+class ComfyUIBackend(ImageBackend):
+    """Small dependency-free adapter for a local ComfyUI server API."""
+
+    def __init__(self, endpoint: str = "http://127.0.0.1:8188", *, timeout: float = 10.0) -> None:
+        self.endpoint = endpoint.rstrip("/")
+        self.timeout = timeout
+        self.client_id = str(uuid.uuid4())
+
+    def _json(self, path: str, *, method: str = "GET", payload: dict | None = None) -> Any:
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self.endpoint + path,
+            data=data,
+            method=method,
+            headers={"Content-Type": "application/json"} if data is not None else {},
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            raw = resp.read()
+            return json.loads(raw.decode("utf-8")) if raw else {}
+
+    def health(self) -> tuple[bool, str]:
+        try:
+            req = urllib.request.Request(self.endpoint + "/system_stats", method="GET")
+            with urllib.request.urlopen(req, timeout=min(self.timeout, 0.75)) as resp:
+                raw = resp.read(64_000)
+            info = json.loads(raw.decode("utf-8")) if raw else {}
+            return True, json.dumps(info)[:500]
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            return False, str(exc)
+
+    def inspect(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for name, path in (("system_stats", "/system_stats"), ("object_info", "/object_info")):
+            try:
+                result[name] = self._json(path)
+            except Exception as exc:
+                result[name] = {"error": str(exc)}
+        return result
+
+    def submit(self, workflow: dict[str, Any]) -> str:
+        response = self._json("/prompt", method="POST", payload={"prompt": workflow, "client_id": self.client_id})
+        prompt_id = str(response.get("prompt_id", ""))
+        if not prompt_id:
+            raise RuntimeError(f"ComfyUI did not return prompt_id: {response}")
+        return prompt_id
+
+    def status(self, backend_job_id: str) -> dict[str, Any]:
+        history = self._json(f"/history/{urllib.parse.quote(backend_job_id)}")
+        entry = history.get(backend_job_id) if isinstance(history, dict) else None
+        if not entry:
+            return {"state": "running", "progress": 0.0}
+        status = entry.get("status", {}) if isinstance(entry, dict) else {}
+        complete = bool(status.get("completed", False)) or bool(entry.get("outputs"))
+        return {
+            "state": "finished" if complete else "running",
+            "progress": 1.0 if complete else 0.5,
+            "history": entry,
+        }
+
+    def _download_view(self, item: dict[str, Any], destination: Path) -> Path:
+        params = urllib.parse.urlencode({
+            "filename": item.get("filename", ""),
+            "subfolder": item.get("subfolder", ""),
+            "type": item.get("type", "output"),
+        })
+        req = urllib.request.Request(self.endpoint + "/view?" + params, method="GET")
+        with urllib.request.urlopen(req, timeout=max(self.timeout, 30.0)) as resp:
+            data = resp.read()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+        return destination
+
+    def fetch_outputs(self, backend_job_id: str, destination: Path) -> list[Path]:
+        state = self.status(backend_job_id)
+        history = state.get("history", {})
+        outputs = history.get("outputs", {}) if isinstance(history, dict) else {}
+        saved: list[Path] = []
+        index = 0
+        for node in outputs.values() if isinstance(outputs, dict) else []:
+            for image in node.get("images", []) if isinstance(node, dict) else []:
+                name = Path(str(image.get("filename", f"image-{index}.png"))).name
+                target = destination / f"{index:02d}-{name}"
+                saved.append(self._download_view(image, target))
+                index += 1
+        return saved
+
+    def cancel(self, backend_job_id: str) -> None:
+        # ComfyUI interrupt currently interrupts the active execution. Keep the id in the
+        # signature so a future queue-specific cancellation implementation is compatible.
+        self._json("/interrupt", method="POST", payload={})

@@ -1,0 +1,16 @@
+[project]
+name = "local-code-agent"
+version = "0.4.0.dev0"
+description = "Local-first coding agent with automatic model routing, web research/browser tooling, local image generation/editing, transactional workflows, and modular tools."
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+browser = ["playwright>=1.50"]
+
+[project.scripts]
+local-code-agent = "localcodeagent.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["localcodeagent*"]

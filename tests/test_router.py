@@ -1,0 +1,32 @@
+import unittest
+
+from localcodeagent.config import ModelProfile
+from localcodeagent.models.router import ModelRouter
+
+
+class RouterTests(unittest.TestCase):
+    def setUp(self):
+        self.router = ModelRouter([
+            ModelProfile(id="fast", endpoint="http://x", model="fast", roles=["fast_coder"], priority=10),
+            ModelProfile(id="primary", endpoint="http://x", model="primary", roles=["primary_coder"], priority=10),
+            ModelProfile(id="deep", endpoint="http://x", model="deep", roles=["deep_reasoner", "reviewer"], priority=10),
+        ])
+
+    def test_simple_task_uses_fast(self):
+        d = self.router.choose("Rename the Save button to Apply")
+        self.assertEqual(d.role, "fast_coder")
+        self.assertEqual(d.model_id, "fast")
+
+    def test_complex_task_uses_deep(self):
+        d = self.router.choose("Find the root cause of this race condition and refactor the architecture after repeated compiler errors")
+        self.assertEqual(d.role, "deep_reasoner")
+        self.assertEqual(d.model_id, "deep")
+
+    def test_review_phase(self):
+        d = self.router.choose("Check the changes", phase="review")
+        self.assertEqual(d.role, "reviewer")
+        self.assertEqual(d.model_id, "deep")
+
+
+if __name__ == "__main__":
+    unittest.main()

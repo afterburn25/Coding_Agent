@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Code Agent</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">Local Code Agent <span>v0.3</span></div>
+      <button id="newChat" class="new-chat">+ New chat</button>
+      <a class="workspace-link" href="/image.html">Image workspace</a>
+      <div class="section-title">Workspace</div>
+      <div id="workspace" class="workspace">Loading…</div>
+      <div class="section-title">Hardware</div>
+      <div id="hardware" class="hardware">Detecting…</div>
+      <div class="section-row"><span class="section-title">Models</span><button id="refreshRuntime" class="mini-button">Refresh</button></div>
+      <div id="models" class="models"></div>
+      <div class="section-row"><span class="section-title">Repository index</span><button id="rebuildIndex" class="mini-button">Rebuild</button></div>
+      <div id="repoIndex" class="inventory">Not indexed</div>
+      <div class="section-title">Local GGUF inventory</div>
+      <div id="inventory" class="inventory">Scanning…</div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <strong>Agent</strong>
+          <span id="status">Checking local backend…</span>
+        </div>
+        <label>Model
+          <select id="mode">
+            <option value="auto">Auto</option>
+            <option value="fast_coder">Fast coder</option>
+            <option value="primary_coder">Primary coder</option>
+            <option value="deep_reasoner">Deep reasoner</option>
+            <option value="reviewer">Reviewer</option>
+          </select>
+        </label>
+      </header>
+
+      <section id="chat" class="chat">
+        <div class="welcome">
+          <h1>What do you want to build?</h1>
+          <p>Auto mode routes models by task phase. v0.3 adds transactional patches, checkpoints, test/build verification, reviewer handoff, project memory, and resumable approvals.</p>
+        </div>
+      </section>
+
+      <section id="activity" class="activity hidden"></section>
+
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Ask the agent to inspect, build, fix, test, refactor, or review code…"></textarea>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </main>
+
+    <aside class="taskbar">
+      <div class="taskbar-title">Task workflow</div>
+      <div id="taskPanel" class="task-panel muted">No task yet.</div>
+      <div class="section-title">Recent tasks</div>
+      <div id="recentTasks" class="recent-tasks muted">No task history.</div>
+    </aside>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
