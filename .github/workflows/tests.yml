@@ -66,48 +66,82 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      - name: Build native Chat Nexus desktop app
-        shell: pwsh
-        run: ./packaging/build_windows.ps1
-
-      - name: Write build metadata
-        shell: pwsh
-        run: |
-          @"
-          Chat Nexus v0.6.0-dev
-          Commit: ${{ github.sha }}
-          Native desktop: .NET 8 WinForms / Microsoft WebView2
-          Bundled inference runtime: llama.cpp b11278 Vulkan x64
-          "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
-
-      - name: Build Chat Nexus installer
+      - name: Build single-file Chat Nexus installer
         shell: pwsh
         run: |
           $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $Iscc)) { $Iscc = (Get-Command ISCC.exe).Source }
-          New-Item -ItemType Directory -Force -Path dist/installer | Out-Null
-          & $Iscc "/DMyAppVersion=0.6.0-dev" "/DMyAppVersionNumeric=0.6.0.0" "/DSourceDir=$PWD\dist\ChatNexus" "/DOutputDir=$PWD\dist\installer" "packaging\ChatNexus.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
-          if (-not (Test-Path "dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe")) { throw "Installer EXE was not produced" }
+          if (-not (Test-Path $Iscc)) {
+            $Iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          }
+          & $Iscc "/DAppVersion=0.6.0-dev" "/DAppNumericVersion=0.6.0.0" "installer\ChatNexus.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+          $Setup = "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe"
+          if (-not (Test-Path $Setup)) { throw "Installer EXE was not produced" }
 
-      - name: Test first install and upgrade-in-place
+      - name: Smoke-test fresh install and upgrade preservation
         shell: pwsh
         run: |
-          $Installer = (Resolve-Path "dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe").Path
-          $InstallDir = Join-Path $env:RUNNER_TEMP "ChatNexusInstalled"
-          & $Installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$InstallDir"
-          if ($LASTEXITCODE -ne 0) { throw "First installer run failed" }
-          if (-not (Test-Path (Join-Path $InstallDir "ChatNexus.exe"))) { throw "Installed ChatNexus.exe missing" }
-          "preserve-me" | Set-Content -Encoding UTF8 (Join-Path $InstallDir "config.json")
+          $Setup = (Resolve-Path "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe").Path
+          $InstallDir = Join-Path $env:RUNNER_TEMP "Chat Nexus Installer Test"
+
+          $First = Start-Process -FilePath $Setup -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/DIR=`"$InstallDir`""
+          ) -PassThru -Wait
+          if ($First.ExitCode -ne 0) { throw "Fresh installer run failed with exit code $($First.ExitCode)" }
+
+          $App = Join-Path $InstallDir "ChatNexus.exe"
+          if (-not (Test-Path $App)) { throw "Installed ChatNexus.exe is missing" }
+          if (-not (Test-Path (Join-Path $InstallDir "backend\ChatNexus.Backend.exe"))) { throw "Installed backend is missing" }
+          if (-not (Test-Path (Join-Path $InstallDir "runtime\llama\llama-server.exe"))) { throw "Installed llama.cpp runtime is missing" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Installed Source Git workspace is missing" }
+          if (-not (Test-Path (Join-Path $InstallDir "config.json"))) { throw "Installer did not seed config.json" }
+
+          $Smoke = Start-Process -FilePath $App -ArgumentList "--self-test" -WorkingDirectory $InstallDir -PassThru -Wait
+          if ($Smoke.ExitCode -ne 0) { throw "Installed ChatNexus.exe self-test failed with exit code $($Smoke.ExitCode)" }
+
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "models") | Out-Null
-          "model-marker" | Set-Content -Encoding UTF8 (Join-Path $InstallDir "models\upgrade-preservation.txt")
-          & (Join-Path $InstallDir "ChatNexus.exe") --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Installed ChatNexus.exe self-test failed" }
-          & $Installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$InstallDir"
-          if ($LASTEXITCODE -ne 0) { throw "Silent upgrade run failed" }
-          if ((Get-Content -Raw (Join-Path $InstallDir "config.json")).Trim() -ne "preserve-me") { throw "Upgrade overwrote config.json" }
-          if ((Get-Content -Raw (Join-Path $InstallDir "models\upgrade-preservation.txt")).Trim() -ne "model-marker") { throw "Upgrade removed model data" }
-          if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Upgrade did not preserve Source Git workspace" }
+          New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "data") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "Source\.agent") | Out-Null
+          Set-Content -Encoding UTF8 (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker") "keep-models"
+          Set-Content -Encoding UTF8 (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker") "keep-data"
+          Set-Content -Encoding UTF8 (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker") "keep-source"
+          Set-Content -Encoding UTF8 (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker") "keep-task-state"
+
+          $ConfigPath = Join-Path $InstallDir "config.json"
+          $Config = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+          $Config | Add-Member -NotePropertyName "upgrade_preserve_marker" -NotePropertyValue "keep-config" -Force
+          $Config | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 $ConfigPath
+
+          # The second run intentionally omits /DIR. The stable AppId and
+          # UsePreviousAppDir must rediscover the existing installation.
+          $Upgrade = Start-Process -FilePath $Setup -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART"
+          ) -PassThru -Wait
+          if ($Upgrade.ExitCode -ne 0) { throw "Upgrade installer run failed with exit code $($Upgrade.ExitCode)" }
+
+          if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed downloaded model state" }
+          if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed application data" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker"))) { throw "Upgrade overwrote the Source workspace" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed task/project state" }
+
+          $ConfigAfter = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+          if ($ConfigAfter.upgrade_preserve_marker -ne "keep-config") { throw "Upgrade overwrote config.json" }
+
+          $SmokeAfter = Start-Process -FilePath $App -ArgumentList "--self-test" -WorkingDirectory $InstallDir -PassThru -Wait
+          if ($SmokeAfter.ExitCode -ne 0) { throw "Upgraded ChatNexus.exe self-test failed with exit code $($SmokeAfter.ExitCode)" }
+
+      - name: Upload Chat Nexus installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chat-Nexus-Setup-0.6.0-dev-Windows-x64
+          path: dist/installer/Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Package Windows desktop app
         shell: pwsh
