@@ -36,9 +36,31 @@ class ModelRouter:
         self.performance_advisor = performance_advisor
 
     def classify_role(self, text: str, *, phase: str = "work", changed_files: int = 0, failures: int = 0) -> tuple[str, int, list[str]]:
-        t = text.lower()
+        t = text.lower().strip()
         score = 1
         reasons: list[str] = []
+
+        casual_exact = {
+            "hi", "hello", "hey", "hey there", "good morning", "good afternoon",
+            "good evening", "thanks", "thank you", "who are you", "what are you",
+            "what can you do", "what all can you do", "help", "help me",
+        }
+        normalized = re.sub(r"[!?.,]+$", "", t).strip()
+        coding_signals = (
+            "code", "debug", "fix", "build", "implement", "refactor", "error",
+            "file", "repo", "repository", "project", "test", "compile", "function",
+            "class", "api", "database", "backend", "frontend", "git", "github",
+        )
+        capability_question = (
+            len(t) <= 180
+            and any(phrase in t for phrase in (
+                "what can you do", "what all can you do", "what are your capabilities",
+                "what do you do", "how can you help",
+            ))
+            and not any(signal in t for signal in coding_signals)
+        )
+        if normalized in casual_exact or capability_question:
+            return "utility", 0, ["lightweight conversational request"]
 
         deep_terms = [
             "architecture", "refactor", "race condition", "deadlock", "memory leak",

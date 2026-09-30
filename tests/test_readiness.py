@@ -161,7 +161,10 @@ class ModelSetupPlannerTests(unittest.TestCase):
         ])
         self.assertEqual([row["id"] for row in suggestions], ["qwen3-14b", "qwen3-coder-30b"])
         self.assertTrue({"utility", "fast_coder", "primary_coder"}.issubset(set(suggestions[0]["roles"])))
+        self.assertEqual(suggestions[0]["max_output_tokens"], 2048)
+        self.assertEqual(suggestions[0]["extra_args"], ["--reasoning", "off"])
         self.assertEqual(set(suggestions[1]["roles"]), {"deep_reasoner", "reviewer"})
+        self.assertEqual(suggestions[1]["max_output_tokens"], 8192)
 
     def test_catalog_pair_is_preferred_even_with_other_ggufs_present(self):
         suggestions = suggest_model_profiles([

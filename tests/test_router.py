@@ -7,10 +7,21 @@ from localcodeagent.models.router import ModelRouter
 class RouterTests(unittest.TestCase):
     def setUp(self):
         self.router = ModelRouter([
-            ModelProfile(id="fast", endpoint="http://x", model="fast", roles=["fast_coder"], priority=10),
+            ModelProfile(id="fast", endpoint="http://x", model="fast", roles=["utility", "fast_coder"], priority=10),
             ModelProfile(id="primary", endpoint="http://x", model="primary", roles=["primary_coder"], priority=10),
             ModelProfile(id="deep", endpoint="http://x", model="deep", roles=["deep_reasoner", "reviewer"], priority=10),
         ])
+
+    def test_greetings_and_capability_questions_use_lightweight_utility_route(self):
+        for prompt in ("hi", "Hello!", "what all can you do?"):
+            with self.subTest(prompt=prompt):
+                d = self.router.choose(prompt)
+                self.assertEqual(d.role, "utility")
+                self.assertEqual(d.model_id, "fast")
+
+    def test_coding_help_request_does_not_collapse_to_utility(self):
+        d = self.router.choose("Help me debug this backend error")
+        self.assertNotEqual(d.role, "utility")
 
     def test_simple_task_uses_fast(self):
         d = self.router.choose("Rename the Save button to Apply")

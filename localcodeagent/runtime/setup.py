@@ -77,6 +77,11 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "model_path": item["path"],
             "roles": roles,
             "context_window": 32768,
+            "max_output_tokens": (
+                2048 if profile_id == "qwen3-14b"
+                else 8192 if profile_id == "qwen3-coder-30b"
+                else 4096
+            ),
             "tool_calling": True,
             "vision": "vision" in roles,
             "priority": {
@@ -97,6 +102,7 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             # requirements. Runtime auto-fit may choose a different split.
             "estimated_vram_gb": round(max(2.0, size * 1.08), 1),
             "estimated_ram_gb": round(max(4.0, size * 1.35 + 2.0), 1),
+            "extra_args": ["--reasoning", "off"] if profile_id == "qwen3-14b" else [],
             "notes": f"Auto-suggested from local GGUF: {item['name']}. Review before use.",
         })
         port += 1

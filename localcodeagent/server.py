@@ -3,6 +3,9 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import queue
+import threading
+import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -594,27 +597,66 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 self._sse_begin()
-                self._sse_event("ready", {"mode": mode})
+                if not self._sse_event("ready", {"mode": mode}):
+                    self.close_connection = True
+                    return
+
+                events: queue.Queue[dict] = queue.Queue()
+                done = threading.Event()
+                started = time.monotonic()
 
                 def emit(event: dict) -> None:
+                    # Agent/model work may run for a while before the first token.
+                    # Queue events back to the request thread so socket writes remain
+                    # serialized and the request thread can send idle heartbeats.
+                    events.put(dict(event))
+
+                def run_agent() -> None:
+                    try:
+                        result = self.state.agent.run(
+                            message,
+                            history=self.state.history,
+                            mode=mode,
+                            event_callback=emit,
+                        )
+                        self.state.history.extend([
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": result.content},
+                        ])
+                        events.put({"type": "result", **self._agent_payload(result)})
+                    except Exception as exc:
+                        events.put({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+                    finally:
+                        done.set()
+
+                threading.Thread(
+                    target=run_agent,
+                    name="chat-nexus-agent-stream",
+                    daemon=True,
+                ).start()
+
+                stream_open = True
+                while stream_open and (not done.is_set() or not events.empty()):
+                    try:
+                        event = events.get(timeout=1.0)
+                    except queue.Empty:
+                        current = self.state.tasks.current()
+                        heartbeat = {
+                            "elapsed_seconds": int(time.monotonic() - started),
+                            "phase": current.phase if current else "starting",
+                            "status": current.status if current else "starting",
+                            "model_id": current.model_id if current else "",
+                            "model_role": current.model_role if current else "",
+                        }
+                        stream_open = self._sse_event("heartbeat", heartbeat)
+                        continue
+
                     event_type = str(event.get("type") or "message")
                     payload = {k: v for k, v in event.items() if k != "type"}
-                    self._sse_event(event_type, payload)
+                    stream_open = self._sse_event(event_type, payload)
 
-                try:
-                    result = self.state.agent.run(
-                        message,
-                        history=self.state.history,
-                        mode=mode,
-                        event_callback=emit,
-                    )
-                    self.state.history.extend([
-                        {"role": "user", "content": message},
-                        {"role": "assistant", "content": result.content},
-                    ])
-                    self._sse_event("result", self._agent_payload(result))
-                except Exception as exc:
-                    self._sse_event("error", {"error": f"{type(exc).__name__}: {exc}"})
+                # If the client disappeared, the daemon worker continues the durable
+                # task to completion; reconnect/status UI can inspect the task ledger.
                 self.close_connection = True
                 return
             if path == "/api/chat":

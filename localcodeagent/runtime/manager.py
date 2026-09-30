@@ -350,6 +350,21 @@ class RuntimeManager:
             cmd.extend(["--threads", str(profile.threads)])
         if profile.fit_target_mb > 0:
             cmd.extend(["--fit-target", str(profile.fit_target_mb)])
+
+        # Qwen3 14B is the low-latency everyday route. Existing user configs from
+        # earlier installers may not have an explicit reasoning flag, so inject
+        # non-thinking mode unless the user already supplied a --reasoning override.
+        has_reasoning_override = any(
+            str(arg) == "--reasoning" or str(arg).startswith("--reasoning=")
+            for arg in profile.extra_args
+        )
+        qwen14 = (
+            profile.id.lower() == "qwen3-14b"
+            or profile.model.lower().startswith("qwen3-14b")
+        )
+        if qwen14 and not has_reasoning_override:
+            cmd.extend(["--reasoning", "off"])
+
         cmd.extend(profile.extra_args)
         return cmd
 

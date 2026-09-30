@@ -19,6 +19,12 @@ from ..workflow.tasks import TaskStore
 from ..workflow.verify import detect_verification_commands
 
 
+UTILITY_PROMPT = """You are Chat Nexus, a local-first AI coding workstation.
+For greetings, capability questions, and casual conversation, answer directly and concisely.
+You can explain that Chat Nexus can inspect/edit code, run tools with permission gates, test changes, research technical issues, use Git/GitHub workflows when authorized, and work with local image tools when configured.
+Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
+"""
+
 SYSTEM_PROMPT = """You are Chat Nexus, a local-first software engineering agent.
 Work carefully inside the selected workspace. Inspect before editing. Prefer small, verifiable changes.
 Use tools when they are needed. Prefer apply_patch over whole-file replacement when editing existing files.
@@ -754,7 +760,7 @@ class AgentOrchestrator:
                 session.provider,
                 session.profile,
                 messages=session.messages,
-                tools=self.tools.schemas(),
+                tools=None if session.decision.role == "utility" else self.tools.schemas(),
                 model_events=session.model_events,
                 on_delta=lambda piece: self._emit(session, "token", text=piece, model_id=session.profile.id),
                 event_callback=session.event_callback,
@@ -825,33 +831,42 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
             self._safe_emit(event_callback, {"type": "error", "error": error_task.error})
             raise
-        project_memory = self.memory.context()
-        index_summary = self.repository_index.ensure()
-        self_hosting = self._self_hosting_context()
+        lightweight = decision.role == "utility"
         research_context: dict[str, Any] = {}
-        if self.research is not None and self.config.research_enabled:
-            try:
-                research_context = self.research.prepare_task(user_text, mode=self.config.research_mode)
-                self.tasks.update(task.id, research=research_context)
-                self._safe_emit(event_callback, {"type": "research", "research": research_context})
-            except Exception as exc:
-                research_context = {"error": f"{type(exc).__name__}: {exc}"}
-                self.tasks.update(task.id, research=research_context)
-                self._safe_emit(event_callback, {"type": "research", "research": research_context})
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "system",
-                "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
-            },
-        ]
-        if self_hosting:
-            messages.append({"role": "system", "content": self_hosting})
-        if research_context.get("guidance"):
-            messages.append({"role": "system", "content": "Research preflight (repository-first, no web request was made yet):\n" + str(research_context["guidance"])})
-        if history:
-            messages.extend(history[-24:])
-        messages.append({"role": "user", "content": user_text})
+        if lightweight:
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": UTILITY_PROMPT},
+            ]
+            if history:
+                messages.extend(history[-12:])
+            messages.append({"role": "user", "content": user_text})
+        else:
+            project_memory = self.memory.context()
+            index_summary = self.repository_index.ensure()
+            self_hosting = self._self_hosting_context()
+            if self.research is not None and self.config.research_enabled:
+                try:
+                    research_context = self.research.prepare_task(user_text, mode=self.config.research_mode)
+                    self.tasks.update(task.id, research=research_context)
+                    self._safe_emit(event_callback, {"type": "research", "research": research_context})
+                except Exception as exc:
+                    research_context = {"error": f"{type(exc).__name__}: {exc}"}
+                    self.tasks.update(task.id, research=research_context)
+                    self._safe_emit(event_callback, {"type": "research", "research": research_context})
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
+                },
+            ]
+            if self_hosting:
+                messages.append({"role": "system", "content": self_hosting})
+            if research_context.get("guidance"):
+                messages.append({"role": "system", "content": "Research preflight (repository-first, no web request was made yet):\n" + str(research_context["guidance"])})
+            if history:
+                messages.extend(history[-24:])
+            messages.append({"role": "user", "content": user_text})
         session = _AgentSession(
             task_id=task.id,
             user_text=user_text,

@@ -66,6 +66,50 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertIn("auto", cmd)
             self.assertIn("9123", cmd)
 
+    def test_qwen3_14b_defaults_to_non_thinking_runtime_for_old_configs(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "Qwen3-14B-Q4_K_M.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            profile = self._profile(
+                id="qwen3-14b",
+                endpoint="",
+                model="Qwen3-14B-Q4_K_M",
+                model_path="models/Qwen3-14B-Q4_K_M.gguf",
+                executable=str(fake_server),
+                roles=["utility", "fast_coder", "primary_coder"],
+                extra_args=[],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            reasoning_index = cmd.index("--reasoning")
+            self.assertEqual(cmd[reasoning_index + 1], "off")
+
+    def test_explicit_reasoning_override_is_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "Qwen3-14B-Q4_K_M.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            profile = self._profile(
+                id="qwen3-14b",
+                endpoint="",
+                model="Qwen3-14B-Q4_K_M",
+                model_path="models/Qwen3-14B-Q4_K_M.gguf",
+                executable=str(fake_server),
+                extra_args=["--reasoning", "auto"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertEqual(cmd.count("--reasoning"), 1)
+            reasoning_index = cmd.index("--reasoning")
+            self.assertEqual(cmd[reasoning_index + 1], "auto")
+
     def test_resource_aware_router_avoids_model_that_does_not_fit(self):
         with tempfile.TemporaryDirectory() as td:
             big = self._profile(id="big", runtime="external", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)

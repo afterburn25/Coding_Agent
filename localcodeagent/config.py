@@ -15,6 +15,7 @@ class ModelProfile:
     model: str
     roles: list[str]
     context_window: int = 32768
+    max_output_tokens: int = 4096
     tool_calling: bool = True
     vision: bool = False
     priority: int = 50
@@ -131,12 +132,14 @@ def default_config() -> AgentConfig:
                 model_path="models/Qwen3-14B-Q4_K_M.gguf",
                 roles=["utility", "fast_coder", "primary_coder"],
                 context_window=32768,
+                max_output_tokens=2048,
                 priority=90,
                 runtime="llama_cpp",
                 gpu_layers="auto",
                 allow_cpu_offload=True,
                 estimated_vram_gb=10.0,
                 estimated_ram_gb=16.0,
+                extra_args=["--reasoning", "off"],
                 notes="Official Qwen3 14B Q4_K_M starter for fast/general coding.",
             ),
             ModelProfile(
@@ -146,6 +149,7 @@ def default_config() -> AgentConfig:
                 model_path="models/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
                 roles=["deep_reasoner", "reviewer"],
                 context_window=32768,
+                max_output_tokens=8192,
                 priority=100,
                 runtime="llama_cpp",
                 gpu_layers="auto",

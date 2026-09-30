@@ -158,6 +158,7 @@ function appendLiveActivity(text){
 }
 function handleAgentStreamEvent(name,data,state){
   if(name==='token'){if(!state.receivedToken){state.bubble.textContent='';state.receivedToken=true;}state.bubble.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='heartbeat'){if(!state.receivedToken&&!state.error){const phase=String(data.phase||'working').replaceAll('_',' ');const model=data.model_id?' · '+data.model_id:'';const elapsed=Number(data.elapsed_seconds||0);state.bubble.textContent='Thinking… · '+phase+model+(elapsed?' · '+elapsed+'s':'');chat.scrollTop=chat.scrollHeight;}return;}
   if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);return;}
   if(name==='approval'){if(data.task)renderTask(data.task);setUtilityPanel('tasks');return;}
   if(name==='model'){const e=data.event||{};appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}

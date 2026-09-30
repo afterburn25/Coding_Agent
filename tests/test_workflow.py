@@ -114,10 +114,44 @@ class _FinishedProvider:
 class _CaptureProvider:
     def __init__(self):
         self.messages = []
+        self.tools = None
 
     def complete(self, *, messages, tools=None):
         self.messages = list(messages)
+        self.tools = tools
         return ProviderResponse(message={"role": "assistant", "content": "done"}, raw={})
+
+
+class LightweightUtilityRouteTests(unittest.TestCase):
+    def test_greeting_skips_repository_research_and_coding_tools(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=True,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root)
+            index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: provider
+
+            result = agent.run("hi")
+
+            self.assertEqual(result.routing.role, "utility")
+            self.assertIsNone(provider.tools)
+            system_text = "\n".join(str(m.get("content", "")) for m in provider.messages if m.get("role") == "system")
+            self.assertIn("greetings, capability questions", system_text)
+            self.assertNotIn("Workspace memory:", system_text)
+            self.assertEqual(result.task["status"], "completed")
 
 
 class ApprovalResumeTests(unittest.TestCase):

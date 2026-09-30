@@ -61,6 +61,30 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertEqual(result.message["content"], "Hello world")
         self.assertEqual(result.raw["finish_reason"], "stop")
 
+    def test_provider_sends_configured_output_token_cap(self):
+        profile = ModelProfile(
+            id="local",
+            endpoint="http://127.0.0.1:9999/v1",
+            model="test-model",
+            roles=["primary_coder"],
+            max_output_tokens=777,
+        )
+        provider = OpenAICompatibleProvider(profile)
+        response = _Response(lines=[
+            _line({"choices": [{"delta": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}),
+            b"data: [DONE]\n",
+        ])
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            captured["payload"] = json.loads(req.data.decode("utf-8"))
+            return response
+
+        with patch("localcodeagent.models.openai_compat.urllib.request.urlopen", side_effect=fake_urlopen):
+            provider.complete_stream(messages=[{"role": "user", "content": "hi"}])
+
+        self.assertEqual(captured["payload"]["max_tokens"], 777)
+
     def test_streamed_tool_call_fragments_are_reassembled(self):
         response = _Response(lines=[
             _line({"choices": [{"delta": {"role": "assistant", "tool_calls": [{
@@ -111,9 +135,14 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("name==='token'", app)
         self.assertIn("name==='tool'", app)
         self.assertIn("name==='task'", app)
+        self.assertIn("name==='heartbeat'", app)
+        self.assertIn("elapsed_seconds", app)
         self.assertIn("state.error=String(data.error", app)
         self.assertIn("fetch('/api/tasks')", app)
         self.assertNotIn("stream ended before a final result was received", app)
+        self.assertIn("queue.Queue", server)
+        self.assertIn("chat-nexus-agent-stream", server)
+        self.assertIn('self._sse_event("heartbeat"', server)
 
 
 if __name__ == "__main__":

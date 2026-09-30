@@ -23,6 +23,7 @@ class OpenAICompatibleProvider:
             "model": self.profile.model,
             "messages": messages,
             "temperature": 0.2,
+            "max_tokens": max(128, int(self.profile.max_output_tokens)),
             "stream": False,
         }
         if tools and self.profile.tool_calling:
@@ -65,6 +66,7 @@ class OpenAICompatibleProvider:
             "model": self.profile.model,
             "messages": messages,
             "temperature": 0.2,
+            "max_tokens": max(128, int(self.profile.max_output_tokens)),
             "stream": True,
         }
         if tools and self.profile.tool_calling:
