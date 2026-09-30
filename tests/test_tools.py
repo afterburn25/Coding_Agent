@@ -1,9 +1,13 @@
+import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from localcodeagent.config import AgentConfig
 from localcodeagent.tools.base import ToolRegistry
 from localcodeagent.tools.filesystem import register_filesystem_tools
+from localcodeagent.tools.github import _repo_slug_from_remote, register_github_tools
 
 
 class ToolTests(unittest.TestCase):
@@ -23,6 +27,75 @@ class ToolTests(unittest.TestCase):
             register_filesystem_tools(reg, Path(td))
             result = reg.execute("write_file", {"path": "a.txt", "content": "x"})
             self.assertTrue(result.startswith("APPROVAL_REQUIRED"))
+
+
+class GitHubCodingToolTests(unittest.TestCase):
+    @staticmethod
+    def _init_repo(root: Path) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.name", "Chat Nexus Test"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "chat-nexus-test@example.invalid"], cwd=root, check=True)
+        (root / "README.md").write_text("initial\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=root, check=True, capture_output=True, text=True)
+
+    def test_repo_slug_parses_https_and_ssh_remotes(self):
+        self.assertEqual(_repo_slug_from_remote("https://github.com/owner/repo.git"), "owner/repo")
+        self.assertEqual(_repo_slug_from_remote("git@github.com:owner/repo.git"), "owner/repo")
+
+    def test_branch_and_explicit_path_commit(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._init_repo(root)
+            permissions = {
+                "filesystem.read": "allow",
+                "git.execute": "allow",
+                "github.read": "allow",
+                "github.write": "ask",
+            }
+            config = AgentConfig(permissions=permissions)
+            reg = ToolRegistry(permissions)
+            register_github_tools(reg, root, config)
+
+            created = json.loads(reg.execute("git_create_branch", {"branch": "feature/native-github"}))
+            self.assertEqual(created["branch"], "feature/native-github")
+            (root / "README.md").write_text("changed\n", encoding="utf-8")
+            committed = json.loads(reg.execute("git_commit", {
+                "message": "Update README",
+                "paths": ["README.md"],
+            }))
+            self.assertTrue(committed["commit"])
+            branch = reg.execute("git_current_branch", {})
+            self.assertEqual(branch, "feature/native-github")
+            changed = subprocess.run(
+                ["git", "show", "--name-only", "--format=", "HEAD"],
+                cwd=root, check=True, capture_output=True, text=True,
+            ).stdout.splitlines()
+            self.assertEqual(changed, ["README.md"])
+
+    def test_agent_metadata_cannot_be_staged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            permissions = {"git.execute": "allow"}
+            config = AgentConfig(permissions=permissions)
+            reg = ToolRegistry(permissions)
+            register_github_tools(reg, root, config)
+            result = reg.execute("git_commit", {
+                "message": "bad commit",
+                "paths": [".agent/tasks.json"],
+            })
+            self.assertTrue(result.startswith("ERROR: ValueError"))
+            self.assertIn(".agent metadata", result)
+
+    def test_remote_push_requires_explicit_approval(self):
+        with tempfile.TemporaryDirectory() as td:
+            permissions = {"github.write": "ask"}
+            config = AgentConfig(permissions=permissions)
+            reg = ToolRegistry(permissions)
+            register_github_tools(reg, Path(td), config)
+            result = reg.execute("git_push", {"remote": "origin", "branch": "main"})
+            self.assertTrue(result.startswith("APPROVAL_REQUIRED"))
+            self.assertIn("github.write", result)
 
 
 if __name__ == "__main__":
