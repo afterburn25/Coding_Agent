@@ -112,6 +112,7 @@ jobs:
           if (-not (Test-Path (Join-Path $InstallDir "backend\ChatNexus.Backend.exe"))) { throw "Installed backend is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "runtime\llama\llama-server.exe"))) { throw "Installed llama.cpp runtime is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Installed Source Git workspace is missing" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\localcodeagent\server.py"))) { throw "Installed Source workspace is incomplete" }
           if (-not (Test-Path (Join-Path $InstallDir "config.json"))) { throw "Installer did not seed config.json" }
 
           $Smoke = Start-Process -FilePath $App -ArgumentList "--self-test" -WorkingDirectory $InstallDir -PassThru -Wait
