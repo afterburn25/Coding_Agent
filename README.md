@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **67 tests passing**.
+Current expected result: **71 tests passing**.
 
 ## API highlights
 
@@ -223,6 +223,21 @@ POST /api/image/models/install
 POST /api/image/models/remove
 POST /api/image/loras/metadata
 ```
+
+## Native GitHub delivery tools
+
+Chat Nexus can now use the current workspace's GitHub remote as part of an agent workflow:
+
+- inspect current branch and repository metadata
+- create/switch local feature branches
+- create commits from **explicit file paths** only
+- push branches
+- list issues / pull requests
+- create issues
+- open pull requests
+- read recent GitHub Actions status
+
+Remote writes use the `github.write` permission, which defaults to **Ask**. GitHub REST writes read credentials from the configured environment variable (default `GITHUB_TOKEN`); the token is never written into project configuration. Agent-created Git commits refuse to stage `.agent` metadata.
 
 ## Continuous verification
 
