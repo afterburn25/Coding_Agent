@@ -82,6 +82,28 @@ class CodingModelCatalogTests(unittest.TestCase):
                 self.assertTrue(verified["verified"])
                 self.assertFalse(list(Path(td).glob("*.part")))
 
+    def test_duplicate_install_request_reuses_active_job(self):
+        asset = tiny_asset(b"x" * 1024)
+
+        class SlowResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def read(self, size=-1):
+                time.sleep(0.05)
+                return b""
+
+        with tempfile.TemporaryDirectory() as td:
+            manager = CodingModelCatalogManager(Path(td))
+            with patch("localcodeagent.runtime.catalog.catalog_by_id", return_value={asset.id: asset}), patch(
+                "localcodeagent.runtime.catalog.urllib.request.urlopen",
+                return_value=SlowResponse(),
+            ):
+                first = manager.start_install(asset.id)
+                second = manager.start_install(asset.id)
+                self.assertEqual(first["id"], second["id"])
+
     def test_existing_untrusted_model_is_never_silently_overwritten(self):
         asset = tiny_asset()
         with tempfile.TemporaryDirectory() as td:
