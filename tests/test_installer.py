@@ -30,7 +30,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WizardSilent()", self.installer)
 
     def test_upgrade_contract_preserves_mutable_user_state(self):
-        self.assertIn(r'Excludes: "Source\*;models\*;data\*;config.json"', self.installer)
+        self.assertIn(r'Excludes: "Source\*,models\*,data\*,config.json"', self.installer)
         self.assertIn("ShouldInstallBundledSource", self.installer)
         self.assertIn("PrepareToInstall", self.installer)
         self.assertIn("InstallBundledSource", self.installer)
