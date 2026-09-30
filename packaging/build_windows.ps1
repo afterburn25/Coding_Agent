@@ -55,6 +55,12 @@ Copy-Item -Path (Join-Path $Server.Directory.FullName "*") -Destination $Runtime
 Copy-Item "config.example.json" "dist/ChatNexus/config.example.json" -Force
 Copy-Item "README.md" "dist/ChatNexus/README.md" -Force
 
+Write-Host "Cloning CI-verified Chat Nexus source into the portable dogfood workspace..."
+git clone --no-hardlinks "$Root" "dist/ChatNexus/Source"
+if ($LASTEXITCODE -ne 0) { throw "Could not create bundled Source working copy" }
+Push-Location "dist/ChatNexus/Source"
+git remote set-url origin "https://github.com/afterburn25/Coding_Agent.git"
+Pop-Location
 Write-Host "Smoke testing packaged backend and embedded web UI..."
 & "dist/ChatNexus/ChatNexus.exe" --smoke-test --workspace "$Root" --config "$Root/config.example.json"
 if ($LASTEXITCODE -ne 0) {
