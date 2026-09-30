@@ -116,29 +116,36 @@ class AppState:
             "error": "",
         }
         brain_seed_path = runtime_root / "brain-seed" / "nexus-brain-locked.json"
-        if brain_seed_path.is_file() and not self.nexus_brain.initialized:
+        if brain_seed_path.is_file():
             self.brain_seed_status["found"] = True
             try:
                 seed_payload = json.loads(brain_seed_path.read_text(encoding="utf-8"))
-                seed_summary = self.nexus_brain.install_locked_export(seed_payload)
-                if not seed_summary.get("verified_for_session"):
-                    raise PermissionError("Bundled Nexus Brain seed failed public signature verification")
-                self.brain_seed_status["installed"] = True
-                self.brain_seed_status["verified"] = True
+                if self.nexus_brain.initialized:
+                    seed_result = self.nexus_brain.install_signed_update(seed_payload)
+                    self.brain_seed_status["installed"] = bool(seed_result.get("updated"))
+                    self.brain_seed_status["action"] = str(seed_result.get("reason") or "")
+                else:
+                    seed_summary = self.nexus_brain.install_locked_export(seed_payload)
+                    if not seed_summary.get("verified_for_session"):
+                        raise PermissionError("Bundled Nexus Brain seed failed public signature verification")
+                    self.brain_seed_status["installed"] = True
+                    self.brain_seed_status["action"] = "installed_initial_brain"
+                self.brain_seed_status["verified"] = bool(self.nexus_brain.verified_for_session)
             except Exception as exc:
                 self.brain_seed_status["error"] = f"{type(exc).__name__}: {exc}"
-                # A failed first-install seed must not permanently occupy the protected
-                # Brain path or prevent the user from initializing a valid Brain later.
-                try:
-                    self.nexus_brain.path.unlink(missing_ok=True)
-                    self.nexus_brain.auth_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                self.nexus_brain = NexusBrain(
-                    brain_path,
-                    enabled=config.nexus_brain_enabled,
-                    max_records=config.nexus_brain_record_limit,
-                )
+                if not self.nexus_brain.initialized:
+                    # A failed first-install seed must not permanently occupy the
+                    # Brain path or block valid creator initialization later.
+                    try:
+                        self.nexus_brain.path.unlink(missing_ok=True)
+                        self.nexus_brain.auth_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    self.nexus_brain = NexusBrain(
+                        brain_path,
+                        enabled=config.nexus_brain_enabled,
+                        max_records=config.nexus_brain_record_limit,
+                    )
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)

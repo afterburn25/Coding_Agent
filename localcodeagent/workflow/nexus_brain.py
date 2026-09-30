@@ -931,15 +931,58 @@ class NexusBrain:
                 "creator_lock": public_auth,
             }
 
-    def install_locked_export(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.initialized:
-            raise RuntimeError("Install locked Brain export only into an uninitialized Nexus Brain")
+    @classmethod
+    def verify_locked_export(cls, payload: dict[str, Any]) -> dict[str, Any]:
         if str(payload.get("format") or "") != "chat-nexus-brain-locked":
             raise ValueError("Unsupported Nexus Brain export format")
         brain = payload.get("brain")
         auth = payload.get("creator_lock")
         if not isinstance(brain, dict) or not isinstance(auth, dict):
             raise ValueError("Locked Brain export is incomplete")
+        if int(auth.get("version") or 1) < 2 or str(auth.get("key_type") or "") != "Ed25519":
+            raise ValueError("Distributed Nexus Brain export must use Ed25519")
+        pem = str(auth.get("public_key_pem") or "").encode("utf-8")
+        if not pem:
+            raise ValueError("Nexus Brain export is missing its public verification key")
+        public_key = serialization.load_pem_public_key(pem)
+        if not isinstance(public_key, Ed25519PublicKey):
+            raise ValueError("Nexus Brain export public key is not Ed25519")
+        raw_public = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        fingerprint = hashlib.sha256(raw_public).hexdigest()
+        expected_fingerprint = str(auth.get("public_key_sha256") or "")
+        if not expected_fingerprint or fingerprint != expected_fingerprint:
+            raise PermissionError("Nexus Brain creator public-key fingerprint mismatch")
+        unsigned = {
+            "schema_version": int(brain.get("schema_version", SCHEMA_VERSION)),
+            "brain_id": str(brain.get("brain_id") or ""),
+            "created_at": float(brain.get("created_at") or 0),
+            "updated_at": float(brain.get("updated_at") or 0),
+            "records": brain.get("records", []),
+            "subroutines": brain.get("subroutines", {}),
+            "emotion_profile": brain.get("emotion_profile", {}),
+            "self_model": brain.get("self_model", {}),
+        }
+        try:
+            signature = cls._unb64(str(brain.get("signature") or ""))
+            public_key.verify(signature, cls._canonical(unsigned))
+        except (InvalidSignature, ValueError, TypeError) as exc:
+            raise PermissionError("Nexus Brain export signature verification failed") from exc
+        return {
+            "fingerprint": fingerprint,
+            "creator_name": str(auth.get("creator_name") or ""),
+            "updated_at": float(brain.get("updated_at") or 0),
+            "brain_id": str(brain.get("brain_id") or ""),
+        }
+
+    def install_locked_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.initialized:
+            raise RuntimeError("Install locked Brain export only into an uninitialized Nexus Brain")
+        verified = self.verify_locked_export(payload)
+        brain = payload.get("brain")
+        auth = payload.get("creator_lock")
         # Ed25519 public verification lets a shipped Brain activate read-only
         # without exposing the creator's passcode/private signing key.
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -957,7 +1000,47 @@ class NexusBrain:
             "self_model": dict(DEFAULT_SELF_MODEL), "signature": "",
         }
         self._load()
-        return self.summary()
+        summary = self.summary()
+        if not summary.get("verified_for_session"):
+            raise PermissionError("Installed Nexus Brain failed public signature verification")
+        summary["installed_fingerprint"] = verified["fingerprint"]
+        return summary
+
+    def install_signed_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply a newer public Brain only when it is signed by the same creator key."""
+        if not self.initialized:
+            summary = self.install_locked_export(payload)
+            return {"updated": True, "reason": "installed_initial_brain", "brain": summary}
+        current = self.summary()
+        if not current.get("verified_for_session"):
+            raise PermissionError("Current Nexus Brain is not verified; refusing signed update")
+        if current.get("creator_signing_key_available"):
+            raise PermissionError("Creator installation will not be auto-overwritten by a distribution Brain update")
+        if not current.get("distribution_read_only"):
+            raise PermissionError("Only public read-only Nexus Brain distributions accept automatic signed updates")
+        verified = self.verify_locked_export(payload)
+        current_fingerprint = str(current.get("creator_key_fingerprint") or "")
+        if not current_fingerprint or verified["fingerprint"] != current_fingerprint:
+            raise PermissionError("Nexus Brain update was not signed by the existing creator key")
+        incoming_updated = float(verified.get("updated_at") or 0)
+        current_updated = float(self._data.get("updated_at") or 0)
+        if incoming_updated <= current_updated:
+            return {"updated": False, "reason": "current_brain_is_same_or_newer", "brain": current}
+        brain_payload = payload.get("brain")
+        auth_payload = payload.get("creator_lock")
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(brain_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.path)
+        self._save_auth(auth_payload)
+        self._signing_key = None
+        self._unlocked = False
+        self._verified_for_session = False
+        self._tampered = False
+        self._load()
+        updated = self.summary()
+        if not updated.get("verified_for_session"):
+            raise PermissionError("Updated Nexus Brain failed public signature verification")
+        return {"updated": True, "reason": "newer_creator_signed_brain", "brain": updated}
 
     def summary(self) -> dict[str, Any]:
         auth = self._auth()

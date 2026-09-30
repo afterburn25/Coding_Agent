@@ -182,6 +182,34 @@ class NexusBrainTests(unittest.TestCase):
             self.assertIn("Built the scanner", context)
             self.assertIn("scanner latency", context)
 
+    def test_public_distribution_accepts_only_newer_same_creator_signed_updates(self):
+        with tempfile.TemporaryDirectory() as td:
+            creator = NexusBrain(Path(td) / "creator.json")
+            creator.initialize_creator("Creator", "example-passcode")
+            creator.bank(kind="fact", text="version one fact", source="test")
+            first_payload = creator.export_payload()
+
+            recipient = NexusBrain(Path(td) / "recipient.json")
+            recipient.install_locked_export(first_payload)
+            self.assertTrue(recipient.verified_for_session)
+            self.assertIn("version one fact", recipient.prompt_context())
+
+            time.sleep(0.01)
+            creator.bank(kind="fact", text="version two fact", source="test")
+            second_payload = creator.export_payload()
+            result = recipient.install_signed_update(second_payload)
+            self.assertTrue(result["updated"])
+            self.assertIn("version two fact", recipient.prompt_context())
+
+            stale = recipient.install_signed_update(first_payload)
+            self.assertFalse(stale["updated"])
+
+            other = NexusBrain(Path(td) / "other.json")
+            other.initialize_creator("Other Creator", "other-passcode")
+            other.bank(kind="fact", text="hostile replacement", source="test")
+            with self.assertRaisesRegex(PermissionError, "existing creator key"):
+                recipient.install_signed_update(other.export_payload())
+
     def test_locked_brain_remains_readable_after_verified_session_lock(self):
         with tempfile.TemporaryDirectory() as td:
             brain = NexusBrain(Path(td) / "brain.json")
