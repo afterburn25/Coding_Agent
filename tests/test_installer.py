@@ -35,6 +35,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("PrepareToInstall", self.installer)
         self.assertIn("InstallBundledSource", self.installer)
         self.assertIn(r"{app}\Source\.git\HEAD", self.installer)
+        self.assertIn(r'Source: "..\dist\ChatNexus\Source\.git\*"', self.installer)
         self.assertIn("if (not FileExists(UserConfig))", self.installer)
         self.assertIn("FileCopy(ExampleConfig, UserConfig, False)", self.installer)
 
