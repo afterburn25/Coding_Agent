@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 86,
-  "next_milestone": "Dogfood Chat Nexus: explicit coding-model catalog/download setup, then real self-development tasks",
+  "test_checkpoint": 90,
+  "next_milestone": "Dogfood Chat Nexus: llama.cpp runtime bootstrap guidance, then real self-development tasks",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo"
 }
