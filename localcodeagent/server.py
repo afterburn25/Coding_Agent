@@ -294,6 +294,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "backend": self.state.images.backend.inspect()})
                 return
 
+            if path == "/api/image/workflows/import":
+                model_id = str(body.get("model_id", "")).strip()
+                operation = str(body.get("operation", "")).strip()
+                workflow = body.get("workflow")
+                if not model_id or not operation or not isinstance(workflow, dict):
+                    self._json({"error": "model_id, operation, and workflow object are required"}, 400)
+                    return
+                try:
+                    result = self.state.images.import_workflow(model_id, operation, workflow)
+                except (ValueError, PermissionError) as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self._json({"ok": True, **result})
+                return
+
             if path == "/api/image/models/verify":
                 self._json({"ok": True, "models": self.state.images.verify_models(deep_hash=bool(body.get("deep_hash", False)))})
                 return
