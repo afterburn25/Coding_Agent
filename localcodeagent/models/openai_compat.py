@@ -22,7 +22,7 @@ class OpenAICompatibleProvider:
         payload: dict[str, Any] = {
             "model": self.profile.model,
             "messages": messages,
-            "temperature": 0.2,
+            "temperature": float(self.profile.temperature),
             "max_tokens": max(128, int(self.profile.max_output_tokens)),
             "stream": False,
         }
@@ -65,7 +65,7 @@ class OpenAICompatibleProvider:
         payload: dict[str, Any] = {
             "model": self.profile.model,
             "messages": messages,
-            "temperature": 0.2,
+            "temperature": float(self.profile.temperature),
             "max_tokens": max(128, int(self.profile.max_output_tokens)),
             "stream": True,
         }

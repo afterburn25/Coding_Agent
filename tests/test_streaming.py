@@ -84,6 +84,31 @@ class ModelStreamingTests(unittest.TestCase):
             provider.complete_stream(messages=[{"role": "user", "content": "hi"}])
 
         self.assertEqual(captured["payload"]["max_tokens"], 777)
+        self.assertEqual(captured["payload"]["temperature"], 1.0)
+
+    def test_provider_uses_profile_temperature(self):
+        profile = ModelProfile(
+            id="local",
+            endpoint="http://127.0.0.1:9999/v1",
+            model="test-model",
+            roles=["primary_coder"],
+            temperature=0.65,
+        )
+        provider = OpenAICompatibleProvider(profile)
+        response = _Response(lines=[
+            _line({"choices": [{"delta": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}),
+            b"data: [DONE]\n",
+        ])
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            captured["payload"] = json.loads(req.data.decode("utf-8"))
+            return response
+
+        with patch("localcodeagent.models.openai_compat.urllib.request.urlopen", side_effect=fake_urlopen):
+            provider.complete_stream(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertEqual(captured["payload"]["temperature"], 0.65)
 
     def test_streamed_tool_call_fragments_are_reassembled(self):
         response = _Response(lines=[

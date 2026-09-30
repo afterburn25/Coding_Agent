@@ -16,6 +16,7 @@ class ModelProfile:
     roles: list[str]
     context_window: int = 32768
     max_output_tokens: int = 4096
+    temperature: float = 1.0
     tool_calling: bool = True
     vision: bool = False
     priority: int = 50
