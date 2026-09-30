@@ -13,6 +13,7 @@ from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, load_config
 from .models.router import ModelRouter
+from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
 from .runtime.setup import suggest_model_profiles, write_suggested_models
 from .research import ResearchCoordinator
@@ -40,7 +41,19 @@ class AppState:
         self.workspace = workspace.resolve()
         self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
-        self.router = ModelRouter(config.models, resource_advisor=self.runtime.resource_fit)
+        self.model_telemetry = ModelPerformanceTelemetry(
+            self.workspace,
+            enabled=config.model_telemetry_enabled,
+            storage_path=config.model_telemetry_path,
+            min_samples=config.model_telemetry_min_samples,
+            weight=config.model_telemetry_weight,
+            max_events=config.model_telemetry_max_events,
+        )
+        self.router = ModelRouter(
+            config.models,
+            resource_advisor=self.runtime.resource_fit,
+            performance_advisor=self.model_telemetry.score,
+        )
         self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
         self.tasks = TaskStore(self.workspace)
         self.checkpoints = CheckpointManager(self.workspace)
@@ -69,6 +82,7 @@ class AppState:
             memory=self.memory,
             repository_index=self.repository_index,
             research=self.research,
+            telemetry=self.model_telemetry,
         )
         self.history: list[dict] = []
 
@@ -77,11 +91,25 @@ class AppState:
         config = load_config(self.config_path if self.config_path.exists() else None)
         self.runtime.reconfigure_models(config)
 
-        router = ModelRouter(config.models, resource_advisor=self.runtime.resource_fit)
+        model_telemetry = ModelPerformanceTelemetry(
+            self.workspace,
+            enabled=config.model_telemetry_enabled,
+            storage_path=config.model_telemetry_path,
+            min_samples=config.model_telemetry_min_samples,
+            weight=config.model_telemetry_weight,
+            max_events=config.model_telemetry_max_events,
+        )
+        router = ModelRouter(
+            config.models,
+            resource_advisor=self.runtime.resource_fit,
+            performance_advisor=model_telemetry.score,
+        )
         self.config = config
+        self.model_telemetry = model_telemetry
         self.router = router
         self.agent.config = config
         self.agent.router = router
+        self.agent.telemetry = model_telemetry
         self.images.config = config
 
         starter = next(
@@ -230,11 +258,15 @@ class Handler(BaseHTTPRequestHandler):
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
                 "research": self.state.research.summary(),
+                "model_telemetry": self.state.model_telemetry.summary(),
                 "image": self.state.images.summary(),
             })
             return
         if path == "/api/models":
             self._json({"models": [asdict(m) for m in self.state.config.models]})
+            return
+        if path == "/api/model-telemetry":
+            self._json(self.state.model_telemetry.summary())
             return
         if path == "/api/models/catalog":
             self._json({

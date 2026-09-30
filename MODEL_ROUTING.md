@@ -35,9 +35,12 @@ After role selection, candidates are ranked using:
 
 1. Configured RAM/VRAM fit against current machine state.
 2. Resource preference (full-VRAM fit ahead of CPU offload).
-3. Profile priority.
-4. Context window.
-5. Stable model ID ordering.
+3. Bounded local outcome score when enough comparable samples exist.
+4. Profile priority.
+5. Context window.
+6. Stable model ID ordering.
+
+Outcome telemetry can only rank candidates that already pass the resource-fit stage. It cannot make an oversized model outrank a runnable model, and manual role override still bypasses role classification.
 
 If configured estimates say no candidate fits, the router returns the best fallback and records the resource warning instead of silently failing to choose a model.
 
@@ -53,13 +56,29 @@ This applies to:
 
 Manual role override remains available in the UI and bypasses task-role classification while preserving runtime/resource checks.
 
+## Local outcome telemetry (v0.6)
+
+Chat Nexus keeps a small local record at `.agent/model_performance.json` by default. It stores no prompt text, source code, retrieved pages, credentials, or conversation transcript.
+
+Each event contains only coarse routing/outcome fields such as:
+
+- model ID and routed role
+- low / medium / high complexity band
+- completed / warning / error / step-limit outcome
+- final verification pass/fail when verification ran
+- reviewer PASS/FINDINGS signal when available
+- step count, elapsed seconds, repair-cycle count
+- whether external research evidence was used
+
+The router requires a configurable minimum sample count (default 3) before the history affects selection. The learned score is bounded (default weight 20), is evaluated only after resource fit, and falls back to the existing deterministic priority/context ordering when data is sparse. `GET /api/model-telemetry` exposes aggregate statistics without exposing task content.
+
 ## Planned routing improvements
 
 - repository language and size
 - retrieved-context token budget
 - measured model load time and tokens/second
-- historical success/failure by task category
 - model-specific language/framework strengths
+- finer task categories beyond role + complexity band
 - KV/cache residency and switch cost
 - reviewer quality and test-fix success history
 

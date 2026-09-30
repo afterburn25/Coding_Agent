@@ -9,6 +9,7 @@ from ..config import ModelProfile
 
 ROLES = ("utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer", "vision")
 ResourceAdvisor = Callable[[ModelProfile], tuple[bool, int, str]]
+PerformanceAdvisor = Callable[[ModelProfile, str, int], tuple[int, str]]
 
 
 @dataclass(slots=True)
@@ -22,11 +23,17 @@ class RoutingDecision:
 class ModelRouter:
     """Capability + resource-aware router for local models."""
 
-    def __init__(self, models: list[ModelProfile], resource_advisor: ResourceAdvisor | None = None) -> None:
+    def __init__(
+        self,
+        models: list[ModelProfile],
+        resource_advisor: ResourceAdvisor | None = None,
+        performance_advisor: PerformanceAdvisor | None = None,
+    ) -> None:
         self.models = [m for m in models if m.enabled]
         if not self.models:
             raise ValueError("At least one enabled model profile is required")
         self.resource_advisor = resource_advisor
+        self.performance_advisor = performance_advisor
 
     def classify_role(self, text: str, *, phase: str = "work", changed_files: int = 0, failures: int = 0) -> tuple[str, int, list[str]]:
         t = text.lower()
@@ -88,36 +95,46 @@ class ModelRouter:
             candidates = [m for m in self.models if "primary_coder" in m.roles] or self.models
             reasons.append(f"no dedicated {role} model configured; using fallback")
 
-        ranked: list[tuple[bool, int, ModelProfile, str]] = []
+        ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
         for model in candidates:
             if self.resource_advisor:
                 fits, resource_score, resource_reason = self.resource_advisor(model)
             else:
                 fits, resource_score, resource_reason = True, 0, ""
-            ranked.append((fits, resource_score, model, resource_reason))
+            if self.performance_advisor:
+                performance_score, performance_reason = self.performance_advisor(model, role, complexity)
+            else:
+                performance_score, performance_reason = 0, ""
+            ranked.append((fits, resource_score, performance_score, model, resource_reason, performance_reason))
 
         fitting = [item for item in ranked if item[0]]
         if fitting:
             pool = fitting
         else:
             fallback_candidates = [m for m in self.models if "primary_coder" in m.roles and m not in candidates]
-            fallback_ranked: list[tuple[bool, int, ModelProfile, str]] = []
+            fallback_ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
             for model in fallback_candidates:
                 if self.resource_advisor:
                     fits, resource_score, resource_reason = self.resource_advisor(model)
                 else:
                     fits, resource_score, resource_reason = True, 0, ""
-                fallback_ranked.append((fits, resource_score, model, resource_reason))
+                if self.performance_advisor:
+                    performance_score, performance_reason = self.performance_advisor(model, role, complexity)
+                else:
+                    performance_score, performance_reason = 0, ""
+                fallback_ranked.append((fits, resource_score, performance_score, model, resource_reason, performance_reason))
             fallback_fitting = [item for item in fallback_ranked if item[0]]
             if fallback_fitting:
                 pool = fallback_fitting
                 reasons.append(f"no runnable dedicated {role} model; using runnable primary-coder fallback")
             else:
                 pool = ranked
-        pool.sort(key=lambda item: (-item[1], -item[2].priority, -item[2].context_window, item[2].id))
-        fits, _, chosen, resource_reason = pool[0]
+        pool.sort(key=lambda item: (-item[1], -item[2], -item[3].priority, -item[3].context_window, item[3].id))
+        fits, _, _, chosen, resource_reason, performance_reason = pool[0]
         if resource_reason:
             reasons.append(f"{chosen.id}: {resource_reason}")
+        if performance_reason:
+            reasons.append(performance_reason)
         if not fits:
             reasons.append("no configured candidate is estimated to fit current resources; trying best fallback")
         return RoutingDecision(role=role, model_id=chosen.id, reasons=reasons, complexity=complexity)

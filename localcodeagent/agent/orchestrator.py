@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
 from ..models.openai_compat import OpenAICompatibleProvider
 from ..models.router import ModelRouter, RoutingDecision
+from ..models.telemetry import ModelPerformanceTelemetry
 from ..runtime.manager import RuntimeManager
 from ..research import ResearchCoordinator
 from ..tools.base import ToolRegistry
@@ -79,6 +81,7 @@ class _AgentSession:
     verification_round_start: int = 0
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
+    started_at: float = field(default_factory=time.time)
 
 
 class AgentOrchestrator:
@@ -94,6 +97,7 @@ class AgentOrchestrator:
         memory: ProjectMemory,
         repository_index: RepositoryIndex,
         research: ResearchCoordinator | None = None,
+        telemetry: ModelPerformanceTelemetry | None = None,
     ) -> None:
         self.config = config
         self.router = router
@@ -104,6 +108,7 @@ class AgentOrchestrator:
         self.memory = memory
         self.repository_index = repository_index
         self.research = research
+        self.telemetry = telemetry
         self._sessions: dict[str, _AgentSession] = {}
 
     def _provider_for(self, profile: ModelProfile) -> OpenAICompatibleProvider:
@@ -187,6 +192,46 @@ class AgentOrchestrator:
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
+
+    @staticmethod
+    def _review_outcome(review: str) -> bool | None:
+        normalized = review.strip().upper()
+        if normalized.startswith("PASS"):
+            return True
+        if normalized.startswith("FINDINGS"):
+            return False
+        return None
+
+    def _record_outcome(
+        self,
+        session: _AgentSession,
+        status: str,
+        *,
+        verification_passed: bool | None = None,
+    ) -> None:
+        if self.telemetry is None:
+            return
+        try:
+            research_used = bool(
+                session.research_context.get("sources")
+                or session.research_context.get("evidence")
+                or session.research_context.get("results")
+            )
+            self.telemetry.record(
+                model_id=session.decision.model_id,
+                role=session.decision.role,
+                complexity=session.decision.complexity,
+                status=status,
+                verification_passed=verification_passed,
+                review_passed=self._review_outcome(session.review_content),
+                steps=session.steps,
+                elapsed_seconds=max(0.0, time.time() - session.started_at),
+                research_used=research_used,
+                repair_cycles=session.repair_cycles,
+            )
+        except Exception:
+            # Learning signals must never be allowed to break a coding task.
+            pass
 
     def _restore_session(self, task_id: str, *, reason: str) -> _AgentSession:
         """Rebuild enough agent context to safely continue a persisted task.
@@ -614,6 +659,11 @@ class AgentOrchestrator:
                 self.repository_index.build()
             except Exception:
                 pass
+        self._record_outcome(
+            session,
+            status,
+            verification_passed=(None if not current_round else not verification_failed),
+        )
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -660,6 +710,7 @@ class AgentOrchestrator:
             summary=session.main_content,
             steps=session.steps,
         )
+        self._record_outcome(session, "step_limit")
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -733,6 +784,7 @@ class AgentOrchestrator:
             error_task = self.tasks.update(task.id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
             self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
             self._safe_emit(event_callback, {"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+            self._record_outcome(session, "error")
             self._sessions.pop(task.id, None)
             raise
 
@@ -763,6 +815,7 @@ class AgentOrchestrator:
                 phase="done",
                 error=f"{type(exc).__name__}: {exc}",
             )
+            self._record_outcome(session, "error")
             self._sessions.pop(task_id, None)
             raise
 

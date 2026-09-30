@@ -62,6 +62,14 @@ class AgentConfig:
     max_review_chars: int = 16000
     task_history_limit: int = 100
 
+    # Outcome-aware automatic model routing. Telemetry stores only coarse local
+    # metrics (no prompts/source text) and never overrides resource-fit checks.
+    model_telemetry_enabled: bool = True
+    model_telemetry_path: str = ".agent/model_performance.json"
+    model_telemetry_min_samples: int = 3
+    model_telemetry_weight: int = 20
+    model_telemetry_max_events: int = 500
+
     # v0.2 runtime manager settings.
     runtime_auto_start: bool = True
     runtime_recovery_attempts: int = 1
@@ -212,6 +220,11 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.auto_verify_after_changes = bool(raw.get("auto_verify_after_changes", cfg.auto_verify_after_changes))
     cfg.max_review_chars = max(2000, int(raw.get("max_review_chars", cfg.max_review_chars)))
     cfg.task_history_limit = max(10, int(raw.get("task_history_limit", cfg.task_history_limit)))
+    cfg.model_telemetry_enabled = bool(raw.get("model_telemetry_enabled", cfg.model_telemetry_enabled))
+    cfg.model_telemetry_path = str(raw.get("model_telemetry_path", cfg.model_telemetry_path))
+    cfg.model_telemetry_min_samples = max(1, int(raw.get("model_telemetry_min_samples", cfg.model_telemetry_min_samples)))
+    cfg.model_telemetry_weight = max(0, min(100, int(raw.get("model_telemetry_weight", cfg.model_telemetry_weight))))
+    cfg.model_telemetry_max_events = max(20, int(raw.get("model_telemetry_max_events", cfg.model_telemetry_max_events)))
     cfg.runtime_auto_start = bool(raw.get("runtime_auto_start", cfg.runtime_auto_start))
     cfg.runtime_recovery_attempts = max(0, int(raw.get("runtime_recovery_attempts", cfg.runtime_recovery_attempts)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))
