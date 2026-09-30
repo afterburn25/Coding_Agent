@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from localcodeagent.config import AgentConfig, ModelProfile
@@ -124,6 +125,51 @@ ThreadingHTTPServer((args.host,args.port),H).serve_forever()
             rows = manager.inventory()
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["name"], "a.gguf")
+
+
+class UnifiedLlamaRuntimeTests(unittest.TestCase):
+    def test_discovers_unified_llama_command(self):
+        with tempfile.TemporaryDirectory() as td, patch(
+            "localcodeagent.runtime.manager.shutil.which",
+            side_effect=lambda name: "/usr/local/bin/llama" if name == "llama" else None,
+        ):
+            manager = RuntimeManager(AgentConfig(models=[]), base_dir=Path(td))
+            self.assertEqual(manager.discover_llama_server(), "/usr/local/bin/llama")
+
+    def test_unified_llama_build_command_inserts_serve_subcommand(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            model = root / "model.gguf"
+            model.write_bytes(b"GGUF")
+            llama = root / "llama"
+            llama.write_text("placeholder", encoding="utf-8")
+            profile = ModelProfile(
+                id="local",
+                runtime="llama_cpp",
+                endpoint="",
+                model="test",
+                model_path=str(model),
+                executable=str(llama),
+                roles=["primary_coder"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            command = manager._build_command(profile, 8081)
+            self.assertEqual(command[:2], [str(llama), "serve"])
+            self.assertIn("--model", command)
+            self.assertIn(str(model), command)
+
+    def test_windows_runtime_guidance_uses_winget_without_auto_execution(self):
+        with tempfile.TemporaryDirectory() as td, patch(
+            "localcodeagent.runtime.manager.platform.system", return_value="Windows"
+        ), patch(
+            "localcodeagent.runtime.manager.shutil.which", return_value=None
+        ):
+            manager = RuntimeManager(AgentConfig(models=[]), base_dir=Path(td))
+            guidance = manager.runtime_install_guidance()
+            self.assertFalse(guidance["installed"])
+            self.assertEqual(guidance["platform"], "Windows")
+            self.assertTrue(any(row["command"] == "winget install llama.cpp" for row in guidance["commands"]))
+            self.assertIn("never executed automatically", guidance["note"])
 
 
 if __name__ == "__main__":
