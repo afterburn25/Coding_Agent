@@ -18,6 +18,7 @@ from .research import ResearchCoordinator
 from .tools.base import ToolRegistry
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
+from .tools.github import register_github_tools
 from .tools.image import register_image_tools
 from .tools.repository import register_repository_tools
 from .tools.research import register_research_tools
@@ -48,6 +49,8 @@ class AppState:
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
+        if config.github_enabled:
+            register_github_tools(self.tools, self.workspace, config)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
