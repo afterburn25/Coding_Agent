@@ -8,6 +8,7 @@ from unittest.mock import patch
 from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.runtime.hardware import GPUInfo, HardwareSnapshot
 from localcodeagent.runtime.manager import RuntimeManager
+from localcodeagent.runtime.setup import suggest_model_profiles, write_suggested_models
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +105,54 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertIn("Ready to code", js)
         self.assertIn("Setup required", js)
         self.assertIn('if path == "/api/readiness":', server)
+
+
+class ModelSetupPlannerTests(unittest.TestCase):
+    def test_single_gguf_gets_all_core_coding_roles(self):
+        suggestions = suggest_model_profiles([{
+            "name": "coder-q4.gguf",
+            "path": "/models/coder-q4.gguf",
+            "size_gb": 8.2,
+        }])
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["id"], "primary-local")
+        self.assertTrue({"fast_coder", "primary_coder", "deep_reasoner", "reviewer"}.issubset(set(suggestions[0]["roles"])))
+
+    def test_three_ggufs_are_split_across_fast_primary_and_deep_roles(self):
+        suggestions = suggest_model_profiles([
+            {"name": "small.gguf", "path": "/models/small.gguf", "size_gb": 4.0},
+            {"name": "medium.gguf", "path": "/models/medium.gguf", "size_gb": 9.0},
+            {"name": "large.gguf", "path": "/models/large.gguf", "size_gb": 20.0},
+        ])
+        self.assertEqual([row["id"] for row in suggestions], ["fast-coder", "primary-coder", "deep-reasoner"])
+        self.assertIn("fast_coder", suggestions[0]["roles"])
+        self.assertIn("primary_coder", suggestions[1]["roles"])
+        self.assertIn("deep_reasoner", suggestions[2]["roles"])
+
+    def test_setup_writer_preserves_non_model_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.json"
+            path.write_text('{"research_enabled": false, "permissions": {"filesystem.read": "allow"}, "models": []}\n', encoding="utf-8")
+            suggestions = suggest_model_profiles([{
+                "name": "coder.gguf",
+                "path": str(Path(td) / "coder.gguf"),
+                "size_gb": 7.0,
+            }])
+            result = write_suggested_models(path, suggestions)
+            import json
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse(saved["research_enabled"])
+            self.assertEqual(saved["permissions"]["filesystem.read"], "allow")
+            self.assertEqual(saved["models"][0]["model_path"], suggestions[0]["model_path"])
+            self.assertTrue(result["restart_required"])
+
+    def test_setup_requires_explicit_apply_in_server_and_ui(self):
+        server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('if path == "/api/readiness/configure":', server)
+        self.assertIn('body.get("apply") is not True', server)
+        self.assertIn("Use discovered models", app)
+        self.assertIn("apply:true", app)
 
 
 if __name__ == "__main__":
