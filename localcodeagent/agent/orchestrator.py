@@ -1690,11 +1690,16 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else ""
         )
-        knowledge_context = (
-            self.knowledge_memory.prompt_context(user_text)
-            if self.knowledge_memory is not None
-            else ""
-        )
+        knowledge_parts: list[str] = []
+        if self.knowledge_memory is not None:
+            remembered = self.knowledge_memory.prompt_context(user_text)
+            if remembered:
+                knowledge_parts.append(remembered)
+        if self.nexus_brain is not None and self.nexus_brain.initialized:
+            brain_knowledge = self.nexus_brain.knowledge_context(user_text)
+            if brain_knowledge:
+                knowledge_parts.append(brain_knowledge)
+        knowledge_context = "\n\n".join(knowledge_parts)
         policy_context = self.policy_prompt()
         clock_context = self.current_time_context()
         timing_context = (

@@ -99,6 +99,54 @@ class NexusBrainTests(unittest.TestCase):
             self.assertEqual(second.self_model()["name"], "Nexus One")
             self.assertIn("portable fact", second.prompt_context())
 
+    def test_general_knowledge_is_recalled_and_expired_current_sensitive_records_are_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "brain.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            brain.sync_knowledge_records([
+                {
+                    "id": "k1",
+                    "query": "What is ExampleLib?",
+                    "answer": "ExampleLib is a fictional test library.",
+                    "sources": [{"title": "Official docs", "url": "https://example.test/docs"}],
+                    "current_sensitive": False,
+                    "learned_at": 100,
+                    "expires_at": 0,
+                },
+                {
+                    "id": "k2",
+                    "query": "What is the current ExampleLib version?",
+                    "answer": "ExampleLib version 1.0 is current.",
+                    "sources": [{"title": "Release notes", "url": "https://example.test/releases"}],
+                    "current_sensitive": True,
+                    "learned_at": 100,
+                    "expires_at": 1,
+                },
+            ])
+            context = brain.knowledge_context("Tell me about ExampleLib")
+            self.assertIn("fictional test library", context)
+            self.assertNotIn("version 1.0 is current", context)
+            self.assertIn("https://example.test/docs", context)
+
+    def test_creator_sync_banks_bounded_autobiographical_continuity(self):
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "brain.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            count = brain.sync_conversations({
+                "conversations": [{
+                    "id": "chat1",
+                    "title": "Built the scanner",
+                    "summary": "User topics: scanner latency. Recent responses: fixed batching.",
+                    "message_count": 8,
+                    "updated_at": 1234.0,
+                }]
+            })
+            self.assertEqual(count, 1)
+            context = brain.prompt_context()
+            self.assertIn("Autobiographical continuity", context)
+            self.assertIn("Built the scanner", context)
+            self.assertIn("scanner latency", context)
+
     def test_locked_brain_remains_readable_after_verified_session_lock(self):
         with tempfile.TemporaryDirectory() as td:
             brain = NexusBrain(Path(td) / "brain.json")

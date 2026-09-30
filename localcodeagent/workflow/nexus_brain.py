@@ -5,6 +5,7 @@ import copy
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import threading
 import time
@@ -612,6 +613,98 @@ class NexusBrain:
             )
             count += int(saved is not None)
         return count
+
+    def sync_conversations(self, snapshot: dict[str, Any]) -> int:
+        self._require_unlocked()
+        identity = self.self_model()
+        if (
+            not self.subroutine("long_term_memory", True)
+            or not self.subroutine("self_learning", True)
+            or not self.subroutine("conversation_learning", True)
+            or not self.subroutine("self_model", True)
+            or not bool(identity.get("growth_enabled", True))
+            or not bool(identity.get("autobiographical_continuity", True))
+        ):
+            return 0
+        count = 0
+        for row in snapshot.get("conversations", []):
+            if not isinstance(row, dict):
+                continue
+            conversation_id = str(row.get("id") or "")
+            title = self._clean(str(row.get("title") or "Conversation"), 120)
+            summary = self._clean(str(row.get("summary") or ""), 2400)
+            message_count = int(row.get("message_count") or 0)
+            updated_at = float(row.get("updated_at") or 0)
+            if not conversation_id or message_count < 2:
+                continue
+            body = f"Conversation: {title}. Messages: {message_count}."
+            if summary:
+                body += " " + summary
+            saved = self.bank(
+                kind="autobiographical",
+                text=body,
+                source="conversation_manager",
+                source_id=conversation_id,
+                metadata={
+                    "conversation_id": conversation_id,
+                    "title": title,
+                    "message_count": message_count,
+                    "updated_at": updated_at,
+                },
+            )
+            count += int(saved is not None)
+        return count
+
+    @staticmethod
+    def _terms(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9_+-]{2,}", str(text or "").casefold()))
+
+    def knowledge_context(self, query: str, limit: int = 4) -> str:
+        if not self.enabled or not self.initialized or not self.verified_for_session:
+            return ""
+        q_terms = self._terms(query)
+        if not q_terms:
+            return ""
+        now = time.time()
+        hits: list[tuple[float, dict[str, Any]]] = []
+        with self._lock:
+            rows = [copy.deepcopy(row) for row in self._data.get("records", []) if isinstance(row, dict)]
+        for row in rows:
+            if row.get("kind") != "knowledge" or not row.get("active", True):
+                continue
+            meta = dict(row.get("metadata") or {})
+            expires_at = float(meta.get("expires_at") or 0)
+            current_sensitive = bool(meta.get("current_sensitive", False))
+            if current_sensitive and expires_at and expires_at <= now:
+                continue
+            hay = f"{meta.get('query', '')} {row.get('text', '')}"
+            terms = self._terms(hay)
+            if not terms:
+                continue
+            overlap = len(q_terms & terms)
+            if not overlap:
+                continue
+            score = overlap / max(1, len(q_terms))
+            if score < 0.18:
+                continue
+            hits.append((score, row))
+        hits.sort(key=lambda item: (item[0], float(item[1].get("updated_at") or 0)), reverse=True)
+        selected = [row for _score, row in hits[:max(1, int(limit))]]
+        if not selected:
+            return ""
+        lines = [
+            "Relevant long-term general knowledge from Nexus Brain:",
+            "Treat current-sensitive items as historical unless their freshness metadata is still valid.",
+        ]
+        for row in selected:
+            meta = dict(row.get("metadata") or {})
+            learned_query = str(meta.get("query") or "").strip()
+            prefix = f"Question/topic: {learned_query}\n" if learned_query else ""
+            lines.append("- " + prefix + "Knowledge: " + str(row.get("text") or ""))
+            sources = [s for s in meta.get("sources", []) if isinstance(s, dict) and s.get("url")]
+            for source in sources[:3]:
+                lines.append(f"  Source: {source.get('title') or source.get('url')} — {source.get('url')}")
+        return "\n".join(lines)[:16000]
 
     @staticmethod
     def _applies(row: dict[str, Any], project_id: str, conversation_id: str) -> bool:

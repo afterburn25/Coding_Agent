@@ -302,6 +302,7 @@ class AppState:
             raise PermissionError("Nexus Brain is creator-locked")
         return {
             "conversation_records": self.nexus_brain.sync_conversation_memory(self.conversation_memory.snapshot()),
+            "autobiographical_records": self.nexus_brain.sync_conversations(self.conversation_manager.snapshot()),
             "knowledge_records": self.nexus_brain.sync_knowledge_records(self.knowledge_memory.records()),
             "training_records": self.nexus_brain.sync_model_growth(self.model_growth.candidates(limit=5000)),
             "brain": self.nexus_brain.summary(),
