@@ -401,6 +401,37 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "consent": record.as_dict()})
                 return
 
+            if path == "/api/chat/stream":
+                message = str(body.get("message", "")).strip()
+                mode = str(body.get("mode", "auto"))
+                if not message:
+                    self._json({"error": "message is required"}, 400)
+                    return
+
+                self._sse_begin()
+                self._sse_event("ready", {"mode": mode})
+
+                def emit(event: dict) -> None:
+                    event_type = str(event.get("type") or "message")
+                    payload = {k: v for k, v in event.items() if k != "type"}
+                    self._sse_event(event_type, payload)
+
+                try:
+                    result = self.state.agent.run(
+                        message,
+                        history=self.state.history,
+                        mode=mode,
+                        event_callback=emit,
+                    )
+                    self.state.history.extend([
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": result.content},
+                    ])
+                    self._sse_event("result", self._agent_payload(result))
+                except Exception as exc:
+                    self._sse_event("error", {"error": f"{type(exc).__name__}: {exc}"})
+                self.close_connection = True
+                return
             if path == "/api/chat":
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
