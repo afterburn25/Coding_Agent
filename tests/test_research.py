@@ -48,6 +48,14 @@ class ResearchRankingTests(unittest.TestCase):
         self.assertGreater(exact.score, mismatch.score)
         self.assertIn(exact.reliability, {"Strong", "Confirmed"})
 
+    def test_generic_github_result_is_not_assumed_official_upstream(self):
+        class Client:
+            def search(self, query, count=8):
+                return [{"title": "Random fork", "url": "https://github.com/someone/fork"}]
+        provider = GitHubResearchProvider(Client())
+        rows = provider.search("library fix", limit=1)
+        self.assertEqual(rows[0].authority, "technical_docs")
+
     def test_blocked_domain_is_never_promoted(self):
         ranker = SourceRanker(blocked_domains=["bad.example"])
         src = ResearchSource(title="Bad", url="https://bad.example/fix", source_type="official_docs", authority="official_docs")
