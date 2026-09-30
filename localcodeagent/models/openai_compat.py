@@ -89,6 +89,17 @@ class OpenAICompatibleProvider:
         chunk_count = 0
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                content_type = str(resp.headers.get("Content-Type") or "").lower()
+                if "text/event-stream" not in content_type:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                    choices = raw.get("choices") or []
+                    if not choices:
+                        raise RuntimeError(f"Model endpoint returned no choices: {raw}")
+                    message = choices[0].get("message", {})
+                    text = str(message.get("content") or "")
+                    if text and on_delta is not None:
+                        on_delta(text)
+                    return ProviderResponse(message=message, raw=raw)
                 for raw_line in resp:
                     line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line or line.startswith(":") or not line.startswith("data:"):
@@ -136,6 +147,8 @@ class OpenAICompatibleProvider:
                 f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
             ) from exc
 
+        if chunk_count == 0:
+            return self.complete(messages=messages, tools=tools)
         message: dict[str, Any] = {"role": role, "content": "".join(content_parts)}
         if tool_calls:
             message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
