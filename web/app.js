@@ -328,7 +328,10 @@ function builtinClientReply(message){
     return 'Hi! Chat Nexus is ready. What would you like to work on?';
   }
   if(['what can you do','what all can you do','what are your capabilities','what do you do','how can you help'].some(x=>normalized.includes(x))){
-    return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical issues, work with Git/GitHub when authorized, manage local coding models, and use configured local image tools.';
+    return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local models, use configured local image tools, and learn across conversations through Nexus Brain. That can include verified general knowledge, facts and preferences, conversational style, corrections, feedback, and approved training examples.';
+  }
+  if(['can you be self learning','can you be self-learning','can you self learn','can you learn and adapt','can you adapt and learn','are you self learning','are you self-learning','can you learn general knowledge','can you learn conversational skills'].some(x=>normalized.includes(x))){
+    return 'Yes. Nexus Brain can adapt beyond coding: it can bank verified general knowledge, remember facts and preferences, learn conversational patterns from feedback and corrections, retain approved training examples, and carry those gains across model replacements. The creator-locked Brain controls which learning channels are enabled.';
   }
   if(['how old are you','do you have an age','what is your age',"what's your age"].includes(normalized)){
     return "I don't have a human age. I'm Chat Nexus, software, so I don't age like a person.";

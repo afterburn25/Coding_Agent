@@ -950,8 +950,6 @@ class Handler(BaseHTTPRequestHandler):
                             source="manual_research",
                             metadata={"knowledge_id": record.get("id"), "sources": record.get("sources", [])},
                         )
-                if self.state.nexus_brain.unlocked:
-                    self.state.sync_nexus_brain()
                 self._json({"ok": True, "session": session})
                 return
 
@@ -1130,8 +1128,6 @@ class Handler(BaseHTTPRequestHandler):
                     model_id="builtin-local",
                 )
                 self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
-                if self.state.nexus_brain.unlocked:
-                    self.state.sync_nexus_brain()
                 self.state.history = self.state.conversation_manager.history(limit=32)
                 self._json({
                     "ok": True,
@@ -1182,8 +1178,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
-                if self.state.nexus_brain.unlocked:
-                    self.state.sync_nexus_brain()
                 self._json({"ok": True, "feedback": saved})
                 return
 
@@ -1191,8 +1185,14 @@ class Handler(BaseHTTPRequestHandler):
                 c = self.state.model_growth.import_conversation_memory(self.state.conversation_memory.snapshot())
                 f = self.state.model_growth.import_conversation_feedback(self.state.conversation_manager.snapshot())
                 k = self.state.model_growth.import_knowledge_memory(self.state.knowledge_memory.snapshot())
-                brain = self.state.sync_nexus_brain() if self.state.nexus_brain.unlocked else {"brain": self.state.nexus_brain.summary()}
-                self._json({"ok": True, "conversation_candidates": c, "feedback_candidates": f, "knowledge_candidates": k, "growth": self.state.model_growth.summary(), "nexus_brain": brain})
+                self._json({
+                    "ok": True,
+                    "conversation_candidates": c,
+                    "feedback_candidates": f,
+                    "knowledge_candidates": k,
+                    "growth": self.state.model_growth.summary(),
+                    "nexus_brain": {"brain": self.state.nexus_brain.summary(), "protected_sync_required": True},
+                })
                 return
 
             if path == "/api/model-growth/review":

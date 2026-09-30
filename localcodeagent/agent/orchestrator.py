@@ -476,7 +476,6 @@ class AgentOrchestrator:
                     "expires_at": record.get("expires_at", 0),
                 },
             )
-        self._sync_nexus_brain()
 
     def _auto_research(self, query: str) -> dict[str, Any]:
         if (
@@ -1181,7 +1180,6 @@ class AgentOrchestrator:
             and self._brain_subroutine_enabled("model_growth", True)
         ):
             self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
-        self._sync_nexus_brain()
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -1564,7 +1562,6 @@ class AgentOrchestrator:
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
-        self._sync_nexus_brain()
 
         if (
             mode == "auto"
@@ -1633,7 +1630,6 @@ class AgentOrchestrator:
                 and self._brain_subroutine_enabled("model_growth", True)
             ):
                 self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
-            self._sync_nexus_brain()
             return AgentResult(
                 content=local_response,
                 routing=builtin_decision,
