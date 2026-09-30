@@ -40,6 +40,7 @@ See `docs/UI_DIRECTION.md` before changing the primary application shell.
 - Shell/build/test tools with permission gates.
 - Reviewer-model handoff.
 - Persistent task ledger, project memory, and repository index.
+- Interrupted tasks are normalized to a recoverable state after restart; pending approvals can also resume cold from durable task metadata.
 
 ## Internet access
 
@@ -185,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **64 tests passing**.
+Current expected result: **67 tests passing**.
 
 ## API highlights
 
@@ -201,6 +202,7 @@ GET  /api/image/history
 GET  /api/image/job/<id>
 POST /api/chat
 POST /api/tasks/resume
+POST /api/tasks/recover
 POST /api/tasks/undo
 POST /api/runtime/start
 POST /api/runtime/stop
@@ -221,6 +223,10 @@ POST /api/image/models/install
 POST /api/image/models/remove
 POST /api/image/loras/metadata
 ```
+
+## Continuous verification
+
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **67 passing tests**.
 
 ## Development state
 
