@@ -92,6 +92,15 @@
 - CI checkpoint: **93/93 tests passing**.
 - The project is ready to begin real Chat Nexus-on-Chat Nexus dogfood tasks once a local model/runtime is installed on the user's machine.
 
+## v0.6 first dogfood-ready checkpoint
+
+- Self-hosting context is automatic for both fresh and recovered tasks when the workspace is the Chat Nexus source tree.
+- Guardrails require repository-first inspection, preservation of the running instance, explicit Git/GitHub delivery intent, and isolated selftest before claiming success.
+- UI **Start self-development task** only pre-fills the prompt; the user must explicitly send it.
+- First-run path is complete: runtime guidance → explicit verified model catalog download → discovered-GGUF role assignment → restart → readiness check → self-development launcher.
+- CI checkpoint: **95/95 tests passing**.
+- Next action: package/test the exact main-branch snapshot, then begin real local-model dogfood work.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -136,7 +145,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **93 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **95 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -264,4 +273,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `93 tests` passing.
+Expected at this checkpoint: `95 tests` passing.
