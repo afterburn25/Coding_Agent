@@ -34,3 +34,11 @@ The substituted LoRA name is the path relative to `models/image/loras`, which ma
 ## Subject profiles
 
 A subject profile may include `loras`, `reference_images`, `face_reference`, `body_reference`, `preferred_model`, and `generation_defaults`. Selecting that subject automatically merges those settings into the image request before model routing. Explicit request settings continue to take precedence over profile defaults.
+
+## Subject profile compatibility
+
+Subject profiles may use the current `loras` list or the simpler single-assignment fields `assigned_lora`, `lora_version`, and `lora_strength`. The image manager normalizes both forms into the same request-level LoRA selection list before routing and validation.
+
+## Workflow slot contract
+
+Every selected LoRA requires both `${lora_N_name}` and `${lora_N_strength}` placeholders in the imported ComfyUI API workflow. This prevents a workflow from silently ignoring a user-selected strength or applying an implementation-defined default.
