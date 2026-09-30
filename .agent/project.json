@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 134,
-  "next_milestone": "Install the stale-task/UI-cache fix, verify immediate local greeting, then test a real 14B request and inspect backend-host.log only if the backend exits",
+  "test_checkpoint": 140,
+  "next_milestone": "Dogfood persistent conversation across restart, teach preferences/rules and corrections through chat, verify completed-result recovery on real model tasks, then build reviewed offline training/export.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -126,5 +126,26 @@
   "ui_cache": {
     "static_assets_no_store": true,
     "client_builtin_greeting_before_sse": true
+  },
+  "conversation_memory": {
+    "enabled_by_default": true,
+    "path": "data/conversation_memory.json",
+    "persists_across_restart_and_update": true,
+    "bounded_history": true,
+    "preferences_and_rules": true,
+    "correction_examples": true,
+    "prompt_injection_of_saved_rules": true,
+    "ui": "Local system → Memory & training",
+    "api": "GET /api/conversation-memory"
+  },
+  "stream_recovery": {
+    "durable_final_content": true,
+    "completed_result_recovery": true,
+    "request_scoped_task_matching": true,
+    "newest_durable_task_preferred": true
+  },
+  "routing": {
+    "short_non_coding_conversation": "utility",
+    "primary_14b_background_prewarm": true
   }
 }

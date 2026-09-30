@@ -86,8 +86,14 @@ The Windows package bundles llama.cpp itself but not the GGUF bytes inside the i
 - Per-task checkpoints and one-click undo.
 - Shell/build/test tools with permission gates.
 - Reviewer-model handoff.
-- Persistent task ledger, project memory, and repository index.
+- Persistent task ledger, project memory, repository index, and local conversation memory.
 - Interrupted tasks are normalized to a recoverable state after restart; pending approvals can also resume cold from durable task metadata.
+
+## Persistent conversation memory
+
+Chat Nexus now stores bounded conversation history, user-taught preferences/rules, and correction examples locally in `data/conversation_memory.json`. The Local system drawer shows Memory & training counts. Saved rules are included in future prompts, and recent conversation is restored after restart.
+
+Completed tasks also persist bounded `final_content`. If the final stream event is lost after a task finishes, the UI can recover the actual answer from durable task state instead of reporting a completed-task error.
 
 ## Outcome-aware model routing
 
@@ -241,7 +247,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **134 tests passing**.
+Current expected result: **140 tests passing**.
 
 ## API highlights
 
@@ -401,7 +407,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **134 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **140 passing tests**.
 
 ## Development state
 

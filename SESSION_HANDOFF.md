@@ -265,6 +265,21 @@
 - Windows native desktop/installer validation: pending until current CI completes.
 - Next: install this exact updater, verify `hi` returns the local greeting immediately, then test a real model request and use `data/logs/backend-host.log` if the backend exits.
 
+## v0.6 persistent conversation + completed-result recovery checkpoint
+
+- Added app-wide local conversation memory at `data/conversation_memory.json`.
+- Memory survives restart/update and stores bounded recent chat, explicit preferences/rules, and correction examples.
+- User-taught rules are injected into later prompts immediately.
+- Short non-coding conversation routes to the lightweight utility path.
+- Qwen3 14B pre-warms in the background after backend startup.
+- Completed tasks persist bounded `final_content`.
+- If the final SSE result is lost after completion, the client recovers the newest matching durable task response instead of showing a completed-task error.
+- Local system now shows Memory & training counts; `GET /api/conversation-memory` exposes the local snapshot.
+- Feature commits: `f233773`, `c9f7a64`, `f49ab2c`.
+- Unit checkpoint: **140/140 tests passing**.
+- Windows native desktop/installer validation: **green**.
+- Next: dogfood continuous conversation across restart, teach preferences/rules and corrections through chat, verify real final-result recovery, then build the reviewed offline training/export workflow.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -437,4 +452,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `134 tests` passing.
+Expected at this checkpoint: `140 tests` passing.

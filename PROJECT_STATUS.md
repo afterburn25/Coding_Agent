@@ -73,7 +73,7 @@
 
 ### Tests
 
-`134` automated tests passing.
+`140` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 134 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 140 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -136,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **134 tests passing**.
+- Current automated checkpoint: **140 tests passing**.
 
 
 
@@ -154,6 +154,11 @@
 - Approved chat-first shell is implemented: slim left rail, center conversation/composer, right Code Diff / Tasks / Terminal utility rail.
 - Existing task approvals, undo, runtime controls, research/image links, model routing, image-job cards, and repository-index controls remain wired to their existing APIs.
 - `chat-nexus` CLI entry point added while retaining `local-code-agent` as a compatibility alias.
+
+- Persistent local conversation memory now stores bounded chat history, explicit preferences/rules, and correction examples under `data/conversation_memory.json`.
+- Completed tasks now persist `final_content`, and the UI can recover the finished response from durable task state if the final SSE event is lost.
+- Short non-coding conversation uses the lightweight utility route; the primary 14B model pre-warms in the background.
+- Local system now exposes Memory & training counts.
 
 ## Next milestone
 
