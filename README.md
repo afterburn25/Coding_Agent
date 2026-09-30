@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **93 tests passing**.
+Current expected result: **95 tests passing**.
 
 ## API highlights
 
@@ -236,6 +236,12 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - approval state
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+## Self-development mode
+
+When the selected workspace is the Chat Nexus source tree, new and recovered agent tasks automatically receive a self-hosting context. It directs the agent to read the repository handoff/docs first, preserve working components, keep the active instance usable, avoid Git/GitHub delivery actions unless requested/approved, and require the isolated second-instance selftest before reporting a self-change complete.
+
+When coding readiness is available, the Local system drawer also exposes **Start self-development task**. It only pre-fills a safe self-development prompt; the user still sends it explicitly.
 
 ## llama.cpp runtime bootstrap
 
