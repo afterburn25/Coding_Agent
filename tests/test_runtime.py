@@ -32,6 +32,17 @@ class RuntimeManagerTests(unittest.TestCase):
         values.update(overrides)
         return ModelProfile(**values)
 
+    def test_bundled_runtime_is_preferred(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bundled = root / "runtime" / "llama"
+            bundled.mkdir(parents=True)
+            exe = bundled / ("llama-server.exe" if os.name == "nt" else "llama-server")
+            exe.write_text("bundled", encoding="utf-8")
+            cfg = AgentConfig(models=[])
+            manager = RuntimeManager(cfg, base_dir=root)
+            self.assertEqual(manager.discover_llama_server(), str(exe.resolve()))
+
     def test_health_url_removes_v1(self):
         self.assertEqual(
             RuntimeManager._health_url("http://127.0.0.1:8080/v1"),
