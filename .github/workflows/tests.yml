@@ -66,6 +66,21 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
+      - name: Build native Chat Nexus desktop app
+        shell: pwsh
+        run: ./packaging/build_windows.ps1
+
+      - name: Write build metadata
+        shell: pwsh
+        run: |
+          @"
+          Chat Nexus v0.6.0-dev
+          Commit: ${{ github.sha }}
+          Native desktop: .NET 8 WinForms / Microsoft WebView2
+          Bundled inference runtime: llama.cpp b11278 Vulkan x64
+          Installer: Inno Setup LZMA2 solid-compressed upgrade-aware EXE
+          "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
+
       - name: Build single-file Chat Nexus installer
         shell: pwsh
         run: |
