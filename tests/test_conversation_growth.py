@@ -112,6 +112,14 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertFalse(AgentOrchestrator.direct_image_generation_intent("upscale this picture"))
         self.assertEqual(ConversationManager.classify_intent("how was your day?"), "conversation")
 
+    def test_coding_model_bypass_is_limited_to_local_or_direct_image_work(self):
+        self.assertTrue(AgentOrchestrator.can_run_without_coding_model("hi"))
+        self.assertTrue(AgentOrchestrator.can_run_without_coding_model("generate a picture of a woman"))
+        self.assertTrue(AgentOrchestrator.can_run_without_coding_model("draw a cat in a garden"))
+        self.assertFalse(AgentOrchestrator.can_run_without_coding_model("make a cup of tea"))
+        self.assertFalse(AgentOrchestrator.can_run_without_coding_model("edit image C:/tmp/source.png"))
+        self.assertFalse(AgentOrchestrator.can_run_without_coding_model("fix this Python bug"))
+
 
 class KnowledgeMemoryTests(unittest.TestCase):
     def test_sourced_knowledge_keeps_provenance_and_is_reused(self):
