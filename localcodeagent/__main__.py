@@ -8,7 +8,7 @@ from .server import serve
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Local-first coding agent")
+    parser = argparse.ArgumentParser(description="Chat Nexus local-first AI coding agent")
     parser.add_argument("--workspace", default=".", help="Project directory the agent may access")
     parser.add_argument("--config", default="config.json", help="Path to agent config JSON")
     parser.add_argument("--host", default="127.0.0.1")
@@ -21,7 +21,7 @@ def main() -> None:
     config = load_config(config_path if config_path.exists() else None)
     runtime_root = config_path.parent if config_path.exists() else Path.cwd().resolve()
     web_root = Path(__file__).resolve().parent.parent / "web"
-    serve(config, workspace, args.host, args.port, web_root, runtime_root)
+    serve(config, workspace, args.host, args.port, web_root, runtime_root, config_path=config_path)
 
 
 if __name__ == "__main__":
