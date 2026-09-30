@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **90 tests passing**.
+Current expected result: **93 tests passing**.
 
 ## API highlights
 
@@ -236,6 +236,14 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - approval state
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+## llama.cpp runtime bootstrap
+
+Chat Nexus recognizes both the traditional `llama-server` executable and the newer unified `llama serve` command.
+
+When no managed llama.cpp runtime is found, Coding readiness shows platform-appropriate install commands that can be copied. Chat Nexus **does not execute package-manager installers automatically**. Current guidance includes Winget on Windows and supported Conda/Homebrew options on other platforms.
+
+After installation, Refresh re-runs discovery. Download/install a catalog GGUF, click **Use discovered models**, restart Chat Nexus, and the managed runtime can auto-launch that model when the router needs it.
 
 ## Explicit coding-model catalog
 
