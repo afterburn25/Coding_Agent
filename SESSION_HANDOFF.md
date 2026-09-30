@@ -44,7 +44,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **61 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **64 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -155,17 +155,17 @@ No image weights are downloaded automatically yet.
 - Subject profiles now apply saved references, preferred model, generation defaults, and assigned LoRAs automatically.
 - Image workspace can filter/use/enable/disable discovered LoRAs.
 - Image job errors are classified into stable codes with user-facing messages and collapsed technical details instead of raw exception strings.
+- Local mask editor now paints/erases/fills/inverts and uploads masks through the existing local image-upload route for `mask_path`.
+- Before/after workbench can compare a finished edit and reuse generated outputs as the next source image.
 
 ## Known gaps / next executable steps
 
 1. Use the Image workspace workflow manager to import and test real ComfyUI API-format workflows for the selected Qwen-Image-2.1 and FLUX.2 Klein local node stacks.
-2. Complete LoRA compatibility/version checks and inject selected multiple LoRAs into model-specific workflows.
-3. Add mask editor and dedicated before/after comparison UI.
-4. Add dedicated background-removal and upscaler adapters/workflows.
-5. Add WebSocket/SSE streaming for chat tokens, tool events, research events, and image-generation progress.
-6. Add persistent browser sessions and richer browser selectors/snapshots.
-7. Add local GitHub integration to the agent itself (clone/issues/PR/CI) behind explicit permissions.
-8. Add model-performance and research-outcome telemetry to improve automatic routing.
+2. Add dedicated background-removal and upscaler adapters/workflows.
+3. Add WebSocket/SSE streaming for chat tokens, tool events, research events, and image-generation progress.
+4. Add persistent browser sessions and richer browser selectors/snapshots.
+5. Add local GitHub integration to the agent itself (clone/issues/PR/CI) behind explicit permissions.
+6. Add model-performance and research-outcome telemetry to improve automatic routing.
 
 ## Testing command
 
@@ -173,4 +173,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `61 tests` passing.
+Expected at this checkpoint: `64 tests` passing.
