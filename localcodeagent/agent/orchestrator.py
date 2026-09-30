@@ -155,6 +155,23 @@ class AgentOrchestrator:
             args = {}
         return name, args
 
+    def _self_hosting_context(self) -> str:
+        root = self.checkpoints.workspace
+        if not (
+            (root / "localcodeagent" / "server.py").is_file()
+            and (root / "web" / "index.html").is_file()
+            and (root / "SESSION_HANDOFF.md").is_file()
+        ):
+            return ""
+        return (
+            "SELF-HOSTING MODE: You are working on Chat Nexus itself. "
+            "Treat README.md, PROJECT_STATUS.md, ARCHITECTURE.md, and SESSION_HANDOFF.md as the source of truth and inspect the relevant files before designing replacements. "
+            "Preserve working components and backward compatibility unless the user explicitly requests otherwise. "
+            "The currently running Chat Nexus instance must remain usable while you work; do not kill or overwrite its active runtime processes. "
+            "Do not create Git commits, push branches, open pull requests, or mutate remote GitHub state unless the user requested that delivery action and the normal approval gate permits it. "
+            "Before reporting a self-change complete, run the repository verification selected by Chat Nexus; for this source tree that verification includes the isolated second-instance selftest. "
+            "If verification fails, diagnose the failure, research when needed, repair, and retest rather than claiming success."
+        )
     def _task_context(self, task_id: str) -> None:
         self.tools.context["task_id"] = task_id
 
@@ -201,6 +218,8 @@ class AgentOrchestrator:
         provider = self._provider_for(profile)
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
+        self_hosting = self._self_hosting_context()
+        recovered_self_hosting = self._self_hosting_context()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -216,6 +235,8 @@ class AgentOrchestrator:
                 ),
             },
         ]
+        if recovered_self_hosting:
+            messages.append({"role": "system", "content": recovered_self_hosting})
         if task.research.get("guidance"):
             messages.append({
                 "role": "system",
