@@ -2,7 +2,15 @@
 
 ## Canonical design
 
-The approved Chat Nexus application shell is the chat-first concept selected on 2026-09-30.
+The approved Chat Nexus application shell is the chat-first concept selected on 2026-09-30, hosted in the **native ChatNexus.exe desktop window**.
+
+### Desktop hosting
+
+- Windows users launch `ChatNexus.exe`; do not make a browser tab the normal product experience.
+- The HTML/CSS/JS shell runs inside Windows WebView2 via the native desktop host.
+- A loopback backend may be used internally but should remain invisible implementation detail.
+- Normal desktop launch has an app/taskbar icon and standard native minimize/maximize/close behavior.
+- Keep `--server` only for developer/debug workflows.
 
 ### Layout
 
