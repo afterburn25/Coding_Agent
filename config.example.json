@@ -261,5 +261,6 @@
   "trainer_backend": "external",
   "trainer_command": "",
   "conversation_policy_mode": "permissive",
-  "ethical_temperature": 1
+  "ethical_temperature": 1,
+  "comfyui_start_on_image_request": true
 }

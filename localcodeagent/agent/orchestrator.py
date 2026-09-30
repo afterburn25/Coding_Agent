@@ -61,6 +61,16 @@ Use native Git/GitHub coding tools for delivery workflows when requested: inspec
 If build/tests fail after a change, diagnose the exact failure, research it when needed, patch, and retest instead of stopping at the first failed verification.
 """
 
+IMAGE_TOOL_NAMES = {
+    "generate_image",
+    "edit_image",
+    "inpaint_image",
+    "outpaint_image",
+    "remove_background",
+    "upscale_image",
+    "create_image_variations",
+}
+
 REVIEW_PROMPT = """You are the reviewer for a local coding agent. Review the supplied task and patch for correctness,
 regressions, missed requirements, security problems, and test gaps. Be concise and concrete. If you find no material issue,
 start the response with PASS. Otherwise start with FINDINGS and list the important issues. Do not invent files or behavior not
@@ -706,12 +716,29 @@ class AgentOrchestrator:
             f"Approval required to run {name} ({permission}). Approve or deny the pending action to continue this task.",
         )
 
+    def _emit_image_job_from_tool_result(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+        name: str,
+        result: str,
+    ) -> None:
+        if name not in IMAGE_TOOL_NAMES or result.startswith(("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
+            return
+        try:
+            payload = json.loads(result)
+            job = payload.get("job") if isinstance(payload, dict) else None
+            if isinstance(job, dict) and str(job.get("id") or ""):
+                self._safe_emit(callback, {"type": "image_job", "job": job})
+        except Exception:
+            pass
+
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
         event = {"name": name, "arguments": args, "result": result}
         session.tool_events.append(event)
         self._emit(session, "tool", tool={**event, "result": result[-12000:]})
+        self._emit_image_job_from_tool_result(session.event_callback, name, result)
         session.messages.append({
             "role": "tool",
             "tool_call_id": call.get("id", name),
@@ -1231,6 +1258,7 @@ class AgentOrchestrator:
         }
         self._safe_emit(event_callback, {"type": "model", "event": model_event})
         self._safe_emit(event_callback, {"type": "tool", "tool": tool_event})
+        self._emit_image_job_from_tool_result(event_callback, "generate_image", result)
 
         if result.startswith(("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
             content = result.split(":", 1)[-1].strip()

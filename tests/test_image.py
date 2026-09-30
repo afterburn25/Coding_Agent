@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from localcodeagent.image.catalog import discover_image_models
@@ -12,6 +14,7 @@ from localcodeagent.image.policy import ConsentStore, ImageSafetyPolicy
 from localcodeagent.image.library import ImageAssetLibrary
 from localcodeagent.image.manager import ImageManager
 from localcodeagent.image.router import ImageRouter
+from localcodeagent.image.runtime import ComfyUIRuntime
 from localcodeagent.image.types import ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
 
@@ -104,6 +107,50 @@ class ImagePolicyTests(unittest.TestCase):
             blocked, reason = policy.check("generate a naked minor")
             self.assertFalse(blocked)
             self.assertIn("minors", reason.lower())
+
+
+class ComfyRuntimeOnDemandTests(unittest.TestCase):
+    class _Backend:
+        endpoint = "http://127.0.0.1:8188"
+
+        def health(self):
+            return False, "connection refused"
+
+    def test_image_request_can_start_discoverable_comfyui_on_demand(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            comfy = root / "ComfyUI"
+            comfy.mkdir()
+            (comfy / "main.py").write_text("# test", encoding="utf-8")
+            config = SimpleNamespace(
+                comfyui_auto_start=False,
+                comfyui_start_on_image_request=True,
+                comfyui_dir=str(comfy),
+                comfyui_python=sys.executable,
+                comfyui_logs_dir=".agent/runtime",
+                comfyui_startup_timeout=10,
+                comfyui_extra_args=[],
+            )
+            runtime = ComfyUIRuntime(base_dir=root, backend=self._Backend(), config=config)
+            with patch.object(runtime, "start") as start:
+                runtime.ensure_ready()
+                start.assert_called_once()
+
+    def test_missing_comfyui_reports_setup_required(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = SimpleNamespace(
+                comfyui_auto_start=False,
+                comfyui_start_on_image_request=True,
+                comfyui_dir=str(root / "missing-ComfyUI"),
+                comfyui_python=sys.executable,
+                comfyui_logs_dir=".agent/runtime",
+                comfyui_startup_timeout=10,
+                comfyui_extra_args=[],
+            )
+            runtime = ComfyUIRuntime(base_dir=root, backend=self._Backend(), config=config)
+            with self.assertRaisesRegex(RuntimeError, "no local ComfyUI checkout"):
+                runtime.ensure_ready()
 
 
 class WorkflowTests(unittest.TestCase):

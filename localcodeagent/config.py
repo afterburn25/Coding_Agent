@@ -120,6 +120,7 @@ class AgentConfig:
     image_workflows_dir: str = "workflows/image"
     comfyui_endpoint: str = "http://127.0.0.1:8188"
     comfyui_auto_start: bool = False
+    comfyui_start_on_image_request: bool = True
     comfyui_dir: str = "ComfyUI"
     comfyui_python: str = ""
     comfyui_extra_args: list[str] = field(default_factory=list)
@@ -296,6 +297,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_workflows_dir = str(raw.get("image_workflows_dir", cfg.image_workflows_dir))
     cfg.comfyui_endpoint = str(raw.get("comfyui_endpoint", cfg.comfyui_endpoint))
     cfg.comfyui_auto_start = bool(raw.get("comfyui_auto_start", cfg.comfyui_auto_start))
+    cfg.comfyui_start_on_image_request = bool(raw.get("comfyui_start_on_image_request", cfg.comfyui_start_on_image_request))
     cfg.comfyui_dir = str(raw.get("comfyui_dir", cfg.comfyui_dir))
     cfg.comfyui_python = str(raw.get("comfyui_python", cfg.comfyui_python))
     cfg.comfyui_extra_args = [str(x) for x in raw.get("comfyui_extra_args", cfg.comfyui_extra_args)]

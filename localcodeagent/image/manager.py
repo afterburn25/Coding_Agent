@@ -279,6 +279,7 @@ class ImageManager:
         stopped=[]
         try:
             job.started_at=time.time(); job.state="loading_model"; job.stage="validating workflow"; job.progress=0.03
+            self._save_jobs()
             workflow_name=profile.workflow_for(job.operation)
             if not workflow_name:
                 raise RuntimeError(f"Image model '{profile.id}' has no ComfyUI API workflow configured for {job.operation}.")
@@ -299,14 +300,17 @@ class ImageManager:
                 missing=[c["key"] for c in verification.get("components",[]) if c.get("required") and not c.get("ok")]
                 raise RuntimeError(f"Image model '{profile.id}' is not fully installed. Missing/invalid: {', '.join(missing) or 'required components'}")
 
-            job.stage="loading model"; job.progress=0.05
+            job.stage="loading model"; job.progress=0.08
+            self._save_jobs()
             if self.runtime is not None:
                 self.runtime.refresh_hardware(); job.vram_before_gb=self.runtime.hardware.free_vram_gb
                 required=max(0.0, profile.estimated_vram_gb)
                 if required and self.runtime.hardware.free_vram_gb < required:
                     stopped=self.runtime.release_managed_models_for_vram(required_vram_gb=required, mode=getattr(self.config,"image_resource_mode","balanced"))
             self._save_jobs()
+            job.stage="starting ComfyUI"; job.progress=max(job.progress,0.10); self._save_jobs()
             self.backend_runtime.ensure_ready()
+            job.stage="preparing workflow"; job.progress=max(job.progress,0.12); self._save_jobs()
             if profile.required_nodes:
                 info=self.backend.inspect().get("object_info", {})
                 available=set(info) if isinstance(info, dict) else set()
@@ -320,7 +324,7 @@ class ImageManager:
             unresolved=rendered_status.get("unresolved_tokens",[])
             if unresolved:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
-            job.state="generating"; job.stage="generating"; job.progress=0.15
+            job.state="generating"; job.stage="generating"; job.progress=0.20
             job.backend_job_id=self.backend.submit(workflow); self._save_jobs()
             deadline=time.monotonic()+max(30, int(getattr(self.config,"image_job_timeout",900)))
             while time.monotonic()<deadline:
@@ -332,6 +336,7 @@ class ImageManager:
                 job.progress=max(job.progress, float(state.get("progress",0.25))); self._save_jobs(); time.sleep(0.75)
             else:
                 raise TimeoutError("Timed out waiting for ComfyUI image generation")
+            job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs()
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]
             job.state="finished"; job.stage="finished"; job.progress=1.0; job.finished_at=time.time()

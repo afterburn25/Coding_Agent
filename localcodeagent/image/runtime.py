@@ -86,11 +86,25 @@ class ComfyUIRuntime:
                 self.status.healthy = True
                 self.status.state = "running" if self._process else "external"
                 return
-            if not getattr(self.config, "comfyui_auto_start", False):
+            auto_start = bool(getattr(self.config, "comfyui_auto_start", False))
+            start_on_request = bool(getattr(self.config, "comfyui_start_on_image_request", True))
+            if not auto_start and not start_on_request:
                 self.status.healthy = False
                 self.status.state = "external_offline"
                 self.status.error = detail[:300]
                 raise RuntimeError(f"ComfyUI backend is offline: {detail}")
+
+            if not auto_start and start_on_request:
+                directory, python = self.discover()
+                if not directory or not python:
+                    self.status.healthy = False
+                    self.status.state = "setup_required"
+                    self.status.error = (
+                        "ComfyUI is offline and no local ComfyUI checkout was found. "
+                        "Install/configure ComfyUI or set comfyui_dir to a checkout containing main.py."
+                    )
+                    raise RuntimeError(self.status.error)
+
             self.start()
 
     def start(self) -> None:
