@@ -73,7 +73,7 @@
 
 ### Tests
 
-`75` automated tests passing.
+`78` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,12 +82,14 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 75 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 78 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
 - Live SSE chat streaming now carries token/model/tool/task/research/approval events to the primary UI.
 - OpenAI-compatible streamed tool calls are reassembled before execution; non-SSE JSON endpoints fall back safely.
+- Isolated self-update validator runs the full tests and launches a second resource-safe Chat Nexus process before self-changes are considered verified.
+- CI regression coverage launches the isolated second instance and probes status + main/Image/Research UIs.
 
 ### Important current limitations
 
@@ -110,7 +112,6 @@
 
 Move directly toward **v0.6 self-hosting/dogfooding**:
 1. extend live streaming to dedicated long-running image/browser workflows where useful
-2. launch an isolated second Chat Nexus instance for self-update smoke tests before accepting self-modifications
-3. run real dogfood tasks against the Chat Nexus repository and harden failures found there
+2. run real dogfood tasks against the Chat Nexus repository and harden failures found there
 4. add model-performance/research-outcome telemetry to improve automatic routing
 5. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
