@@ -33,7 +33,12 @@ function renderReadiness(r){
   const deep=catalogById['qwen3-coder-30b-a3b-q4-k-m'];
   const missingStarter=starter&&!starter.verified;
   const missingDeep=deep&&!deep.verified;
-  const quickSetup=!ready&&(missingStarter||missingDeep)?`<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Chat Nexus already includes the llama.cpp runtime.</small><div class="first-run-actions">${missingStarter?`<button class="setup-primary" data-model-plan="starter" type="button">Install recommended 14B <span>~${esc(starter.size_gb)} GB</span></button>`:''}${(missingStarter||missingDeep)?`<button class="setup-secondary" data-model-plan="full" type="button">Install full 14B + 30B stack <span>~${esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))} GB</span></button>`:''}</div><small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>`:'';
+  let quickSetup='';
+  if(missingStarter){
+    quickSetup=`<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Chat Nexus already includes the llama.cpp runtime.</small><div class="first-run-actions"><button class="setup-primary" data-model-plan="starter" type="button">Install recommended 14B <span>~${esc(starter.size_gb)} GB</span></button>${missingDeep?`<button class="setup-secondary" data-model-plan="full" type="button">Install full 14B + 30B stack <span>~${esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))} GB</span></button>`:''}</div><small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>`;
+  }else if(missingDeep){
+    quickSetup=`<div class="first-run-setup optional-deep"><strong>${ready?'Everyday coding is ready':'Complete the coding stack'}</strong><small>The 14B coder is installed. Add the 30B coder for difficult debugging, architecture work, and review.</small><div class="first-run-actions"><button class="setup-secondary" data-model-plan="deep" type="button">Add 30B deep coder <span>~${esc(deep.size_gb)} GB</span></button></div></div>`;
+  }
   const catalog=(r.catalog||[]).map(m=>{const job=jobsByModel[m.id];const pct=job?Math.round(Number(job.progress||0)*100):0;const action=m.verified?'<span class="catalog-installed">✓ Installed</span>':m.installed?`<button class="mini-button catalog-repair" data-catalog="${esc(m.id)}">Repair / verify</button>`:`<button class="mini-button catalog-install" data-catalog="${esc(m.id)}">Install</button>`;const progress=job?`<div class="catalog-progress"><span style="width:${pct}%"></span></div><small>${esc(job.state)} · ${pct}% · ${formatBytes(job.bytes_done||0)} / ${formatBytes(job.bytes_total||0)}</small><button class="mini-button catalog-cancel" data-job="${esc(job.id)}">Cancel</button>`:'';return `<div class="catalog-card"><div class="catalog-head"><strong>${esc(m.title)}</strong><span>${m.verified?'verified':esc(m.source_type)}</span></div><small>${esc(m.size_gb)} GB · ${esc(m.license)} · ${esc((m.roles||[]).join(', '))}</small><p>${esc(m.description)}</p><p class="hardware-note">${esc(m.hardware_note)}</p>${progress||`<div class="catalog-action">${action}</div>`}</div>`;}).join('');
   const catalogPanel=(r.catalog||[]).length?`<details class="catalog-panel"><summary>Advanced model downloads <span>${r.catalog.length}</span></summary>${catalog}</details>`:'';
   panel.innerHTML=`<div class="readiness-head ${cls}"><span>${esc(state)}</span><small>${esc((r.covered_roles||[]).join(', ')||'no active coding roles')}</small></div>${quickSetup}${rows||'<div class="muted">No model profiles configured.</div>'}${runtimeSetup}${setup}${catalogPanel}${rec?`<ul class="readiness-recs">${rec}</ul>`:''}${r.self_hosting_tree?`<div class="selfhost-line">${selfHost?'✓':'○'} Chat Nexus self-hosting workspace</div><button id="startSelfDevelopment" class="mini-button selfhost-start" type="button" ${ready?'':'disabled'}>${ready?'Start self-development task':'Install/configure a coding model first'}</button>`:''}`;
@@ -63,10 +68,10 @@ async function configureDownloadedModels({announce=true}={}){
   const res=await fetch('/api/readiness/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not save model setup');if(announce)addMessage('assistant',data.message||'Coding models configured. Restart Chat Nexus to load the new routing setup.');await loadReadiness();return data;
 }
 async function installModelPlan(kind){
-  const ids=kind==='full'?['qwen3-14b-q4-k-m','qwen3-coder-30b-a3b-q4-k-m']:['qwen3-14b-q4-k-m'];
+  const ids=kind==='full'?['qwen3-14b-q4-k-m','qwen3-coder-30b-a3b-q4-k-m']:kind==='deep'?['qwen3-coder-30b-a3b-q4-k-m']:['qwen3-14b-q4-k-m'];
   const catalog=Object.fromEntries((lastReadiness?.catalog||[]).map(m=>[m.id,m]));
   const pending=ids.filter(id=>!catalog[id]?.verified);
-  const label=kind==='full'?'the full 14B + 30B coding stack':'the recommended 14B coding model';
+  const label=kind==='full'?'the full 14B + 30B coding stack':kind==='deep'?'the 30B deep-reasoning coder':'the recommended 14B coding model';
   const bytes=pending.reduce((sum,id)=>sum+Number(catalog[id]?.size_bytes||0),0);
   if(!pending.length){try{await configureDownloadedModels();}catch(e){addMessage('assistant',`Model setup error: ${e.message}`);}return;}
   if(!confirm(`Install ${label}? This will download approximately ${formatBytes(bytes)} and verify each model before configuration.`))return;
@@ -81,7 +86,8 @@ async function installModelPlan(kind){
       }
     }
     const configured=await configureDownloadedModels({announce:false});
-    addMessage('assistant',`${kind==='full'?'14B and 30B models':'14B model'} installed, checksum verified, and routing configured. Restart Chat Nexus once to activate the new model configuration.`);
+    const installedLabel=kind==='full'?'14B and 30B models':kind==='deep'?'30B deep coder':'14B model';
+    addMessage('assistant',`${installedLabel} installed, checksum verified, and routing configured. Restart Chat Nexus once to activate the new model configuration.`);
   }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
 }
 async function pollCatalogInstall(jobId){
