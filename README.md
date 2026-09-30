@@ -39,7 +39,7 @@ The installer uses a stable application identity so a later installer can detect
 - generated `data\`
 - the existing self-development `Source\.git` workspace and local edits/task state
 
-The installer is per-user under Local AppData, creates Start Menu shortcuts, optionally creates a desktop shortcut, uses LZMA2 solid compression, and acts as a small bootstrapper for the default coding stack. During a normal fresh install it downloads Qwen3 14B and Qwen3-Coder 30B-A3B directly into `models\` using the installer progress UI and verifies each file with its pinned SHA-256 before setup completes. During an update it checks the canonical model files first and downloads only the missing or untrusted one(s). CI performs a real fresh install and in-place update with model downloading disabled only for the smoke-test process, launches the installed app self-test, and confirms mutable state survives.
+The installer is per-user under Local AppData, creates Start Menu shortcuts, optionally creates a desktop shortcut, uses LZMA2 solid compression, and acts as a small bootstrapper for the default coding stack. During a normal fresh install it downloads Qwen3 14B and Qwen3-Coder 30B-A3B directly into `models\`, verifies each file with its pinned SHA-256, and uses the built-in install progress bar for the entire setup. When model downloading begins, a second progress bar appears underneath for the current model; it fills for 14B, resets for 30B, and shows downloaded MB while the main bar continues tracking the whole install/update. During an update the installer checks canonical model files first and downloads only missing or untrusted ones. CI performs a real fresh install and in-place update with model downloading disabled only for the smoke-test process, launches the installed app self-test, and confirms mutable state survives.
 
 The portable ZIP remains a secondary development/recovery artifact.
 
@@ -63,7 +63,7 @@ The intended two-model coding setup is:
 - **Qwen3 14B Q4_K_M** — utility, fast coder, and normal primary coding.
 - **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — deep reasoning and reviewer work.
 
-The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. If the 30B GGUF is not installed or cannot run, deep tasks can fall back to the runnable 14B primary coder instead of failing the task.
+The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. Routing now accounts for memory that will be freed when the resident 14B process is stopped before a 30B switch, so temporary RAM pressure from 14B does not incorrectly disqualify 30B. If 30B still cannot start, Auto mode falls back to the runnable 14B primary coder instead of terminating the task; the same fallback applies to reviewer activation.
 
 The Windows package bundles llama.cpp itself but not the GGUF bytes inside the installer EXE. The installer downloads the default 14B + 30B coding stack during setup/update when those verified files are missing, keeping the setup EXE small while leaving the installed application ready for coding.
 
@@ -72,7 +72,8 @@ The Windows package bundles llama.cpp itself but not the GGUF bytes inside the i
 - ChatGPT-style local chat UI.
 - Automatic model roles: utility, fast coder, primary coder, deep reasoner, reviewer, vision.
 - Automatic escalation when tasks become harder or repeated attempts fail.
-- RAM/VRAM-aware model choice.
+- RAM/VRAM-aware model choice, including memory that will be reclaimed when the currently resident model is replaced.
+- Automatic activation fallback in Auto mode when a preferred deep/reviewer model cannot start.
 - Outcome-aware candidate ranking from local verification/review history once enough samples exist.
 - Managed llama.cpp model start/health/stop/recovery.
 - GGUF inventory.
@@ -236,7 +237,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **119 tests passing**.
+Current expected result: **123 tests passing**.
 
 ## API highlights
 
@@ -286,7 +287,7 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - research preflight state
 - approval state
 
-Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are now retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
 ## Self-development mode
 
@@ -391,7 +392,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **119 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **123 passing tests**.
 
 ## Development state
 

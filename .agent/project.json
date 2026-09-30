@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 119,
-  "next_milestone": "Run the new installer/update on the dogfood Windows machine, confirm 14B+30B bootstrap downloads and first real self-development task, then harden observed failures",
+  "test_checkpoint": 123,
+  "next_milestone": "Dogfood the validated dual-progress installer, confirm real 14B→30B switching/offload and automatic fallback, then harden observed runtime behavior",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -28,7 +28,17 @@
     "model_download_progress": "Inno Setup native install progress",
     "model_download_hash_verification": "SHA-256",
     "default_model_download_bytes": 27558441344,
-    "default_model_download_gib": 25.66
+    "default_model_download_gib": 25.66,
+    "progress_ui": {
+      "overall": "Inno Setup native install/update progress including ExternalSize model downloads",
+      "model": "Second per-model progress bar under overall bar",
+      "model_sequence": [
+        "Qwen3 14B Q4_K_M",
+        "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
+      ],
+      "resets_between_models": true,
+      "shows_downloaded_mb": true
+    }
   },
   "first_run_model_setup": {
     "starter": "Install recommended 14B",
@@ -57,5 +67,11 @@
     "weight": 20,
     "content_free": true,
     "api": "GET /api/model-telemetry"
+  },
+  "model_switching": {
+    "accounts_for_reclaimable_resident_memory": true,
+    "auto_activation_fallback": true,
+    "reviewer_activation_fallback": true,
+    "durable_stream_error_recovery": true
   }
 }

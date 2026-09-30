@@ -197,6 +197,20 @@
 - Windows native desktop/installer fresh-install + update-preservation validation: **green**.
 - Next: run this installer interactively on the dogfood Windows machine, confirm real 14B/30B download progress and model readiness, then start the first real Chat Nexus-on-Chat Nexus development task.
 
+## v0.6 model-switch + dual installer progress checkpoint
+
+- Resource-fit decisions now include RAM/VRAM that will be reclaimed when an older managed model is about to be stopped by the residency limit. This directly fixes the observed case where the 30B model was rejected at **30.0 GB estimated RAM vs 29.3 GB currently available** while 14B was still resident.
+- With `max_resident_models=1`, routing can select 30B using the effective post-switch memory state; llama.cpp still performs the real CPU/GPU offload fit at startup.
+- Auto mode model activation now has a second safety net: if the preferred deep/reviewer model still fails to start, Chat Nexus excludes that failed candidate and activates the next runnable model (normally 14B) instead of killing the task.
+- Reviewer activation is inside the protected fallback/error path, so a 30B reviewer startup problem cannot end the SSE stream before a final coding result.
+- The chat client retains backend SSE `error` payloads. If a connection closes with no final result, it queries `GET /api/tasks` and displays the durable task error/interrupted/waiting state rather than the old generic “stream ended before a final result” message.
+- Windows setup keeps the native Inno Setup progress bar as the **overall install/update** bar. Because the model entries declare `ExternalSize`, those downloads contribute to the main installation progress.
+- A second `TNewProgressBar` appears under the main bar only while coding models download. It reads the active `models\*.tmp` download size, shows current MB/total MB, fills for **Qwen3 14B (model 1 of 2)**, resets for **Qwen3-Coder 30B (model 2 of 2)**, then ends at “Coding model downloads complete.”
+- Feature commit: `f6ffb28` — Harden model switching and installer progress.
+- Unit checkpoint: **123/123 tests passing**.
+- Windows installer/native desktop validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
+- Next: install/update the validated dogfood build on the Windows machine, confirm the two installer progress bars with real model downloads, then run a real deep/reviewer task to measure actual 30B offload behavior.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -369,4 +383,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `119 tests` passing.
+Expected at this checkpoint: `123 tests` passing.
