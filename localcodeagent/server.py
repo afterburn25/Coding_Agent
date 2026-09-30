@@ -275,8 +275,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/image/generate":
                 from .image.types import ImageRequest
                 allowed = set(ImageRequest.__dataclass_fields__)
-                request = ImageRequest(**{k: v for k, v in body.items() if k in allowed})
-                job = self.state.images.create_job(request, real_person=bool(body.get("real_person", False)))
+                try:
+                    request = ImageRequest(**{k: v for k, v in body.items() if k in allowed})
+                    job = self.state.images.create_job(request, real_person=bool(body.get("real_person", False)))
+                except PermissionError as exc:
+                    self._json({"error": str(exc)}, 403)
+                    return
+                except (ValueError, TypeError, RuntimeError) as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self._json({"ok": True, "job": job.as_dict()})
                 return
 
