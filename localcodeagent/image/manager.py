@@ -10,6 +10,7 @@ from typing import Any
 
 from .catalog import discover_image_models
 from .comfyui import ComfyUIBackend
+from .errors import describe_image_error
 from .policy import ConsentStore, ImageSafetyPolicy
 from .library import ImageAssetLibrary
 from .profiles import SubjectProfileStore
@@ -79,7 +80,10 @@ class ImageManager:
                 job=ImageJob(**row)
                 if job.state in {"loading_model", "generating", "refining", "upscaling"}:
                     job.state="failed"
-                    job.error="Application restarted while this image job was active."
+                    job.error_code="application_restarted"
+                    job.error_message="The application restarted while this image job was active."
+                    job.error=job.error_message
+                    job.technical_details="The persisted job was in an active state when Local Code Agent started."
                 self._jobs[job.id]=job
         except Exception:
             pass
@@ -162,6 +166,17 @@ class ImageManager:
         assigned=[]
         for item in list(subject.get("loras") or []):
             assigned.append({"name": item} if isinstance(item, str) else item)
+        legacy_lora=subject.get("assigned_lora")
+        if legacy_lora:
+            if isinstance(legacy_lora, dict):
+                legacy=dict(legacy_lora)
+            else:
+                legacy={"name": str(legacy_lora)}
+            if subject.get("lora_version") and not legacy.get("version"):
+                legacy["version"]=str(subject.get("lora_version"))
+            if subject.get("lora_strength") is not None and legacy.get("strength") is None:
+                legacy["strength"]=float(subject.get("lora_strength"))
+            assigned.append(legacy)
         if assigned:
             request.loras=[*assigned, *request.loras]
         defaults=subject.get("generation_defaults") or {}
@@ -246,11 +261,15 @@ class ImageManager:
             return
         tokens=set(workflow_status.get("unresolved_tokens") or [])
         for idx,_lora in enumerate(resolved_loras,1):
-            required_token=f"lora_{idx}_name"
-            if required_token not in tokens:
+            name_token=f"lora_{idx}_name"
+            strength_token=f"lora_{idx}_strength"
+            missing=[token for token in (name_token, strength_token) if token not in tokens]
+            if missing:
+                placeholders=", ".join(f"${{{token}}}" for token in missing)
                 raise RuntimeError(
-                    f"Workflow '{workflow_name}' does not expose LoRA slot {idx} (${{{required_token}}}). "
-                    "Import an API workflow with enough LoRA template slots or remove that LoRA selection."
+                    f"Workflow '{workflow_name}' does not expose complete LoRA slot {idx} ({placeholders}). "
+                    "Import an API workflow with both name and strength template slots for every selected LoRA, "
+                    "or remove that LoRA selection."
                 )
 
     def _run_job(self, job_id: str) -> None:
@@ -320,7 +339,10 @@ class ImageManager:
                 self.runtime.refresh_hardware(); job.vram_after_gb=self.runtime.hardware.free_vram_gb
             self._append_history(job, profile)
         except Exception as exc:
-            job.state="failed"; job.stage="failed"; job.error=f"{type(exc).__name__}: {exc}"; job.finished_at=time.time()
+            error=describe_image_error(exc)
+            job.state="failed"; job.stage="failed"
+            job.error_code=error["code"]; job.error_message=error["message"]; job.error=job.error_message
+            job.technical_details=error["technical_details"]; job.finished_at=time.time()
         finally:
             self._save_jobs()
             if stopped and bool(getattr(self.config,"image_restore_chat_model",True)) and self.runtime is not None:
