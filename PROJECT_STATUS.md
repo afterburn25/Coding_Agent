@@ -57,6 +57,7 @@
 - ComfyUI API-workflow validation before model loading.
 - Required ComfyUI node checks before generation.
 - Safe Image Model Manager import of validated ComfyUI API workflows.
+- Structured image error reporting with friendly messages and expandable technical details.
 - Main-chat inline image job cards with polling and Edit/Variation/Upscale/Save controls.
 - Validated per-operation ComfyUI API-workflow import from the Image workspace.
 - Atomic workflow replacement: invalid/UI-format imports never overwrite the last valid API workflow.
@@ -66,10 +67,11 @@
 - Explicit multi-LoRA workflow slots (`${lora_N_name}` / `${lora_N_strength}`) with early validation before GPU loading.
 - Subject profiles now automatically apply saved references, preferred model, generation defaults, and assigned LoRAs.
 - Image workspace LoRA filter, one-click selection, and enable/disable controls.
+- Structured image error classification with friendly messages and separate technical details for CUDA OOM, backend, model/VAE, LoRA, workflow, dependency, disk, checkpoint, and timeout failures.
 
 ### Tests
 
-`56` automated tests passing.
+`61` automated tests passing.
 
 ### Important current limitations
 
