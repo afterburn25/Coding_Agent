@@ -49,3 +49,9 @@ Likely credentials/secrets are redacted from research queries before network use
 - `none`
 
 Research cache/session data lives under `.agent/research` by default and is local to the workspace.
+
+## Environment evidence
+
+The preflight reads project manifests plus Python distribution metadata from the agent runtime without importing package modules or executing project code. Runtime package evidence is labeled separately because a project-specific virtual environment may differ.
+
+Generic GitHub search results are deliberately not assumed to be official upstream repositories; authority is promoted only when stronger project-specific evidence establishes that relationship.
