@@ -179,7 +179,7 @@ class ConversationManager:
 
     @staticmethod
     def image_generation_intent(text: str) -> bool:
-        t = re.sub(r"\\s+", " ", str(text or "").lower()).strip()
+        t = re.sub(r"\s+", " ", str(text or "").lower()).strip()
         if not t:
             return False
 
@@ -189,16 +189,16 @@ class ConversationManager:
             "upscale", "remove background", "replace background", "variation of",
         )):
             return False
-        if re.search(r"\\b(?:this|my|attached|uploaded|existing|source)\\s+(?:image|photo|picture)\\b", t):
+        if re.search(r"\b(?:this|my|attached|uploaded|existing|source)\s+(?:image|photo|picture)\b", t):
             return False
 
         # Natural requests often put politeness before the actual generation verb.
         request_prefix = re.compile(
-            r"^(?:hey(?:,)?\\s+|please(?:,)?\\s+|"
-            r"(?:can|could|would|will)\\s+you\\s+|"
-            r"i\\s+want\\s+you\\s+to\\s+|"
-            r"i\\s+would\\s+like\\s+you\\s+to\\s+|"
-            r"i'd\\s+like\\s+you\\s+to\\s+)"
+            r"^(?:hey(?:,)?\s+|please(?:,)?\s+|"
+            r"(?:can|could|would|will)\s+you\s+|"
+            r"i\s+want\s+you\s+to\s+|"
+            r"i\s+would\s+like\s+you\s+to\s+|"
+            r"i'd\s+like\s+you\s+to\s+)"
         )
         while True:
             stripped = request_prefix.sub("", t, count=1).strip()
@@ -221,14 +221,14 @@ class ConversationManager:
         )
 
         def contains_any(terms: tuple[str, ...]) -> bool:
-            return any(re.search(rf"\\b{re.escape(term)}\\b", t) for term in terms)
+            return any(re.search(rf"\b{re.escape(term)}\b", t) for term in terms)
 
         if contains_any(non_image_outputs):
             return False
-        if any(re.match(rf"^{verb}\\b", t) for verb in strong_visual_verbs):
+        if any(re.match(rf"^{verb}\b", t) for verb in strong_visual_verbs):
             return True
         return (
-            any(re.match(rf"^{verb}\\b", t) for verb in visual_verbs)
+            any(re.match(rf"^{verb}\b", t) for verb in visual_verbs)
             and contains_any(visual_terms)
         )
 
