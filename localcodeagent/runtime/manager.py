@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from ..config import AgentConfig, ModelProfile
 from .hardware import HardwareSnapshot, detect_hardware
+from .catalog import CodingModelCatalogManager
 
 
 @dataclass(slots=True)
@@ -63,6 +64,7 @@ class RuntimeManager:
         self.models_dir = self._resolve(config.models_dir)
         self.logs_dir = self._resolve(config.runtime_logs_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.model_catalog = CodingModelCatalogManager(self.models_dir)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.hardware: HardwareSnapshot = detect_hardware()
         self._managed: dict[str, _ManagedProcess] = {}
@@ -525,4 +527,6 @@ class RuntimeManager:
             "runtimes": self.statuses(probe_external=probe_external),
             "max_resident_models": self.config.max_resident_models,
             "runtime_auto_start": self.config.runtime_auto_start,
+            "catalog": self.model_catalog.catalog(),
+            "install_jobs": self.model_catalog.jobs(),
         }
