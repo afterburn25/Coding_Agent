@@ -84,7 +84,7 @@ class ModelStreamingTests(unittest.TestCase):
             provider.complete_stream(messages=[{"role": "user", "content": "hi"}])
 
         self.assertEqual(captured["payload"]["max_tokens"], 777)
-        self.assertEqual(captured["payload"]["temperature"], 1.0)
+        self.assertEqual(captured["payload"]["temperature"], 0.2)
 
     def test_provider_uses_profile_temperature(self):
         profile = ModelProfile(

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from localcodeagent.agent.orchestrator import AgentOrchestrator
 from localcodeagent.config import default_config, load_config
 from localcodeagent.image.policy import ConsentStore, ImageSafetyPolicy
 
@@ -12,7 +13,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ConversationPolicyTests(unittest.TestCase):
     def test_default_policy_is_permissive(self):
-        self.assertEqual(default_config().conversation_policy_mode, "permissive")
+        cfg = default_config()
+        self.assertEqual(cfg.conversation_policy_mode, "permissive")
+        self.assertEqual(cfg.ethical_temperature, 1.0)
+        self.assertEqual(cfg.models[0].temperature, 0.2)
+        self.assertEqual(cfg.models[1].temperature, 0.2)
+
+    def test_generic_model_refusal_is_detected_for_permissive_retry(self):
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I can't generate or describe explicit content. Let's talk about something else. What would you like to discuss?"
+        ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I can't create that because it violates ethical guidelines. Let's focus on something more constructive."
+        ))
+        self.assertFalse(AgentOrchestrator.generic_topic_refusal(
+            "Non-consensual intimate imagery is blocked by policy."
+        ))
+
+    def test_policy_prompt_uses_ethical_temperature(self):
+        source = (ROOT / "localcodeagent" / "agent" / "orchestrator.py").read_text(encoding="utf-8")
+        self.assertIn("Ethical temperature:", source)
+        self.assertIn("Maximum conversational permissiveness is requested", source)
+        self.assertIn("generic_refusal_retry", source)
 
     def test_invalid_policy_falls_back_to_permissive(self):
         with tempfile.TemporaryDirectory() as td:
@@ -40,6 +62,9 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertIn('path == "/api/policy/mode"', server)
         self.assertIn("set_conversation_policy_mode", server)
         self.assertIn("/api/policy/mode", app)
+        self.assertIn("ethicalTemperature", app)
+        self.assertIn("ethical_temperature", server)
+        self.assertIn('id="ethicalTemperature"', page)
         self.assertIn('value="permissive"', page)
         self.assertIn('value="balanced"', page)
         self.assertIn('value="strict"', page)
