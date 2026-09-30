@@ -1,6 +1,6 @@
-# Local Code Agent
+# Chat Nexus
 
-A local-first ChatGPT-style coding workstation with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
+Chat Nexus is a local-first ChatGPT-style coding workstation with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
 
 **GitHub source of truth:** `afterburn25/Coding_Agent`
 
@@ -11,6 +11,20 @@ Future development sessions should begin with `README.md`, `PROJECT_STATUS.md`, 
 `0.5.0-dev`
 
 The stable coding workflow remains intact while v0.5 adds repository-first research intelligence, automatic verification repair/retest cycles, and hardens the local-image workflow.
+
+## Chat Nexus identity and v0.6 UI
+
+The product name is **Chat Nexus**. The GitHub repository remains `afterburn25/Coding_Agent` as the development source of truth.
+
+The canonical v0.6 desktop/web shell is chat-first:
+- slim left navigation for Chat / Projects / Models / Research / Images / Tools / Settings
+- center conversation workspace with automatic model routing
+- right utility rail with **Code Diff / Tasks / Terminal** tabs
+- official cyan → blue → violet orbital **CN** emblem
+- dark navy UI with restrained neon accents
+- local-system details remain available without dominating the chat experience
+
+See `docs/UI_DIRECTION.md` before changing the primary application shell.
 
 ## Core coding-agent capabilities
 

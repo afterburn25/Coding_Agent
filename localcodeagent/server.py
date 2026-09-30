@@ -29,7 +29,7 @@ from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 
 
-VERSION = "0.5.0-dev"
+VERSION = "0.6.0-dev"
 
 
 class AppState:

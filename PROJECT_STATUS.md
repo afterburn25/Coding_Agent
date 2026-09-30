@@ -1,6 +1,6 @@
 # Project Status
 
-## Active version: 0.5.0-dev — Research Intelligence + Local Image Workflow
+## Active version: 0.6.0-dev — Chat Nexus Self-Hosting UI
 
 ### Stable capabilities retained from v0.1–v0.3
 

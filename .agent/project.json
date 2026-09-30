@@ -1,9 +1,10 @@
 {
-  "name": "Local Code Agent",
-  "version": "0.5.0-dev",
+  "name": "Chat Nexus",
+  "version": "0.6.0-dev",
   "default_model_mode": "auto",
   "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
   "source_of_truth": "afterburn25/Coding_Agent",
   "test_checkpoint": 64,
-  "next_milestone": "Complete v0.5 research/image workflows and streaming"
+  "next_milestone": "Self-host Chat Nexus: streaming, recovery, isolated self-update validation, and native GitHub coding actions",
+  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo"
 }

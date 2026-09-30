@@ -1,4 +1,13 @@
-# Session Handoff — Coding_Agent
+# Session Handoff — Chat Nexus / Coding_Agent
+
+## Canonical product/UI identity
+
+- Product name: **Chat Nexus**.
+- Repository/source of truth: `afterburn25/Coding_Agent`.
+- Official mark: orbital cyan/blue/violet **CN** emblem at `web/assets/chat-nexus-emblem.png`.
+- Canonical primary UI: chat-first center pane, slim left navigation, and right **Code Diff / Tasks / Terminal** utility rail.
+- Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
+- UI details are documented in `docs/UI_DIRECTION.md`.
 
 ## Source of truth
 
@@ -40,7 +49,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 ## Current development baseline
 
 - Stable baseline through v0.3 coding workflow.
-- Active branch/worktree is now v0.5 development.
+- Active branch/worktree is now v0.6 Chat Nexus/self-hosting development.
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
