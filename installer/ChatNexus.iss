@@ -58,6 +58,7 @@ Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 ; Seed the self-development workspace only when it does not already exist.
 ; Existing Source/.git plus local edits are preserved during upgrades.
 Source: "..\dist\ChatNexus\Source\*"; DestDir: "{app}\Source"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
+Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
 
 [Dirs]
 Name: "{app}\models"
