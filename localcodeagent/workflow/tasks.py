@@ -29,6 +29,8 @@ class TaskRecord:
     error: str = ""
     research: dict[str, Any] = field(default_factory=dict)
     reverted: bool = False
+    interrupted_from: str = ""
+    recovery_count: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,10 +53,24 @@ class TaskStore:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
+            normalized = False
             for item in raw.get("tasks", []):
                 task = TaskRecord(**item)
+                # In-memory model/tool-call state cannot survive a process restart. Mark
+                # formerly active tasks as recoverable instead of pretending they are
+                # still running. Approval-gated tasks keep their persisted approval
+                # payload and can be resumed cold by the orchestrator.
+                if task.status in {"running", "verifying", "reviewing"}:
+                    task.interrupted_from = task.phase or task.status
+                    task.status = "interrupted"
+                    task.phase = "interrupted"
+                    task.error = task.error or "Chat Nexus stopped before this task completed."
+                    task.updated_at = time.time()
+                    normalized = True
                 self._tasks[task.id] = task
                 self._order.append(task.id)
+            if normalized:
+                self._save()
         except (OSError, ValueError, TypeError):
             # Do not prevent the coding agent from starting because old task state is damaged.
             self._tasks = {}
@@ -103,7 +119,7 @@ class TaskStore:
         with self._lock:
             for task_id in reversed(self._order):
                 task = self._tasks[task_id]
-                if task.status in {"running", "waiting_approval", "reviewing", "verifying"}:
+                if task.status in {"running", "waiting_approval", "reviewing", "verifying", "interrupted"}:
                     return task
             return self._tasks[self._order[-1]] if self._order else None
 
