@@ -229,5 +229,36 @@ class UnifiedLlamaRuntimeTests(unittest.TestCase):
             self.assertIn("never executed automatically", guidance["note"])
 
 
+class LiveRuntimeReconfigurationTests(unittest.TestCase):
+    def test_reconfigure_models_rebuilds_runtime_state_without_new_manager(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first = ModelProfile(
+                id="old",
+                endpoint="http://127.0.0.1:8081/v1",
+                model="old",
+                roles=["primary_coder"],
+                runtime="external",
+            )
+            manager = RuntimeManager(AgentConfig(models=[first]), base_dir=root)
+            identity = id(manager)
+
+            second = ModelProfile(
+                id="qwen3-14b",
+                endpoint="http://127.0.0.1:8082/v1",
+                model="Qwen3-14B-Q4_K_M",
+                roles=["utility", "fast_coder", "primary_coder"],
+                runtime="external",
+            )
+            new_config = AgentConfig(models=[second])
+            manager.reconfigure_models(new_config)
+
+            self.assertEqual(id(manager), identity)
+            self.assertIs(manager.config, new_config)
+            statuses = manager.statuses(probe_external=False)
+            self.assertEqual([row["model_id"] for row in statuses], ["qwen3-14b"])
+            self.assertEqual(statuses[0]["endpoint"], "http://127.0.0.1:8082/v1")
+
+
 if __name__ == "__main__":
     unittest.main()
