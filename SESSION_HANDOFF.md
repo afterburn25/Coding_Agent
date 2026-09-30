@@ -101,6 +101,21 @@
 - CI checkpoint: **95/95 tests passing**.
 - Next action: package/test the exact main-branch snapshot, then begin real local-model dogfood work.
 
+## v0.6 native Windows desktop checkpoint
+
+- **Canonical Windows deliverable:** a real native `ChatNexus.exe`, not a browser launcher. Future dogfood/release work should produce the Windows desktop artifact by default; source ZIPs are secondary.
+- Native UI host: `localcodeagent/desktop.py` using pywebview + Windows WebView2 (`edgechromium`). The loopback HTTP backend is private implementation plumbing.
+- Packaged/frozen `localcodeagent.__main__` launches desktop mode automatically; `--server` is development/debug only.
+- CI Windows build uses PyInstaller windowed/onedir packaging and smoke-tests `ChatNexus.exe --smoke-test` before upload.
+- Portable bundle includes pinned official llama.cpp `b11278` Vulkan x64 runtime in `runtime/llama`; runtime discovery prefers the bundled copy.
+- Default coding roles: Qwen3 14B Q4_K_M = utility/fast/primary; Qwen3-Coder 30B-A3B Q4_K_M = deep_reasoner/reviewer.
+- The 30B is an intended automatic route for difficult tasks. If its GGUF/runtime is unavailable, the router can fall back to a runnable primary coder rather than failing.
+- No-model chat attempts are blocked before SSE starts and return a single `coding_model_setup_required` response; the UI opens Coding readiness without duplicating the error.
+- Dogfood app defaults its workspace to bundled `Source` when present. The Windows ZIP packaging explicitly preserves `Source/.git` so it remains a real Git working tree.
+- Official logo asset was replaced with byte-verified valid PNG data after CI caught a corrupt/truncated prior asset.
+- Unit checkpoint: **99/99 tests passing**. Windows native build + packaged backend/UI smoke test passed before artifact upload.
+- Next: install/download the 14B and 30B GGUFs on the target machine and begin real Chat Nexus-on-Chat Nexus dogfood development.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -145,7 +160,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **95 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **99 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -273,4 +288,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `95 tests` passing.
+Expected at this checkpoint: `99 tests` passing.
