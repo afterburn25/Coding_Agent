@@ -194,10 +194,12 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             )
             index = RepositoryIndex(root); index.build()
             provider = _CaptureProvider()
+            conversations = ConversationManager(root / "conversations.json")
             agent = AgentOrchestrator(
                 config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
                 tasks=TaskStore(root), checkpoints=CheckpointManager(root),
                 memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=conversations,
             )
             agent._provider_for = lambda _: provider
 
