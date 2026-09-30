@@ -215,5 +215,12 @@ class LiveFirstRunSetupTests(unittest.TestCase):
         self.assertNotIn("Restart Chat Nexus once to activate", app)
 
 
+    def test_first_run_setup_hides_raw_missing_paths_behind_details(self):
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Technical model status", app)
+        self.assertIn("const modelStatus=quickSetup?", app)
+        self.assertEqual(app.count("function formatBytes(value)"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
