@@ -63,14 +63,14 @@ The intended two-model coding setup is:
 - **Qwen3 14B Q4_K_M** — utility, fast coder, and normal primary coding.
 - **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — deep reasoning and reviewer work.
 
-The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. Routing now accounts for memory that will be freed when the resident 14B process is stopped before a 30B switch, so temporary RAM pressure from 14B does not incorrectly disqualify 30B. If 30B still cannot start, Auto mode falls back to the runnable 14B primary coder instead of terminating the task; the same fallback applies to reviewer activation.
+The 30B model is expected to use llama.cpp CPU/GPU offload on a 12 GB GPU. Routing accounts for memory that will be freed when the resident 14B process is stopped before a 30B switch, so temporary RAM pressure from 14B does not incorrectly disqualify 30B. If 30B still cannot start, Auto mode falls back to the runnable 14B primary coder instead of terminating the task; the same fallback applies to reviewer activation. The everyday Qwen3 14B route starts llama.cpp with `--reasoning off` unless explicitly overridden and defaults to a 2,048-token output cap; the 30B deep/reviewer route defaults to 8,192 output tokens.
 
 The Windows package bundles llama.cpp itself but not the GGUF bytes inside the installer EXE. The installer downloads the default 14B + 30B coding stack during setup/update when those verified files are missing, keeping the setup EXE small while leaving the installed application ready for coding.
 
 ## Core coding-agent capabilities
 
 - ChatGPT-style local chat UI.
-- Automatic model roles: utility, fast coder, primary coder, deep reasoner, reviewer, vision.
+- Automatic model roles: utility, fast coder, primary coder, deep reasoner, reviewer, vision; greetings/capability questions take a lightweight utility path.
 - Automatic escalation when tasks become harder or repeated attempts fail.
 - RAM/VRAM-aware model choice, including memory that will be reclaimed when the currently resident model is replaced.
 - Automatic activation fallback in Auto mode when a preferred deep/reviewer model cannot start.
@@ -237,7 +237,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **123 tests passing**.
+Current expected result: **129 tests passing**.
 
 ## API highlights
 
@@ -278,7 +278,7 @@ POST /api/image/loras/metadata
 
 ## Live agent streaming
 
-The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Events. OpenAI-compatible local runtimes stream assistant content immediately while Chat Nexus reconstructs streamed function/tool calls for the normal agent loop. Live events include:
+The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. Agent work runs behind a request-thread event queue so the server can emit liveness heartbeats while a local model is loading or waiting for its first token. OpenAI-compatible local runtimes stream assistant content once generation starts while Chat Nexus reconstructs streamed function/tool calls for the normal agent loop. Live events include:
 
 - assistant token deltas
 - selected/switched model events
@@ -286,8 +286,9 @@ The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Event
 - task/phase changes
 - research preflight state
 - approval state
+- liveness heartbeats with elapsed time, task phase, and selected model
 
-Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are now retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat events update the assistant bubble with phase/model/elapsed seconds instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
 ## Self-development mode
 
@@ -392,7 +393,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **123 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **129 passing tests**.
 
 ## Development state
 

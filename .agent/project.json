@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 123,
-  "next_milestone": "Dogfood the validated dual-progress installer, confirm real 14B→30B switching/offload and automatic fallback, then harden observed runtime behavior",
+  "test_checkpoint": 129,
+  "next_milestone": "Dogfood immediate utility chat and SSE heartbeats on Windows, measure real 14B/30B first-token and throughput, then harden remaining runtime latency",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -73,5 +73,25 @@
     "auto_activation_fallback": true,
     "reviewer_activation_fallback": true,
     "durable_stream_error_recovery": true
+  },
+  "local_chat_latency": {
+    "lightweight_utility_route": true,
+    "utility_skips_repo_research_tools": true,
+    "qwen3_14b_default_reasoning": "off unless explicitly overridden",
+    "max_output_tokens": {
+      "qwen3_14b": 2048,
+      "qwen3_coder_30b": 8192,
+      "generic": 4096
+    },
+    "sse_worker_queue": true,
+    "heartbeat_seconds": 1,
+    "heartbeat_fields": [
+      "elapsed_seconds",
+      "phase",
+      "status",
+      "model_id",
+      "model_role"
+    ],
+    "client_heartbeat_status": true
   }
 }

@@ -211,6 +211,19 @@
 - Windows installer/native desktop validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
 - Next: install/update the validated dogfood build on the Windows machine, confirm the two installer progress bars with real model downloads, then run a real deep/reviewer task to measure actual 30B offload behavior.
 
+## v0.6 local-chat latency / SSE heartbeat checkpoint
+
+- Dogfood symptom: simple prompts such as **“hi”** and **“what all can you do”** stayed on `Thinking…`, then the WebView reported a closed stream while the durable task still showed `running`.
+- Greetings/capability questions now route to `utility`; this path uses a short system prompt and recent chat only, with no repository preload, research preflight, or coding tool schema.
+- Qwen3 14B starts with `--reasoning off` unless an explicit `--reasoning` override exists. This runtime default also upgrades behavior for older preserved configs.
+- Model profiles expose `max_output_tokens`; defaults are 14B **2048**, 30B **8192**, generic **4096**. The OpenAI-compatible provider sends the cap in streamed and non-streamed requests.
+- `POST /api/chat/stream` now runs the agent in a worker thread and queues events back to the request thread. When no event arrives for one second, the server emits an SSE `heartbeat` with elapsed seconds, phase/status, model ID, and model role.
+- The WebView displays heartbeat status in the pending assistant bubble until the first token arrives.
+- Feature commit: `406a7a7` — Fix local chat latency and SSE liveness.
+- Unit checkpoint: **129/129 tests passing**.
+- Windows native desktop/installer validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
+- Next: update the dogfood Windows install, verify immediate utility replies and visible heartbeat status, then measure real 14B/30B first-token and throughput.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -383,4 +396,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `123 tests` passing.
+Expected at this checkpoint: `129 tests` passing.
