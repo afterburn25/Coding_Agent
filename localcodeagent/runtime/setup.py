@@ -121,5 +121,5 @@ def write_suggested_models(config_path: Path, suggestions: list[dict[str, Any]])
     return {
         "path": str(path),
         "models": len(suggestions),
-        "restart_required": True,
+        "restart_required": False,
     }

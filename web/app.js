@@ -14,6 +14,7 @@ function renderRecent(tasks){$('#recentTasks').innerHTML=tasks?.length?tasks.map
 function renderStatus(s){$('#status').textContent=`v${s.version} · GPU ready`;$('#workspace').textContent=s.workspace;$('#hardware').innerHTML=renderHardware(s.runtime?.hardware);const statuses=Object.fromEntries((s.runtime?.statuses||[]).map(x=>[x.model_id,x]));$('#models').innerHTML=(s.models||[]).map(m=>{const r=statuses[m.id]||{};const cls=r.healthy?'healthy':r.state==='loading'?'loading':String(r.state||'').includes('error')?'error':'';const action=m.runtime==='llama_cpp'?`<button class="mini-button runtime-action" data-action="${r.healthy?'stop':'start'}" data-model="${esc(m.id)}">${r.healthy?'Stop':'Start'}</button>`:'';return `<div class="model"><div class="model-head"><strong>${esc(m.id)}</strong><span class="state ${cls}">${esc(r.state||m.runtime)}</span></div><small>${esc(m.roles.join(', '))}</small><small>${esc(m.runtime)}${r.pid?' · PID '+esc(r.pid):''}</small>${action}</div>`;}).join('');const inventory=s.runtime?.inventory||[];$('#inventory').innerHTML=inventory.length?inventory.map(x=>`<div>${esc(x.name)} <small>${esc(x.size_gb)} GB</small></div>`).join(''):'<span class="muted">No .gguf files found</span>';const idx=s.repository_index||{};$('#repoIndex').textContent=`${idx.file_count||0} files indexed${idx.generated_at?' · '+new Date(idx.generated_at*1000).toLocaleTimeString():''}`;renderTask(s.tasks?.current);renderRecent(s.tasks?.recent||[]);}
 function formatBytes(value){const n=Number(value||0);if(n>=1024**3)return `${(n/1024**3).toFixed(1)} GB`;if(n>=1024**2)return `${(n/1024**2).toFixed(0)} MB`;if(n>=1024)return `${(n/1024).toFixed(0)} KB`;return `${n} B`;}
 let lastReadiness=null;
+let activeModelPlan=null;
 function renderReadiness(r){
   lastReadiness=r;
   const panel=$('#readinessPanel');if(!panel)return;
@@ -32,11 +33,29 @@ function renderReadiness(r){
   const deep=catalogById['qwen3-coder-30b-a3b-q4-k-m'];
   const missingStarter=starter&&!starter.verified;
   const missingDeep=deep&&!deep.verified;
+  const setupBusy=activeJobs.length>0||!!activeModelPlan;
+  const planDisabled=setupBusy?' disabled aria-busy="true"':'';
+  const storage=r.model_storage||{};
+  const installPath=storage.path||r.models_dir||'';
+  const freeBytes=Number(storage.free_bytes||0);
+  const storageLine=installPath?'<small class="setup-storage">Install location: <code>'+esc(installPath)+'</code>'+(freeBytes?' · '+formatBytes(freeBytes)+' free':'')+'</small>':'';
+  const currentJob=activeJobs[0]||null;
+  const currentAsset=currentJob?catalogById[currentJob.catalog_id]:null;
+  let installProgress='';
+  if(currentJob){
+    const pct=Math.round(Number(currentJob.progress||0)*100);
+    installProgress='<div class="first-run-progress"><div class="first-run-progress-head"><strong>'+esc(currentAsset?.title||currentJob.catalog_id||'Coding model')+'</strong><span>'+pct+'%</span></div><div class="catalog-progress"><span style="width:'+pct+'%"></span></div><small>'+esc(currentJob.state)+' · '+formatBytes(currentJob.bytes_done||0)+' / '+formatBytes(currentJob.bytes_total||0)+'</small></div>';
+  }else if(activeModelPlan){
+    const total=Number(activeModelPlan.totalBytes||0);
+    const done=(activeModelPlan.ids||[]).reduce((sum,id)=>sum+(catalogById[id]?.verified?Number(catalogById[id]?.size_bytes||0):0),0);
+    const pct=total?Math.min(100,Math.round((done/total)*100)):0;
+    installProgress='<div class="first-run-progress"><div class="first-run-progress-head"><strong>'+esc(activeModelPlan.label||'Coding model setup')+'</strong><span>'+pct+'%</span></div><div class="catalog-progress"><span style="width:'+pct+'%"></span></div><small>Preparing next verified model download…</small></div>';
+  }
   let quickSetup='';
   if(missingStarter){
-    quickSetup=`<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Chat Nexus already includes the llama.cpp runtime.</small><div class="first-run-actions"><button class="setup-primary" data-model-plan="starter" type="button">Install recommended 14B <span>~${esc(starter.size_gb)} GB</span></button>${missingDeep?`<button class="setup-secondary" data-model-plan="full" type="button">Install full 14B + 30B stack <span>~${esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))} GB</span></button>`:''}</div><small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>`;
+    quickSetup='<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Chat Nexus already includes the llama.cpp runtime.</small>'+storageLine+'<div class="first-run-actions"><button class="setup-primary" data-model-plan="starter" type="button"'+planDisabled+'>Install recommended 14B <span>~'+esc(starter.size_gb)+' GB</span></button>'+(missingDeep?'<button class="setup-secondary" data-model-plan="full" type="button"'+planDisabled+'>Install full 14B + 30B stack <span>~'+esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))+' GB</span></button>':'')+'</div>'+installProgress+'<small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>';
   }else if(missingDeep){
-    quickSetup=`<div class="first-run-setup optional-deep"><strong>${ready?'Everyday coding is ready':'Complete the coding stack'}</strong><small>The 14B coder is installed. Add the 30B coder for difficult debugging, architecture work, and review.</small><div class="first-run-actions"><button class="setup-secondary" data-model-plan="deep" type="button">Add 30B deep coder <span>~${esc(deep.size_gb)} GB</span></button></div></div>`;
+    quickSetup='<div class="first-run-setup optional-deep"><strong>'+(ready?'Everyday coding is ready':'Complete the coding stack')+'</strong><small>The 14B coder is installed. Add the 30B coder for difficult debugging, architecture work, and review.</small>'+storageLine+'<div class="first-run-actions"><button class="setup-secondary" data-model-plan="deep" type="button"'+planDisabled+'>Add 30B deep coder <span>~'+esc(deep.size_gb)+' GB</span></button></div>'+installProgress+'</div>';
   }
   const modelStatus=quickSetup?`<details class="setup-details"><summary>Technical model status</summary>${rows||'<div class="muted">No model profiles configured.</div>'}</details>`:(rows||'<div class="muted">No model profiles configured.</div>');
   const catalog=(r.catalog||[]).map(m=>{const job=jobsByModel[m.id];const pct=job?Math.round(Number(job.progress||0)*100):0;const action=m.verified?'<span class="catalog-installed">✓ Installed</span>':m.installed?`<button class="mini-button catalog-repair" data-catalog="${esc(m.id)}">Repair / verify</button>`:`<button class="mini-button catalog-install" data-catalog="${esc(m.id)}">Install</button>`;const progress=job?`<div class="catalog-progress"><span style="width:${pct}%"></span></div><small>${esc(job.state)} · ${pct}% · ${formatBytes(job.bytes_done||0)} / ${formatBytes(job.bytes_total||0)}</small><button class="mini-button catalog-cancel" data-job="${esc(job.id)}">Cancel</button>`:'';return `<div class="catalog-card"><div class="catalog-head"><strong>${esc(m.title)}</strong><span>${m.verified?'verified':esc(m.source_type)}</span></div><small>${esc(m.size_gb)} GB · ${esc(m.license)} · ${esc((m.roles||[]).join(', '))}</small><p>${esc(m.description)}</p><p class="hardware-note">${esc(m.hardware_note)}</p>${progress||`<div class="catalog-action">${action}</div>`}</div>`;}).join('');
@@ -74,7 +93,15 @@ async function installModelPlan(kind){
   const label=kind==='full'?'the full 14B + 30B coding stack':kind==='deep'?'the 30B deep-reasoning coder':'the recommended 14B coding model';
   const bytes=pending.reduce((sum,id)=>sum+Number(catalog[id]?.size_bytes||0),0);
   if(!pending.length){try{await configureDownloadedModels();}catch(e){addMessage('assistant',`Model setup error: ${e.message}`);}return;}
+  const freeBytes=Number(lastReadiness?.model_storage?.free_bytes||0);
+  const reserve=1024**3;
+  if(freeBytes&&freeBytes<bytes+reserve){
+    const path=lastReadiness?.model_storage?.path||lastReadiness?.models_dir||'the model directory';
+    addMessage('assistant','Not enough free disk space for '+label+'. Need about '+formatBytes(bytes+reserve)+' including working space, but only '+formatBytes(freeBytes)+' is free at '+path+'.');
+    return;
+  }
   if(!confirm(`Install ${label}? This will download approximately ${formatBytes(bytes)} and verify each model before configuration.`))return;
+  activeModelPlan={kind,ids:[...pending],label,totalBytes:bytes};
   document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=true);
   try{
     for(const id of pending){
@@ -90,7 +117,7 @@ async function installModelPlan(kind){
     const startError=configured?.applied?.start_error||'';
     if(startError)addMessage('assistant',`${installedLabel} installed, checksum verified, and routing configured. The starter model did not finish loading yet: ${startError}`);
     else addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Chat Nexus is ready to use without restarting.`);
-  }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
+  }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{activeModelPlan=null;await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
 }
 async function pollCatalogInstall(jobId){
   try{const job=await getCatalogJob(jobId);await loadReadiness();if(!['finished','failed','cancelled'].includes(job.state)){setTimeout(()=>pollCatalogInstall(jobId),1000);}else if(job.state==='finished'){addMessage('assistant','Coding model installed and checksum verified. Use “Use discovered models” to assign it to agent roles.');}else if(job.state==='failed'){addMessage('assistant',`Model install failed: ${job.error||job.message}`);}}catch(e){addMessage('assistant',`Model install status error: ${e.message}`);}

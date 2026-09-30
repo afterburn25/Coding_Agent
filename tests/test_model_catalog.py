@@ -4,6 +4,7 @@ import hashlib
 import io
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -114,11 +115,24 @@ class CodingModelCatalogTests(unittest.TestCase):
                 with self.assertRaises(FileExistsError):
                     manager.start_install(asset.id, repair=False)
 
+    def test_new_install_rejects_insufficient_disk_before_download(self):
+        asset = tiny_asset(b"x" * 1024)
+        with tempfile.TemporaryDirectory() as td:
+            manager = CodingModelCatalogManager(Path(td))
+            with patch("localcodeagent.runtime.catalog.catalog_by_id", return_value={asset.id: asset}), patch(
+                "localcodeagent.runtime.catalog.shutil.disk_usage",
+                return_value=SimpleNamespace(total=1024, used=1024, free=0),
+            ):
+                with self.assertRaises(OSError) as ctx:
+                    manager.start_install(asset.id)
+            self.assertIn("Not enough free disk space", str(ctx.exception))
+
     def test_catalog_api_and_ui_require_explicit_install_action(self):
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn('if path == "/api/models/install":', server)
         self.assertIn('if path == "/api/models/install/cancel":', server)
+        self.assertIn("insufficient_model_storage", server)
         self.assertIn("/api/models/catalog", app)
         self.assertIn("Download and install", app)
         self.assertIn("Large model downloads can use significant disk space", app)

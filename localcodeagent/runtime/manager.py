@@ -193,6 +193,28 @@ class RuntimeManager:
             "commands": commands,
             "note": "Install commands are shown for convenience and are never executed automatically by Chat Nexus.",
         }
+    def model_storage(self) -> dict:
+        """Return install-path and disk-capacity information for local coding models."""
+        try:
+            usage = shutil.disk_usage(self.models_dir)
+            return {
+                "path": str(self.models_dir),
+                "total_bytes": int(usage.total),
+                "used_bytes": int(usage.used),
+                "free_bytes": int(usage.free),
+                "available": True,
+                "error": "",
+            }
+        except OSError as exc:
+            return {
+                "path": str(self.models_dir),
+                "total_bytes": 0,
+                "used_bytes": 0,
+                "free_bytes": 0,
+                "available": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
     def inventory(self) -> list[dict]:
         rows: list[dict] = []
         if not self.models_dir.exists():
@@ -584,6 +606,7 @@ class RuntimeManager:
             "hardware": self.hardware.as_dict(),
             "llama_server": self.discover_llama_server(),
             "models_dir": str(self.models_dir),
+            "model_storage": self.model_storage(),
             "inventory": self.inventory(),
             "recommendations": recommendations,
             "runtime_install": self.runtime_install_guidance(),
@@ -594,6 +617,7 @@ class RuntimeManager:
             "hardware": self.hardware.as_dict(),
             "llama_server": self.discover_llama_server(),
             "models_dir": str(self.models_dir),
+            "model_storage": self.model_storage(),
             "inventory": self.inventory(),
             "runtimes": self.statuses(probe_external=probe_external),
             "max_resident_models": self.config.max_resident_models,

@@ -93,6 +93,9 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertTrue(result["models"][0]["runnable"])
         self.assertEqual(result["models"][0]["model_file"], str(model))
         self.assertEqual(result["models"][0]["issues"], [])
+        self.assertEqual(result["model_storage"]["path"], str((root / "models").resolve()))
+        self.assertTrue(result["model_storage"]["available"])
+        self.assertGreater(result["model_storage"]["free_bytes"], 0)
 
     def test_missing_managed_model_reports_one_clear_missing_file_issue(self):
         with tempfile.TemporaryDirectory() as td, patch(
@@ -134,6 +137,9 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertIn("Add 30B deep coder", js)
         self.assertIn("installModelPlan", js)
         self.assertIn("configureDownloadedModels", js)
+        self.assertIn("first-run-progress", js)
+        self.assertIn("model_storage", js)
+        self.assertIn("Not enough free disk space", js)
         self.assertIn('if path == "/api/readiness":', server)
 
 
@@ -193,7 +199,7 @@ class ModelSetupPlannerTests(unittest.TestCase):
             self.assertFalse(saved["research_enabled"])
             self.assertEqual(saved["permissions"]["filesystem.read"], "allow")
             self.assertEqual(saved["models"][0]["model_path"], suggestions[0]["model_path"])
-            self.assertTrue(result["restart_required"])
+            self.assertFalse(result["restart_required"])
 
     def test_setup_requires_explicit_apply_in_server_and_ui(self):
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import threading
 import time
 import urllib.request
@@ -174,6 +175,16 @@ class CodingModelCatalogManager:
             return {"id": f"reuse-{asset.id}", "catalog_id": asset.id, "state": "finished", "progress": 1.0, "bytes_done": asset.size_bytes, "bytes_total": asset.size_bytes, "message": "Already installed and verified; existing model reused.", "path": existing["path"], "created_at": now, "finished_at": now, "error": ""}
         if existing["installed"] and not repair:
             raise FileExistsError(f"{asset.filename} already exists but is not trusted/verified. Choose Repair to verify/replace it explicitly.")
+        if not existing["installed"]:
+            usage = shutil.disk_usage(self.models_dir)
+            reserve = 512 * 1024 * 1024
+            required = asset.size_bytes + reserve
+            if usage.free < required:
+                raise OSError(
+                    f"Not enough free disk space in {self.models_dir}. "
+                    f"{asset.title} needs about {asset.size_bytes / (1024 ** 3):.2f} GB "
+                    f"plus 0.5 GB working space, but only {usage.free / (1024 ** 3):.2f} GB is free."
+                )
         job_id = uuid.uuid4().hex
         cancel = threading.Event()
         job = {"id": job_id, "catalog_id": asset.id, "title": asset.title, "state": "queued", "progress": 0.0, "bytes_done": 0, "bytes_total": asset.size_bytes, "message": "Queued", "path": str(self.target(asset)), "created_at": time.time(), "finished_at": None, "error": ""}

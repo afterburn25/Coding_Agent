@@ -389,6 +389,9 @@ class Handler(BaseHTTPRequestHandler):
                 except FileExistsError as exc:
                     self._json({"error": str(exc), "repair_available": True}, 409)
                     return
+                except OSError as exc:
+                    self._json({"error": str(exc), "code": "insufficient_model_storage"}, 507)
+                    return
                 self._json({"ok": True, "job": job})
                 return
 

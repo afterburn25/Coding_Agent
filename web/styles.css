@@ -38,6 +38,13 @@
 .setup-primary{border:1px solid #427cc4;background:linear-gradient(90deg,#0d2945,#312061);color:#e8f0ff}
 .setup-secondary{border:1px solid #374b67;background:#0a1422;color:#c5d2e6}
 .setup-note{border-top:1px solid #2a3550;padding-top:6px}
+.setup-storage{display:block;border:1px solid #263753;background:#081424;border-radius:7px;padding:6px 7px;color:#8498b7;word-break:break-word}
+.setup-storage code{font:inherit;color:#bbcae2}
+.first-run-progress{border:1px solid #2f4161;background:#081525;border-radius:8px;padding:7px}
+.first-run-progress-head{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.first-run-progress-head strong{font-size:8.5px;color:#d8e5f8;min-width:0}
+.first-run-progress-head span{font-size:8px;color:#8fd9ff;flex:0 0 auto}
+.first-run-progress>small{display:block;font-size:7.5px;color:#8295b2;margin-top:4px}
 
 
 .setup-details{border:1px solid #202b3d;border-radius:8px;background:#07101c;padding:6px 7px}
