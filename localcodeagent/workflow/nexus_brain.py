@@ -6,15 +6,18 @@ import hashlib
 import hmac
 import json
 import re
-import secrets
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-SCHEMA_VERSION = 1
+
+SCHEMA_VERSION = 2
 SCRYPT_N = 1 << 15
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -77,7 +80,7 @@ class NexusBrain:
         self.enabled = bool(enabled)
         self.max_records = max(100, int(max_records))
         self._lock = threading.RLock()
-        self._session_key: bytes | None = None
+        self._signing_key: Ed25519PrivateKey | None = None
         self._unlocked = False
         self._verified_for_session = False
         self._tampered = False
@@ -108,7 +111,7 @@ class NexusBrain:
 
     @property
     def unlocked(self) -> bool:
-        return bool(self._unlocked and self._session_key)
+        return bool(self._unlocked and self._signing_key)
 
     @property
     def verified_for_session(self) -> bool:
@@ -127,7 +130,7 @@ class NexusBrain:
         return base64.b64decode(str(text or "").encode("ascii"), validate=True)
 
     @staticmethod
-    def _derive(passcode: str, salt: bytes) -> bytes:
+    def _derive_legacy(passcode: str, salt: bytes) -> bytes:
         return hashlib.scrypt(
             str(passcode or "").encode("utf-8"),
             salt=salt,
@@ -191,6 +194,13 @@ class NexusBrain:
                 "self_model": self_model,
                 "signature": str(raw.get("signature") or ""),
             })
+            if self.initialized and int(self._auth().get("version") or 1) >= 2:
+                try:
+                    self._verified_for_session = self._verify_public_signature()
+                    self._tampered = not self._verified_for_session
+                except (InvalidSignature, ValueError, TypeError, RuntimeError):
+                    self._verified_for_session = False
+                    self._tampered = True
         except (OSError, ValueError, TypeError):
             pass
 
@@ -215,8 +225,63 @@ class NexusBrain:
             "self_model": self._data.get("self_model", {}),
         }
 
-    def _digest(self, key: bytes) -> str:
+    def _legacy_digest(self, key: bytes) -> str:
         return hmac.new(key, self._canonical(self._unsigned_payload()), hashlib.sha256).hexdigest()
+
+    @staticmethod
+    def _public_fingerprint(public_key: Ed25519PublicKey) -> str:
+        raw = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        return hashlib.sha256(raw).hexdigest()
+
+    def _public_key_from_auth(self, auth: dict[str, Any] | None = None) -> Ed25519PublicKey:
+        auth = auth or self._auth()
+        pem = str(auth.get("public_key_pem") or "").encode("utf-8")
+        if not pem:
+            raise RuntimeError("Nexus Brain public verification key is missing")
+        key = serialization.load_pem_public_key(pem)
+        if not isinstance(key, Ed25519PublicKey):
+            raise RuntimeError("Nexus Brain public verification key is not Ed25519")
+        return key
+
+    def _verify_public_signature(self, auth: dict[str, Any] | None = None) -> bool:
+        auth = auth or self._auth()
+        if int(auth.get("version") or 1) < 2:
+            return False
+        signature_text = str(self._data.get("signature") or "")
+        if not signature_text:
+            return False
+        public_key = self._public_key_from_auth(auth)
+        expected_fingerprint = str(auth.get("public_key_sha256") or "")
+        if expected_fingerprint and expected_fingerprint != self._public_fingerprint(public_key):
+            raise InvalidSignature("Nexus Brain creator public-key fingerprint mismatch")
+        public_key.verify(self._unb64(signature_text), self._canonical(self._unsigned_payload()))
+        return True
+
+    def _new_creator_auth(self, creator: str, secret: str) -> tuple[dict[str, Any], Ed25519PrivateKey]:
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.BestAvailableEncryption(secret.encode("utf-8")),
+        ).decode("utf-8")
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        auth = {
+            "version": 2,
+            "creator_name": creator,
+            "key_type": "Ed25519",
+            "encrypted_private_key_pem": private_pem,
+            "public_key_pem": public_pem,
+            "public_key_sha256": self._public_fingerprint(public_key),
+            "created_at": time.time(),
+        }
+        return auth, private_key
 
     def _save_auth(self, auth: dict[str, Any]) -> None:
         tmp = self.auth_path.with_suffix(self.auth_path.suffix + ".tmp")
@@ -227,7 +292,14 @@ class NexusBrain:
         self._require_unlocked()
         self._data["schema_version"] = SCHEMA_VERSION
         self._data["updated_at"] = time.time()
-        self._data["signature"] = self._digest(self._session_key or b"")
+        signing_key = self._signing_key
+        if signing_key is None:
+            raise PermissionError("Nexus Brain creator signing key is not unlocked")
+        self._data["signature"] = self._b64(
+            signing_key.sign(self._canonical(self._unsigned_payload()))
+        )
+        self._verified_for_session = True
+        self._tampered = False
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
@@ -244,24 +316,39 @@ class NexusBrain:
         with self._lock:
             if self.initialized:
                 raise RuntimeError("Nexus Brain creator lock is already initialized")
-            auth_salt = secrets.token_bytes(16)
-            integrity_salt = secrets.token_bytes(16)
-            auth = {
-                "version": 1,
-                "creator_name": creator,
-                "auth_salt": self._b64(auth_salt),
-                "auth_hash": self._b64(self._derive(secret, auth_salt)),
-                "integrity_salt": self._b64(integrity_salt),
-                "kdf": {"name": "scrypt", "n": SCRYPT_N, "r": SCRYPT_R, "p": SCRYPT_P, "dklen": SCRYPT_DKLEN},
-                "created_at": time.time(),
-            }
+            auth, private_key = self._new_creator_auth(creator, secret)
             self._save_auth(auth)
-            self._session_key = self._derive(secret, integrity_salt)
+            self._signing_key = private_key
             self._unlocked = True
             self._verified_for_session = True
             self._tampered = False
             self._save_signed()
             return self.summary()
+
+    def _migrate_legacy_unlock(self, auth: dict[str, Any], creator: str, secret: str) -> dict[str, Any]:
+        try:
+            auth_salt = self._unb64(str(auth.get("auth_salt") or ""))
+            expected = self._unb64(str(auth.get("auth_hash") or ""))
+            integrity_salt = self._unb64(str(auth.get("integrity_salt") or ""))
+        except Exception as exc:
+            raise RuntimeError("Legacy Nexus Brain creator metadata is invalid") from exc
+        supplied = self._derive_legacy(secret, auth_salt)
+        if not hmac.compare_digest(supplied, expected):
+            raise PermissionError("Creator authentication failed")
+        legacy_key = self._derive_legacy(secret, integrity_salt)
+        signature = str(self._data.get("signature") or "")
+        if signature and not hmac.compare_digest(signature, self._legacy_digest(legacy_key)):
+            self._tampered = True
+            self._verified_for_session = False
+            raise PermissionError("Nexus Brain integrity verification failed; protected data appears to have been modified")
+        new_auth, private_key = self._new_creator_auth(creator, secret)
+        self._save_auth(new_auth)
+        self._signing_key = private_key
+        self._unlocked = True
+        self._verified_for_session = True
+        self._tampered = False
+        self._save_signed()
+        return self.summary()
 
     def unlock(self, creator_name: str, passcode: str) -> dict[str, Any]:
         if not self.initialized:
@@ -270,34 +357,48 @@ class NexusBrain:
         creator = self._clean(creator_name, 120)
         if creator.casefold() != str(auth.get("creator_name") or "").casefold():
             raise PermissionError("Creator authentication failed")
+        secret = str(passcode or "")
+        if int(auth.get("version") or 1) < 2:
+            with self._lock:
+                return self._migrate_legacy_unlock(auth, creator, secret)
+        encrypted_pem = str(auth.get("encrypted_private_key_pem") or "").encode("utf-8")
+        if not encrypted_pem:
+            raise RuntimeError("Nexus Brain encrypted creator signing key is missing")
         try:
-            auth_salt = self._unb64(str(auth.get("auth_salt") or ""))
-            expected = self._unb64(str(auth.get("auth_hash") or ""))
-            integrity_salt = self._unb64(str(auth.get("integrity_salt") or ""))
-        except Exception as exc:
-            raise RuntimeError("Nexus Brain creator metadata is invalid") from exc
-        if not hmac.compare_digest(self._derive(str(passcode or ""), auth_salt), expected):
-            raise PermissionError("Creator authentication failed")
-        key = self._derive(str(passcode or ""), integrity_salt)
+            private_key = serialization.load_pem_private_key(
+                encrypted_pem,
+                password=secret.encode("utf-8"),
+            )
+        except (ValueError, TypeError) as exc:
+            raise PermissionError("Creator authentication failed") from exc
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise RuntimeError("Nexus Brain creator signing key is not Ed25519")
+        public_key = private_key.public_key()
+        if self._public_fingerprint(public_key) != str(auth.get("public_key_sha256") or ""):
+            raise PermissionError("Creator signing key does not match the locked Nexus Brain")
         with self._lock:
-            signature = str(self._data.get("signature") or "")
-            if signature and not hmac.compare_digest(signature, self._digest(key)):
+            try:
+                if str(self._data.get("signature") or ""):
+                    self._verify_public_signature(auth)
+            except (InvalidSignature, ValueError, TypeError, RuntimeError) as exc:
                 self._tampered = True
-                self._session_key = None
+                self._signing_key = None
                 self._unlocked = False
                 self._verified_for_session = False
-                raise PermissionError("Nexus Brain integrity verification failed; protected data appears to have been modified")
-            self._session_key = key
+                raise PermissionError(
+                    "Nexus Brain integrity verification failed; protected data appears to have been modified"
+                ) from exc
+            self._signing_key = private_key
             self._unlocked = True
             self._verified_for_session = True
             self._tampered = False
-            if not signature:
+            if not str(self._data.get("signature") or ""):
                 self._save_signed()
             return self.summary()
 
     def lock(self) -> dict[str, Any]:
         with self._lock:
-            self._session_key = None
+            self._signing_key = None
             self._unlocked = False
             return self.summary()
 
@@ -824,12 +925,13 @@ class NexusBrain:
         auth = payload.get("creator_lock")
         if not isinstance(brain, dict) or not isinstance(auth, dict):
             raise ValueError("Locked Brain export is incomplete")
-        # It remains locked/unverified until the original creator supplies the passcode.
+        # Ed25519 public verification lets a shipped Brain activate read-only
+        # without exposing the creator's passcode/private signing key.
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(brain, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
         self._save_auth(auth)
-        self._session_key = None
+        self._signing_key = None
         self._unlocked = False
         self._verified_for_session = False
         self._tampered = False
@@ -854,6 +956,8 @@ class NexusBrain:
                 "enabled": self.enabled, "path": str(self.path), "initialized": self.initialized,
                 "unlocked": self.unlocked, "verified_for_session": self.verified_for_session,
                 "creator_name": str(auth.get("creator_name") or "") if self.initialized else "",
+                "signature_scheme": "ed25519" if int(auth.get("version") or 1) >= 2 else "legacy-hmac-scrypt",
+                "creator_key_fingerprint": str(auth.get("public_key_sha256") or ""),
                 "brain_id": str(self._data.get("brain_id") or ""), "schema_version": int(self._data.get("schema_version", SCHEMA_VERSION)),
                 "integrity": "tampered" if self._tampered else "verified" if self.verified_for_session else "locked_unverified" if self.initialized else "uninitialized",
                 "records": len(records), "counts": counts, "subroutines": self.subroutines(),

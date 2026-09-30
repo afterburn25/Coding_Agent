@@ -58,9 +58,10 @@ class NexusBrainTests(unittest.TestCase):
             auth_text = brain.auth_path.read_text(encoding="utf-8")
             self.assertNotIn(passcode, auth_text)
             auth = json.loads(auth_text)
-            self.assertEqual(auth["kdf"]["name"], "scrypt")
-            self.assertTrue(auth["auth_hash"])
-            self.assertTrue(auth["auth_salt"])
+            self.assertEqual(auth["key_type"], "Ed25519")
+            self.assertIn("ENCRYPTED PRIVATE KEY", auth["encrypted_private_key_pem"])
+            self.assertIn("PUBLIC KEY", auth["public_key_pem"])
+            self.assertEqual(len(auth["public_key_sha256"]), 64)
 
     def test_tampering_breaks_integrity_verification(self):
         with tempfile.TemporaryDirectory() as td:
@@ -73,6 +74,8 @@ class NexusBrainTests(unittest.TestCase):
             raw["subroutines"]["adult_content"] = not raw["subroutines"]["adult_content"]
             path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
             changed = NexusBrain(path)
+            self.assertFalse(changed.verified_for_session)
+            self.assertEqual(changed.summary()["integrity"], "tampered")
             with self.assertRaisesRegex(PermissionError, "integrity verification failed"):
                 changed.unlock("Creator", "example-passcode")
 
@@ -109,6 +112,9 @@ class NexusBrainTests(unittest.TestCase):
             second.install_locked_export(payload)
             self.assertTrue(second.initialized)
             self.assertFalse(second.unlocked)
+            self.assertTrue(second.verified_for_session)
+            self.assertEqual(second.summary()["signature_scheme"], "ed25519")
+            self.assertIn("portable fact", second.prompt_context())
             with self.assertRaises(PermissionError):
                 second.unlock("Creator", "wrong-passcode")
             second.unlock("Creator", "example-passcode")
