@@ -117,15 +117,35 @@ def default_config() -> AgentConfig:
     return AgentConfig(
         models=[
             ModelProfile(
-                id="primary-local",
-                endpoint="http://127.0.0.1:8080/v1",
-                model="local-model",
-                roles=["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"],
+                id="qwen3-14b",
+                endpoint="http://127.0.0.1:8081/v1",
+                model="Qwen3-14B-Q4_K_M",
+                model_path="models/Qwen3-14B-Q4_K_M.gguf",
+                roles=["utility", "fast_coder", "primary_coder"],
                 context_window=32768,
-                priority=50,
-                runtime="external",
-                notes="Fallback profile. Point this at a llama.cpp/Ollama/OpenAI-compatible local endpoint.",
-            )
+                priority=90,
+                runtime="llama_cpp",
+                gpu_layers="auto",
+                allow_cpu_offload=True,
+                estimated_vram_gb=10.0,
+                estimated_ram_gb=16.0,
+                notes="Official Qwen3 14B Q4_K_M starter for fast/general coding.",
+            ),
+            ModelProfile(
+                id="qwen3-coder-30b",
+                endpoint="http://127.0.0.1:8082/v1",
+                model="Qwen3-Coder-30B-A3B-Instruct-Q4_K_M",
+                model_path="models/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+                roles=["deep_reasoner", "reviewer"],
+                context_window=32768,
+                priority=100,
+                runtime="llama_cpp",
+                gpu_layers="auto",
+                allow_cpu_offload=True,
+                estimated_vram_gb=18.6,
+                estimated_ram_gb=30.0,
+                notes="Heavier coding/reasoning model; expected to use CPU/GPU offload on 12 GB VRAM.",
+            ),
         ],
         image_models=[
             ImageModelProfile(
