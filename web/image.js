@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s); const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-let refs=[]; let latest={}; let pendingWorkflowImport=null;
+let refs=[]; let latest={}; let pendingWorkflowImport=null; let pendingWorkflowImport=null;
 function parseKV(text){const o={}; for(const part of String(text||'').split(',')){const [k,v]=part.split(':').map(x=>x?.trim()); if(k&&v&&!Number.isNaN(Number(v)))o[k]=Number(v);} return o;}
 function parseLoras(text){return String(text||'').split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const [name,strength]=x.split(':');return {name:name.trim(),strength:strength?Number(strength):1};});}
 function pathUrl(jobId,path){const name=String(path).replace(/\\/g,'/').split('/').pop();return `/api/image/output/${encodeURIComponent(jobId)}/${encodeURIComponent(name)}`;}
