@@ -26,8 +26,8 @@
       "fit_target_mb": 1024,
       "keep_loaded": false,
       "allow_cpu_offload": true,
-      "estimated_vram_gb": 6.0,
-      "estimated_ram_gb": 10.0,
+      "estimated_vram_gb": 6,
+      "estimated_ram_gb": 10,
       "notes": "Small fast coding model. Replace model_path with your actual GGUF."
     },
     {
@@ -49,8 +49,8 @@
       "fit_target_mb": 1024,
       "keep_loaded": false,
       "allow_cpu_offload": true,
-      "estimated_vram_gb": 11.0,
-      "estimated_ram_gb": 28.0,
+      "estimated_vram_gb": 11,
+      "estimated_ram_gb": 28,
       "notes": "Default software-engineering model. Replace model_path with your actual GGUF."
     },
     {
@@ -73,8 +73,8 @@
       "fit_target_mb": 1024,
       "keep_loaded": false,
       "allow_cpu_offload": true,
-      "estimated_vram_gb": 12.0,
-      "estimated_ram_gb": 40.0,
+      "estimated_vram_gb": 12,
+      "estimated_ram_gb": 40,
       "notes": "Large reasoning/coding model intended for hard debugging and review."
     }
   ],
@@ -87,7 +87,9 @@
     "image.generate": "allow",
     "network.read": "allow",
     "browser.control": "ask",
-    "image.manage": "ask"
+    "image.manage": "ask",
+    "github.read": "allow",
+    "github.write": "ask"
   },
   "max_agent_steps": 12,
   "review_after_changes": true,
@@ -167,8 +169,8 @@
       "priority": 80,
       "enabled": true,
       "quantization": "official int8 convrot; GGUF profiles/workflows can be added without changing the router",
-      "estimated_vram_gb": 11.0,
-      "estimated_ram_gb": 28.0,
+      "estimated_vram_gb": 11,
+      "estimated_ram_gb": 28,
       "max_reference_images": 10,
       "max_loras": 4,
       "supports_transparency": true,
@@ -218,8 +220,8 @@
       "priority": 70,
       "enabled": true,
       "quantization": "4B distilled",
-      "estimated_vram_gb": 9.0,
-      "estimated_ram_gb": 16.0,
+      "estimated_vram_gb": 9,
+      "estimated_ram_gb": 16,
       "max_reference_images": 4,
       "max_loras": 4,
       "supports_transparency": false,
@@ -242,5 +244,11 @@
   "research_github_api_version": "2026-03-10",
   "research_github_token_env": "GITHUB_TOKEN",
   "research_github_timeout": 15,
-  "max_auto_repair_cycles": 2
+  "max_auto_repair_cycles": 2,
+  "github_enabled": true,
+  "github_api_url": "https://api.github.com",
+  "github_api_version": "2026-03-10",
+  "github_token_env": "GITHUB_TOKEN",
+  "github_timeout": 15,
+  "github_default_remote": "origin"
 }
