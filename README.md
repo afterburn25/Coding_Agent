@@ -227,7 +227,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **110 tests passing**.
+Current expected result: **113 tests passing**.
 
 ## API highlights
 
@@ -316,6 +316,16 @@ A fresh installed Chat Nexus no longer leaves users at raw missing-GGUF paths. *
 Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After model configuration changes, Chat Nexus asks for one restart so the backend/router reload the new profiles.
 
 Missing-model readiness diagnostics are deduplicated: each unavailable GGUF is reported once instead of as two near-identical runtime errors.
+
+### First-run coding setup
+
+A fresh install no longer requires hand-editing paths or restarting after model setup. In **Local system → Coding readiness**, Chat Nexus shows:
+
+- **Install recommended 14B** — downloads and SHA256-verifies the everyday Qwen3 14B coder.
+- **Install full 14B + 30B stack** — installs the 14B primary coder plus the 30B deep-reasoner/reviewer.
+- **Add 30B deep coder** — remains available later if the user starts with only 14B.
+
+After the requested downloads finish, Chat Nexus writes the model roles to `config.json`, reloads the coding runtime/router in-process, starts the primary model when possible, refreshes readiness, and becomes usable **without restarting the desktop application**. Raw missing-file paths are kept under a collapsed **Technical model status** section during first-run setup.
 
 ## Coding-model readiness and local GGUF setup
 

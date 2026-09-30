@@ -144,6 +144,17 @@
 - Unit checkpoint: **110/110 tests passing**. The native installer build containing the first-run setup UI passed fresh-install + upgrade-preservation smoke tests.
 - Next: dogfood installed Chat Nexus with the downloaded 14B/30B stack and harden real model/task behavior.
 
+## v0.6 no-restart first-run model checkpoint
+
+- Fresh install UI exposes **Install recommended 14B**, **Install full 14B + 30B stack**, and later **Add 30B deep coder**.
+- Downloads remain explicit and checksum-verified; no multi-gigabyte coding model is silently bundled or fetched.
+- `POST /api/readiness/configure` now rewrites model roles, reloads `AgentConfig`/RuntimeManager/ModelRouter/AgentOrchestrator live, and starts the primary model when possible.
+- The old “Restart Chat Nexus once” requirement is removed.
+- Setup success text reflects actual starter-model launch status.
+- Raw missing model paths are collapsed under **Technical model status** during first-run setup.
+- Unit checkpoint: **113/113 tests passing**.
+- Installer remains the canonical Windows deliverable: one compressed setup EXE with existing-install detection and in-place upgrade preservation.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -316,4 +327,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `110 tests` passing.
+Expected at this checkpoint: `113 tests` passing.
