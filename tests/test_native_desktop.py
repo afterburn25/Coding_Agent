@@ -37,6 +37,9 @@ class NativeDesktopArchitectureTests(unittest.TestCase):
         self.assertIn("ChatNexus.Backend.exe", build)
         self.assertIn("dotnet publish", build)
         self.assertIn("--self-test", build)
+        self.assertIn("CHAT_NEXUS_BRAIN_SEED", build)
+        self.assertIn("nexus-brain-locked.json", build)
+        self.assertIn("private signing key not included", build)
         self.assertNotIn("pywebview", build.lower())
         self.assertNotIn("pythonnet", build.lower())
         self.assertNotIn("pywebview", workflow.lower())
@@ -49,6 +52,9 @@ class NativeDesktopArchitectureTests(unittest.TestCase):
         self.assertIn("ready_to_code", server)
         self.assertIn("coding_model_setup_required", app)
         self.assertIn("loadReadiness()", app)
+        self.assertIn('"nexus_brain_seed": dict(self.state.brain_seed_status)', server)
+        self.assertIn('brain-seed" / "nexus-brain-locked.json"', server)
+        self.assertIn("Bundled Nexus Brain seed failed public signature verification", server)
 
 
 if __name__ == "__main__":

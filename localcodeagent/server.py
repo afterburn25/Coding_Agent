@@ -108,6 +108,37 @@ class AppState:
             enabled=config.nexus_brain_enabled,
             max_records=config.nexus_brain_record_limit,
         )
+        self.brain_seed_status = {
+            "path": str(runtime_root / "brain-seed" / "nexus-brain-locked.json"),
+            "found": False,
+            "installed": False,
+            "verified": bool(self.nexus_brain.verified_for_session),
+            "error": "",
+        }
+        brain_seed_path = runtime_root / "brain-seed" / "nexus-brain-locked.json"
+        if brain_seed_path.is_file() and not self.nexus_brain.initialized:
+            self.brain_seed_status["found"] = True
+            try:
+                seed_payload = json.loads(brain_seed_path.read_text(encoding="utf-8"))
+                seed_summary = self.nexus_brain.install_locked_export(seed_payload)
+                if not seed_summary.get("verified_for_session"):
+                    raise PermissionError("Bundled Nexus Brain seed failed public signature verification")
+                self.brain_seed_status["installed"] = True
+                self.brain_seed_status["verified"] = True
+            except Exception as exc:
+                self.brain_seed_status["error"] = f"{type(exc).__name__}: {exc}"
+                # A failed first-install seed must not permanently occupy the protected
+                # Brain path or prevent the user from initializing a valid Brain later.
+                try:
+                    self.nexus_brain.path.unlink(missing_ok=True)
+                    self.nexus_brain.auth_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                self.nexus_brain = NexusBrain(
+                    brain_path,
+                    enabled=config.nexus_brain_enabled,
+                    max_records=config.nexus_brain_record_limit,
+                )
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
@@ -631,6 +662,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
                 "clock": self.state.agent.current_time_snapshot(),
                 "nexus_brain": self.state.nexus_brain.summary(),
+                "nexus_brain_seed": dict(self.state.brain_seed_status),
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),

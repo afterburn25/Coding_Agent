@@ -363,7 +363,10 @@ class NexusBrain:
                 return self._migrate_legacy_unlock(auth, creator, secret)
         encrypted_pem = str(auth.get("encrypted_private_key_pem") or "").encode("utf-8")
         if not encrypted_pem:
-            raise RuntimeError("Nexus Brain encrypted creator signing key is missing")
+            raise PermissionError(
+                "This is a public read-only Nexus Brain distribution. "
+                "Creator modifications must be made on a creator installation that holds the private signing key."
+            )
         try:
             private_key = serialization.load_pem_private_key(
                 encrypted_pem,
@@ -896,8 +899,20 @@ class NexusBrain:
         return "\n".join(lines)[:16000]
 
     def export_payload(self) -> dict[str, Any]:
+        """Export a public-verifiable, read-only Brain package for distribution."""
         self._require_unlocked()
         auth = self._auth()
+        public_auth = {
+            "version": int(auth.get("version") or SCHEMA_VERSION),
+            "creator_name": str(auth.get("creator_name") or ""),
+            "key_type": str(auth.get("key_type") or "Ed25519"),
+            "public_key_pem": str(auth.get("public_key_pem") or ""),
+            "public_key_sha256": str(auth.get("public_key_sha256") or ""),
+            "created_at": float(auth.get("created_at") or 0),
+            "distribution_read_only": True,
+        }
+        if not public_auth["public_key_pem"] or not public_auth["public_key_sha256"]:
+            raise RuntimeError("Nexus Brain must be migrated to Ed25519 before distribution export")
         with self._lock:
             data = {
                 "schema_version": SCHEMA_VERSION, "brain_id": self._data.get("brain_id"),
@@ -913,7 +928,7 @@ class NexusBrain:
                 "schema_version": SCHEMA_VERSION,
                 "exported_at": time.time(),
                 "brain": data,
-                "creator_lock": copy.deepcopy(auth),
+                "creator_lock": public_auth,
             }
 
     def install_locked_export(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -958,6 +973,8 @@ class NexusBrain:
                 "creator_name": str(auth.get("creator_name") or "") if self.initialized else "",
                 "signature_scheme": "ed25519" if int(auth.get("version") or 1) >= 2 else "legacy-hmac-scrypt",
                 "creator_key_fingerprint": str(auth.get("public_key_sha256") or ""),
+                "creator_signing_key_available": bool(str(auth.get("encrypted_private_key_pem") or "")),
+                "distribution_read_only": bool(auth.get("distribution_read_only", False)),
                 "brain_id": str(self._data.get("brain_id") or ""), "schema_version": int(self._data.get("schema_version", SCHEMA_VERSION)),
                 "integrity": "tampered" if self._tampered else "verified" if self.verified_for_session else "locked_unverified" if self.initialized else "uninitialized",
                 "records": len(records), "counts": counts, "subroutines": self.subroutines(),

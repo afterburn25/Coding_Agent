@@ -62,8 +62,9 @@ function renderBrain(){
   ['brainSelfName','brainHumanLike','brainAutobiography','brainStablePreferences','brainGrowthEnabled'].forEach(id=>$('#'+id).disabled=!unlocked);
 
   $('#brainInitialize').disabled=initialized;
-  $('#brainUnlock').disabled=!initialized||(unlocked&&!!brainCreatorToken);
-  $('#brainUnlock').textContent=unlocked&&!brainCreatorToken?'Re-authenticate':'Unlock';
+  const signingKeyAvailable=brainState.creator_signing_key_available!==false;
+  $('#brainUnlock').disabled=!initialized||!signingKeyAvailable||(unlocked&&!!brainCreatorToken);
+  $('#brainUnlock').textContent=!signingKeyAvailable?'Read-only signed Brain':unlocked&&!brainCreatorToken?'Re-authenticate':'Unlock';
   $('#brainLock').disabled=!unlocked;
   $('#brainSync').disabled=!unlocked;
   $('#brainExport').disabled=!unlocked;

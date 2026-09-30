@@ -107,6 +107,9 @@ class NexusBrainTests(unittest.TestCase):
                 metadata={"candidate_kind": "conversation_example", "candidate_status": "approved"},
             )
             payload = first.export_payload()
+            self.assertNotIn("encrypted_private_key_pem", payload["creator_lock"])
+            self.assertTrue(payload["creator_lock"]["distribution_read_only"])
+            self.assertIn("PUBLIC KEY", payload["creator_lock"]["public_key_pem"])
 
             second = NexusBrain(Path(td) / "second.json")
             second.install_locked_export(payload)
@@ -114,10 +117,11 @@ class NexusBrainTests(unittest.TestCase):
             self.assertFalse(second.unlocked)
             self.assertTrue(second.verified_for_session)
             self.assertEqual(second.summary()["signature_scheme"], "ed25519")
+            self.assertTrue(second.summary()["distribution_read_only"])
+            self.assertFalse(second.summary()["creator_signing_key_available"])
             self.assertIn("portable fact", second.prompt_context())
-            with self.assertRaises(PermissionError):
-                second.unlock("Creator", "wrong-passcode")
-            second.unlock("Creator", "example-passcode")
+            with self.assertRaisesRegex(PermissionError, "public read-only Nexus Brain distribution"):
+                second.unlock("Creator", "example-passcode")
             self.assertFalse(second.subroutine("web_research"))
             self.assertTrue(second.subroutine("adult_content"))
             self.assertAlmostEqual(second.emotion_profile()["curiosity"], 0.93)

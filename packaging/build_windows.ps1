@@ -80,6 +80,18 @@ Copy-Item "config.example.json" (Join-Path $PackageRoot "config.example.json") -
 Copy-Item "config.example.json" (Join-Path $PackageRoot "config.json") -Force
 Copy-Item "README.md" (Join-Path $PackageRoot "README.md") -Force
 
+$BrainSeed = $env:CHAT_NEXUS_BRAIN_SEED
+if ($BrainSeed) {
+    $BrainSeedPath = (Resolve-Path $BrainSeed -ErrorAction Stop).Path
+    Write-Host "Validating creator-signed Nexus Brain seed..."
+    & $Python -c "import json,pathlib,sys; p=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')); assert p.get('format')=='chat-nexus-brain-locked'; a=p.get('creator_lock') or {}; b=p.get('brain') or {}; assert int(a.get('version',0))>=2; assert a.get('key_type')=='Ed25519'; assert a.get('public_key_pem'); assert a.get('public_key_sha256'); assert not a.get('encrypted_private_key_pem'); assert b.get('signature')" $BrainSeedPath
+    if ($LASTEXITCODE -ne 0) { throw "CHAT_NEXUS_BRAIN_SEED is not a valid public read-only Ed25519 Nexus Brain export" }
+    $BrainSeedTarget = Join-Path $PackageRoot "brain-seed"
+    New-Item -ItemType Directory -Force -Path $BrainSeedTarget | Out-Null
+    Copy-Item $BrainSeedPath (Join-Path $BrainSeedTarget "nexus-brain-locked.json") -Force
+    Write-Host "Bundled creator-signed public Nexus Brain seed (private signing key not included)."
+}
+
 Write-Host "Bundling default ComfyUI API workflows..."
 $WorkflowTarget = Join-Path $PackageRoot "workflows"
 New-Item -ItemType Directory -Force -Path $WorkflowTarget | Out-Null
