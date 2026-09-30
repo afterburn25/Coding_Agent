@@ -233,8 +233,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _agent_response(self, result) -> None:
-        self._json({
+    def _agent_payload(self, result) -> dict:
+        return {
             "content": result.content,
             "routing": {
                 "role": result.routing.role,
@@ -252,7 +252,10 @@ class Handler(BaseHTTPRequestHandler):
             "research": result.research,
             "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
-        })
+        }
+
+    def _agent_response(self, result) -> None:
+        self._json(self._agent_payload(result))
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
