@@ -11,6 +11,20 @@
 #define AppExeName "ChatNexus.exe"
 #define StableAppId "ChatNexus.Afterburn25"
 
+#define Qwen14CatalogId "qwen3-14b-q4-k-m"
+#define Qwen14FileName "Qwen3-14B-Q4_K_M.gguf"
+#define Qwen14Url "https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf"
+#define Qwen14Sha256 "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0"
+#define Qwen14Size 9001752960
+#define Qwen14SourceRepo "Qwen/Qwen3-14B-GGUF"
+
+#define Qwen30CatalogId "qwen3-coder-30b-a3b-q4-k-m"
+#define Qwen30FileName "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+#define Qwen30Url "https://huggingface.co/lm-kit/qwen3-coder-30b-a3b-instruct-gguf/resolve/main/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+#define Qwen30Sha256 "956682fa9d36d4d0e5a80eb90ff8a001f2c48f988a497e565ae4d0c42af4fe44"
+#define Qwen30Size 18556688384
+#define Qwen30SourceRepo "lm-kit/qwen3-coder-30b-a3b-instruct-gguf"
+
 [Setup]
 AppId={#StableAppId}
 AppName={#AppName}
@@ -20,6 +34,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\Programs\Chat Nexus
 DefaultGroupName=Chat Nexus
 DisableProgramGroupPage=yes
+DisableStartupPrompt=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -59,9 +74,15 @@ Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 Source: "..\dist\ChatNexus\workflows\*"; DestDir: "{app}\workflows"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist
 
 ; Seed the self-development workspace only when it does not already exist.
-; Existing Source/.git plus local edits are preserved during upgrades.
+; Existing Source/.git plus local edits are preserved during updates.
 Source: "..\dist\ChatNexus\Source\*"; DestDir: "{app}\Source"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
 Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
+
+; Coding models are downloaded by Setup directly into the final model directory.
+; Inno Setup shows download/install progress, verifies SHA-256 before the final
+; filename is committed, and the Check functions skip already-trusted models.
+Source: "{#Qwen14Url}"; DestDir: "{app}\models"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
+Source: "{#Qwen30Url}"; DestDir: "{app}\models"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
 
 [Dirs]
 Name: "{app}\models"
@@ -86,6 +107,126 @@ var
   ExistingInstallDir: String;
   UpgradeInfoPage: TOutputMsgWizardPage;
   InstallBundledSource: Boolean;
+  SkipModelDownloads: Boolean;
+
+function CatalogMetadataPath(const CatalogId: String): String;
+begin
+  Result := ExpandConstant('{app}\models\.catalog\') + CatalogId + '.json';
+end;
+
+procedure WriteCatalogMetadata(
+  const CatalogId, FileName, ExpectedHash: String;
+  const ExpectedSize: Int64;
+  const SourceRepo: String);
+var
+  MetadataDir: String;
+  MetadataFile: String;
+  Data: AnsiString;
+begin
+  MetadataDir := ExpandConstant('{app}\models\.catalog');
+  ForceDirectories(MetadataDir);
+  MetadataFile := CatalogMetadataPath(CatalogId);
+
+  Data :=
+    '{' + #13#10 +
+    '  "catalog_id": "' + CatalogId + '",' + #13#10 +
+    '  "filename": "' + FileName + '",' + #13#10 +
+    '  "sha256": "' + ExpectedHash + '",' + #13#10 +
+    '  "size_bytes": ' + IntToStr(ExpectedSize) + ',' + #13#10 +
+    '  "verified_at": 0,' + #13#10 +
+    '  "source_repo": "' + SourceRepo + '"' + #13#10 +
+    '}' + #13#10;
+
+  if not SaveStringToFile(MetadataFile, Data, False) then
+    Log('Warning: could not write model catalog metadata: ' + MetadataFile);
+end;
+
+function CatalogMetadataMatches(
+  const CatalogId, ExpectedHash: String): Boolean;
+var
+  Data: AnsiString;
+begin
+  Result := False;
+  if LoadStringFromFile(CatalogMetadataPath(CatalogId), Data) then
+    Result := Pos(ExpectedHash, Data) > 0;
+end;
+
+function ModelIsInstalledAndTrusted(
+  const FileName, CatalogId, ExpectedHash: String;
+  const ExpectedSize: Int64;
+  const SourceRepo: String): Boolean;
+var
+  Target: String;
+  Size: Int64;
+  ActualHash: String;
+begin
+  Result := False;
+  Target := ExpandConstant('{app}\models\') + FileName;
+
+  if not FileExists(Target) then
+    Exit;
+
+  if (not FileSize64(Target, Size)) or (Size <> ExpectedSize) then
+  begin
+    Log('Existing model has unexpected size and will be replaced: ' + Target);
+    Exit;
+  end;
+
+  if CatalogMetadataMatches(CatalogId, ExpectedHash) then
+  begin
+    Log('Verified model metadata found; preserving existing model: ' + Target);
+    Result := True;
+    Exit;
+  end;
+
+  try
+    Log('Existing model has no trusted metadata; verifying SHA-256: ' + Target);
+    ActualHash := GetSHA256OfFile(Target);
+    if CompareText(ActualHash, ExpectedHash) = 0 then
+    begin
+      WriteCatalogMetadata(CatalogId, FileName, ExpectedHash, ExpectedSize, SourceRepo);
+      Result := True;
+      Log('Existing model SHA-256 verified; download not required: ' + Target);
+    end
+    else
+      Log('Existing model SHA-256 mismatch; installer will replace it: ' + Target);
+  except
+    Log('Could not verify existing model; installer will replace it: ' +
+      Target + ' (' + GetExceptionMessage + ')');
+  end;
+end;
+
+function ShouldDownloadQwen14(): Boolean;
+begin
+  if SkipModelDownloads then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    '{#Qwen14FileName}',
+    '{#Qwen14CatalogId}',
+    '{#Qwen14Sha256}',
+    {#Qwen14Size},
+    '{#Qwen14SourceRepo}');
+end;
+
+function ShouldDownloadQwen30(): Boolean;
+begin
+  if SkipModelDownloads then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    '{#Qwen30FileName}',
+    '{#Qwen30CatalogId}',
+    '{#Qwen30Sha256}',
+    {#Qwen30Size},
+    '{#Qwen30SourceRepo}');
+end;
 
 function InstalledUninstallKey(): String;
 begin
@@ -130,8 +271,12 @@ function InitializeSetup(): Boolean;
 var
   Prompt: String;
 begin
+  SkipModelDownloads := CompareText(GetEnv('CHAT_NEXUS_SKIP_MODEL_DOWNLOADS'), '1') = 0;
   UpgradeDetected := DetectExistingInstall();
   Result := True;
+
+  if SkipModelDownloads then
+    Log('CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1; installer model downloads are disabled for this run.');
 
   if UpgradeDetected and (not WizardSilent()) then
   begin
@@ -144,7 +289,7 @@ begin
       Prompt := Prompt + 'Location: ' + ExistingInstallDir + #13#10;
 
     Prompt := Prompt + #13#10 +
-      'Upgrade now?' + #13#10 + #13#10 +
+      'Update now?' + #13#10 + #13#10 +
       'Your downloaded models, config.json, task/data files, and Source workspace will be preserved.';
 
     Result := MsgBox(Prompt, mbConfirmation, MB_YESNO) = IDYES;
@@ -157,8 +302,8 @@ var
 begin
   if UpgradeDetected then
   begin
-    WizardForm.Caption := 'Upgrade Chat Nexus';
-    WizardForm.WelcomeLabel1.Caption := 'Upgrade Chat Nexus';
+    WizardForm.Caption := 'Update Chat Nexus';
+    WizardForm.WelcomeLabel1.Caption := 'Update Chat Nexus';
 
     MessageText :=
       'Setup detected an existing Chat Nexus installation.' + #13#10 + #13#10 +
@@ -169,8 +314,8 @@ begin
 
     UpgradeInfoPage := CreateOutputMsgPage(
       wpWelcome,
-      'Upgrade detected',
-      'Your existing Chat Nexus installation will be upgraded.',
+      'Update detected',
+      'Your existing Chat Nexus installation will be updated.',
       MessageText
     );
   end;
@@ -188,9 +333,15 @@ begin
   if InstallBundledSource then
     Log('No existing Source Git workspace detected; installing the bundled workspace.')
   else
-    Log('Existing Source Git workspace detected; preserving it unchanged during upgrade.');
+    Log('Existing Source Git workspace detected; preserving it unchanged during update.');
 
   Result := '';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if UpgradeDetected and (CurPageID = wpReady) then
+    WizardForm.NextButton.Caption := '&Update';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -207,5 +358,22 @@ begin
     // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
+
+    // Keep installer-downloaded models recognized as verified by Chat Nexus.
+    if FileExists(ExpandConstant('{app}\models\{#Qwen14FileName}')) then
+      WriteCatalogMetadata(
+        '{#Qwen14CatalogId}',
+        '{#Qwen14FileName}',
+        '{#Qwen14Sha256}',
+        {#Qwen14Size},
+        '{#Qwen14SourceRepo}');
+
+    if FileExists(ExpandConstant('{app}\models\{#Qwen30FileName}')) then
+      WriteCatalogMetadata(
+        '{#Qwen30CatalogId}',
+        '{#Qwen30FileName}',
+        '{#Qwen30Sha256}',
+        {#Qwen30Size},
+        '{#Qwen30SourceRepo}');
   end;
 end;

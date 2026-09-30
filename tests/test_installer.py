@@ -21,15 +21,17 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("PrivilegesRequired=lowest", self.installer)
         self.assertIn(r"DefaultDirName={localappdata}\Programs\Chat Nexus", self.installer)
 
-    def test_upgrade_detection_prompts_and_uses_previous_install_directory(self):
+    def test_update_detection_prompts_and_uses_previous_install_directory(self):
         self.assertIn("UsePreviousAppDir=yes", self.installer)
         self.assertIn("DetectExistingInstall()", self.installer)
-        self.assertIn("Upgrade now?", self.installer)
-        self.assertIn("Upgrade detected", self.installer)
+        self.assertIn("Update now?", self.installer)
+        self.assertIn("Update detected", self.installer)
         self.assertIn("MB_YESNO", self.installer)
         self.assertIn("WizardSilent()", self.installer)
+        self.assertIn("WizardForm.NextButton.Caption := '&Update'", self.installer)
+        self.assertIn("Update Chat Nexus", self.installer)
 
-    def test_upgrade_contract_preserves_mutable_user_state(self):
+    def test_update_contract_preserves_mutable_user_state(self):
         self.assertIn(r'Excludes: "Source\*,models\*,data\*,workflows\*,config.json"', self.installer)
         self.assertIn("onlyifdoesntexist", self.installer)
         self.assertIn("ShouldInstallBundledSource", self.installer)
@@ -40,17 +42,33 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("if (not FileExists(UserConfig))", self.installer)
         self.assertIn("FileCopy(ExampleConfig, UserConfig, False)", self.installer)
 
-    def test_ci_compiles_real_installer_and_runs_upgrade_twice(self):
+    def test_installer_bootstraps_missing_default_models_with_hash_verification(self):
+        self.assertIn("Qwen3-14B-Q4_K_M.gguf", self.installer)
+        self.assertIn("Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", self.installer)
+        self.assertIn("huggingface.co/Qwen/Qwen3-14B-GGUF", self.installer)
+        self.assertIn("huggingface.co/lm-kit/qwen3-coder-30b-a3b-instruct-gguf", self.installer)
+        self.assertIn("500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0", self.installer)
+        self.assertIn("956682fa9d36d4d0e5a80eb90ff8a001f2c48f988a497e565ae4d0c42af4fe44", self.installer)
+        self.assertGreaterEqual(self.installer.count("Flags: external download ignoreversion nocompression"), 2)
+        self.assertIn("Check: ShouldDownloadQwen14", self.installer)
+        self.assertIn("Check: ShouldDownloadQwen30", self.installer)
+        self.assertIn("ModelIsInstalledAndTrusted", self.installer)
+        self.assertIn("GetSHA256OfFile", self.installer)
+        self.assertIn("WriteCatalogMetadata", self.installer)
+        self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.installer)
+
+    def test_ci_compiles_real_installer_and_runs_update_twice(self):
         self.assertIn('installer\\ChatNexus.iss', self.workflow)
         self.assertIn("Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe", self.workflow)
-        self.assertIn("Smoke-test fresh install and upgrade preservation", self.workflow)
+        self.assertIn("Smoke-test fresh install and update preservation", self.workflow)
         self.assertIn("UPGRADE_PRESERVE.marker", self.workflow)
         self.assertIn("upgrade_preserve_marker", self.workflow)
         self.assertIn("second run intentionally omits /DIR", self.workflow)
-        self.assertIn("Upgrade installer run failed", self.workflow)
-        self.assertIn("Upgrade removed imported workflows", self.workflow)
+        self.assertIn("Update installer run failed", self.workflow)
+        self.assertIn("Update removed imported workflows", self.workflow)
         self.assertIn("Build native Chat Nexus desktop app", self.workflow)
         self.assertIn("Installed Source workspace is incomplete", self.workflow)
+        self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.workflow)
         self.assertNotIn("Chat-Nexus-Setup-v0.6.0-dev.exe", self.workflow)
 
     def test_legacy_duplicate_installer_definition_is_removed(self):

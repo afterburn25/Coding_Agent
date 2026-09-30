@@ -78,7 +78,7 @@ jobs:
           Commit: ${{ github.sha }}
           Native desktop: .NET 8 WinForms / Microsoft WebView2
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
-          Installer: Inno Setup LZMA2 solid-compressed upgrade-aware EXE
+          Installer: Inno Setup LZMA2 solid-compressed update-aware bootstrap EXE with verified coding-model downloads
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
       - name: Build single-file Chat Nexus installer
@@ -93,7 +93,7 @@ jobs:
           $Setup = "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe"
           if (-not (Test-Path $Setup)) { throw "Installer EXE was not produced" }
 
-      - name: Smoke-test fresh install and upgrade preservation
+      - name: Smoke-test fresh install and update preservation
         shell: pwsh
         run: |
           function Invoke-WithTimeout {
@@ -122,6 +122,10 @@ jobs:
 
           $Setup = (Resolve-Path "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe").Path
           $InstallDir = Join-Path $env:RUNNER_TEMP "Chat Nexus Installer Test"
+
+          # Skip multi-gigabyte public model downloads only in CI smoke tests.
+          # Normal interactive installers keep the bootstrap downloads enabled.
+          $env:CHAT_NEXUS_SKIP_MODEL_DOWNLOADS = "1"
 
           $FirstExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
             "/VERYSILENT",
@@ -159,24 +163,24 @@ jobs:
 
           # The second run intentionally omits /DIR. The stable AppId and
           # UsePreviousAppDir must rediscover the existing installation.
-          $UpgradeExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
+          $UpdateExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
             "/VERYSILENT",
             "/SUPPRESSMSGBOXES",
             "/NORESTART"
           ) -TimeoutSeconds 180
-          if ($UpgradeExit -ne 0) { throw "Upgrade installer run failed with exit code $UpgradeExit" }
+          if ($UpdateExit -ne 0) { throw "Update installer run failed with exit code $UpdateExit" }
 
-          if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed downloaded model state" }
-          if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed application data" }
-          if (-not (Test-Path (Join-Path $InstallDir "workflows\image\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed imported workflows" }
-          if (-not (Test-Path (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker"))) { throw "Upgrade overwrote the Source workspace" }
-          if (-not (Test-Path (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker"))) { throw "Upgrade removed task/project state" }
+          if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Update removed downloaded model state" }
+          if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Update removed application data" }
+          if (-not (Test-Path (Join-Path $InstallDir "workflows\image\UPGRADE_PRESERVE.marker"))) { throw "Update removed imported workflows" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\UPGRADE_PRESERVE.marker"))) { throw "Update overwrote the Source workspace" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\.agent\UPGRADE_PRESERVE.marker"))) { throw "Update removed task/project state" }
 
           $ConfigAfter = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-          if ($ConfigAfter.upgrade_preserve_marker -ne "keep-config") { throw "Upgrade overwrote config.json" }
+          if ($ConfigAfter.upgrade_preserve_marker -ne "keep-config") { throw "Update overwrote config.json" }
 
           $SmokeAfterExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
-          if ($SmokeAfterExit -ne 0) { throw "Upgraded ChatNexus.exe self-test failed with exit code $SmokeAfterExit" }
+          if ($SmokeAfterExit -ne 0) { throw "Updated ChatNexus.exe self-test failed with exit code $SmokeAfterExit" }
 
       - name: Upload Chat Nexus installer
         uses: actions/upload-artifact@v4
