@@ -123,7 +123,7 @@ def default_config() -> AgentConfig:
                     "variation":"qwen/qwen-image-2.1-edit-api.json",
                     "inpaint":"qwen/qwen-image-2.1-inpaint-api.json",
                     "outpaint":"qwen/qwen-image-2.1-edit-api.json",
-                    "background_removal":"qwen/qwen-image-2.1-background-removal-api.json",
+                    "remove_background":"qwen/qwen-image-2.1-background-removal-api.json",
                 },
                 components=[
                     {"key":"diffusion_model","path":"models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors","url":"https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors","required":True},
