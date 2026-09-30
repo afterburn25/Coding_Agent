@@ -186,7 +186,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **71 tests passing**.
+Current expected result: **75 tests passing**.
 
 ## API highlights
 
@@ -223,6 +223,19 @@ POST /api/image/models/install
 POST /api/image/models/remove
 POST /api/image/loras/metadata
 ```
+
+## Live agent streaming
+
+The main Chat Nexus chat now uses `POST /api/chat/stream` with Server-Sent Events. OpenAI-compatible local runtimes stream assistant content immediately while Chat Nexus reconstructs streamed function/tool calls for the normal agent loop. Live events include:
+
+- assistant token deltas
+- selected/switched model events
+- tool calls and bounded output
+- task/phase changes
+- research preflight state
+- approval state
+
+Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
 ## Native GitHub delivery tools
 
