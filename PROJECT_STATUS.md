@@ -73,7 +73,7 @@
 
 ### Tests
 
-`99` automated tests passing.
+`102` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 99 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 102 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -103,7 +103,7 @@
 ### Native desktop dogfood checkpoint
 
 - Windows product delivery is now a real **`ChatNexus.exe` desktop app**, not a browser-launch workflow.
-- Native host uses pywebview with the Windows WebView2/EdgeChromium renderer.
+- Native host is a self-contained .NET 8 WinForms application using Microsoft WebView2. It launches the Python agent as hidden `backend/ChatNexus.Backend.exe`; pywebview/pythonnet are no longer part of the desktop runtime.
 - The internal backend binds to loopback and is owned/shut down by the desktop process.
 - PyInstaller produces a windowed portable application folder; no console window is shown on normal launch.
 - Official Chat Nexus logo is used for the app/UI and its repository bytes are verified.
@@ -113,7 +113,8 @@
 - Availability-aware routing falls back from an unavailable 30B model to a runnable primary coder.
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
-- Current automated checkpoint: **99 tests passing**.
+- The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
+- Current automated checkpoint: **102 tests passing**.
 
 
 

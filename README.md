@@ -28,7 +28,7 @@ See `docs/UI_DIRECTION.md` before changing the primary application shell.
 
 ## Native Windows desktop application
 
-The normal Windows deliverable is **`ChatNexus.exe`**, not a browser launcher. The application opens its own native Windows window using WebView2. A loopback-only HTTP service is still used internally to connect the UI to the Python agent backend, but it is implementation plumbing and is not the user-facing application.
+The normal Windows deliverable is **`ChatNexus.exe`**, not a browser launcher. `ChatNexus.exe` is a self-contained **.NET 8 WinForms** application using **Microsoft WebView2**. It starts `backend/ChatNexus.Backend.exe` as a hidden child process and connects the desktop UI to that backend over loopback only. The HTTP service is private implementation plumbing, not the user-facing product.
 
 The portable Windows dogfood bundle includes:
 - `ChatNexus.exe` with the official Chat Nexus icon
@@ -37,7 +37,7 @@ The portable Windows dogfood bundle includes:
 - a real `Source` working copy of `afterburn25/Coding_Agent` for self-development
 - config/example and build metadata
 
-Packaged builds default to native desktop mode. `--server` remains available only as a low-level development/debugging mode.
+Normal users launch `ChatNexus.exe`. The hidden Python backend remains available as `backend/ChatNexus.Backend.exe --server` only for low-level development/debugging. The earlier pywebview/pythonnet desktop host was removed completely after a frozen CLR-loading failure.
 
 ### Default coding models
 
@@ -210,7 +210,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **99 tests passing**.
+Current expected result: **102 tests passing**.
 
 ## API highlights
 
@@ -282,7 +282,7 @@ The Local system drawer now contains a small auditable coding-model catalog. Dow
 Initial entries:
 
 - **Qwen3 14B Q4_K_M** — official Qwen GGUF, 9.0 GB, Apache-2.0; starter roles for utility/fast/general coding.
-- **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — community GGUF quantization of the Apache-2.0 Qwen base, 18.56 GB; primary/deep/reviewer roles and expected CPU/GPU offload on 12 GB VRAM.
+- **Qwen3-Coder 30B-A3B Instruct Q4_K_M** — community GGUF quantization of the Apache-2.0 Qwen base, 18.56 GB; deep-reasoner/reviewer roles and expected CPU/GPU offload on 12 GB VRAM.
 
 Each catalog entry records a direct source URL, exact byte size and SHA256. Downloads use a temporary `.part` file, stream progress, support cancellation, verify exact size + SHA256, and atomically install only after verification. An existing untrusted file is never silently replaced; **Repair** must be selected explicitly.
 

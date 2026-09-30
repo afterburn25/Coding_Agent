@@ -2,12 +2,12 @@
   "name": "Chat Nexus",
   "version": "0.6.0-dev",
   "default_model_mode": "auto",
-  "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
+  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 99,
-  "next_milestone": "Run native ChatNexus.exe dogfood with Qwen3 14B + Qwen3-Coder 30B, then harden observed self-development failures",
+  "test_checkpoint": 102,
+  "next_milestone": "Run corrected native .NET ChatNexus.exe dogfood with Qwen3 14B + Qwen3-Coder 30B, then harden observed self-development failures",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
-  "delivery_target": "Native Windows ChatNexus.exe desktop app; source ZIP secondary",
+  "delivery_target": "Self-contained .NET 8 WinForms/WebView2 ChatNexus.exe + hidden Python backend; source ZIP secondary",
   "default_coding_models": {
     "fast_primary": "Qwen3 14B Q4_K_M",
     "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
