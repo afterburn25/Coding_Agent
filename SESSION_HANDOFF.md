@@ -29,6 +29,17 @@
 - CI exposed a stale Image Studio implementation: mask editor and before/after tests existed, but HTML/JS had not been synced. That implementation is now restored and CI-green.
 - Next priorities: streaming events, native GitHub coding actions, isolated self-update validation, then real self-hosting/dogfood tasks.
 
+## v0.6 native GitHub coding checkpoint
+
+- `localcodeagent/tools/github.py` is registered when `github_enabled=true`.
+- Agent tools: `git_current_branch`, `git_create_branch`, `git_commit`, `git_push`, `github_repository`, `github_list_issues`, `github_create_issue`, `github_create_pull_request`, `github_ci_status`.
+- Local branch/commit mutations use `git.execute`; remote GitHub writes use `github.write` and default to **Ask**.
+- Agent commits require explicit paths and reject `.agent` metadata.
+- GitHub REST credentials come from `github_token_env` (default `GITHUB_TOKEN`) and are never persisted in config.
+- Regression coverage includes HTTPS/SSH remote parsing, explicit-path commit behavior, metadata staging protection, and push approval gating.
+- GitHub Actions checkpoint: **71/71 tests passing**.
+- Next self-hosting blocker: event/token streaming, then isolated second-instance self-update validation.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -73,7 +84,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **67 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **71 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -193,7 +204,6 @@ No image weights are downloaded automatically yet.
 2. Add dedicated background-removal and upscaler adapters/workflows.
 3. Add WebSocket/SSE streaming for chat tokens, tool events, research events, and image-generation progress.
 4. Add persistent browser sessions and richer browser selectors/snapshots.
-5. Add local GitHub integration to the agent itself (clone/issues/PR/CI) behind explicit permissions.
 6. Add model-performance and research-outcome telemetry to improve automatic routing.
 
 ## Testing command
@@ -202,4 +212,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `67 tests` passing.
+Expected at this checkpoint: `71 tests` passing.
