@@ -218,7 +218,6 @@ class AgentOrchestrator:
         provider = self._provider_for(profile)
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
-        self_hosting = self._self_hosting_context()
         recovered_self_hosting = self._self_hosting_context()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -682,6 +681,7 @@ class AgentOrchestrator:
         provider = self._provider_for(profile)
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
+        self_hosting = self._self_hosting_context()
         research_context: dict[str, Any] = {}
         if self.research is not None and self.config.research_enabled:
             try:
@@ -699,6 +699,8 @@ class AgentOrchestrator:
                 "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
             },
         ]
+        if self_hosting:
+            messages.append({"role": "system", "content": self_hosting})
         if research_context.get("guidance"):
             messages.append({"role": "system", "content": "Research preflight (repository-first, no web request was made yet):\n" + str(research_context["guidance"])})
         if history:
