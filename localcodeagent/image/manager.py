@@ -108,6 +108,23 @@ class ImageManager:
         }
 
 
+    def import_workflow(self, model_id: str, operation: str, workflow: dict[str, Any]) -> dict[str, Any]:
+        profile = self.router.get_profile(model_id)
+        operation = str(operation or "").strip()
+        configured = profile.workflows or ({"default": profile.workflow} if profile.workflow else {})
+        if operation not in configured:
+            raise ValueError(f"{model_id} has no configured workflow for operation {operation!r}")
+        name = profile.workflow_for(operation)
+        if not name:
+            raise ValueError(f"{model_id} has no workflow destination configured for {operation!r}")
+        saved = self.workflows.save_api(name, workflow)
+        return {
+            "model_id": profile.id,
+            "operation": operation,
+            "workflow": saved,
+            "model_status": self.library.verify_model(profile),
+        }
+
     def verify_models(self, *, deep_hash: bool = False) -> list[dict[str, Any]]:
         return self.library.verify_all(self.router.models, deep_hash=deep_hash)
 
