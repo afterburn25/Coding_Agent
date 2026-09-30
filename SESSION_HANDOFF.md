@@ -327,6 +327,20 @@
 - Unit checkpoint: **160/160 tests passing**.
 - Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, in-place Update, state preservation, and Windows artifacts all passed.
 
+## v0.6 direct-image preflight hardening checkpoint
+
+- Direct text-to-image generation in Auto mode is now treated as a **coding-model-independent** path before the HTTP chat preflight, at both `/api/chat` and `/api/chat/stream`.
+- This closes the remaining gap where deterministic image routing existed inside the orchestrator but an unavailable coding model could still return `coding_model_setup_required` before the image route ran.
+- Natural-language generation routing is centralized in the Conversation Manager and now accepts common polite/request prefixes such as **“can you”**, **“could you please”**, **“please”**, **“I want you to”**, and **“I would like you to”**.
+- Strong visual verbs such as draw/paint/illustrate/sketch are recognized without requiring a fixed subject vocabulary; ambiguous create/make/generate/render/design requests still require visual terms.
+- Existing/source-image edits, upscales, background operations, variations, and non-image outputs remain excluded from the direct text-to-image shortcut.
+- Regression coverage verifies that prompts such as **“can you generate a picture of a woman”**, **“could you please draw a dragon”**, and **“please paint a sunset”** use the direct image path, while **“make this photo brighter”**, **“make a cup of tea”**, and website/code requests do not.
+- Coding-readiness preflight feature commits: `0d0d0fc`, `45a34f8`, with regression updates through `cb1ae4c`.
+- Natural-language routing commit: `a750f00`; regex serialization correction and verified code checkpoint: `fbf328c`.
+- Unit checkpoint: **162/162 tests passing**.
+- Windows native desktop/installer validation: **green** — native build, installer compile, fresh install, running-app shutdown, in-place Update, state preservation, installer artifact, and portable desktop artifact all passed for `fbf328c`.
+- Next: dogfood this 162-test build against real local Qwen/ComfyUI workflows, then harden observed runtime/progress failures and extend dedicated long-running workflow streaming where useful.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -499,4 +513,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `160 tests` passing.
+Expected at this checkpoint: `162 tests` passing.

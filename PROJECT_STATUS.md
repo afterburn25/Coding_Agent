@@ -73,7 +73,7 @@
 
 ### Tests
 
-`160` automated tests passing.
+`162` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 160 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 162 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -136,7 +136,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **160 tests passing**.
+- Current automated checkpoint: **162 tests passing**.
 
 
 
@@ -174,6 +174,8 @@
 - Direct generation respects the existing `image.generate` permission and supports approval without constructing a chat-model session.
 - `ImageSafetyPolicy` is the policy source of truth for direct generation; `naked` is treated consistently with `nude` by the explicit-image policy.
 - Specialized edit/inpaint/outpaint/upscale requests remain on their dedicated image-tool flow instead of being forced through text-to-image generation.
+- Direct text-to-image requests in Auto mode now bypass coding-model readiness at both `/api/chat` and `/api/chat/stream`, so an unavailable coding model cannot block a model-free image job before it reaches the image subsystem.
+- Direct-generation intent is centralized and recognizes natural request prefixes such as “can you”, “could you please”, “please”, and “I would like you to” while keeping source-image edits and non-image outputs out of the shortcut.
 
 ## Next milestone
 

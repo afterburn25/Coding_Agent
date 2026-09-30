@@ -271,7 +271,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **160 tests passing**.
+Current expected result: **162 tests passing**.
 
 ## API highlights
 
@@ -431,7 +431,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **160 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **162 passing tests**.
 
 ## Development state
 

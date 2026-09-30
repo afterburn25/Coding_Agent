@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 160,
-  "next_milestone": "Dogfood deterministic chat-image routing and the 160-test build; verify ordinary image generation reaches the image subsystem without chat-model refusal, then harden any remaining ComfyUI/model runtime failures.",
+  "test_checkpoint": 162,
+  "next_milestone": "Dogfood the verified 162-test direct-image preflight build against real local Qwen/ComfyUI workflows; harden remaining model/runtime and image-progress failures, then extend measured routing telemetry and long-running workflow streaming.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
