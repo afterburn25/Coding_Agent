@@ -660,7 +660,12 @@ class NexusBrain:
         return set(re.findall(r"[a-z0-9_+-]{2,}", str(text or "").casefold()))
 
     def knowledge_context(self, query: str, limit: int = 4) -> str:
-        if not self.enabled or not self.initialized or not self.verified_for_session:
+        if (
+            not self.enabled
+            or not self.initialized
+            or not self.verified_for_session
+            or not self.subroutine("long_term_memory", True)
+        ):
             return ""
         q_terms = self._terms(query)
         if not q_terms:
@@ -705,6 +710,50 @@ class NexusBrain:
             for source in sources[:3]:
                 lines.append(f"  Source: {source.get('title') or source.get('url')} — {source.get('url')}")
         return "\n".join(lines)[:16000]
+
+    def training_context(self, query: str, limit: int = 4) -> str:
+        """Use approved conversational learning as portable in-context skill guidance."""
+        if (
+            not self.enabled
+            or not self.initialized
+            or not self.verified_for_session
+            or not self.subroutine("long_term_memory", True)
+            or not self.subroutine("conversation_learning", True)
+        ):
+            return ""
+        q_terms = self._terms(query)
+        if not q_terms:
+            return ""
+        hits: list[tuple[float, dict[str, Any]]] = []
+        with self._lock:
+            rows = [copy.deepcopy(row) for row in self._data.get("records", []) if isinstance(row, dict)]
+        for row in rows:
+            if row.get("kind") != "training_signal" or not row.get("active", True):
+                continue
+            meta = dict(row.get("metadata") or {})
+            if str(meta.get("candidate_status") or "") != "approved":
+                continue
+            if str(meta.get("candidate_kind") or "") not in {"conversation_example", "correction"}:
+                continue
+            terms = self._terms(str(row.get("text") or ""))
+            overlap = len(q_terms & terms)
+            if not overlap:
+                continue
+            score = overlap / max(1, len(q_terms))
+            if score < 0.12:
+                continue
+            hits.append((score, row))
+        hits.sort(key=lambda item: (item[0], float(item[1].get("updated_at") or 0)), reverse=True)
+        selected = [row for _score, row in hits[:max(1, int(limit))]]
+        if not selected:
+            return ""
+        lines = [
+            "Relevant approved conversational learning from Nexus Brain:",
+            "Use these as portable behavior examples for the current model. Adapt the learned pattern to the current "
+            "request; do not copy the stored wording mechanically.",
+        ]
+        lines.extend(f"- {row.get('text', '')}" for row in selected)
+        return "\n".join(lines)[:12000]
 
     @staticmethod
     def _applies(row: dict[str, Any], project_id: str, conversation_id: str) -> bool:

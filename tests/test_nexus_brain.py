@@ -84,6 +84,25 @@ class NexusBrainTests(unittest.TestCase):
             first.set_emotion_profile({"curiosity": 0.93})
             first.set_self_model({"name": "Nexus One", "human_like_behavior": True})
             first.bank(kind="fact", text="portable fact", source="test")
+            first.bank(
+                kind="knowledge",
+                text="The fictional Example Planet has two moons.",
+                source="knowledge_memory",
+                source_id="portable-k1",
+                metadata={
+                    "query": "How many moons does Example Planet have?",
+                    "expires_at": 0,
+                    "current_sensitive": False,
+                    "sources": [{"title": "Example astronomy", "url": "https://example.test/moons"}],
+                },
+            )
+            first.bank(
+                kind="training_signal",
+                text="Instruction: greet me warmly\nResponse: Good to see you — what are we getting into today?",
+                source="model_growth",
+                source_id="portable-t1",
+                metadata={"candidate_kind": "conversation_example", "candidate_status": "approved"},
+            )
             payload = first.export_payload()
 
             second = NexusBrain(Path(td) / "second.json")
@@ -98,6 +117,12 @@ class NexusBrainTests(unittest.TestCase):
             self.assertAlmostEqual(second.emotion_profile()["curiosity"], 0.93)
             self.assertEqual(second.self_model()["name"], "Nexus One")
             self.assertIn("portable fact", second.prompt_context())
+            imported_knowledge = second.knowledge_context("How many moons does Example Planet have?")
+            self.assertIn("two moons", imported_knowledge)
+            self.assertIn("example.test/moons", imported_knowledge)
+            imported_skill = second.training_context("Please greet me warmly")
+            self.assertIn("Good to see you", imported_skill)
+            self.assertIn("do not copy", imported_skill)
 
     def test_general_knowledge_is_recalled_and_expired_current_sensitive_records_are_skipped(self):
         with tempfile.TemporaryDirectory() as td:

@@ -1700,6 +1700,11 @@ class AgentOrchestrator:
             if brain_knowledge:
                 knowledge_parts.append(brain_knowledge)
         knowledge_context = "\n\n".join(knowledge_parts)
+        brain_skill_context = (
+            self.nexus_brain.training_context(user_text)
+            if self.nexus_brain is not None and self.nexus_brain.initialized
+            else ""
+        )
         policy_context = self.policy_prompt()
         clock_context = self.current_time_context()
         timing_context = (
@@ -1753,6 +1758,8 @@ class AgentOrchestrator:
                 messages.append({"role": "system", "content": personality_context})
             if intent_context:
                 messages.append({"role": "system", "content": intent_context})
+            if brain_skill_context:
+                messages.append({"role": "system", "content": brain_skill_context})
             if brain_behavior_context:
                 messages.append({"role": "system", "content": brain_behavior_context})
             if knowledge_context:
@@ -1809,6 +1816,8 @@ class AgentOrchestrator:
                 messages.append({"role": "system", "content": personality_context})
             if intent_context:
                 messages.append({"role": "system", "content": intent_context})
+            if brain_skill_context:
+                messages.append({"role": "system", "content": brain_skill_context})
             if brain_behavior_context:
                 messages.append({"role": "system", "content": brain_behavior_context})
             if knowledge_context:
