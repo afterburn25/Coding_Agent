@@ -87,7 +87,7 @@ Filename: "{app}\ChatNexus.exe"; Description: "Launch Chat Nexus"; Flags: nowait
 
 [Code]
 const
-  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppId}_is1';
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{4A4EC89B-8F5B-4F4F-A722-5B48F3B927A4}_is1';
 
 function ReadInstalledVersion(var Version: String): Boolean;
 begin
@@ -106,18 +106,25 @@ begin
 
   if ReadInstalledVersion(InstalledVersion) then
   begin
-    Choice := MsgBox(
-      'Chat Nexus ' + InstalledVersion + ' is already installed.' + #13#10 + #13#10 +
-      'Upgrade this installation to Chat Nexus {#MyAppVersion}?' + #13#10 + #13#10 +
-      'Your downloaded models, config, generated data, and existing Source Git workspace will be preserved.',
-      mbConfirmation,
-      MB_YESNO
-    );
-
-    if Choice <> IDYES then
+    if WizardSilent then
     begin
-      Result := False;
-      Exit;
+      Log('Existing Chat Nexus ' + InstalledVersion + ' detected; silent upgrade will continue.');
+    end
+    else
+    begin
+      Choice := MsgBox(
+        'Chat Nexus ' + InstalledVersion + ' is already installed.' + #13#10 + #13#10 +
+        'Upgrade this installation to Chat Nexus {#MyAppVersion}?' + #13#10 + #13#10 +
+        'Your downloaded models, config, generated data, and existing Source Git workspace will be preserved.',
+        mbConfirmation,
+        MB_YESNO
+      );
+
+      if Choice <> IDYES then
+      begin
+        Result := False;
+        Exit;
+      end;
     end;
   end;
 end;
