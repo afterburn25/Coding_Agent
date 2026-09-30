@@ -236,7 +236,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **117 tests passing**.
+Current expected result: **118 tests passing**.
 
 ## API highlights
 
@@ -300,7 +300,7 @@ Chat Nexus recognizes both the traditional `llama-server` executable and the new
 
 When no managed llama.cpp runtime is found, Coding readiness shows platform-appropriate install commands that can be copied. Chat Nexus **does not execute package-manager installers automatically**. Current guidance includes Winget on Windows and supported Conda/Homebrew options on other platforms.
 
-After installation, Refresh re-runs discovery. Download/install a catalog GGUF, click **Use discovered models**, restart Chat Nexus, and the managed runtime can auto-launch that model when the router needs it.
+After installation, Refresh re-runs discovery. Download/install a catalog GGUF and click **Use discovered models**; Chat Nexus reloads the coding runtime/router in-process and can auto-launch the selected model without restarting the desktop app.
 
 ## Explicit coding-model catalog
 
@@ -337,6 +337,8 @@ A fresh install no longer requires hand-editing paths or restarting after model 
 
 After the requested downloads finish, Chat Nexus writes the model roles to `config.json`, reloads the coding runtime/router in-process, starts the primary model when possible, refreshes readiness, and becomes usable **without restarting the desktop application**. Raw missing-file paths are kept under a collapsed **Technical model status** section during first-run setup.
 
+The first-run card now shows the exact model install directory and free disk space, keeps the quick-install controls disabled while a download plan is active, and surfaces live model download/verification progress without requiring the Advanced downloads section to be opened. A full-stack install is preflighted against available disk space before the first large download starts, and the backend also rejects an individual model install when the target volume cannot safely hold the model plus working space.
+
 ## Coding-model readiness and local GGUF setup
 
 `GET /api/readiness` reports whether Chat Nexus can actually perform coding work, rather than merely whether the web app is running. It checks:
@@ -351,7 +353,7 @@ After the requested downloads finish, Chat Nexus writes the model roles to `conf
 
 The main UI distinguishes **Setup required**, **Ready to code**, and **Self-host ready**.
 
-If GGUF files already exist locally, Chat Nexus proposes conservative role assignments. Clicking **Use discovered models** explicitly writes those model profiles into the selected config and preserves unrelated settings; a restart is required. No model is downloaded or replaced silently.
+If GGUF files already exist locally, Chat Nexus proposes conservative role assignments. Clicking **Use discovered models** explicitly writes those model profiles into the selected config, preserves unrelated settings, and reloads the coding runtime/router live. No model is downloaded or replaced silently.
 
 ## Isolated self-update validation
 
@@ -389,7 +391,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **110 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **118 passing tests**.
 
 ## Development state
 

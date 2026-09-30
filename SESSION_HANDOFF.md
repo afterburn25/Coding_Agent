@@ -169,6 +169,19 @@
 - Feature commit: `5e84c3a` — Add outcome-aware model routing telemetry.
 - Next: dogfood real Qwen3 14B / Qwen3-Coder 30B tasks, then add research-outcome and measured load/tokens-per-second signals.
 
+## v0.6 first-run model-install hardening checkpoint
+
+- Coding readiness now reports the exact coding-model install directory and available disk capacity.
+- The primary **Finish coding setup** card shows live model download/verification progress; users no longer need to expand Advanced model downloads to see activity.
+- Quick-install controls stay disabled while an install plan is active, preventing misleading duplicate clicks during the one-second readiness refresh loop.
+- Full 14B / 14B+30B plans preflight available disk space before beginning; the backend independently rejects an individual new model download if the target volume cannot hold the model plus 0.5 GB working space.
+- `write_suggested_models()` now consistently reports `restart_required=false`; the server still reloads the runtime/router live and starts the starter model when possible.
+- The displayed install path remains the actual application-relative model directory; custom/nested Windows install paths are not silently rewritten.
+- Feature commit: `84976ca` — Harden first-run model install UX.
+- Unit checkpoint: **118/118 tests passing**.
+- Windows native desktop/package validation: green.
+- Next: complete the local 14B/30B installation on the dogfood machine and run real Chat Nexus-on-Chat Nexus coding tasks.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -341,4 +354,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `117 tests` passing.
+Expected at this checkpoint: `118 tests` passing.

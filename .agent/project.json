@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 117,
-  "next_milestone": "Dogfood real Qwen3 14B / Qwen3-Coder 30B tasks, harden observed failures, then add research/throughput routing telemetry",
+  "test_checkpoint": 118,
+  "next_milestone": "Install/dogfood the real Qwen3 14B + Qwen3-Coder 30B stack, harden observed task failures, then add research/throughput routing telemetry",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Single compressed upgrade-aware Windows installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -34,7 +34,12 @@
     "restart_after_configure": false,
     "live_runtime_reload": true,
     "starter_auto_start": true,
-    "diagnostics": "Collapsed under Technical model status during setup"
+    "diagnostics": "Collapsed under Technical model status during setup",
+    "install_path_visible": true,
+    "free_disk_visible": true,
+    "top_level_progress": true,
+    "disk_preflight": true,
+    "active_plan_controls_locked": true
   },
   "ci_hardening": "Installer/app smoke processes have explicit timeouts so hung setup/self-test runs fail deterministically.",
   "routing_telemetry": {
