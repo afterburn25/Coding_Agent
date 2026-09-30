@@ -94,6 +94,31 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertEqual(result["models"][0]["model_file"], str(model))
         self.assertEqual(result["models"][0]["issues"], [])
 
+    def test_missing_managed_model_reports_one_clear_missing_file_issue(self):
+        with tempfile.TemporaryDirectory() as td, patch(
+            "localcodeagent.runtime.manager.detect_hardware", return_value=hardware()
+        ):
+            root = Path(td)
+            server = root / ("llama-server.exe" if __import__("os").name == "nt" else "llama-server")
+            server.write_text("placeholder", encoding="utf-8")
+            profile = ModelProfile(
+                id="missing-coder",
+                endpoint="",
+                model="coder",
+                roles=["primary_coder"],
+                runtime="llama_cpp",
+                model_path="models/missing.gguf",
+                executable=str(server),
+                estimated_vram_gb=8.0,
+                estimated_ram_gb=16.0,
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            result = manager.readiness(probe_external=False)
+
+        issues = result["models"][0]["issues"]
+        self.assertEqual(len([x for x in issues if "GGUF" in x]), 1)
+        self.assertIn("GGUF model file is missing", issues[0])
+
     def test_main_ui_surfaces_readiness_endpoint_and_states(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
@@ -104,6 +129,10 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertIn("Self-host ready", js)
         self.assertIn("Ready to code", js)
         self.assertIn("Setup required", js)
+        self.assertIn("Install recommended 14B", js)
+        self.assertIn("Install full 14B + 30B stack", js)
+        self.assertIn("installModelPlan", js)
+        self.assertIn("configureDownloadedModels", js)
         self.assertIn('if path == "/api/readiness":', server)
 
 
@@ -125,6 +154,16 @@ class ModelSetupPlannerTests(unittest.TestCase):
         ])
         self.assertEqual([row["id"] for row in suggestions], ["fast-primary", "deep-reasoner"])
         self.assertTrue({"utility", "fast_coder", "primary_coder"}.issubset(set(suggestions[0]["roles"])))
+        self.assertEqual(set(suggestions[1]["roles"]), {"deep_reasoner", "reviewer"})
+
+    def test_catalog_pair_is_preferred_even_with_other_ggufs_present(self):
+        suggestions = suggest_model_profiles([
+            {"name": "tiny-other.gguf", "path": "/models/tiny.gguf", "size_gb": 2.0},
+            {"name": "Qwen3-14B-Q4_K_M.gguf", "path": "/models/qwen14.gguf", "size_gb": 9.0},
+            {"name": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "path": "/models/qwen30.gguf", "size_gb": 18.6},
+        ])
+        self.assertEqual([row["id"] for row in suggestions], ["qwen3-14b", "qwen3-coder-30b"])
+        self.assertEqual(set(suggestions[0]["roles"]), {"utility", "fast_coder", "primary_coder"})
         self.assertEqual(set(suggestions[1]["roles"]), {"deep_reasoner", "reviewer"})
 
     def test_three_ggufs_are_split_across_fast_primary_and_deep_roles(self):
