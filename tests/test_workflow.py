@@ -106,6 +106,11 @@ class _SequencedProvider:
         return ProviderResponse(message={"role": "assistant", "content": "finished"}, raw={})
 
 
+class _FinishedProvider:
+    def complete(self, *, messages, tools=None):
+        return ProviderResponse(message={"role": "assistant", "content": "finished after recovery"}, raw={})
+
+
 class ApprovalResumeTests(unittest.TestCase):
     def test_approval_resumes_exact_tool_call(self):
         with tempfile.TemporaryDirectory() as td:
@@ -142,6 +147,96 @@ class ApprovalResumeTests(unittest.TestCase):
             self.assertEqual(seen, ["ok"])
             self.assertEqual(second.content, "finished")
             self.assertEqual(second.task["status"], "completed")
+
+    def test_persisted_approval_resumes_after_process_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(models=[profile], permissions={"test.execute": "ask"}, auto_verify_after_changes=False, review_after_changes=False)
+            router = ModelRouter(config.models)
+            seen = []
+
+            def make_tools():
+                tools = ToolRegistry(config.permissions)
+                tools.register(ToolSpec("dangerous_test_tool", "test", {
+                    "type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]
+                }, "test.execute", lambda args: seen.append(args["value"]) or "OK"))
+                return tools
+
+            tasks1 = TaskStore(root)
+            checkpoints = CheckpointManager(root)
+            memory = ProjectMemory(root)
+            index = RepositoryIndex(root); index.build()
+            agent1 = AgentOrchestrator(
+                config, router, make_tools(), _FakeRuntime(),
+                tasks=tasks1, checkpoints=checkpoints, memory=memory, repository_index=index,
+            )
+            provider1 = _SequencedProvider()
+            agent1._provider_for = lambda _: provider1
+            first = agent1.run("do the thing")
+            self.assertEqual(first.task["status"], "waiting_approval")
+
+            # Simulate a full application restart: new task store + orchestrator,
+            # with no in-memory _AgentSession from the first process.
+            tasks2 = TaskStore(root)
+            agent2 = AgentOrchestrator(
+                config, router, make_tools(), _FakeRuntime(),
+                tasks=tasks2, checkpoints=checkpoints, memory=memory, repository_index=index,
+            )
+            agent2._provider_for = lambda _: _FinishedProvider()
+            resumed = agent2.resume(first.task["id"], approved=True)
+            self.assertEqual(seen, ["ok"])
+            self.assertEqual(resumed.content, "finished after recovery")
+            self.assertEqual(resumed.task["status"], "completed")
+            self.assertEqual(resumed.task["recovery_count"], 1)
+
+
+class TaskRecoveryTests(unittest.TestCase):
+    def test_taskstore_marks_inflight_task_interrupted_after_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tasks = TaskStore(root)
+            task = tasks.create("continue me", "auto")
+            tasks.update(task.id, status="running", phase="working", model_id="local", model_role="primary_coder")
+
+            reloaded = TaskStore(root)
+            recovered = reloaded.get(task.id)
+            self.assertEqual(recovered.status, "interrupted")
+            self.assertEqual(recovered.phase, "interrupted")
+            self.assertEqual(recovered.interrupted_from, "working")
+            self.assertIn("stopped before", recovered.error.lower())
+            self.assertEqual(reloaded.current().id, task.id)
+
+    def test_interrupted_task_can_recover_from_durable_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(models=[profile], permissions={}, auto_verify_after_changes=False, review_after_changes=False)
+            tasks = TaskStore(root)
+            task = tasks.create("finish the interrupted work", "auto")
+            tasks.update(task.id, status="running", phase="working", model_id="local", model_role="primary_coder", steps=2)
+
+            # Restart normalizes the formerly active task to interrupted.
+            tasks = TaskStore(root)
+            self.assertEqual(tasks.get(task.id).status, "interrupted")
+            router = ModelRouter(config.models)
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, router, ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=tasks, checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: _FinishedProvider()
+            result = agent.recover(task.id)
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(result.task["recovery_count"], 1)
+            self.assertTrue(any(e.get("type") == "session_recovery" for e in result.model_events))
 
 
 class _RepairProvider:
