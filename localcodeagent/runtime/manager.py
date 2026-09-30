@@ -174,7 +174,6 @@ class RuntimeManager:
                 size = path.stat().st_size
             except OSError:
                 continue
-            issues = list(dict.fromkeys(issues))
             rows.append({
                 "name": path.name,
                 "path": str(path),
