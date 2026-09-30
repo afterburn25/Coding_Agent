@@ -87,7 +87,9 @@ async function installModelPlan(kind){
     }
     const configured=await configureDownloadedModels({announce:false});
     const installedLabel=kind==='full'?'14B and 30B models':kind==='deep'?'30B deep coder':'14B model';
-    addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Chat Nexus is ready to use without restarting.`);
+    const startError=configured?.applied?.start_error||'';
+    if(startError)addMessage('assistant',`${installedLabel} installed, checksum verified, and routing configured. The starter model did not finish loading yet: ${startError}`);
+    else addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Chat Nexus is ready to use without restarting.`);
   }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
 }
 async function pollCatalogInstall(jobId){
