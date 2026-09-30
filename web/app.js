@@ -65,7 +65,7 @@ async function waitForCatalogJob(jobId){
   while(true){const job=await getCatalogJob(jobId);await loadReadiness();if(['finished','failed','cancelled'].includes(job.state))return job;await new Promise(r=>setTimeout(r,1000));}
 }
 async function configureDownloadedModels({announce=true}={}){
-  const res=await fetch('/api/readiness/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not save model setup');if(announce)addMessage('assistant',data.message||'Coding models configured. Restart Chat Nexus to load the new routing setup.');await loadReadiness();return data;
+  const res=await fetch('/api/readiness/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apply:true})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not save model setup');if(announce)addMessage('assistant',data.message||'Coding models configured and activated.');await loadStatus(false);await loadReadiness();return data;
 }
 async function installModelPlan(kind){
   const ids=kind==='full'?['qwen3-14b-q4-k-m','qwen3-coder-30b-a3b-q4-k-m']:kind==='deep'?['qwen3-coder-30b-a3b-q4-k-m']:['qwen3-14b-q4-k-m'];
@@ -87,7 +87,7 @@ async function installModelPlan(kind){
     }
     const configured=await configureDownloadedModels({announce:false});
     const installedLabel=kind==='full'?'14B and 30B models':kind==='deep'?'30B deep coder':'14B model';
-    addMessage('assistant',`${installedLabel} installed, checksum verified, and routing configured. Restart Chat Nexus once to activate the new model configuration.`);
+    addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Chat Nexus is ready to use without restarting.`);
   }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
 }
 async function pollCatalogInstall(jobId){
