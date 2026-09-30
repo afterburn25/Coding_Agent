@@ -164,6 +164,10 @@ class CodingModelCatalogManager:
 
     def start_install(self, catalog_id: str, repair: bool = False) -> dict[str, Any]:
         asset = self.asset(catalog_id)
+        with self._lock:
+            for row in self._jobs.values():
+                if row.get("catalog_id") == asset.id and row.get("state") in {"queued", "downloading", "verifying", "cancelling"}:
+                    return dict(row)
         existing = self.status(asset)
         if existing["verified"]:
             now = time.time()
