@@ -1004,7 +1004,13 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 row = self.state.conversation_manager.set_active(conversation_id)
                 self.state.history = self.state.conversation_manager.history(limit=32)
-                self._json({"ok": True, "conversation": row, "history": self.state.history})
+                self._json({
+                    "ok": True,
+                    "conversation": row,
+                    # UI history keeps durable message IDs/timestamps for precise feedback,
+                    # while self.state.history remains role/content-only for model APIs.
+                    "history": list(row.get("messages", []))[-32:],
+                })
                 return
 
             if path == "/api/conversations/personality":

@@ -194,6 +194,8 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("recordBuiltinExchange", app)
         self.assertIn("loadConversations", app)
         self.assertIn("/api/conversations/select", app)
+        self.assertIn('"history": list(row.get("messages", []))[-32:]', server)
+        self.assertIn("data-message-id", app)
         self.assertIn("conversationSearch", app)
         self.assertIn("data-feedback", app)
         self.assertIn("/api/conversation-memory/exchange", server)
