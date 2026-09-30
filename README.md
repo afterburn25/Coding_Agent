@@ -93,7 +93,7 @@ The dedicated workspace is available at:
 http://127.0.0.1:8765/image.html
 ```
 
-It provides drag/drop references, conversational prompting, Auto/manual model selection, operation/quality/resolution/count/seed controls, advanced edit controls, queue progress/cancellation, and an image gallery.
+It provides drag/drop references, conversational prompting, Auto/manual model selection, operation/quality/resolution/count/seed controls, advanced edit controls, queue progress/cancellation, and an image gallery. It now also includes a local canvas mask editor for inpainting plus a before/after comparison workbench; saved masks are passed to workflows through `mask_path`.
 
 The complete requested image specification is preserved at `docs/IMAGE_MODULE_SPEC.md`.
 
@@ -159,7 +159,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **61 tests passing**.
+Current expected result: **64 tests passing**.
 
 ## API highlights
 
