@@ -37,7 +37,9 @@ def main() -> None:
     args = parser.parse_args()
 
     app_dir = _application_dir()
-    workspace = Path(args.workspace).expanduser().resolve() if args.workspace else app_dir
+    bundled_source = app_dir / "Source"
+    default_workspace = bundled_source if (bundled_source / "localcodeagent" / "server.py").is_file() else app_dir
+    workspace = Path(args.workspace).expanduser().resolve() if args.workspace else default_workspace
     workspace.mkdir(parents=True, exist_ok=True)
     config_path = Path(args.config).expanduser().resolve() if args.config else (app_dir / "config.json")
     config = load_config(config_path if config_path.exists() else None)
