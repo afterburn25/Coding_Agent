@@ -4,7 +4,12 @@
   "default_model_mode": "auto",
   "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 95,
-  "next_milestone": "Package/test v0.6 dogfood build, then begin real Chat Nexus-on-Chat Nexus development",
-  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo"
+  "test_checkpoint": 99,
+  "next_milestone": "Run native ChatNexus.exe dogfood with Qwen3 14B + Qwen3-Coder 30B, then harden observed self-development failures",
+  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
+  "delivery_target": "Native Windows ChatNexus.exe desktop app; source ZIP secondary",
+  "default_coding_models": {
+    "fast_primary": "Qwen3 14B Q4_K_M",
+    "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
+  }
 }
