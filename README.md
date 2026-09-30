@@ -34,6 +34,8 @@ The **primary Windows deliverable is now a single compressed installer EXE**:
 
 The installer uses a stable application identity so a later installer can detect an existing Chat Nexus installation. On an existing installation the wizard becomes **Update Chat Nexus** and the final action button says **Update**. The update replaces application/backend/runtime files while preserving mutable local state:
 
+Update shutdown is installer-owned rather than delegated to Windows Restart Manager. Setup first asks the running `ChatNexus.exe` process tree to close, waits briefly, then force-cleans any orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, or `llama.exe` before replacing files.
+
 - downloaded `models\`
 - `config.json`
 - generated `data\`
@@ -239,7 +241,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **131 tests passing**.
+Current expected result: **133 tests passing**.
 
 ## API highlights
 
@@ -291,6 +293,8 @@ The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. A
 - liveness heartbeats with elapsed time, task phase, and selected model
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat events update the assistant bubble with phase/model/elapsed seconds instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+
+Basic greetings and capability questions are now answered by a built-in local utility response and do **not** require llama.cpp, model readiness, repository context, or tool-schema construction. The native desktop host also captures hidden backend stdout/stderr to `data/logs/backend-host.log` and will attempt a bounded automatic backend restart if the backend process exits unexpectedly.
 
 ## Self-development mode
 
@@ -395,7 +399,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **131 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **133 passing tests**.
 
 ## Development state
 

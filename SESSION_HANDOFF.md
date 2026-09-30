@@ -238,6 +238,20 @@
 - Windows installer/native desktop validation: **green** — installer compiled, fresh-install/update smoke passed, state preservation passed, and Windows artifacts uploaded.
 - Next: update the dogfood install and observe real 30B load/offload behavior, then record measured first-token/tokens-per-second and actual memory use.
 
+## v0.6 resilient greeting / backend watchdog / installer-close checkpoint
+
+- Dogfood still showed **“Chat Nexus stopped before this task completed.”** after a long `hi` request. That message is written only when a newly started backend discovers a previously active task, proving the hidden backend had stopped/restarted rather than merely producing a slow token.
+- Basic greetings and capability questions now use a built-in local utility response. They complete immediately in Auto mode with `model_id=builtin-local` and do not call model readiness, llama.cpp, repository indexing/context, research preflight, or coding tools.
+- The chat endpoints skip the coding-model readiness gate for those built-in utility requests, so `hi` works even if llama.cpp is stopped or unhealthy.
+- The native .NET host now redirects hidden backend stdout/stderr to `data/logs/backend-host.log`, records backend start/exit events, and automatically restarts an unexpectedly exited backend up to a bounded retry limit. Restarted backends reload the UI; interrupted task state remains recoverable through the durable task ledger.
+- Installer close errors were traced to `CloseApplications=yes` / Restart Manager interacting with the desktop → backend → llama.cpp process tree.
+- The installer now sets `CloseApplications=no` and owns update shutdown: it terminates the `ChatNexus.exe` process tree, waits briefly, then force-cleans orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, and `llama.exe` before replacing files.
+- Windows CI now creates a deliberately long-running executable named `ChatNexus.exe` before the Update smoke run and fails if Setup does not close it.
+- Feature commit: `654bdea` — Make greetings resilient and harden update shutdown.
+- Unit checkpoint: **133/133 tests passing**.
+- Windows native desktop/installer validation: **green** — native host compiled, installer compiled, the running-`ChatNexus.exe` shutdown reproduction passed, fresh-install/update preservation passed, and Windows artifacts uploaded.
+- Next: install this dogfood build, verify `hi` responds instantly without model startup, then use `data/logs/backend-host.log` if any further unexpected backend exit occurs; after stability, measure real 14B/30B first-token and throughput.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -410,4 +424,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `131 tests` passing.
+Expected at this checkpoint: `133 tests` passing.
