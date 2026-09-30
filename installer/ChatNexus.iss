@@ -53,7 +53,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 ; Replace application/runtime files on every install or upgrade, but never overwrite
 ; mutable user state or the bundled self-development Git workspace.
-Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Source\*;models\*;data\*;config.json"
+Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Source\*,models\*,data\*,config.json"
 
 ; Seed the self-development workspace only when it does not already exist.
 ; Existing Source/.git plus local edits are preserved during upgrades.
