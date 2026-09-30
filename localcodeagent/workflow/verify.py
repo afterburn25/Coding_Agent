@@ -9,9 +9,24 @@ def detect_verification_commands(workspace: Path) -> list[dict[str, str]]:
     root = workspace.resolve()
     commands: list[dict[str, str]] = []
 
+    chat_nexus_tree = (
+        (root / "localcodeagent" / "server.py").is_file()
+        and (root / "web" / "index.html").is_file()
+        and (root / "pyproject.toml").is_file()
+    )
+
     if (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "tests").is_dir():
-        # unittest requires no third-party dependency. pytest is left to project-specific agent decisions.
-        commands.append({"name": "Python unit tests", "command": "python -m unittest discover -s tests -v"})
+        # Chat Nexus self-development gets a stronger single approval-gated check:
+        # the selftest command runs the unit suite, launches a second isolated
+        # loopback instance from the edited tree, probes its APIs/UIs, then exits.
+        if chat_nexus_tree:
+            commands.append({
+                "name": "Chat Nexus isolated self-update validation",
+                "command": "python -m localcodeagent.selftest --workspace . --json",
+            })
+        else:
+            # unittest requires no third-party dependency. pytest is left to project-specific agent decisions.
+            commands.append({"name": "Python unit tests", "command": "python -m unittest discover -s tests -v"})
 
     package_json = root / "package.json"
     if package_json.exists():
