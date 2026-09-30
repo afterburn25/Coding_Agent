@@ -73,7 +73,17 @@
 
 ### Tests
 
-`64` automated tests passing.
+`67` automated tests passing.
+
+### v0.6 self-hosting progress
+
+- Durable task recovery across application restarts.
+- Active tasks that were running/verifying/reviewing are marked `interrupted` on startup instead of being left falsely active.
+- Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
+- Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
+- Chat Nexus UI surfaces a **Resume interrupted task** action.
+- GitHub Actions test workflow runs on push/PR and currently passes all 67 tests.
+- Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 
 ### Important current limitations
 
@@ -96,8 +106,8 @@
 
 Move directly toward **v0.6 self-hosting/dogfooding**:
 1. add SSE/WebSocket streaming for model tokens, tool output, task/research/image progress
-2. add persistent task recovery/resume after process restart or model failure
-3. add first-class GitHub coding actions (branch/commit/push/PR/CI) behind explicit permissions
-4. launch an isolated second Chat Nexus instance for self-update smoke tests before accepting self-modifications
-5. run real dogfood tasks against the Chat Nexus repository and harden failures found there
+2. add first-class GitHub coding actions (branch/commit/push/PR/CI) behind explicit permissions
+3. launch an isolated second Chat Nexus instance for self-update smoke tests before accepting self-modifications
+4. run real dogfood tasks against the Chat Nexus repository and harden failures found there
+5. add model-performance/research-outcome telemetry to improve automatic routing
 6. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
