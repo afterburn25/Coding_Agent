@@ -136,21 +136,44 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             )
             index = RepositoryIndex(root)
             index.build()
-            provider = _CaptureProvider()
             agent = AgentOrchestrator(
                 config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
                 tasks=TaskStore(root), checkpoints=CheckpointManager(root),
                 memory=ProjectMemory(root), repository_index=index,
             )
-            agent._provider_for = lambda _: provider
+            agent._provider_for = lambda _: (_ for _ in ()).throw(AssertionError("greeting should not load a model"))
 
             result = agent.run("hi")
 
             self.assertEqual(result.routing.role, "utility")
-            self.assertIsNone(provider.tools)
-            system_text = "\n".join(str(m.get("content", "")) for m in provider.messages if m.get("role") == "system")
-            self.assertIn("greetings, capability questions", system_text)
-            self.assertNotIn("Workspace memory:", system_text)
+            self.assertEqual(result.routing.model_id, "builtin-local")
+            self.assertTrue(result.content.startswith("Hi!"))
+            self.assertEqual(result.task["status"], "completed")
+            self.assertTrue(any(e.get("type") == "builtin_utility" for e in result.model_events))
+
+    def test_capability_question_is_answered_without_model_activation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=True,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(AssertionError("capability question should not load a model"))
+
+            result = agent.run("what all can you do?")
+
+            self.assertEqual(result.routing.model_id, "builtin-local")
+            self.assertIn("inspect and edit code", result.content)
             self.assertEqual(result.task["status"], "completed")
 
 

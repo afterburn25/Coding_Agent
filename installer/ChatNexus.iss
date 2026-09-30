@@ -47,8 +47,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
-CloseApplicationsFilter=ChatNexus.exe,ChatNexus.Backend.exe,llama-server.exe
+CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
 VersionInfoVersion={#AppNumericVersion}
@@ -447,8 +446,54 @@ begin
   Result := InstallBundledSource;
 end;
 
+procedure TaskKillImage(const ImageName: String; const Force: Boolean);
+var
+  ResultCode: Integer;
+  Params: String;
+begin
+  Params := '/IM "' + ImageName + '" /T';
+  if Force then
+    Params := '/F ' + Params;
+
+  if Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    Params,
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) then
+  begin
+    if ResultCode = 0 then
+      Log('Stopped process tree: ' + ImageName)
+    else
+      Log('taskkill returned ' + IntToStr(ResultCode) + ' for ' + ImageName);
+  end
+  else
+    Log('Could not execute taskkill for ' + ImageName);
+end;
+
+procedure StopRunningChatNexus();
+begin
+  if not UpgradeDetected then
+    Exit;
+
+  Log('Update detected; closing running Chat Nexus processes before replacing files.');
+
+  // Avoid Restart Manager for Chat Nexus because the desktop host owns a hidden
+  // backend and llama.cpp child process. Close the desktop tree first, allow a
+  // short grace period, then force-clean any orphaned children.
+  TaskKillImage('{#AppExeName}', False);
+  Sleep(1500);
+  TaskKillImage('{#AppExeName}', True);
+  TaskKillImage('ChatNexus.Backend.exe', True);
+  TaskKillImage('llama-server.exe', True);
+  TaskKillImage('llama.exe', True);
+  Sleep(500);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  StopRunningChatNexus();
   InstallBundledSource := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
 
   if InstallBundledSource then

@@ -17,6 +17,11 @@ class NativeDesktopArchitectureTests(unittest.TestCase):
         self.assertIn("WebView2", program)
         self.assertIn("CreateNoWindow = true", program)
         self.assertIn("Kill(entireProcessTree: true)", program)
+        self.assertIn("backend-host.log", program)
+        self.assertIn("RedirectStandardOutput = true", program)
+        self.assertIn("UnexpectedExit", program)
+        self.assertIn("RecoverBackendAsync", program)
+        self.assertIn("_backendRestartCount > 3", program)
 
     def test_python_backend_no_longer_owns_desktop_window(self):
         main = (ROOT / "localcodeagent" / "__main__.py").read_text(encoding="utf-8")

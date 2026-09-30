@@ -67,6 +67,17 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("CurrentModelProgressNumber <> ModelNumber", self.installer)
         self.assertIn("Coding model downloads complete", self.installer)
 
+    def test_update_uses_installer_owned_process_shutdown(self):
+        self.assertIn("CloseApplications=no", self.installer)
+        self.assertNotIn("CloseApplicationsFilter=", self.installer)
+        self.assertIn("procedure TaskKillImage", self.installer)
+        self.assertIn("procedure StopRunningChatNexus", self.installer)
+        self.assertIn("taskkill.exe", self.installer)
+        self.assertIn("TaskKillImage('{#AppExeName}', False)", self.installer)
+        self.assertIn("TaskKillImage('ChatNexus.Backend.exe', True)", self.installer)
+        self.assertIn("TaskKillImage('llama-server.exe', True)", self.installer)
+        self.assertIn("StopRunningChatNexus();", self.installer)
+
     def test_ci_compiles_real_installer_and_runs_update_twice(self):
         self.assertIn('installer\\ChatNexus.iss', self.workflow)
         self.assertIn("Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe", self.workflow)
@@ -79,6 +90,8 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Build native Chat Nexus desktop app", self.workflow)
         self.assertIn("Installed Source workspace is incomplete", self.workflow)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.workflow)
+        self.assertIn("Fake Chat Nexus Process", self.workflow)
+        self.assertIn("Installer did not close the running ChatNexus.exe process", self.workflow)
         self.assertNotIn("Chat-Nexus-Setup-v0.6.0-dev.exe", self.workflow)
 
     def test_legacy_duplicate_installer_definition_is_removed(self):

@@ -53,13 +53,60 @@ internal static class Program
 internal sealed class BackendProcess : IDisposable
 {
     private readonly Process _process;
+    private readonly TextWriter _logWriter;
+    private readonly object _logLock = new();
+    private volatile bool _disposing;
+
     public int Port { get; }
     public string BaseUrl => $"http://127.0.0.1:{Port}/";
+    public string LogPath { get; }
+    public event Action<int>? UnexpectedExit;
 
-    private BackendProcess(Process process, int port)
+    private BackendProcess(Process process, int port, string logPath)
     {
         _process = process;
         Port = port;
+        LogPath = logPath;
+        _logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true) { AutoFlush = true });
+
+        _process.EnableRaisingEvents = true;
+        _process.OutputDataReceived += (_, e) => WriteLog("OUT", e.Data);
+        _process.ErrorDataReceived += (_, e) => WriteLog("ERR", e.Data);
+        _process.Exited += (_, _) =>
+        {
+            var code = SafeExitCode();
+            WriteLog("HOST", $"backend exited with code {code}");
+            if (!_disposing)
+            {
+                UnexpectedExit?.Invoke(code);
+            }
+        };
+    }
+
+    private int SafeExitCode()
+    {
+        try { return _process.ExitCode; }
+        catch { return -1; }
+    }
+
+    private void WriteLog(string stream, string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+
+        try
+        {
+            lock (_logLock)
+            {
+                _logWriter.WriteLine($"{DateTimeOffset.Now:O} [{stream}] {line}");
+            }
+        }
+        catch
+        {
+            // Logging must never crash the desktop host.
+        }
     }
 
     public static BackendProcess Start(string appDir)
@@ -79,6 +126,10 @@ internal sealed class BackendProcess : IDisposable
         var config = Path.Combine(appDir, "config.json");
         var port = FindFreePort();
 
+        var logDir = Path.Combine(appDir, "data", "logs");
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, "backend-host.log");
+
         var start = new ProcessStartInfo
         {
             FileName = backendExe,
@@ -86,7 +137,10 @@ internal sealed class BackendProcess : IDisposable
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
+        start.Environment["PYTHONUNBUFFERED"] = "1";
         start.ArgumentList.Add("--server");
         start.ArgumentList.Add("--host");
         start.ArgumentList.Add("127.0.0.1");
@@ -99,7 +153,11 @@ internal sealed class BackendProcess : IDisposable
 
         var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start Chat Nexus backend.");
-        return new BackendProcess(process, port);
+        var backend = new BackendProcess(process, port, logPath);
+        backend.WriteLog("HOST", $"started backend pid {process.Id} on port {port}");
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return backend;
     }
 
     public async Task WaitUntilHealthyAsync(TimeSpan timeout)
@@ -153,6 +211,7 @@ internal sealed class BackendProcess : IDisposable
 
     public void Dispose()
     {
+        _disposing = true;
         try
         {
             if (!_process.HasExited)
@@ -167,6 +226,7 @@ internal sealed class BackendProcess : IDisposable
         }
         finally
         {
+            try { _logWriter.Dispose(); } catch { }
             _process.Dispose();
         }
     }
@@ -191,6 +251,9 @@ internal sealed class MainForm : Form
     private readonly string _appDir;
     private readonly WebView2 _webView = new();
     private BackendProcess? _backend;
+    private bool _closing;
+    private bool _backendRestarting;
+    private int _backendRestartCount;
 
     public MainForm(string appDir)
     {
@@ -213,15 +276,19 @@ internal sealed class MainForm : Form
         Controls.Add(_webView);
 
         Shown += async (_, _) => await StartAsync();
-        FormClosing += (_, _) => _backend?.Dispose();
+        FormClosing += (_, _) =>
+        {
+            _closing = true;
+            _backend?.Dispose();
+        };
     }
 
     private async Task StartAsync()
     {
         try
         {
-            _backend = BackendProcess.Start(_appDir);
-            await _backend.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30));
+            AttachBackend(BackendProcess.Start(_appDir));
+            await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30));
 
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -250,6 +317,77 @@ internal sealed class MainForm : Form
                 MessageBoxIcon.Error
             );
             Close();
+        }
+    }
+
+    private void AttachBackend(BackendProcess backend)
+    {
+        _backend = backend;
+        backend.UnexpectedExit += exitCode =>
+        {
+            if (_closing || IsDisposed || !IsHandleCreated || !ReferenceEquals(_backend, backend))
+            {
+                return;
+            }
+
+            try
+            {
+                BeginInvoke(new Action(() => _ = RecoverBackendAsync(exitCode, backend.LogPath)));
+            }
+            catch
+            {
+                // The form may be closing while the backend exit event is raised.
+            }
+        };
+    }
+
+    private async Task RecoverBackendAsync(int exitCode, string logPath)
+    {
+        if (_closing || _backendRestarting)
+        {
+            return;
+        }
+
+        _backendRestarting = true;
+        try
+        {
+            _backendRestartCount += 1;
+            _backend?.Dispose();
+            _backend = null;
+
+            if (_backendRestartCount > 3)
+            {
+                MessageBox.Show(
+                    $"Chat Nexus backend stopped repeatedly (last exit code {exitCode}).\n\nBackend log: {logPath}",
+                    "Chat Nexus backend error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+                return;
+            }
+
+            await Task.Delay(350);
+            var replacement = BackendProcess.Start(_appDir);
+            AttachBackend(replacement);
+            await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30));
+
+            if (!_closing && _webView.CoreWebView2 is not null)
+            {
+                _webView.Source = new Uri(replacement.BaseUrl);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Chat Nexus could not restart its backend.\n\n{ex}\n\nBackend log: {logPath}",
+                "Chat Nexus backend restart error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
+        finally
+        {
+            _backendRestarting = false;
         }
     }
 

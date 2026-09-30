@@ -587,14 +587,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                readiness = self.state.runtime.readiness(probe_external=True)
-                if not readiness.get("ready_to_code"):
-                    self._json({
-                        "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
-                        "code": "coding_model_setup_required",
-                        "readiness": readiness,
-                    }, 409)
-                    return
+                builtin_utility = (
+                    mode == "auto"
+                    and self.state.agent.builtin_utility_response(message) is not None
+                )
+                if not builtin_utility:
+                    readiness = self.state.runtime.readiness(probe_external=True)
+                    if not readiness.get("ready_to_code"):
+                        self._json({
+                            "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
+                            "code": "coding_model_setup_required",
+                            "readiness": readiness,
+                        }, 409)
+                        return
 
                 self._sse_begin()
                 if not self._sse_event("ready", {"mode": mode}):
@@ -665,14 +670,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                readiness = self.state.runtime.readiness(probe_external=True)
-                if not readiness.get("ready_to_code"):
-                    self._json({
-                        "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
-                        "code": "coding_model_setup_required",
-                        "readiness": readiness,
-                    }, 409)
-                    return
+                builtin_utility = (
+                    mode == "auto"
+                    and self.state.agent.builtin_utility_response(message) is not None
+                )
+                if not builtin_utility:
+                    readiness = self.state.runtime.readiness(probe_external=True)
+                    if not readiness.get("ready_to_code"):
+                        self._json({
+                            "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
+                            "code": "coding_model_setup_required",
+                            "readiness": readiness,
+                        }, 409)
+                        return
                 result = self.state.agent.run(message, history=self.state.history, mode=mode)
                 self.state.history.extend([
                     {"role": "user", "content": message},

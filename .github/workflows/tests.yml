@@ -161,6 +161,22 @@ jobs:
           $Config | Add-Member -NotePropertyName "upgrade_preserve_marker" -NotePropertyValue "keep-config" -Force
           $Config | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 $ConfigPath
 
+          # Fake Chat Nexus Process: prove the Update path can close a running
+          # process tree itself instead of relying on Inno Restart Manager.
+          $FakeDir = Join-Path $env:RUNNER_TEMP "Fake Chat Nexus Process"
+          New-Item -ItemType Directory -Force -Path $FakeDir | Out-Null
+          $FakeExe = Join-Path $FakeDir "ChatNexus.exe"
+          Copy-Item "$env:SystemRoot\System32\cmd.exe" $FakeExe -Force
+          $FakeChatNexus = Start-Process -FilePath $FakeExe -ArgumentList @(
+            "/c",
+            "ping",
+            "127.0.0.1",
+            "-t"
+          ) -PassThru
+          Start-Sleep -Seconds 1
+          $FakeChatNexus.Refresh()
+          if ($FakeChatNexus.HasExited) { throw "Fake ChatNexus.exe process did not stay running for update-close smoke test" }
+
           # The second run intentionally omits /DIR. The stable AppId and
           # UsePreviousAppDir must rediscover the existing installation.
           $UpdateExit = Invoke-WithTimeout -FilePath $Setup -ArgumentList @(
@@ -169,6 +185,12 @@ jobs:
             "/NORESTART"
           ) -TimeoutSeconds 180
           if ($UpdateExit -ne 0) { throw "Update installer run failed with exit code $UpdateExit" }
+
+          $FakeChatNexus.Refresh()
+          if (-not $FakeChatNexus.HasExited) {
+            try { Stop-Process -Id $FakeChatNexus.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw "Installer did not close the running ChatNexus.exe process"
+          }
 
           if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Update removed downloaded model state" }
           if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Update removed application data" }

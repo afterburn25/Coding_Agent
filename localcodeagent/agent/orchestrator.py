@@ -117,6 +117,32 @@ class AgentOrchestrator:
         self.telemetry = telemetry
         self._sessions: dict[str, _AgentSession] = {}
 
+    @staticmethod
+    def builtin_utility_response(user_text: str) -> str | None:
+        normalized = user_text.strip().lower().rstrip("!?.,")
+        greetings = {
+            "hi", "hello", "hey", "hey there", "good morning",
+            "good afternoon", "good evening",
+        }
+        if normalized in greetings:
+            return "Hi! Chat Nexus is ready. What would you like to work on?"
+
+        capability_phrases = (
+            "what can you do",
+            "what all can you do",
+            "what are your capabilities",
+            "what do you do",
+            "how can you help",
+        )
+        if any(phrase in normalized for phrase in capability_phrases):
+            return (
+                "I can inspect and edit code, build features, debug errors, run tests and commands with "
+                "permission gates, research technical issues, work with Git/GitHub when authorized, "
+                "manage local coding models, and use configured local image tools. For simple questions "
+                "I answer directly; for coding work I can inspect the repository and carry the task through verification."
+            )
+        return None
+
     def _provider_for(self, profile: ModelProfile) -> OpenAICompatibleProvider:
         endpoint = self.runtime.ensure_ready(profile)
         return OpenAICompatibleProvider(profile, endpoint=endpoint)
@@ -806,6 +832,44 @@ class AgentOrchestrator:
         self.tasks.update(task.id, phase="planning")
 
         decision = self.router.choose(user_text, override=mode)
+        builtin_response = (
+            self.builtin_utility_response(user_text)
+            if mode == "auto" and decision.role == "utility"
+            else None
+        )
+        if builtin_response is not None:
+            builtin_decision = RoutingDecision(
+                role="utility",
+                model_id="builtin-local",
+                reasons=[*decision.reasons, "answered locally without loading a model"],
+                complexity=0,
+            )
+            completed_task = self.tasks.update(
+                task.id,
+                status="completed",
+                phase="done",
+                model_id="builtin-local",
+                model_role="utility",
+                summary=builtin_response,
+                steps=0,
+                error="",
+            )
+            builtin_event = {
+                "type": "builtin_utility",
+                "model_id": "builtin-local",
+                "role": "utility",
+                "reason": "no model load required",
+            }
+            self._safe_emit(event_callback, {"type": "model", "event": builtin_event})
+            self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
+            return AgentResult(
+                content=builtin_response,
+                routing=builtin_decision,
+                model_events=[builtin_event],
+                steps=0,
+                task=completed_task.as_dict(),
+            )
+
         model_events = [{
             "type": "selected",
             "model_id": decision.model_id,

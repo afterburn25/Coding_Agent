@@ -143,6 +143,8 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("queue.Queue", server)
         self.assertIn("chat-nexus-agent-stream", server)
         self.assertIn('self._sse_event("heartbeat"', server)
+        self.assertIn("builtin_utility_response(message)", server)
+        self.assertIn("if not builtin_utility:", server)
 
 
 if __name__ == "__main__":
