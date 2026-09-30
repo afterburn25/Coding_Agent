@@ -69,9 +69,10 @@ class ModelRouter:
         )
         work_signals = (
             "build", "create", "implement", "write code", "edit", "change",
-            "debug", "fix", "refactor", "test", "compile", "repository", "repo",
-            "project", "file", "backend", "frontend", "database", "api", "github",
-            "git", "function", "class", "script", "website", "webpage",
+            "rename", "improve", "debug", "fix", "refactor", "test", "compile",
+            "repository", "repo", "project", "file", "backend", "frontend",
+            "database", "api", "github", "git", "function", "class", "script",
+            "website", "webpage", "button", "chat nexus",
         )
         if (
             len(t) <= 320
