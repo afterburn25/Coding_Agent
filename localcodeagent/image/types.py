@@ -29,7 +29,9 @@ class ImageModelProfile:
     notes: str = ""
 
     def workflow_for(self, operation: str) -> str:
-        return self.workflows.get(operation) or self.workflows.get("default") or self.workflow
+        aliases = {"remove_background": "background_removal", "background_removal": "remove_background"}
+        alias = aliases.get(operation, "")
+        return self.workflows.get(operation) or (self.workflows.get(alias) if alias else "") or self.workflows.get("default") or self.workflow
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
