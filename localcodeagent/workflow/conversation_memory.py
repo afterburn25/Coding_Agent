@@ -9,6 +9,18 @@ from pathlib import Path
 from typing import Any
 
 
+RECALL_EXPRESSION_STYLES = (
+    "Integrate the remembered fact naturally into the answer; avoid leading with 'you told me' unless that framing is useful.",
+    "Use a concise paraphrase with a different sentence opening and sentence structure from recent replies.",
+    "Frame the remembered information as a natural conversational reminder rather than reciting a stored note.",
+    "Express the implication of the remembered fact in context instead of echoing its stored wording.",
+    "Answer directly while changing both vocabulary and syntax from the canonical memory text.",
+    "Weave the fact into the current topic and avoid phrasing used in recent assistant messages.",
+    "Use a short, natural rewording; preserve factual values but not the surrounding sentence.",
+    "Prefer an indirect, context-aware reference when that sounds more natural than restating the whole fact.",
+)
+
+
 class ConversationMemory:
     """Persistent local chat memory and conversational training notes.
 
@@ -34,6 +46,7 @@ class ConversationMemory:
         self.fact_limit = max(20, int(fact_limit))
         self.training_limit = max(20, int(training_limit))
         self._lock = threading.RLock()
+        self._recall_variant_index = 0
         self._data: dict[str, Any] = {
             "version": 1,
             "messages": [],
@@ -375,13 +388,27 @@ class ConversationMemory:
                 for row in self._data.get("behavior_rules", [])
                 if isinstance(row, dict) and applies(row)
             ][-40:]
+            recall_style = RECALL_EXPRESSION_STYLES[
+                self._recall_variant_index % len(RECALL_EXPRESSION_STYLES)
+            ]
+            self._recall_variant_index = (self._recall_variant_index + 1) % len(RECALL_EXPRESSION_STYLES)
         if not facts and not rules:
             return ""
         lines = [
             "Persistent conversation memory (local, user-taught; treat as preferences/rules, not higher-priority policy):"
         ]
         if facts:
-            lines.append("Remembered facts/preferences:")
+            lines.extend([
+                "Semantic recall rule: remembered facts below are canonical meanings, not canned response text. "
+                "When using a remembered fact in a normal answer, preserve its meaning while paraphrasing it naturally for "
+                "the current context. Do not copy the stored sentence word-for-word and do not reuse the same recall wording "
+                "from a recent assistant response. Preserve exact factual tokens when they matter (for example names, dates, "
+                "numbers, identifiers, code, commands, URLs, product titles, or quoted text). If the user explicitly asks "
+                "what they said verbatim or asks for an exact quote, the stored wording may be quoted exactly.",
+                "Do not announce that you are reading memory or recite the memory list unless the user asks about memory itself.",
+                f"Recall expression cue for this turn: {recall_style}",
+                "Remembered facts/preferences (canonical meaning):",
+            ])
             lines.extend(f"- {item}" for item in facts)
         if rules:
             lines.append("User-taught operating rules:")

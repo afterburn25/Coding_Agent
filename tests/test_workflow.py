@@ -431,6 +431,10 @@ class ConversationMemoryTests(unittest.TestCase):
             context = reloaded.prompt_context()
             self.assertIn("keep answers concise", context)
             self.assertIn("I prefer dark mode", context)
+            self.assertIn("Semantic recall rule", context)
+            self.assertIn("canonical meanings, not canned response text", context)
+            self.assertIn("Do not copy the stored sentence word-for-word", context)
+            self.assertIn("Recall expression cue for this turn:", context)
 
     def test_correction_becomes_reviewable_training_example(self):
         with tempfile.TemporaryDirectory() as td:

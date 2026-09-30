@@ -138,6 +138,15 @@ class ScopedConversationMemoryTests(unittest.TestCase):
             self.assertIn("dark mode", other_project)
             self.assertIn("dark mode", other_chat)
 
+            first_recall = memory.prompt_context(project_id="project-a", conversation_id="chat-a")
+            second_recall = memory.prompt_context(project_id="project-a", conversation_id="chat-a")
+            first_cue = next(line for line in first_recall.splitlines() if line.startswith("Recall expression cue for this turn:"))
+            second_cue = next(line for line in second_recall.splitlines() if line.startswith("Recall expression cue for this turn:"))
+            self.assertNotEqual(first_cue, second_cue)
+            self.assertIn("canonical meaning", first_recall)
+            self.assertIn("verbatim", first_recall)
+            self.assertIn("names, dates", first_recall)
+
             learned = memory.learn_from_user("Forget that project formatter")
             self.assertTrue(learned["forgotten"])
             after = memory.prompt_context(project_id="project-a", conversation_id="chat-a")
