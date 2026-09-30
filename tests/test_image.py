@@ -94,6 +94,17 @@ class ImagePolicyTests(unittest.TestCase):
             allowed, _ = policy.check("explicit nude minor")
             self.assertFalse(allowed)
 
+    def test_adult_synthetic_naked_request_is_allowed_and_minor_is_blocked(self):
+        with tempfile.TemporaryDirectory() as td:
+            policy = ImageSafetyPolicy(ConsentStore(Path(td) / "consents.json"))
+            allowed, reason = policy.check("generate a naked adult woman")
+            self.assertTrue(allowed)
+            self.assertEqual(reason, "allowed")
+
+            blocked, reason = policy.check("generate a naked minor")
+            self.assertFalse(blocked)
+            self.assertIn("minors", reason.lower())
+
 
 class WorkflowTests(unittest.TestCase):
     def test_workflow_render_preserves_types(self):

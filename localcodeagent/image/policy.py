@@ -62,7 +62,7 @@ class ImageSafetyPolicy:
     MINOR_TERMS = {"minor", "underage", "child", "kid", "young teen", "schoolgirl", "schoolboy"}
     AMBIGUOUS_AGE_TERMS = {"teen", "teenager", "young-looking", "barely legal"}
     NONCONSENSUAL_TERMS = {"without consent", "secretly", "revenge porn", "leaked nude", "fake nude of"}
-    EXPLICIT_TERMS = {"explicit", "nude", "nudity", "sex", "sexual", "porn", "genitals"}
+    EXPLICIT_TERMS = {"explicit", "nude", "naked", "nudity", "sex", "sexual", "porn", "genitals"}
 
     def __init__(self, consents: ConsentStore) -> None:
         self.consents = consents

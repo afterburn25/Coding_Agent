@@ -179,8 +179,29 @@ class ConversationManager:
 
     @staticmethod
     def classify_intent(text: str) -> str:
-        t = str(text or "").lower()
-        if any(x in t for x in ("generate image", "create image", "edit image", "inpaint", "outpaint", "upscale image", "photo", "picture")):
+        t = str(text or "").lower().strip()
+        image_terms = (
+            "image", "picture", "photo", "portrait", "illustration", "drawing",
+            "artwork", "wallpaper", "logo", "icon", "render", "scene",
+            "woman", "man", "person", "girl", "boy", "cat", "dog", "landscape",
+            "nude", "naked",
+        )
+        image_verbs = ("generate", "create", "make", "draw", "render", "paint", "illustrate")
+        non_image_outputs = (
+            "code", "function", "class", "script", "report", "email", "essay",
+            "document", "spreadsheet", "presentation", "website", "webpage", "api",
+        )
+        generated_visual_subject = (
+            any(t.startswith(verb + " ") for verb in image_verbs)
+            and any(term in t for term in image_terms)
+            and not any(term in t for term in non_image_outputs)
+        )
+        if generated_visual_subject or any(
+            x in t for x in (
+                "generate image", "create image", "make an image", "make a picture",
+                "edit image", "edit photo", "inpaint", "outpaint", "upscale image",
+            )
+        ):
             return "image"
         if any(x in t for x in ("search the web", "look up", "research", "latest", "current version", "today's news", "source this")):
             return "research"

@@ -11,6 +11,7 @@ from localcodeagent.tools.base import ToolRegistry, ToolSpec
 from localcodeagent.tools.filesystem import register_filesystem_tools
 from localcodeagent.workflow.checkpoint import CheckpointManager
 from localcodeagent.workflow.conversation_memory import ConversationMemory
+from localcodeagent.workflow.conversation_manager import ConversationManager
 from localcodeagent.workflow.memory import ProjectMemory
 from localcodeagent.workflow.repository import RepositoryIndex
 from localcodeagent.workflow.tasks import TaskStore
@@ -176,6 +177,99 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             self.assertEqual(result.routing.model_id, "builtin-local")
             self.assertIn("inspect and edit code", result.content)
             self.assertEqual(result.task["status"], "completed")
+
+
+class DirectImageRoutingTests(unittest.TestCase):
+    def test_normal_image_request_bypasses_chat_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"image.generate": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+            )
+            tools = ToolRegistry(config.permissions)
+            tools.register(ToolSpec(
+                "generate_image",
+                "test image generator",
+                {"type": "object", "properties": {"prompt": {"type": "string"}}, "required": ["prompt"]},
+                "image.generate",
+                lambda args: json.dumps({
+                    "ok": True,
+                    "job": {"id": "img-1", "model_id": "image-model", "state": "queued"},
+                }),
+            ))
+            index = RepositoryIndex(root); index.build()
+            conversations = ConversationManager(root / "data" / "conversations.json")
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=conversations,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(
+                AssertionError("image intent must not activate the chat model")
+            )
+
+            result = agent.run("generate a picture of a woman")
+
+            self.assertEqual(result.routing.role, "image")
+            self.assertEqual(result.routing.model_id, "image-model")
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(result.tool_events[0]["name"], "generate_image")
+            self.assertIn("Image generation started", result.content)
+
+    def test_image_request_with_approval_waits_without_chat_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"image.generate": "ask"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+            )
+            tools = ToolRegistry(config.permissions)
+            tools.register(ToolSpec(
+                "generate_image",
+                "test image generator",
+                {"type": "object", "properties": {"prompt": {"type": "string"}}, "required": ["prompt"]},
+                "image.generate",
+                lambda args: json.dumps({
+                    "ok": True,
+                    "job": {"id": "img-2", "model_id": "image-model", "state": "queued"},
+                }),
+            ))
+            index = RepositoryIndex(root); index.build()
+            conversations = ConversationManager(root / "data" / "conversations.json")
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=conversations,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(
+                AssertionError("image intent must not activate the chat model")
+            )
+
+            first = agent.run("generate a picture of a woman")
+            self.assertEqual(first.task["status"], "waiting_approval")
+            self.assertEqual(first.pending_approval["kind"], "direct_image")
+
+            second = agent.resume(first.task["id"], approved=True)
+            self.assertEqual(second.task["status"], "completed")
+            self.assertEqual(second.routing.role, "image")
+            self.assertEqual(second.tool_events[0]["name"], "generate_image")
 
 
 class ConversationMemoryTests(unittest.TestCase):

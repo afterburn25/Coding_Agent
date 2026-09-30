@@ -583,6 +583,14 @@ class AgentOrchestrator:
             error="",
         )
 
+        if pending["kind"] == "direct_image":
+            return self._direct_image_result(
+                task_id=task_id,
+                user_text=task.prompt,
+                event_callback=None,
+                approved=approved,
+            )
+
         if pending["kind"] == "tool":
             name = str(pending.get("name", ""))
             args = dict(pending.get("arguments") or {})
@@ -1080,6 +1088,188 @@ class AgentOrchestrator:
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
+    def _direct_image_result(
+        self,
+        *,
+        task_id: str,
+        user_text: str,
+        event_callback: Callable[[dict[str, Any]], None] | None,
+        approved: bool | None = None,
+    ) -> AgentResult:
+        decision = RoutingDecision(
+            role="image",
+            model_id="image-router",
+            reasons=["deterministic image intent routed directly to image subsystem"],
+            complexity=0,
+        )
+        model_event = {
+            "type": "direct_image_route",
+            "model_id": "image-router",
+            "role": "image",
+            "reason": "chat model bypassed for image generation intent",
+        }
+        permission, permission_mode = self.tools.permission_for("generate_image")
+        arguments = {"prompt": user_text}
+
+        if not permission:
+            content = "Image generation is not available because the image tool is not configured."
+            failed = self.tasks.update(
+                task_id,
+                status="error",
+                phase="done",
+                model_id="image-router",
+                model_role="image",
+                summary=content,
+                final_content=content,
+                error=content,
+            )
+            self._safe_emit(event_callback, {"type": "model", "event": model_event})
+            self._safe_emit(event_callback, {"type": "task", "task": failed.as_dict()})
+            return AgentResult(content=content, routing=decision, model_events=[model_event], task=failed.as_dict())
+
+        if permission_mode == "ask" and approved is None:
+            pending = {
+                "kind": "direct_image",
+                "name": "generate_image",
+                "permission": permission,
+                "arguments": arguments,
+                "detail": user_text,
+            }
+            waiting = self.tasks.update(
+                task_id,
+                status="waiting_approval",
+                phase="waiting_approval",
+                model_id="image-router",
+                model_role="image",
+                pending_approval=pending,
+                error="",
+            )
+            self._safe_emit(event_callback, {"type": "model", "event": model_event})
+            self._safe_emit(event_callback, {"type": "task", "task": waiting.as_dict()})
+            self._safe_emit(event_callback, {"type": "approval", "task": waiting.as_dict(), "approval": pending})
+            return AgentResult(
+                content="",
+                routing=decision,
+                model_events=[model_event],
+                task=waiting.as_dict(),
+                pending_approval=pending,
+            )
+
+        if permission_mode == "ask" and approved is False:
+            content = "Image generation was not approved."
+            denied = self.tasks.update(
+                task_id,
+                status="completed",
+                phase="done",
+                model_id="image-router",
+                model_role="image",
+                summary=content,
+                final_content=content,
+                pending_approval=None,
+                steps=0,
+                error="",
+            )
+            self._safe_emit(event_callback, {"type": "task", "task": denied.as_dict()})
+            return AgentResult(
+                content=content,
+                routing=decision,
+                model_events=[model_event],
+                task=denied.as_dict(),
+            )
+
+        if permission_mode == "deny":
+            content = "Image generation is disabled by the image.generate permission."
+            denied = self.tasks.update(
+                task_id,
+                status="error",
+                phase="done",
+                model_id="image-router",
+                model_role="image",
+                summary=content,
+                final_content=content,
+                error=content,
+            )
+            self._safe_emit(event_callback, {"type": "model", "event": model_event})
+            self._safe_emit(event_callback, {"type": "task", "task": denied.as_dict()})
+            return AgentResult(content=content, routing=decision, model_events=[model_event], task=denied.as_dict())
+
+        result = self.tools.execute("generate_image", arguments, approved=bool(approved))
+        tool_event = {
+            "name": "generate_image",
+            "arguments": arguments,
+            "result": result,
+            "phase": "direct_image",
+        }
+        self._safe_emit(event_callback, {"type": "model", "event": model_event})
+        self._safe_emit(event_callback, {"type": "tool", "tool": tool_event})
+
+        if result.startswith(("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
+            content = result.split(":", 1)[-1].strip()
+            failed = self.tasks.update(
+                task_id,
+                status="error",
+                phase="done",
+                model_id="image-router",
+                model_role="image",
+                summary=content,
+                final_content=content,
+                error=content,
+                pending_approval=None,
+                steps=1,
+            )
+            self._safe_emit(event_callback, {"type": "task", "task": failed.as_dict()})
+            return AgentResult(
+                content=content,
+                routing=decision,
+                tool_events=[tool_event],
+                model_events=[model_event],
+                steps=1,
+                task=failed.as_dict(),
+            )
+
+        model_id = "image-router"
+        try:
+            payload = json.loads(result)
+            model_id = str((payload.get("job") or {}).get("model_id") or model_id)
+        except Exception:
+            pass
+        content = "Image generation started."
+        completed = self.tasks.update(
+            task_id,
+            status="completed",
+            phase="done",
+            model_id=model_id,
+            model_role="image",
+            summary=content,
+            final_content=content,
+            pending_approval=None,
+            steps=1,
+            error="",
+        )
+        self._safe_emit(event_callback, {"type": "task", "task": completed.as_dict()})
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(user_text, content)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(
+                user_text,
+                content,
+                intent="image",
+                model_id=model_id,
+            )
+        return AgentResult(
+            content=content,
+            routing=RoutingDecision(
+                role="image",
+                model_id=model_id,
+                reasons=decision.reasons,
+                complexity=0,
+            ),
+            tool_events=[tool_event],
+            model_events=[model_event],
+            steps=1,
+            task=completed.as_dict(),
+        )
+
     def run(
         self,
         user_text: str,
@@ -1110,6 +1300,13 @@ class AgentOrchestrator:
                 user_text,
                 project_id=project_id,
                 conversation_id=conversation_id,
+            )
+
+        if mode == "auto" and conversation_intent == "image":
+            return self._direct_image_result(
+                task_id=task.id,
+                user_text=user_text,
+                event_callback=event_callback,
             )
 
         decision = self.router.choose(user_text, override=mode)

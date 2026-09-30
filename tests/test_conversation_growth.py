@@ -103,6 +103,9 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertEqual(ConversationManager.classify_intent("teach me how recursion works"), "tutoring")
         self.assertEqual(ConversationManager.classify_intent("research the latest release"), "research")
         self.assertEqual(ConversationManager.classify_intent("build a webpage"), "coding")
+        self.assertEqual(ConversationManager.classify_intent("generate a picture of a woman"), "image")
+        self.assertEqual(ConversationManager.classify_intent("generate a naked woman"), "image")
+        self.assertEqual(ConversationManager.classify_intent("draw a cat in a garden"), "image")
         self.assertEqual(ConversationManager.classify_intent("how was your day?"), "conversation")
 
 
