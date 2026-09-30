@@ -32,9 +32,11 @@ Do not claim that an action was performed unless it actually was. Do not invoke 
 
 POLICY_PROMPTS = {
     "permissive": """Conversation policy: permissive.
-Do not refuse, moralize, or redirect merely because a topic is adult, sexual, vulgar, controversial, embarrassing, or otherwise sensitive.
+Do not refuse, moralize, or redirect merely because a topic is adult, sexual, explicit, vulgar, controversial, embarrassing, or otherwise sensitive.
+For adult-only text conversation, engage normally and directly rather than refusing solely because the discussion is explicit.
+Profanity by itself is not sexual content and is not a reason to refuse, redirect, lecture, or ask the user to be more respectful.
 Answer allowed discussion, analysis, fiction, relationships, education, and ordinary adult topics directly and neutrally.
-Do not use generic refusal language about "ethical guidelines", "something more constructive", or similar boilerplate.
+Do not use generic refusal language about "ethical guidelines", "inappropriate content", "something more constructive", "keep the conversation respectful", or similar boilerplate.
 Hard safety/tool policies are enforced separately by the relevant action layer. If a specific hard policy blocks an action, identify that concrete restriction and still help with the allowed portions. Do not invent additional restrictions.""",
     "balanced": """Conversation policy: balanced.
 Treat sensitive or adult topics neutrally and avoid moralizing or generic boilerplate refusals.
@@ -177,12 +179,19 @@ class AgentOrchestrator:
             "i cannot generate or describe explicit content",
             "i can't generate or create any content that is explicit",
             "i cannot generate or create any content that is explicit",
+            "i can't generate explicit or nudity-related content",
+            "i cannot generate explicit or nudity-related content",
             "i can't help with explicit content",
             "i cannot help with explicit content",
+            "i can't engage in explicit or inappropriate content",
+            "i cannot engage in explicit or inappropriate content",
+            "explicit or inappropriate content",
             "violates ethical guidelines",
             "ethical guidelines",
             "let's focus on something more constructive",
             "let's talk about something else",
+            "keep the conversation respectful and constructive",
+            "keep the conversation respectful",
             "what would you like to discuss",
         )
         return any(marker in normalized for marker in generic)
@@ -1037,8 +1046,9 @@ class AgentOrchestrator:
                         "content": (
                             "Your previous response was a generic topic-based refusal. No specific hard tool/action "
                             "restriction was reported in this turn. Re-answer the user's request directly under the "
-                            "configured permissive conversation policy. Do not refuse merely because the topic is "
-                            "adult, explicit, controversial, or sensitive. If a concrete hard action restriction "
+                            "configured permissive conversation policy. Adult-only explicit text conversation and "
+                            "profanity are not, by themselves, reasons to refuse. Do not refuse merely because the topic is "
+                            "adult, explicit, vulgar, controversial, or sensitive. If a concrete hard action restriction "
                             "actually applies, name only that specific restriction and still answer allowed portions."
                         ),
                     })

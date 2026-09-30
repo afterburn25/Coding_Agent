@@ -26,6 +26,12 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertTrue(AgentOrchestrator.generic_topic_refusal(
             "I can't create that because it violates ethical guidelines. Let's focus on something more constructive."
         ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I understand you're looking for a different kind of interaction, but I can't engage in explicit or inappropriate content. Let's keep the conversation respectful and constructive."
+        ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I can't generate explicit or nudity-related content. Let's talk about something else."
+        ))
         self.assertFalse(AgentOrchestrator.generic_topic_refusal(
             "Non-consensual intimate imagery is blocked by policy."
         ))
@@ -53,6 +59,8 @@ class ConversationPolicyTests(unittest.TestCase):
         source = (ROOT / "localcodeagent" / "agent" / "orchestrator.py").read_text(encoding="utf-8")
         self.assertIn("Conversation policy: permissive.", source)
         self.assertIn("Do not refuse, moralize, or redirect merely because a topic is adult", source)
+        self.assertIn("For adult-only text conversation, engage normally and directly", source)
+        self.assertIn("Profanity by itself is not sexual content", source)
         self.assertIn('Do not use generic refusal language about "ethical guidelines"', source)
         self.assertIn("Hard safety/tool policies are enforced separately", source)
 
