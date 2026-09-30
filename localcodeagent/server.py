@@ -501,6 +501,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
+                readiness = self.state.runtime.readiness(probe_external=True)
+                if not readiness.get("ready_to_code"):
+                    self._json({
+                        "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
+                        "code": "coding_model_setup_required",
+                        "readiness": readiness,
+                    }, 409)
+                    return
 
                 self._sse_begin()
                 self._sse_event("ready", {"mode": mode})
@@ -531,6 +539,14 @@ class Handler(BaseHTTPRequestHandler):
                 mode = str(body.get("mode", "auto"))
                 if not message:
                     self._json({"error": "message is required"}, 400)
+                    return
+                readiness = self.state.runtime.readiness(probe_external=True)
+                if not readiness.get("ready_to_code"):
+                    self._json({
+                        "error": "No usable coding model is ready. Open Local system → Coding readiness, install/configure a model, then retry.",
+                        "code": "coding_model_setup_required",
+                        "readiness": readiness,
+                    }, 409)
                     return
                 result = self.state.agent.run(message, history=self.state.history, mode=mode)
                 self.state.history.extend([
