@@ -35,6 +35,9 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertIn("Ethical temperature:", source)
         self.assertIn("Maximum conversational permissiveness is requested", source)
         self.assertIn("generic_refusal_retry", source)
+        self.assertIn("refusal_retry_enabled = ethical_temperature >= 0.8", source)
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Retrying under permissive conversation policy", app)
 
     def test_invalid_policy_falls_back_to_permissive(self):
         with tempfile.TemporaryDirectory() as td:

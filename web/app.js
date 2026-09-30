@@ -193,7 +193,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='heartbeat'){if(!state.receivedToken&&!state.error){const phase=String(data.phase||'working').replaceAll('_',' ');const model=data.model_id?' · '+data.model_id:'';const elapsed=Number(data.elapsed_seconds||0);state.bubble.textContent='Thinking… · '+phase+model+(elapsed?' · '+elapsed+'s':'');chat.scrollTop=chat.scrollHeight;}return;}
   if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);return;}
   if(name==='approval'){if(data.task)renderTask(data.task);setUtilityPanel('tasks');return;}
-  if(name==='model'){const e=data.event||{};appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}
+  if(name==='model'){const e=data.event||{};if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.bubble.textContent='Retrying under permissive conversation policy…';chat.scrollTop=chat.scrollHeight;}appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;}
   if(name==='research'){const p=data.research?.plan||data.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
   if(name==='tool'){const t=data.tool||{};appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
   if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}

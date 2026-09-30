@@ -967,7 +967,8 @@ class AgentOrchestrator:
                 return paused
 
             ethical_temperature = max(0.0, min(1.0, float(getattr(self.config, "ethical_temperature", 1.0))))
-            buffer_for_refusal_check = session.decision.role == "utility" and ethical_temperature >= 0.8
+            refusal_retry_enabled = ethical_temperature >= 0.8
+            buffer_for_refusal_check = session.decision.role == "utility" and refusal_retry_enabled
             buffered_deltas: list[str] = []
             on_delta = (
                 buffered_deltas.append
@@ -991,7 +992,7 @@ class AgentOrchestrator:
             if not calls:
                 session.main_content = str(message.get("content") or "")
                 if (
-                    buffer_for_refusal_check
+                    refusal_retry_enabled
                     and session.refusal_retries < 1
                     and self.generic_topic_refusal(session.main_content)
                 ):
