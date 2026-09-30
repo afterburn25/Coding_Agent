@@ -11,7 +11,7 @@ from urllib.parse import quote, unquote, urlparse
 
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
-from .config import AgentConfig
+from .config import AgentConfig, load_config
 from .models.router import ModelRouter
 from .runtime.manager import RuntimeManager
 from .runtime.setup import suggest_model_profiles, write_suggested_models
@@ -71,6 +71,45 @@ class AppState:
             research=self.research,
         )
         self.history: list[dict] = []
+
+    def reload_model_configuration(self) -> dict:
+        """Reload model profiles from config.json without restarting Chat Nexus."""
+        config = load_config(self.config_path if self.config_path.exists() else None)
+        self.runtime.reconfigure_models(config)
+
+        router = ModelRouter(config.models, resource_advisor=self.runtime.resource_fit)
+        self.config = config
+        self.router = router
+        self.agent.config = config
+        self.agent.router = router
+        self.images.config = config
+
+        starter = next(
+            (
+                profile
+                for profile in config.models
+                if profile.enabled and "primary_coder" in profile.roles
+            ),
+            None,
+        )
+        started = False
+        start_error = ""
+        if starter is not None:
+            fits, _score, _reason = self.runtime.resource_fit(starter)
+            if fits:
+                try:
+                    self.runtime.ensure_ready(starter)
+                    started = True
+                except Exception as exc:
+                    start_error = f"{type(exc).__name__}: {exc}"
+
+        return {
+            "models": [asdict(model) for model in config.models],
+            "starter_model": starter.id if starter else "",
+            "started": started,
+            "start_error": start_error,
+            "readiness": self.readiness_payload(probe_external=True),
+        }
 
     def task_payload(self) -> dict:
         current = self.tasks.current()
@@ -348,11 +387,20 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "No local GGUF models were discovered to configure."}, 400)
                     return
                 saved = write_suggested_models(self.state.config_path, suggestions)
+                applied = self.state.reload_model_configuration()
+                saved["restart_required"] = False
+                message = "Coding models configured and activated."
+                if applied.get("start_error"):
+                    message = (
+                        "Coding models were configured live, but the starter model did not finish starting: "
+                        + str(applied["start_error"])
+                    )
                 self._json({
                     "ok": True,
                     "saved": saved,
                     "suggested_models": suggestions,
-                    "message": "Model roles were written to config. Restart Chat Nexus to load them.",
+                    "applied": applied,
+                    "message": message,
                 })
                 return
             if path == "/api/research/plan":
