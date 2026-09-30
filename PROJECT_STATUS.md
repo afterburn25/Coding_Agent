@@ -58,6 +58,8 @@
 - Required ComfyUI node checks before generation.
 - Safe Image Model Manager import of validated ComfyUI API workflows.
 - Structured image error reporting with friendly messages and expandable technical details.
+- Local canvas mask editor for inpaint workflows with paint/erase/fill/invert/save controls.
+- Before/after comparison workbench and generated-output reuse as a new editing source.
 - Main-chat inline image job cards with polling and Edit/Variation/Upscale/Save controls.
 - Validated per-operation ComfyUI API-workflow import from the Image workspace.
 - Atomic workflow replacement: invalid/UI-format imports never overwrite the last valid API workflow.
@@ -71,7 +73,7 @@
 
 ### Tests
 
-`61` automated tests passing.
+`64` automated tests passing.
 
 ### Important current limitations
 
@@ -79,7 +81,7 @@
 - Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
 - Image progress is currently polling-based; ComfyUI WebSocket progress events are not wired into the app yet.
-- Mask painting UI, advanced before/after viewer, LoRA file import and richer version/compatibility metadata editing, and dedicated upscaler/background-removal adapters remain upcoming.
+- LoRA file import and richer version/compatibility metadata editing, dedicated upscaler/background-removal adapters, and richer comparison controls remain upcoming.
 - Browser automation is optional and requires Playwright + Chromium.
 
 ## Next milestone
