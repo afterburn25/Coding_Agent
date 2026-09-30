@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -123,7 +124,7 @@ class RuntimeManager:
             candidates.append(profile.executable)
         if self.config.llama_cpp_executable:
             candidates.append(self.config.llama_cpp_executable)
-        candidates.extend(["llama-server.exe", "llama-server"])
+        candidates.extend(["llama-server.exe", "llama-server", "llama.exe", "llama"])
         for item in candidates:
             expanded = str(Path(item).expanduser())
             if os.path.isabs(expanded) and Path(expanded).is_file():
@@ -136,6 +137,27 @@ class RuntimeManager:
                 return str(local.resolve())
         return None
 
+    @staticmethod
+    def _is_unified_llama(executable: str) -> bool:
+        name = Path(executable).name.lower()
+        return name in {"llama", "llama.exe"}
+
+    def runtime_install_guidance(self) -> dict:
+        installed = self.discover_llama_server()
+        system = platform.system().lower()
+        if system == "windows":
+            commands = [{"label": "Winget", "command": "winget install llama.cpp"}, {"label": "Conda", "command": "conda install -c conda-forge llama.cpp"}]
+        elif system == "darwin":
+            commands = [{"label": "Homebrew", "command": "brew install llama.cpp"}, {"label": "Conda", "command": "conda install -c conda-forge llama.cpp"}]
+        else:
+            commands = [{"label": "Conda", "command": "conda install -c conda-forge llama.cpp"}, {"label": "Homebrew (Linuxbrew)", "command": "brew install llama.cpp"}]
+        return {
+            "installed": bool(installed),
+            "executable": installed or "",
+            "platform": platform.system(),
+            "commands": commands,
+            "note": "Install commands are shown for convenience and are never executed automatically by Chat Nexus.",
+        }
     def inventory(self) -> list[dict]:
         rows: list[dict] = []
         if not self.models_dir.exists():
@@ -179,8 +201,8 @@ class RuntimeManager:
         exe = self.discover_llama_server(profile)
         if not exe:
             raise RuntimeError(
-                "llama-server was not found. Set llama_cpp_executable or the model profile executable, "
-                "or add llama-server to PATH."
+                "llama.cpp server was not found. Set llama_cpp_executable or the model profile executable, "
+                "or add llama-server / the unified llama command to PATH."
             )
         if not profile.model_path:
             raise RuntimeError(f"Model profile '{profile.id}' has runtime=llama_cpp but no model_path.")
@@ -188,13 +210,15 @@ class RuntimeManager:
         if not model_path.is_file():
             raise RuntimeError(f"Model file not found: {model_path}")
 
-        cmd = [
-            exe,
+        cmd = [exe]
+        if self._is_unified_llama(exe):
+            cmd.append("serve")
+        cmd.extend([
             "--model", str(model_path),
             "--host", profile.host,
             "--port", str(port),
             "--ctx-size", str(profile.context_window),
-        ]
+        ])
         if profile.gpu_layers:
             cmd.extend(["--gpu-layers", str(profile.gpu_layers)])
         if profile.threads > 0:
@@ -455,7 +479,7 @@ class RuntimeManager:
             elif profile.runtime == "llama_cpp":
                 executable = self.discover_llama_server(profile) or ""
                 if not executable:
-                    issues.append("llama-server was not found")
+                    issues.append("llama.cpp server command was not found")
                 if not profile.model_path:
                     issues.append("GGUF model path is not configured")
                     model_ok = False
@@ -497,7 +521,7 @@ class RuntimeManager:
             recommendations.append("Configure at least one enabled coding model profile.")
         managed = [row for row in rows if row["runtime"] == "llama_cpp"]
         if managed and not any(row["llama_server"] for row in managed):
-            recommendations.append("Install llama.cpp and put llama-server on PATH, or set llama_cpp_executable.")
+            recommendations.append("Install llama.cpp and put llama-server (or the unified llama command) on PATH, or set llama_cpp_executable.")
         if managed and not any(row["runnable"] or row["healthy"] for row in managed):
             recommendations.append("Point a managed model profile at an existing GGUF file in the models directory.")
         external = [row for row in rows if row["runtime"] == "external"]
@@ -516,6 +540,7 @@ class RuntimeManager:
             "models_dir": str(self.models_dir),
             "inventory": self.inventory(),
             "recommendations": recommendations,
+            "runtime_install": self.runtime_install_guidance(),
         }
 
     def summary(self, *, probe_external: bool = False) -> dict:
