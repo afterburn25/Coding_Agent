@@ -4,6 +4,6 @@
   "default_model_mode": "auto",
   "architecture": "UI -> Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> Local Providers/Runtimes",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 61,
+  "test_checkpoint": 64,
   "next_milestone": "Complete v0.5 research/image workflows and streaming"
 }
