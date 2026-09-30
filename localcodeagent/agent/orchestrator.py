@@ -17,7 +17,7 @@ from ..workflow.tasks import TaskStore
 from ..workflow.verify import detect_verification_commands
 
 
-SYSTEM_PROMPT = """You are Local Code Agent, a local-first software engineering agent.
+SYSTEM_PROMPT = """You are Chat Nexus, a local-first software engineering agent.
 Work carefully inside the selected workspace. Inspect before editing. Prefer small, verifiable changes.
 Use tools when they are needed. Prefer apply_patch over whole-file replacement when editing existing files.
 After code changes, run appropriate tests or builds when permissions allow.
@@ -149,6 +149,150 @@ class AgentOrchestrator:
 
     def _task_context(self, task_id: str) -> None:
         self.tools.context["task_id"] = task_id
+
+    def _restore_session(self, task_id: str, *, reason: str) -> _AgentSession:
+        """Rebuild enough agent context to safely continue a persisted task.
+
+        Exact model KV state/tool-call transcripts are intentionally not persisted.
+        Instead, Chat Nexus re-inspects the durable task/checkpoint/repository state
+        and tells the model it is continuing an interrupted task.
+        """
+        task = self.tasks.get(task_id)
+        base = self.router.choose(
+            task.prompt,
+            override=task.mode,
+            changed_files=len(task.files_changed),
+        )
+        decision = base
+        if task.model_id:
+            try:
+                self.router.get_profile(task.model_id)
+                decision = RoutingDecision(
+                    role=task.model_role or base.role,
+                    model_id=task.model_id,
+                    reasons=["restored persisted task model", *base.reasons],
+                    complexity=base.complexity,
+                )
+            except KeyError:
+                pass
+
+        profile = self.router.get_profile(decision.model_id)
+        provider = self._provider_for(profile)
+        project_memory = self.memory.context()
+        index_summary = self.repository_index.ensure()
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
+            },
+            {
+                "role": "system",
+                "content": (
+                    "This is a recovered Chat Nexus task after a process/session interruption. "
+                    "Do not assume the previous model transcript survived. Re-inspect the current "
+                    "workspace and checkpoint diff before making further edits. " + reason
+                ),
+            },
+        ]
+        if task.research.get("guidance"):
+            messages.append({
+                "role": "system",
+                "content": "Persisted research preflight:\n" + str(task.research["guidance"]),
+            })
+        if task.files_changed:
+            diff = self.checkpoints.diff(task.id, max_chars=min(self.config.max_review_chars, 12000))
+            messages.append({
+                "role": "system",
+                "content": "Changes already present from this task checkpoint:\n" + (diff or ", ".join(task.files_changed)),
+            })
+        if task.verification:
+            verification = "\n\n".join(
+                f"{item.get('name')}: {item.get('command')}\n{str(item.get('result', ''))[-4000:]}"
+                for item in task.verification[-4:]
+            )
+            messages.append({"role": "system", "content": "Previous verification results:\n" + verification})
+        messages.append({"role": "user", "content": task.prompt})
+
+        session = _AgentSession(
+            task_id=task.id,
+            user_text=task.prompt,
+            mode=task.mode,
+            messages=messages,
+            decision=decision,
+            profile=profile,
+            provider=provider,
+            steps=task.steps,
+            model_events=[{
+                "type": "session_recovery",
+                "model_id": decision.model_id,
+                "role": decision.role,
+                "reason": reason,
+            }],
+            verification_round_start=len(task.verification),
+            research_context=dict(task.research),
+        )
+        return session
+
+    def _resume_persisted_approval(self, task_id: str, *, approved: bool) -> AgentResult:
+        task = self.tasks.get(task_id)
+        pending = task.pending_approval
+        if task.status != "waiting_approval" or not pending:
+            raise KeyError(f"No resumable approval is pending for task {task_id}")
+
+        session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
+        self._sessions[task_id] = session
+        self._task_context(task_id)
+        self.tasks.update(
+            task_id,
+            recovery_count=task.recovery_count + 1,
+            error="",
+        )
+
+        if pending["kind"] == "tool":
+            name = str(pending.get("name", ""))
+            args = dict(pending.get("arguments") or {})
+            permission = str(pending.get("permission", ""))
+            result = (
+                self.tools.execute(name, args, approved=True)
+                if approved
+                else f"PERMISSION_DENIED: user denied {permission} for {name}"
+            )
+            session.tool_events.append({
+                "name": name,
+                "arguments": args,
+                "result": result,
+                "phase": "recovered_approval",
+            })
+            if result.startswith(("ERROR", "PERMISSION_DENIED")):
+                session.failures += 1
+            session.messages.append({
+                "role": "system",
+                "content": (
+                    f"Recovered pending tool action '{name}' after restart. "
+                    f"The user {'approved' if approved else 'denied'} it. Result:\n{result}"
+                ),
+            })
+            self.tasks.update(task_id, status="running", phase="working", pending_approval=None)
+            self._maybe_escalate(session)
+            return self._drive(session)
+
+        if pending["kind"] == "verification":
+            commands = detect_verification_commands(self.checkpoints.workspace)
+            command = str((pending.get("arguments") or {}).get("command") or pending.get("detail") or "")
+            index = next((i for i, item in enumerate(commands) if item.get("command") == command), -1)
+            if index < 0:
+                commands = [{
+                    "name": str(pending.get("name") or "verification"),
+                    "command": command,
+                }]
+                index = 0
+            session.verification_commands = commands
+            session.verification_index = index
+            session.pending_approval = dict(pending)
+            return self.resume(task_id, approved=approved)
+
+        raise ValueError(f"Unknown approval kind {pending['kind']}")
 
     def _result(self, session: _AgentSession, content: str | None = None) -> AgentResult:
         task = self.tasks.get(session.task_id)
@@ -512,9 +656,41 @@ class AgentOrchestrator:
             self._sessions.pop(task.id, None)
             raise
 
+    def recover(self, task_id: str) -> AgentResult:
+        """Continue an interrupted/error task from durable workspace state."""
+        task = self.tasks.get(task_id)
+        if task.status not in {"interrupted", "error"}:
+            raise ValueError(f"Task {task_id} is not recoverable from status {task.status}")
+        session = self._restore_session(
+            task_id,
+            reason=f"Previous status was {task.status}; previous phase was {task.interrupted_from or task.phase}.",
+        )
+        self._sessions[task_id] = session
+        self.tasks.update(
+            task_id,
+            status="running",
+            phase="working",
+            error="",
+            pending_approval=None,
+            recovery_count=task.recovery_count + 1,
+        )
+        try:
+            return self._drive(session)
+        except Exception as exc:
+            self.tasks.update(
+                task_id,
+                status="error",
+                phase="done",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            self._sessions.pop(task_id, None)
+            raise
+
     def resume(self, task_id: str, *, approved: bool) -> AgentResult:
         session = self._sessions.get(task_id)
-        if session is None or not session.pending_approval:
+        if session is None:
+            return self._resume_persisted_approval(task_id, approved=approved)
+        if not session.pending_approval:
             raise KeyError(f"No resumable approval is pending for task {task_id}")
         pending = session.pending_approval
         session.pending_approval = None
