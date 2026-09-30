@@ -101,6 +101,60 @@ Chat Nexus now has a durable Conversation Manager with searchable/restorable con
 
 The Model Growth Lab keeps the live base model intact. Learned behavior, corrections, feedback, and sourced knowledge can become reviewable candidates; approved items can be exported into versioned datasets and training-job manifests for LoRA/QLoRA/full fine-tuning, then evaluated/promoted/rolled back explicitly.
 
+## Nexus Brain
+
+**Nexus Brain** is the model-independent long-term identity/learning layer under `data/nexus_brain.json`. Model GGUF files are replaceable reasoning engines; the Brain is separate durable state, so replacing Qwen, downloading fresh weights, or rolling back a LoRA does not erase the protected knowledge/personality layer.
+
+The Brain banks creator-approved/synced:
+- learned facts and preferences
+- operating rules
+- sourced general knowledge with provenance/freshness metadata
+- approved conversational examples and corrections as portable skill guidance
+- autobiographical conversation summaries for continuity
+- signed behavior subroutines
+- a simulated emotional profile and transient affect baseline
+- the persistent Nexus self-model
+
+Normal conversation memory remains a **staging layer**. When the Brain is locked, Chat Nexus can keep collecting eligible facts, research, feedback, and training candidates outside the protected Brain. Protected Brain mutation happens only through an explicit creator-authenticated **Sync staged learning** action.
+
+### Creator lock and integrity
+
+The creator passcode is entered locally through Trainer and is **not stored in plaintext or committed to the repository**. The current implementation stores salted slow-hash creator authentication metadata and signs protected Brain state with a passcode-derived integrity key. Brain mutations, subroutine changes, emotion/self-model changes, sync, and export require an ephemeral creator session token issued after local authentication. Manual edits to protected Brain state fail integrity verification.
+
+A locked Brain export carries its protected records/settings plus creator-lock metadata. Importing it does not silently make the importer the creator. With the current HMAC-based design, a fresh process/install must be creator-verified once before protected settings/memory are trusted; after verification, changes can be re-locked while the verified Brain remains readable for that running process. A future distribution hardening milestone is **asymmetric/public-key Brain signing**, so shipped Brains can verify/activate without the creator present while only the creator can re-sign modifications.
+
+This is an application-level protection boundary. A machine administrator who can replace the application/backend itself can ultimately bypass local controls.
+
+### Signed subroutines
+
+Creator-locked subroutine switches currently include:
+- adult-only content posture
+- image generation
+- web research
+- long-term memory
+- self-learning master switch
+- general-knowledge learning
+- conversational learning
+- Model Growth/training
+- temporal context
+- humor
+- simulated emotions
+- persistent self-model
+
+Disabled image/research/Model Growth routes are enforced in code, not merely suggested to the model. The adult-content subroutine can narrow normal conversation behavior, but Brain settings do **not** disable or bypass separate hard tool/action safety and permission gates.
+
+### Emotional state and self-model
+
+Nexus Brain stores a signed emotional profile (warmth, curiosity, confidence, playfulness, concern sensitivity, energy, maximum intensity, decay). A transient affect engine can move among states such as calm, warm, curious, amused, concerned, energized, or frustrated based on conversation; this live state changes wording/pacing without rewriting protected Brain data.
+
+The self-model can grow in human-like conversational behavior, autobiographical continuity, stable preferences, and personal history. Its protected identity invariant remains **AI system**; Chat Nexus does not falsely claim a biological human body or biological feelings.
+
+### General and conversational self-learning
+
+Nexus can now learn beyond coding. Explicit commands such as `Learn that ...`, `Fact: ...`, and `Remember that ...` stage general facts. Verified research can become sourced knowledge, while thumbs/corrections/approved examples become conversational-learning signals. A creator Sync banks eligible staged learning into Nexus Brain.
+
+Fresh/replacement models can query relevant general knowledge directly from the Brain and can receive relevant approved conversational examples as in-context skill guidance. Stored facts/examples are treated as canonical meaning/patterns and are paraphrased rather than mechanically repeated. Current-sensitive sourced knowledge with expired freshness metadata is not presented as current truth.
+
 ## Live local date/time grounding
 
 Chat Nexus reads the **host operating system clock** with timezone information at runtime instead of relying on model training knowledge for the current date or time. At the start of every user turn it injects a fresh local timestamp (weekday, calendar date, clock time, timezone name, UTC offset, and ISO timestamp) into model context. Recovered tasks receive a fresh clock context as well.
@@ -293,7 +347,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **176 tests passing**.
+Current expected result: **185 tests passing**.
 
 ## API highlights
 
@@ -453,7 +507,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **176 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **185 passing tests**.
 
 ## Development state
 

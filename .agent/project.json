@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 176,
-  "next_milestone": "Dogfood the verified 176-test conversational build across several real sessions: validate temporal continuity and the NEXUS activity HUD, deliberately rate/correct replies, review/export conversational examples, then decide whether a dedicated conversation model/LoRA is warranted.",
+  "test_checkpoint": 185,
+  "next_milestone": "Dogfood the verified 185-test Nexus Brain build, then add asymmetric/public-key Brain signing and optional installer Brain seeding so creator-signed Brains can ship preloaded and verify without the creator credential.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -163,7 +163,9 @@
     "dry_humor_when_appropriate": true,
     "lower_forced_followups": true,
     "feedback_exact_message_pairing": true,
-    "verified_code_checkpoint": "2781447"
+    "verified_code_checkpoint": "d3e3dd08",
+    "general_fact_commands": true,
+    "brain_autobiographical_sync": true
   },
   "knowledge_memory": {
     "enabled": true,
@@ -185,7 +187,10 @@
     "rollback": true,
     "positive_feedback_conversation_examples": true,
     "negative_feedback_signals": true,
-    "negative_feedback_excluded_from_sft_targets": true
+    "negative_feedback_excluded_from_sft_targets": true,
+    "brain_training_signal_sync": true,
+    "portable_approved_skill_context": true,
+    "verified_code_checkpoint": "d3e3dd08"
   },
   "conversation_policy": {
     "default": "permissive",
@@ -294,5 +299,74 @@
     "compacts_on_token_stream": true,
     "reduced_motion_support": true,
     "verified_code_checkpoint": "2781447"
+  },
+  "nexus_brain": {
+    "enabled": true,
+    "path": "data/nexus_brain.json",
+    "auth_path": "data/nexus_brain.auth.json",
+    "model_independent": true,
+    "preserved_on_update": true,
+    "protected_write_mode": "explicit creator-authenticated sync only",
+    "staging_sources": [
+      "conversation_memory",
+      "knowledge_memory",
+      "conversation_manager",
+      "model_growth"
+    ],
+    "records": [
+      "fact",
+      "rule",
+      "knowledge",
+      "training_signal",
+      "autobiographical"
+    ],
+    "creator_passcode_plaintext_stored": false,
+    "creator_session_token": "ephemeral in-memory Trainer token",
+    "integrity": "scrypt creator authentication + passcode-derived HMAC signed Brain payload",
+    "tamper_detection": true,
+    "locked_export_import": true,
+    "verified_read_after_relock_same_process": true,
+    "fresh_process_requires_creator_verification": true,
+    "subroutines": [
+      "adult_content",
+      "image_generation",
+      "web_research",
+      "long_term_memory",
+      "self_learning",
+      "general_knowledge_learning",
+      "conversation_learning",
+      "model_growth",
+      "temporal_context",
+      "humor",
+      "emotions",
+      "self_model"
+    ],
+    "code_gated_routes": [
+      "image_generation",
+      "web_research",
+      "model_growth"
+    ],
+    "general_fact_commands": [
+      "Remember that ...",
+      "Learn that ...",
+      "Fact: ..."
+    ],
+    "sourced_general_knowledge": true,
+    "freshness_aware_knowledge_recall": true,
+    "portable_approved_conversation_skill_recall": true,
+    "autobiographical_continuity": true,
+    "emotion_profile_signed": true,
+    "transient_affect_engine": true,
+    "self_model": {
+      "human_like_behavior": true,
+      "autobiographical_continuity": true,
+      "stable_preferences": true,
+      "growth_enabled": true,
+      "immutable_identity_type": "AI system",
+      "biological_human_claim": false
+    },
+    "hard_tool_safety_bypass": false,
+    "verified_code_checkpoint": "d3e3dd08",
+    "next_security_upgrade": "asymmetric/public-key signing for creator-absent verification plus optional installer Brain seed"
   }
 }
