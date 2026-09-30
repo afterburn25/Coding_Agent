@@ -124,7 +124,7 @@
 - Stable installer identity: `ChatNexus.Afterburn25`.
 - Default per-user location: `%LOCALAPPDATA%\Programs\Chat Nexus`.
 - Interactive reinstall detects the existing version/location and asks whether to **Upgrade now?**; silent mode continues the upgrade for CI.
-- Upgrade replaces immutable app/backend/runtime files but preserves downloaded `models\`, `data\`, customized `config.json`, and the existing `Source\.git` workspace/local task state.
+- Upgrade replaces immutable app/backend/runtime files but preserves downloaded `models\`, `data\`, imported `workflows\`, customized `config.json`, and the existing `Source\.git` workspace/local task state.
 - First install explicitly embeds both `Source\*` and hidden `Source\.git\*`. A deterministic pre-install flag decides once whether Source should be seeded; upgrades do not overwrite it.
 - Inno `Excludes` patterns are comma-separated: `Source\*,models\*,data\*,config.json`.
 - CI builds the native .NET app first, compiles the LZMA2 solid-compressed installer, performs a fresh install, runs `ChatNexus.exe --self-test`, writes preservation markers/config state, runs the same installer a second time without `/DIR`, verifies the existing path is rediscovered and mutable state survives, then runs the self-test again.

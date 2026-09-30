@@ -20,7 +20,8 @@
       "models",
       "data",
       "config.json",
-      "Source Git workspace/task state"
+      "Source Git workspace/task state",
+      "workflows/"
     ],
     "interactive_existing_install_action": "Prompt to upgrade"
   },
