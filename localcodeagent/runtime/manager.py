@@ -182,7 +182,15 @@ class RuntimeManager:
         return rows
 
     def resource_fit(self, profile: ModelProfile) -> tuple[bool, int, str]:
-        """Return (fits, preference score, reason). Score is used only as a candidate tiebreaker."""
+        """Return availability/resource fit for routing before a model is selected."""
+        if profile.runtime == "llama_cpp":
+            if not self.discover_llama_server(profile):
+                return False, -200, "managed runtime executable is unavailable"
+            if not profile.model_path:
+                return False, -200, "managed GGUF path is not configured"
+            model_path = self._resolve(profile.model_path)
+            if not model_path.is_file():
+                return False, -200, f"managed GGUF is not installed: {model_path.name}"
         h = self.hardware
         free_vram = h.free_vram_gb
         avail_ram = h.available_ram_gb
