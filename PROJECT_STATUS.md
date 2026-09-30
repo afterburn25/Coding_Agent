@@ -73,7 +73,7 @@
 
 ### Tests
 
-`113` automated tests passing.
+`117` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -99,6 +99,8 @@
 - Coding-readiness UI gives safe copyable OS-specific install guidance; system package installers are never executed automatically.
 - Fresh/recovered self-development tasks automatically receive Chat Nexus self-hosting guardrails.
 - Self-development launcher pre-fills a safe dogfood task but never starts edits automatically.
+- Local model-performance telemetry now records content-free task outcomes and contributes a bounded routing score only after resource-fit filtering and a minimum sample threshold.
+- `GET /api/model-telemetry` exposes aggregate model/role/complexity statistics; default local history is `.agent/model_performance.json`.
 
 ### Native desktop dogfood checkpoint
 
@@ -114,7 +116,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **110 tests passing**.
+- Current automated checkpoint: **117 tests passing**.
 
 
 
@@ -136,7 +138,8 @@
 ## Next milestone
 
 **First dogfood-ready checkpoint reached.** Move directly into real self-hosting/dogfooding:
-1. extend live streaming to dedicated long-running image/browser workflows where useful
-2. run real dogfood tasks against the Chat Nexus repository and harden failures found there
-4. add model-performance/research-outcome telemetry to improve automatic routing
+1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
+2. add research-outcome plus measured load-time/tokens-per-second telemetry to refine routing
+3. extend live streaming to dedicated long-running image/browser workflows where useful
+4. surface learned routing statistics in the Models UI when enough samples exist
 5. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting

@@ -73,6 +73,7 @@ The Windows package bundles llama.cpp itself; large GGUF model files remain expl
 - Automatic model roles: utility, fast coder, primary coder, deep reasoner, reviewer, vision.
 - Automatic escalation when tasks become harder or repeated attempts fail.
 - RAM/VRAM-aware model choice.
+- Outcome-aware candidate ranking from local verification/review history once enough samples exist.
 - Managed llama.cpp model start/health/stop/recovery.
 - GGUF inventory.
 - Workspace-contained filesystem tools.
@@ -82,6 +83,14 @@ The Windows package bundles llama.cpp itself; large GGUF model files remain expl
 - Reviewer-model handoff.
 - Persistent task ledger, project memory, and repository index.
 - Interrupted tasks are normalized to a recoverable state after restart; pending approvals can also resume cold from durable task metadata.
+
+## Outcome-aware model routing
+
+Chat Nexus now learns a bounded routing preference from completed local tasks. The history is stored under `.agent/model_performance.json` by default and deliberately excludes prompts, source code, retrieved pages, credentials, and conversation text.
+
+The recorded signals are coarse: model/role, complexity band, task outcome, verification result, reviewer PASS/FINDINGS signal when present, steps, elapsed time, repair cycles, and whether research evidence was used. Resource fit remains the first gate, manual role override still wins, and the learned score is ignored until the configurable minimum sample count is reached.
+
+Relevant settings are `model_telemetry_enabled`, `model_telemetry_path`, `model_telemetry_min_samples`, `model_telemetry_weight`, and `model_telemetry_max_events`. Aggregate statistics are available at `GET /api/model-telemetry`.
 
 ## Internet access
 
@@ -227,13 +236,14 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **113 tests passing**.
+Current expected result: **117 tests passing**.
 
 ## API highlights
 
 ```text
 GET  /api/status
 GET  /api/models
+GET  /api/model-telemetry
 GET  /api/runtime
 GET  /api/tasks
 GET  /api/index
@@ -313,7 +323,7 @@ A fresh installed Chat Nexus no longer leaves users at raw missing-GGUF paths. *
 - **Install full 14B + 30B stack** — installs both Qwen3 14B and Qwen3-Coder 30B-A3B, verifies them, and configures 14B for everyday coding plus 30B for deep reasoning/review.
 - If 14B is installed first, **Add 30B deep coder** remains visible until the full stack is available.
 
-Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After model configuration changes, Chat Nexus asks for one restart so the backend/router reload the new profiles.
+Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After the requested downloads finish, Chat Nexus rewrites the role profiles, reloads the runtime/router in-process, and starts the primary model when possible; no desktop restart is required.
 
 Missing-model readiness diagnostics are deduplicated: each unavailable GGUF is reported once instead of as two near-identical runtime errors.
 

@@ -155,6 +155,20 @@
 - Unit checkpoint: **113/113 tests passing**.
 - Installer remains the canonical Windows deliverable: one compressed setup EXE with existing-install detection and in-place upgrade preservation.
 
+## v0.6 outcome-aware routing checkpoint
+
+- `localcodeagent/models/telemetry.py` adds local content-free outcome history for automatic model routing.
+- Default storage: `.agent/model_performance.json`; it records model/role, complexity band, completion status, final verification result, reviewer PASS/FINDINGS signal, steps, elapsed seconds, repair cycles, and a research-used flag.
+- Prompt text, source code, retrieved pages, credentials, and conversation content are not copied into routing telemetry.
+- Router order is now resource fit → resource preference → bounded learned outcome score → configured priority → context window → stable model ID.
+- The learned score is ignored until the configured minimum sample count is reached (default 3) and cannot make a non-fitting model outrank a runnable model.
+- Configuration: `model_telemetry_enabled`, `model_telemetry_path`, `model_telemetry_min_samples`, `model_telemetry_weight`, `model_telemetry_max_events`.
+- Aggregate inspection endpoint: `GET /api/model-telemetry`.
+- Unit checkpoint: **117/117 tests passing**.
+- Windows native desktop/package CI is green for feature commit `5e84c3a`.
+- Feature commit: `5e84c3a` — Add outcome-aware model routing telemetry.
+- Next: dogfood real Qwen3 14B / Qwen3-Coder 30B tasks, then add research-outcome and measured load/tokens-per-second signals.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -327,4 +341,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `113 tests` passing.
+Expected at this checkpoint: `117 tests` passing.

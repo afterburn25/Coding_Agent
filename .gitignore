@@ -18,3 +18,7 @@ ComfyUI/
 .agent/browser/
 
 .agent/research/
+
+# Local model-routing outcome telemetry
+.agent/model_performance.json
+.agent/model_performance.json.tmp
