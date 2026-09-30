@@ -62,6 +62,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller==6.22.3 pillow
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
       - name: Build native Chat Nexus desktop app
         shell: pwsh
         run: ./packaging/build_windows.ps1
@@ -76,9 +80,46 @@ jobs:
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
+      - name: Build Chat Nexus installer
+        shell: pwsh
+        run: |
+          $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $Iscc)) { $Iscc = (Get-Command ISCC.exe).Source }
+          New-Item -ItemType Directory -Force -Path dist/installer | Out-Null
+          & $Iscc "/DMyAppVersion=0.6.0-dev" "/DMyAppVersionNumeric=0.6.0.0" "/DSourceDir=$PWD\dist\ChatNexus" "/DOutputDir=$PWD\dist\installer" "packaging\ChatNexus.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          if (-not (Test-Path "dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe")) { throw "Installer EXE was not produced" }
+
+      - name: Test first install and upgrade-in-place
+        shell: pwsh
+        run: |
+          $Installer = (Resolve-Path "dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe").Path
+          $InstallDir = Join-Path $env:RUNNER_TEMP "ChatNexusInstalled"
+          & $Installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$InstallDir"
+          if ($LASTEXITCODE -ne 0) { throw "First installer run failed" }
+          if (-not (Test-Path (Join-Path $InstallDir "ChatNexus.exe"))) { throw "Installed ChatNexus.exe missing" }
+          "preserve-me" | Set-Content -Encoding UTF8 (Join-Path $InstallDir "config.json")
+          New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "models") | Out-Null
+          "model-marker" | Set-Content -Encoding UTF8 (Join-Path $InstallDir "models\upgrade-preservation.txt")
+          & (Join-Path $InstallDir "ChatNexus.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed ChatNexus.exe self-test failed" }
+          & $Installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$InstallDir"
+          if ($LASTEXITCODE -ne 0) { throw "Silent upgrade run failed" }
+          if ((Get-Content -Raw (Join-Path $InstallDir "config.json")).Trim() -ne "preserve-me") { throw "Upgrade overwrote config.json" }
+          if ((Get-Content -Raw (Join-Path $InstallDir "models\upgrade-preservation.txt")).Trim() -ne "model-marker") { throw "Upgrade removed model data" }
+          if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Upgrade did not preserve Source Git workspace" }
+
       - name: Package Windows desktop app
         shell: pwsh
         run: python packaging/make_windows_zip.py dist/ChatNexus Chat-Nexus-v0.6.0-dev-Windows-x64.zip
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chat-Nexus-Setup-v0.6.0-dev
+          path: dist/installer/Chat-Nexus-Setup-v0.6.0-dev.exe
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload Windows desktop app
         uses: actions/upload-artifact@v4
