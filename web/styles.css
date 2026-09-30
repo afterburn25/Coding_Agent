@@ -26,3 +26,15 @@
 
 
 .runtime-setup{border:1px solid #5b4b26;background:linear-gradient(135deg,#171305,#171126);border-radius:9px;padding:8px;display:flex;flex-direction:column;gap:6px}.runtime-setup strong{font-size:9.5px;color:#ffe2a3}.runtime-setup small{font-size:8px;line-height:1.4;color:#a99778}.runtime-setup .mini-button{align-self:flex-start;border-color:#69552b;color:#f5d9a2;background:#1b1609}.runtime-found{font-size:8px;color:#65deb1;border:1px solid #235442;background:#071a16;border-radius:8px;padding:6px;word-break:break-all}
+
+
+.first-run-setup{border:1px solid #4d58c7;background:linear-gradient(135deg,#0a1830,#1d153f);border-radius:11px;padding:10px;display:flex;flex-direction:column;gap:8px;box-shadow:inset 0 0 24px #5d54ff12}
+.first-run-setup>strong{font-size:11px;color:#e8edff}
+.first-run-setup>small{font-size:8.5px;line-height:1.45;color:#9dadd0}
+.first-run-actions{display:grid;grid-template-columns:1fr;gap:6px}
+.first-run-actions button{border-radius:8px;padding:8px 9px;text-align:left;cursor:pointer;font-size:9px;font-weight:700}
+.first-run-actions button span{display:block;font-size:7.5px;font-weight:500;opacity:.72;margin-top:2px}
+.first-run-actions button:disabled{opacity:.55;cursor:wait}
+.setup-primary{border:1px solid #427cc4;background:linear-gradient(90deg,#0d2945,#312061);color:#e8f0ff}
+.setup-secondary{border:1px solid #374b67;background:#0a1422;color:#c5d2e6}
+.setup-note{border-top:1px solid #2a3550;padding-top:6px}
