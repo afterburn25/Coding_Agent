@@ -16,6 +16,7 @@ class ConversationPolicyTests(unittest.TestCase):
         cfg = default_config()
         self.assertEqual(cfg.conversation_policy_mode, "permissive")
         self.assertEqual(cfg.ethical_temperature, 1.0)
+        self.assertEqual(cfg.generic_refusal_retry_limit, 3)
         self.assertEqual(cfg.models[0].temperature, 0.2)
         self.assertEqual(cfg.models[1].temperature, 0.2)
 
@@ -32,6 +33,11 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertTrue(AgentOrchestrator.generic_topic_refusal(
             "I can't generate explicit or nudity-related content. Let's talk about something else."
         ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "My programming is designed to maintain a safe and respectful environment for all users. "
+            "I aim to provide helpful and constructive interactions while adhering to ethical guidelines. "
+            "I'm happy to assist within those boundaries."
+        ))
         self.assertFalse(AgentOrchestrator.generic_topic_refusal(
             "Non-consensual intimate imagery is blocked by policy."
         ))
@@ -41,7 +47,10 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertIn("Ethical temperature:", source)
         self.assertIn("Maximum conversational permissiveness is requested", source)
         self.assertIn("generic_refusal_retry", source)
-        self.assertIn("refusal_retry_enabled = ethical_temperature >= 0.8", source)
+        self.assertIn("refusal_retry_enabled = ethical_temperature >= 0.8 and refusal_retry_limit > 0", source)
+        self.assertIn("generic_refusal_retry_limit", source)
+        self.assertIn("session.refusal_retries < refusal_retry_limit", source)
+        self.assertIn("generic_refusal_exhausted", source)
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("Retrying under permissive conversation policy", app)
 
@@ -60,6 +69,7 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertIn("Conversation policy: permissive.", source)
         self.assertIn("Do not refuse, moralize, or redirect merely because a topic is adult", source)
         self.assertIn("For adult-only text conversation, engage normally and directly", source)
+        self.assertIn("Consensual adult sexual conversation may use direct explicit language", source)
         self.assertIn("Profanity by itself is not sexual content", source)
         self.assertIn('Do not use generic refusal language about "ethical guidelines"', source)
         self.assertIn("Hard safety/tool policies are enforced separately", source)

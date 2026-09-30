@@ -124,6 +124,26 @@ class _CaptureProvider:
         return ProviderResponse(message={"role": "assistant", "content": "done"}, raw={})
 
 
+class _RepeatedRefusalProvider:
+    def __init__(self, refusals: int):
+        self.refusals = refusals
+        self.calls = 0
+        self.messages = []
+
+    def complete(self, *, messages, tools=None):
+        self.calls += 1
+        self.messages = list(messages)
+        if self.calls <= self.refusals:
+            return ProviderResponse(message={
+                "role": "assistant",
+                "content": "I can't engage in explicit or inappropriate content. Let's keep the conversation respectful and constructive.",
+            }, raw={})
+        return ProviderResponse(message={
+            "role": "assistant",
+            "content": "Understood. Adult-only explicit conversation is allowed here, so I'll answer the request directly.",
+        }, raw={})
+
+
 class LightweightUtilityRouteTests(unittest.TestCase):
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
@@ -177,6 +197,62 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             self.assertEqual(result.routing.model_id, "builtin-local")
             self.assertIn("inspect and edit code", result.content)
             self.assertEqual(result.task["status"], "completed")
+
+
+class PermissiveConversationRetryTests(unittest.TestCase):
+    def _agent(self, root: Path, provider, *, retry_limit: int = 3):
+        profile = ModelProfile(
+            id="local", endpoint="http://unused/v1", model="x",
+            roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+        )
+        config = AgentConfig(
+            models=[profile],
+            permissions={},
+            research_enabled=False,
+            auto_verify_after_changes=False,
+            review_after_changes=False,
+            ethical_temperature=1.0,
+            generic_refusal_retry_limit=retry_limit,
+        )
+        index = RepositoryIndex(root); index.build()
+        agent = AgentOrchestrator(
+            config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+            tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+            memory=ProjectMemory(root), repository_index=index,
+        )
+        agent._provider_for = lambda _: provider
+        return agent
+
+    def test_repeated_generic_refusals_are_discarded_until_direct_answer(self):
+        with tempfile.TemporaryDirectory() as td:
+            provider = _RepeatedRefusalProvider(refusals=2)
+            agent = self._agent(Path(td), provider, retry_limit=3)
+
+            result = agent.run("I want to talk about explicit adult topics.")
+
+            self.assertEqual(provider.calls, 3)
+            self.assertIn("answer the request directly", result.content)
+            self.assertNotIn("keep the conversation respectful", result.content.lower())
+            retries = [e for e in result.model_events if e.get("type") == "generic_refusal_retry"]
+            self.assertEqual(len(retries), 2)
+            self.assertEqual([e.get("attempt") for e in retries], [1, 2])
+            assistant_refusals = [
+                m for m in provider.messages
+                if m.get("role") == "assistant" and "can't engage in explicit" in str(m.get("content", "")).lower()
+            ]
+            self.assertEqual(assistant_refusals, [])
+
+    def test_retry_exhaustion_reports_model_level_blocker_not_policy_ban(self):
+        with tempfile.TemporaryDirectory() as td:
+            provider = _RepeatedRefusalProvider(refusals=10)
+            agent = self._agent(Path(td), provider, retry_limit=2)
+
+            result = agent.run("I want to talk about explicit adult topics.")
+
+            self.assertEqual(provider.calls, 3)
+            self.assertIn("model itself is refusing", result.content.lower())
+            self.assertIn("not blocking adult-only consensual explicit text", result.content.lower())
+            self.assertTrue(any(e.get("type") == "generic_refusal_exhausted" for e in result.model_events))
 
 
 class DirectImageRoutingTests(unittest.TestCase):

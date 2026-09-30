@@ -262,5 +262,6 @@
   "trainer_command": "",
   "conversation_policy_mode": "permissive",
   "ethical_temperature": 1,
+  "generic_refusal_retry_limit": 3,
   "comfyui_start_on_image_request": true
 }

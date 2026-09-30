@@ -68,6 +68,7 @@ class AgentConfig:
     # narrow hard safety checks remain enforced in the relevant tool/policy layer.
     conversation_policy_mode: str = "permissive"  # permissive | balanced | strict
     ethical_temperature: float = 1.0  # 0.0 cautious -> 1.0 maximally permissive conversation
+    generic_refusal_retry_limit: int = 3  # retries for canned topic refusals at high ethical temperature
 
     # Persistent conversational memory/training. These records stay local and
     # affect prompts immediately; actual weight training remains an explicit
@@ -262,6 +263,7 @@ def load_config(path: Path | None) -> AgentConfig:
     policy_mode = str(raw.get("conversation_policy_mode", cfg.conversation_policy_mode)).strip().lower()
     cfg.conversation_policy_mode = policy_mode if policy_mode in {"permissive", "balanced", "strict"} else "permissive"
     cfg.ethical_temperature = max(0.0, min(1.0, float(raw.get("ethical_temperature", cfg.ethical_temperature))))
+    cfg.generic_refusal_retry_limit = max(0, min(5, int(raw.get("generic_refusal_retry_limit", cfg.generic_refusal_retry_limit))))
     cfg.conversation_memory_enabled = bool(raw.get("conversation_memory_enabled", cfg.conversation_memory_enabled))
     cfg.conversation_memory_path = str(raw.get("conversation_memory_path", cfg.conversation_memory_path))
     cfg.conversation_history_limit = max(20, int(raw.get("conversation_history_limit", cfg.conversation_history_limit)))
