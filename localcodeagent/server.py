@@ -404,6 +404,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._agent_response(result)
                 return
 
+            if path == "/api/tasks/recover":
+                task_id = str(body.get("task_id", "")).strip()
+                if not task_id:
+                    self._json({"error": "task_id is required"}, 400)
+                    return
+                result = self.state.agent.recover(task_id)
+                if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
+                    self.state.history.append({"role": "assistant", "content": result.content})
+                self._agent_response(result)
+                return
+
             if path == "/api/tasks/undo":
                 task_id = str(body.get("task_id", "")).strip()
                 task = self.state.tasks.get(task_id)
