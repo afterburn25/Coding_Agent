@@ -131,6 +131,7 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertIn("Setup required", js)
         self.assertIn("Install recommended 14B", js)
         self.assertIn("Install full 14B + 30B stack", js)
+        self.assertIn("Add 30B deep coder", js)
         self.assertIn("installModelPlan", js)
         self.assertIn("configureDownloadedModels", js)
         self.assertIn('if path == "/api/readiness":', server)
