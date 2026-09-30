@@ -157,7 +157,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **43 tests passing**.
+Current expected result: **46 tests passing**.
 
 ## API highlights
 
