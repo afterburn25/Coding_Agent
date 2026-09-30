@@ -19,6 +19,16 @@
 - Runtime/CLI identity is now Chat Nexus v0.6; the old `local-code-agent` CLI remains as a compatibility alias.
 - Next development priority is self-hosting reliability: streaming, resume/recovery, GitHub actions, isolated self-test instance, and dogfood tasks.
 
+## v0.6 restart recovery + CI checkpoint
+
+- Durable task ledger now distinguishes genuine in-process work from tasks interrupted by an application restart.
+- Persisted `waiting_approval` actions can be resumed after a full restart without the original in-memory agent session.
+- `POST /api/tasks/recover` rebuilds a safe continuation context from the task, model role, checkpoint diff, project memory, repository index, research preflight, and prior verification results.
+- The main Chat Nexus UI exposes a **Resume interrupted task** button in the Tasks rail.
+- GitHub Actions was added at `.github/workflows/tests.yml`; main currently passes **67 tests**.
+- CI exposed a stale Image Studio implementation: mask editor and before/after tests existed, but HTML/JS had not been synced. That implementation is now restored and CI-green.
+- Next priorities: streaming events, native GitHub coding actions, isolated self-update validation, then real self-hosting/dogfood tasks.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -63,7 +73,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **64 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **67 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -192,4 +202,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `64 tests` passing.
+Expected at this checkpoint: `67 tests` passing.
