@@ -1,6 +1,6 @@
 # Project Status
 
-## Active version: 0.6.0-dev — Chat Nexus Self-Hosting UI
+## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
 
 ### Stable capabilities retained from v0.1–v0.3
 
@@ -73,7 +73,7 @@
 
 ### Tests
 
-`95` automated tests passing.
+`99` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 95 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 99 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -100,7 +100,22 @@
 - Fresh/recovered self-development tasks automatically receive Chat Nexus self-hosting guardrails.
 - Self-development launcher pre-fills a safe dogfood task but never starts edits automatically.
 
-### Important current limitations
+### Native desktop dogfood checkpoint
+
+- Windows product delivery is now a real **`ChatNexus.exe` desktop app**, not a browser-launch workflow.
+- Native host uses pywebview with the Windows WebView2/EdgeChromium renderer.
+- The internal backend binds to loopback and is owned/shut down by the desktop process.
+- PyInstaller produces a windowed portable application folder; no console window is shown on normal launch.
+- Official Chat Nexus logo is used for the app/UI and its repository bytes are verified.
+- Windows CI builds and smoke-tests the packaged executable before artifact upload.
+- The package bundles a pinned official llama.cpp **Vulkan x64** runtime under `runtime/llama`, so users no longer need a separate llama.cpp install for the portable build.
+- The default model roles are **Qwen3 14B** for fast/general/primary coding and **Qwen3-Coder 30B-A3B** for deep reasoning/review.
+- Availability-aware routing falls back from an unavailable 30B model to a runnable primary coder.
+- Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
+- Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
+- Current automated checkpoint: **99 tests passing**.
+
+
 
 - Model files are not bundled and large image models are not silently downloaded.
 - Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
