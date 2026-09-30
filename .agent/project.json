@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 173,
-  "next_milestone": "Dogfood the verified 173-test build on Windows: confirm live host-local date/time grounding, permissive conversation retry behavior, and the new ComfyUI/image bootstrap together.",
+  "test_checkpoint": 176,
+  "next_milestone": "Dogfood the verified 176-test conversational build across several real sessions: validate temporal continuity and the NEXUS activity HUD, deliberately rate/correct replies, review/export conversational examples, then decide whether a dedicated conversation model/LoRA is warranted.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -155,7 +155,15 @@
     "personality": true,
     "scoped_memory": true,
     "feedback": true,
-    "trainer_ui": "/trainer.html"
+    "trainer_ui": "/trainer.html",
+    "temporal_continuity": true,
+    "recent_message_elapsed_context": true,
+    "previous_conversation_recency": true,
+    "mature_conversation_prompt": true,
+    "dry_humor_when_appropriate": true,
+    "lower_forced_followups": true,
+    "feedback_exact_message_pairing": true,
+    "verified_code_checkpoint": "2781447"
   },
   "knowledge_memory": {
     "enabled": true,
@@ -174,7 +182,10 @@
     ],
     "evaluation": true,
     "promotion": true,
-    "rollback": true
+    "rollback": true,
+    "positive_feedback_conversation_examples": true,
+    "negative_feedback_signals": true,
+    "negative_feedback_excluded_from_sft_targets": true
   },
   "conversation_policy": {
     "default": "permissive",
@@ -259,5 +270,29 @@
       "tonight"
     ],
     "verified_code_checkpoint": "948bec1"
+  },
+  "activity_hud": {
+    "enabled": true,
+    "title": "NEXUS CORE // ACTIVE",
+    "style": "animated starship-console sci-fi HUD",
+    "high_level_only": true,
+    "private_chain_of_thought_exposed": false,
+    "elapsed_telemetry": true,
+    "event_types": [
+      "context",
+      "task_phase",
+      "model_route",
+      "model_switch",
+      "research",
+      "tool",
+      "verification",
+      "review",
+      "approval",
+      "image_generation",
+      "policy_retry"
+    ],
+    "compacts_on_token_stream": true,
+    "reduced_motion_support": true,
+    "verified_code_checkpoint": "2781447"
   }
 }

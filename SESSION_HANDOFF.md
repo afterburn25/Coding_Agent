@@ -370,6 +370,24 @@
 - Windows validation for `948bec1`: **green** — native build, installer compile, fresh install, in-place Update/preservation smoke, installer artifact, portable desktop artifact, and dogfood source artifact all passed.
 - Next: update the dogfood Windows install and verify real host-local clock behavior alongside the new ComfyUI/image bootstrap and permissive-conversation behavior.
 
+## v0.6 temporal continuity / conversational maturity / activity-HUD checkpoint
+
+- User requested that Chat Nexus understand not only the live clock but also **when prior conversation messages happened** and how much time passed between chats/turns.
+- Conversation Manager now converts durable message timestamps into bounded system context with local absolute timestamps, “N minutes/hours/days ago” age, meaningful inter-message gaps, and recent previous-conversation last-active/topic summaries.
+- This temporal context is injected alongside the authoritative host clock in both lightweight and full model conversations and restored-task sessions. Normal provider history remains role/content-only, avoiding nonstandard message fields.
+- User also reported the model still felt “like an infant.” Conversation-quality rules now require mature adult back-and-forth: answer the substance first, maintain continuity, avoid repeat questions/parroting/canned empathy/stock closings, do not force a question at the end of every reply, vary phrasing, and acknowledge time gaps only when relevant.
+- Personality defaults are livelier (warmer, more curious, slightly less formal, lower forced follow-up frequency) and the prompt translates personality settings into behavior. Moderate/high humor now permits occasional **dry/playful wit** without forcing jokes or joking through serious moments.
+- Feedback training is now grounded in the real exchange. Conversation feedback records the assistant message ID, preceding user prompt, assistant response, response timestamp, rating, and optional note.
+- Thumbs-up / “better” becomes an auto-approved `conversation_example` Model Growth candidate. Thumbs-down / “worse” becomes a `negative_feedback` candidate; negative-response text is explicitly excluded from SFT export even if manually approved later.
+- Reopened conversation UI now receives full durable message metadata for precise feedback targets while backend model history stays sanitized to role/content.
+- User requested ChatGPT-like visible activity plus a more sci-fi/starship-computer feel. The assistant streaming bubble now renders an animated **NEXUS CORE // ACTIVE** HUD with orbit/scan/pulse motion, elapsed telemetry, and a rolling list of real high-level execution events.
+- HUD states include context link, command channel, planning/working, model route/switch, sensor sweep (research), engineering operation (tool), diagnostics (verification), review, authorization hold, image synthesis, and permissive-policy retry. The HUD compacts when answer tokens start streaming.
+- The HUD intentionally exposes **high-level execution state only**, never hidden chain-of-thought/private reasoning. `prefers-reduced-motion` is supported.
+- Feature commits: `b6dd3ea` (temporal continuity + feedback training), `b7a221b` (starship HUD + personality), `d35018f` / `bcea2d3` (regression fixture/status fixes), `2781447` (precise reopened-message feedback IDs).
+- Unit checkpoint: **176/176 tests passing**.
+- Windows validation for `2781447`: **green** — native build, installer compile, fresh install, running-app shutdown/in-place Update preservation, installer artifact upload, portable Windows artifact upload, and dogfood source artifact all passed.
+- Next: dogfood natural conversation for several sessions, use thumbs/corrections deliberately, review/export the resulting Model Growth examples, and decide whether a dedicated conversational model/LoRA should supplement Qwen3 14B after enough real examples are collected.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -542,4 +560,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `173 tests` passing.
+Expected at this checkpoint: `176 tests` passing.

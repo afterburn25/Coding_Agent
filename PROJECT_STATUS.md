@@ -73,7 +73,7 @@
 
 ### Tests
 
-`173` automated tests passing.
+`176` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 173 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 176 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -123,6 +123,11 @@
 - The WebView short-circuits the most basic greeting/capability prompts locally before SSE, and the backend serves UI assets with `Cache-Control: no-store` to eliminate stale post-Update JavaScript.
 - Runtime clock grounding now reads the host-local timezone-aware clock on every user turn and injects weekday/date/time/timezone/UTC-offset context into both lightweight and full model prompts; recovered tasks receive a fresh timestamp too.
 - Basic date/time/day questions are answered by the built-in local utility path without loading Qwen. `GET /api/time` exposes the same clock and `/api/status` includes a live `clock` snapshot.
+- Durable conversation timestamps are converted into bounded temporal-continuity context: recent message times, elapsed age, meaningful inter-message gaps, and recent previous-conversation recency/topic are injected alongside the live clock.
+- Conversation-quality prompting now targets mature natural back-and-forth: continuity, non-repetition, varied phrasing, fewer forced follow-up questions, natural contractions, and occasional light dry humor when appropriate.
+- Explicit feedback is contextual: thumbs-up/down resolve the exact assistant message and preceding user prompt. Positive pairs become approved Model Growth conversation examples; negative pairs remain negative signals and are excluded from SFT dataset targets.
+- Reopened conversation history preserves durable message IDs/timestamps for precise feedback while model history stays role/content-only.
+- Main chat streaming now includes an animated **NEXUS CORE // ACTIVE** starship-console HUD showing only real high-level execution state (phase/model/research/tools/verification/review/approval/image/policy retry) plus elapsed time; it never exposes private reasoning.
 
 ### Native desktop dogfood checkpoint
 
@@ -138,7 +143,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **173 tests passing**.
+- Current automated checkpoint: **176 tests passing**.
 
 
 

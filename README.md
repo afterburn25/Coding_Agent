@@ -107,6 +107,22 @@ Chat Nexus reads the **host operating system clock** with timezone information a
 
 Simple clock questions such as `what time is it?`, `what day is it?`, and `what's today's date?` are answered locally without loading a coding model. The same authoritative clock is available through `GET /api/time` and appears as `clock` in `GET /api/status`. Relative references such as **today**, **tomorrow**, **yesterday**, **tonight**, and **now** are instructed to use this runtime clock unless the user explicitly specifies another timezone.
 
+### Temporal conversation continuity
+
+Durable conversation messages already carried timestamps; Chat Nexus now turns those timestamps into model-friendly context instead of discarding them before inference. Recent exchanges include their local absolute time, how long ago they occurred, and meaningful gaps between stored messages. Recent previous conversations are also summarized with their last-active time and last user topic, which lets the model understand requests such as **“what did I tell you earlier?”**, **“how long has it been?”**, or **“we talked about this yesterday.”**
+
+Timing context is bounded and separate from the normal OpenAI-compatible message objects, so provider payloads remain role/content clean while the model still receives temporal continuity.
+
+### Conversation quality and feedback learning
+
+Ordinary conversation now has a stronger quality contract: respond like a capable adult conversational partner, preserve context, avoid asking the same question twice, vary phrasing, avoid canned empathy/customer-service closings, and do not force a question onto every response. The default personality is warmer, a little more curious, less formal, and uses occasional dry/playful humor when it naturally fits. Serious moments remain serious.
+
+Feedback is also more useful for training. Thumbs-up/down are tied to the exact durable assistant message and its preceding user prompt. Positive feedback becomes an approved conversational training candidate; negative feedback is retained as a negative signal but is never exported as a supervised “good answer” target. Explicit corrections remain reviewable high-value training examples for Model Growth.
+
+### Live NEXUS activity HUD
+
+While a response is running, the chat bubble now shows an animated starship-console-style **NEXUS CORE // ACTIVE** HUD driven only by real high-level execution events—not hidden chain-of-thought. It shows elapsed time and a short rolling list such as context link, model routing, task phase, research/sensor sweep, tool/engineering operation, verification diagnostics, review, approval waits, image synthesis, and policy retry state. Once answer tokens begin, the HUD compacts while streaming continues. Reduced-motion OS preferences are respected.
+
 ## Conversation policy modes
 
 Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, explicit, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.” Adult-only consensual text conversation may use direct explicit language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction.
@@ -277,7 +293,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **173 tests passing**.
+Current expected result: **176 tests passing**.
 
 ## API highlights
 
@@ -328,7 +344,7 @@ The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. A
 - approval state
 - liveness heartbeats with elapsed time, task phase, and selected model
 
-Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat events update the assistant bubble with phase/model/elapsed seconds instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
+Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat/events drive the animated NEXUS activity HUD with phase/model/elapsed seconds and real high-level operations instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
 Basic greetings and capability questions are now answered by a built-in local utility response and do **not** require llama.cpp, model readiness, repository context, or tool-schema construction. The native desktop host also captures hidden backend stdout/stderr to `data/logs/backend-host.log` and will attempt a bounded automatic backend restart if the backend process exits unexpectedly.
 
@@ -437,7 +453,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **173 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **176 passing tests**.
 
 ## Development state
 
