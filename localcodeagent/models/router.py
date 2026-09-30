@@ -62,6 +62,24 @@ class ModelRouter:
         if normalized in casual_exact or capability_question:
             return "utility", 0, ["lightweight conversational request"]
 
+        current_info_signals = (
+            "latest", "latest version", "current version", "current release",
+            "today's news", "today’s news", "weather today", "news",
+            "look up", "lookup", "search the web", "online", "release version",
+        )
+        work_signals = (
+            "build", "create", "implement", "write code", "edit", "change",
+            "debug", "fix", "refactor", "test", "compile", "repository", "repo",
+            "project", "file", "backend", "frontend", "database", "api", "github",
+            "git", "function", "class", "script", "website", "webpage",
+        )
+        if (
+            len(t) <= 320
+            and not any(signal in t for signal in current_info_signals)
+            and not any(signal in t for signal in work_signals)
+        ):
+            return "utility", 0, ["short non-coding conversation"]
+
         deep_terms = [
             "architecture", "refactor", "race condition", "deadlock", "memory leak",
             "security", "migration", "dependency conflict", "compiler errors",

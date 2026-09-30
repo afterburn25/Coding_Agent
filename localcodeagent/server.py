@@ -31,6 +31,7 @@ from .tools.shell import register_shell_tools
 from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
 from .workflow.memory import ProjectMemory
+from .workflow.conversation_memory import ConversationMemory
 from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 
@@ -61,6 +62,17 @@ class AppState:
         self.tasks = TaskStore(self.workspace)
         self.checkpoints = CheckpointManager(self.workspace)
         self.memory = ProjectMemory(self.workspace)
+        conversation_path = Path(config.conversation_memory_path).expanduser()
+        if not conversation_path.is_absolute():
+            conversation_path = runtime_root / conversation_path
+        self.conversation_memory = ConversationMemory(
+            conversation_path,
+            enabled=config.conversation_memory_enabled,
+            history_limit=config.conversation_history_limit,
+            rule_limit=config.conversation_rule_limit,
+            fact_limit=config.conversation_fact_limit,
+            training_limit=config.conversation_training_limit,
+        )
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
@@ -86,8 +98,42 @@ class AppState:
             repository_index=self.repository_index,
             research=self.research,
             telemetry=self.model_telemetry,
+            conversation_memory=self.conversation_memory,
         )
-        self.history: list[dict] = []
+        self.history: list[dict] = self.conversation_memory.history(24)
+        self._prewarm_thread: threading.Thread | None = None
+        self._start_primary_prewarm()
+
+    def _start_primary_prewarm(self) -> None:
+        if not self.config.runtime_auto_start:
+            return
+        starter = next(
+            (
+                profile
+                for profile in self.config.models
+                if profile.enabled and "primary_coder" in profile.roles
+            ),
+            None,
+        )
+        if starter is None or starter.runtime != "llama_cpp":
+            return
+        fits, _score, _reason = self.runtime.resource_fit(starter)
+        if not fits:
+            return
+
+        def warm() -> None:
+            try:
+                self.runtime.ensure_ready(starter)
+            except Exception:
+                # Runtime status captures the real failure; prewarm must never prevent UI startup.
+                pass
+
+        self._prewarm_thread = threading.Thread(
+            target=warm,
+            name="chat-nexus-primary-prewarm",
+            daemon=True,
+        )
+        self._prewarm_thread.start()
 
     def reload_model_configuration(self) -> dict:
         """Reload model profiles from config.json without restarting Chat Nexus."""
@@ -113,6 +159,19 @@ class AppState:
         self.agent.config = config
         self.agent.router = router
         self.agent.telemetry = model_telemetry
+        conversation_path = Path(config.conversation_memory_path).expanduser()
+        if not conversation_path.is_absolute():
+            conversation_path = self.runtime.base_dir / conversation_path
+        self.conversation_memory = ConversationMemory(
+            conversation_path,
+            enabled=config.conversation_memory_enabled,
+            history_limit=config.conversation_history_limit,
+            rule_limit=config.conversation_rule_limit,
+            fact_limit=config.conversation_fact_limit,
+            training_limit=config.conversation_training_limit,
+        )
+        self.agent.conversation_memory = self.conversation_memory
+        self.history = self.conversation_memory.history(24)
         self.images.config = config
 
         starter = next(
@@ -240,6 +299,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/conversation-memory":
+            self._json(self.state.conversation_memory.snapshot())
+            return
         if path == "/api/status":
             runtime = self.state.runtime.summary(probe_external=False)
             self._json({
@@ -584,17 +646,33 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "consent": record.as_dict()})
                 return
 
+            if path == "/api/conversation-memory/exchange":
+                user_text = str(body.get("user", "")).strip()
+                assistant_text = str(body.get("assistant", "")).strip()
+                if not user_text or not assistant_text:
+                    self._json({"error": "user and assistant are required"}, 400)
+                    return
+                self.state.conversation_memory.learn_from_user(user_text)
+                self.state.conversation_memory.record_exchange(user_text, assistant_text)
+                self.state.history.extend([
+                    {"role": "user", "content": user_text},
+                    {"role": "assistant", "content": assistant_text},
+                ])
+                self.state.history = self.state.history[-48:]
+                self._json({"ok": True, "memory": self.state.conversation_memory.snapshot()})
+                return
+
             if path == "/api/chat/stream":
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                builtin_utility = (
+                local_conversation = (
                     mode == "auto"
-                    and self.state.agent.builtin_utility_response(message) is not None
+                    and self.state.agent.can_answer_locally(message)
                 )
-                if not builtin_utility:
+                if not local_conversation:
                     readiness = self.state.runtime.readiness(probe_external=True)
                     if not readiness.get("ready_to_code"):
                         self._json({
@@ -631,6 +709,7 @@ class Handler(BaseHTTPRequestHandler):
                             {"role": "user", "content": message},
                             {"role": "assistant", "content": result.content},
                         ])
+                        self.state.history = self.state.history[-48:]
                         events.put({"type": "result", **self._agent_payload(result)})
                     except Exception as exc:
                         events.put({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
@@ -673,11 +752,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
-                builtin_utility = (
+                local_conversation = (
                     mode == "auto"
-                    and self.state.agent.builtin_utility_response(message) is not None
+                    and self.state.agent.can_answer_locally(message)
                 )
-                if not builtin_utility:
+                if not local_conversation:
                     readiness = self.state.runtime.readiness(probe_external=True)
                     if not readiness.get("ready_to_code"):
                         self._json({
@@ -691,6 +770,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"role": "user", "content": message},
                     {"role": "assistant", "content": result.content},
                 ])
+                self.state.history = self.state.history[-48:]
                 self._agent_response(result)
                 return
 

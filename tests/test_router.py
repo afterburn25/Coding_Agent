@@ -19,6 +19,17 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual(d.role, "utility")
                 self.assertEqual(d.model_id, "fast")
 
+    def test_short_general_conversation_uses_utility(self):
+        for prompt in ("tell me a joke", "how are you doing today?", "what do you think about coffee?"):
+            with self.subTest(prompt=prompt):
+                d = self.router.choose(prompt)
+                self.assertEqual(d.role, "utility")
+                self.assertEqual(d.model_id, "fast")
+
+    def test_current_or_coding_requests_do_not_use_chat_only_route(self):
+        self.assertNotEqual(self.router.choose("what is the latest Python release version?").role, "utility")
+        self.assertNotEqual(self.router.choose("can you build me a webpage?").role, "utility")
+
     def test_coding_help_request_does_not_collapse_to_utility(self):
         d = self.router.choose("Help me debug this backend error")
         self.assertNotEqual(d.role, "utility")

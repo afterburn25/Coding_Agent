@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -14,6 +15,7 @@ from ..research import ResearchCoordinator
 from ..tools.base import ToolRegistry
 from ..workflow.checkpoint import CheckpointManager
 from ..workflow.memory import ProjectMemory
+from ..workflow.conversation_memory import ConversationMemory
 from ..workflow.repository import RepositoryIndex
 from ..workflow.tasks import TaskStore
 from ..workflow.verify import detect_verification_commands
@@ -104,6 +106,7 @@ class AgentOrchestrator:
         repository_index: RepositoryIndex,
         research: ResearchCoordinator | None = None,
         telemetry: ModelPerformanceTelemetry | None = None,
+        conversation_memory: ConversationMemory | None = None,
     ) -> None:
         self.config = config
         self.router = router
@@ -115,6 +118,7 @@ class AgentOrchestrator:
         self.repository_index = repository_index
         self.research = research
         self.telemetry = telemetry
+        self.conversation_memory = conversation_memory
         self._sessions: dict[str, _AgentSession] = {}
 
     @staticmethod
@@ -138,10 +142,61 @@ class AgentOrchestrator:
             return (
                 "I can inspect and edit code, build features, debug errors, run tests and commands with "
                 "permission gates, research technical issues, work with Git/GitHub when authorized, "
-                "manage local coding models, and use configured local image tools. For simple questions "
-                "I answer directly; for coding work I can inspect the repository and carry the task through verification."
+                "manage local coding models, remember things you explicitly teach me, and use configured "
+                "local image tools. For coding work I can inspect the repository and carry the task through verification."
             )
+
+        if normalized in {
+            "how old are you", "do you have an age", "what is your age", "what's your age",
+        }:
+            return "I do not have a human age. I am Chat Nexus, software, so I do not age like a person."
+
+        if normalized in {
+            "who are you", "what are you", "what is your name", "what's your name", "are you human",
+        }:
+            return "I am Chat Nexus, a local-first AI coding workstation. I am software, not a person."
         return None
+
+    @staticmethod
+    def looks_like_training_command(user_text: str) -> bool:
+        text = user_text.strip().lower()
+        return any(
+            re.match(pattern, text, flags=re.IGNORECASE)
+            for pattern in (
+                r"^remember(?:\s+that|\s*:)",
+                r"^from\s+now\s+on",
+                r"^always\s+",
+                r"^never\s+",
+                r"^i\s+want\s+you\s+to\s+",
+                r"^i\s+prefer\s+",
+                r"^i\s+like\s+",
+                r"^i\s+use\s+",
+                r"^i(?:'m| am)\s+using\s+",
+                r"^my\s+.{1,40}\s+is\s+",
+                r"^(?:teach|training)\s*:",
+                r"^(?:no[, ]|you\s+should\s+|instead[, ]|correction\s*:)",
+            )
+        )
+
+    @classmethod
+    def can_answer_locally(cls, user_text: str) -> bool:
+        return cls.builtin_utility_response(user_text) is not None or cls.looks_like_training_command(user_text)
+
+    @staticmethod
+    def training_acknowledgement(learned: dict[str, list[Any]]) -> str | None:
+        facts = learned.get("facts") or []
+        rules = learned.get("behavior_rules") or []
+        examples = learned.get("training_examples") or []
+        if not (facts or rules or examples):
+            return None
+        parts = ["Got it."]
+        if facts:
+            parts.append("I saved that to persistent memory.")
+        if rules:
+            parts.append("I saved that as an operating rule and will apply it in future chats.")
+        if examples:
+            parts.append("I saved your correction as a reviewable training example.")
+        return " ".join(parts)
 
     def _provider_for(self, profile: ModelProfile) -> OpenAICompatibleProvider:
         endpoint = self.runtime.ensure_ready(profile)
@@ -746,6 +801,7 @@ class AgentOrchestrator:
             phase="done",
             pending_approval=None,
             summary=session.main_content[:4000],
+            final_content=session.main_content[:50000],
             review=session.review_content,
             steps=session.steps,
         )
@@ -768,6 +824,8 @@ class AgentOrchestrator:
             status,
             verification_passed=(None if not current_round else not verification_failed),
         )
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(session.user_text, session.main_content)
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -812,9 +870,12 @@ class AgentOrchestrator:
             status="step_limit",
             phase="done",
             summary=session.main_content,
+            final_content=session.main_content[:50000],
             steps=session.steps,
         )
         self._record_outcome(session, "step_limit")
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(session.user_text, session.main_content)
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
@@ -831,13 +892,15 @@ class AgentOrchestrator:
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")
 
+        learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": []}
+        if self.conversation_memory is not None:
+            learned = self.conversation_memory.learn_from_user(user_text)
+
         decision = self.router.choose(user_text, override=mode)
-        builtin_response = (
-            self.builtin_utility_response(user_text)
-            if mode == "auto" and decision.role == "utility"
-            else None
-        )
-        if builtin_response is not None:
+        builtin_response = self.builtin_utility_response(user_text) if mode == "auto" else None
+        training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        local_response = training_response or builtin_response
+        if local_response is not None:
             builtin_decision = RoutingDecision(
                 role="utility",
                 model_id="builtin-local",
@@ -850,7 +913,8 @@ class AgentOrchestrator:
                 phase="done",
                 model_id="builtin-local",
                 model_role="utility",
-                summary=builtin_response,
+                summary=local_response,
+                final_content=local_response,
                 steps=0,
                 error="",
             )
@@ -862,8 +926,10 @@ class AgentOrchestrator:
             }
             self._safe_emit(event_callback, {"type": "model", "event": builtin_event})
             self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
+            if self.conversation_memory is not None:
+                self.conversation_memory.record_exchange(user_text, local_response)
             return AgentResult(
-                content=builtin_response,
+                content=local_response,
                 routing=builtin_decision,
                 model_events=[builtin_event],
                 steps=0,
@@ -896,11 +962,18 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "error", "error": error_task.error})
             raise
         lightweight = decision.role == "utility"
+        persistent_context = (
+            self.conversation_memory.prompt_context()
+            if self.conversation_memory is not None
+            else ""
+        )
         research_context: dict[str, Any] = {}
         if lightweight:
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": UTILITY_PROMPT},
             ]
+            if persistent_context:
+                messages.append({"role": "system", "content": persistent_context})
             if history:
                 messages.extend(history[-12:])
             messages.append({"role": "user", "content": user_text})
@@ -924,6 +997,8 @@ class AgentOrchestrator:
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
                 },
             ]
+            if persistent_context:
+                messages.append({"role": "system", "content": persistent_context})
             if self_hosting:
                 messages.append({"role": "system", "content": self_hosting})
             if research_context.get("guidance"):

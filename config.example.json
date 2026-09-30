@@ -239,5 +239,11 @@
   "github_api_version": "2026-03-10",
   "github_token_env": "GITHUB_TOKEN",
   "github_timeout": 15,
-  "github_default_remote": "origin"
+  "github_default_remote": "origin",
+  "conversation_memory_enabled": true,
+  "conversation_memory_path": "data/conversation_memory.json",
+  "conversation_history_limit": 200,
+  "conversation_rule_limit": 300,
+  "conversation_fact_limit": 500,
+  "conversation_training_limit": 500
 }

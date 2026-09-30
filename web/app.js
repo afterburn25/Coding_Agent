@@ -132,6 +132,15 @@ async function applySuggestedModelSetup(){
   const button=$('#applyModelSetup');if(button)button.disabled=true;
   try{await configureDownloadedModels();}catch(e){addMessage('assistant',`Model setup error: ${e.message}`);}finally{const b=$('#applyModelSetup');if(b)b.disabled=false;}
 }
+function renderConversationMemory(m){
+  const facts=(m.facts||[]).filter(x=>x.active!==false);
+  const rules=(m.behavior_rules||[]).filter(x=>x.active!==false);
+  const examples=m.training_examples||[];
+  const recentRules=rules.slice(-3).map(x=>'• '+esc(x.text||'')).join('<br>');
+  $('#memoryStatus').innerHTML=`<div><strong>${facts.length}</strong> remembered facts/preferences · <strong>${rules.length}</strong> operating rules · <strong>${examples.length}</strong> training examples</div>${recentRules?`<small>${recentRules}</small>`:''}<small>Stored locally · corrections become reviewable examples before any offline weight training.</small>`;
+}
+async function loadConversationMemory(){try{const res=await fetch('/api/conversation-memory');const data=await res.json();if(!res.ok)throw new Error(data.error||'Memory lookup failed');renderConversationMemory(data);}catch(e){if($('#memoryStatus'))$('#memoryStatus').textContent='Memory unavailable · '+e.message;}}
+async function recordBuiltinExchange(userText,assistantText){try{await fetch('/api/conversation-memory/exchange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:userText,assistant:assistantText})});}catch{}}
 async function loadStatus(probe=false){try{const url=probe?'/api/runtime':'/api/status';const data=await fetch(url).then(r=>r.json());if(probe){const s=await fetch('/api/status').then(r=>r.json());s.runtime=data;renderStatus(s);}else renderStatus(data);}catch(e){$('#status').textContent='Backend unavailable';}}
 async function runtimeAction(action,modelId){const res=await fetch(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:modelId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Runtime action failed');await loadStatus(false);}
 const imageJobEls=new Map();
@@ -147,7 +156,7 @@ function beginAssistantStream(){
   const wrap=document.createElement('div');wrap.className='message assistant streaming';
   wrap.innerHTML='<div class="role">assistant</div><div class="bubble">Thinking…</div>';
   chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
-  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000};
+  return {wrap,bubble:wrap.querySelector('.bubble'),receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000,requestMessage:''};
 }
 function appendLiveActivity(text){
   const existing=activity.textContent.trim();
@@ -174,7 +183,7 @@ function parseSseBlock(block,state){
   handleAgentStreamEvent(name,payload,state);
 }
 async function streamAgent(message){
-  const state=beginAssistantStream();
+  const state=beginAssistantStream();state.requestMessage=message;
   const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message,mode:mode.value})});
   if(!res.ok){let detail='Request failed',code='';try{const d=await res.json();detail=d.error||detail;code=d.code||'';}catch{}state.bubble.textContent=detail;state.wrap.classList.remove('streaming');if(code==='coding_model_setup_required'){document.querySelector('#systemBlock')?.setAttribute('open','');loadReadiness();}const err=new Error(detail);err.displayed=true;throw err;}
   if(!res.body)throw new Error('Streaming response body is unavailable in this browser.');
@@ -191,8 +200,39 @@ async function streamAgent(message){
       if(statusRes.ok){
         const statusData=await statusRes.json();
         const current=statusData.current;
-        const currentIsThisRequest=current&&Number(current.created_at||0)>=state.startedAt-1;
-        const task=state.lastTask||(currentIsThisRequest?current:null);
+        const currentIsThisRequest=current&&(
+          String(current.prompt||'')===state.requestMessage ||
+          Number(current.created_at||0)>=state.startedAt-1
+        );
+        const lastUpdated=Number(state.lastTask?.updated_at||0);
+        const currentUpdated=Number(current?.updated_at||0);
+        const task=currentIsThisRequest&&(!state.lastTask||currentUpdated>=lastUpdated)?current:state.lastTask;
+        const terminal=['completed','completed_with_warnings','step_limit'];
+        if(task&&terminal.includes(task.status)&&String(task.final_content||task.summary||'').trim()){
+          const recovered={
+            content:String(task.final_content||task.summary||''),
+            routing:{
+              role:String(task.model_role||'primary_coder'),
+              model_id:String(task.model_id||'recovered'),
+              complexity:0,
+              reasons:['final result recovered from durable task ledger after stream closed'],
+            },
+            tool_events:[],
+            model_events:[{type:'stream_result_recovered',model_id:String(task.model_id||''),role:String(task.model_role||'')}],
+            steps:Number(task.steps||0),
+            task,
+            pending_approval:task.pending_approval||null,
+            verification:task.verification||[],
+            review:String(task.review||''),
+            research:task.research||{},
+            image_jobs:[],
+          };
+          state.result=recovered;
+          state.bubble.textContent=recovered.content;
+          state.wrap.classList.remove('streaming');
+          chat.scrollTop=chat.scrollHeight;
+          return recovered;
+        }
         if(task?.error)detail=task.error;
         else if(task?.status==='interrupted')detail='Chat Nexus restarted while this task was running. Use Resume interrupted task to continue from the saved checkpoint.';
         else if(task?.status==='waiting_approval')detail='The task is waiting for approval. Open the Tasks panel to continue.';
@@ -209,6 +249,7 @@ $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-app
 $('#models').addEventListener('click',async e=>{const btn=e.target.closest('.runtime-action');if(!btn)return;btn.disabled=true;try{await runtimeAction(btn.dataset.action,btn.dataset.model);}catch(err){addMessage('assistant',`Runtime error: ${err.message}`);}finally{btn.disabled=false;}});
 $('#readinessPanel').addEventListener('click',e=>{const plan=e.target.closest('[data-model-plan]');if(plan){installModelPlan(plan.dataset.modelPlan);return;}if(e.target.closest('#startSelfDevelopment')){prepareSelfDevelopmentTask();return;}if(e.target.closest('#applyModelSetup')){applySuggestedModelSetup();return;}const copy=e.target.closest('.copy-runtime-command'),install=e.target.closest('.catalog-install'),repair=e.target.closest('.catalog-repair'),cancel=e.target.closest('.catalog-cancel');if(copy)copyText(copy.dataset.command);else if(install)startCatalogInstall(install.dataset.catalog,false);else if(repair)startCatalogInstall(repair.dataset.catalog,true);else if(cancel)cancelCatalogInstall(cancel.dataset.job);});
 $('#refreshRuntime').addEventListener('click',async()=>{await loadStatus(true);await loadReadiness();});
+$('#refreshMemory').addEventListener('click',loadConversationMemory);
 $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex');b.disabled=true;try{const res=await fetch('/api/index/rebuild',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await res.json();if(!res.ok)throw new Error(data.error||'Index rebuild failed');await loadStatus(false);}catch(e){addMessage('assistant',`Index error: ${e.message}`);}finally{b.disabled=false;}});
 function builtinClientReply(message){
   const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
@@ -218,11 +259,17 @@ function builtinClientReply(message){
   if(['what can you do','what all can you do','what are your capabilities','what do you do','how can you help'].some(x=>normalized.includes(x))){
     return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical issues, work with Git/GitHub when authorized, manage local coding models, and use configured local image tools.';
   }
+  if(['how old are you','do you have an age','what is your age',"what's your age"].includes(normalized)){
+    return "I don't have a human age. I'm Chat Nexus, software, so I don't age like a person.";
+  }
+  if(['who are you','what are you','what is your name',"what's your name",'are you human'].includes(normalized)){
+    return "I'm Chat Nexus, a local-first AI coding workstation. I'm software, not a person.";
+  }
   return '';
 }
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';const builtin=builtinClientReply(message);if(builtin){addMessage('assistant',builtin);input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;addMessage('user',message);input.value='';const builtin=builtinClientReply(message);if(builtin){addMessage('assistant',builtin);recordBuiltinExchange(message,builtin).then(loadConversationMemory);input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await loadConversationMemory();}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',e=>{const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',async()=>{await fetch('/api/chat/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});chat.innerHTML=welcomeHtml();activity.innerHTML='<span class="muted">Tool calls, model switches, and command output will appear here.</span>';renderTask(null);input.focus();});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
-loadStatus().then(()=>loadReadiness());input.focus();
+loadStatus().then(()=>Promise.all([loadReadiness(),loadConversationMemory()]));input.focus();

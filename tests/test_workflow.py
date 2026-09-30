@@ -10,6 +10,7 @@ from localcodeagent.models.router import ModelRouter
 from localcodeagent.tools.base import ToolRegistry, ToolSpec
 from localcodeagent.tools.filesystem import register_filesystem_tools
 from localcodeagent.workflow.checkpoint import CheckpointManager
+from localcodeagent.workflow.conversation_memory import ConversationMemory
 from localcodeagent.workflow.memory import ProjectMemory
 from localcodeagent.workflow.repository import RepositoryIndex
 from localcodeagent.workflow.tasks import TaskStore
@@ -175,6 +176,94 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             self.assertEqual(result.routing.model_id, "builtin-local")
             self.assertIn("inspect and edit code", result.content)
             self.assertEqual(result.task["status"], "completed")
+
+
+class ConversationMemoryTests(unittest.TestCase):
+    def test_taught_rules_and_facts_survive_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "conversation_memory.json"
+            memory = ConversationMemory(path)
+            learned_rule = memory.learn_from_user("From now on, keep answers concise")
+            learned_fact = memory.learn_from_user("Remember that I prefer dark mode")
+
+            self.assertIn("keep answers concise", learned_rule["behavior_rules"])
+            self.assertIn("I prefer dark mode", learned_fact["facts"])
+
+            reloaded = ConversationMemory(path)
+            context = reloaded.prompt_context()
+            self.assertIn("keep answers concise", context)
+            self.assertIn("I prefer dark mode", context)
+
+    def test_correction_becomes_reviewable_training_example(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "conversation_memory.json")
+            memory.record_exchange("Explain this", "A long answer")
+            learned = memory.learn_from_user("No, you should keep that answer much shorter")
+
+            self.assertEqual(len(learned["training_examples"]), 1)
+            example = learned["training_examples"][0]
+            self.assertEqual(example["instruction"], "Explain this")
+            self.assertEqual(example["previous_response"], "A long answer")
+            self.assertFalse(example["approved"])
+            self.assertIn("keep that answer much shorter", learned["behavior_rules"])
+
+    def test_training_command_is_saved_without_model_activation(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            conversation = ConversationMemory(root / "data" / "conversation_memory.json")
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_memory=conversation,
+            )
+            agent._provider_for = lambda _: (_ for _ in ()).throw(AssertionError("teaching command should not load a model"))
+
+            result = agent.run("From now on, explain errors in plain English")
+
+            self.assertEqual(result.routing.model_id, "builtin-local")
+            self.assertIn("operating rule", result.content)
+            self.assertIn("explain errors in plain English", conversation.prompt_context())
+            self.assertEqual(result.task["final_content"], result.content)
+
+    def test_saved_rules_are_injected_into_future_model_prompt(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            conversation = ConversationMemory(root / "data" / "conversation_memory.json")
+            conversation.learn_from_user("From now on, keep answers concise")
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_memory=conversation,
+            )
+            agent._provider_for = lambda _: provider
+
+            result = agent.run("Explain the architecture of this project")
+
+            system_text = "\n".join(str(m.get("content", "")) for m in provider.messages if m.get("role") == "system")
+            self.assertIn("User-taught operating rules", system_text)
+            self.assertIn("keep answers concise", system_text)
+            self.assertEqual(result.task["final_content"], "done")
 
 
 class ApprovalResumeTests(unittest.TestCase):
