@@ -114,7 +114,7 @@
 - Dogfood app defaults its workspace to bundled `Source` when present. The Windows ZIP packaging explicitly preserves `Source/.git` so it remains a real Git working tree.
 - Windows package guard rejects any pythonnet / `Python.Runtime.dll` / pywebview path before producing an artifact.
 - Official logo asset was replaced with byte-verified valid PNG data after CI caught a corrupt/truncated prior asset.
-- Native desktop checkpoint was **102/102 tests passing**; the current overall installer/upgrade checkpoint is **109/109 tests passing**.
+- Native desktop checkpoint was **102/102 tests passing**; the current overall installer/upgrade checkpoint is **110/110 tests passing**.
 - Next: install/download the 14B and 30B GGUFs on the target machine and begin real Chat Nexus-on-Chat Nexus dogfood development.
 
 ## v0.6 installer/upgrade checkpoint
@@ -128,7 +128,7 @@
 - First install explicitly embeds both `Source\*` and hidden `Source\.git\*`. A deterministic pre-install flag decides once whether Source should be seeded; upgrades do not overwrite it.
 - Inno `Excludes` patterns are comma-separated: `Source\*,models\*,data\*,config.json`.
 - CI builds the native .NET app first, compiles the LZMA2 solid-compressed installer, performs a fresh install, runs `ChatNexus.exe --self-test`, writes preservation markers/config state, runs the same installer a second time without `/DIR`, verifies the existing path is rediscovered and mutable state survives, then runs the self-test again.
-- Current unit checkpoint: **109/109 tests passing**. The installer fresh-install + upgrade preservation smoke test is green.
+- Current unit checkpoint: **110/110 tests passing**. The installer fresh-install + upgrade preservation smoke test is green.
 - Future Windows releases should publish the installer EXE first and may also publish the portable ZIP.
 
 ## v0.6 first-run model setup checkpoint
@@ -141,7 +141,7 @@
 - Catalog duplicate-start protection returns the existing active job for the same model.
 - Known catalog filenames are preferred over generic size heuristics when assigning the 14B/30B pair.
 - Missing-GGUF readiness output is deduplicated.
-- Unit checkpoint: **109/109 tests passing**. The native installer build containing the first-run setup UI passed fresh-install + upgrade-preservation smoke tests.
+- Unit checkpoint: **110/110 tests passing**. The native installer build containing the first-run setup UI passed fresh-install + upgrade-preservation smoke tests.
 - Next: dogfood installed Chat Nexus with the downloaded 14B/30B stack and harden real model/task behavior.
 
 ## Source of truth
@@ -316,4 +316,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `109 tests` passing.
+Expected at this checkpoint: `110 tests` passing.

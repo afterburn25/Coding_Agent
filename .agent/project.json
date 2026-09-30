@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 109,
+  "test_checkpoint": 110,
   "next_milestone": "Dogfood the installed Chat Nexus with Qwen3 14B + Qwen3-Coder 30B and harden real model/task behavior",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Single compressed upgrade-aware Windows installer EXE; portable ZIP secondary",
@@ -31,5 +31,6 @@
     "checksum_verified": true,
     "auto_configure_after_download": true,
     "restart_after_configure": true
-  }
+  },
+  "ci_hardening": "Installer/app smoke processes have explicit timeouts so hung setup/self-test runs fail deterministically."
 }
