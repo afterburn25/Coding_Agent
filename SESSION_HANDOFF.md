@@ -72,6 +72,18 @@
 - CI checkpoint: **86/86 tests passing**.
 - Next practical blocker: an explicit model catalog/downloader, then first real Chat Nexus-on-Chat Nexus dogfood task.
 
+## v0.6 coding model catalog checkpoint
+
+- `localcodeagent/runtime/catalog.py` contains the explicit auditable coding-model catalog/downloader.
+- Initial catalog: official Qwen3-14B Q4_K_M starter; community Qwen3-Coder-30B-A3B-Instruct Q4_K_M with the base/source distinction shown in UI.
+- Exact expected file sizes/SHA256 values are embedded and tested.
+- Download lifecycle: explicit confirmation → `.part` streaming → progress/cancel → exact size+SHA256 → atomic rename + trusted metadata.
+- Existing unverified model files are not overwritten without explicit Repair.
+- API: `GET /api/models/catalog`, `GET /api/models/install/<job>`, `POST /api/models/install`, `POST /api/models/install/cancel`, `POST /api/models/verify`.
+- The readiness drawer renders model source/type/roles/hardware note and live install progress.
+- CI checkpoint: **90/90 tests passing**.
+- Next: first-run `llama-server` bootstrap guidance, then real Chat Nexus dogfood development.
+
 ## Source of truth
 
 GitHub repository: `afterburn25/Coding_Agent`
@@ -116,7 +128,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
-- Automated tests: **86 passing** after the research/verification-repair and image-workflow-validation milestone.
+- Automated tests: **90 passing** after the research/verification-repair and image-workflow-validation milestone.
 
 ## Completed before v0.4
 
@@ -244,4 +256,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `86 tests` passing.
+Expected at this checkpoint: `90 tests` passing.
