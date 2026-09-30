@@ -73,11 +73,7 @@ jobs:
 
       - name: Package Windows desktop app
         shell: pwsh
-        run: |
-          if (-not (Test-Path "dist/ChatNexus/Source/.git")) { throw "Bundled Source workspace is missing .git metadata" }
-          tar.exe -a -c -f Chat-Nexus-v0.6.0-dev-Windows-x64.zip -C dist/ChatNexus .
-          $Listing = tar.exe -tf Chat-Nexus-v0.6.0-dev-Windows-x64.zip
-          if (-not ($Listing -match "Source/.git/HEAD")) { throw "Packaged desktop ZIP dropped Source/.git metadata" }
+        run: python packaging/make_windows_zip.py dist/ChatNexus Chat-Nexus-v0.6.0-dev-Windows-x64.zip
 
       - name: Upload Windows desktop app
         uses: actions/upload-artifact@v4
