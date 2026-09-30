@@ -356,24 +356,38 @@ class AppState:
             pass
         return {"restored": True, "base_model_id": base_id, "applied": applied}
 
-    def set_conversation_policy_mode(self, mode: str) -> dict:
+    def set_conversation_policy_mode(
+        self,
+        mode: str,
+        *,
+        ethical_temperature: float | None = None,
+    ) -> dict:
         mode = str(mode or "").strip().lower()
         if mode not in {"permissive", "balanced", "strict"}:
             raise ValueError("policy mode must be permissive, balanced, or strict")
+
+        if ethical_temperature is None:
+            temperature = float(getattr(self.config, "ethical_temperature", 1.0))
+        else:
+            temperature = max(0.0, min(1.0, float(ethical_temperature)))
 
         if self.config_path.exists():
             raw = json.loads(self.config_path.read_text(encoding="utf-8"))
         else:
             raw = asdict(self.config)
         raw["conversation_policy_mode"] = mode
+        raw["ethical_temperature"] = temperature
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".policy.tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.config_path)
 
         self.config.conversation_policy_mode = mode
+        self.config.ethical_temperature = temperature
         self.agent.config.conversation_policy_mode = mode
+        self.agent.config.ethical_temperature = temperature
         return {
             "mode": mode,
+            "ethical_temperature": temperature,
             "hard_tool_safety": True,
             "message": (
                 "Permissive reduces generic topic-based refusals while narrow hard tool safety remains enforced."
@@ -527,6 +541,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/policy":
             self._json({
                 "mode": self.state.config.conversation_policy_mode,
+                "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
                 "available_modes": ["permissive", "balanced", "strict"],
                 "hard_tool_safety": True,
             })
@@ -550,6 +565,7 @@ class Handler(BaseHTTPRequestHandler):
                 ],
                 "permissions": self.state.config.permissions,
                 "policy_mode": self.state.config.conversation_policy_mode,
+                "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
                 "runtime": runtime,
                 "tasks": self.state.task_payload(),
                 "repository_index": self.state.repository_index.summary(),
@@ -679,7 +695,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self._body()
             if path == "/api/policy/mode":
-                saved = self.state.set_conversation_policy_mode(str(body.get("mode", "")))
+                saved = self.state.set_conversation_policy_mode(
+                    str(body.get("mode", "")),
+                    ethical_temperature=body.get("ethical_temperature"),
+                )
+                self._json({"ok": True, **saved})
+                return
+
+            if path == "/api/policy/temperature":
+                saved = self.state.set_conversation_policy_mode(
+                    self.state.config.conversation_policy_mode,
+                    ethical_temperature=float(body.get("ethical_temperature", 1.0)),
+                )
                 self._json({"ok": True, **saved})
                 return
 

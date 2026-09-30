@@ -63,7 +63,11 @@
             <option value="balanced">Balanced</option>
             <option value="strict">Strict</option>
           </select>
-          <small id="policyNote" class="policy-note">Permissive avoids generic adult/sensitive-topic refusals. Narrow hard tool safety remains enforced.</small>
+          <label class="ethical-temperature-row">
+            <span>Ethical temperature <strong id="ethicalTemperatureValue">1.00</strong></span>
+            <input id="ethicalTemperature" type="range" min="0" max="1" step="0.05" value="1" />
+          </label>
+          <small id="policyNote" class="policy-note">1.00 = maximum conversational permissiveness within the hard tool/action safety boundary.</small>
         </div>
         <div class="system-block">
           <div class="section-row"><span class="section-title">Memory & training</span><button id="refreshMemory" class="mini-button" type="button">Refresh</button></div>

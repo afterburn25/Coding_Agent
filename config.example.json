@@ -35,7 +35,7 @@
         "--reasoning",
         "off"
       ],
-      "temperature": 1
+      "temperature": 0.2
     },
     {
       "id": "qwen3-coder-30b",
@@ -61,7 +61,7 @@
       "estimated_ram_gb": 30,
       "notes": "Heavier code/reasoning model; expected to use CPU/GPU offload on 12 GB VRAM.",
       "max_output_tokens": 8192,
-      "temperature": 1
+      "temperature": 0.2
     }
   ],
   "permissions": {
@@ -260,5 +260,6 @@
   "model_growth_dir": "data/model_growth",
   "trainer_backend": "external",
   "trainer_command": "",
-  "conversation_policy_mode": "permissive"
+  "conversation_policy_mode": "permissive",
+  "ethical_temperature": 1
 }

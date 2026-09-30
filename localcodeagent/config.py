@@ -16,7 +16,7 @@ class ModelProfile:
     roles: list[str]
     context_window: int = 32768
     max_output_tokens: int = 4096
-    temperature: float = 1.0
+    temperature: float = 0.2
     tool_calling: bool = True
     vision: bool = False
     priority: int = 50
@@ -67,6 +67,7 @@ class AgentConfig:
     # Conversation-policy posture. This controls tone/refusal sensitivity only;
     # narrow hard safety checks remain enforced in the relevant tool/policy layer.
     conversation_policy_mode: str = "permissive"  # permissive | balanced | strict
+    ethical_temperature: float = 1.0  # 0.0 cautious -> 1.0 maximally permissive conversation
 
     # Persistent conversational memory/training. These records stay local and
     # affect prompts immediately; actual weight training remains an explicit
@@ -259,6 +260,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.task_history_limit = max(10, int(raw.get("task_history_limit", cfg.task_history_limit)))
     policy_mode = str(raw.get("conversation_policy_mode", cfg.conversation_policy_mode)).strip().lower()
     cfg.conversation_policy_mode = policy_mode if policy_mode in {"permissive", "balanced", "strict"} else "permissive"
+    cfg.ethical_temperature = max(0.0, min(1.0, float(raw.get("ethical_temperature", cfg.ethical_temperature))))
     cfg.conversation_memory_enabled = bool(raw.get("conversation_memory_enabled", cfg.conversation_memory_enabled))
     cfg.conversation_memory_path = str(raw.get("conversation_memory_path", cfg.conversation_memory_path))
     cfg.conversation_history_limit = max(20, int(raw.get("conversation_history_limit", cfg.conversation_history_limit)))
