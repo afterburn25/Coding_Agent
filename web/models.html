@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat Nexus · Local Models</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/tools.css" />
+</head>
+<body>
+  <div class="tools-shell">
+    <aside class="tools-side">
+      <div class="brand">Chat Nexus <span>Local Models</span></div>
+      <a class="workspace-link" href="/">← Chat</a>
+      <a class="workspace-link" href="/tools.html">Tools &amp; Plugins</a>
+      <a class="workspace-link" href="/research.html">Research Hub</a>
+      <a class="workspace-link" href="/image.html">Image workspace</a>
+      <a class="workspace-link" href="/trainer.html">Trainer</a>
+
+      <div class="section-title">Hardware</div>
+      <div id="hwBox" class="perm-summary muted">Loading…</div>
+
+      <div class="section-title">Model files</div>
+      <div id="fileList" class="file-list muted">Loading…</div>
+    </aside>
+
+    <main class="tools-main">
+      <header class="tools-header">
+        <div>
+          <h1>Local Models</h1>
+          <p>llama.cpp residency, role assignments, VRAM budgeting, and the downloadable model catalog.</p>
+        </div>
+        <button id="refreshAll" class="mini-button">Refresh</button>
+      </header>
+
+      <section class="tools-card">
+        <h2>Runtimes</h2>
+        <div id="runtimeList" class="proc-list muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Configured profiles</h2>
+        <div id="modelList" class="tool-list muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Catalog</h2>
+        <div id="catalogList" class="tool-list muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Install jobs</h2>
+        <div id="jobList" class="job-list muted">Loading…</div>
+      </section>
+    </main>
+  </div>
+  <script src="/models.js"></script>
+</body>
+</html>
