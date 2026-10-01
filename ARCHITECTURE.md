@@ -191,7 +191,15 @@ failure → autonomous_error_retry_seconds backoff, bounded by
   `task_id` attribution.
 - The chat page keeps its direct `/api/chat/stream` connection authoritative
   (`agentStreamActive` suppresses bus duplicates); on reload the bus
-  subscription + `/api/tasks` + `/api/task-log` restore the live view.
+  subscription + `/api/tasks` + `/api/task-log` restore the live view, and
+  the transcript re-fetches on every EventSource reconnect so output emitted
+  during a disconnect gap is recovered in place.
+- Transcript markers cover the whole run: `$ tool args`, live output,
+  `· tool ok|failed|timeout`, `## task <status/phase>` transitions,
+  `## approval required`, `## image <op/state/stage>` (state-change deduped),
+  `## model`/`## research`/`## perf` markers, `## error`, and the final
+  `## result` block (4 KiB preview) on terminal status — plus crash lines
+  for failures before the session loop begins.
 - `PermissionManager.set_autonomous` auto-approves `ask`/`session` workspace
   actions; hard gates (spend/message/mic/camera) and `deny` are never touched.
   `autonomous_approval_timeout_seconds` bounds hard-gate waits.
