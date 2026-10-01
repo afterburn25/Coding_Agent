@@ -108,6 +108,30 @@ class PluginManifest:
         return found, missing
 
 
+INSTALL_METHODS = {
+    "winget": lambda pkg: ["winget", "install", "--id", pkg, "-e", "--accept-source-agreements", "--accept-package-agreements"],
+    "choco": lambda pkg: ["choco", "install", pkg, "-y"],
+    "pip": lambda pkg: [sys.executable, "-m", "pip", "install", pkg],
+    "uv": lambda pkg: ["uv", "pip", "install", pkg],
+    "npm": lambda pkg: ["npm", "install", "-g", pkg],
+    "apt": lambda pkg: ["apt", "install", "-y", pkg],
+    "dnf": lambda pkg: ["dnf", "install", "-y", pkg],
+    "brew": lambda pkg: ["brew", "install", pkg],
+}
+
+
+def install_command(install: dict[str, Any]) -> list[str] | None:
+    """Translate a manifest install spec into an argv, or None if not automatable."""
+    if not isinstance(install, dict):
+        return None
+    method = str(install.get("method") or "").strip().lower()
+    package = str(install.get("package") or "").strip()
+    builder = INSTALL_METHODS.get(method)
+    if builder is None or not package:
+        return None
+    return builder(package)
+
+
 def _substitute(template: list[str], arguments: dict[str, Any]) -> list[str]:
     command: list[str] = []
     for part in template:

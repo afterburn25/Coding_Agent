@@ -110,6 +110,25 @@
         }
       });
     });
+    $("toolList").querySelectorAll("[data-install]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          let res = await post("/api/tools/install", { tool: btn.dataset.install });
+          if (res.needs_approval) {
+            if (!confirm(`Install ${btn.dataset.install} via ${res.install.method || "package manager"}?`)) return;
+            res = await post("/api/tools/install", { tool: btn.dataset.install, approve: true });
+          }
+          if (!res.ok) { alert(res.error || "install not available"); return; }
+          btn.textContent = "Installing…";
+          setTimeout(() => { loadTools(); loadJobs(); }, 2000);
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
     $("toolList").querySelectorAll("[data-health]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
@@ -144,6 +163,7 @@
         </div>
         <div class="tool-actions">
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
+          ${t.install_status === "missing" && t.install && t.install.package ? `<button class="mini-button" data-install="${esc(t.name)}" title="via ${esc(t.install.method)}">Install</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
       </div>`;

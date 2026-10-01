@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 237,
+  "test_checkpoint": 239,
   "next_milestone": "v0.7 modular AI workstation: Phase 1 tool foundation landed; Phase 2 started with controlled terminal tools, ripgrep search, and build-system adapters (221 tests). Next: tree-sitter/LSP indexing, MCP support, then Playwright browser backend, llama.cpp model page, and continued Nexus Brain hardening.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -464,6 +464,7 @@
     "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
     "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
     "browser": "localcodeagent/webtools/browser.py \u2014 Playwright runner w/ sessions, console+network capture, extended actions, health probe",
-    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u2014 live install status in Tool Manager"
+    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u2014 live install status in Tool Manager",
+    "install_manager": "POST /api/tools/install \u2014 packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button"
   }
 }

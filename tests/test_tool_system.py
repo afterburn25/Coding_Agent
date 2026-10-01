@@ -16,6 +16,7 @@ from localcodeagent.tools.search import find_ripgrep, register_search_tools
 from localcodeagent.tools.terminal import TerminalTracker, register_terminal_tools, resolve_shell
 from localcodeagent.tool_router import ToolRouter
 from localcodeagent.mcp import MCPManager, MCPServerConfig, load_mcp_configs
+from localcodeagent.tools.plugins import install_command
 
 
 def _registry(**permissions):
@@ -262,6 +263,25 @@ class PluginManifestTests(unittest.TestCase):
             result = load_plugin_manifests(mdir, _registry())
             self.assertEqual(result["loaded"], [])
             self.assertEqual(len(result["errors"]), 1)
+
+    def test_install_command_mapping(self):
+        self.assertEqual(install_command({"method": "winget", "package": "Gyan.FFmpeg"})[:4],
+                         ["winget", "install", "--id", "Gyan.FFmpeg"])
+        self.assertEqual(install_command({"method": "pip", "package": "duckdb"})[-4:],
+                         ["-m", "pip", "install", "duckdb"])
+        self.assertIsNone(install_command({"method": "build", "notes": "compile it"}))
+        self.assertIsNone(install_command({"method": "winget"}))
+        self.assertIsNone(install_command({}))
+
+    def test_bundled_manifests_load(self):
+        root = Path(__file__).resolve().parent.parent / "tools" / "manifests"
+        reg = _registry(**{"shell.execute": "allow", "docker.access": "ask"})
+        report = load_plugin_manifests(root, reg, workspace=Path(tempfile.mkdtemp()))
+        self.assertFalse(report["errors"])
+        for expected in ("ffmpeg", "ffprobe", "whisper", "tesseract", "pandoc", "duckdb", "docker", "blender", "ripgrep"):
+            self.assertIn(expected, report["loaded"])
+        docker = reg.manifest("docker")
+        self.assertEqual(docker["permission"], "docker.access")
 
     def test_missing_directory_is_clean(self):
         result = load_plugin_manifests(Path("does/not/exist"), _registry())
