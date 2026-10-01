@@ -26,6 +26,7 @@ class _FakeModelServer:
         self.delay = 0.0    # seconds to stall each chat response
         self.tool_name = "system_resources"
         self.tool_args = "{}"
+        self.tool_calls: list[tuple[str, str]] | None = None  # multi-call batch
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -43,17 +44,22 @@ class _FakeModelServer:
                 if outer.delay:
                     time.sleep(outer.delay)
                 messages = body.get("messages") or []
-                saw_tool = any(m.get("role") == "tool" for m in messages)
+                saw_tool = any(
+                    m.get("role") == "tool"
+                    or "Recovered pending tool action" in str(m.get("content", ""))
+                    for m in messages
+                )
                 if saw_tool:
                     message = {"role": "assistant", "content": "Resource check complete — all healthy."}
                     chunks = ["Resource check complete", " — all healthy."]
                 else:
+                    calls = outer.tool_calls or [(outer.tool_name, outer.tool_args)]
                     message = {
                         "role": "assistant", "content": "",
                         "tool_calls": [{
-                            "id": "call_1", "type": "function",
-                            "function": {"name": outer.tool_name, "arguments": outer.tool_args},
-                        }],
+                            "id": f"call_{i}", "type": "function",
+                            "function": {"name": n, "arguments": a},
+                        } for i, (n, a) in enumerate(calls)],
                     }
                     chunks = None
 
@@ -66,9 +72,9 @@ class _FakeModelServer:
                             delta = {"choices": [{"index": 0, "delta": {"role": "assistant", "content": piece}}]}
                             self.wfile.write(f"data: {json.dumps(delta)}\n\n".encode())
                     else:
-                        for tc in message["tool_calls"]:
+                        for i, tc in enumerate(message["tool_calls"]):
                             delta = {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
-                                {"index": 0, "id": tc["id"], "type": "function",
+                                {"index": i, "id": tc["id"], "type": "function",
                                  "function": {"name": tc["function"]["name"],
                                               "arguments": tc["function"]["arguments"]}}]}}]}
                             self.wfile.write(f"data: {json.dumps(delta)}\n\n".encode())
@@ -285,6 +291,52 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertFalse((Path(td) / "note.txt").exists())
             tool_msg = [m for m in fake.requests[1]["messages"] if m.get("role") == "tool"]
             self.assertIn("PERMISSION_DENIED", json.dumps(tool_msg))
+
+    def test_batched_tool_calls_execute_sequentially(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            fake.tool_calls = [
+                ("system_resources", "{}"),
+                ("list_files", "{}"),
+            ]
+            result = state.agent.run("inspect the workspace")
+
+            self.assertEqual(result.task.get("status"), "completed")
+            # Both calls ran before the follow-up model turn.
+            self.assertEqual(len(fake.requests), 2)
+            tool_msgs = [m for m in fake.requests[1]["messages"] if m.get("role") == "tool"]
+            self.assertEqual(len(tool_msgs), 2)
+            log = state.tasks.read_log(result.task["id"])
+            self.assertIn("$ system_resources", log)
+            self.assertIn("$ list_files", log)
+
+    def test_pending_approval_survives_restart(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            fake.tool_name = "write_file"
+            fake.tool_args = json.dumps({"path": "note.txt", "content": "survived restart"})
+            result = state.agent.run("write a note file")
+            self.assertEqual(result.task.get("status"), "waiting_approval")
+            task_id = result.task["id"]
+
+            # Simulate a backend restart: brand-new AppState on the same
+            # workspace — the live session is gone, the ledger persists.
+            state2 = self._state(td, fake.endpoint)
+            resumed = state2.agent.resume(task_id, approved=True)
+
+            self.assertEqual(resumed.task.get("status"), "completed")
+            self.assertEqual(
+                (Path(td) / "note.txt").read_text(encoding="utf-8"),
+                "survived restart")
+            # The executed tool result reached the model via the recovered
+            # system note (rebuilt context has no dangling tool_calls).
+            recovery = [m for m in fake.requests[1]["messages"]
+                        if "Recovered pending tool action" in str(m.get("content", ""))]
+            self.assertIn("WROTE", json.dumps(recovery))
 
 
 if __name__ == "__main__":

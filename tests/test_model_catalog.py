@@ -104,6 +104,13 @@ class CodingModelCatalogTests(unittest.TestCase):
                 first = manager.start_install(asset.id)
                 second = manager.start_install(asset.id)
                 self.assertEqual(first["id"], second["id"])
+            # Wait for the download worker to release the .part file before
+            # the TemporaryDirectory tears down (Windows file-lock flake).
+            deadline = time.time() + 10
+            while (manager.get_job(first["id"])["state"]
+                   in {"queued", "downloading", "verifying", "cancelling"}
+                   and time.time() < deadline):
+                time.sleep(0.05)
 
     def test_existing_untrusted_model_is_never_silently_overwritten(self):
         asset = tiny_asset()
