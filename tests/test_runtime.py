@@ -1,5 +1,7 @@
+import io
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -7,7 +9,40 @@ from pathlib import Path
 from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.models.router import ModelRouter
 from localcodeagent.runtime.hardware import GPUInfo, HardwareSnapshot, parse_nvidia_smi_csv
-from localcodeagent.runtime.manager import RuntimeManager
+from localcodeagent.runtime.manager import RuntimeManager, _ManagedProcess
+
+
+class _FakeProcess:
+    """Minimal stand-in for subprocess.Popen used by _stop_managed."""
+
+    def __init__(self):
+        self.alive = True
+        self.terminated = False
+
+    def poll(self):
+        return None if self.alive else 0
+
+    def terminate(self):
+        self.terminated = True
+        self.alive = False
+
+    def kill(self):
+        self.alive = False
+
+    def wait(self, timeout=None):
+        self.alive = False
+        return 0
+
+
+def _attach_fake_managed(manager: RuntimeManager, profile: ModelProfile, *, last_used: float | None = None) -> _FakeProcess:
+    proc = _FakeProcess()
+    status = manager._status[profile.id]
+    status.managed = True
+    status.state = "running"
+    status.healthy = True
+    manager._managed[profile.id] = _ManagedProcess(profile, proc, "http://x/v1", io.StringIO(), status)
+    manager._last_used[profile.id] = time.time() if last_used is None else last_used
+    return proc
 
 
 class HardwareTests(unittest.TestCase):
@@ -244,6 +279,68 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertLess(score, 0)
             self.assertIn("after releasing resident fast", reason)
             self.assertIn("CPU offload", reason)
+
+    def test_evict_idle_stops_model_past_idle_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(keep_loaded=False)
+            cfg = AgentConfig(models=[profile], model_idle_unload_seconds=60)
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            proc = _attach_fake_managed(manager, profile, last_used=time.time() - 3600)
+
+            stopped = manager.evict_idle()
+
+            self.assertEqual(stopped, ["coder"])
+            self.assertTrue(proc.terminated)
+            self.assertEqual(manager._status["coder"].state, "stopped")
+
+    def test_evict_idle_skips_recent_busy_and_keep_loaded(self):
+        with tempfile.TemporaryDirectory() as td:
+            fresh = self._profile(id="fresh", model_path="models/fresh.gguf")
+            stale_busy = self._profile(id="busy", model_path="models/busy.gguf")
+            pinned = self._profile(id="pinned", model_path="models/pinned.gguf", keep_loaded=True)
+            cfg = AgentConfig(models=[fresh, stale_busy, pinned], model_idle_unload_seconds=60)
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            _attach_fake_managed(manager, fresh)
+            _attach_fake_managed(manager, stale_busy, last_used=time.time() - 3600)
+            _attach_fake_managed(manager, pinned, last_used=time.time() - 3600)
+
+            stopped = manager.evict_idle(busy_models={"busy"})
+
+            self.assertEqual(stopped, [])
+            self.assertEqual(sorted(manager.resident_model_ids()), ["busy", "fresh", "pinned"])
+
+    def test_evict_idle_disabled_when_threshold_zero(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            cfg = AgentConfig(models=[profile], model_idle_unload_seconds=0)
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            _attach_fake_managed(manager, profile, last_used=1.0)
+
+            self.assertEqual(manager.evict_idle(), [])
+            self.assertIn("coder", manager.resident_model_ids())
+
+    def test_evict_idle_pressure_evicts_lru_not_busy(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = self._profile(id="old", model_path="models/old.gguf")
+            new = self._profile(id="new", model_path="models/new.gguf")
+            cfg = AgentConfig(
+                models=[old, new],
+                model_idle_unload_seconds=0,
+                memory_pressure_ram_gb=512,
+            )
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64, available_ram_gb=2,
+                gpus=[], nvidia_smi_available=False,
+            )
+            manager.refresh_hardware = lambda: manager.hardware
+            _attach_fake_managed(manager, old, last_used=time.time() - 100)
+            _attach_fake_managed(manager, new)
+
+            stopped = manager.evict_idle(busy_models={"new"})
+
+            self.assertEqual(stopped, ["old"])
+            self.assertEqual(manager.resident_model_ids(), ["new"])
 
     @unittest.skipIf(os.name == "nt", "fake executable uses POSIX permissions")
     def test_missing_deep_model_falls_back_to_available_primary(self):

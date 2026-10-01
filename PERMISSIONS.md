@@ -62,12 +62,35 @@ profile back to `custom`.
 - Manifest/plugin tools default to `shell.execute` unless they declare a
   narrower key.
 
+## Autonomous mode
+
+`autonomous_mode` (config key, or the Tools page toggle) lets the agent run
+unattended: permission levels `ask` and `session` are auto-approved for
+reversible workspace actions and recorded in `session_grants` for visibility.
+
+It never bypasses:
+
+- `deny` levels — denied stays denied.
+- Hard gates (`AUTONOMY_NEVER_AUTO` in `permissions.py`): `spend.money`,
+  `message.send`, `microphone.use`, `camera.use` always require an explicit
+  human approval regardless of mode.
+
+Two companion settings bound autonomous runs:
+
+- `autonomous_max_continuations` (default 5) — how many times the agent may
+  extend past `max_agent_steps` without finishing.
+- `model_idle_unload_seconds` (default 900) plus `memory_pressure_vram_gb` /
+  `memory_pressure_ram_gb` — idle or pressured managed models are unloaded by
+  the process watchdog tick; models pinned by a running task are never
+  evicted, and `ensure_ready()` transparently restarts them on resume.
+
 ## API
 
 ```text
-GET  /api/permissions            profile, levels, effective map, session grants
-POST /api/permissions/level      {"permission": "shell.execute", "level": "session"}
-POST /api/permissions/profile    {"profile": "offline"}
+GET  /api/permissions             profile, levels, effective map, session grants, autonomy state
+POST /api/permissions/level       {"permission": "shell.execute", "level": "session"}
+POST /api/permissions/profile     {"profile": "offline"}
+POST /api/permissions/autonomous  {"enabled": true}
 ```
 
 Changes persist into `config.json` atomically. Session grants are intentionally

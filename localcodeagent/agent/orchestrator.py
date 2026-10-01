@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -120,6 +121,7 @@ class _AgentSession:
     review_content: str = ""
     repair_cycles: int = 0
     refusal_retries: int = 0
+    continuations: int = 0
     verification_round_start: int = 0
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
@@ -991,6 +993,11 @@ class AgentOrchestrator:
         })
         self.tasks.update(session.task_id, model_id=escalated.model_id, model_role=escalated.role)
 
+    # Permissions whose tools only observe state — safe to run concurrently.
+    _READ_ONLY_TOOL_PERMS = frozenset({
+        "filesystem.read", "network.read", "browser.control", "image.read", "github.read",
+    })
+
     def _process_pending_calls(self, session: _AgentSession) -> AgentResult | None:
         while session.pending_call_index < len(session.pending_calls):
             call = session.pending_calls[session.pending_call_index]
@@ -1010,9 +1017,32 @@ class AgentOrchestrator:
                     permission=permission,
                     call_id=str(call.get("id", name)),
                 )
-            result = self.tools.execute(name, args)
-            self._append_tool_result(session, call, name, args, result)
-            session.pending_call_index += 1
+            # Gather the run of calls that can proceed without approval. If they
+            # are all read-only they execute in parallel (independent reads,
+            # research lookups, fetches); mutating runs stay sequential because
+            # later steps often depend on earlier side effects.
+            batch: list[tuple[dict[str, Any], str, dict[str, Any]]] = [(call, name, args)]
+            j = session.pending_call_index + 1
+            while j < len(session.pending_calls):
+                n2, a2 = self._parse_call(session.pending_calls[j])
+                if self._tool_blocked_by_brain(n2) or self.tools.requires_approval(n2)[0]:
+                    break
+                batch.append((session.pending_calls[j], n2, a2))
+                j += 1
+            readonly = len(batch) > 1 and all(
+                str(self.tools.permission_for(n)[0] or "") in self._READ_ONLY_TOOL_PERMS
+                for _, n, _ in batch
+            )
+            for _, n, a in batch:
+                self._emit(session, "tool_start", tool={"name": n, "arguments": a})
+            if readonly:
+                with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
+                    results = list(pool.map(lambda item: self.tools.execute(item[1], item[2]), batch))
+            else:
+                results = [self.tools.execute(n, a) for _, n, a in batch]
+            for (c, n, a), result in zip(batch, results):
+                self._append_tool_result(session, c, n, a, result)
+            session.pending_call_index = j
             self._maybe_escalate(session)
         session.pending_calls = []
         session.pending_call_index = 0
@@ -1046,6 +1076,7 @@ class AgentOrchestrator:
                     permission=permission,
                     detail=item["command"],
                 )
+            self._emit(session, "tool_start", tool={"name": "run_shell", "arguments": args})
             result = self.tools.execute("run_shell", args)
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(session.task_id)
@@ -1356,6 +1387,39 @@ class AgentOrchestrator:
 
             session.pending_calls = list(calls)
             session.pending_call_index = 0
+
+        # Autonomous mode: extend the step budget a bounded number of times so
+        # unattended runs are not cut off mid-task. The hard cap still applies
+        # per continuation, so a stuck task cannot loop forever.
+        max_continuations = max(0, int(getattr(self.config, "autonomous_max_continuations", 0)))
+        task_status = ""
+        try:
+            task_status = str(self.tasks.get(session.task_id).status or "")
+        except Exception:
+            task_status = ""
+        if (
+            getattr(self.config, "autonomous_mode", False)
+            and session.continuations < max_continuations
+            and task_status in {"running", "verifying", "reviewing"}
+        ):
+            session.continuations += 1
+            session.steps = 0
+            session.messages.append({
+                "role": "user",
+                "content": (
+                    "The step budget was reached but the task is not finished. "
+                    "Continue working from the current repository state; do not "
+                    "repeat steps that already succeeded."
+                ),
+            })
+            event = {
+                "type": "autonomous_continuation",
+                "continuation": session.continuations,
+                "max_continuations": max_continuations,
+            }
+            session.model_events.append(event)
+            self._emit(session, "model", event=event)
+            return self._drive(session)
 
         session.main_content = "Agent stopped after reaching the configured step limit. Review the tool log and continue if needed."
         self.tasks.update(
@@ -1934,6 +1998,8 @@ class AgentOrchestrator:
         if pending["kind"] == "tool":
             call = session.pending_calls[session.pending_call_index]
             name, args = self._parse_call(call)
+            if approved:
+                self._emit(session, "tool_start", tool={"name": name, "arguments": args})
             result = self.tools.execute(name, args, approved=True) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1

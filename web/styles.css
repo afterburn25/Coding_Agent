@@ -87,3 +87,17 @@
 .nexus-thinking-telemetry{position:relative;z-index:1;font:700 9px ui-monospace,SFMono-Regular,Consolas,monospace;color:#6e8bab;white-space:nowrap}.nexus-thinking-hud.compact{max-height:62px;padding-top:8px;padding-bottom:8px}.nexus-thinking-hud.compact .nexus-thinking-list{display:none}.nexus-thinking-hud.compact .nexus-core-orbit{width:34px;height:34px}.nexus-thinking-hud.compact .nexus-core-orbit:before{inset:4px}.nexus-thinking-hud.compact .nexus-core-orbit:after{inset:9px}.nexus-thinking-hud.compact .nexus-core-orbit span{inset:13px}.nexus-response-text{white-space:pre-wrap;line-height:1.58}
 @keyframes nexus-orbit{to{transform:rotate(360deg)}}@keyframes nexus-pulse{0%,100%{opacity:.45;transform:scale(.82)}50%{opacity:1;transform:scale(1.08)}}@keyframes nexus-scan{to{transform:translateX(100%)}}
 @media(prefers-reduced-motion:reduce){.nexus-thinking-hud:before,.nexus-core-orbit:before,.nexus-core-orbit:after,.nexus-core-orbit span,.nexus-core-orbit i,.nexus-thinking-step.active .nexus-step-dot{animation:none}}
+.term-line{padding:1px 0;color:#91b2d4}
+.term-block{margin:4px 0;border:1px solid #16304d;border-radius:6px;background:#04101c;overflow:hidden}
+.term-head{display:flex;align-items:center;gap:6px;padding:4px 8px;background:#0a1a30;border-bottom:1px solid #16304d}
+.term-prompt{color:#2be59a;font-weight:700}
+.term-cmd{flex:1;min-width:0;color:#cfe6ff;white-space:pre-wrap;word-break:break-all;font-size:10px}
+.term-state{font-size:9px;color:#8fa8c8;text-transform:uppercase;letter-spacing:.08em;flex-shrink:0}
+.term-block.running .term-state{color:#11cfff;animation:nexus-pulse 1.6s ease-in-out infinite}
+.term-block.done .term-state{color:#2be59a}
+.term-block.failed .term-state{color:#ff7b8f}
+.term-block.failed{border-color:#5a2433}
+.term-out{margin:0;padding:6px 8px;max-height:220px;overflow:auto;color:#91b2d4;white-space:pre-wrap;word-break:break-word}
+.term-out:empty{display:none}
+.autonomy-toggle{display:flex;align-items:center;gap:7px;margin-top:9px;font-size:11px;color:#c9d5e7;cursor:pointer}
+.autonomy-toggle input{accent-color:#11cfff}

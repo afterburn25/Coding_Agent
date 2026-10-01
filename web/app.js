@@ -214,12 +214,65 @@ function beginAssistantStream(){
   nexusThinkingStep(state,'Context link established','Reading conversation state','context');
   return state;
 }
+const ACTIVITY_MAX_BLOCKS=80;
+const liveToolBlocks=[];
+function _activityPrune(){
+  while(activity.children.length>ACTIVITY_MAX_BLOCKS)activity.firstChild.remove();
+}
+function _activityInit(){
+  const muted=activity.querySelector('.muted');
+  if(muted)activity.textContent='';
+}
 function appendLiveActivity(text){
-  const existing=activity.textContent.trim();
-  if(!existing||activity.querySelector('.muted'))activity.textContent='';
-  activity.textContent+=(activity.textContent?'\n':'')+text;
-  if(activity.textContent.length>30000)activity.textContent=activity.textContent.slice(-30000);
+  _activityInit();
+  const line=document.createElement('div');
+  line.className='term-line';
+  line.textContent=text;
+  activity.appendChild(line);_activityPrune();
+  activity.scrollTop=activity.scrollHeight;
   setUtilityPanel('terminal');
+}
+const SECRET_ARG=/key|token|secret|passw|credential|auth/i;
+function fmtToolCmd(name,args){
+  if(args&&typeof args==='object'){
+    if(typeof args.command==='string')return args.command;
+    if(typeof args.cmd==='string')return args.cmd;
+    if(typeof args.script==='string')return args.script.split('\n')[0]+(args.script.includes('\n')?' …':'');
+  }
+  const pairs=Object.entries(args||{}).map(([k,v])=>{
+    const shown=(typeof v==='string'&&v.startsWith('secret:'))?'•••':SECRET_ARG.test(k)?'•••':JSON.stringify(v);
+    return `${k}=${shown}`;
+  });
+  return `${name} ${pairs.join(' ')}`.trim();
+}
+function toolStartBlock(tool){
+  _activityInit();
+  const name=String(tool.name||'tool');
+  const cmd=fmtToolCmd(name,tool.arguments||{});
+  const block=document.createElement('div');
+  block.className='term-block running';
+  block.innerHTML='<div class="term-head"><span class="term-prompt">$</span><code class="term-cmd"></code><span class="term-state">running</span></div><pre class="term-out"></pre>';
+  block.querySelector('.term-cmd').textContent=cmd;
+  activity.appendChild(block);_activityPrune();
+  activity.scrollTop=activity.scrollHeight;
+  liveToolBlocks.push({name,el:block});
+  setUtilityPanel('terminal');
+}
+function toolCompleteBlock(tool){
+  const name=String(tool.name||'');
+  let idx=liveToolBlocks.findIndex(b=>b.name===name);
+  if(idx<0)idx=liveToolBlocks.length-1;
+  const entry=idx>=0?liveToolBlocks.splice(idx,1)[0]:null;
+  if(!entry){toolStartBlock(tool);return toolCompleteBlock(tool);}
+  const block=entry.el;block.classList.remove('running');
+  const state=block.querySelector('.term-state');
+  const result=String(tool.result??'');
+  const failed=/error|fail|denied|exception|traceback/i.test(result.slice(0,400));
+  block.classList.add(failed?'failed':'done');
+  state.textContent=failed?'failed':'done';
+  const out=block.querySelector('.term-out');
+  out.textContent=result.slice(-6000);
+  activity.scrollTop=activity.scrollHeight;
 }
 function handleAgentStreamEvent(name,data,state){
   if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
@@ -238,7 +291,8 @@ function handleAgentStreamEvent(name,data,state){
     appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;
   }
   if(name==='research'){const p=data.research?.plan||data.research||{};nexusThinkingStep(state,'Sensor sweep',p.mode||'Researching external evidence','research');appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
-  if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' '),'tool:'+String(t.name||'unknown'));appendLiveActivity(`TOOL · ${t.name||'unknown'} ${JSON.stringify(t.arguments||{})}\n${String(t.result||'').slice(-6000)}`);return;}
+  if(name==='tool_start'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' '),'tool:'+String(t.name||'unknown'));toolStartBlock(t);return;}
+  if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.completion_tokens?p.completion_tokens+' tok':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
   if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}

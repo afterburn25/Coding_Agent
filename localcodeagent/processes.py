@@ -58,7 +58,7 @@ class ProcessManager:
     # user-requested "stopped" is never restarted.
 
     def start_watchdog(self, *, interval: float = 30.0, window_seconds: float = 600.0,
-                       max_restarts: int = 3) -> None:
+                       max_restarts: int = 3, on_tick: Callable[[], None] | None = None) -> None:
         if self._watchdog is not None and self._watchdog.is_alive():
             return
         self._watchdog_running = True
@@ -67,6 +67,12 @@ class ProcessManager:
         def loop() -> None:
             while self._watchdog_running:
                 time.sleep(max(0.05, interval))
+                if on_tick is not None:
+                    try:
+                        on_tick()
+                    except Exception as exc:
+                        self._emit({"service": "", "event": "watchdog_tick_error",
+                                    "error": f"{type(exc).__name__}: {exc}"})
                 with self._lock:
                     services = list(self._services.values())
                 for service in services:

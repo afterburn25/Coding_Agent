@@ -267,7 +267,7 @@ Unit checkpoint: **282 tests passing**.
 
 ## Next milestone
 
-**Modular workstation core is in place** (287 tests). Priorities:
+**Modular workstation core is in place** (306 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)

@@ -487,6 +487,54 @@ class RuntimeManager:
                     break
             return stopped
 
+    def evict_idle(self, *, busy_models: set[str] | None = None) -> list[str]:
+        """Stop managed runtimes that are idle or under memory pressure.
+
+        Models listed in ``busy_models`` are currently serving a task and are
+        never evicted. ``keep_loaded`` and external runtimes are untouched.
+        Idle eviction honors ``model_idle_unload_seconds``; pressure eviction
+        honors ``memory_pressure_vram_gb`` / ``memory_pressure_ram_gb`` and can
+        run even while tasks are active (it still skips busy models).
+        Returns the ids that were stopped.
+        """
+        busy = set(busy_models or ())
+        idle_seconds = float(getattr(self.config, "model_idle_unload_seconds", 0.0) or 0.0)
+        vram_floor = float(getattr(self.config, "memory_pressure_vram_gb", 0.0) or 0.0)
+        ram_floor = float(getattr(self.config, "memory_pressure_ram_gb", 0.0) or 0.0)
+        stopped: list[str] = []
+        with self._lock:
+            profiles = {m.id: m for m in self.config.models}
+            if idle_seconds > 0:
+                now = time.time()
+                for mid, item in list(self._managed.items()):
+                    if mid in busy or item.process.poll() is not None:
+                        continue
+                    profile = profiles.get(mid)
+                    if profile is None or profile.keep_loaded:
+                        continue
+                    if now - self._last_used.get(mid, 0.0) >= idle_seconds:
+                        self._stop_managed(mid)
+                        stopped.append(mid)
+            if vram_floor <= 0 and ram_floor <= 0:
+                return stopped
+            self.refresh_hardware()
+            while (self.hardware.free_vram_gb < vram_floor
+                   or self.hardware.available_ram_gb < ram_floor):
+                candidates = [
+                    mid for mid, item in self._managed.items()
+                    if mid not in busy
+                    and item.process.poll() is None
+                    and mid in profiles
+                    and not profiles[mid].keep_loaded
+                ]
+                if not candidates:
+                    break
+                victim = min(candidates, key=lambda m: self._last_used.get(m, 0.0))
+                self._stop_managed(victim)
+                stopped.append(victim)
+                self.refresh_hardware()
+        return stopped
+
     def restore_managed_models(self, model_ids: list[str]) -> list[str]:
         restored: list[str] = []
         profiles = {m.id: m for m in self.config.models}

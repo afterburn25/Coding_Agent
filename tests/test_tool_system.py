@@ -142,6 +142,39 @@ class PermissionManagerTests(unittest.TestCase):
             for key in KNOWN_PERMISSIONS:
                 self.assertIn(key, mapping, f"{name} missing {key}")
 
+    def test_autonomous_mode_auto_approves_workspace_actions(self):
+        mgr = PermissionManager(
+            {"shell.execute": "ask", "filesystem.write": "session"},
+            autonomous=True,
+        )
+        self.assertEqual(mgr.effective("shell.execute"), "allow")
+        self.assertEqual(mgr.effective("filesystem.write"), "allow")
+        self.assertIn("shell.execute", mgr.summary()["session_grants"])
+        self.assertTrue(mgr.summary()["autonomous"])
+
+    def test_autonomous_mode_never_auto_approves_hard_gates(self):
+        mgr = PermissionManager(
+            {
+                "spend.money": "ask",
+                "message.send": "session",
+                "microphone.use": "allow",
+                "filesystem.delete": "deny",
+            },
+            autonomous=True,
+        )
+        self.assertEqual(mgr.effective("spend.money"), "ask")
+        self.assertEqual(mgr.effective("message.send"), "ask")
+        self.assertEqual(mgr.effective("microphone.use"), "allow")
+        self.assertEqual(mgr.effective("filesystem.delete"), "deny")
+
+    def test_autonomous_mode_is_toggleable(self):
+        mgr = PermissionManager({"shell.execute": "ask"})
+        self.assertEqual(mgr.effective("shell.execute"), "ask")
+        mgr.set_autonomous(True)
+        self.assertEqual(mgr.effective("shell.execute"), "allow")
+        mgr.set_autonomous(False)
+        self.assertEqual(mgr.effective("shell.execute"), "ask")
+
 
 class JobManagerTests(unittest.TestCase):
     def test_submit_update_cancel(self):
@@ -333,6 +366,35 @@ class ProcessManagerTests(unittest.TestCase):
         mgr.register(ManagedService(id="svc:x", name="x", kind="internal"))
         with self.assertRaises(ValueError):
             mgr.action("svc:x", "start")
+
+    def test_watchdog_invokes_on_tick(self):
+        mgr = ProcessManager()
+        ticks = []
+        try:
+            mgr.start_watchdog(interval=0.05, on_tick=lambda: ticks.append(time.time()))
+            deadline = time.time() + 2.0
+            while not ticks and time.time() < deadline:
+                time.sleep(0.02)
+        finally:
+            mgr.stop_watchdog()
+        self.assertTrue(ticks)
+
+    def test_watchdog_survives_on_tick_errors(self):
+        mgr = ProcessManager()
+        events = []
+        mgr.on_event = events.append
+
+        def boom():
+            raise RuntimeError("tick broke")
+
+        try:
+            mgr.start_watchdog(interval=0.05, on_tick=boom)
+            deadline = time.time() + 2.0
+            while not events and time.time() < deadline:
+                time.sleep(0.02)
+        finally:
+            mgr.stop_watchdog()
+        self.assertTrue(any(e.get("event") == "watchdog_tick_error" for e in events))
 
 
 class TerminalToolTests(unittest.TestCase):

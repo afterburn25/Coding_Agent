@@ -25,9 +25,12 @@
       .join("");
     const counts = {};
     for (const level of Object.values(data.permissions)) counts[level] = (counts[level] || 0) + 1;
+    const autoEl = $("autonomousMode");
+    if (autoEl) autoEl.checked = !!data.autonomous;
     $("permSummary").textContent =
       `Profile: ${data.profile} · ` +
       Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(" · ") +
+      (data.autonomous ? " · AUTONOMOUS" : "") +
       (data.session_grants.length ? ` · session: ${data.session_grants.join(", ")}` : "");
     $("permTable").innerHTML = Object.entries(data.permissions)
       .map(
@@ -343,6 +346,27 @@
       alert(e.message);
     }
   });
+  const autoToggle = $("autonomousMode");
+  if (autoToggle) {
+    autoToggle.addEventListener("change", async () => {
+      const enabled = autoToggle.checked;
+      if (enabled && !confirm(
+        "Enable autonomous mode? The agent will run without asking for approvals on " +
+        "reversible workspace actions (file edits, commands, git, installs). Spending " +
+        "money, sending messages, microphone, and camera still require approval."
+      )) {
+        autoToggle.checked = false;
+        return;
+      }
+      try {
+        await post("/api/permissions/autonomous", { enabled });
+        await loadPermissions();
+      } catch (e) {
+        autoToggle.checked = !enabled;
+        alert(e.message);
+      }
+    });
+  }
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {

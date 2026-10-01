@@ -5,6 +5,11 @@
   "runtime_auto_start": true,
   "runtime_recovery_attempts": 1,
   "max_resident_models": 1,
+  "autonomous_mode": false,
+  "autonomous_max_continuations": 5,
+  "model_idle_unload_seconds": 900,
+  "memory_pressure_vram_gb": 0,
+  "memory_pressure_ram_gb": 0,
   "models": [
     {
       "id": "qwen3-14b",

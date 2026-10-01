@@ -884,5 +884,91 @@ class SelfHostingContextTests(unittest.TestCase):
         self.assertIn("Do not commit or push unless I explicitly ask", app)
 
 
+class _RepeatToolProvider:
+    """Returns a tool call on the first N completions, then a final answer."""
+
+    def __init__(self, tool_calls: int, tool_name: str = "probe_tool"):
+        self.remaining = tool_calls
+        self.tool_name = tool_name
+        self.calls = 0
+
+    def complete(self, *, messages, tools=None):
+        self.calls += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            return ProviderResponse(message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": f"c{self.calls}",
+                    "type": "function",
+                    "function": {"name": self.tool_name, "arguments": "{}"},
+                }],
+            }, raw={})
+        return ProviderResponse(message={"role": "assistant", "content": "all done"}, raw={})
+
+
+class AutonomousContinuationTests(unittest.TestCase):
+    def _agent(self, root: Path, provider, *, autonomous: bool, continuations: int = 2):
+        profile = ModelProfile(
+            id="local", endpoint="http://unused/v1", model="x",
+            roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+        )
+        config = AgentConfig(
+            models=[profile],
+            permissions={"probe.execute": "allow"},
+            research_enabled=False,
+            auto_verify_after_changes=False,
+            review_after_changes=False,
+            max_agent_steps=1,
+            autonomous_mode=autonomous,
+            autonomous_max_continuations=continuations,
+        )
+        tools = ToolRegistry(config.permissions)
+        tools.register(ToolSpec("probe_tool", "test", {"type": "object", "properties": {}},
+                                "probe.execute", lambda args: "PROBE_OK"))
+        index = RepositoryIndex(root)
+        index.build()
+        agent = AgentOrchestrator(
+            config, ModelRouter(config.models), tools, _FakeRuntime(),
+            tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+            memory=ProjectMemory(root), repository_index=index,
+        )
+        agent._provider_for = lambda _: provider
+        return agent
+
+    def test_autonomous_mode_continues_past_step_limit(self):
+        with tempfile.TemporaryDirectory() as td:
+            provider = _RepeatToolProvider(tool_calls=2)
+            agent = self._agent(Path(td), provider, autonomous=True, continuations=2)
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.content, "all done")
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(provider.calls, 3)
+            continuations = [e for e in result.model_events if e.get("type") == "autonomous_continuation"]
+            self.assertEqual(len(continuations), 2)
+
+    def test_step_limit_still_applies_without_autonomous_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            provider = _RepeatToolProvider(tool_calls=2)
+            agent = self._agent(Path(td), provider, autonomous=False)
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "step_limit")
+
+    def test_autonomous_continuations_are_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            provider = _RepeatToolProvider(tool_calls=10)
+            agent = self._agent(Path(td), provider, autonomous=True, continuations=1)
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "step_limit")
+            self.assertEqual(provider.calls, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

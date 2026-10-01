@@ -125,6 +125,16 @@ PROFILES: dict[str, dict[str, str]] = {
 # may introduce additional keys; unknown keys default to "ask".
 KNOWN_PERMISSIONS = sorted({key for profile in PROFILES.values() for key in profile})
 
+# Actions with irreversible real-world side effects. Autonomous mode
+# auto-approves "ask"/"session" workspace actions, but these always still
+# require an explicit human approval. "deny" stays denied regardless.
+AUTONOMY_NEVER_AUTO = frozenset({
+    "spend.money",
+    "message.send",
+    "microphone.use",
+    "camera.use",
+})
+
 
 class PermissionManager:
     """Central permission policy for tool/action execution.
@@ -134,9 +144,11 @@ class PermissionManager:
     effective-mode query used by the tool registry.
     """
 
-    def __init__(self, permissions: dict[str, str], *, profile: str = "custom") -> None:
+    def __init__(self, permissions: dict[str, str], *, profile: str = "custom",
+                 autonomous: bool = False) -> None:
         self.permissions = permissions
         self.profile = profile if profile in PROFILES or profile == "custom" else "custom"
+        self._autonomous = bool(autonomous)
         self._session_grants: set[str] = set()
         self._lock = threading.RLock()
 
@@ -148,9 +160,24 @@ class PermissionManager:
     def effective(self, permission: str) -> str:
         """Effective decision for this call: allow / ask / deny."""
         mode = self.level(permission)
+        if mode == "deny":
+            return "deny"
+        if self._autonomous and permission not in AUTONOMY_NEVER_AUTO:
+            if mode in {"ask", "session"}:
+                # Record the auto-grant so it is visible in summary()/audit UI.
+                with self._lock:
+                    self._session_grants.add(permission)
+                return "allow"
         if mode == "session":
             return "allow" if permission in self._session_grants else "ask"
         return mode
+
+    @property
+    def autonomous(self) -> bool:
+        return self._autonomous
+
+    def set_autonomous(self, enabled: bool) -> None:
+        self._autonomous = bool(enabled)
 
     def grant_session(self, permission: str) -> None:
         with self._lock:
@@ -189,6 +216,8 @@ class PermissionManager:
             "profile": self.profile,
             "available_profiles": sorted(PROFILES) + ["custom"],
             "levels": list(LEVELS),
+            "autonomous": self._autonomous,
+            "autonomy_hard_gates": sorted(AUTONOMY_NEVER_AUTO),
             "permissions": {key: self.level(key) for key in keys},
             "session_grants": sorted(self._session_grants),
         }

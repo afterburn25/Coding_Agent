@@ -128,6 +128,20 @@ class AgentConfig:
     runtime_auto_start: bool = True
     runtime_recovery_attempts: int = 1
     max_resident_models: int = 1
+
+    # v0.8 unattended operation. autonomous_mode auto-approves permission
+    # levels "ask"/"session" for reversible workspace actions; irreversible
+    # real-world actions (spend.money, message.send, microphone.use,
+    # camera.use) and explicit "deny" levels always stay gated.
+    autonomous_mode: bool = False
+    autonomous_max_continuations: int = 5
+    # Idle managed models are stopped after this many seconds without a request
+    # (0 disables). Busy models currently serving a task are never evicted.
+    model_idle_unload_seconds: float = 900.0
+    # When free memory drops below these floors, the least-recently-used
+    # resident model is stopped even inside the idle window (0 disables each).
+    memory_pressure_vram_gb: float = 0.0
+    memory_pressure_ram_gb: float = 0.0
     models_dir: str = "models"
     runtime_logs_dir: str = ".agent/runtime"
     llama_cpp_executable: str = ""
@@ -318,6 +332,11 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.model_telemetry_max_events = max(20, int(raw.get("model_telemetry_max_events", cfg.model_telemetry_max_events)))
     cfg.runtime_auto_start = bool(raw.get("runtime_auto_start", cfg.runtime_auto_start))
     cfg.runtime_recovery_attempts = max(0, int(raw.get("runtime_recovery_attempts", cfg.runtime_recovery_attempts)))
+    cfg.autonomous_mode = bool(raw.get("autonomous_mode", cfg.autonomous_mode))
+    cfg.autonomous_max_continuations = max(0, int(raw.get("autonomous_max_continuations", cfg.autonomous_max_continuations)))
+    cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
+    cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
+    cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))
     cfg.models_dir = str(raw.get("models_dir", cfg.models_dir))
     cfg.runtime_logs_dir = str(raw.get("runtime_logs_dir", cfg.runtime_logs_dir))

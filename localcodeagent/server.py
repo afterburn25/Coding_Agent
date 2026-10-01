@@ -173,7 +173,11 @@ class AppState:
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
-        self.permission_manager = PermissionManager(config.permissions, profile=getattr(config, "permission_profile", "custom"))
+        self.permission_manager = PermissionManager(
+            config.permissions,
+            profile=getattr(config, "permission_profile", "custom"),
+            autonomous=getattr(config, "autonomous_mode", False),
+        )
         tools_state_path = Path(getattr(config, "tools_state_path", "data/tools_state.json")).expanduser()
         if not tools_state_path.is_absolute():
             tools_state_path = runtime_root / tools_state_path
@@ -189,7 +193,7 @@ class AppState:
         self.processes.on_event = make_emitter(self.events, "process")
         self._register_processes()
         if getattr(config, "process_watchdog", True):
-            self.processes.start_watchdog()
+            self.processes.start_watchdog(on_tick=self._evict_idle_models)
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         self.terminal_tracker = register_terminal_tools(
@@ -776,6 +780,27 @@ class AppState:
             spec = self.tools.get(name)
             if spec and spec.health_check is None:
                 spec.health_check = always_ok("native subprocess execution")
+
+    def _evict_idle_models(self) -> None:
+        """Watchdog tick: reclaim memory from managed models that are not in use.
+
+        Models serving an in-flight task are pinned; models parked behind a
+        waiting_approval task are safe to unload since the task state is
+        durable and ensure_ready() restores the runtime on resume.
+        """
+        try:
+            busy = {
+                str(t.get("model_id") or "")
+                for t in self.tasks.recent(50)
+                if t.get("status") in {"running", "verifying", "reviewing"}
+            }
+            busy.discard("")
+            stopped = self.runtime.evict_idle(busy_models=busy)
+            for model_id in stopped:
+                self.events.publish("model", {"event": "idle_evicted",
+                                              "model_id": model_id})
+        except Exception:
+            pass
 
     def _update_config_file(self, updates: dict) -> None:
         """Merge keys into config.json atomically, preserving unrelated settings."""
@@ -2005,6 +2030,15 @@ class Handler(BaseHTTPRequestHandler):
                     "permission_profile": applied,
                 })
                 self._json({"ok": True, "profile": applied, "manager": self.state.permission_manager.summary()})
+                return
+
+            if path == "/api/permissions/autonomous":
+                enabled = bool(body.get("enabled"))
+                self.state.permission_manager.set_autonomous(enabled)
+                self.state.config.autonomous_mode = enabled
+                self.state._update_config_file({"autonomous_mode": enabled})
+                self._json({"ok": True, "autonomous": enabled,
+                            "manager": self.state.permission_manager.summary()})
                 return
 
             if path == "/api/processes/action":
