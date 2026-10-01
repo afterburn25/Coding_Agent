@@ -1067,6 +1067,7 @@ class AppState:
         return {
             "current": current.as_dict() if current else None,
             "recent": self.tasks.recent(12),
+            "queue": self.queue.list(),
         }
 
     def readiness_payload(self, *, probe_external: bool = True) -> dict:
