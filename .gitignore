@@ -33,3 +33,6 @@ ComfyUI/
 .agent/data/
 .agent/workflow_runs/
 .agent/knowledge_index.json
+
+# Dev-server runtime state (chat history, charts, image outputs at repo root)
+data/
