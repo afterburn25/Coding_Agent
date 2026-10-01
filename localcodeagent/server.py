@@ -881,6 +881,15 @@ class AppState:
             "isolated_selftest_available": (self.workspace / "localcodeagent" / "selftest.py").is_file(),
             "suggested_models": suggest_model_profiles(payload.get("inventory") or []),
         })
+        tools = self.tools.manifests()
+        payload["tools_summary"] = {
+            "total": len(tools),
+            "installed": sum(1 for t in tools if t["install_status"] == "installed"),
+            "missing": sum(1 for t in tools if t["install_status"] == "missing"),
+            "disabled": sum(1 for t in tools if not t["enabled"]),
+            "missing_tools": [t["name"] for t in tools
+                              if t["install_status"] == "missing" and t["callable"]][:20],
+        }
         payload["self_hosting_ready"] = bool(
             payload.get("ready_to_code")
             and self_tree

@@ -1329,6 +1329,17 @@ class AppStateWiringTests(unittest.TestCase):
             ):
                 self.assertIn(expected, names, f"missing registered tool: {expected}")
 
+    def test_readiness_reports_tools_summary(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            payload = state.readiness_payload(probe_external=False)
+            summary = payload["tools_summary"]
+            self.assertGreater(summary["total"], 50)
+            self.assertEqual(summary["installed"] + summary["missing"]
+                             + sum(1 for t in state.tools.manifests()
+                                   if t["install_status"] == "not_applicable"),
+                             summary["total"])
+
     def test_use_capability_routes_through_router(self):
         with tempfile.TemporaryDirectory() as td:
             state = self._state(td)
