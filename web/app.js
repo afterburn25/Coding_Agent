@@ -284,7 +284,7 @@ function handleAgentStreamEvent(name,data,state){
     state.text.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;
   }
   if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);if(data.event==='queued'||data.event==='dequeued')refreshQueue();nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
+  if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);if(data.event==='queued'||data.event==='dequeued'||data.event==='queue_item_cancelled')refreshQueue();nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
   if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
   if(name==='model'){
     const e=data.event||{};
@@ -328,7 +328,7 @@ function connectAgentEvents(){
     on('tool_start',d=>{if(d.tool)toolStartBlock(d.tool);});
     on('tool_output',d=>{const name=String(d.tool||'');let entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];if(!entry&&name){toolStartBlock({name});entry=liveToolBlocks[liveToolBlocks.length-1];}if(entry){const out=entry.el.querySelector('.term-out');if(out){out.textContent=(out.textContent+String(d.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}}});
     on('tool',d=>{if(d.tool)toolCompleteBlock(d.tool);});
-    on('task',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);}if(d.event==='queued'||d.event==='dequeued')refreshQueue();});
+    on('task',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);}if(d.event==='queued'||d.event==='dequeued'||d.event==='queue_item_cancelled')refreshQueue();});
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});

@@ -2198,7 +2198,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/queue/cancel":
                 item_id = str(body.get("id", "")).strip()
-                self._json({"ok": self.state.queue.remove(item_id)})
+                removed = self.state.queue.remove(item_id)
+                if removed:
+                    self.state.events.publish("task", {"event": "queue_item_cancelled", "queue_item": {"id": item_id}})
+                self._json({"ok": removed})
                 return
 
             if path == "/api/tasks/resume":
