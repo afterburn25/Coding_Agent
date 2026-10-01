@@ -370,6 +370,43 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertEqual(manager.resident_model_ids(), ["pinned"])
             self.assertEqual(manager._pending_rewarm, set())
 
+    def test_prewarm_retries_until_model_fits(self):
+        # A failed resource_fit at boot must not leave the app cold — VRAM is
+        # often still draining the previous session's models for the first
+        # few seconds. Bounded retry warms the model once it fits.
+        from types import SimpleNamespace
+        from localcodeagent.server import AppState
+
+        calls = {"fit": 0, "ready": 0}
+
+        def fit(_p):
+            calls["fit"] += 1
+            return (calls["fit"] >= 3, 0, "")
+
+        def ready(_p):
+            calls["ready"] += 1
+
+        state = AppState.__new__(AppState)
+        state.runtime = SimpleNamespace(resource_fit=fit, ensure_ready=ready)
+        AppState._prewarm_with_retry(state, self._profile(), attempts=5, delay=0)
+
+        self.assertEqual(calls, {"fit": 3, "ready": 1})
+
+    def test_prewarm_gives_up_after_bounded_attempts(self):
+        from types import SimpleNamespace
+        from localcodeagent.server import AppState
+
+        calls = {"fit": 0, "ready": 0}
+        state = AppState.__new__(AppState)
+        state.runtime = SimpleNamespace(
+            resource_fit=lambda _p: (calls.__setitem__("fit", calls["fit"] + 1) or (False, 0, "no room")),
+            ensure_ready=lambda _p: calls.__setitem__("ready", calls["ready"] + 1),
+        )
+        AppState._prewarm_with_retry(state, self._profile(), attempts=3, delay=0)
+
+        self.assertEqual(calls["fit"], 3)
+        self.assertEqual(calls["ready"], 0)
+
     @unittest.skipIf(os.name == "nt", "fake executable uses POSIX permissions")
     def test_missing_deep_model_falls_back_to_available_primary(self):
         with tempfile.TemporaryDirectory() as td:

@@ -493,17 +493,11 @@ class AppState:
             None,
         )
         if utility is not None and utility.runtime == "llama_cpp":
-            u_fits, _s, _r = self.runtime.resource_fit(utility)
-            if u_fits:
-                self._boot(95, "INITIALIZING · NEURAL ENGINE", "Preparing fast conversational intelligence")
-
-                def warm_utility(p: ModelProfile = utility) -> None:
-                    try:
-                        self.runtime.ensure_ready(p)
-                    except Exception:
-                        pass
-
-                threading.Thread(target=warm_utility, name="chat-nexus-utility-prewarm", daemon=True).start()
+            self._boot(95, "INITIALIZING · NEURAL ENGINE", "Preparing fast conversational intelligence")
+            threading.Thread(
+                target=self._prewarm_with_retry, args=(utility,),
+                name="chat-nexus-utility-prewarm", daemon=True,
+            ).start()
         starter = next(
             (
                 profile
@@ -514,23 +508,33 @@ class AppState:
         )
         if starter is None or starter.runtime != "llama_cpp":
             return
-        fits, _score, _reason = self.runtime.resource_fit(starter)
-        if not fits:
-            return
-
-        def warm() -> None:
-            try:
-                self.runtime.ensure_ready(starter)
-            except Exception:
-                # Runtime status captures the real failure; prewarm must never prevent UI startup.
-                pass
 
         self._prewarm_thread = threading.Thread(
-            target=warm,
+            target=self._prewarm_with_retry, args=(starter,),
             name="chat-nexus-primary-prewarm",
             daemon=True,
         )
         self._prewarm_thread.start()
+
+    def _prewarm_with_retry(self, profile: ModelProfile, attempts: int = 8, delay: float = 45.0) -> None:
+        """Warm a model, retrying while it doesn't fit yet.
+
+        At boot the GPU may still be draining the previous session's models
+        or busy with desktop apps — a single resource_fit snapshot that fails
+        would leave the app cold until the first task pays the full load.
+        Bounded retries ride out transient contention without retrying
+        forever on genuinely unstartable profiles.
+        """
+        for attempt in range(attempts):
+            try:
+                if self.runtime.resource_fit(profile)[0]:
+                    self.runtime.ensure_ready(profile)
+                    return
+            except Exception:
+                # Runtime status captures the real failure; prewarm must never
+                # prevent UI startup.
+                return
+            time.sleep(delay)
 
     def reload_model_configuration(self) -> dict:
         """Reload model profiles without allowing config.json to bypass a protected Brain."""
