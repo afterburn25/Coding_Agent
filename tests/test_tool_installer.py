@@ -303,7 +303,7 @@ class ServerInstallFlowTests(unittest.TestCase):
                 manifests = root / "tools" / "manifests"
                 manifests.mkdir(parents=True)
                 (manifests / "demo.json").write_text(json.dumps({
-                    "id": "demo", "name": "Demo Tool",
+                    "id": "demo", "name": "Demo Tool", "version": "2.0",
                     "install": {
                         "method": "archive",
                         "url": f"http://127.0.0.1:{port}/pkg.zip",
@@ -346,6 +346,13 @@ class ServerInstallFlowTests(unittest.TestCase):
                 self.assertTrue(_wait(
                     lambda: state.tools.get("demo").install_status == "installed", 5))
                 self.assertTrue((root / "demo_tool" / ".chatnexus-version").is_file())
+
+                # Update detection: marker version vs manifest version.
+                payload = state.tools.manifest("demo")
+                self.assertEqual(payload["installed_version"], "2.0")
+                self.assertFalse(payload["update_available"])
+                (root / "demo_tool" / ".chatnexus-version").write_text("1.0\n", encoding="utf-8")
+                self.assertTrue(state.tools.manifest("demo")["update_available"])
 
                 # Full lifecycle: uninstall removes files and status flips back.
                 rm = state.uninstall_tool("demo")

@@ -203,12 +203,30 @@ class ToolRegistry:
         result.setdefault("detail", "")
         return result
 
+    def installed_version(self, name: str) -> str:
+        """Version recorded in an archive install's .chatnexus-version marker."""
+        spec = self._tools.get(name)
+        if spec is None or spec.install_status != "installed":
+            return ""
+        install = self._plugin_meta.get(name, {}).get("install") or {}
+        if str(install.get("method") or "").lower() != "archive":
+            return ""
+        dest = str(install.get("dest") or spec.tool_id)
+        try:
+            marker = (self.install_root / dest).resolve() / ".chatnexus-version"
+            if not marker.is_relative_to(self.install_root) or not marker.is_file():
+                return ""
+            return marker.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
+        except (OSError, IndexError):
+            return ""
+
     def manifest(self, name: str) -> dict[str, Any]:
         spec = self._tools.get(name)
         if spec is None:
             raise KeyError(name)
         permission, mode = self.permission_for(name)
         usage = self._usage.get(name) or {}
+        installed_version = self.installed_version(name)
         return {
             "id": spec.tool_id,
             "name": spec.name,
@@ -236,6 +254,10 @@ class ToolRegistry:
             "docs": spec.docs,
             "source": spec.source,
             "install_status": spec.install_status,
+            "installed_version": installed_version,
+            "update_available": bool(
+                installed_version and spec.version
+                and installed_version != spec.version),
             "enabled": name not in self._disabled,
             "has_health_check": spec.health_check is not None,
             "use_count": int(usage.get("count", 0)),

@@ -255,7 +255,9 @@
       : !osOk
         ? `<span class="chip missing">${esc((t.supported_os || []).join("/") || "other OS")} only</span>`
         : t.install_status === "installed"
-          ? '<span class="chip installed">Installed</span>'
+          ? (t.update_available
+            ? `<span class="chip update" title="Installed v${esc(t.installed_version)} — manifest is v${esc(t.version)}">Update available</span>`
+            : `<span class="chip installed">Installed${t.installed_version ? ` v${esc(t.installed_version)}` : ""}</span>`)
           : installable
             ? '<span class="chip missing">Not installed</span>'
             : "";
@@ -282,7 +284,7 @@
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
           ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
           ${!busy && osOk && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
-          ${!busy && osOk && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button" data-install="${esc(t.name)}" title="Re-download and reinstall ${esc(installTitle)}">Reinstall</button>` : ""}
+          ${!busy && osOk && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button" data-install="${esc(t.name)}" title="${t.update_available ? `Update v${esc(t.installed_version)} to v${esc(t.version)}` : `Re-download and reinstall ${esc(installTitle)}`}">${t.update_available ? "Update" : "Reinstall"}</button>` : ""}
           ${!busy && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button danger" data-uninstall="${esc(t.name)}" title="Delete ${esc(spec.dest || "installed files")} and any partial download">Remove</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
