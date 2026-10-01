@@ -152,7 +152,7 @@
 - Model files are not bundled and large image models are not silently downloaded.
 - Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
-- Image progress is currently polling-based; ComfyUI WebSocket progress events are not wired into the app yet.
+- Image progress refines the coarse /history poll with a dependency-free ComfyUI `/ws` listener (`image/ws.py`) that reports real per-node/step progress.
 - LoRA file import and richer version/compatibility metadata editing, dedicated upscaler/background-removal adapters, and richer comparison controls remain upcoming.
 - Browser automation is optional and requires Playwright + Chromium.
 

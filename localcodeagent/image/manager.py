@@ -50,7 +50,23 @@ class ImageManager:
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
+        self._ws_listener = None
         self._load_jobs()
+
+    def _ws_progress_listener(self):
+        """Lazy ComfyUI /ws listener for real per-node generation progress.
+
+        Polling /history stays authoritative; the listener only refines the
+        progress fraction between polls. Failures degrade silently.
+        """
+        if self._ws_listener is None:
+            try:
+                from .ws import ComfyUIProgressListener
+                self._ws_listener = ComfyUIProgressListener(self.backend.endpoint)
+                self._ws_listener.start()
+            except Exception:
+                self._ws_listener = None
+        return self._ws_listener
 
     def _resolve(self, value: str) -> Path:
         path = Path(value).expanduser()
@@ -335,6 +351,7 @@ class ImageManager:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
             job.state="generating"; job.stage="generating"; job.progress=0.20
             job.backend_job_id=self.backend.submit(workflow); self._save_jobs()
+            listener=self._ws_progress_listener()
             deadline=time.monotonic()+max(30, int(getattr(self.config,"image_job_timeout",900)))
             while time.monotonic()<deadline:
                 state=self.backend.status(job.backend_job_id)
@@ -342,7 +359,14 @@ class ImageManager:
                     break
                 if state.get("state")=="failed":
                     raise RuntimeError(str(state.get("error") or "ComfyUI generation failed"))
-                job.progress=max(job.progress, float(state.get("progress",0.25))); self._save_jobs(); time.sleep(0.75)
+                job.progress=max(job.progress, float(state.get("progress",0.25)))
+                if listener is not None:
+                    ws_progress, ws_node = listener.progress_for(job.backend_job_id)
+                    if ws_progress:
+                        # Map ComfyUI's 0..1 step fraction into the generating band.
+                        job.progress=max(job.progress, 0.20 + 0.70 * ws_progress)
+                        job.stage="generating" + (f" · node {ws_node}" if ws_node else "")
+                self._save_jobs(); time.sleep(0.75)
             else:
                 raise TimeoutError("Timed out waiting for ComfyUI image generation")
             job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs()

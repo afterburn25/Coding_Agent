@@ -443,5 +443,74 @@ class ImageLibraryTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"existing")
 
 
+class ComfyUIProgressListenerTests(unittest.TestCase):
+    def _fake_ws_server(self, messages):
+        """Serve one WS connection: 101 handshake then unmasked text frames."""
+        import base64
+        import hashlib
+        import socket
+        import struct
+        import threading
+
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+
+        def serve():
+            conn, _ = sock.accept()
+            try:
+                req = b""
+                while b"\r\n\r\n" not in req:
+                    req += conn.recv(4096)
+                key = [l.split(":", 1)[1].strip() for l in req.decode().split("\r\n")
+                       if l.lower().startswith("sec-websocket-key")][0]
+                accept = base64.b64encode(hashlib.sha1(
+                    (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+                conn.sendall((
+                    "HTTP/1.1 101 Switching Protocols\r\n"
+                    "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                    f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
+                for msg in messages:
+                    payload = json.dumps(msg).encode()
+                    conn.sendall(bytes([0x81, len(payload)]) + payload)
+                import time
+                time.sleep(0.5)  # keep socket open so the listener can read
+            except OSError:
+                pass
+            finally:
+                conn.close()
+                sock.close()
+
+        threading.Thread(target=serve, daemon=True).start()
+        return port
+
+    def test_progress_events_tracked_per_prompt(self):
+        from localcodeagent.image.ws import ComfyUIProgressListener
+        port = self._fake_ws_server([
+            {"type": "executing", "data": {"prompt_id": "p1", "node": "KSampler"}},
+            {"type": "progress", "data": {"prompt_id": "p1", "value": 3, "max": 10}},
+            {"type": "executed", "data": {"prompt_id": "p2", "node": "Save"}},
+        ])
+        listener = ComfyUIProgressListener(f"http://127.0.0.1:{port}")
+        listener.start()
+        try:
+            deadline = __import__("time").time() + 5
+            frac = None
+            while __import__("time").time() < deadline:
+                frac, node = listener.progress_for("p1")
+                if frac is not None:
+                    break
+                __import__("time").sleep(0.05)
+            frac, node = listener.progress_for("p1")
+            self.assertAlmostEqual(frac, 0.3)
+            self.assertEqual(node, "KSampler")
+            done, _ = listener.progress_for("p2")
+            self.assertEqual(done, 1.0)
+            self.assertEqual(listener.progress_for("nope"), (None, None))
+        finally:
+            listener.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
