@@ -55,30 +55,48 @@ def _safe_member_name(name: str) -> str | None:
     return str(p)
 
 
-class _SevenZipProgress:
-    """py7zr ExtractCallback shim (optional dependency; degrades gracefully)."""
+def _sevenzip_progress(on_file: Callable[[str, int], None]):
+    """Build a py7zr ExtractCallback-compatible progress shim.
 
-    def __init__(self, on_file: Callable[[str, int], None]) -> None:
-        self._on_file = on_file
-        self._written = 0
+    py7zr >= 1.0 validates that the callback subclasses its ExtractCallback
+    ABC, so this must subclass the real type (which is why the class is built
+    lazily — py7zr is an optional dependency). Extra report_* aliases cover
+    the method-name drift across py7zr releases.
+    """
+    try:
+        from py7zr.callbacks import ExtractCallback
+    except Exception:
+        return None
 
-    def report_start_preparation(self) -> None:
-        pass
+    class _Progress(ExtractCallback):
+        def __init__(self) -> None:
+            self._written = 0
 
-    def report_start(self, processing_file_path: str, processing_bytes: int) -> None:
-        self._on_file(str(processing_file_path or ""), self._written)
+        def report_start_preparation(self) -> None:
+            pass
 
-    def report_end(self, processing_file_path: str, wrote_bytes: int) -> None:
-        self._written += int(wrote_bytes or 0)
+        def report_start(self, processing_file_path: str, processing_bytes: int) -> None:
+            on_file(str(processing_file_path or ""), self._written)
 
-    def report_warning(self, message: str) -> None:
-        pass
+        def report_update(self) -> None:
+            pass
 
-    def report_postprocessing(self) -> None:
-        pass
+        def report_end(self, processing_file_path: str, wrote_bytes: int) -> None:
+            self._written += int(wrote_bytes or 0)
 
-    def report_finish(self) -> None:
-        pass
+        def report_postprocess(self) -> None:
+            pass
+
+        def report_postprocessing(self) -> None:
+            pass
+
+        def report_warning(self, message: str) -> None:
+            pass
+
+        def report_finish(self) -> None:
+            pass
+
+    return _Progress()
 
 
 class ToolDownloadManager:
@@ -461,7 +479,33 @@ class ToolDownloadManager:
 
     @staticmethod
     def _system_tar() -> str | None:
-        return shutil.which("tar")
+        """Return a libarchive-capable tar, or None.
+
+        `which tar` may resolve to GNU tar (Git Bash/MSYS on PATH), which
+        cannot read 7z — probe --version for the libarchive build. Windows
+        System32 ships bsdtar; check it explicitly before PATH.
+        """
+        import subprocess
+        candidates: list[str] = []
+        if os.name == "nt":
+            sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
+            candidates.append(str(sys32))
+        for name in ("bsdtar", "tar"):
+            found = shutil.which(name)
+            if found:
+                candidates.append(found)
+        for cand in candidates:
+            if not Path(cand).is_file():
+                continue
+            try:
+                out = subprocess.run(
+                    [cand, "--version"], capture_output=True, text=True, timeout=15)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            banner = f"{out.stdout or ''} {out.stderr or ''}".lower()
+            if "libarchive" in banner or "bsdtar" in banner:
+                return cand
+        return None
 
     def _extract_7z_native(self, job_id: str, archive: Path, dest: Path,
                            flag: threading.Event) -> bool:
@@ -546,8 +590,12 @@ class ToolDownloadManager:
                 state["current_path"] = str(dest / (safe or ""))
                 self._maybe_emit_extract(job_id, dest, state)
 
+            callback = _sevenzip_progress(on_file)
             try:
-                zf.extractall(path=dest, callback=_SevenZipProgress(on_file))
+                if callback is not None:
+                    zf.extractall(path=dest, callback=callback)
+                else:
+                    zf.extractall(path=dest)
             except TypeError:
                 # Older py7zr without callback support — extract, then report done.
                 zf.extractall(path=dest)

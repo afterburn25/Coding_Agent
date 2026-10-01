@@ -216,6 +216,42 @@ class ToolDownloadManagerTests(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertTrue((self.root.parent).is_dir())  # nothing deleted
 
+    def _make_7z(self) -> bytes:
+        py7zr = __import__("py7zr")
+        src = self.root / "mk"
+        src.mkdir(exist_ok=True)
+        (src / "hello.txt").write_text("hi from 7z")
+        with py7zr.SevenZipFile(self.root / "pkg.7z", "w") as zf:
+            zf.write(src / "hello.txt", "mk/hello.txt")
+        return (self.root / "pkg.7z").read_bytes()
+
+    def test_7z_extracts_and_completes(self):
+        try:
+            blob = self._make_7z()
+        except ImportError:
+            self.skipTest("py7zr not installed")
+        result, _ = self._install(
+            blob, url=f"http://127.0.0.1:{self.port}/pkg.7z", format="7z",
+            sha256=hashlib.sha256(blob).hexdigest())
+        job = self._wait_job(result["job_id"])
+        self.assertEqual(job.state, "completed", job.error)
+        self.assertEqual((self.root / "tools_x" / "mk" / "hello.txt").read_text(), "hi from 7z")
+
+    def test_7z_py7zr_fallback_uses_valid_callback(self):
+        """Regression: py7zr >=1.0 requires an ExtractCallback subclass."""
+        try:
+            blob = self._make_7z()
+        except ImportError:
+            self.skipTest("py7zr not installed")
+        from unittest.mock import patch
+        with patch.object(ToolDownloadManager, "_system_tar", lambda: None):
+            result, _ = self._install(
+                blob, url=f"http://127.0.0.1:{self.port}/pkg.7z", format="7z",
+                sha256=hashlib.sha256(blob).hexdigest())
+        job = self._wait_job(result["job_id"])
+        self.assertEqual(job.state, "completed", job.error)
+        self.assertEqual((self.root / "tools_x" / "mk" / "hello.txt").read_text(), "hi from 7z")
+
     def test_http_urls_require_localhost(self):
         result, _ = self._install(b"x", url="http://example.com/pkg.zip")
         self.assertFalse(result["ok"])

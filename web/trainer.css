@@ -1,14 +1,14 @@
 
 :root{color-scheme:dark}
 body{margin:0;background:#07101f;color:#eef4ff;font-family:Inter,Segoe UI,system-ui,sans-serif}
-.trainer-shell{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
-.trainer-side{padding:24px 18px;border-right:1px solid #1b2940;background:#091321}
+.trainer-shell{display:grid;grid-template-columns:260px 1fr;height:100vh;min-height:0}
+.trainer-side{padding:24px 18px;border-right:1px solid #1b2940;background:#091321;overflow-y:auto;min-height:0}
 .brand-lockup{display:flex;gap:12px;align-items:center;margin-bottom:20px}.brand-emblem{width:38px;height:38px}.brand-wordmark{display:flex;flex-direction:column}.brand-wordmark small{color:#8190a9}
 .workspace-link{display:block;color:#c8d4eb;text-decoration:none;padding:9px 10px;border-radius:8px}.workspace-link:hover{background:#101d31}
 .section-title{margin-top:20px;color:#8898b5;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
 .pipeline{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:10px}.pipeline span{background:#122038;border:1px solid #253655;padding:5px 7px;border-radius:999px;font-size:11px}.pipeline b{color:#64748b}
 .small{font-size:12px;line-height:1.5}.muted{color:#8392aa}
-.trainer-main{padding:28px;max-width:1500px;width:100%;box-sizing:border-box}
+.trainer-main{padding:28px;max-width:1500px;width:100%;box-sizing:border-box;min-height:0;overflow-y:auto;max-height:100vh}
 .trainer-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:20px}.trainer-header h1{margin:0 0 6px}.trainer-header p{margin:0;color:#93a3be}
 .trainer-primary,.mini-button,.candidate-actions button,.trainer-row button{border:1px solid #33527f;background:#142743;color:#eaf2ff;border-radius:8px;padding:9px 12px;cursor:pointer}.trainer-primary{background:#173a64;border-color:#3c72b5}.trainer-primary:hover,.mini-button:hover,.candidate-actions button:hover{filter:brightness(1.12)}
 .stat-grid{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:12px;margin-bottom:16px}.stat-grid .trainer-card{display:flex;flex-direction:column;gap:8px}.stat-grid strong{font-size:26px}

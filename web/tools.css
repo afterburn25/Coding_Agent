@@ -1,5 +1,5 @@
-.tools-shell{display:grid;grid-template-columns:285px minmax(0,1fr);min-height:100vh;background:#101217;color:#eef1f6}
-.tools-side{background:#0b0d11;border-right:1px solid #242833;padding:18px;overflow:auto}
+.tools-shell{display:grid;grid-template-columns:285px minmax(0,1fr);height:100vh;min-height:0;background:#101217;color:#eef1f6}
+.tools-side{background:#0b0d11;border-right:1px solid #242833;padding:18px;overflow-y:auto;min-height:0}
 .tools-side .brand{font-weight:800;font-size:17px;color:#24d7ff;margin-bottom:14px}
 .tools-side .brand span{display:block;font-size:10px;color:#8fa5c4;font-weight:500;letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
 .workspace-link{display:block;color:#a8b5ff;font-size:12px;text-decoration:none;padding:5px 0}
@@ -16,7 +16,7 @@
 .category-item:hover,.category-item.active{background:#141a24;border-color:#2a3446;color:#fff}
 .category-item span{color:#77839a}
 .small{font-size:10px;line-height:1.5}
-.tools-main{padding:28px;min-width:0;max-width:1500px;width:100%;margin:0 auto;overflow:auto}
+.tools-main{padding:28px;min-width:0;max-width:1500px;width:100%;margin:0 auto;overflow-y:auto;min-height:0;max-height:100vh}
 .tools-header{display:flex;justify-content:space-between;align-items:flex-start}
 .tools-header h1{font-size:30px;margin:0}
 .tools-header p{color:#8d97aa;margin:7px 0 24px}

@@ -148,24 +148,35 @@
   }
 
   function renderTools() {
-    const shown = activeCategory ? tools.filter((t) => t.category === activeCategory) : tools;
-    if (!shown.length) {
-      $("toolList").textContent = "No tools in this category.";
-      return;
+    // Dedicated install strip at the top: every missing, OS-supported tool
+    // with an automated install method gets a card with an Install button.
+    const availHost = $("installableList");
+    const availCard = $("availableCard");
+    if (availHost && availCard) {
+      const installableNow = tools.filter(
+        (t) => t.install_status === "missing" && t.os_supported !== false &&
+          ((t.install || {}).package || (t.install || {}).method === "archive"));
+      availCard.hidden = installableNow.length === 0;
+      availHost.innerHTML = installableNow.map(renderTool).join("");
     }
-    const groups = {};
-    for (const t of shown) (groups[t.category] ||= []).push(t);
-    $("toolList").innerHTML = Object.entries(groups)
-      .map(
-        ([cat, items]) => `
-        <div class="tool-group">
-          <div class="tool-group-title">${esc(cat.replace(/_/g, " "))}</div>
-          ${items.map(renderTool).join("")}
-        </div>`
-      )
-      .join("");
-    $("toolList").classList.remove("muted");
-    $("toolList").querySelectorAll(".tool-toggle").forEach((btn) => {
+    const shown = activeCategory ? tools.filter((t) => t.category === activeCategory) : tools;
+    if (shown.length) {
+      const groups = {};
+      for (const t of shown) (groups[t.category] ||= []).push(t);
+      $("toolList").innerHTML = Object.entries(groups)
+        .map(
+          ([cat, items]) => `
+          <div class="tool-group">
+            <div class="tool-group-title">${esc(cat.replace(/_/g, " "))}</div>
+            ${items.map(renderTool).join("")}
+          </div>`
+        )
+        .join("");
+      $("toolList").classList.remove("muted");
+    } else {
+      $("toolList").textContent = "No tools in this category.";
+    }
+    document.querySelectorAll(".tool-toggle").forEach((btn) => {
       btn.addEventListener("click", async () => {
         try {
           await post("/api/tools/state", { tool: btn.dataset.tool, enabled: btn.dataset.enabled !== "true" });
@@ -175,7 +186,7 @@
         }
       });
     });
-    $("toolList").querySelectorAll("[data-install]").forEach((btn) => {
+    document.querySelectorAll("[data-install]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
@@ -197,7 +208,7 @@
         }
       });
     });
-    $("toolList").querySelectorAll("[data-uninstall]").forEach((btn) => {
+    document.querySelectorAll("[data-uninstall]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
@@ -217,7 +228,7 @@
         }
       });
     });
-    $("toolList").querySelectorAll("[data-cancel-job]").forEach((btn) => {
+    document.querySelectorAll("[data-cancel-job]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
@@ -229,7 +240,7 @@
         }
       });
     });
-    $("toolList").querySelectorAll("[data-health]").forEach((btn) => {
+    document.querySelectorAll("[data-health]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
