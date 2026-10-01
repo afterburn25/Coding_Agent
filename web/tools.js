@@ -257,6 +257,7 @@
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
           ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
           ${!job && osOk && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
+          ${!job && osOk && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button" data-install="${esc(t.name)}" title="Re-download and reinstall ${esc(installTitle)}">Reinstall</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
       </div>`;

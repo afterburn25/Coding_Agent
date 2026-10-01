@@ -692,3 +692,12 @@ missed it; the new `test_full_stack_sse_stream_end_to_end` parses real
 frames and now guards it. Also added: batched tool_calls, persisted
 approval across AppState restart, catalog-download teardown flake fix.
 Checkpoint: **346 tests**, head `7acfc8e`.
+
+## In-app tool installation (Tools page owns optional downloads)
+
+- The Windows installer no longer downloads ComfyUI or the Qwen-Image/FLUX stacks — only the two coding GGUFs bootstrap at setup, keeping install fast. All optional tools install on demand from the Tools page.
+- `localcodeagent/tools/downloads.py` (`ToolDownloadManager`) runs manifest `install.method: "archive"` jobs: HTTPS download → `.part` → SHA-256 → extract → `.chatnexus-version` marker. Job metadata carries phase/download_progress/extract_progress/bytes/current_file/current_path; emits over the JobManager→EventBus SSE path. Dedupe per tool, cancel cleans `.part`.
+- 7z extraction prefers the OS `tar.exe` (libarchive, native speed, per-file `-v` progress); py7zr is the bundled fallback (see `--collect-submodules py7zr` + codec hidden-imports in `build_windows.ps1`). Extraction progress is byte-weighted and throttled (4 emits/sec — unthrottled per-file updates rewrote jobs.json thousands of times and flooded SSE).
+- Manifest `detect.files` are install-root-relative markers for non-PATH payloads; `os_supported` is computed into the tool payload and gated in `install_tool` + UI. Packaged builds find manifests under `_MEIPASS` via fallback; `pip` installs resolve `managed_python()` (ComfyUI embedded Python → `{app}/python`) because `sys.executable` is the frozen exe.
+- Tools page (`web/tools.*`): Installations card (overall bar + current file/path), per-tool progress bars, Installed/Not installed/Installing chips, Install/Cancel/Reinstall, and an Image model packs section wired to `/api/image/models/install`.
+- `tests/test_tool_installer.py` (13 tests) covers the archive lifecycle, traversal/sha/cancel/dedupe, detect.files, managed-python resolution, and a real `AppState.install_tool` flow. `tests/test_installer.py` now asserts the installer ships NO optional downloads.
