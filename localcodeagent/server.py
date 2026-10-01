@@ -3033,6 +3033,23 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _NexusHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that doesn't traceback-log client disconnects.
+
+    The default handle_error prints a full exception for every request
+    thread failure — including BrokenPipe/ConnectionReset/Aborted when a
+    browser tab or SSE stream goes away mid-write. Those are normal client
+    behavior, not server faults; logging them floods the backend log over
+    long unattended runs. Real errors still go through the default path.
+    """
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def create_server(
     config: AgentConfig,
     workspace: Path,
@@ -3045,7 +3062,7 @@ def create_server(
 ) -> tuple[ThreadingHTTPServer, AppState]:
     state = AppState(config, workspace, runtime_root, config_path=config_path, boot=boot)
     handler = type("ChatNexusHandler", (Handler,), {"state": state, "web_root": web_root})
-    server = ThreadingHTTPServer((host, port), handler)
+    server = _NexusHTTPServer((host, port), handler)
     return server, state
 
 
