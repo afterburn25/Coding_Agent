@@ -193,6 +193,7 @@ class AppState:
         self.jobs = JobManager(jobs_path)
         self.events = EventBus()
         self.jobs.on_change = make_emitter(self.events, "job")
+        self.images.on_change = make_emitter(self.events, "image_job")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
         self.processes.on_event = make_emitter(self.events, "process")

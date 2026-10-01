@@ -51,6 +51,9 @@ class ImageManager:
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
         self._ws_listener = None
+        # Optional callback invoked with {"job": job.as_dict()} on each
+        # persisted state transition — wired to the server EventBus.
+        self.on_change = None
         self._load_jobs()
 
     def _ws_progress_listener(self):
@@ -105,9 +108,14 @@ class ImageManager:
         except Exception:
             pass
 
-    def _save_jobs(self) -> None:
+    def _save_jobs(self, job: "ImageJob | None" = None) -> None:
         rows=[j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:500]]
         self.jobs_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        if job is not None and self.on_change is not None:
+            try:
+                self.on_change({"job": job.as_dict()})
+            except Exception:
+                pass
 
     def summary(self) -> dict[str, Any]:
         backend_runtime = self.backend_runtime.probe()
@@ -227,7 +235,7 @@ class ImageManager:
         )
         with self._lock:
             self._jobs[job.id]=job
-            self._save_jobs()
+            self._save_jobs(job)
         if bool(getattr(self.config, "image_auto_run_jobs", True)):
             threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
         return job
@@ -304,7 +312,7 @@ class ImageManager:
         stopped=[]
         try:
             job.started_at=time.time(); job.state="loading_model"; job.stage="validating workflow"; job.progress=0.03
-            self._save_jobs()
+            self._save_jobs(job)
             workflow_name=profile.workflow_for(job.operation)
             if not workflow_name:
                 raise RuntimeError(f"Image model '{profile.id}' has no ComfyUI API workflow configured for {job.operation}.")
@@ -326,16 +334,16 @@ class ImageManager:
                 raise RuntimeError(f"Image model '{profile.id}' is not fully installed. Missing/invalid: {', '.join(missing) or 'required components'}")
 
             job.stage="loading model"; job.progress=0.08
-            self._save_jobs()
+            self._save_jobs(job)
             if self.runtime is not None:
                 self.runtime.refresh_hardware(); job.vram_before_gb=self.runtime.hardware.free_vram_gb
                 required=max(0.0, profile.estimated_vram_gb)
                 if required and self.runtime.hardware.free_vram_gb < required:
                     stopped=self.runtime.release_managed_models_for_vram(required_vram_gb=required, mode=getattr(self.config,"image_resource_mode","balanced"))
-            self._save_jobs()
-            job.stage="starting ComfyUI"; job.progress=max(job.progress,0.10); self._save_jobs()
+            self._save_jobs(job)
+            job.stage="starting ComfyUI"; job.progress=max(job.progress,0.10); self._save_jobs(job)
             self.backend_runtime.ensure_ready()
-            job.stage="preparing workflow"; job.progress=max(job.progress,0.12); self._save_jobs()
+            job.stage="preparing workflow"; job.progress=max(job.progress,0.12); self._save_jobs(job)
             if profile.required_nodes:
                 info=self.backend.inspect().get("object_info", {})
                 available=set(info) if isinstance(info, dict) else set()
@@ -350,7 +358,7 @@ class ImageManager:
             if unresolved:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
             job.state="generating"; job.stage="generating"; job.progress=0.20
-            job.backend_job_id=self.backend.submit(workflow); self._save_jobs()
+            job.backend_job_id=self.backend.submit(workflow); self._save_jobs(job)
             listener=self._ws_progress_listener()
             deadline=time.monotonic()+max(30, int(getattr(self.config,"image_job_timeout",900)))
             while time.monotonic()<deadline:
@@ -366,10 +374,10 @@ class ImageManager:
                         # Map ComfyUI's 0..1 step fraction into the generating band.
                         job.progress=max(job.progress, 0.20 + 0.70 * ws_progress)
                         job.stage="generating" + (f" · node {ws_node}" if ws_node else "")
-                self._save_jobs(); time.sleep(0.75)
+                self._save_jobs(job); time.sleep(0.75)
             else:
                 raise TimeoutError("Timed out waiting for ComfyUI image generation")
-            job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs()
+            job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs(job)
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]
             job.state="finished"; job.stage="finished"; job.progress=1.0; job.finished_at=time.time()
@@ -382,7 +390,7 @@ class ImageManager:
             job.error_code=error["code"]; job.error_message=error["message"]; job.error=job.error_message
             job.technical_details=error["technical_details"]; job.finished_at=time.time()
         finally:
-            self._save_jobs()
+            self._save_jobs(job)
             if stopped and bool(getattr(self.config,"image_restore_chat_model",True)) and self.runtime is not None:
                 self.runtime.restore_managed_models(stopped)
 
@@ -403,7 +411,7 @@ class ImageManager:
         if job.state in {"finished","failed","cancelled"}: return job
         if job.backend_job_id:
             self.backend.cancel(job.backend_job_id)
-        job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(); return job
+        job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(job); return job
 
     def get_job(self, job_id: str) -> ImageJob:
         try:
