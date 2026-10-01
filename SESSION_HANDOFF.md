@@ -618,3 +618,36 @@ Expected at this checkpoint: `328 tests` passing.
 - Concurrency + batching: live `tool_output` chunks route per-task via thread-local dispatch with reader-thread fallback (`539a3a7`, `9d6169b`); file mutations attribute to the owning task under concurrent runs (`04c363a`); durable `WorkQueue` (`.agent/queue.json`) dequeues prompts through `agent.run` on the watchdog tick — `GET/POST /api/queue`, `POST /api/queue/cancel`, queue surfaced in `/api/tasks` and the chat task card (`4e53364`, `bcd74d2`, `e61dee3`). `chat_queue_when_busy` (default true) auto-enqueues chat messages sent while a task is active instead of racing it (`c061ec5`). Tools page has a Work queue card with per-item cancel (`bef8ff8`).
 - Event-bus polish batch: agent-run failures publish an `error` event to the bus (`7b20df4`); task card recovered on bus open via `/api/tasks` fetch rather than relying on replay (`1b77b3b`); orphan `tool_output` chunks lazily open terminal blocks (`4dfe3b1`); `agentStreamActive` guard released on fetch/non-OK/stream errors (`84e0781`); `/api/tasks` returns `{current, recent, queue}` — not `{tasks}` (`c7de272`); recent tasks are clickable to inspect/resume (`a7e9c3d`); bus handles `approval`/`image_job` (`f203f25`); `tool_output` chunks coalesce in the 100-event replay history so chatty commands don't evict task context (`c044877`); queue-run and recovered tasks publish through shared `_bus_emit` (no tokens on the bus, `task_id` attribution) — `recover()` gained an `event_callback` param (`8cb4a22`, `cd260c8`). Persisted per-task terminal transcripts under `.agent/terminal/<id>.log` (512 KiB bound, 64 KiB tail via `GET /api/task-log`) restore prior command context on reload (`406c68f`); orphaned logs prune on load (`9e8dfe3`). Follow-ups: instant dequeue on enqueue/task completion (`4498381`, `c375dec`, `58462db`), task lifecycle markers in transcripts (`8dfa282`), `/api/task-log` path-traversal guard (`59414c5`), bounded request event queue under client backpressure (`562630f`), `?replay=N` on `/api/events` + `_bus_emit` policy test (`2d925a2`).
 - Next: real ComfyUI Qwen/FLUX workflow runs on GPU hardware, real MCP-server interop validation, tree-sitter/LSP indexing, and continued Nexus Brain dogfooding.
+
+## v0.7 autonomy hardening + Brain lifecycle checkpoint
+
+- Queue single-flight: dequeue serialized under a lock; completion chain waits
+  briefly so fast workers can't strand items; 200-item bound; busy chat returns
+  409 or auto-queues via `chat_queue_when_busy`.
+- Transcripts cover the full lifecycle via a wrapped event callback — model
+  select, task transitions, tool I/O, approvals, image jobs, errors, and
+  pre-session failures all land in `.agent/terminal/<id>.log`.
+- Idle eviction: `model_idle_unload_seconds` for llama.cpp runtimes plus
+  `comfyui_idle_unload_seconds` for the managed ComfyUI process (external
+  installs untouched); `idle_evicted` bus events surface on the Tools page.
+- Growth bounds everywhere: task ledger 100, queue 200, terminal logs 512 KiB,
+  checkpoints pruned, routing telemetry compacts, JobManager 300, research
+  cache/sessions pruned (500/100), llama/comfyui/terminal/backend-host logs
+  tail-bounded, EventBus 100-event replay + bounded subscriber queues.
+- Shutdown hygiene: `stop_state` terminates MCP servers, tracked terminal
+  processes, managed ComfyUI, and model runtimes. Desktop host restarts a
+  crashed backend — crash-loop bound resets after 5 stable minutes.
+- All durable stores write atomically (tasks/queue/jobs/brain/memory/secrets/
+  consent/activation backup/image ledgers/workflow resume checkpoints).
+- Nexus Brain: encrypted creator-key backup/restore
+  (`POST /api/nexus-brain/key-backup` + `/key-restore`; bundle re-encrypted
+  under a backup passphrase, restore proves key by verifying the existing
+  signature — foreign keys rejected); bounded 10-entry signed settings history
+  with reversible creator rollback (`GET /api/nexus-brain/history`,
+  `POST /api/nexus-brain/rollback`); audit trail + version list rendered on
+  the Trainer page; `settings_history` stripped from imported payloads.
+- Isolated selftest now smoke-checks `/api/queue` and the `/api/events` SSE
+  handshake in addition to boot + the four pages.
+- Verified checkpoint: **336 tests** (2 skips). Remaining work is
+  hardware-bound: real Qwen3-14B/30B runs, ComfyUI/FLUX interop, overnight
+  unattended queue soak; plus interactive Brain dogfood on a real install.
