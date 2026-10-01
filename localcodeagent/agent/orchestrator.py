@@ -1362,6 +1362,17 @@ class AgentOrchestrator:
             if m.get("role") == "user" or len(str(m.get("content") or "")) <= 400:
                 continue
             m["content"] = stub
+        # Second pass: if recent messages alone still exceed the window (many
+        # large tool results close together), truncate oversized bodies —
+        # head keeps the diagnosis, tail keeps the final error lines.
+        total = sum(len(str(m.get("content") or "")) for m in msgs)
+        if total > char_budget:
+            for m in msgs[head:]:
+                if m.get("role") == "user":
+                    continue
+                content = str(m.get("content") or "")
+                if len(content) > 4000:
+                    m["content"] = content[:2000] + "\n…\n" + content[-1000:]
         trim_event = {"type": "context_trim", "model_id": session.profile.id}
         session.model_events.append(trim_event)
         self._emit(session, "model", event=trim_event)
