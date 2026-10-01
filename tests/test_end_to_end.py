@@ -440,6 +440,77 @@ class EndToEndAgentTests(unittest.TestCase):
             rows = tasks.get("recent") or tasks.get("tasks") or []
             self.assertTrue(any(t.get("status") == "completed" for t in rows))
 
+    def test_events_bus_streams_live_task_events(self):
+        """The shared /api/events bus — the browser's EventSource path —
+        must deliver parseable task/tool frames while a task runs."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import create_server, stop_state
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint=fake.endpoint, model="fake-model",
+                    roles=["primary_coder", "utility", "fast_coder"],
+                    runtime="external")],
+                process_watchdog=False,
+                research_enabled=False,
+            )
+            server, state = create_server(cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(lambda: (server.shutdown(), server.server_close(), stop_state(state)))
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            bus_events: list[tuple[str, dict]] = []
+            bus_ready = threading.Event()
+
+            def subscribe():
+                req = urllib.request.Request(f"{base}/api/events?replay=0")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    bus_ready.set()
+                    buf = ""
+                    deadline = time.time() + 60
+                    while time.time() < deadline:
+                        chunk = resp.read1(4096)
+                        if not chunk:
+                            break
+                        buf += chunk.decode("utf-8", errors="replace")
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            line = line.strip()
+                            if line.startswith("event:"):
+                                bus_events.append((line[6:].strip(), {}))
+                            elif line.startswith("data:") and bus_events:
+                                try:
+                                    bus_events[-1] = (bus_events[-1][0],
+                                                      json.loads(line[5:].strip()))
+                                except json.JSONDecodeError:
+                                    pass
+                        if any(k == "task" and isinstance(d.get("task"), dict)
+                               and d["task"].get("status") == "completed"
+                               for k, d in bus_events):
+                            break
+
+            sub = threading.Thread(target=subscribe, daemon=True)
+            sub.start()
+            self.assertTrue(bus_ready.wait(10))
+            time.sleep(0.2)  # let the subscription register before the task
+
+            # Production path: queue worker wires event_callback=_bus_emit.
+            state.queue.enqueue("inspect the workspace and fix the failing tests")
+            state._dequeue_next()
+            sub.join(timeout=60)
+
+            kinds = [k for k, _ in bus_events]
+            self.assertIn("task", kinds)
+            self.assertIn("tool_start", kinds)
+            self.assertTrue(
+                any(k == "task" and isinstance(d.get("task"), dict)
+                    and d["task"].get("status") == "completed"
+                    for k, d in bus_events),
+                "bus never delivered the completed task event")
+
 
 if __name__ == "__main__":
     unittest.main()
