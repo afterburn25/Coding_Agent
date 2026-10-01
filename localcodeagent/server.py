@@ -22,7 +22,10 @@ from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
 from .runtime.setup import suggest_model_profiles, write_suggested_models
 from .research import ResearchCoordinator
-from .tools.base import ToolRegistry
+from .permissions import PermissionManager
+from .jobs import JobManager
+from .processes import ManagedService, ProcessManager
+from .tools.base import TOOL_CATEGORIES, ToolRegistry
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.github import register_github_tools
@@ -151,7 +154,17 @@ class AppState:
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
-        self.tools = ToolRegistry(config.permissions)
+        self.permission_manager = PermissionManager(config.permissions, profile=getattr(config, "permission_profile", "custom"))
+        tools_state_path = Path(getattr(config, "tools_state_path", "data/tools_state.json")).expanduser()
+        if not tools_state_path.is_absolute():
+            tools_state_path = runtime_root / tools_state_path
+        self.tools = ToolRegistry(self.permission_manager, state_path=tools_state_path)
+        jobs_path = Path(getattr(config, "jobs_path", "data/jobs.json")).expanduser()
+        if not jobs_path.is_absolute():
+            jobs_path = runtime_root / jobs_path
+        self.jobs = JobManager(jobs_path)
+        self.processes = ProcessManager()
+        self._register_processes()
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
@@ -243,6 +256,12 @@ class AppState:
         self.config = config
         self.model_telemetry = model_telemetry
         self.router = router
+        # The permission manager and tool registry wrap the live permissions
+        # dict; point them at the reloaded map and refresh process services.
+        self.permission_manager.permissions = config.permissions
+        self.permission_manager.profile = getattr(config, "permission_profile", "custom")
+        self.tools.permissions = config.permissions
+        self._register_processes()
         self.agent.config = config
         self.agent.router = router
         self.agent.telemetry = model_telemetry
@@ -501,6 +520,74 @@ class AppState:
             ),
         }
 
+    def _register_processes(self) -> None:
+        """Register controllable services with the central ProcessManager."""
+        for service_id in self.processes.service_ids(prefix="llama:"):
+            self.processes.unregister(service_id)
+        for model in self.config.models:
+            if model.runtime != "llama_cpp":
+                continue
+            profile = model
+            model_id = model.id
+
+            def describe(mid: str = model_id) -> dict:
+                statuses = {row.get("model_id"): row for row in self.runtime.statuses(probe_external=False)}
+                return dict(statuses.get(mid) or {"state": "stopped"})
+
+            self.processes.register(ManagedService(
+                id=f"llama:{model_id}",
+                name=f"llama.cpp · {model_id}",
+                kind="llm_runtime",
+                port=self.runtime._port_from_endpoint(profile.endpoint) or 0,
+                describe=describe,
+                start=lambda p=profile: self.runtime.ensure_ready(p),
+                stop=lambda mid=model_id: self.runtime.stop_model(mid).as_dict(),
+                metadata={"roles": list(profile.roles), "model_path": profile.model_path},
+            ))
+        if self.config.image_enabled:
+            endpoint = str(getattr(self.config, "comfyui_endpoint", ""))
+            self.processes.register(ManagedService(
+                id="comfyui",
+                name="ComfyUI",
+                kind="image_backend",
+                port=self.runtime._port_from_endpoint(endpoint) or 8188,
+                describe=lambda: self.images.backend_runtime.probe(),
+                start=lambda: self.images.backend_runtime.ensure_ready(),
+                stop=lambda: self.images.backend_runtime.stop(),
+                restart=lambda: self.images.backend_runtime.recover(),
+            ))
+
+    def _update_config_file(self, updates: dict) -> None:
+        """Merge keys into config.json atomically, preserving unrelated settings."""
+        if self.config_path.exists():
+            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        else:
+            raw = asdict(self.config)
+        raw.update(updates)
+        tmp = self.config_path.with_suffix(self.config_path.suffix + ".cnx.tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.config_path)
+
+    def jobs_payload(self) -> dict:
+        image = self.images.summary() if self.config.image_enabled else {}
+        catalog_jobs: list = []
+        try:
+            catalog_jobs = self.runtime.model_catalog.jobs()
+        except Exception:
+            catalog_jobs = []
+        return {
+            "jobs": self.jobs.aggregate(
+                tasks_payload=self.task_payload(),
+                image_jobs=list(image.get("jobs") or []),
+                model_installs=catalog_jobs,
+                image_installs=list(image.get("installs") or []),
+            ),
+            "states": [
+                "queued", "preparing", "running", "waiting_for_tool",
+                "waiting_for_permission", "completed", "failed", "cancelled",
+            ],
+        }
+
     def task_payload(self) -> dict:
         current = self.tasks.current()
         return {
@@ -694,6 +781,41 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/model-telemetry":
             self._json(self.state.model_telemetry.summary())
+            return
+        if path == "/api/tools":
+            self._json({
+                "tools": self.state.tools.manifests(),
+                "categories": TOOL_CATEGORIES,
+            })
+            return
+        if path.startswith("/api/tools/health/"):
+            tool_id = unquote(path[len("/api/tools/health/"):]).strip("/")
+            if not tool_id:
+                self._json({"error": "tool id is required"}, 400)
+                return
+            try:
+                self._json({"tool": tool_id, "health": self.state.tools.health(tool_id)})
+            except Exception as exc:
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            return
+        if path == "/api/permissions":
+            self._json(self.state.permission_manager.summary())
+            return
+        if path == "/api/jobs":
+            self._json(self.state.jobs_payload())
+            return
+        if path == "/api/processes":
+            self._json({"processes": self.state.processes.list()})
+            return
+        if path == "/api/resources":
+            runtime = self.state.runtime.summary(probe_external=True)
+            self._json({
+                "hardware": runtime.get("hardware"),
+                "runtimes": runtime.get("runtimes"),
+                "max_resident_models": runtime.get("max_resident_models"),
+                "image_resource_mode": getattr(self.state.config, "image_resource_mode", "balanced"),
+                "model_storage": runtime.get("model_storage"),
+            })
             return
         if path == "/api/models/catalog":
             self._json({
@@ -1494,6 +1616,98 @@ class Handler(BaseHTTPRequestHandler):
                 row = self.state.conversation_manager.create("New chat")
                 self.state.history = []
                 self._json({"ok": True, "conversation": row})
+                return
+
+            if path == "/api/tools/state":
+                tool_id = str(body.get("tool", "")).strip()
+                if not tool_id:
+                    self._json({"error": "tool is required"}, 400)
+                    return
+                spec = self.state.tools.get(tool_id)
+                if spec is None:
+                    # Allow addressing a tool by manifest id as well as name.
+                    match = next(
+                        (m for m in self.state.tools.manifests() if m["id"] == tool_id),
+                        None,
+                    )
+                    if match is None:
+                        self._json({"error": f"unknown tool '{tool_id}'"}, 404)
+                        return
+                    tool_id = match["name"]
+                enabled = bool(body.get("enabled", True))
+                self.state.tools.set_enabled(tool_id, enabled)
+                self._json({"ok": True, "tool": self.state.tools.manifest(tool_id)})
+                return
+
+            if path == "/api/permissions/level":
+                permission = str(body.get("permission", "")).strip()
+                level = str(body.get("level", "")).strip().lower()
+                try:
+                    applied = self.state.permission_manager.set_level(permission, level)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self.state._update_config_file({
+                    "permissions": dict(self.state.permission_manager.permissions),
+                    "permission_profile": self.state.permission_manager.profile,
+                })
+                self._json({"ok": True, "permission": permission, "level": applied, "manager": self.state.permission_manager.summary()})
+                return
+
+            if path == "/api/permissions/profile":
+                profile = str(body.get("profile", "")).strip().lower()
+                try:
+                    applied = self.state.permission_manager.apply_profile(profile)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self.state._update_config_file({
+                    "permissions": dict(self.state.permission_manager.permissions),
+                    "permission_profile": applied,
+                })
+                self._json({"ok": True, "profile": applied, "manager": self.state.permission_manager.summary()})
+                return
+
+            if path == "/api/processes/action":
+                service_id = str(body.get("id", "")).strip()
+                action = str(body.get("action", "")).strip().lower()
+                if not service_id or action not in {"start", "stop", "restart"}:
+                    self._json({"error": "id and action (start|stop|restart) are required"}, 400)
+                    return
+                try:
+                    result = self.state.processes.action(service_id, action)
+                except (KeyError, ValueError) as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                except Exception as exc:
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+                    return
+                self._json(result)
+                return
+
+            if path == "/api/jobs/cancel":
+                job_id = str(body.get("job_id", "")).strip()
+                if not job_id:
+                    self._json({"error": "job_id is required"}, 400)
+                    return
+                if job_id.startswith("image-"):
+                    job = self.state.images.cancel(job_id[len("image-"):])
+                    self._json({"ok": True, "job": job.as_dict()})
+                    return
+                if job_id.startswith("model_install-"):
+                    try:
+                        job = self.state.runtime.model_catalog.cancel(job_id[len("model_install-"):])
+                    except KeyError:
+                        self._json({"error": "model install job not found"}, 404)
+                        return
+                    self._json({"ok": True, "job": job})
+                    return
+                try:
+                    job = self.state.jobs.cancel(job_id)
+                except KeyError:
+                    self._json({"error": "job not found or not cancellable through the Job Manager"}, 404)
+                    return
+                self._json({"ok": True, "job": job.as_dict()})
                 return
 
             self.send_error(HTTPStatus.NOT_FOUND)

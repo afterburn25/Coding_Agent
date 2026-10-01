@@ -1,0 +1,60 @@
+.tools-shell{display:grid;grid-template-columns:285px minmax(0,1fr);min-height:100vh;background:#101217;color:#eef1f6}
+.tools-side{background:#0b0d11;border-right:1px solid #242833;padding:18px;overflow:auto}
+.tools-side .brand{font-weight:800;font-size:17px;color:#24d7ff;margin-bottom:14px}
+.tools-side .brand span{display:block;font-size:10px;color:#8fa5c4;font-weight:500;letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
+.workspace-link{display:block;color:#a8b5ff;font-size:12px;text-decoration:none;padding:5px 0}
+.workspace-link:hover{color:#fff}
+.section-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#7f8ba0;margin:18px 0 8px}
+.full-select{width:100%;margin:0;background:#171c24;color:#eef1f6;border:1px solid #303744;border-radius:8px;padding:8px}
+.mini-button{border:1px solid #303744;background:#1a2230;color:#dfe7f5;border-radius:8px;padding:7px 12px;font-size:11px;cursor:pointer;margin-top:8px}
+.mini-button:hover{border-color:#2877ff;color:#fff}
+.perm-summary{font-size:10px;line-height:1.5;margin-top:8px}
+.category-list{display:grid;gap:4px}
+.category-item{display:flex;justify-content:space-between;font-size:11px;color:#b8c1d0;padding:4px 6px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.category-item:hover,.category-item.active{background:#141a24;border-color:#2a3446;color:#fff}
+.category-item span{color:#77839a}
+.small{font-size:10px;line-height:1.5}
+.tools-main{padding:28px;min-width:0;max-width:1500px;width:100%;margin:0 auto;overflow:auto}
+.tools-header{display:flex;justify-content:space-between;align-items:flex-start}
+.tools-header h1{font-size:30px;margin:0}
+.tools-header p{color:#8d97aa;margin:7px 0 24px}
+.tools-card{border:1px solid #292f3a;background:#11151b;border-radius:14px;padding:18px;margin-bottom:16px}
+.tools-card h2{font-size:15px;margin:0 0 12px}
+.muted{color:#77839a}
+.perm-table{display:grid;gap:4px}
+.perm-row{display:grid;grid-template-columns:1fr 130px;gap:10px;align-items:center;font-size:12px;padding:4px 0;border-bottom:1px solid #1c222c}
+.perm-row code{color:#9fd8ff;font-size:11px}
+.perm-row select{background:#171c24;color:#eef1f6;border:1px solid #303744;border-radius:6px;padding:4px;font-size:11px}
+.tool-list{display:grid;gap:10px}
+.tool-group{margin-bottom:6px}
+.tool-group-title{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#8fa5c4;margin:10px 0 6px}
+.tool-card{border:1px solid #252c37;border-radius:10px;padding:12px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px}
+.tool-card.disabled{opacity:.55}
+.tool-name{font-size:13px;font-weight:650;color:#e8eefb}
+.tool-id{font-size:9.5px;color:#63718c;font-family:ui-monospace,Consolas,monospace}
+.tool-desc{font-size:11px;color:#aeb7c6;line-height:1.5;margin-top:5px}
+.tool-meta{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.chip{font-size:9px;border:1px solid #2a3446;border-radius:20px;padding:2px 8px;color:#9fb0ca;background:#131926}
+.chip.net{border-color:#33507e;color:#8fc1ff}
+.chip.gpu{border-color:#5b3f8c;color:#c4a5ff}
+.chip.perm{border-color:#4d3b1f;color:#f0cd8a}
+.chip.perm.allow{border-color:#23543e;color:#65deb1}
+.chip.perm.deny{border-color:#5e2630;color:#ff97a5}
+.chip.cap{border-color:#23414e;color:#7fd4e8}
+.chip.off{border-color:#5e2630;color:#ff97a5}
+.tool-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.tool-toggle{font-size:10px;border-radius:7px;padding:5px 10px;cursor:pointer;border:1px solid #2a3446;background:#17202c;color:#cfe0f5}
+.tool-toggle.on{border-color:#23543e;color:#65deb1}
+.tool-toggle.off{border-color:#5e2630;color:#ff97a5}
+.tool-health{font-size:9.5px;color:#77839a}
+.proc-list,.job-list{display:grid;gap:6px}
+.proc-row,.job-row{display:grid;grid-template-columns:150px 110px 90px 70px 1fr auto;gap:10px;align-items:center;font-size:11px;padding:7px 8px;border:1px solid #20262f;border-radius:8px}
+.job-row{grid-template-columns:110px 1fr 110px 70px 140px auto}
+.proc-row .name,.job-row .name{color:#dfe7f5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.state{font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.state.running,.state.completed,.state.healthy{color:#65deb1}
+.state.failed,.state.error{color:#ff97a5}
+.state.queued,.state.preparing,.state.waiting_for_permission,.state.waiting_for_tool{color:#f0cd8a}
+.state.stopped,.state.cancelled,.state.external_offline{color:#77839a}
+.row-actions button{font-size:9.5px;border:1px solid #303744;background:#1a2230;color:#cfd9ec;border-radius:6px;padding:3px 8px;cursor:pointer;margin-left:4px}
+.row-actions button:hover{border-color:#2877ff;color:#fff}

@@ -58,6 +58,12 @@ class AgentConfig:
         "github.read": "allow",
         "github.write": "ask",
     })
+    # Named workspace permission profile; "custom" means the permissions map
+    # above is authoritative. Levels: allow | session | ask | deny.
+    permission_profile: str = "custom"
+    # Modular tool/plugin system state.
+    tools_state_path: str = "data/tools_state.json"
+    jobs_path: str = "data/jobs.json"
     max_agent_steps: int = 12
     review_after_changes: bool = True
     auto_verify_after_changes: bool = True
@@ -260,6 +266,9 @@ def load_config(path: Path | None) -> AgentConfig:
     defaults = default_config()
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
     cfg.permissions.update(raw.get("permissions", {}))
+    cfg.permission_profile = str(raw.get("permission_profile", cfg.permission_profile))
+    cfg.tools_state_path = str(raw.get("tools_state_path", cfg.tools_state_path))
+    cfg.jobs_path = str(raw.get("jobs_path", cfg.jobs_path))
     cfg.max_agent_steps = int(raw.get("max_agent_steps", cfg.max_agent_steps))
     cfg.review_after_changes = bool(raw.get("review_after_changes", cfg.review_after_changes))
     cfg.auto_verify_after_changes = bool(raw.get("auto_verify_after_changes", cfg.auto_verify_after_changes))

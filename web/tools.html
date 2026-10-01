@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat Nexus · Tools &amp; Plugins</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/tools.css" />
+</head>
+<body>
+  <div class="tools-shell">
+    <aside class="tools-side">
+      <div class="brand">Chat Nexus <span>Tools &amp; Plugins</span></div>
+      <a class="workspace-link" href="/">← Chat</a>
+      <a class="workspace-link" href="/research.html">Research Hub</a>
+      <a class="workspace-link" href="/image.html">Image workspace</a>
+      <a class="workspace-link" href="/trainer.html">Trainer</a>
+
+      <div class="section-title">Permission profile</div>
+      <select id="permProfile" class="full-select"></select>
+      <button id="applyProfile" class="mini-button">Apply profile</button>
+      <div id="permSummary" class="perm-summary muted"></div>
+
+      <div class="section-title">Categories</div>
+      <div id="categoryList" class="category-list"></div>
+
+      <div class="section-title">MCP servers</div>
+      <div class="muted small">MCP integration is planned. Native tools and future MCP tools will coexist in this registry.</div>
+    </aside>
+
+    <main class="tools-main">
+      <header class="tools-header">
+        <div>
+          <h1>Tools &amp; Plugins</h1>
+          <p>Every capability registers a manifest. The agent queries this registry instead of hard-coding tools.</p>
+        </div>
+        <button id="refreshAll" class="mini-button">Refresh</button>
+      </header>
+
+      <section class="tools-card">
+        <h2>Permissions</h2>
+        <div id="permTable" class="perm-table muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Tool registry</h2>
+        <div id="toolList" class="tool-list muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Processes</h2>
+        <div id="processList" class="proc-list muted">Loading…</div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Jobs</h2>
+        <div id="jobList" class="job-list muted">Loading…</div>
+      </section>
+    </main>
+  </div>
+  <script src="/tools.js"></script>
+</body>
+</html>
