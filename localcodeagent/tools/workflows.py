@@ -101,7 +101,8 @@ def _save_resume(path: Path | None, *, workflow_id: str, next_step: int,
             for name, value in steps.items()
         }
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({
             "workflow_id": workflow_id,
             "next_step": next_step,
             "params": params,
@@ -109,6 +110,7 @@ def _save_resume(path: Path | None, *, workflow_id: str, next_step: int,
             "step_log": step_log,
             "saved_at": time.time(),
         }, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
         return str(path)
     except OSError:
         return ""
