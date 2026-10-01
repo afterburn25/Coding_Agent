@@ -2087,6 +2087,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Agent/model work may run for a while before the first token.
                     # Queue events back to the request thread so socket writes remain
                     # serialized and the request thread can send idle heartbeats.
+                    # Token deltas and live-output chunks are drop-safe under
+                    # backpressure (a disconnected or stalled client must not
+                    # grow memory for the rest of the task); everything else —
+                    # task/tool/result/error — always lands.
+                    if event.get("type") in {"token", "tool_output"} and events.qsize() > 2000:
+                        return
                     events.put(dict(event))
                     # Mirror onto the shared bus so a reloaded page (or the
                     # Tools UI) can follow the run live via /api/events.
