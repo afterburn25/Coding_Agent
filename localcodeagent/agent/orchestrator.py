@@ -127,9 +127,7 @@ class _AgentSession:
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
     started_at: float = field(default_factory=time.time)
-    logged_task_state: str = ""
-    logged_image_state: str = ""
-    logged_model_state: str = ""
+
 
 
 class AgentOrchestrator:
@@ -630,11 +628,28 @@ class AgentOrchestrator:
             pass
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
-        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job", "model", "research", "perf"}:
-            self._log_terminal(session, event_type, payload)
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
 
-    def _log_terminal(self, session: _AgentSession, event_type: str, payload: dict[str, Any]) -> None:
+    def _logging_callback(
+        self,
+        task_id: str,
+        callback: Callable[[dict[str, Any]], None] | None,
+    ) -> Callable[[dict[str, Any]], None]:
+        """Wrap a session callback so every event also lands in the persisted
+        terminal transcript — including _safe_emit sites that bypass _emit."""
+        dedup: dict[str, str] = {"task": "", "image": "", "model": ""}
+
+        def wrapped(event: dict[str, Any]) -> None:
+            etype = str(event.get("type") or "")
+            if etype in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job", "model", "research", "perf"}:
+                payload = {k: v for k, v in event.items() if k != "type"}
+                self._log_terminal(task_id, etype, payload, dedup)
+            if callback is not None:
+                callback(event)
+
+        return wrapped
+
+    def _log_terminal(self, task_id: str, event_type: str, payload: dict[str, Any], dedup: dict[str, str]) -> None:
         """Persist a bounded terminal transcript so a reloaded page can
         recover prior command context for long-running tasks."""
         try:
@@ -658,8 +673,8 @@ class AgentOrchestrator:
             elif event_type == "task":
                 task = payload.get("task") or {}
                 status = f"{task.get('status') or ''}/{task.get('phase') or ''}".strip("/")
-                if status and status != session.logged_task_state:
-                    session.logged_task_state = status
+                if status and status != dedup["task"]:
+                    dedup["task"] = status
                     line = f"## task {status}\n"
                     content = str(task.get("final_content") or "")
                     if task.get("status") in {"completed", "failed", "cancelled", "error"} and content:
@@ -673,16 +688,16 @@ class AgentOrchestrator:
             elif event_type == "image_job":
                 job = payload.get("job") or {}
                 state = f"{job.get('operation', 'job')}/{job.get('state', '')}/{job.get('stage', '')}"
-                if state != session.logged_image_state:
-                    session.logged_image_state = state
+                if state != dedup["image"]:
+                    dedup["image"] = state
                     line = f"## image {state}\n"
                 else:
                     line = ""
             elif event_type == "model":
                 ev = payload.get("event") or {}
                 marker = f"{ev.get('type', 'event')}:{ev.get('model_id') or ev.get('to') or ''}:{ev.get('role') or ''}"
-                if marker != session.logged_model_state:
-                    session.logged_model_state = marker
+                if marker != dedup["model"]:
+                    dedup["model"] = marker
                     line = f"## model {ev.get('type', 'event')} {ev.get('model_id') or ev.get('to') or ''} {ev.get('role') or ''}\n".rstrip() + "\n"
                 else:
                     line = ""
@@ -699,7 +714,7 @@ class AgentOrchestrator:
             else:
                 line = f"## error: {str(payload.get('error') or '')[:300]}\n"
             if line:
-                self.tasks.append_log(session.task_id, line)
+                self.tasks.append_log(task_id, line)
         except Exception:
             pass
 
@@ -903,13 +918,12 @@ class AgentOrchestrator:
             return self._direct_image_result(
                 task_id=task_id,
                 user_text=task.prompt,
-                event_callback=event_callback,
+                event_callback=self._logging_callback(task_id, event_callback),
                 approved=approved,
             )
 
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
-        if event_callback is not None:
-            session.event_callback = event_callback
+        session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
         self.tasks.update(
             task_id,
@@ -1915,6 +1929,7 @@ class AgentOrchestrator:
     ) -> AgentResult:
         self.runtime.refresh_hardware()
         task = self.tasks.create(user_text, mode)
+        event_callback = self._logging_callback(task.id, event_callback)
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")
 
@@ -2239,8 +2254,7 @@ class AgentOrchestrator:
             task_id,
             reason=f"Previous status was {task.status}; previous phase was {task.interrupted_from or task.phase}.",
         )
-        if event_callback is not None:
-            session.event_callback = event_callback
+        session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
         self.tasks.update(
             task_id,
@@ -2263,8 +2277,7 @@ class AgentOrchestrator:
         if session is None:
             return self._resume_persisted_approval(
                 task_id, approved=approved, event_callback=event_callback)
-        if event_callback is not None:
-            session.event_callback = event_callback
+        session.event_callback = self._logging_callback(task_id, event_callback)
         if str(self.tasks.get(task_id).status or "") == "cancelled":
             raise KeyError(f"Task {task_id} was cancelled and cannot be resumed")
         if not session.pending_approval:
