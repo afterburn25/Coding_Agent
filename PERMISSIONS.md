@@ -13,7 +13,7 @@ Core keys plus risk-sensitive keys shared across profiles:
 `docker.access` · `credentials.use` · `network.read` · `browser.control` ·
 `browser.submit` · `external_api.call` · `image.read` · `image.generate` ·
 `image.manage` · `github.read` · `github.write` · `message.send` ·
-`microphone.use` · `camera.use` · `spend.money`
+`microphone.use` · `camera.use` · `spend.money` · `tasks.queue`
 
 High-impact actions (spending money, sending messages, mic/camera) default
 to `deny` in every shipped profile; installs/deletes/pushes/submissions
