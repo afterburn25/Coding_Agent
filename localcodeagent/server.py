@@ -642,7 +642,9 @@ class AppState:
             "created_at": time.time(),
         }
         backup_path = self.model_growth.root / "activation_backup.json"
-        backup_path.write_text(json.dumps(backup, indent=2), encoding="utf-8")
+        _tmp_backup = backup_path.with_suffix(".json.tmp")
+        _tmp_backup.write_text(json.dumps(backup, indent=2), encoding="utf-8")
+        _tmp_backup.replace(backup_path)
 
         method = str(candidate.get("method") or "lora")
         extra_args = self._remove_lora_args([str(x) for x in target.get("extra_args") or []])
