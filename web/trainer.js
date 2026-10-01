@@ -174,6 +174,30 @@ $('#brainImportFile').addEventListener('change',async e=>{
     alert('Locked Nexus Brain imported. Unlock it with the original creator credential to verify and activate it.');
   }catch(err){alert(err.message);}finally{e.target.value='';}
 });
+$('#brainKeyBackup').addEventListener('click',async()=>{
+  const passcode=prompt('Current creator passcode (required to export the signing key):');
+  if(passcode===null)return;
+  const backup_passcode=prompt('Backup passphrase (min 8 chars; used to open this backup file):');
+  if(backup_passcode===null)return;
+  try{
+    const out=await postJson('/api/nexus-brain/key-backup',{creator_token:brainCreatorToken,passcode,backup_passcode});
+    const blob=new Blob([JSON.stringify(out.backup,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='chat-nexus-creator-key-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert(e.message);}
+});
+$('#brainKeyRestoreFile').addEventListener('change',async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  try{
+    const backup=JSON.parse(await file.text());
+    const backup_passcode=prompt('Backup passphrase for this file:');
+    if(backup_passcode===null)return;
+    const passcode=prompt('New unlock passcode (min 8 chars; leave blank to reuse the backup passphrase):')||'';
+    await postJson('/api/nexus-brain/key-restore',{backup,backup_passcode,passcode});
+    await refresh();
+    alert('Creator key restored. Unlock the Nexus Brain with the new passcode.');
+  }catch(err){alert(err.message);}finally{e.target.value='';}
+});
 
 $('#rulesList').addEventListener('click',async e=>{
   const toggle=e.target.closest('[data-memory-toggle]');
