@@ -23,6 +23,7 @@ class _FakeModelServer:
         outer = self
         self.requests: list[dict] = []
         self.fail_next = 0  # when >0, respond 500 to that many POSTs
+        self.delay = 0.0    # seconds to stall each chat response
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -37,6 +38,8 @@ class _FakeModelServer:
                     self.send_response(404)
                     self.end_headers()
                     return
+                if outer.delay:
+                    time.sleep(outer.delay)
                 messages = body.get("messages") or []
                 saw_tool = any(m.get("role") == "tool" for m in messages)
                 if saw_tool:
@@ -203,6 +206,39 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertIn("## error", log)
             # Calls are bounded: 1 initial + 1 recovery attempt, not infinite.
             self.assertLessEqual(len(fake.requests), 4)
+
+    def test_task_cancelled_mid_run(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            fake.delay = 0.6  # slow first response -> cancel window
+            outcome: list = []
+
+            def worker():
+                try:
+                    outcome.append(state.agent.run("cancel me"))
+                except Exception as exc:
+                    outcome.append(exc)
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            # Wait for the task to exist, then cancel it while the model call
+            # is still stalled on the fake endpoint.
+            deadline = time.time() + 5
+            task = None
+            while time.time() < deadline:
+                recent = state.tasks.recent(1)
+                if recent and recent[0].get("status") == "running":
+                    task = recent[0]
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(task)
+            state.tasks.update(task["id"], status="cancelled")
+            t.join(timeout=15)
+            self.assertFalse(t.is_alive(), "run() did not return after cancel")
+            result = outcome[0]
+            self.assertEqual(result.task.get("status"), "cancelled")
 
 
 if __name__ == "__main__":

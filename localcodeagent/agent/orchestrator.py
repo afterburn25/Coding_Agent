@@ -1549,6 +1549,8 @@ class AgentOrchestrator:
                 chunk=redactor(chunk) if redactor else chunk,
             )
         )
+        if self._task_cancelled(session):
+            return self._cancel_result(session)
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
         self._emit(session, "task", task=working_task.as_dict())
         session.pending_approval = None
