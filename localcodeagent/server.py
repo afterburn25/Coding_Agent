@@ -202,10 +202,10 @@ class AppState:
         register_document_tools(self.tools, self.workspace, jobs=self.jobs)
         register_knowledge_tools(self.tools, self.workspace)
         register_sandbox_tools(self.tools, self.workspace)
-        wf_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
-        if not wf_dir.is_absolute():
-            wf_dir = self.workspace / wf_dir
-        register_workflow_tools(self.tools, self.workspace, workflows_dir=wf_dir, jobs=self.jobs)
+        self.workflows_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
+        if not self.workflows_dir.is_absolute():
+            self.workflows_dir = self.workspace / self.workflows_dir
+        register_workflow_tools(self.tools, self.workspace, workflows_dir=self.workflows_dir, jobs=self.jobs)
         register_blender_tools(self.tools, self.workspace, jobs=self.jobs)
         register_docker_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
@@ -1078,6 +1078,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tools/telemetry":
             self._json({"routing": self.state.tool_router.recent(50),
                         "stats": self.state.tool_router.stats()})
+            return
+        if path == "/api/workflows":
+            from .tools.workflows import load_workflows
+            workflows = load_workflows(self.state.workflows_dir)
+            self._json({
+                "directory": str(self.state.workflows_dir),
+                "workflows": [
+                    {"id": w["id"], "name": w.get("name", w["id"]),
+                     "description": (w.get("description") or "")[:300],
+                     "steps": [s.get("tool") for s in w.get("steps", [])],
+                     "params": w.get("params") or {},
+                     "file": w.get("_path", "")}
+                    for w in workflows.values()
+                ],
+            })
             return
         if path == "/api/mcp":
             self._json(self.state.mcp.status())
