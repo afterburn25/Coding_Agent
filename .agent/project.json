@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 327,
-  "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling \u00e2\u20ac\u201d MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing.",
+  "test_checkpoint": 328,
+  "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling — MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -135,7 +135,7 @@
     "preferences_and_rules": true,
     "correction_examples": true,
     "prompt_injection_of_saved_rules": true,
-    "ui": "Local system \u00e2\u2020\u2019 Memory & training",
+    "ui": "Local system → Memory & training",
     "api": "GET /api/conversation-memory"
   },
   "stream_recovery": {
@@ -204,7 +204,7 @@
       "GET /api/policy",
       "POST /api/policy/mode"
     ],
-    "ui": "Local system \u00e2\u2020\u2019 Conversation policy",
+    "ui": "Local system → Conversation policy",
     "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
     "ethical_temperature_default": 1,
     "ethical_temperature_range": [
@@ -386,7 +386,7 @@
     "installer_seed_public_only": true,
     "installer_seed_build_validation": true,
     "adult_content_image_gate": true,
-    "audit_log": "data/nexus_brain.audit.jsonl \u00e2\u20ac\u201d signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit"
+    "audit_log": "data/nexus_brain.audit.jsonl — signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit"
   },
   "takeover": {
     "owner": "Devin",
@@ -463,21 +463,21 @@
     ],
     "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
     "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
-    "browser": "localcodeagent/webtools/browser.py \u00e2\u20ac\u201d Playwright runner w/ sessions, console+network capture, extended actions, health probe",
-    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u00e2\u20ac\u201d live install status in Tool Manager",
-    "install_manager": "POST /api/tools/install \u00e2\u20ac\u201d packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
-    "secrets": "localcodeagent/secrets.py \u00e2\u20ac\u201d Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
-    "codeintel": "localcodeagent/tools/codeintel.py \u00e2\u20ac\u201d code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
-    "data": "localcodeagent/tools/data.py \u00e2\u20ac\u201d data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
+    "browser": "localcodeagent/webtools/browser.py — Playwright runner w/ sessions, console+network capture, extended actions, health probe",
+    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep — live install status in Tool Manager",
+    "install_manager": "POST /api/tools/install — packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
+    "secrets": "localcodeagent/secrets.py — Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
+    "codeintel": "localcodeagent/tools/codeintel.py — code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
+    "data": "localcodeagent/tools/data.py — data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
     "models_ui": "/models.html",
-    "media": "localcodeagent/tools/media.py \u00e2\u20ac\u201d media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
-    "documents": "localcodeagent/tools/documents.py \u00e2\u20ac\u201d extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
-    "knowledge": "localcodeagent/tools/knowledge.py \u00e2\u20ac\u201d local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
-    "sandbox": "localcodeagent/tools/sandbox.py \u00e2\u20ac\u201d python_exec isolated -I interpreter in .agent/sandbox",
-    "workflows": "localcodeagent/tools/workflows.py \u00e2\u20ac\u201d declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
-    "blender3d": "localcodeagent/tools/blender3d.py \u00e2\u20ac\u201d blender_render scene-script generator delegating to blender manifest",
-    "events": "localcodeagent/events.py + GET /api/events \u00e2\u20ac\u201d SSE bus for job/tool events; tools.js live refresh",
-    "capability_dispatch": "use_capability tool \u00e2\u20ac\u201d model-callable ToolRouter dispatch (outcome-based tool selection)",
+    "media": "localcodeagent/tools/media.py — media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
+    "documents": "localcodeagent/tools/documents.py — extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
+    "knowledge": "localcodeagent/tools/knowledge.py — local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
+    "sandbox": "localcodeagent/tools/sandbox.py — python_exec isolated -I interpreter in .agent/sandbox",
+    "workflows": "localcodeagent/tools/workflows.py — declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
+    "blender3d": "localcodeagent/tools/blender3d.py — blender_render scene-script generator delegating to blender manifest",
+    "events": "localcodeagent/events.py + GET /api/events — SSE bus for job/tool events; tools.js live refresh",
+    "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)",
     "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
     "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
     "workflows_api": "GET /api/workflows + Tools-page Workflows panel",
@@ -496,7 +496,7 @@
       "busy_chat": "chat_queue_when_busy auto-enqueues while a task is active"
     },
     "event_bus_reconnect": {
-      "bus": "localcodeagent/events.py EventBus \u00e2\u20ac\u201d /api/events SSE, 100-event replay",
+      "bus": "localcodeagent/events.py EventBus — /api/events SSE, 100-event replay",
       "mirroring": "non-token agent events publish with task_id via AppState._bus_emit",
       "ui": "web/app.js connectAgentEvents + agentStreamActive dedup",
       "transcript": ".agent/terminal/<task>.log, GET /api/task-log, pruned on load"
