@@ -215,7 +215,12 @@ failure → autonomous_error_retry_seconds backoff, bounded by
   queue is capped at 200; `routing_telemetry.jsonl` compacts past 512 KiB
   (in-memory deque maxlen 500); JobManager trims at 300 records; request-local
   SSE queues drop token/output chunks under backpressure while task, tool,
-  and result events always land.
+  and result events always land. Per-model llama.cpp logs, `terminal-*.log`
+  job output, `comfyui.log`, and the desktop `backend-host.log` all retain a
+  bounded tail instead of appending forever. On exit, `stop_state` shuts down
+  MCP server subprocesses, tracked background terminal processes, the managed
+  ComfyUI process, and all model runtimes; the desktop host restarts a crashed
+  backend (crash-loop bound of 3 restarts inside 5 minutes).
 
 ## v0.4 Web + Image capability layers
 
