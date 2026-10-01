@@ -2023,6 +2023,8 @@ class AgentOrchestrator:
         session = self._sessions.get(task_id)
         if session is None:
             return self._resume_persisted_approval(task_id, approved=approved)
+        if str(self.tasks.get(task_id).status or "") == "cancelled":
+            raise KeyError(f"Task {task_id} was cancelled and cannot be resumed")
         if not session.pending_approval:
             raise KeyError(f"No resumable approval is pending for task {task_id}")
         pending = session.pending_approval
