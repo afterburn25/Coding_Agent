@@ -988,7 +988,7 @@ class AgentOrchestrator:
             session.verification_commands = commands
             session.verification_index = index
             session.pending_approval = dict(pending)
-            return self.resume(task_id, approved=approved)
+            return self.resume(task_id, approved=approved, event_callback=event_callback)
 
         raise ValueError(f"Unknown approval kind {pending['kind']}")
 
