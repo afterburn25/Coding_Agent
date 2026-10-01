@@ -165,6 +165,41 @@ Execute agent request
 
 A later workflow phase (for example review) can route to a different model, causing Runtime Manager to perform the corresponding switch.
 
+## Autonomous operation layer
+
+```text
+POST /api/queue (durable .agent/queue.json, FIFO)
+  ↓ watchdog tick — dequeue only when no task is active
+agent.run / recover (single-flight)
+  ↓
+live terminal: tool_start → tool_output chunks → tool completion
+  ↓ (post-redaction)
+persisted transcript .agent/terminal/<task>.log (512 KiB bound)
+  ↓
+bounded execution: agent_tool_timeout_seconds, context trimming,
+  step-limit continuations (autonomous_max_continuations)
+  ↓
+failure → autonomous_error_retry_seconds backoff, bounded by
+  autonomous_max_recoveries; crash → startup auto-resume
+```
+
+- `EventBus` (`events.py`) fans events to `/api/events` SSE subscribers with a
+  100-event replay buffer; consecutive `tool_output` chunks for the same
+  tool+task coalesce in history so replay keeps task context. All agent-event
+  producers (chat stream, queue worker, auto-resume, error retry) share
+  `AppState._bus_emit` — tokens/results stay chat-only, everything else gets
+  `task_id` attribution.
+- The chat page keeps its direct `/api/chat/stream` connection authoritative
+  (`agentStreamActive` suppresses bus duplicates); on reload the bus
+  subscription + `/api/tasks` + `/api/task-log` restore the live view.
+- `PermissionManager.set_autonomous` auto-approves `ask`/`session` workspace
+  actions; hard gates (spend/message/mic/camera) and `deny` are never touched.
+  `autonomous_approval_timeout_seconds` bounds hard-gate waits.
+- `RuntimeManager.evict_idle` on the watchdog tick unloads models idle past
+  `model_idle_unload_seconds` or under `memory_pressure_*` floors, while
+  pinning models serving active tasks — `ensure_ready` restarts them
+  transparently.
+
 ## v0.4 Web + Image capability layers
 
 The core agent remains responsible for conversation/task planning. Web and image functions are tools, not hard-wired into the chat model.
