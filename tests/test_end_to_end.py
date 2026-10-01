@@ -185,6 +185,25 @@ class EndToEndAgentTests(unittest.TestCase):
                            if e.get("type") == "model" and isinstance(e.get("event"), dict)]
             self.assertIn("transient_retry", model_kinds)
 
+    def test_persistent_model_failure_fails_task(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            state.config.runtime_recovery_attempts = 1
+            state.agent.config.runtime_recovery_attempts = 1
+            fake.fail_next = 50  # model never recovers
+            with self.assertRaises(RuntimeError):
+                state.agent.run("this will keep failing")
+
+            task = state.tasks.recent(1)[0]
+            self.assertEqual(task.get("status"), "error")
+            self.assertTrue(task.get("error"))
+            log = state.tasks.read_log(task["id"])
+            self.assertIn("## error", log)
+            # Calls are bounded: 1 initial + 1 recovery attempt, not infinite.
+            self.assertLessEqual(len(fake.requests), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
