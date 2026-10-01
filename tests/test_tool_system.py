@@ -1475,6 +1475,31 @@ class AppStateWiringTests(unittest.TestCase):
             ):
                 self.assertIn(expected, names, f"missing registered tool: {expected}")
 
+    def test_idle_comfyui_evicted_only_when_managed_and_idle(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            state.config.comfyui_idle_unload_seconds = 60.0
+            rt = state.images.backend_runtime
+            stopped = []
+            rt.stop = lambda: stopped.append(True)
+            # External ComfyUI is never killed.
+            rt.status.managed = False
+            rt.status.state = "running"
+            state.images.last_activity = 0.0
+            state._evict_idle_comfyui()
+            self.assertEqual(stopped, [])
+            # Managed + recently started → not yet idle.
+            rt.status.managed = True
+            rt.status.started_at = time.time()
+            state._evict_idle_comfyui()
+            self.assertEqual(stopped, [])
+            # Managed + idle past the bound → stopped and event published.
+            rt.status.started_at = time.time() - 3600
+            state._evict_idle_comfyui()
+            self.assertEqual(stopped, [True])
+            ev = [e for e in state.events._history if e.get("event", {}).get("type") == "idle_evicted"]
+            self.assertTrue(ev and ev[-1]["event"].get("model_id") == "comfyui")
+
     def test_readiness_reports_tools_summary(self):
         with tempfile.TemporaryDirectory() as td:
             state = self._state(td)

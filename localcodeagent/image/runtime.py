@@ -21,6 +21,7 @@ class ComfyRuntimeStatus:
     error: str = ""
     log_path: str = ""
     restarts: int = 0
+    started_at: float = 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -31,6 +32,7 @@ class ComfyRuntimeStatus:
             "error": self.error,
             "log_path": self.log_path,
             "restarts": self.restarts,
+            "started_at": self.started_at,
         }
 
 
@@ -135,7 +137,7 @@ class ComfyUIRuntime:
             if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
                 flags = subprocess.CREATE_NO_WINDOW
             self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
-            self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts)
+            self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
             deadline = time.monotonic() + max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
             last = ""
             while time.monotonic() < deadline:

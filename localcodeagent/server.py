@@ -1034,6 +1034,36 @@ class AppState:
             for model_id in stopped:
                 self.events.publish("model", {"event": {"type": "idle_evicted",
                                                         "model_id": model_id}})
+            self._evict_idle_comfyui()
+        except Exception:
+            pass
+
+    def _evict_idle_comfyui(self) -> None:
+        """Stop the managed ComfyUI process after an idle bound — it holds GPU
+        memory even when no image job is running. Only managed processes are
+        stopped; an external ComfyUI install belongs to the user."""
+        timeout = float(getattr(self.config, "comfyui_idle_unload_seconds", 0.0) or 0.0)
+        if timeout <= 0:
+            return
+        try:
+            rt = self.images.backend_runtime
+            status = rt.status
+            if not (status.managed and status.state == "running"):
+                return
+            if self.images.has_active_jobs():
+                return
+            # Idle since the later of last job activity or process start —
+            # auto-start boots ComfyUI before any job touches it.
+            idle_since = max(
+                float(getattr(self.images, "last_activity", 0.0)),
+                float(getattr(status, "started_at", 0.0) or 0.0),
+            )
+            if time.time() - idle_since < timeout:
+                return
+            rt.stop()
+            self.events.publish("model", {"event": {"type": "idle_evicted",
+                                                    "model_id": "comfyui",
+                                                    "role": "image_backend"}})
         except Exception:
             pass
 

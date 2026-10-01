@@ -54,6 +54,7 @@ class ImageManager:
         # Optional callback invoked with {"job": job.as_dict()} on each
         # persisted state transition — wired to the server EventBus.
         self.on_change = None
+        self.last_activity = time.time()
         self._load_jobs()
 
     def _ws_progress_listener(self):
@@ -109,6 +110,7 @@ class ImageManager:
             pass
 
     def _save_jobs(self, job: "ImageJob | None" = None) -> None:
+        self.last_activity = time.time()
         rows=[j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:500]]
         self.jobs_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
         if job is not None and self.on_change is not None:
@@ -418,6 +420,9 @@ class ImageManager:
             return self._jobs[job_id]
         except KeyError as exc:
             raise KeyError(f"Unknown image job {job_id}") from exc
+
+    def has_active_jobs(self) -> bool:
+        return any(j.state in {"queued", "loading_model", "generating", "refining", "upscaling"} for j in self._jobs.values())
 
     def history(self, *, query: str = "") -> list[dict[str, Any]]:
         if not self.history_path.exists(): return []

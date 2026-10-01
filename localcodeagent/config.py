@@ -182,6 +182,7 @@ class AgentConfig:
     comfyui_extra_args: list[str] = field(default_factory=list)
     comfyui_logs_dir: str = ".agent/runtime"
     comfyui_startup_timeout: int = 180
+    comfyui_idle_unload_seconds: float = 900.0
     image_resource_mode: str = "balanced"
     image_restore_chat_model: bool = True
     image_auto_run_jobs: bool = True
@@ -383,6 +384,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.comfyui_extra_args = [str(x) for x in raw.get("comfyui_extra_args", cfg.comfyui_extra_args)]
     cfg.comfyui_logs_dir = str(raw.get("comfyui_logs_dir", cfg.comfyui_logs_dir))
     cfg.comfyui_startup_timeout = max(10, int(raw.get("comfyui_startup_timeout", cfg.comfyui_startup_timeout)))
+    cfg.comfyui_idle_unload_seconds = max(0.0, float(raw.get("comfyui_idle_unload_seconds", cfg.comfyui_idle_unload_seconds)))
     cfg.image_resource_mode = str(raw.get("image_resource_mode", cfg.image_resource_mode))
     cfg.image_restore_chat_model = bool(raw.get("image_restore_chat_model", cfg.image_restore_chat_model))
     cfg.image_auto_run_jobs = bool(raw.get("image_auto_run_jobs", cfg.image_auto_run_jobs))

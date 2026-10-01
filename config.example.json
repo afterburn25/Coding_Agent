@@ -128,6 +128,7 @@
   "comfyui_extra_args": [],
   "comfyui_logs_dir": ".agent/runtime",
   "comfyui_startup_timeout": 180,
+  "comfyui_idle_unload_seconds": 900,
   "image_resource_mode": "balanced",
   "image_restore_chat_model": true,
   "image_auto_run_jobs": true,
