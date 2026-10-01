@@ -257,7 +257,7 @@ function toolStartBlock(tool){
   block.querySelector('.term-cmd').textContent=cmd;
   activity.appendChild(block);_activityPrune();
   activity.scrollTop=activity.scrollHeight;
-  liveToolBlocks.push({name,el:block});
+  liveToolBlocks.push({name,el:block,t0:performance.now()});
   setUtilityPanel('terminal');
 }
 function toolCompleteBlock(tool){
@@ -271,7 +271,7 @@ function toolCompleteBlock(tool){
   const result=String(tool.result??'');
   const failed=/error|fail|denied|exception|traceback/i.test(result.slice(0,400));
   block.classList.add(failed?'failed':'done');
-  state.textContent=failed?'failed':'done';
+  state.textContent=(failed?'failed':'done')+' '+(((performance.now()-entry.t0)/1000).toFixed(1))+'s';
   const out=block.querySelector('.term-out');
   out.textContent=result.slice(-6000);
   activity.scrollTop=activity.scrollHeight;
