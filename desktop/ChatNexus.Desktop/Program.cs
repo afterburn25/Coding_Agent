@@ -129,6 +129,26 @@ internal sealed class BackendProcess : IDisposable
         var logDir = Path.Combine(appDir, "data", "logs");
         Directory.CreateDirectory(logDir);
         var logPath = Path.Combine(logDir, "backend-host.log");
+        // The host log appends every backend stdout/stderr line forever —
+        // keep only a tail so long unattended sessions cannot grow it.
+        try
+        {
+            var logInfo = new FileInfo(logPath);
+            const long MaxLogBytes = 8L * 1024 * 1024;
+            if (logInfo.Exists && logInfo.Length > MaxLogBytes)
+            {
+                using var src = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var keep = 4L * 1024 * 1024;
+                src.Seek(-Math.Min(keep, src.Length), SeekOrigin.End);
+                using var ms = new MemoryStream();
+                src.CopyTo(ms);
+                File.WriteAllBytes(logPath, ms.ToArray());
+            }
+        }
+        catch
+        {
+            // Log maintenance must never block startup.
+        }
 
         var start = new ProcessStartInfo
         {
