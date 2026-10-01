@@ -320,6 +320,9 @@ function connectAgentEvents(){
   if(typeof EventSource==='undefined')return;
   try{
     const es=new EventSource('/api/events');
+    // tool_output chunks can flood the bus replay history on long runs, so
+    // recover the current task card directly once the stream opens.
+    es.onopen=async()=>{try{const data=await fetch('/api/tasks').then(r=>r.json());const cur=(data.tasks||[]).find(t=>!['completed','error','cancelled'].includes(t.status));if(cur&&cur.id!==lastTask?.id){lastTask=cur;renderTask(cur);renderDiff(cur);}refreshQueue();}catch{}};
     const on=(n,f)=>es.addEventListener(n,e=>{if(agentStreamActive)return;let d={};try{d=JSON.parse(e.data);}catch{return;}f(d);});
     on('tool_start',d=>{if(d.tool)toolStartBlock(d.tool);});
     on('tool_output',d=>{const name=String(d.tool||'');const entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];if(entry){const out=entry.el.querySelector('.term-out');if(out){out.textContent=(out.textContent+String(d.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}}});
@@ -328,6 +331,7 @@ function connectAgentEvents(){
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
+    on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
   }catch(e){}
 }
 async function streamAgent(message){
