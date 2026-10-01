@@ -35,6 +35,14 @@ CATEGORIES = {
 
 OUTPUT_TAIL_LIMIT = 20000
 
+# Self-maintenance: the JSONL is append-only (every update/flush writes a full
+# row), so it grows without bound and would make every boot reread months of
+# history. Past this size the store rewrites itself with one row per activity;
+# TaskStore persists only the last ~100 tasks, so rows for older tasks are
+# unreachable dead weight and are dropped entirely.
+COMPACT_BYTES = 8 * 1024 * 1024
+KEEP_TASKS = 150
+
 
 class ActivityStore:
     def __init__(self, path: Path | str) -> None:
@@ -44,6 +52,7 @@ class ActivityStore:
         self._by_task: dict[str, list[dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self._output_flush_at: dict[str, float] = {}
+        self._persist_ticks = 0
         self._load()
 
     # ------------------------------------------------------------------
@@ -77,13 +86,40 @@ class ActivityStore:
                     if row.get("state") in OPEN_STATES:
                         row["state"] = "interrupted"
                         row["ended_at"] = row.get("ended_at") or time.time()
+            if self.path.stat().st_size > COMPACT_BYTES or len(self._by_task) > KEEP_TASKS:
+                self._compact()
         except OSError:
             pass
+
+    def _compact(self) -> None:
+        """Rewrite the log with the latest state of each row, dropping tasks
+        beyond KEEP_TASKS. Crash-safe via tmp+replace."""
+        keep = sorted(
+            self._by_task,
+            key=lambda t: max((r.get("started_at") or 0) for r in self._by_task[t]),
+        )[-KEEP_TASKS:]
+        keep_set = set(keep)
+        self._by_task = {t: self._by_task[t] for t in keep}
+        try:
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8") as fh:
+                for task_id in keep:
+                    for row in self._by_task[task_id]:
+                        fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+            tmp.replace(self.path)
+        except OSError:
+            pass
+        del keep_set
 
     def _persist(self, row: dict[str, Any]) -> None:
         try:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+            # Periodically self-compact so long unattended sessions cannot grow
+            # the log without bound (checked cheaply every 200 writes).
+            self._persist_ticks += 1
+            if self._persist_ticks % 200 == 0 and self.path.stat().st_size > COMPACT_BYTES:
+                self._compact()
         except OSError:
             pass
 

@@ -181,6 +181,33 @@ class OrchestratorActivityTests(unittest.TestCase):
             self.assertIn("EXIT_CODE=0", out)
             self.assertFalse(flag.is_set())
 
+    def test_compacts_oversized_log_and_drops_old_tasks(self):
+        from localcodeagent.workflow import activity as act_mod
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "act.jsonl"
+            old_compact, old_keep = act_mod.COMPACT_BYTES, act_mod.KEEP_TASKS
+            act_mod.COMPACT_BYTES = 4096
+            act_mod.KEEP_TASKS = 3
+            try:
+                # Older tasks get dropped entirely; recent tasks keep latest state.
+                s0 = ActivityStore(path)
+                for t in range(6):
+                    r = s0.open(f"task-{t}", "tool", f"title {t}", "x" * 2000)
+                    s0.update(f"task-{t}", r["id"], state="completed")
+                s0._persist({"id": "trigger", "task_id": "task-5",
+                             "category": "tool", "state": "completed", "x": "y" * 2000})
+                del s0
+                s1 = ActivityStore(path)
+                self.assertLessEqual(len(s1._by_task), 3)
+                self.assertIn("task-5", s1._by_task)
+                # File holds one line per surviving row — no update duplicates.
+                lines = [l for l in path.read_text().splitlines() if l.strip()]
+                total_rows = sum(len(v) for v in s1._by_task.values())
+                self.assertEqual(len(lines), total_rows)
+            finally:
+                act_mod.COMPACT_BYTES, act_mod.KEEP_TASKS = old_compact, old_keep
+
     def test_malformed_tool_args_feedback_without_executing(self):
         # A tool call with unrecoverable arguments must not execute with {}
         # — the error goes back to the model so it can re-emit correctly.
