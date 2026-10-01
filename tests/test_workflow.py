@@ -59,6 +59,10 @@ class WorkflowTests(unittest.TestCase):
             tail = tasks.read_log(task.id)
             self.assertLess(len(tail), 65 * 1024)
             self.assertEqual(tasks.read_log("missing"), "")
+            # path traversal in task_id is rejected, not resolved
+            tasks.append_log("../escape", "x")
+            self.assertEqual(tasks.read_log("../escape"), "")
+            self.assertFalse((Path(td) / ".agent" / "escape.log").exists())
 
     def test_patchset_validates_before_writing(self):
         with tempfile.TemporaryDirectory() as td:

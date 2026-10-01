@@ -128,13 +128,23 @@ class TaskStore:
         except OSError:
             pass
 
+    @staticmethod
+    def _log_path(root: Path, task_id: str) -> Path | None:
+        # task ids are generated hex, but the endpoint accepts arbitrary
+        # strings — refuse anything that could escape the terminal dir.
+        if not task_id or not task_id.replace("-", "").replace("_", "").isalnum():
+            return None
+        return root / "terminal" / f"{task_id}.log"
+
     def append_log(self, task_id: str, text: str) -> None:
         """Append to the task's terminal transcript under .agent/terminal/.
 
         Bounded at ~512 KiB with a 256 KiB tail kept; failures never break
         the agent loop.
         """
-        path = self.root / "terminal" / f"{task_id}.log"
+        path = self._log_path(self.root, task_id)
+        if path is None:
+            return
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8", errors="replace") as fh:
@@ -146,7 +156,9 @@ class TaskStore:
 
     def read_log(self, task_id: str, *, max_bytes: int = 64 * 1024) -> str:
         """Return the tail of a task's terminal transcript."""
-        path = self.root / "terminal" / f"{task_id}.log"
+        path = self._log_path(self.root, task_id)
+        if path is None:
+            return ""
         try:
             if not path.exists():
                 return ""
