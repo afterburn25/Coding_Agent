@@ -864,6 +864,12 @@ class AppState:
             return
         if not hasattr(self, "_queue_running"):
             self._queue_running = set()
+        if not hasattr(self, "_dequeue_lock"):
+            self._dequeue_lock = threading.Lock()
+        # Called from the watchdog, run-completion handlers, and enqueue —
+        # two callers must not both observe idle and start two tasks.
+        if not self._dequeue_lock.acquire(blocking=False):
+            return
         try:
             recent = self.tasks.recent(20)
             if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
@@ -902,6 +908,8 @@ class AppState:
             threading.Thread(target=run_item, args=(item,), name=f"queue-{item_id}", daemon=True).start()
         except Exception:
             pass
+        finally:
+            self._dequeue_lock.release()
 
     def _retry_failed_tasks(self) -> None:
         """Re-drive error tasks in autonomous mode after a backoff.
