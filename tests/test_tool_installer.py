@@ -532,5 +532,130 @@ class ServerPackageUninstallTests(unittest.TestCase):
                 state.tool_downloads.shutdown()
 
 
+class UpdateCheckerTests(unittest.TestCase):
+    """ToolUpdateChecker probes + cache + manifest merge."""
+
+    def _checker(self, root: Path):
+        from localcodeagent.tools.updates import ToolUpdateChecker
+        return ToolUpdateChecker(root)
+
+    def test_winget_row_parses_available_version(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        table = (
+            "Name     Id                        Version  Available  Source\n"
+            "Blender  BlenderFoundation.Blender 4.1.0    4.2.0      winget\n")
+        with mock.patch("subprocess.run", return_value=SimpleNamespace(
+                returncode=0, stdout=table, stderr="")):
+            with TemporaryDirectory() as td:
+                res = self._checker(Path(td)).probe(
+                    "blender", {"method": "winget",
+                                "package": "BlenderFoundation.Blender"})
+        self.assertEqual(res["status"], "checked")
+        self.assertEqual(res["latest"], "4.2.0")
+
+    def test_winget_no_upgrade_marks_current(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        with mock.patch("subprocess.run", return_value=SimpleNamespace(
+                returncode=0, stdout="No applicable upgrade found.",
+                stderr="")):
+            with TemporaryDirectory() as td:
+                res = self._checker(Path(td)).probe(
+                    "x", {"method": "winget", "package": "Vendor.X"})
+        self.assertEqual(res["status"], "current")
+
+    def test_github_archive_probe_reads_latest_tag(self):
+        import io
+        from unittest import mock
+
+        class _Resp:
+            def read(self):
+                return b'{"tag_name": "v9.9.9"}'
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        url = ("https://github.com/Comfy-Org/ComfyUI/releases/download/"
+               "v0.38.0/ComfyUI_windows_portable_nvidia.7z")
+        with mock.patch("urllib.request.urlopen", return_value=_Resp()):
+            with TemporaryDirectory() as td:
+                res = self._checker(Path(td)).probe(
+                    "comfyui", {"method": "archive", "url": url})
+        self.assertEqual(res["status"], "checked")
+        self.assertEqual(res["latest"], "v9.9.9")
+
+    def test_unknown_method_and_cache_roundtrip(self):
+        with TemporaryDirectory() as td:
+            c = self._checker(Path(td))
+            res = c.probe("manualtool", {"method": "build"})
+            self.assertEqual(res["status"], "unavailable")
+            c.save()
+            from localcodeagent.tools.updates import ToolUpdateChecker
+            c2 = ToolUpdateChecker(Path(td))
+            self.assertEqual(c2.info("manualtool")["status"], "unavailable")
+            self.assertIn("checked_at", c2.info("manualtool"))
+
+    def test_manifest_merges_update_info(self):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            manifests = root / "tools" / "manifests"
+            manifests.mkdir(parents=True)
+            (manifests / "pkgtool.json").write_text(json.dumps({
+                "id": "pkgtool", "name": "Pkg Tool", "version": "1.0",
+                "install": {"method": "winget", "package": "Vendor.PkgTool"},
+            }), encoding="utf-8")
+            state = AppState(
+                AgentConfig(
+                    models=[ModelProfile(
+                        id="fake", endpoint="http://127.0.0.1:1/v1",
+                        model="fake-model",
+                        roles=["primary_coder", "utility", "fast_coder"],
+                        runtime="external")],
+                    process_watchdog=False, research_enabled=False),
+                root / "workspace", root)
+            try:
+                state.tool_updates._cache["pkgtool"] = {
+                    "status": "checked", "latest": "2.0", "checked_at": 1.0}
+                m = state.tools.manifest("pkgtool")
+                self.assertEqual(m["latest_version"], "2.0")
+                self.assertEqual(m["update_check"], "checked")
+            finally:
+                state.tool_downloads.shutdown()
+
+    def test_check_updates_job_gated_and_runs(self):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState
+        from unittest import mock
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools" / "manifests").mkdir(parents=True)
+            state = AppState(
+                AgentConfig(
+                    models=[ModelProfile(
+                        id="fake", endpoint="http://127.0.0.1:1/v1",
+                        model="fake-model",
+                        roles=["primary_coder", "utility", "fast_coder"],
+                        runtime="external")],
+                    process_watchdog=False, research_enabled=False),
+                root / "workspace", root)
+            try:
+                out = state.check_tool_updates()
+                if out.get("needs_approval"):
+                    out = state.check_tool_updates(approve=True)
+                self.assertTrue(out.get("ok"), out)
+                ok = _wait(
+                    lambda: state.jobs.get(out["job_id"]).state
+                    in {"completed", "failed"}, 15)
+                self.assertTrue(ok)
+                self.assertEqual(state.jobs.get(out["job_id"]).state,
+                                 "completed")
+            finally:
+                state.tool_downloads.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

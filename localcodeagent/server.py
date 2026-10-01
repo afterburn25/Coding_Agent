@@ -254,6 +254,9 @@ class AppState:
             manifests_dir, self.tools, workspace=self.workspace, install_root=runtime_root)
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
+        from .tools.updates import ToolUpdateChecker
+        self.tool_updates = ToolUpdateChecker(runtime_root)
+        self.tools.update_lookup = self.tool_updates.info
         self._register_health_checks()
         self.tool_router = ToolRouter(
             self.tools,
@@ -1249,6 +1252,40 @@ class AppState:
         threading.Thread(target=_run_remove, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name,
                 "method": str(install.get("method") or "")}
+
+    def check_tool_updates(self, *, approve: bool = False) -> dict:
+        """Probe real package sources for newer tool versions (tracked job)."""
+        gate = self._permission_gate("network.read", approve, "update check")
+        if gate is not None:
+            return gate
+        job = self.jobs.submit("tool_update_check", "Check for tool updates",
+                               metadata={"phase": "queued"})
+        from .tools.plugins import managed_python
+
+        def _run() -> None:
+            self.jobs.update(job.id, state="running", status="checking")
+            checked = found = 0
+            try:
+                py = managed_python(self.runtime.base_dir)
+                for m in self.tools.manifests():
+                    if not m.get("install"):
+                        continue
+                    if m.get("install_status") != "installed":
+                        continue
+                    res = self.tool_updates.probe(
+                        m["id"], m.get("install"), python=py)
+                    checked += 1
+                    if res.get("status") == "checked":
+                        found += 1
+                self.tool_updates.save()
+                self.jobs.update(
+                    job.id, state="completed", status="finished", progress=1.0,
+                    detail=f"checked {checked} tools, {found} versions resolved")
+            except Exception as exc:  # noqa: BLE001 — job must not die silently
+                self.jobs.update(job.id, state="failed", error=str(exc)[:300])
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": job.id}
 
     def jobs_payload(self) -> dict:
         image = self.images.summary() if self.config.image_enabled else {}
@@ -2733,6 +2770,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 404)
                     return
                 status = 200 if result.get("ok") else (403 if "denied" in str(result.get("error", "")) else 200)
+                self._json(result, status)
+                return
+
+            if path == "/api/tools/check-updates":
+                result = self.state.check_tool_updates(
+                    approve=bool(body.get("approve", False)))
+                status = 200 if result.get("ok") else (
+                    403 if "denied" in str(result.get("error", "")) else 200)
                 self._json(result, status)
                 return
 

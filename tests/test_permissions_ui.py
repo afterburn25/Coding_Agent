@@ -265,8 +265,22 @@ class PermissionApiTests(unittest.TestCase):
         self.assertIn("partials", data)
         tool = data["tools"][0]
         for key in ("install_path", "install_size_bytes", "latest_version",
-                    "installed_at", "process_id", "dependencies", "health", "mcp_server"):
+                    "installed_at", "process_id", "dependencies", "health",
+                    "mcp_server", "installable"):
             self.assertIn(key, tool)
+
+    def test_non_automatable_install_reports_installable_false(self):
+        # A manifest whose install method isn't automatable (e.g. manual
+        # "build") must surface installable=False so the UI hides Install.
+        from localcodeagent.server import AppState
+        state = self.state
+        manifests = state.tools.manifests()
+        by_id = {m["id"]: m for m in manifests}
+        if "whisper" in by_id:  # shipped manifest uses method=build
+            self.assertFalse(by_id["whisper"]["installable"])
+        # The test pkgtool manifest uses winget → automatable.
+        self.assertTrue(by_id.get("pkgtool", {}).get("installable", True)
+                        or "pkgtool" not in by_id)
 
     def test_creator_level_via_api_gates_install(self):
         self._post("/api/permissions/level", {"permission": "packages.install", "level": "creator"})

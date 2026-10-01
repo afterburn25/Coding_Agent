@@ -121,6 +121,9 @@
 .tools-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .tools-toolbar input[type=search]{flex:1;min-width:180px;padding:9px 13px;border:1px solid #252c37;border-radius:9px;background:#0d141f;color:#eef1f6;font:inherit;font-size:12px}
 .tools-toolbar select{padding:9px 10px;border:1px solid #252c37;border-radius:9px;background:#0d141f;color:#eef1f6;font:inherit;font-size:12px}
+.tools-toolbar .tb-btn{padding:9px 14px;border:1px solid #252c37;border-radius:9px;background:#14202e;color:#cfe0f5;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.tools-toolbar .tb-btn:hover{border-color:#2877ff;color:#fff}
+.tools-toolbar .tb-btn:disabled{opacity:.55;cursor:default}
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 .fchip{font-size:10px;padding:4px 12px;border-radius:14px;border:1px solid #2a3446;background:#131926;color:#9fb0ca;cursor:pointer}
 .fchip:hover{border-color:#2877ff;color:#fff}

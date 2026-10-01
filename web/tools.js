@@ -284,7 +284,8 @@
     const busy = !!job;
     const proc = procForTool(t);
     const running = isRunning(t);
-    const installable = ["winget", "choco", "uv", "npm", "apt", "dnf", "brew", "pip", "archive"].includes(String(spec.method || ""));
+    const installable = t.installable !== undefined ? !!t.installable
+      : ["winget", "choco", "uv", "npm", "apt", "dnf", "brew", "pip", "archive"].includes(String(spec.method || ""));
     const osOk = t.os_supported !== false;
     const partial = partials[t.name];
     const caps = (t.capabilities || []).slice(0, 3);
@@ -634,7 +635,11 @@
         (t.enabled === false ? row("Enabled", "No — disabled") : "") +
         row("Version", esc(t.version)) +
         (t.installed_version ? row("Installed version", esc(t.installed_version)) : "") +
-        row("Latest known version", t.latest_version ? esc(t.latest_version) : "Update check unavailable") +
+        row("Latest known version", t.update_check === "checked"
+            ? esc(t.latest_version)
+            : t.update_check === "current"
+              ? "Up to date (checked " + esc(fmtDate(t.update_checked_at)) + ")"
+              : "Update check unavailable") +
         row("Provider / source", `${esc(t.provider)} · ${esc(t.source)}`) +
         row("Permission", `${esc(t.permission)} <span class="badge ${esc(t.permission_mode)}">${esc(t.permission_mode)}</span>`) +
         row("OS support", esc((t.supported_os || []).join(", ") || "all") + (t.os_supported === false ? " — not supported here" : "")) +
@@ -653,7 +658,8 @@
         (t.docs ? `<div class="dtl-note" style="margin-top:8px">${esc(t.docs)}</div>` : "");
       const busy = jobForTool(t.name);
       html += `<div class="dtl-actions" style="padding:10px 0 0;border-top:1px solid #1c2634;margin-top:8px">
-        ${!busy && t.install_status === "missing" && t.os_supported !== false && spec.method ? `<button data-dact="install">Install</button>` : ""}
+        ${!busy && t.install_status === "missing" && t.os_supported !== false && (t.installable !== undefined ? t.installable : spec.method) ? `<button data-dact="install">Install</button>` : ""}
+        ${t.install_status === "missing" && t.installable === false && spec.notes ? `<div class="dtl-note muted">Manual install: ${esc(spec.notes)}</div>` : ""}
         ${!busy && t.install_status === "installed" && spec.method === "archive" ? `<button data-dact="install">${t.update_available ? "Update" : "Reinstall"}</button>` : ""}
         ${!busy && t.install_status === "installed" && t.removable ? `<button class="danger" data-dact="uninstall">Uninstall</button>` : ""}
         ${t.has_health_check && t.install_status === "installed" ? `<button data-dact="health">Run health check</button>` : ""}
@@ -723,6 +729,23 @@
 
   $("toolSearch").addEventListener("input", (e) => { search = e.target.value; renderGrid(); });
   $("toolSort").addEventListener("change", (e) => { sortBy = e.target.value; renderGrid(); });
+  $("checkUpdates").addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      let r = await post("/api/tools/check-updates", {});
+      if (r.needs_approval) {
+        if (!confirm(`Update checks query package sources and GitHub — allow ${r.permission}?`)) return;
+        r = await post("/api/tools/check-updates", { approve: true });
+      }
+      if (r.error) { b.title = r.error; return; }
+      b.textContent = "Checking…";
+      setTimeout(() => { loadJobs(); loadTools(); b.textContent = "Check updates"; b.disabled = false; }, 6000);
+    } catch (err) {
+      b.title = err.message;
+      b.disabled = false;
+    }
+  });
   $("installQueueHead").addEventListener("click", () => $("installQueue").classList.toggle("collapsed"));
   $("detailClose").addEventListener("click", () => {
     $("toolDetail").classList.add("hidden"); selectedTool = "";

@@ -108,6 +108,9 @@ class ToolRegistry:
         # Install root for manifest `detect.files` markers (set by
         # load_plugin_manifests); used when refreshing install status.
         self.install_root: Path | None = None
+        # Optional hook: tool_id -> cached update-probe result (see
+        # tools.updates.ToolUpdateChecker). Wired by AppState.
+        self.update_lookup: Any = None
         self._lock = threading.RLock()
         self.state_path = Path(state_path).resolve() if state_path else None
         # Mutable execution context is set by the orchestrator before tool calls.
@@ -338,7 +341,7 @@ class ToolRegistry:
 
     def manifest(self, name: str) -> dict[str, Any]:
         # plugins imports this module — keep the uninstall_command lookup lazy.
-        from .plugins import uninstall_command
+        from .plugins import install_command, uninstall_command
 
         spec = self._tools.get(name)
         if spec is None:
@@ -347,6 +350,9 @@ class ToolRegistry:
         usage = self._usage.get(name) or {}
         installed_version = self.installed_version(name)
         install = self._plugin_meta.get(name, {}).get("install") or {}
+        update = self.update_lookup(spec.tool_id) if self.update_lookup else {}
+        latest = (update.get("latest") if update.get("status") == "checked"
+                  else None) or spec.version or ""
         return {
             "id": spec.tool_id,
             "name": spec.name,
@@ -376,14 +382,21 @@ class ToolRegistry:
             "install_status": spec.install_status,
             "installed_version": installed_version,
             "update_available": bool(
-                installed_version and spec.version
-                and installed_version != spec.version),
+                installed_version and latest
+                and installed_version != latest),
+            "update_check": update.get("status") or "",
+            "update_checked_at": update.get("checked_at"),
             "enabled": name not in self._disabled,
             "has_health_check": spec.health_check is not None,
             "use_count": int(usage.get("count", 0)),
             "last_used_at": usage.get("last_used_at"),
             "callable": bool(self._plugin_meta.get(name, {}).get("invocable", True)),
             "install": dict(install),
+            "installable": (
+                str(install.get("method") or "").strip().lower() == "archive"
+                or install_command(install, install_root=self.install_root)
+                is not None
+            ),
             "removable": (
                 str(install.get("method") or "").strip().lower() == "archive"
                 or uninstall_command(install, install_root=self.install_root)
@@ -397,7 +410,7 @@ class ToolRegistry:
             "install_path": self.install_path(name),
             "install_size_bytes": self.install_size(name),
             "installed_at": self.installed_at(name),
-            "latest_version": str(spec.version or ""),
+            "latest_version": str(latest),
             "health": dict(self._health_cache.get(name) or {}),
             "mcp_server": str(self._plugin_meta.get(name, {}).get("mcp_server") or ""),
         }

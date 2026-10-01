@@ -554,6 +554,8 @@ class ToolDownloadManager:
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+            if proc.stdout is not None and not proc.stdout.closed:
+                proc.stdout.close()
         if rc != 0:
             return False
         state["files_done"] = len(names)
