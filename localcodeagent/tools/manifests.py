@@ -26,6 +26,15 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "run_tests": {"category": "coding", "capabilities": ["run_tests", "terminal_run"]},
     "configure_project": {"category": "coding", "capabilities": ["build_project", "terminal_run"]},
     "clean_project": {"category": "coding", "capabilities": ["build_project", "terminal_run"]},
+    "code_symbols": {"category": "coding", "capabilities": ["code_symbols", "repository_search"]},
+    "code_map": {"category": "coding", "capabilities": ["code_map", "repository_search"]},
+    # -- data ------------------------------------------------------------------
+    "data_query": {"category": "data", "capabilities": ["query_csv", "query_json", "query_database", "execute_sql", "summarize_table"], "provider": "duckdb"},
+    "profile_dataset": {"category": "data", "capabilities": ["profile_dataset", "summarize_table"], "provider": "duckdb"},
+    "chart_generate": {"category": "data", "capabilities": ["chart_generate", "visualization"]},
+    # -- external apis / secrets ------------------------------------------------
+    "api_request": {"category": "external_apis", "capabilities": ["api_request", "http_client", "external_api"], "requires_network": True},
+    "secrets_list": {"category": "utilities", "capabilities": ["secrets_list"]},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

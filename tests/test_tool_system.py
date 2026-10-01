@@ -20,6 +20,7 @@ from localcodeagent.tools.plugins import install_command
 from localcodeagent.secrets import SecretVault
 from localcodeagent.tools.api import register_api_tools
 from localcodeagent.tools.codeintel import extract_symbols, register_codeintel_tools
+from localcodeagent.tools.data import profile_source, query_source, register_data_tools, render_chart
 
 
 def _registry(**permissions):
@@ -689,6 +690,46 @@ class ApiToolTests(unittest.TestCase):
             out = json.loads(reg.execute("secrets_list", {}))
             self.assertEqual(out["secrets"][0]["name"], "svc.key")
             self.assertNotIn("supersecret", json.dumps(out))
+
+
+class DataToolTests(unittest.TestCase):
+    def _csv_ws(self):
+        ws = Path(tempfile.mkdtemp())
+        (ws / "sales.csv").write_text("region,amount\nwest,10\neast,30\nwest,15\n", encoding="utf-8")
+        return ws
+
+    def test_csv_query_and_profile(self):
+        ws = self._csv_ws()
+        out = query_source(ws, "sales.csv", "SELECT region, SUM(CAST(amount AS REAL)) AS total FROM data GROUP BY region ORDER BY total DESC")
+        rows = out["rows"]
+        self.assertEqual(rows[0]["region"], "east")
+        self.assertIn(out["engine"], {"sqlite", "duckdb"})
+        prof = profile_source(ws, "sales.csv")
+        self.assertEqual(prof["source"], "sales.csv")
+        self.assertTrue(prof.get("columns"))
+
+    def test_query_rejects_outside_workspace(self):
+        ws = self._csv_ws()
+        with self.assertRaises(ValueError):
+            query_source(ws, "../outside.csv", "SELECT 1")
+
+    def test_registry_tool_returns_json(self):
+        ws = self._csv_ws()
+        reg = ToolRegistry({"filesystem.read": "allow"})
+        register_data_tools(reg, ws, artifacts_dir=ws / ".charts")
+        out = reg.execute("data_query", {"source": "sales.csv", "sql": "SELECT COUNT(*) AS n FROM data"})
+        self.assertIn('"rows"', out)
+
+    def test_chart_svg_written(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = render_chart({"type": "bar", "labels": ["a", "b"], "values": [3, 7], "title": "T"}, Path(td) / "c.svg")
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("<svg", text)
+            self.assertIn("<rect", text)
+            out2 = render_chart({"type": "pie", "labels": ["x", "y"], "values": [1, 1]}, Path(td) / "p.svg")
+            self.assertIn("<path", out2.read_text())
+            with self.assertRaises(ValueError):
+                render_chart({"type": "nope", "values": [1]}, Path(td) / "n.svg")
 
 
 if __name__ == "__main__":

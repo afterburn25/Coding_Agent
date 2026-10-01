@@ -32,6 +32,7 @@ from .secrets import SecretVault
 from .tools.api import register_api_tools
 from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
+from .tools.data import register_data_tools
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.github import register_github_tools
@@ -185,6 +186,7 @@ class AppState:
         register_codeintel_tools(self.tools, self.workspace)
         self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
         register_api_tools(self.tools, vault=self.secrets)
+        register_data_tools(self.tools, self.workspace, artifacts_dir=runtime_root / "data" / "charts")
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)
