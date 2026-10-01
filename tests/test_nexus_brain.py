@@ -50,6 +50,33 @@ class NexusBrainTests(unittest.TestCase):
             self.assertAlmostEqual(reloaded.emotion_profile()["warmth"], 0.9)
             self.assertEqual(reloaded.self_model()["name"], "Nexus Prime")
 
+    def test_unlock_throttling_backs_off_failed_attempts(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "nexus_brain.json"
+            brain = NexusBrain(path)
+            brain.initialize_creator("Creator", "right-passcode")
+            brain.lock()
+
+            with self.assertRaises(PermissionError):
+                brain.unlock("Creator", "wrong-passcode")
+            # Second immediate attempt is refused by the backoff, not by auth.
+            with self.assertRaises(PermissionError) as ctx:
+                brain.unlock("Creator", "wrong-passcode")
+            self.assertIn("retry in", str(ctx.exception))
+            self.assertGreater(brain._throttled_seconds(), 0)
+            # Backoff state survives reload via the auth sidecar.
+            reloaded = NexusBrain(path)
+            self.assertGreater(reloaded._throttled_seconds(), 0)
+            # A correct passcode inside the window is also blocked.
+            with self.assertRaises(PermissionError):
+                reloaded.unlock("Creator", "right-passcode")
+            # Once the window expires the correct passcode works again.
+            reloaded._clear_unlock_throttle()
+            reloaded.unlock("Creator", "right-passcode")
+            self.assertTrue(reloaded.unlocked)
+            audit = brain.audit_events(50)
+            self.assertTrue(any(e.get("event") == "unlock_throttled" for e in audit))
+
     def test_creator_passcode_is_not_stored_in_plaintext(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "nexus_brain.json"
@@ -230,6 +257,7 @@ class NexusBrainTests(unittest.TestCase):
             brain.lock()
             with self.assertRaises(PermissionError):
                 brain.unlock("Creator", "wrong-passcode-123")
+            brain._clear_unlock_throttle()  # simulate the backoff window expiring
             brain.unlock("Creator", "example-passcode")
 
             events = brain.audit_events(100)

@@ -85,6 +85,8 @@ class NexusBrain:
         self._unlocked = False
         self._verified_for_session = False
         self._tampered = False
+        self._unlock_failures = 0
+        self._unlock_backoff_until = 0.0
         self._recall_variant_index = 0
         self._affect_state: dict[str, float] = {
             "valence": 0.12,
@@ -367,15 +369,18 @@ class NexusBrain:
             raise RuntimeError("Legacy Nexus Brain creator metadata is invalid") from exc
         supplied = self._derive_legacy(secret, auth_salt)
         if not hmac.compare_digest(supplied, expected):
+            self._record_unlock_failure("bad_passcode")
             raise PermissionError("Creator authentication failed")
         legacy_key = self._derive_legacy(secret, integrity_salt)
         signature = str(self._data.get("signature") or "")
         if signature and not hmac.compare_digest(signature, self._legacy_digest(legacy_key)):
             self._tampered = True
             self._verified_for_session = False
+            self._record_unlock_failure("integrity_verification_failed")
             raise PermissionError("Nexus Brain integrity verification failed; protected data appears to have been modified")
         new_auth, private_key = self._new_creator_auth(creator, secret)
         self._save_auth(new_auth)
+        self._clear_unlock_throttle()
         self._signing_key = private_key
         self._unlocked = True
         self._verified_for_session = True
@@ -383,13 +388,54 @@ class NexusBrain:
         self._save_signed()
         return self.summary()
 
+    def _throttled_seconds(self) -> float:
+        """Remaining unlock-attempt cooldown (persisted backoff wins over memory)."""
+        persisted = float(self._auth().get("unlock_backoff_until") or 0.0)
+        return max(0.0, max(persisted, self._unlock_backoff_until) - time.time())
+
+    def _record_unlock_failure(self, reason: str) -> None:
+        """Exponential backoff on failed creator-unlock attempts (brute-force guard).
+
+        The counter/backoff are persisted to the auth sidecar (outside the
+        signed payload, so it cannot trip integrity checks) with an in-memory
+        fallback for read-only distributions.
+        """
+        self._unlock_failures += 1
+        delay = min(60.0, 2.0 ** min(self._unlock_failures, 6))
+        self._unlock_backoff_until = time.time() + delay
+        try:
+            auth = dict(self._auth())
+            auth["unlock_failures"] = int(auth.get("unlock_failures") or 0) + 1
+            auth["unlock_backoff_until"] = self._unlock_backoff_until
+            self._save_auth(auth)
+        except Exception:
+            pass
+        self._audit("unlock_failed", reason=reason, failures=self._unlock_failures,
+                    backoff_seconds=round(delay, 1))
+
+    def _clear_unlock_throttle(self) -> None:
+        self._unlock_failures = 0
+        self._unlock_backoff_until = 0.0
+        try:
+            auth = dict(self._auth())
+            if auth.get("unlock_failures") or auth.get("unlock_backoff_until"):
+                auth.pop("unlock_failures", None)
+                auth.pop("unlock_backoff_until", None)
+                self._save_auth(auth)
+        except Exception:
+            pass
+
     def unlock(self, creator_name: str, passcode: str) -> dict[str, Any]:
         if not self.initialized:
             raise RuntimeError("Nexus Brain creator lock has not been initialized")
+        wait = self._throttled_seconds()
+        if wait > 0:
+            self._audit("unlock_throttled", wait_seconds=round(wait, 1))
+            raise PermissionError(f"Too many failed unlock attempts; retry in {int(wait) + 1}s")
         auth = self._auth()
         creator = self._clean(creator_name, 120)
         if creator.casefold() != str(auth.get("creator_name") or "").casefold():
-            self._audit("unlock_failed", reason="creator_name_mismatch")
+            self._record_unlock_failure("creator_name_mismatch")
             raise PermissionError("Creator authentication failed")
         secret = str(passcode or "")
         if int(auth.get("version") or 1) < 2:
@@ -408,13 +454,13 @@ class NexusBrain:
                 password=secret.encode("utf-8"),
             )
         except (ValueError, TypeError) as exc:
-            self._audit("unlock_failed", reason="bad_passcode")
+            self._record_unlock_failure("bad_passcode")
             raise PermissionError("Creator authentication failed") from exc
         if not isinstance(private_key, Ed25519PrivateKey):
             raise RuntimeError("Nexus Brain creator signing key is not Ed25519")
         public_key = private_key.public_key()
         if self._public_fingerprint(public_key) != str(auth.get("public_key_sha256") or ""):
-            self._audit("unlock_failed", reason="key_fingerprint_mismatch")
+            self._record_unlock_failure("key_fingerprint_mismatch")
             raise PermissionError("Creator signing key does not match the locked Nexus Brain")
         with self._lock:
             try:
@@ -425,7 +471,7 @@ class NexusBrain:
                 self._signing_key = None
                 self._unlocked = False
                 self._verified_for_session = False
-                self._audit("unlock_failed", reason="integrity_verification_failed")
+                self._record_unlock_failure("integrity_verification_failed")
                 raise PermissionError(
                     "Nexus Brain integrity verification failed; protected data appears to have been modified"
                 ) from exc
@@ -433,6 +479,7 @@ class NexusBrain:
             self._unlocked = True
             self._verified_for_session = True
             self._tampered = False
+            self._clear_unlock_throttle()
             if not str(self._data.get("signature") or ""):
                 self._save_signed()
             self._audit("unlocked", creator=str(auth.get("creator_name") or ""))
