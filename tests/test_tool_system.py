@@ -28,6 +28,7 @@ from localcodeagent.tools.documents import extract_document_text, register_docum
 from localcodeagent.tools.knowledge import KnowledgeIndex, register_knowledge_tools
 from localcodeagent.tools.sandbox import run_python, register_sandbox_tools
 from localcodeagent.events import EventBus, make_emitter
+from localcodeagent.tools.workflows import load_workflows, register_workflow_tools, run_workflow
 
 
 def _registry(**permissions):
@@ -946,6 +947,62 @@ class EventBusTests(unittest.TestCase):
             reg.execute("ok_tool", {})
             seen = [sub.get(timeout=1)["type"] for _ in range(3)]
             self.assertEqual(seen, ["job", "job", "tool"])
+
+
+class WorkflowToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        self.wdir = self.ws / "workflows"
+        self.wdir.mkdir()
+        self.reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
+        register_workflow_tools(self.reg, self.ws, workflows_dir=self.wdir,
+                                jobs=JobManager(self.ws / "jobs.json"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _stub(self, name, result):
+        self.reg.register(ToolSpec(name, "d", {"type": "object", "properties": {}},
+                                   "filesystem.read", (lambda a, r=result: r)))
+
+    def test_load_and_list(self):
+        (self.wdir / "wf.json").write_text(json.dumps({
+            "id": "demo", "name": "Demo", "params": {"x": "1"},
+            "steps": [{"tool": "a", "args": {}}]}))
+        out = json.loads(self.reg.execute("list_workflows", {}))
+        self.assertEqual(out["workflows"][0]["id"], "demo")
+
+    def test_run_workflow_templates_and_outputs(self):
+        self._stub("make", json.dumps({"made": "thing-42"}))
+        captured = {}
+        def use(args):
+            captured.update(args)
+            return "ok"
+        self.reg.register(ToolSpec("use", "d", {"type": "object", "properties": {}},
+                                   "filesystem.read", use))
+        wf = {"id": "w", "steps": [
+            {"tool": "make", "args": {"p": "{params.seed}"}, "save_as": "first"},
+            {"tool": "use", "args": {"v": "{steps.first.made}"}},
+        ]}
+        out = run_workflow(self.reg, wf, {"seed": "x"})
+        self.assertTrue(out["ok"])
+        self.assertEqual(captured["v"], "thing-42")
+        self.assertEqual(out["outputs"]["first"], '{"made": "thing-42"}')
+
+    def test_run_workflow_stops_on_error(self):
+        self._stub("boom", "ERROR: failed hard")
+        self._stub("never", "ok")
+        wf = {"id": "w", "steps": [{"tool": "boom", "args": {}}, {"tool": "never", "args": {}}]}
+        out = run_workflow(self.reg, wf, {})
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["failed_tool"], "boom")
+        self.assertEqual(len(out["steps"]), 1)
+
+    def test_unknown_workflow(self):
+        out = self.reg.execute("run_workflow", {"workflow": "nope"})
+        self.assertIn("ERROR", out)
+        self.assertIn("unknown workflow", out)
 
 
 if __name__ == "__main__":

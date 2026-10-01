@@ -54,6 +54,8 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "knowledge_search": {"category": "research", "capabilities": ["search_knowledge", "local_rag", "recall_documents"], "provider": "nexus"},
     "knowledge_forget": {"category": "research", "capabilities": ["forget_knowledge", "manage_index"], "provider": "nexus"},
     "python_exec": {"category": "utilities", "capabilities": ["execute_code", "run_python", "sandbox_eval"], "provider": "nexus"},
+    "list_workflows": {"category": "utilities", "capabilities": ["list_workflows", "automation"], "provider": "nexus"},
+    "run_workflow": {"category": "utilities", "capabilities": ["run_workflow", "multi_step_automation", "orchestrate_tools"], "provider": "nexus"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

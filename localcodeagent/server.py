@@ -37,6 +37,7 @@ from .events import EventBus, make_emitter
 from .tools.documents import register_document_tools
 from .tools.knowledge import register_knowledge_tools
 from .tools.sandbox import register_sandbox_tools
+from .tools.workflows import register_workflow_tools
 from .tools.media import register_media_tools
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
@@ -199,6 +200,10 @@ class AppState:
         register_document_tools(self.tools, self.workspace, jobs=self.jobs)
         register_knowledge_tools(self.tools, self.workspace)
         register_sandbox_tools(self.tools, self.workspace)
+        wf_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
+        if not wf_dir.is_absolute():
+            wf_dir = self.workspace / wf_dir
+        register_workflow_tools(self.tools, self.workspace, workflows_dir=wf_dir, jobs=self.jobs)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)

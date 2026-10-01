@@ -81,6 +81,7 @@
   "tools_state_path": "data/tools_state.json",
   "jobs_path": "data/jobs.json",
   "tool_manifests_dir": "tools/manifests",
+  "workflows_dir": "workflows",
   "preferred_tools": [],
   "mcp_servers": [
     {

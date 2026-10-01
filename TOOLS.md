@@ -69,6 +69,16 @@ Every registered tool has a manifest:
 | `enabled` | runtime toggle, persisted in `data/tools_state.json` |
 | `callable` | false when a manifest has no invoker (catalog entry only) |
 
+## Workflows
+
+`workflows/*.json` (config `workflows_dir`) define declarative multi-step
+pipelines: each step calls a registered tool by name, so permission gates,
+install checks, and Job Manager tracking apply per step. Steps can pass data
+via `{params.name}` and `{steps.save_as.field}` placeholders (parsed from JSON
+step output). `list_workflows` / `run_workflow` expose them to the agent —
+e.g. the bundled `clip_transcribe` chains thumbnail → audio extract →
+whisper transcription.
+
 ## Tool interfaces
 
 `localcodeagent/tools/interfaces.py` defines structural (duck-typed) contracts:

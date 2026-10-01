@@ -1,0 +1,23 @@
+{
+  "id": "clip_transcribe",
+  "name": "Transcribe a media clip",
+  "description": "Extract audio, transcribe with whisper.cpp, and grab a thumbnail — produces .json/.srt subtitles plus a poster frame.",
+  "params": {
+    "source": "",
+    "language": "auto",
+    "thumbnail": ".agent/media/thumbnail.png",
+    "thumbnail_at": 1.0
+  },
+  "steps": [
+    {
+      "tool": "create_thumbnail",
+      "args": {"source": "{params.source}", "output": "{params.thumbnail}", "at": "{params.thumbnail_at}"},
+      "save_as": "thumbnail"
+    },
+    {
+      "tool": "media_transcribe",
+      "args": {"source": "{params.source}", "language": "{params.language}"},
+      "save_as": "transcript"
+    }
+  ]
+}
