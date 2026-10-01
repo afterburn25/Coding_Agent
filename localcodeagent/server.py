@@ -226,6 +226,7 @@ class AppState:
             self.tools,
             resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
             prefer=getattr(config, "preferred_tools", []),
+            telemetry_path=runtime_root / "data" / "routing_telemetry.jsonl",
         )
         self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])))
         try:
@@ -998,7 +999,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.tool_router.explain(capability, check_health=check_health))
             return
         if path == "/api/tools/telemetry":
-            self._json({"routing": self.state.tool_router.recent(50)})
+            self._json({"routing": self.state.tool_router.recent(50),
+                        "stats": self.state.tool_router.stats()})
             return
         if path == "/api/mcp":
             self._json(self.state.mcp.status())

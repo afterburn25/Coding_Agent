@@ -1072,5 +1072,39 @@ class DockerToolTests(unittest.TestCase):
             self.assertNotIn("--network", captured["argv"])
 
 
+class RouterTelemetryTests(unittest.TestCase):
+    def _registry(self):
+        reg = ToolRegistry({"filesystem.read": "allow"})
+        reg.register(ToolSpec("tool_a", "d", {"type": "object", "properties": {}},
+                              "filesystem.read", lambda a: "ok", capabilities=["cap_x"]))
+        reg.register(ToolSpec("tool_b", "d", {"type": "object", "properties": {}},
+                              "filesystem.read", lambda a: "ERROR: boom", capabilities=["cap_x"]))
+        return reg
+
+    def test_learned_score_ranks_reliable_tool_first(self):
+        reg = self._registry()
+        router = ToolRouter(reg)
+        for _ in range(3):
+            router.execute("cap_x", {}, approved=True)  # tool_a wins, tool_b fails
+        scored = {c["tool"]: c["score"] for c in router.explain("cap_x")["candidates"]}
+        self.assertGreater(scored["tool_a"], scored["tool_b"])
+
+    def test_telemetry_persists_and_stats(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "telemetry.jsonl"
+            reg = self._registry()
+            router = ToolRouter(reg, telemetry_path=path)
+            for _ in range(3):
+                router.execute("cap_x", {}, approved=True)
+            self.assertTrue(path.is_file())
+            # New router instance replays history
+            router2 = ToolRouter(self._registry(), telemetry_path=path)
+            self.assertEqual(len(router2.recent(10)), 3)
+            stats = router2.stats()
+            self.assertEqual(stats["total_events"], 3)
+            row = next(r for r in stats["routes"] if r["tool"] == "tool_a")
+            self.assertEqual(row["success_rate"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

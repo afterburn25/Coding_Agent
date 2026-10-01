@@ -282,6 +282,38 @@
     });
   }
 
+  async function loadTelemetry() {
+    const data = await api("/api/tools/telemetry");
+    const stats = (data.stats && data.stats.routes) || [];
+    const recent = (data.routing || []).slice(-15).reverse();
+    const host = $("telemetryList");
+    if (!stats.length && !recent.length) {
+      host.textContent = "No routing decisions yet — tools chosen via use_capability/run_workflow appear here.";
+      return;
+    }
+    const statsHtml = stats.length ? `
+      <div class="telemetry-sub">Learned routing (feeds tool ranking)</div>
+      ${stats.map((r) => `
+        <div class="telemetry-row">
+          <span class="name">${esc(r.capability)}</span>
+          <span>${esc(r.tool || "—")}</span>
+          <span class="muted">${r.calls} calls</span>
+          <span class="${r.success_rate >= 0.8 ? "ok" : "warn"}">${Math.round(r.success_rate * 100)}%</span>
+          <span class="muted">${r.avg_ms}ms avg</span>
+        </div>`).join("")}` : "";
+    const recentHtml = recent.length ? `
+      <div class="telemetry-sub">Recent decisions</div>
+      ${recent.map((e) => `
+        <div class="telemetry-row">
+          <span class="name">${esc(e.capability)}</span>
+          <span>${esc(e.chosen || "—")}</span>
+          <span class="${e.ok ? "ok" : "warn"}">${e.ok ? "ok" : "failed"}</span>
+          <span class="muted">${Math.round(e.elapsed_ms || 0)}ms · ${fmtTime(e.ts)}</span>
+        </div>`).join("")}` : "";
+    host.innerHTML = statsHtml + recentHtml;
+    host.classList.remove("muted");
+  }
+
   $("applyProfile").addEventListener("click", async () => {
     if (!confirm(`Apply the "${$("permProfile").value}" permission profile?`)) return;
     try {
@@ -295,10 +327,10 @@
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {
-    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp()]).catch((e) => alert(e.message));
+    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp(), loadTelemetry()]).catch((e) => alert(e.message));
   }
   refreshAll();
-  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp()]).catch(() => {}), 5000);
+  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp(), loadTelemetry()]).catch(() => {}), 5000);
 
   // Live updates: job/tool events stream over SSE; polling above stays as the
   // fallback if EventSource is unavailable or the connection drops.

@@ -68,3 +68,7 @@
 .mcp-actions button{font-size:9px;border:1px solid #303744;background:#1a2230;color:#cfd9ec;border-radius:6px;padding:3px 7px;cursor:pointer}
 .mcp-actions button:hover{border-color:#2877ff;color:#fff}
 .small{font-size:10px}
+.telemetry-sub{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#77839a;margin:8px 0 4px}
+.telemetry-row{display:grid;grid-template-columns:140px 130px 90px 60px 1fr;gap:10px;align-items:center;font-size:11px;padding:5px 8px;border:1px solid #20262f;border-radius:8px;margin-bottom:4px}
+.telemetry-row .name{color:#dfe7f5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ok{color:#4ade80}.warn{color:#fbbf24}
