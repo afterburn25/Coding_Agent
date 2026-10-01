@@ -43,6 +43,7 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "create_thumbnail": {"category": "video", "capabilities": ["create_thumbnail", "extract_frames"], "provider": "ffmpeg-project"},
     "normalize_audio": {"category": "audio", "capabilities": ["normalize_audio"], "provider": "ffmpeg-project"},
     "add_subtitles": {"category": "video", "capabilities": ["add_subtitles"], "provider": "ffmpeg-project"},
+    "media_transcribe": {"category": "audio", "capabilities": ["transcribe_video", "transcribe_audio", "generate_subtitles", "media_pipeline"], "provider": "nexus"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

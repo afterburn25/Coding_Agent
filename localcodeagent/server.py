@@ -188,7 +188,7 @@ class AppState:
         self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
         register_api_tools(self.tools, vault=self.secrets)
         register_data_tools(self.tools, self.workspace, artifacts_dir=runtime_root / "data" / "charts")
-        register_media_tools(self.tools, self.workspace)
+        register_media_tools(self.tools, self.workspace, jobs=self.jobs)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)

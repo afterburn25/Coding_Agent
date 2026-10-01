@@ -767,6 +767,20 @@ class MediaToolTests(unittest.TestCase):
             out = reg.execute("trim_video", {"source": "../nope.mp4", "output": "x.mp4"})
             self.assertTrue(out.startswith("ERROR"))
 
+    def test_media_transcribe_pipeline_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "clip.mp4").write_bytes(b"fake")
+            reg = ToolRegistry({"shell.execute": "allow", "filesystem.write": "allow"})
+            register_media_tools(reg, ws, jobs=JobManager(ws / "jobs"))
+            raw = reg.execute("media_transcribe", {"source": "clip.mp4"})
+            if raw.startswith("ERROR"):
+                self.assertIn("model", raw.lower())  # no whisper model in fixture
+            else:
+                out = json.loads(raw)
+                self.assertFalse(out["ok"])
+                self.assertEqual(out.get("failed_step"), "extract_audio")
+
 
 if __name__ == "__main__":
     unittest.main()

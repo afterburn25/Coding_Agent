@@ -115,7 +115,18 @@ def build_merge(files: list[Path], dst: Path) -> list[str]:
     return argv
 
 
-def register_media_tools(registry: ToolRegistry, workspace: Path) -> None:
+def default_whisper_model(workspace: Path) -> str | None:
+    """Find a whisper GGML model under models/audio or models/."""
+    for base in (workspace / "models" / "audio", workspace / "models"):
+        if not base.is_dir():
+            continue
+        for candidate in sorted(base.glob("*.bin")) + sorted(base.glob("*.gguf")):
+            if "whisper" in candidate.name.lower() or candidate.name.startswith("ggml-"):
+                return str(candidate)
+    return None
+
+
+def register_media_tools(registry: ToolRegistry, workspace: Path, *, jobs=None) -> None:
 
     def _src_dst(args: dict[str, Any]) -> tuple[Path, Path] | str:
         src = _resolve(workspace, str(args.get("source", "")))
@@ -213,4 +224,75 @@ def register_media_tools(registry: ToolRegistry, workspace: Path) -> None:
         },
         "shell.execute", add_subtitles,
         category="video", capabilities=["add_subtitles"],
+    ))
+
+    def media_transcribe(args: dict[str, Any]) -> str:
+        """Chain: extract audio (ffmpeg) -> whisper.cpp -> subtitles file."""
+        src = _resolve(workspace, str(args.get("source", "")))
+        if src is None:
+            return "ERROR: source must be an existing file inside the workspace"
+        model = str(args.get("model", "") or "") or (default_whisper_model(workspace) or "")
+        if not model:
+            return "ERROR: no whisper model — set 'model' or place a ggml-*.bin under models/audio/"
+        model_path = Path(model)
+        if not model_path.is_absolute():
+            model_path = _resolve(workspace, model) or Path(model)
+        if not model_path.is_file():
+            return f"ERROR: whisper model not found: {model}"
+        workdir = workspace / ".agent" / "media"
+        workdir.mkdir(parents=True, exist_ok=True)
+        audio = workdir / f"{src.stem}-{int(time.time())}.wav"
+        job = jobs.submit("media", f"Transcribe {src.name}") if jobs is not None else None
+        steps: list[dict[str, Any]] = []
+
+        if job:
+            jobs.update(job.id, state="running", detail="extracting audio")
+        result = registry.execute("extract_audio", {
+            "source": str(src.relative_to(workspace)),
+            "output": str(audio.relative_to(workspace)),
+        }, approved=bool(args.get("approved", False)))
+        steps.append({"step": "extract_audio", "ok": not result.startswith(("ERROR", "PERMISSION", "TOOL_", "APPROVAL"))})
+        if not steps[-1]["ok"]:
+            if job:
+                jobs.update(job.id, state="failed", error=result[:300])
+            return json.dumps({"ok": False, "failed_step": "extract_audio", "detail": result[:500], "steps": steps})
+
+        if job:
+            jobs.update(job.id, detail="transcribing (whisper.cpp)")
+        whisper_args: list[str] = ["-l", str(args.get("language", "auto"))]
+        result = registry.execute("whisper", {
+            "model": str(model_path),
+            "file": str(audio),
+            "args": whisper_args,
+        }, approved=bool(args.get("approved", False)))
+        steps.append({"step": "transcribe", "ok": not result.startswith(("ERROR", "PERMISSION", "TOOL_", "APPROVAL"))})
+        if not steps[-1]["ok"]:
+            if job:
+                jobs.update(job.id, state="failed", error=result[:300])
+            return json.dumps({"ok": False, "failed_step": "transcribe", "detail": result[:500],
+                               "audio": str(audio), "steps": steps})
+        srt = audio.with_suffix(".srt")
+        out = {"ok": True, "steps": steps, "audio": str(audio),
+               "transcript_json": str(audio.with_suffix(".json")), "subtitles": str(srt) if srt.exists() else "",
+               "detail": result[:500]}
+        if job:
+            jobs.update(job.id, state="completed", detail=f"subtitles: {srt.name if srt.exists() else 'n/a'}")
+        return json.dumps(out, ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "media_transcribe",
+        "Media Agent recipe: extract audio from a video/audio file with FFmpeg, then transcribe with whisper.cpp to produce JSON + SRT subtitles. Chains through the Tool Registry — every step is permission-gated.",
+        {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "video/audio file in the workspace"},
+                "model": {"type": "string", "description": "whisper GGML model path (auto-detected under models/)"},
+                "language": {"type": "string", "default": "auto"},
+            },
+            "required": ["source"],
+        },
+        "shell.execute",
+        media_transcribe,
+        category="audio",
+        capabilities=["transcribe_video", "transcribe_audio", "generate_subtitles", "media_pipeline"],
     ))
