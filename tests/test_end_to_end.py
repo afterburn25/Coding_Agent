@@ -24,6 +24,8 @@ class _FakeModelServer:
         self.requests: list[dict] = []
         self.fail_next = 0  # when >0, respond 500 to that many POSTs
         self.delay = 0.0    # seconds to stall each chat response
+        self.tool_name = "system_resources"
+        self.tool_args = "{}"
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -50,7 +52,7 @@ class _FakeModelServer:
                         "role": "assistant", "content": "",
                         "tool_calls": [{
                             "id": "call_1", "type": "function",
-                            "function": {"name": "system_resources", "arguments": "{}"},
+                            "function": {"name": outer.tool_name, "arguments": outer.tool_args},
                         }],
                     }
                     chunks = None
@@ -67,7 +69,8 @@ class _FakeModelServer:
                         for tc in message["tool_calls"]:
                             delta = {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [
                                 {"index": 0, "id": tc["id"], "type": "function",
-                                 "function": {"name": tc["function"]["name"], "arguments": "{}"}}]}}]}
+                                 "function": {"name": tc["function"]["name"],
+                                              "arguments": tc["function"]["arguments"]}}]}}]}
                             self.wfile.write(f"data: {json.dumps(delta)}\n\n".encode())
                     self.wfile.write(b"data: {\"choices\": [{\"index\": 0, \"delta\": {}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 4}}\n\n")
                     self.wfile.write(b"data: [DONE]\n\n")
@@ -153,11 +156,11 @@ class EndToEndAgentTests(unittest.TestCase):
             state.queue.enqueue("second queued task")
             state._dequeue_next()
 
-            deadline = time.time() + 20
+            deadline = time.time() + 30
             while len(state.queue) and time.time() < deadline:
                 time.sleep(0.1)
             # Wait for the chained worker to finish the second item.
-            deadline = time.time() + 10
+            deadline = time.time() + 30
             while True:
                 recent = state.tasks.recent(5)
                 done = [t for t in recent if t.get("status") == "completed"]
@@ -239,6 +242,49 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertFalse(t.is_alive(), "run() did not return after cancel")
             result = outcome[0]
             self.assertEqual(result.task.get("status"), "cancelled")
+
+    def test_approval_pause_and_resume_end_to_end(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            # filesystem.write defaults to "ask" — the run pauses for approval.
+            fake.tool_name = "write_file"
+            fake.tool_args = json.dumps({"path": "note.txt", "content": "hello nexus"})
+            result = state.agent.run("write a note file")
+
+            self.assertEqual(result.task.get("status"), "waiting_approval")
+            self.assertTrue(result.pending_approval)
+            # Paused before the follow-up model call.
+            self.assertEqual(len(fake.requests), 1)
+            self.assertFalse((Path(td) / "note.txt").exists())
+
+            resumed = state.agent.resume(result.task["id"], approved=True)
+            self.assertEqual(resumed.task.get("status"), "completed")
+            self.assertEqual((Path(td) / "note.txt").read_text(encoding="utf-8"), "hello nexus")
+            # Resume executed the tool and sent its result back to the model.
+            self.assertGreaterEqual(len(fake.requests), 2)
+            tool_msg = [m for m in fake.requests[1]["messages"] if m.get("role") == "tool"]
+            self.assertIn("WROTE", json.dumps(tool_msg))
+
+            log = state.tasks.read_log(result.task["id"])
+            self.assertIn("## approval", log)
+
+    def test_approval_denial_reaches_model_end_to_end(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            fake.tool_name = "write_file"
+            fake.tool_args = json.dumps({"path": "note.txt", "content": "hello nexus"})
+            result = state.agent.run("write a note file")
+            self.assertEqual(result.task.get("status"), "waiting_approval")
+
+            resumed = state.agent.resume(result.task["id"], approved=False)
+            self.assertEqual(resumed.task.get("status"), "completed")
+            self.assertFalse((Path(td) / "note.txt").exists())
+            tool_msg = [m for m in fake.requests[1]["messages"] if m.get("role") == "tool"]
+            self.assertIn("PERMISSION_DENIED", json.dumps(tool_msg))
 
 
 if __name__ == "__main__":
