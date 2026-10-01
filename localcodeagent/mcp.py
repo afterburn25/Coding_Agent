@@ -32,6 +32,8 @@ class MCPServerConfig:
     command: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     cwd: str = ""
+    url: str = ""
+    transport: str = "stdio"  # stdio | http
     enabled: bool = True
     auto_start: bool = True
     permission: str = "shell.execute"
@@ -41,15 +43,21 @@ class MCPServerConfig:
         command = raw.get("command", [])
         if isinstance(command, str):
             command = [command]
+        url = str(raw.get("url") or raw.get("endpoint") or "").strip()
+        transport = str(raw.get("transport") or ("http" if url else "stdio")).strip().lower()
+        # HTTP servers call remote services — default to the external_api gate.
+        default_permission = "external_api.call" if transport == "http" else "shell.execute"
         return cls(
             id=str(raw.get("id") or raw.get("name") or "").strip(),
             name=str(raw.get("name") or raw.get("id") or "").strip(),
             command=[str(c) for c in command],
             env={str(k): str(v) for k, v in (raw.get("env") or {}).items()},
             cwd=str(raw.get("cwd") or ""),
+            url=url,
+            transport=transport,
             enabled=bool(raw.get("enabled", True)),
             auto_start=bool(raw.get("auto_start", True)),
-            permission=str(raw.get("permission") or "shell.execute"),
+            permission=str(raw.get("permission") or default_permission),
         )
 
 
@@ -219,6 +227,99 @@ class MCPClient:
             pass
 
 
+class MCPHTTPClient:
+    """Streamable-HTTP MCP client: POSTs JSON-RPC, tolerates plain-JSON or SSE
+    (``data:``) responses, and tracks the ``Mcp-Session-Id`` header."""
+
+    def __init__(self, config: MCPServerConfig, *, timeout: float = 30.0) -> None:
+        self.config = config
+        self.timeout = timeout
+        self._next_id = 0
+        self._session_id = ""
+        self._connected = False
+        self._send_lock = threading.Lock()
+
+    def start(self) -> None:
+        if self._connected:
+            return
+        if not self.config.url:
+            raise MCPError(f"MCP server '{self.config.id}' has no url")
+        self._connected = True
+
+    def is_alive(self) -> bool:
+        return self._connected
+
+    def close(self) -> None:
+        self._connected = False
+        self._session_id = ""
+
+    def _post(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        import urllib.request
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+        }
+        if self._session_id:
+            headers["Mcp-Session-Id"] = self._session_id
+        req = urllib.request.Request(
+            self.config.url, data=json.dumps(message).encode("utf-8"),
+            headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                sid = resp.headers.get("Mcp-Session-Id") or resp.headers.get("mcp-session-id")
+                if sid:
+                    self._session_id = sid
+                if resp.status == 202 or resp.status == 204:
+                    return None
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            raise MCPError(f"MCP HTTP {exc.code}: {exc.read()[:300]!r}") from exc
+        except OSError as exc:
+            raise MCPError(f"MCP HTTP request failed: {exc}") from exc
+        # Streamable HTTP may answer with SSE frames — take the last data: line.
+        payload = ""
+        for line in body.splitlines():
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+        if not payload:
+            payload = body.strip()
+        if not payload:
+            return None
+        try:
+            return json.loads(payload)
+        except ValueError as exc:
+            raise MCPError(f"invalid MCP response: {payload[:200]}") from exc
+
+    def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        if not self.is_alive():
+            raise MCPError(f"MCP server '{self.config.id}' is not connected")
+        with self._send_lock:
+            self._next_id += 1
+            message = self._post({"jsonrpc": "2.0", "id": self._next_id,
+                                  "method": method, "params": params or {}})
+        if message is None:
+            raise MCPError(f"MCP request '{method}' returned no body")
+        if "error" in message:
+            err = message["error"]
+            raise MCPError(f"MCP error {err.get('code')}: {err.get('message')}")
+        return message.get("result")
+
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        if self.is_alive():
+            try:
+                self._post({"jsonrpc": "2.0", "method": method, "params": params or {}})
+            except Exception:
+                pass
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        result = self.request("tools/list", {})
+        return list((result or {}).get("tools") or [])
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.request("tools/call", {"name": name, "arguments": arguments})
+
+
 class MCPManager:
     """Lifecycle manager for configured MCP servers; imports tools into the registry."""
 
@@ -246,7 +347,8 @@ class MCPManager:
                 return self._status_row(server_id)
             if client is not None:
                 client.close()
-            client = MCPClient(config, timeout=self._timeout)
+            client = (MCPHTTPClient if config.transport == "http" else MCPClient)(
+                config, timeout=self._timeout)
             try:
                 client.start()
             except Exception as exc:
@@ -262,7 +364,9 @@ class MCPManager:
                 self._status[server_id] = {"state": "error", "error": f"tools/list failed: {exc}", "tools": 0}
                 return self._status_row(server_id)
             imported = self._import_tools(server_id, client, tools)
-            self._status[server_id] = {"state": "connected", "error": "", "tools": imported, "pid": client._proc.pid if client._proc else None}
+            pid = getattr(client, "_proc", None)
+            self._status[server_id] = {"state": "connected", "error": "", "tools": imported,
+                                       "pid": pid.pid if pid else None}
             return self._status_row(server_id)
 
     def disconnect(self, server_id: str) -> dict[str, Any]:
@@ -305,6 +409,8 @@ class MCPManager:
             "name": config.name if config else server_id,
             "enabled": config.enabled if config else False,
             "command": list(config.command) if config else [],
+            "transport": config.transport if config else "stdio",
+            "url": config.url if config else "",
             "state": st.get("state", "disconnected"),
             "error": st.get("error", ""),
             "tools": st.get("tools", 0),

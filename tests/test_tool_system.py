@@ -604,6 +604,64 @@ class MCPManagerTests(unittest.TestCase):
             mgr.connect("nope")
 
 
+class MCPHTTPTests(unittest.TestCase):
+    def _http_server(self):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                msg = json.loads(self.rfile.read(length) or b"{}")
+                if msg.get("id") is None:
+                    self.send_response(202)
+                    self.end_headers()
+                    return
+                method = msg.get("method")
+                if method == "tools/list":
+                    result = {"tools": [{"name": "ping", "description": "pong",
+                                         "inputSchema": {"type": "object", "properties": {}}}]}
+                elif method == "tools/call":
+                    result = {"content": [{"type": "text", "text": "pong"}]}
+                else:
+                    result = {"capabilities": {"tools": {}}, "serverInfo": {"name": "fake-http"}}
+                body = json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Mcp-Session-Id", "sess-1")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        return f"http://127.0.0.1:{server.server_port}/mcp"
+
+    def test_http_transport_connects_and_calls(self):
+        url = self._http_server()
+        reg = ToolRegistry({"external_api.call": "allow"})
+        cfg = MCPServerConfig.from_dict({"id": "webmcp", "url": url})
+        self.assertEqual(cfg.transport, "http")
+        self.assertEqual(cfg.permission, "external_api.call")
+        mgr = MCPManager(reg, [cfg], timeout=10)
+        self.addCleanup(mgr.shutdown)
+        row = mgr.connect("webmcp")
+        self.assertEqual(row["state"], "connected", row)
+        self.assertEqual(row["tools"], 1)
+        spec = reg.get("mcp__webmcp__ping")
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.permission, "external_api.call")
+        out = reg.execute("mcp__webmcp__ping", {})
+        self.assertEqual(out, "pong")
+        status = mgr.status()["servers"][0]
+        self.assertEqual(status["transport"], "http")
+
+
 class BrowserRunnerTests(unittest.TestCase):
     def test_session_path_sanitized(self):
         from localcodeagent.webtools.browser import BrowserRunner

@@ -7,11 +7,16 @@ depend exclusively on MCP — native tools remain first-class.
 
 ## Transport
 
-`localcodeagent/mcp.py` implements a stdio JSON-RPC 2.0 client
-(newline-delimited messages, per the MCP stdio transport spec). Each configured
-server runs as a child process; `initialize`/`notifications/initialized`
-handshake, `tools/list` schema import, and `tools/call` execution are
-supported.
+Two transports are supported:
+
+- **stdio** (default): newline-delimited JSON-RPC 2.0 over a spawned child
+  process' stdin/stdout, per the MCP stdio transport spec.
+- **http** (Streamable HTTP): JSON-RPC POSTs to a configured `url` —
+  plain-JSON or `text/event-stream` (`data:`) responses are handled and the
+  `Mcp-Session-Id` header is tracked automatically.
+
+Both support `initialize`/`notifications/initialized`,
+`tools/list` schema import, and `tools/call` execution.
 
 ## Configuration
 
@@ -36,9 +41,11 @@ Add servers to `config.json` (`mcp_servers`):
 | --- | --- |
 | `id` | stable server id used in tool names and API calls |
 | `command` | argv launched as a subprocess (stdio transport) |
+| `url` | HTTP endpoint for the `http` transport (Streamable HTTP) |
+| `transport` | `stdio` (default) or `http` — auto-set when `url` is present |
 | `env` | extra environment variables (secrets by reference recommended) |
 | `enabled` / `auto_start` | whether the server may run / is connected at backend startup |
-| `permission` | permission key applied to every imported tool (default `shell.execute`) |
+| `permission` | permission key applied to every imported tool (default `shell.execute` for stdio, `external_api.call` for http) |
 
 ## Imported tools
 
