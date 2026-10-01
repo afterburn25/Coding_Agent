@@ -2056,7 +2056,11 @@ class Handler(BaseHTTPRequestHandler):
                 if getattr(self.state.config, "chat_queue_when_busy", True):
                     current = self.state.tasks.current()
                     if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
-                        item = self.state.queue.enqueue(message, mode=mode)
+                        try:
+                            item = self.state.queue.enqueue(message, mode=mode)
+                        except ValueError as exc:
+                            self._json({"error": str(exc)}, 429)
+                            return
                         self.state.events.publish("task", {"event": "queued", "queue_item": item})
                         self._sse_begin()
                         self._sse_event("ready", {"mode": mode, "queued": True})
@@ -2192,7 +2196,11 @@ class Handler(BaseHTTPRequestHandler):
                 if getattr(self.state.config, "chat_queue_when_busy", True):
                     current = self.state.tasks.current()
                     if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
-                        item = self.state.queue.enqueue(message, mode=mode)
+                        try:
+                            item = self.state.queue.enqueue(message, mode=mode)
+                        except ValueError as exc:
+                            self._json({"error": str(exc)}, 429)
+                            return
                         self.state.events.publish("task", {"event": "queued", "queue_item": item})
                         self._json({
                             "content": (
@@ -2240,7 +2248,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not prompt:
                     self._json({"error": "prompt is required"}, 400)
                     return
-                item = self.state.queue.enqueue(prompt, mode=str(body.get("mode", "auto")))
+                try:
+                    item = self.state.queue.enqueue(prompt, mode=str(body.get("mode", "auto")))
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 429)
+                    return
                 self.state.events.publish("task", {"event": "queued", "queue_item": item})
                 try:
                     self.state._dequeue_next()

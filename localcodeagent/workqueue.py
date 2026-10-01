@@ -16,6 +16,8 @@ class WorkQueue:
     through a list instead of a single request.
     """
 
+    MAX_ITEMS = 200
+
     def __init__(self, workspace: Path) -> None:
         self.root = workspace.resolve() / ".agent"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -40,6 +42,8 @@ class WorkQueue:
 
     def enqueue(self, prompt: str, *, mode: str = "auto") -> dict[str, Any]:
         with self._lock:
+            if len(self._items) >= self.MAX_ITEMS:
+                raise ValueError(f"Work queue is full ({self.MAX_ITEMS} items); wait for tasks to finish or cancel queued items")
             item = {
                 "id": uuid.uuid4().hex[:12],
                 "prompt": prompt,

@@ -16,7 +16,10 @@ def register_queue_tools(registry: ToolRegistry, queue) -> None:
         prompt = str(args.get("prompt", "")).strip()
         if not prompt:
             return "ERROR: prompt is required"
-        item = queue.enqueue(prompt, mode=str(args.get("mode") or "auto"))
+        try:
+            item = queue.enqueue(prompt, mode=str(args.get("mode") or "auto"))
+        except ValueError as exc:
+            return f"ERROR: {exc}"
         return json.dumps({"queued": item["id"], "position": len(queue), "prompt": item["prompt"]})
 
     def queue_list(args: dict) -> str:

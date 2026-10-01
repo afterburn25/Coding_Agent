@@ -1589,6 +1589,16 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertTrue(reloaded.remove(reloaded.list()[0]["id"]))
             self.assertEqual(len(reloaded), 0)
 
+    def test_work_queue_is_bounded(self):
+        from localcodeagent.workqueue import WorkQueue
+        with tempfile.TemporaryDirectory() as td:
+            q = WorkQueue(Path(td))
+            for i in range(WorkQueue.MAX_ITEMS):
+                q.enqueue(f"task {i}")
+            with self.assertRaises(ValueError):
+                q.enqueue("one too many")
+            self.assertEqual(len(q), WorkQueue.MAX_ITEMS)
+
     def test_queue_dequeues_when_idle(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.config import AgentConfig, ModelProfile
