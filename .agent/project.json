@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 322,
+  "test_checkpoint": 325,
   "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling — MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -480,6 +480,37 @@
     "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)",
     "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
     "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
-    "workflows_api": "GET /api/workflows + Tools-page Workflows panel"
+    "workflows_api": "GET /api/workflows + Tools-page Workflows panel",
+    "work_queue": {
+      "durable": ".agent/queue.json",
+      "apis": [
+        "GET /api/queue",
+        "POST /api/queue",
+        "POST /api/queue/cancel"
+      ],
+      "agent_tools": [
+        "queue_task",
+        "queue_list",
+        "queue_cancel"
+      ],
+      "busy_chat": "chat_queue_when_busy auto-enqueues while a task is active"
+    },
+    "event_bus_reconnect": {
+      "bus": "localcodeagent/events.py EventBus — /api/events SSE, 100-event replay",
+      "mirroring": "non-token agent events publish with task_id via AppState._bus_emit",
+      "ui": "web/app.js connectAgentEvents + agentStreamActive dedup",
+      "transcript": ".agent/terminal/<task>.log, GET /api/task-log, pruned on load"
+    },
+    "autonomy": {
+      "autonomous_mode": "auto-approves ask/session; hard gates never auto-approve",
+      "bounds": [
+        "agent_tool_timeout_seconds",
+        "autonomous_max_continuations",
+        "autonomous_approval_timeout_seconds",
+        "autonomous_error_retry_seconds",
+        "autonomous_max_recoveries",
+        "model_idle_unload_seconds"
+      ]
+    }
   }
 }
