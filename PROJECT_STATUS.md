@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `12fbfbe`; verified suite: **323/323**; CI green on latest push.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `cd260c8`; verified suite: **324/324**; CI green on latest push.
 
 ## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
 
@@ -267,7 +267,7 @@ Unit checkpoint: **282 tests passing**.
 
 ## Next milestone
 
-**Modular workstation core is in place** (323 tests). Priorities:
+**Modular workstation core is in place** (324 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)
