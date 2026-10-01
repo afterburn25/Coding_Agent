@@ -297,7 +297,7 @@ function handleAgentStreamEvent(name,data,state){
     const entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];
     if(entry){
       const out=entry.el.querySelector('.term-out');
-      if(out){out.textContent+=String(data.chunk||'');activity.scrollTop=activity.scrollHeight;}
+      if(out){out.textContent=(out.textContent+String(data.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}
     }
     return;
   }
