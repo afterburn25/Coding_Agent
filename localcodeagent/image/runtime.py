@@ -132,6 +132,12 @@ class ComfyUIRuntime:
             logs = self._resolve(str(getattr(self.config, "comfyui_logs_dir", ".agent/runtime")))
             logs.mkdir(parents=True, exist_ok=True)
             log_path = logs / "comfyui.log"
+            try:
+                # Bound the append-only process log for unattended runs.
+                if log_path.exists() and log_path.stat().st_size > 8 * 1024 * 1024:
+                    log_path.write_bytes(log_path.read_bytes()[-4 * 1024 * 1024:])
+            except OSError:
+                pass
             self._log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
             flags = 0
             if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):

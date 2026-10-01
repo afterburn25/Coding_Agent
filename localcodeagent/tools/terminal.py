@@ -44,6 +44,21 @@ class TerminalTracker:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._procs: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        self._prune_logs()
+
+    def _prune_logs(self, keep: int = 200) -> None:
+        """Each background job writes terminal-<job>.log; keep only the
+        newest handful so long-running deployments do not accumulate files."""
+        try:
+            logs = sorted(
+                self.log_dir.glob("terminal-*.log"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            for path in logs[keep:]:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def spawn(self, argv: list[str], *, cwd: Path, env: dict[str, str] | None, job_id: str, command: str) -> dict[str, Any]:
         log_path = self.log_dir / f"terminal-{job_id}.log"

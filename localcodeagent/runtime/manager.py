@@ -576,6 +576,13 @@ class RuntimeManager:
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
         endpoint = self._profile_endpoint(profile, port)
         log_path = self.logs_dir / f"{profile.id}.log"
+        try:
+            # The per-model log appends on every start — bound it so months of
+            # unattended restarts cannot grow it without limit.
+            if log_path.exists() and log_path.stat().st_size > 8 * 1024 * 1024:
+                log_path.write_bytes(log_path.read_bytes()[-4 * 1024 * 1024:])
+        except OSError:
+            pass
         log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
         command = self._build_command(profile, port)
         creationflags = 0
