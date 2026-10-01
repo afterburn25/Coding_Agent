@@ -436,6 +436,17 @@ function connectAgentEvents(){
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
     on('activity',d=>{upsertActivityRow(d.activity||d);});
+    on('job',d=>{
+      const j=d.job||d;const jid=String(j.id||'');if(!jid)return;
+      const kind=String(j.kind||'job');const state={completed:'completed',finished:'completed',failed:'failed',cancelled:'interrupted',queued:'waiting'}[String(j.state||'running')]||'running';
+      const cat=/download|install|model/.test(kind)?'download':(/tune|benchmark/.test(kind)?'model':'tool');
+      const pct=j.progress!=null?Math.round(Number(j.progress)*100)+'%':'';
+      upsertActivityRow({id:'job:'+jid,task_id:j.task_id||'',category:cat,
+        title:String(j.title||kind),state,
+        summary:[String(j.status||j.state||'').replaceAll('_',' '),pct,j.detail?String(j.detail).slice(0,200):''].filter(Boolean).join(' · '),
+        details:{bytes_done:j.bytes_done,bytes_total:j.bytes_total,error:j.error||''},
+        started_at:Number(j.started_at||Date.now()/1000),elapsed:null});
+    });
     on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}});
     on('image_job',d=>{if(d.job){renderImageJobs([d.job]);imageJobActivityRow(d.job);}});
     on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
