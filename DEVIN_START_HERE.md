@@ -1,4 +1,4 @@
-# DEVIN START HERE — Chat Nexus takeover
+# DEVIN START HERE — Nexus Core takeover
 
 This file is the handoff entry point for Devin. **Do not reconstruct project state from chat history if the repository can answer it.**
 
@@ -34,12 +34,12 @@ Read in this order:
 
 ## Product direction that must be preserved
 
-Chat Nexus is a **native local-first Windows AI workstation**, not a browser-only demo.
+Nexus Core is a **native local-first Windows AI workstation**, not a browser-only demo.
 
 Canonical delivery stack:
 
 ```text
-ChatNexus.exe
+NexusCore.exe
   .NET 8 WinForms + Microsoft WebView2
         |
         v
@@ -106,7 +106,7 @@ Do not remove these checks.
 From GitHub Actions run `36796088939`:
 
 - Artifact `11133807708`
-  - `Chat-Nexus-Setup-0.6.0-dev-Windows-x64`
+  - `NexusCore-Setup-0.6.0-dev-Windows-x64`
   - 75,555,341 bytes
 - Artifact `11133708132`
   - `Chat-Nexus-v0.6.0-dev-Windows-x64`
@@ -315,7 +315,7 @@ It must **not expose hidden chain-of-thought/private reasoning**.
 
 ## Time awareness
 
-Chat Nexus uses the host OS clock via timezone-aware runtime timestamps.
+Nexus Core uses the host OS clock via timezone-aware runtime timestamps.
 
 It understands:
 - current date
@@ -498,7 +498,7 @@ Do not put a creator-private Brain/auth file into the public repository.
 Before accepting a substantial change, verify these still hold:
 
 - `main` remains the source of truth.
-- Native `ChatNexus.exe` still launches the hidden backend.
+- Native `NexusCore.exe` still launches the hidden backend.
 - Installer still preserves `models/`, `data/`, `config.json`, `workflows/`, and `Source/`.
 - Unit suite remains green.
 - Windows build/installer/update smoke remains green.
@@ -574,7 +574,7 @@ Recommended order:
 
 ## v0.7 direction — modular local AI workstation
 
-User direction (2026-09-30): expand Chat Nexus into a modular, general-purpose
+User direction (2026-09-30): expand Nexus Core into a modular, general-purpose
 local AI workstation with a unified tool/plugin system. Users describe the
 outcome; the agent chooses the models, tools, runtimes, and external
 applications automatically. Do not build it as one tightly coupled subsystem —

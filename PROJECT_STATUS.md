@@ -2,7 +2,7 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `0cbe0ab`; verified suite: **362 / 362**; CI green on latest push.
 
-## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
+## Active version: 0.6.0-dev — Native Nexus Core Desktop Dogfood
 
 ### Stable capabilities retained from v0.1–v0.3
 
@@ -53,7 +53,7 @@
 - Local image model/LoRA asset library with install verification and explicit repair/remove operations.
 - Operation-specific ComfyUI workflow selection per image model.
 - Safe upload of source/reference/mask images into ComfyUI input storage.
-- Generated ComfyUI `extra_model_paths.yaml` for Chat Nexus model directories.
+- Generated ComfyUI `extra_model_paths.yaml` for Nexus Core model directories.
 - Image Model Manager UI for verify/install/repair/remove plus install progress.
 - LoRA discovery/metadata display foundation.
 - ComfyUI API-workflow validation before model loading.
@@ -83,14 +83,14 @@
 - Active tasks that were running/verifying/reviewing are marked `interrupted` on startup instead of being left falsely active.
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
-- Chat Nexus UI surfaces a **Resume interrupted task** action.
+- Nexus Core UI surfaces a **Resume interrupted task** action.
 - GitHub Actions test workflow runs on push/PR and currently passes all 362 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
 - Live SSE chat streaming now carries token/model/tool/task/research/approval events to the primary UI.
 - OpenAI-compatible streamed tool calls are reassembled before execution; non-SSE JSON endpoints fall back safely.
-- Isolated self-update validator runs the full tests and launches a second resource-safe Chat Nexus process before self-changes are considered verified.
+- Isolated self-update validator runs the full tests and launches a second resource-safe Nexus Core process before self-changes are considered verified.
 - CI regression coverage launches the isolated second instance and probes status + main/Image/Research UIs.
 - Coding-readiness diagnostics classify the active stack as Setup required / Ready to code / Self-host ready.
 - Readiness checks local endpoint health, `llama-server`, GGUF paths/inventory, role coverage, resource fit, Git/selftest availability.
@@ -99,14 +99,14 @@
 - Catalog distinguishes official source weights from community quantizations and records source/license/hardware notes.
 - Runtime discovery supports both `llama-server` and the 2026 unified `llama serve` command.
 - Coding-readiness UI gives safe copyable OS-specific install guidance; system package installers are never executed automatically.
-- Fresh/recovered self-development tasks automatically receive Chat Nexus self-hosting guardrails.
+- Fresh/recovered self-development tasks automatically receive Nexus Core self-hosting guardrails.
 - Self-development launcher pre-fills a safe dogfood task but never starts edits automatically.
 - Local model-performance telemetry now records content-free task outcomes and contributes a bounded routing score only after resource-fit filtering and a minimum sample threshold.
 - `GET /api/model-telemetry` exposes aggregate model/role/complexity statistics; default local history is `.agent/model_performance.json`.
 - First-run model setup now exposes the exact model install directory and free disk space, shows live progress in the primary setup card, keeps quick-install controls disabled while a plan is running, and preflights disk capacity before starting large downloads.
 - Backend model installation also rejects a new download when the target volume cannot hold the model plus working space; manual/discovered-model configuration is now consistently marked no-restart.
 - The canonical Windows installer is now a model bootstrapper: fresh installs download and SHA-256 verify Qwen3 14B + Qwen3-Coder 30B-A3B during setup, while updates skip verified existing models and fetch only missing/untrusted canonical model files.
-- Existing-install UI now says **Update Chat Nexus**, asks **Update now?**, and changes the Ready-page action from Install to **Update**. The setup EXE stays small because GGUF bytes are downloaded directly into the final `models` directory instead of being bundled.
+- Existing-install UI now says **Update Nexus Core**, asks **Update now?**, and changes the Ready-page action from Install to **Update**. The setup EXE stays small because GGUF bytes are downloaded directly into the final `models` directory instead of being bundled.
 - The installer now shows two progress tracks when models are needed: the built-in bar remains the overall install/update progress, while a second model bar appears beneath it, reports the current model and MB downloaded, fills for 14B, then resets for 30B.
 - Runtime fit now accounts for reclaimable resident-model RAM/VRAM before a `max_resident_models=1` switch, preventing the loaded 14B model from making the 30B candidate look artificially unavailable.
 - Auto mode now falls back to another runnable model if initial/deep/reviewer activation fails; reviewer startup failure no longer terminates an otherwise completed coding task.
@@ -118,8 +118,8 @@
 - Managed llama.cpp RAM gating now has a bounded near-fit auto-fit band: small estimate gaps (including the observed 30.0 GB estimate vs 29.8 GB available) are allowed to try runtime CPU/GPU placement, while clearly oversized models remain rejected.
 - Auto-mode greetings/capability questions now complete through a built-in local utility response without touching model readiness or starting llama.cpp.
 - The native desktop captures hidden backend output to `data/logs/backend-host.log` and performs a bounded automatic backend restart on unexpected backend exit.
-- Windows Update no longer depends on Inno Restart Manager for the Chat Nexus process tree. Setup owns shutdown/cleanup of the desktop, backend, and llama.cpp child processes before file replacement.
-- CI now launches a deliberate long-running executable named `ChatNexus.exe` before the second installer run and fails unless the updater closes it successfully.
+- Windows Update no longer depends on Inno Restart Manager for the Nexus Core process tree. Setup owns shutdown/cleanup of the desktop, backend, and llama.cpp child processes before file replacement.
+- CI now launches a deliberate long-running executable named `NexusCore.exe` before the second installer run and fails unless the updater closes it successfully.
 - `TaskStore.current()` now returns the newest record rather than searching backward for any interrupted task; old interrupted work remains in Recent tasks but cannot replace a newer completed request.
 - Stream-close diagnosis is request-scoped: it prefers the task event observed by the current stream and only accepts global task state if its creation time matches the current request.
 - The WebView short-circuits the most basic greeting/capability prompts locally before SSE, and the backend serves UI assets with `Cache-Control: no-store` to eliminate stale post-Update JavaScript.
@@ -133,11 +133,11 @@
 
 ### Native desktop dogfood checkpoint
 
-- Windows product delivery is now a real **`ChatNexus.exe` desktop app**, not a browser-launch workflow.
+- Windows product delivery is now a real **`NexusCore.exe` desktop app**, not a browser-launch workflow.
 - Native host is a self-contained .NET 8 WinForms application using Microsoft WebView2. It launches the Python agent as hidden `backend/ChatNexus.Backend.exe`; pywebview/pythonnet are no longer part of the desktop runtime.
 - The internal backend binds to loopback and is owned/shut down by the desktop process.
-- The Python agent backend is packaged with PyInstaller while the user-facing `ChatNexus.exe` is the self-contained .NET 8 WinForms/WebView2 desktop host; no console window is shown on normal launch.
-- Official Chat Nexus logo is used for the app/UI and its repository bytes are verified.
+- The Python agent backend is packaged with PyInstaller while the user-facing `NexusCore.exe` is the self-contained .NET 8 WinForms/WebView2 desktop host; no console window is shown on normal launch.
+- Official Nexus Core logo is used for the app/UI and its repository bytes are verified.
 - Windows CI builds and smoke-tests the packaged executable before artifact upload.
 - The package bundles a pinned official llama.cpp **Vulkan x64** runtime under `runtime/llama`, so users no longer need a separate llama.cpp install for the portable build.
 - The default model roles are **Qwen3 14B** for fast/general/primary coding and **Qwen3-Coder 30B-A3B** for deep reasoning/review.
@@ -158,7 +158,7 @@
 
 ## v0.6 UI checkpoint
 
-- Product renamed to **Chat Nexus** while preserving the existing Python package/repository structure for compatibility.
+- Product renamed to **Nexus Core** while preserving the existing Python package/repository structure for compatibility.
 - Official orbital CN emblem is stored locally under `web/assets/`.
 - Approved chat-first shell is implemented: slim left rail, center conversation/composer, right Code Diff / Tasks / Terminal utility rail.
 - Existing task approvals, undo, runtime controls, research/image links, model routing, image-job cards, and repository-index controls remain wired to their existing APIs.
@@ -185,11 +185,11 @@
 - Conversation policy modes are live-configurable: Permissive / Balanced / Strict. Default Permissive suppresses generic adult/sensitive-topic moralizing; narrow hard tool/action safety remains separate and enforced.
 - Policy mode is persisted in `config.json`, surfaced in `/api/status`, and changeable through `POST /api/policy/mode`.
 - Permissive adult-only consensual text conversation explicitly allows direct sexual language, including anatomy, acts, fantasies, preferences, and adult erotic fiction; profanity alone is never treated as sexual content.
-- If the selected local model still returns a generic topic refusal after the configured retry limit, Chat Nexus reports a **model-level refusal** rather than falsely claiming Chat Nexus policy blocks the topic. Default `generic_refusal_retry_limit` is 3 (bounded 0–5).
+- If the selected local model still returns a generic topic refusal after the configured retry limit, Nexus Core reports a **model-level refusal** rather than falsely claiming Nexus Core policy blocks the topic. Default `generic_refusal_retry_limit` is 3 (bounded 0–5).
 
 ## v0.7 modular tool/plugin system — Phase 1 (foundation)
 
-Direction: expand Chat Nexus into a general-purpose local AI workstation where
+Direction: expand Nexus Core into a general-purpose local AI workstation where
 the agent chooses models/tools/runtimes automatically. Phase 1 delivers the
 foundation the later phases build on:
 
@@ -283,7 +283,7 @@ Unit checkpoint: **362 tests passing**.
 ## Next milestone
 
 **Modular workstation core is in place** (362 tests). Priorities:
-1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
+1. run real 14B/30B dogfood tasks against the Nexus Core repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)
 4. richer resource-manager extraction and runtime controls

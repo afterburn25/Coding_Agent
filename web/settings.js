@@ -105,7 +105,7 @@
       <div class="settings-title">
         <div>
           <h2>Permissions &amp; Safety</h2>
-          <p>Control what Chat Nexus can do on your system, what requires approval, and where access is allowed.</p>
+          <p>Control what Nexus Core can do on your system, what requires approval, and where access is allowed.</p>
         </div>
       </div>
       <div class="autonomy-bar">
@@ -361,14 +361,14 @@
       models: `<div class="settings-title"><div><h2>Models</h2><p>Model profiles are managed on the Models page.</p></div></div>` + kv(
         (s.models || []).map((m) => [m.id, `${(m.roles || []).join(", ")} · ${m.runtime || "—"}${m.enabled ? "" : " · disabled"}`])
       ) + `<p class="muted small"><a href="/models.html" style="color:var(--cyan)">Open Models page →</a></p>`,
-      appearance: `<div class="settings-title"><div><h2>Appearance</h2><p>Chat Nexus uses its fixed dark sci-fi workstation theme. No appearance toggles are exposed yet.</p></div></div>`,
+      appearance: `<div class="settings-title"><div><h2>Appearance</h2><p>Nexus Core uses its fixed dark sci-fi workstation theme. No appearance toggles are exposed yet.</p></div></div>`,
       privacy: `<div class="settings-title"><div><h2>Privacy</h2><p>Local data locations and memory state.</p></div></div>` + kv([
         ["Workspace", s.workspace || "—"],
         ["Nexus Brain records", s.nexus_brain ? String(s.nexus_brain.records ?? "—") : "—"],
         ["Nexus Brain", s.nexus_brain ? (s.nexus_brain.initialized ? "initialized" : "not initialized") : "—"],
         ["Repository index", s.repository_index ? `${s.repository_index.files ?? "—"} files` : "—"],
       ]) + `<p class="muted small">Permissions and the decision audit live under <a href="#permissions" style="color:var(--cyan)">Settings → Permissions</a>.</p>`,
-      notifications: `<div class="settings-title"><div><h2>Notifications</h2><p>Chat Nexus currently has no notification channel settings.</p></div></div>`,
+      notifications: `<div class="settings-title"><div><h2>Notifications</h2><p>Nexus Core currently has no notification channel settings.</p></div></div>`,
       advanced: `<div class="settings-title"><div><h2>Advanced</h2><p>Runtime and autonomy tuning live in config.json.</p></div></div>` + kv([
         ["Workspace", s.workspace || "—"],
         ["Version", s.version || "—"],

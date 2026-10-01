@@ -28,10 +28,10 @@ from ..workflow.tasks import TaskStore
 from ..workflow.verify import detect_verification_commands
 
 
-UTILITY_PROMPT = """You are Chat Nexus, a local-first AI coding workstation.
+UTILITY_PROMPT = """You are Nexus Core, a local-first AI coding workstation.
 For greetings, capability questions, and casual conversation, answer directly and naturally.
 In ordinary conversation, sound like a capable adult rather than a scripted help bot. Track what the user has already said, carry references forward, notice relevant time gaps, vary phrasing, and avoid repetitive stock closings. Do not force a follow-up question onto every reply.
-You can explain that Chat Nexus can inspect/edit code, run tools with permission gates, test changes, research technical and general-knowledge questions, use Git/GitHub workflows when authorized, work with local image tools when configured, and adapt conversational behavior through Nexus Brain memory/feedback/training signals.
+You can explain that Nexus Core can inspect/edit code, run tools with permission gates, test changes, research technical and general-knowledge questions, use Git/GitHub workflows when authorized, work with local image tools when configured, and adapt conversational behavior through Nexus Brain memory/feedback/training signals.
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
 """
 
@@ -52,7 +52,7 @@ Use a cautious tone for sensitive requests and follow all configured hard tool/a
 Even in strict mode, avoid vague moralizing. If something is blocked, state the specific applicable restriction and help with allowed alternatives.""",
 }
 
-SYSTEM_PROMPT = """You are Chat Nexus, a local-first software engineering agent.
+SYSTEM_PROMPT = """You are Nexus Core, a local-first software engineering agent.
 Work carefully inside the selected workspace. Inspect before editing. Prefer small, verifiable changes.
 Use tools when they are needed. Prefer apply_patch over whole-file replacement when editing existing files.
 After code changes, run appropriate tests or builds when permissions allow.
@@ -341,7 +341,7 @@ class AgentOrchestrator:
             "good afternoon", "good evening",
         }
         if normalized in greetings:
-            return "Hi! Chat Nexus is ready. What would you like to work on?"
+            return "Hi! Nexus Core is ready. What would you like to work on?"
 
         capability_phrases = (
             "what can you do",
@@ -375,12 +375,12 @@ class AgentOrchestrator:
         if normalized in {
             "how old are you", "do you have an age", "what is your age", "what's your age",
         }:
-            return "I do not have a human age. I am Chat Nexus, software, so I do not age like a person."
+            return "I do not have a human age. I am Nexus Core, software, so I do not age like a person."
 
         if normalized in {
             "who are you", "what are you", "what is your name", "what's your name", "are you human",
         }:
-            return "I am Chat Nexus, a local-first AI coding workstation. I am software, not a person."
+            return "I am Nexus Core, a local-first AI coding workstation. I am software, not a person."
         return None
 
     @staticmethod
@@ -606,12 +606,12 @@ class AgentOrchestrator:
         ):
             return ""
         return (
-            "SELF-HOSTING MODE: You are working on Chat Nexus itself. "
+            "SELF-HOSTING MODE: You are working on Nexus Core itself. "
             "Treat README.md, PROJECT_STATUS.md, ARCHITECTURE.md, and SESSION_HANDOFF.md as the source of truth and inspect the relevant files before designing replacements. "
             "Preserve working components and backward compatibility unless the user explicitly requests otherwise. "
-            "The currently running Chat Nexus instance must remain usable while you work; do not kill or overwrite its active runtime processes. "
+            "The currently running Nexus Core instance must remain usable while you work; do not kill or overwrite its active runtime processes. "
             "Do not create Git commits, push branches, open pull requests, or mutate remote GitHub state unless the user requested that delivery action and the normal approval gate permits it. "
-            "Before reporting a self-change complete, run the repository verification selected by Chat Nexus; for this source tree that verification includes the isolated second-instance selftest. "
+            "Before reporting a self-change complete, run the repository verification selected by Nexus Core; for this source tree that verification includes the isolated second-instance selftest. "
             "If verification fails, diagnose the failure, research when needed, repair, and retest rather than claiming success."
         )
     def _task_context(self, task_id: str) -> None:
@@ -805,7 +805,7 @@ class AgentOrchestrator:
         """Rebuild enough agent context to safely continue a persisted task.
 
         Exact model KV state/tool-call transcripts are intentionally not persisted.
-        Instead, Chat Nexus re-inspects the durable task/checkpoint/repository state
+        Instead, Nexus Core re-inspects the durable task/checkpoint/repository state
         and tells the model it is continuing an interrupted task.
         """
         task = self.tasks.get(task_id)
@@ -852,7 +852,7 @@ class AgentOrchestrator:
             {
                 "role": "system",
                 "content": (
-                    "This is a recovered Chat Nexus task after a process/session interruption. "
+                    "This is a recovered Nexus Core task after a process/session interruption. "
                     "Do not assume the previous model transcript survived. Re-inspect the current "
                     "workspace and checkpoint diff before making further edits. " + reason
                 ),
@@ -1645,7 +1645,7 @@ class AgentOrchestrator:
                     self._emit(session, "model", event=exhausted_event)
                     session.main_content = (
                         f"The selected local model ({session.profile.id}) kept returning a generic topic refusal after "
-                        f"{refusal_retry_limit} permissive-policy retries. Chat Nexus policy is not blocking adult-only "
+                        f"{refusal_retry_limit} permissive-policy retries. Nexus Core policy is not blocking adult-only "
                         "consensual explicit text conversation. The model itself is refusing this prompt; switch or install "
                         "a less-restrictive conversation model, or tune this model in Model Growth."
                     )

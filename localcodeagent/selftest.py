@@ -86,7 +86,7 @@ def validate_self_update(
         "log_tail": "",
     }
     if not is_chat_nexus_tree(root):
-        result["error"] = "Workspace is not a Chat Nexus source tree."
+        result["error"] = "Workspace is not a Nexus Core source tree."
         return result
 
     env = dict(os.environ)
@@ -153,7 +153,7 @@ def validate_self_update(
         try:
             while time.monotonic() < deadline:
                 if process.poll() is not None:
-                    error = f"Isolated Chat Nexus exited early with code {process.returncode}."
+                    error = f"Isolated Nexus Core exited early with code {process.returncode}."
                     break
                 try:
                     code, content_type, body = _get(f"http://127.0.0.1:{port}/api/status")
@@ -163,7 +163,7 @@ def validate_self_update(
                 except (URLError, TimeoutError, OSError, json.JSONDecodeError):
                     time.sleep(0.2)
             if status_payload is None and not error:
-                error = f"Isolated Chat Nexus did not become healthy within {startup_timeout}s."
+                error = f"Isolated Nexus Core did not become healthy within {startup_timeout}s."
 
             checks: dict[str, Any] = {}
             if status_payload is not None:
@@ -173,10 +173,10 @@ def validate_self_update(
                     "workspace": status_payload.get("workspace"),
                 }
                 for name, path, marker in (
-                    ("main_ui", "/", "Chat Nexus"),
-                    ("image_ui", "/image.html", "Chat Nexus"),
-                    ("research_ui", "/research.html", "Chat Nexus"),
-                    ("trainer_ui", "/trainer.html", "Chat Nexus"),
+                    ("main_ui", "/", "Nexus Core"),
+                    ("image_ui", "/image.html", "Nexus Core"),
+                    ("research_ui", "/research.html", "Nexus Core"),
+                    ("trainer_ui", "/trainer.html", "Nexus Core"),
                     ("queue_api", "/api/queue", '"items"'),
                 ):
                     try:
@@ -220,7 +220,7 @@ def validate_self_update(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate the current Chat Nexus working tree in an isolated second instance.")
+    parser = argparse.ArgumentParser(description="Validate the current Nexus Core working tree in an isolated second instance.")
     parser.add_argument("--workspace", default=".")
     parser.add_argument("--skip-tests", action="store_true", help="Skip the unit-test phase and run only the isolated server smoke test.")
     parser.add_argument("--test-timeout", type=int, default=300)
@@ -237,7 +237,7 @@ def main() -> None:
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print("Chat Nexus self-update validation:", "PASS" if result["ok"] else "FAIL")
+        print("Nexus Core self-update validation:", "PASS" if result["ok"] else "FAIL")
         if result.get("tests") is not None:
             print("Tests:", "PASS" if result["tests"].get("ok") else "FAIL")
         for name, check in (result.get("smoke", {}).get("checks", {}) or {}).items():

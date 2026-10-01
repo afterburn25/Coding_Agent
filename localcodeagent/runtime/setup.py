@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _catalog_pair_assignments(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any], list[str], str]]:
-    """Prefer the known Chat Nexus 14B/30B pair when those files are present."""
+    """Prefer the known Nexus Core 14B/30B pair when those files are present."""
     by_name = {str(row["name"]).lower(): row for row in rows}
     q14 = by_name.get("qwen3-14b-q4_k_m.gguf")
     q30 = by_name.get("qwen3-coder-30b-a3b-instruct-q4_k_m.gguf")

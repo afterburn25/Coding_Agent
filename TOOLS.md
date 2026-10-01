@@ -1,6 +1,6 @@
 # Tools & Plugins
 
-Chat Nexus exposes capabilities through a central **Tool Registry**. The agent
+Nexus Core exposes capabilities through a central **Tool Registry**. The agent
 queries the registry instead of hard-coding tool knowledge, so tools can be
 installed, removed, enabled, disabled, and replaced independently.
 
@@ -222,6 +222,26 @@ Dependencies, Configuration, and Logs tabs — every field wired to the real
 registry/process/job state. Authorization was intentionally moved out:
 permission profiles, levels, scopes, and the decision audit live under
 **Settings → Permissions** (`web/settings.html`).
+
+Manifest fields the catalog consumes: `install` (`method` archive/winget/
+choco/uv/npm/apt/dnf/brew/pip, `url`, `sha256`, `size_bytes`, `format`,
+`dest`, `package`, `notes`), `detect.files` (install-root-relative markers),
+`executables`, `process`, `dependencies`, `health_check`, `invoke`. A tool
+with no automatable method surfaces `installable: false` and shows its
+manual-install `notes` instead of a broken Install button.
+
+Executables resolve in order: absolute path → PATH →
+`<install_root>/<tool_id>/**` → shallow install-root scan — so
+archive-installed binaries (e.g. `whisper/Release/whisper-cli.exe`) run
+without PATH changes.
+
+`POST /api/tools/check-updates` (gated by `network.read`) runs a tracked job
+that probes each installed tool's real source — `winget upgrade`,
+`pip index versions`, or the latest GitHub release for archive installs —
+and caches results at `.agent/update_check.json`. The payload exposes
+`latest_version`, `update_available`, `update_check` status, and
+`update_checked_at`; the Updates summary card and a "Check updates" toolbar
+button use it.
 
 The agent can also enqueue follow-up work itself via the `queue_task`,
 `queue_list`, and `queue_cancel` tools (`localcodeagent/tools/queue.py`,

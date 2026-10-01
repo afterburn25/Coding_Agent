@@ -58,7 +58,7 @@ Manual role override remains available in the UI and bypasses task-role classifi
 
 ## Local outcome telemetry (v0.6)
 
-Chat Nexus keeps a small local record at `.agent/model_performance.json` by default. It stores no prompt text, source code, retrieved pages, credentials, or conversation transcript.
+Nexus Core keeps a small local record at `.agent/model_performance.json` by default. It stores no prompt text, source code, retrieved pages, credentials, or conversation transcript.
 
 Each event contains only coarse routing/outcome fields such as:
 

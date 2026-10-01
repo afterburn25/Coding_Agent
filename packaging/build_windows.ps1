@@ -17,14 +17,17 @@ $BackendDist = Join-Path $Root "build\backend-dist"
 $BackendWork = Join-Path $Root "build\backend-work"
 $DesktopPublish = Join-Path $Root "build\desktop-publish"
 $DesktopProject = Join-Path $Root "desktop\ChatNexus.Desktop\ChatNexus.Desktop.csproj"
-$DesktopIcon = Join-Path $Root "desktop\ChatNexus.Desktop\chat-nexus.ico"
+$DesktopIcon = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core.ico"
+$DesktopSplash = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core-splash.png"
 
 Remove-Item -Recurse -Force "build","dist",$RuntimeExtract -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "build","dist" | Out-Null
 
-Write-Host "Preparing Chat Nexus Windows icon..."
-& $Python -c "from PIL import Image; img=Image.open(r'web/assets/chat-nexus-emblem.png').convert('RGBA'); img.save(r'desktop/ChatNexus.Desktop/chat-nexus.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $DesktopIcon)) { throw "Could not create Chat Nexus application icon" }
+Write-Host "Verifying Nexus Core brand assets..."
+if (-not (Test-Path $DesktopIcon)) { throw "nexus-core.ico missing — the official multi-resolution icon must be committed" }
+if (-not (Test-Path $DesktopSplash)) { throw "nexus-core-splash.png missing — the official splash artwork must be committed" }
+& $Python -c "from PIL import Image; im=Image.open(r'$DesktopIcon'); req={(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)}; missing=req-set(im.ico.sizes()); assert not missing, f'ico missing sizes: {missing}'"
+if ($LASTEXITCODE -ne 0) { throw "nexus-core.ico does not contain the required resolution layers" }
 
 Write-Host "Building hidden Python agent backend..."
 & $Python -m PyInstaller `
@@ -45,7 +48,7 @@ Write-Host "Building hidden Python agent backend..."
     --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `
     --hidden-import multivolumefile --hidden-import Cryptodome `
     "packaging/chat_nexus_backend_entry.py"
-if ($LASTEXITCODE -ne 0) { throw "Chat Nexus backend PyInstaller build failed" }
+if ($LASTEXITCODE -ne 0) { throw "Nexus Core backend PyInstaller build failed" }
 $BackendSource = Join-Path $BackendDist "ChatNexus.Backend"
 if (-not (Test-Path (Join-Path $BackendSource "ChatNexus.Backend.exe"))) { throw "ChatNexus.Backend.exe was not produced" }
 
@@ -60,12 +63,13 @@ dotnet publish $DesktopProject `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $DesktopPublish
-if ($LASTEXITCODE -ne 0) { throw "Native Chat Nexus desktop publish failed" }
-if (-not (Test-Path (Join-Path $DesktopPublish "ChatNexus.exe"))) { throw "Native ChatNexus.exe was not produced" }
+if ($LASTEXITCODE -ne 0) { throw "Native Nexus Core desktop publish failed" }
+if (-not (Test-Path (Join-Path $DesktopPublish "NexusCore.exe"))) { throw "Native NexusCore.exe was not produced" }
 
 New-Item -ItemType Directory -Force -Path $PackageRoot | Out-Null
 Copy-Item -Path (Join-Path $DesktopPublish "*") -Destination $PackageRoot -Recurse -Force
-Copy-Item $DesktopIcon (Join-Path $PackageRoot "chat-nexus.ico") -Force
+Copy-Item $DesktopIcon (Join-Path $PackageRoot "nexus-core.ico") -Force
+Copy-Item $DesktopSplash (Join-Path $PackageRoot "nexus-core-splash.png") -Force
 
 $BackendTarget = Join-Path $PackageRoot "backend"
 New-Item -ItemType Directory -Force -Path $BackendTarget | Out-Null
@@ -124,8 +128,8 @@ git remote set-url origin "https://github.com/afterburn25/Coding_Agent.git"
 Pop-Location
 if (-not (Test-Path (Join-Path $PackageRoot "Source\.git\HEAD"))) { throw "Bundled Source workspace is missing Git metadata" }
 
-Write-Host "Smoke testing native ChatNexus.exe -> hidden backend integration..."
-$Smoke = Start-Process -FilePath (Join-Path $PackageRoot "ChatNexus.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
-if ($Smoke.ExitCode -ne 0) { throw "Native ChatNexus.exe self-test failed with exit code $($Smoke.ExitCode)" }
+Write-Host "Smoke testing native NexusCore.exe -> hidden backend integration..."
+$Smoke = Start-Process -FilePath (Join-Path $PackageRoot "NexusCore.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
+if ($Smoke.ExitCode -ne 0) { throw "Native NexusCore.exe self-test failed with exit code $($Smoke.ExitCode)" }
 
-Write-Host "Native Chat Nexus desktop package ready: $PackageRoot"
+Write-Host "Native Nexus Core desktop package ready: $PackageRoot"

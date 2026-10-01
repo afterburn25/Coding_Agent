@@ -1,6 +1,6 @@
 # Permissions
 
-Chat Nexus routes every tool/action through `PermissionManager`
+Nexus Core routes every tool/action through `PermissionManager`
 (`localcodeagent/permissions.py`). The manager wraps the `permissions` map in
 `config.json`, so existing configs keep working.
 

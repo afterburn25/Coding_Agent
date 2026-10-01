@@ -68,7 +68,7 @@ def _safe_git_paths(paths: list[Any]) -> list[str]:
         if path.is_absolute() or ".." in path.parts:
             raise ValueError(f"unsafe Git path: {value}")
         if path.parts and path.parts[0] == ".agent":
-            raise ValueError("Chat Nexus .agent metadata cannot be staged by the coding agent")
+            raise ValueError("Nexus Core .agent metadata cannot be staged by the coding agent")
         cleaned.append(value)
     if not cleaned:
         raise ValueError("at least one repository path is required")

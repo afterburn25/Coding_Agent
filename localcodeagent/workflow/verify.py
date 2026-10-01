@@ -16,12 +16,12 @@ def detect_verification_commands(workspace: Path) -> list[dict[str, str]]:
     )
 
     if (root / "pyproject.toml").exists() or (root / "setup.py").exists() or (root / "tests").is_dir():
-        # Chat Nexus self-development gets a stronger single approval-gated check:
+        # Nexus Core self-development gets a stronger single approval-gated check:
         # the selftest command runs the unit suite, launches a second isolated
         # loopback instance from the edited tree, probes its APIs/UIs, then exits.
         if chat_nexus_tree:
             commands.append({
-                "name": "Chat Nexus isolated self-update validation",
+                "name": "Nexus Core isolated self-update validation",
                 "command": "python -m localcodeagent.selftest --workspace . --json",
             })
         else:

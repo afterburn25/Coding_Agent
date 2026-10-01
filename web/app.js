@@ -2,7 +2,7 @@ const $=s=>document.querySelector(s);
 const chat=$('#chat'),form=$('#composer'),input=$('#input'),send=$('#send'),mode=$('#mode'),activity=$('#activity');
 let lastTask=null;
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const welcomeHtml=()=>`<div class="welcome"><img src="/assets/chat-nexus-emblem.png" alt="Chat Nexus" class="welcome-logo" /><h1>Chat Nexus</h1><p>Your local AI coding partner.</p><span>Write. Refactor. Debug. Build. All on your machine.</span><div class="quick-actions"><button type="button" data-prompt="Explain the current code and architecture."><b>&lt;/&gt;</b>Explain this code</button><button type="button" data-prompt="Refactor the current code to be cleaner and easier to maintain."><b>✦</b>Refactor to be cleaner</button><button type="button" data-prompt="Add useful tests for the current code and run them."><b>▤</b>Add tests for this file</button><button type="button" data-prompt="Help me build a new feature in this project. Inspect the repository first and make a plan."><b>↗</b>Help me build a feature</button></div></div>`;
+const welcomeHtml=()=>`<div class="welcome"><img src="/assets/nexus-core-logo.png" alt="Nexus Core" class="welcome-logo" /><h1>Nexus Core</h1><p>Your local AI coding partner.</p><span>Write. Refactor. Debug. Build. All on your machine.</span><div class="quick-actions"><button type="button" data-prompt="Explain the current code and architecture."><b>&lt;/&gt;</b>Explain this code</button><button type="button" data-prompt="Refactor the current code to be cleaner and easier to maintain."><b>✦</b>Refactor to be cleaner</button><button type="button" data-prompt="Add useful tests for the current code and run them."><b>▤</b>Add tests for this file</button><button type="button" data-prompt="Help me build a new feature in this project. Inspect the repository first and make a plan."><b>↗</b>Help me build a feature</button></div></div>`;
 function setUtilityPanel(name){document.querySelectorAll('.utility-tab').forEach(x=>x.classList.toggle('active',x.dataset.panel===name));document.querySelectorAll('[data-utility-panel]').forEach(x=>x.classList.toggle('active',x.dataset.utilityPanel===name));}
 function feedbackControls(messageId=''){return '<div class="message-feedback"><button type="button" data-feedback="up" data-message-id="'+esc(messageId)+'" title="Helpful">👍</button><button type="button" data-feedback="down" data-message-id="'+esc(messageId)+'" title="Needs improvement">👎</button></div>';}
 function addMessage(role,text,messageId=''){const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();const el=document.createElement('div');el.className=`message ${role}`;if(messageId)el.dataset.messageId=messageId;el.innerHTML=`<div class="role">${esc(role)}</div><div class="bubble">${esc(text)}</div>${role==='assistant'?feedbackControls(messageId):''}`;chat.appendChild(el);chat.scrollTop=chat.scrollHeight;}
@@ -14,7 +14,7 @@ async function newConversation(){const res=await fetch('/api/chat/reset',{method
 function addRoute(route,events=[]){if(!route)return;const el=document.createElement('div');el.className='route';const switches=(events||[]).filter(x=>x.type==='switch').map(x=>`${x.from} → ${x.to}`).join(' · ');el.textContent=`${route.role} · ${route.model_id} · complexity ${route.complexity}${switches?' · '+switches:''}`;chat.appendChild(el);}
 function renderHardware(h){if(!h)return 'Unknown';const gpu=(h.gpus||[]).map(g=>`${g.name}: ${g.free_vram_gb.toFixed(1)}/${g.total_vram_gb.toFixed(1)} GB VRAM free`).join('<br>');return `${esc(h.available_ram_gb?.toFixed?.(1)??'?')}/${esc(h.total_ram_gb?.toFixed?.(1)??'?')} GB RAM free${gpu?'<br>'+esc(gpu).replace(/&lt;br&gt;/g,'<br>'):''}`;}
 function phaseIndex(phase){return ({planning:0,working:1,researching_failure:1,waiting_approval:1,interrupted:1,verifying:2,reviewing:3,done:4})[phase]??0;}
-function renderDiff(task){const panel=$('#diffPanel');if(!panel)return;if(!task?.files_changed?.length){panel.className='empty-utility';panel.innerHTML='<div class="empty-icon">▤</div><strong>No changes yet</strong><p>When Chat Nexus changes code, affected files will appear here for review.</p>';return;}panel.className='task-card';panel.innerHTML=`<div class="task-head"><strong>Changed files</strong><span class="task-status">${esc(task.files_changed.length)} files</span></div><div class="files">${task.files_changed.map(f=>`<div>• ${esc(f)}</div>`).join('')}</div>${task.review?`<div class="review-box"><strong>Reviewer notes</strong>\n${esc(task.review)}</div>`:''}`;}
+function renderDiff(task){const panel=$('#diffPanel');if(!panel)return;if(!task?.files_changed?.length){panel.className='empty-utility';panel.innerHTML='<div class="empty-icon">▤</div><strong>No changes yet</strong><p>When Nexus Core changes code, affected files will appear here for review.</p>';return;}panel.className='task-card';panel.innerHTML=`<div class="task-head"><strong>Changed files</strong><span class="task-status">${esc(task.files_changed.length)} files</span></div><div class="files">${task.files_changed.map(f=>`<div>• ${esc(f)}</div>`).join('')}</div>${task.review?`<div class="review-box"><strong>Reviewer notes</strong>\n${esc(task.review)}</div>`:''}`;}
 let lastQueue=[];
 async function refreshQueue(){try{const r=await fetch('/api/queue');if(r.ok){const d=await r.json();lastQueue=d.items||[];if(lastTask)renderTask(lastTask);}}catch{}}
 function renderTask(task){lastTask=task||null;renderDiff(task);if(!task){$('#taskPanel').innerHTML='<span class="muted">No task yet.</span>';return;}const p=phaseIndex(task.phase);const progress=Array.from({length:5},(_,i)=>`<span class="${i<=p?'active':''}"></span>`).join('');const pending=task.pending_approval;const approval=pending?`<div class="approval"><strong>Approval required</strong><div>${esc(pending.name)} · ${esc(pending.permission)}</div>${pending.detail?`<code>${esc(pending.detail)}</code>`:''}<div class="button-row"><button class="approve" data-approve="1">Approve</button><button class="deny" data-approve="0">Deny</button></div></div>`:'';const verify=(task.verification||[]).length?`<div class="verification-box"><strong>Verification</strong>\n${esc(task.verification.map(v=>`${v.name}: ${String(v.result).includes('EXIT_CODE=0')?'passed':'attention needed'}`).join('\n'))}</div>`:'';const review=task.review?`<div class="review-box"><strong>Reviewer</strong>\n${esc(task.review)}</div>`:'';const rp=task.research?.plan;const research=rp?`<div class="verification-box"><strong>Research</strong>\n${esc(rp.mode)} · ${rp.needed?'evidence needed':'local evidence sufficient'}${rp.reasons?.length?'\n'+esc(rp.reasons.join('\n')):''}</div>`:'';const recover=task.status==='interrupted'?`<button class="resume-button" data-recover="${esc(task.id)}">Resume interrupted task</button>`:'';const undo=['completed','completed_with_warnings','step_limit'].includes(task.status)&&task.files_changed?.length&&!task.reverted?`<button class="undo-button" data-undo="${esc(task.id)}">Undo this task</button>`:'';const stop=['running','working','verifying','reviewing','waiting_approval','planning'].includes(task.status)?`<button class="undo-button" data-cancel-task="${esc(task.id)}">Stop task</button>`:'';const queueRow=lastQueue.length?`<div class="verification-box"><strong>Queue</strong>\n${esc(lastQueue.map((q,i)=>`${i+1}. ${String(q.prompt||'').slice(0,60)}`).join('\n'))}</div>`:'';$('#taskPanel').innerHTML=`<div class="task-card"><div class="task-head"><span class="task-id">${esc(task.id)}</span><span class="task-status ${esc(task.status)}">${esc(task.status)}</span></div><div class="task-prompt">${esc(task.prompt)}</div><div class="progress">${progress}</div><div class="meta"><span>Phase</span><strong>${esc(task.phase)}</strong><span>Model</span><strong>${esc(task.model_role||'—')}</strong><span>Steps</span><strong>${esc(task.steps)}</strong><span>Files</span><strong>${esc(task.files_changed?.length||0)}</strong></div>${task.files_changed?.length?`<div class="files">${esc(task.files_changed.join(', '))}</div>`:''}${approval}${research}${verify}${review}${queueRow}${recover}${undo}${stop}</div>`;if(task.pending_approval||task.status==='interrupted')setUtilityPanel('tasks');}
@@ -34,7 +34,7 @@ function renderReadiness(r){
   const rec=(r.recommendations||[]).map(x=>`<li>${esc(x)}</li>`).join('');
   const suggestions=(r.suggested_models||[]);
   const setup=suggestions.length&&!ready?`<div class="setup-suggestion"><strong>Local models found</strong><small>${suggestions.map(x=>`${esc(x.id)} → ${esc((x.roles||[]).join(', '))}`).join('<br>')}</small><button id="applyModelSetup" class="mini-button" type="button">Use discovered models</button></div>`:'';
-  const runtime=r.runtime_install||{};const runtimeSetup=!runtime.installed?`<div class="runtime-setup"><strong>llama.cpp runtime needed</strong><small>${esc(runtime.platform||'')} · Chat Nexus will not execute installers automatically.</small>${(runtime.commands||[]).map(c=>`<button class="mini-button copy-runtime-command" data-command="${esc(c.command)}" type="button">${esc(c.label)} · Copy install command</button>`).join('')}</div>`:`<div class="runtime-found">✓ llama.cpp · ${esc(runtime.executable||'available')}</div>`;
+  const runtime=r.runtime_install||{};const runtimeSetup=!runtime.installed?`<div class="runtime-setup"><strong>llama.cpp runtime needed</strong><small>${esc(runtime.platform||'')} · Nexus Core will not execute installers automatically.</small>${(runtime.commands||[]).map(c=>`<button class="mini-button copy-runtime-command" data-command="${esc(c.command)}" type="button">${esc(c.label)} · Copy install command</button>`).join('')}</div>`:`<div class="runtime-found">✓ llama.cpp · ${esc(runtime.executable||'available')}</div>`;
   const activeJobs=(r.install_jobs||[]).filter(j=>!['finished','failed','cancelled'].includes(j.state));
   const jobsByModel=Object.fromEntries(activeJobs.map(j=>[j.catalog_id,j]));
   const catalogById=Object.fromEntries((r.catalog||[]).map(m=>[m.id,m]));
@@ -62,15 +62,15 @@ function renderReadiness(r){
   }
   let quickSetup='';
   if(missingStarter){
-    quickSetup='<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Chat Nexus already includes the llama.cpp runtime.</small>'+storageLine+'<div class="first-run-actions"><button class="setup-primary" data-model-plan="starter" type="button"'+planDisabled+'>Install recommended 14B <span>~'+esc(starter.size_gb)+' GB</span></button>'+(missingDeep?'<button class="setup-secondary" data-model-plan="full" type="button"'+planDisabled+'>Install full 14B + 30B stack <span>~'+esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))+' GB</span></button>':'')+'</div>'+installProgress+'<small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>';
+    quickSetup='<div class="first-run-setup"><strong>Finish coding setup</strong><small>Install verified local model weights. Nexus Core already includes the llama.cpp runtime.</small>'+storageLine+'<div class="first-run-actions"><button class="setup-primary" data-model-plan="starter" type="button"'+planDisabled+'>Install recommended 14B <span>~'+esc(starter.size_gb)+' GB</span></button>'+(missingDeep?'<button class="setup-secondary" data-model-plan="full" type="button"'+planDisabled+'>Install full 14B + 30B stack <span>~'+esc(((starter?.size_gb||0)+(deep?.size_gb||0)).toFixed(1))+' GB</span></button>':'')+'</div>'+installProgress+'<small class="setup-note">14B handles everyday coding. 30B is reserved for deep reasoning and review. Downloads are checksum-verified before use.</small></div>';
   }else if(missingDeep){
     quickSetup='<div class="first-run-setup optional-deep"><strong>'+(ready?'Everyday coding is ready':'Complete the coding stack')+'</strong><small>The 14B coder is installed. Add the 30B coder for difficult debugging, architecture work, and review.</small>'+storageLine+'<div class="first-run-actions"><button class="setup-secondary" data-model-plan="deep" type="button"'+planDisabled+'>Add 30B deep coder <span>~'+esc(deep.size_gb)+' GB</span></button></div>'+installProgress+'</div>';
   }
   const modelStatus=quickSetup?`<details class="setup-details"><summary>Technical model status</summary>${rows||'<div class="muted">No model profiles configured.</div>'}</details>`:(rows||'<div class="muted">No model profiles configured.</div>');
   const catalog=(r.catalog||[]).map(m=>{const job=jobsByModel[m.id];const pct=job?Math.round(Number(job.progress||0)*100):0;const action=m.verified?'<span class="catalog-installed">✓ Installed</span>':m.installed?`<button class="mini-button catalog-repair" data-catalog="${esc(m.id)}">Repair / verify</button>`:`<button class="mini-button catalog-install" data-catalog="${esc(m.id)}">Install</button>`;const progress=job?`<div class="catalog-progress"><span style="width:${pct}%"></span></div><small>${esc(job.state)} · ${pct}% · ${formatBytes(job.bytes_done||0)} / ${formatBytes(job.bytes_total||0)}</small><button class="mini-button catalog-cancel" data-job="${esc(job.id)}">Cancel</button>`:'';return `<div class="catalog-card"><div class="catalog-head"><strong>${esc(m.title)}</strong><span>${m.verified?'verified':esc(m.source_type)}</span></div><small>${esc(m.size_gb)} GB · ${esc(m.license)} · ${esc((m.roles||[]).join(', '))}</small><p>${esc(m.description)}</p><p class="hardware-note">${esc(m.hardware_note)}</p>${progress||`<div class="catalog-action">${action}</div>`}</div>`;}).join('');
   const catalogPanel=(r.catalog||[]).length?`<details class="catalog-panel"><summary>Advanced model downloads <span>${r.catalog.length}</span></summary>${catalog}</details>`:'';
-  panel.innerHTML=`<div class="readiness-head ${cls}"><span>${esc(state)}</span><small>${esc((r.covered_roles||[]).join(', ')||'no active coding roles')}</small></div>${quickSetup}${modelStatus}${runtimeSetup}${setup}${catalogPanel}${rec?`<ul class="readiness-recs">${rec}</ul>`:''}${r.self_hosting_tree?`<div class="selfhost-line">${selfHost?'✓':'○'} Chat Nexus self-hosting workspace</div><button id="startSelfDevelopment" class="mini-button selfhost-start" type="button" ${ready?'':'disabled'}>${ready?'Start self-development task':'Install/configure a coding model first'}</button>`:''}`;
-  const v=String($('#status').textContent||'').split(' · ')[0]||'Chat Nexus';
+  panel.innerHTML=`<div class="readiness-head ${cls}"><span>${esc(state)}</span><small>${esc((r.covered_roles||[]).join(', ')||'no active coding roles')}</small></div>${quickSetup}${modelStatus}${runtimeSetup}${setup}${catalogPanel}${rec?`<ul class="readiness-recs">${rec}</ul>`:''}${r.self_hosting_tree?`<div class="selfhost-line">${selfHost?'✓':'○'} Nexus Core self-hosting workspace</div><button id="startSelfDevelopment" class="mini-button selfhost-start" type="button" ${ready?'':'disabled'}>${ready?'Start self-development task':'Install/configure a coding model first'}</button>`:''}`;
+  const v=String($('#status').textContent||'').split(' · ')[0]||'Nexus Core';
   $('#status').textContent=`${v} · ${selfHost?'self-host ready':ready?'ready':'setup required'}`;
 }
 async function loadReadiness(){try{const [readyRes,catalogRes]=await Promise.all([fetch('/api/readiness'),fetch('/api/models/catalog')]);const data=await readyRes.json();if(!readyRes.ok)throw new Error(data.error||'Readiness check failed');if(catalogRes.ok){const catalog=await catalogRes.json();data.catalog=catalog.models||[];data.install_jobs=catalog.jobs||[];}renderReadiness(data);return data;}catch(e){const p=$('#readinessPanel');if(p)p.innerHTML=`<span class="state error">${esc(e.message)}</span>`;return null;}}
@@ -125,7 +125,7 @@ async function installModelPlan(kind){
     const installedLabel=kind==='full'?'14B and 30B models':kind==='deep'?'30B deep coder':'14B model';
     const startError=configured?.applied?.start_error||'';
     if(startError)addMessage('assistant',`${installedLabel} installed, checksum verified, and routing configured. The starter model did not finish loading yet: ${startError}`);
-    else addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Chat Nexus is ready to use without restarting.`);
+    else addMessage('assistant',`${installedLabel} installed, checksum verified, routing configured, and activated. Nexus Core is ready to use without restarting.`);
   }catch(e){addMessage('assistant',`First-run model setup error: ${e.message}`);}finally{activeModelPlan=null;await loadReadiness();document.querySelectorAll('[data-model-plan]').forEach(b=>b.disabled=false);}
 }
 async function pollCatalogInstall(jobId){
@@ -133,11 +133,11 @@ async function pollCatalogInstall(jobId){
 }
 async function cancelCatalogInstall(jobId){try{const res=await fetch('/api/models/install/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:jobId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');await loadReadiness();}catch(e){addMessage('assistant',`Cancel error: ${e.message}`);}}
 function prepareSelfDevelopmentTask(){
-  input.value='Continue developing Chat Nexus itself. Read README.md, PROJECT_STATUS.md, ARCHITECTURE.md, and SESSION_HANDOFF.md first. Inspect the current implementation before changing anything. Make the requested improvement without breaking working features, run the required verification including the isolated self-update test, and report the exact files/tests changed. Do not commit or push unless I explicitly ask.';
+  input.value='Continue developing Nexus Core itself. Read README.md, PROJECT_STATUS.md, ARCHITECTURE.md, and SESSION_HANDOFF.md first. Inspect the current implementation before changing anything. Make the requested improvement without breaking working features, run the required verification including the isolated self-update test, and report the exact files/tests changed. Do not commit or push unless I explicitly ask.';
   input.focus();input.setSelectionRange(input.value.length,input.value.length);
 }
 async function applySuggestedModelSetup(){
-  if(!confirm('Write the discovered GGUF role assignments to your Chat Nexus config? Existing model profiles will be replaced; other settings are preserved.'))return;
+  if(!confirm('Write the discovered GGUF role assignments to your Nexus Core config? Existing model profiles will be replaced; other settings are preserved.'))return;
   const button=$('#applyModelSetup');if(button)button.disabled=true;
   try{await configureDownloadedModels();}catch(e){addMessage('assistant',`Model setup error: ${e.message}`);}finally{const b=$('#applyModelSetup');if(b)b.disabled=false;}
 }
@@ -354,7 +354,7 @@ async function streamAgent(message){
     const err=new Error(state.error);err.displayed=true;throw err;
   }
   if(!state.result){
-    let detail='Chat Nexus connection closed before the task returned a final result.';
+    let detail='Nexus Core connection closed before the task returned a final result.';
     try{
       agentStreamActive=false;const statusRes=await fetch('/api/tasks');
       if(statusRes.ok){
@@ -395,7 +395,7 @@ async function streamAgent(message){
           return recovered;
         }
         if(task?.error)detail=task.error;
-        else if(task?.status==='interrupted')detail='Chat Nexus restarted while this task was running. Use Resume interrupted task to continue from the saved checkpoint.';
+        else if(task?.status==='interrupted')detail='Nexus Core restarted while this task was running. Use Resume interrupted task to continue from the saved checkpoint.';
         else if(task?.status==='waiting_approval')detail='The task is waiting for approval. Open the Tasks panel to continue.';
         else if(task?.status)detail+=' Current task status: '+task.status+'.';
       }
@@ -420,7 +420,7 @@ $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex')
 function builtinClientReply(message){
   const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
   if(['hi','hello','hey','hey there','good morning','good afternoon','good evening'].includes(normalized)){
-    return 'Hi! Chat Nexus is ready. What would you like to work on?';
+    return 'Hi! Nexus Core is ready. What would you like to work on?';
   }
   if(['what can you do','what all can you do','what are your capabilities','what do you do','how can you help'].some(x=>normalized.includes(x))){
     return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local models, use configured local image tools, and learn across conversations through Nexus Brain. That can include verified general knowledge, facts and preferences, conversational style, corrections, feedback, and approved training examples.';
@@ -429,10 +429,10 @@ function builtinClientReply(message){
     return 'Yes. Nexus Brain can adapt beyond coding: it can bank verified general knowledge, remember facts and preferences, learn conversational patterns from feedback and corrections, retain approved training examples, and carry those gains across model replacements. The creator-locked Brain controls which learning channels are enabled.';
   }
   if(['how old are you','do you have an age','what is your age',"what's your age"].includes(normalized)){
-    return "I don't have a human age. I'm Chat Nexus, software, so I don't age like a person.";
+    return "I don't have a human age. I'm Nexus Core, software, so I don't age like a person.";
   }
   if(['who are you','what are you','what is your name',"what's your name",'are you human'].includes(normalized)){
-    return "I'm Chat Nexus, a local-first AI coding workstation. I'm software, not a person.";
+    return "I'm Nexus Core, a local-first AI coding workstation. I'm software, not a person.";
   }
   return '';
 }
@@ -446,4 +446,8 @@ $('#conversationSearch').addEventListener('input',e=>{clearTimeout(conversationS
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
 connectAgentEvents();
-loadStatus().then(async()=>{const [_,__,convos]=await Promise.all([loadReadiness(),loadConversationMemory(),loadConversations()]);const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});input.focus();
+loadStatus().then(async()=>{const [_,__,convos]=await Promise.all([loadReadiness(),loadConversationMemory(),loadConversations()]);const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);}).finally(()=>{
+  // Readiness handshake: the desktop host holds the splash screen until the
+  // main shell has actually initialized, so the user never sees a blank window.
+  try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
+});input.focus();

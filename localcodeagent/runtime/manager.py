@@ -82,7 +82,7 @@ class RuntimeManager:
             )
 
     def reconfigure_models(self, config: AgentConfig) -> None:
-        """Apply a new coding-model configuration without restarting Chat Nexus."""
+        """Apply a new coding-model configuration without restarting Nexus Core."""
         with self._lock:
             for model_id in list(self._managed):
                 self._stop_managed(model_id)
@@ -191,7 +191,7 @@ class RuntimeManager:
             "executable": installed or "",
             "platform": platform.system(),
             "commands": commands,
-            "note": "Install commands are shown for convenience and are never executed automatically by Chat Nexus.",
+            "note": "Install commands are shown for convenience and are never executed automatically by Nexus Core.",
         }
     def model_storage(self) -> dict:
         """Return install-path and disk-capacity information for local coding models."""

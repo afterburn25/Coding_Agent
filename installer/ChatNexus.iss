@@ -6,9 +6,9 @@
   #define AppNumericVersion "0.6.0.0"
 #endif
 
-#define AppName "Chat Nexus"
+#define AppName "Nexus Core"
 #define AppPublisher "Afterburn25"
-#define AppExeName "ChatNexus.exe"
+#define AppExeName "NexusCore.exe"
 #define StableAppId "ChatNexus.Afterburn25"
 
 #define Qwen14CatalogId "qwen3-14b-q4-k-m"
@@ -34,8 +34,8 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={localappdata}\Programs\Chat Nexus
-DefaultGroupName=Chat Nexus
+DefaultDirName={localappdata}\Programs\Nexus Core
+DefaultGroupName=Nexus Core
 DisableProgramGroupPage=yes
 DisableStartupPrompt=yes
 PrivilegesRequired=lowest
@@ -44,8 +44,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
 OutputDir=..\dist\installer
-OutputBaseFilename=Chat-Nexus-Setup-{#AppVersion}-Windows-x64
-SetupIconFile=..\desktop\ChatNexus.Desktop\chat-nexus.ico
+OutputBaseFilename=NexusCore-Setup-{#AppVersion}-Windows-x64
+SetupIconFile=..\desktop\ChatNexus.Desktop\nexus-core.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -58,8 +58,8 @@ VersionInfoVersion={#AppNumericVersion}
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppNumericVersion}
 VersionInfoCompany={#AppPublisher}
-VersionInfoDescription=Chat Nexus Installer
-VersionInfoCopyright=Chat Nexus
+VersionInfoDescription=Nexus Core Installer
+VersionInfoCopyright=Nexus Core
 MinVersion=10.0.17763
 ChangesEnvironment=no
 ChangesAssociations=no
@@ -98,13 +98,15 @@ Name: "{app}\data"
 ; Clean the obsolete pywebview portable runtime from early dogfood builds if an
 ; installer is pointed at that same directory. Mutable model/data/source paths are untouched.
 Type: filesandordirs; Name: "{app}\_internal"
+; Remove the legacy Chat Nexus desktop exe on upgrades; Nexus Core ships NexusCore.exe.
+Type: files; Name: "{app}\ChatNexus.exe"
 
 [Icons]
-Name: "{autoprograms}\Chat Nexus"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
-Name: "{autodesktop}\Chat Nexus"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\Nexus Core"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\Nexus Core"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch Chat Nexus"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "Launch Nexus Core"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
@@ -384,9 +386,14 @@ begin
     Exit;
   end;
 
-  // Also recognize an unpacked/older install at the normal installer location.
-  DefaultPath := ExpandConstant('{localappdata}\Programs\Chat Nexus');
-  if FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
+  // Also recognize an unpacked/older install at the normal installer
+  // locations (Nexus Core dir with NexusCore.exe, or the legacy
+  // Chat Nexus dir with ChatNexus.exe).
+  DefaultPath := ExpandConstant('{localappdata}\Programs\Nexus Core');
+  if not FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
+    DefaultPath := ExpandConstant('{localappdata}\Programs\Chat Nexus');
+  if FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') or
+     FileExists(AddBackslash(DefaultPath) + 'ChatNexus.exe') then
   begin
     ExistingVersion := 'unknown / portable build';
     ExistingInstallDir := DefaultPath;
@@ -408,7 +415,7 @@ begin
   if UpgradeDetected and (not WizardSilent()) then
   begin
     Prompt :=
-      'Chat Nexus is already installed.' + #13#10 + #13#10 +
+      'Nexus Core is already installed.' + #13#10 + #13#10 +
       'Installed version: ' + ExistingVersion + #13#10 +
       'New version: {#AppVersion}' + #13#10;
 
@@ -431,11 +438,11 @@ begin
 
   if UpgradeDetected then
   begin
-    WizardForm.Caption := 'Update Chat Nexus';
-    WizardForm.WelcomeLabel1.Caption := 'Update Chat Nexus';
+    WizardForm.Caption := 'Update Nexus Core';
+    WizardForm.WelcomeLabel1.Caption := 'Update Nexus Core';
 
     MessageText :=
-      'Setup detected an existing Chat Nexus installation.' + #13#10 + #13#10 +
+      'Setup detected an existing Nexus Core installation.' + #13#10 + #13#10 +
       'Existing version: ' + ExistingVersion + #13#10 +
       'Installing version: {#AppVersion}' + #13#10 + #13#10 +
       'The application and bundled runtime will be updated in place.' + #13#10 +
@@ -444,7 +451,7 @@ begin
     UpgradeInfoPage := CreateOutputMsgPage(
       wpWelcome,
       'Update detected',
-      'Your existing Chat Nexus installation will be updated.',
+      'Your existing Nexus Core installation will be updated.',
       MessageText
     );
   end;
@@ -481,19 +488,21 @@ begin
     Log('Could not execute taskkill for ' + ImageName);
 end;
 
-procedure StopRunningChatNexus();
+procedure StopRunningNexusCore();
 begin
   if not UpgradeDetected then
     Exit;
 
-  Log('Update detected; closing running Chat Nexus processes before replacing files.');
+  Log('Update detected; closing running Nexus Core processes before replacing files.');
 
-  // Avoid Restart Manager for Chat Nexus because the desktop host owns a hidden
+  // Avoid Restart Manager for Nexus Core because the desktop host owns a hidden
   // backend and llama.cpp child process. Close the desktop tree first, allow a
   // short grace period, then force-clean any orphaned children.
   TaskKillImage('{#AppExeName}', False);
+  TaskKillImage('ChatNexus.exe', False);  // legacy exe name from pre-Nexus-Core installs
   Sleep(1500);
   TaskKillImage('{#AppExeName}', True);
+  TaskKillImage('ChatNexus.exe', True);
   TaskKillImage('ChatNexus.Backend.exe', True);
   TaskKillImage('llama-server.exe', True);
   TaskKillImage('llama.exe', True);
@@ -502,7 +511,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  StopRunningChatNexus();
+  StopRunningNexusCore();
   InstallBundledSource := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
 
   if InstallBundledSource then
@@ -548,7 +557,7 @@ begin
 
     MarkModelDownloadsComplete();
 
-    // Keep installer-downloaded models recognized as verified by Chat Nexus.
+    // Keep installer-downloaded models recognized as verified by Nexus Core.
     if FileExists(ExpandConstant('{app}\models\{#Qwen14FileName}')) then
       WriteCatalogMetadata(
         '{#Qwen14CatalogId}',

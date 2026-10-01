@@ -1944,7 +1944,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/readiness/configure":
                 if body.get("apply") is not True:
-                    self._json({"error": "apply=true is required to change the Chat Nexus config"}, 400)
+                    self._json({"error": "apply=true is required to change the Nexus Core config"}, 400)
                     return
                 readiness = self.state.readiness_payload(probe_external=False)
                 suggestions = list(readiness.get("suggested_models") or [])
@@ -2636,7 +2636,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "model_id": model_id, "endpoint": endpoint, "runtime": self.state.runtime.summary()})
                 else:
                     if profile.runtime == "external":
-                        self._json({"error": "External runtimes are not controlled by Chat Nexus."}, 400)
+                        self._json({"error": "External runtimes are not controlled by Nexus Core."}, 400)
                     else:
                         status = self.state.runtime.stop_model(model_id)
                         self._json({"ok": True, "status": status.as_dict(), "runtime": self.state.runtime.summary()})
@@ -2920,7 +2920,7 @@ def stop_state(state: AppState) -> None:
 def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
     server, state = create_server(config, workspace, host, port, web_root, runtime_root, config_path=config_path)
     actual_port = int(server.server_address[1])
-    print(f"Chat Nexus v{VERSION}")
+    print(f"Nexus Core v{VERSION}")
     print(f"Workspace: {workspace.resolve()}")
     print(f"UI: http://{host}:{actual_port}")
     print(f"Models: {state.runtime.models_dir}")

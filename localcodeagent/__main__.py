@@ -8,9 +8,9 @@ from .server import serve
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chat Nexus backend / development server")
+    parser = argparse.ArgumentParser(description="Nexus Core backend / development server")
     parser.add_argument("--workspace", default=".", help="Project directory the agent may access")
-    parser.add_argument("--config", default="config.json", help="Path to Chat Nexus config JSON")
+    parser.add_argument("--config", default="config.json", help="Path to Nexus Core config JSON")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(

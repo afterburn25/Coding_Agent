@@ -36,3 +36,5 @@ ComfyUI/
 
 # Dev-server runtime state (chat history, charts, image outputs at repo root)
 data/
+desktop/**/bin/
+desktop/**/obj/

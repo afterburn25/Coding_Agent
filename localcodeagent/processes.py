@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 @dataclass(slots=True)
 class ManagedService:
-    """A controllable local service/process known to Chat Nexus.
+    """A controllable local service/process known to Nexus Core.
 
     `describe` returns live status (state, pid, health, extra fields). The
     start/stop callables delegate to the owning subsystem (RuntimeManager,
@@ -33,7 +33,7 @@ FAILED_STATES = {"crashed", "error", "exited", "failed", "dead"}
 
 
 class ProcessManager:
-    """Central registry of Chat Nexus-managed and attached services."""
+    """Central registry of Nexus Core-managed and attached services."""
 
     def __init__(self) -> None:
         self._services: dict[str, ManagedService] = {}

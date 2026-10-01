@@ -1,12 +1,12 @@
-# Chat Nexus UI Direction
+# Nexus Core UI Direction
 
 ## Canonical design
 
-The approved Chat Nexus application shell is the chat-first concept selected on 2026-09-30, hosted in the **native ChatNexus.exe desktop window**.
+The approved Nexus Core application shell is the chat-first concept selected on 2026-09-30, hosted in the **native NexusCore.exe desktop window**.
 
 ### Desktop hosting
 
-- Windows users launch `ChatNexus.exe`; do not make a browser tab the normal product experience.
+- Windows users launch `NexusCore.exe`; do not make a browser tab the normal product experience.
 - The HTML/CSS/JS shell runs inside Windows WebView2 via the native desktop host.
 - A loopback backend may be used internally but should remain invisible implementation detail.
 - Normal desktop launch has an app/taskbar icon and standard native minimize/maximize/close behavior.
@@ -14,9 +14,9 @@ The approved Chat Nexus application shell is the chat-first concept selected on 
 
 ### Layout
 
-- **Left rail:** official Chat Nexus brand, Chat, Projects, Models, Research, Images, Tools, Settings.
+- **Left rail:** official Nexus Core brand, Chat, Projects, Models, Research, Images, Tools, Settings.
 - **Settings** (`/settings.html`) is its own shell page with secondary nav (General, Permissions, Models, Appearance, Privacy, Notifications, Advanced). **Settings → Permissions** owns authorization: profiles, per-capability matrix, scopes, approval rules, and the audit log. **Tools** (`/tools.html`) owns operations: install/remove/health/runtime management only.
-- **Center:** model selector/status, Chat Nexus conversation, quick actions, and a persistent composer.
+- **Center:** model selector/status, Nexus Core conversation, quick actions, and a persistent composer.
 - **Right rail:** tabs for **Code Diff**, **Tasks**, and **Terminal / agent activity**.
 - System/model/hardware details are available but should stay secondary to the conversation.
 
@@ -26,7 +26,13 @@ The approved Chat Nexus application shell is the chat-first concept selected on 
 - Cyan → electric blue → violet → magenta accents.
 - Thin blue borders and restrained glow; polished rather than visually busy.
 - Rounded 8–13 px panels.
-- The selected orbital **CN** emblem is the official logo.
+- The official brand is **Nexus Core**: the full shield/wordmark
+  (`web/assets/nexus-core-logo.png`) on large surfaces and the compact shield
+  (`web/assets/nexus-core-icon.png`, `desktop/ChatNexus.Desktop/nexus-core.ico`)
+  where space is tight. The retired orbital CN emblem must not be used as the
+  primary identity.
+- Startup shows the official splash artwork (`nexus-core-splash.png`) with a
+  real milestone-driven progress bar; see `desktop/ChatNexus.Desktop/Program.cs`.
 - Use the logo as a recognizable mark; do not surround every control with extra decorative effects.
 
 ### Interaction principles
@@ -41,6 +47,6 @@ The approved Chat Nexus application shell is the chat-first concept selected on 
 
 ### Asset
 
-`web/assets/chat-nexus-emblem.png`
+`web/assets/nexus-core-icon.png`
 
 This is the canonical application emblem. Do not replace it without explicit user approval.

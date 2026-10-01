@@ -1,5 +1,5 @@
 {
-  "name": "Chat Nexus",
+  "name": "Nexus Core",
   "version": "0.6.0-dev",
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
@@ -15,7 +15,7 @@
   "installer": {
     "canonical_script": "installer/ChatNexus.iss",
     "app_id": "ChatNexus.Afterburn25",
-    "default_dir": "%LOCALAPPDATA%\\\\Programs\\\\Chat Nexus",
+    "default_dir": "%LOCALAPPDATA%\\\\Programs\\\\Nexus Core",
     "interactive_existing_install_action": "Update",
     "preserves_on_update": [
       "models",
@@ -42,9 +42,9 @@
     "close_applications": "installer-owned",
     "restart_manager_close_disabled": true,
     "shutdown_sequence": [
-      "graceful ChatNexus.exe process-tree close",
+      "graceful NexusCore.exe process-tree close",
       "brief grace period",
-      "force ChatNexus.exe cleanup",
+      "force NexusCore.exe cleanup",
       "force orphan ChatNexus.Backend.exe cleanup",
       "force llama-server.exe / llama.exe cleanup"
     ],
@@ -400,7 +400,7 @@
     "verified_artifacts": [
       {
         "id": 11133807708,
-        "name": "Chat-Nexus-Setup-0.6.0-dev-Windows-x64",
+        "name": "NexusCore-Setup-0.6.0-dev-Windows-x64",
         "size_bytes": 75555341
       },
       {

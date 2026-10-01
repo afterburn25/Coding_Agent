@@ -1,8 +1,8 @@
 # MCP Integration
 
-Chat Nexus can connect to Model Context Protocol servers and import their tools
+Nexus Core can connect to Model Context Protocol servers and import their tools
 into the central Tool Registry, so MCP tools coexist with native tools under
-the same permission, enable/disable, and manifest model. Chat Nexus does **not**
+the same permission, enable/disable, and manifest model. Nexus Core does **not**
 depend exclusively on MCP — native tools remain first-class.
 
 ## Transport

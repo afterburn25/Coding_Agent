@@ -6,19 +6,25 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>ChatNexus</AssemblyName>
+    <AssemblyName>NexusCore</AssemblyName>
     <RootNamespace>ChatNexus.Desktop</RootNamespace>
-    <ApplicationIcon>chat-nexus.ico</ApplicationIcon>
+    <ApplicationIcon>nexus-core.ico</ApplicationIcon>
     <Version>0.6.0</Version>
     <FileVersion>0.6.0.0</FileVersion>
     <AssemblyVersion>0.6.0.0</AssemblyVersion>
-    <Authors>Chat Nexus</Authors>
-    <Product>Chat Nexus</Product>
-    <Description>Chat Nexus local AI coding workstation</Description>
+    <Authors>Afterburn25</Authors>
+    <Product>Nexus Core</Product>
+    <Description>Nexus Core local AI workstation</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="nexus-core.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="nexus-core-splash.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="nexus-core-icon.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -27,7 +27,7 @@ class SelfUpdateValidationTests(unittest.TestCase):
             (root / "tests").mkdir()
             (root / "pyproject.toml").write_text("[project]\nname='chat-nexus-test'\n", encoding="utf-8")
             commands = detect_verification_commands(root)
-            self.assertEqual(commands[0]["name"], "Chat Nexus isolated self-update validation")
+            self.assertEqual(commands[0]["name"], "Nexus Core isolated self-update validation")
             self.assertIn("localcodeagent.selftest", commands[0]["command"])
             self.assertFalse(any("unittest discover" in item["command"] for item in commands))
 

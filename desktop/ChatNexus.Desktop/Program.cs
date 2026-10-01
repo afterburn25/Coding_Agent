@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -26,8 +27,7 @@ internal static class Program
             }
 
             ApplicationConfiguration.Initialize();
-            using var form = new MainForm(appDir);
-            Application.Run(form);
+            Application.Run(new NexusCoreApplicationContext(appDir));
             return 0;
         }
         catch (Exception ex)
@@ -40,13 +40,426 @@ internal static class Program
             {
                 MessageBox.Show(
                     ex.ToString(),
-                    "Chat Nexus startup error",
+                    "Nexus Core startup error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
             }
             return 1;
         }
+    }
+}
+
+/// <summary>
+/// Milestone-driven startup progress. Real phases raise the target; the
+/// displayed value eases toward it. The splash may only dismiss when the
+/// minimum display time AND genuine app readiness are both satisfied —
+/// never before 100% is earned, never backward.
+/// </summary>
+internal sealed class StartupProgress
+{
+    public static readonly TimeSpan MinimumDisplayTime = TimeSpan.FromSeconds(7);
+
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private double _target;
+    private double _displayed;
+    private string _primary = "INITIALIZING · NEXUS CORE";
+    private string _secondary = "Preparing local application environment";
+    private DateTimeOffset? _completionStarted;
+
+    /// <summary>How long the READY state + core glow plays before the swap.</summary>
+    public static readonly TimeSpan CompletionEffectTime = TimeSpan.FromMilliseconds(850);
+
+    public bool AppReady { get; private set; }
+    public double Displayed => _displayed;
+    public TimeSpan Elapsed => _clock.Elapsed;
+    public bool MinimumElapsed => Elapsed >= MinimumDisplayTime;
+    public bool ReadyToDismiss => AppReady && MinimumElapsed;
+    /// <summary>0→1 while the READY state + shield-core glow plays.</summary>
+    public double CompletionPhase =>
+        _completionStarted is null ? 0.0 :
+        Math.Clamp((DateTimeOffset.Now - _completionStarted.Value) / CompletionEffectTime, 0.0, 1.0);
+    public bool CompletionFinished => _completionStarted is not null && CompletionPhase >= 1.0;
+
+    /// <summary>PRIMARY · SUBSYSTEM line.</summary>
+    public string Primary =>
+        _completionStarted is not null || ReadyToDismiss ? "READY · NEXUS CORE" :
+        AppReady ? "FINALIZING · NEXUS CORE" : _primary;
+
+    /// <summary>Dim secondary explanation line.</summary>
+    public string Secondary =>
+        _completionStarted is not null || ReadyToDismiss ? "All startup-critical systems online" :
+        AppReady ? "Preparing interface" : _secondary;
+
+    public void Report(double fraction, string primary, string secondary)
+    {
+        var clamped = Math.Clamp(fraction, 0.0, 1.0);
+        if (clamped > _target)
+        {
+            _target = clamped;
+        }
+        _primary = primary;
+        _secondary = secondary;
+    }
+
+    public void MarkAppReady()
+    {
+        AppReady = true;
+        if (_target < 1.0)
+        {
+            _target = 1.0;
+        }
+    }
+
+    /// <summary>
+    /// Both conditions met: start the brief READY + core-glow completion
+    /// effect, after which the splash may hand off to the main window.
+    /// </summary>
+    public void BeginCompletion()
+    {
+        _completionStarted ??= DateTimeOffset.Now;
+    }
+
+    /// <summary>Ease the displayed bar toward the current target.</summary>
+    public void Tick()
+    {
+        // Before readiness the bar approaches but never parks at 100%.
+        var ceiling = AppReady ? 1.0 : Math.Min(_target, 0.985);
+        var goal = Math.Min(_target, ceiling);
+        var delta = goal - _displayed;
+        if (delta <= 0)
+        {
+            return;
+        }
+        _displayed += Math.Max(delta * 0.18, 0.001);
+        if (_displayed > goal)
+        {
+            _displayed = goal;
+        }
+    }
+}
+
+/// <summary>
+/// Borderless splash rendered from the official Nexus Core artwork with a
+/// real progress bar and status line driven by StartupProgress. Fatal
+/// startup failure swaps to an actionable failure state (Retry/Open Log/Exit)
+/// instead of dying silently.
+/// </summary>
+internal sealed class SplashForm : Form
+{
+    private readonly StartupProgress _progress;
+    private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly Image? _artwork;
+    private readonly string _appDir;
+
+    private Panel? _failurePanel;
+    public event Action? RetryRequested;
+    public event Action? ExitRequested;
+
+    public SplashForm(string appDir, StartupProgress progress)
+    {
+        _appDir = appDir;
+        _progress = progress;
+
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.CenterScreen;
+        ShowInTaskbar = true;
+        TopMost = true;
+        BackColor = Color.FromArgb(4, 8, 18);
+        DoubleBuffered = true;
+        ClientSize = new Size(1024, 576);
+        Text = "Nexus Core";
+
+        var iconPath = Path.Combine(appDir, "nexus-core.ico");
+        if (File.Exists(iconPath))
+        {
+            Icon = new Icon(iconPath);
+        }
+
+        var splashPath = Path.Combine(appDir, "nexus-core-splash.png");
+        if (File.Exists(splashPath))
+        {
+            _artwork = Image.FromFile(splashPath);
+        }
+
+        _timer.Interval = 33;
+        _timer.Tick += (_, _) =>
+        {
+            _progress.Tick();
+            Invalidate();
+        };
+        _timer.Start();
+    }
+
+    public void ShowFailure(string message)
+    {
+        _timer.Stop();
+        _failurePanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(10, 14, 26),
+        };
+
+        var title = new Label
+        {
+            Text = "NEXUS CORE COULD NOT START",
+            ForeColor = Color.FromArgb(255, 120, 120),
+            Font = new Font("Segoe UI Semibold", 20f, FontStyle.Bold),
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Dock = DockStyle.Top,
+            Height = 140,
+        };
+        var detail = new Label
+        {
+            Text = message,
+            ForeColor = Color.FromArgb(150, 170, 200),
+            Font = new Font("Segoe UI", 10f),
+            AutoSize = false,
+            TextAlign = ContentAlignment.TopCenter,
+            Dock = DockStyle.Top,
+            Height = 120,
+        };
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 10, 0, 0),
+        };
+        buttons.WrapContents = false;
+
+        Button MakeButton(string text)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Width = 130,
+                Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.FromArgb(220, 235, 255),
+                BackColor = Color.FromArgb(22, 34, 54),
+                Font = new Font("Segoe UI", 10f),
+            };
+            b.FlatAppearance.BorderColor = Color.FromArgb(60, 120, 220);
+            return b;
+        }
+
+        var retry = MakeButton("Retry");
+        retry.Click += (_, _) => RetryRequested?.Invoke();
+        var openLog = MakeButton("Open Log");
+        openLog.Click += (_, _) =>
+        {
+            var log = Path.Combine(_appDir, "data", "logs", "backend-host.log");
+            try
+            {
+                Process.Start(new ProcessStartInfo(
+                    File.Exists(log) ? log : "notepad.exe",
+                    File.Exists(log) ? "" : Path.Combine(_appDir, "data", "logs"))
+                { UseShellExecute = true });
+            }
+            catch { }
+        };
+        var exit = MakeButton("Exit");
+        exit.Click += (_, _) => ExitRequested?.Invoke();
+
+        buttons.Controls.Add(retry);
+        buttons.Controls.Add(openLog);
+        buttons.Controls.Add(exit);
+        // Center the button row.
+        buttons.PerformLayout();
+        buttons.Left = (ClientSize.Width - buttons.PreferredSize.Width) / 2;
+        buttons.Dock = DockStyle.None;
+        buttons.Top = 300;
+        buttons.Anchor = AnchorStyles.None;
+
+        _failurePanel.Controls.Add(buttons);
+        _failurePanel.Controls.Add(detail);
+        _failurePanel.Controls.Add(title);
+        Controls.Add(_failurePanel);
+        _failurePanel.BringToFront();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        if (_artwork is not null)
+        {
+            // Cover-fit the artwork.
+            var scale = Math.Max((float)ClientSize.Width / _artwork.Width,
+                                 (float)ClientSize.Height / _artwork.Height);
+            var w = _artwork.Width * scale;
+            var h = _artwork.Height * scale;
+            g.DrawImage(_artwork, (ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+        }
+        else
+        {
+            using var bg = new LinearGradientBrush(ClientRectangle,
+                Color.FromArgb(4, 8, 18), Color.FromArgb(10, 20, 44), 90f);
+            g.FillRectangle(bg, ClientRectangle);
+            using var font = new Font("Segoe UI", 30f, FontStyle.Bold);
+            TextRenderer.DrawText(g, "NEXUS CORE", font, ClientRectangle,
+                Color.FromArgb(120, 200, 255),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        // Progress bar — measured to overlay the artwork's own empty bar
+        // outline (x 392–631, y ~503–509 on the 1024×576 source).
+        var barWidth = (int)(ClientSize.Width * 0.234);
+        var barHeight = 7;
+        var barX = (int)(ClientSize.Width * 0.383);
+        var barY = (int)(ClientSize.Height * 0.873);
+        var track = new Rectangle(barX, barY, barWidth, barHeight);
+        using (var trackBrush = new SolidBrush(Color.FromArgb(90, 12, 22, 40)))
+        {
+            g.FillRectangle(trackBrush, track);
+        }
+        var fillWidth = (int)(barWidth * Math.Clamp(_progress.Displayed, 0.0, 1.0));
+        if (fillWidth > 0)
+        {
+            var fill = new Rectangle(barX, barY, fillWidth, barHeight);
+            using var fillBrush = new LinearGradientBrush(fill,
+                Color.FromArgb(0, 160, 255), Color.FromArgb(140, 80, 255), 0f);
+            g.FillRectangle(fillBrush, fill);
+            using var glow = new SolidBrush(Color.FromArgb(60, 80, 180, 255));
+            g.FillRectangle(glow, new Rectangle(barX, barY - 2, fillWidth, barHeight + 4));
+        }
+
+        // Brief brightening of the shield's central core on completion —
+        // a soft radial bloom over the artwork's core position (~512,195
+        // on the 1024×576 source, cover-fitted to the client area).
+        var completion = _progress.CompletionPhase;
+        if (completion > 0)
+        {
+            var coreX = ClientSize.Width * 0.5f;
+            var coreY = ClientSize.Height * 0.34f;
+            var radius = 130f * (0.6f + 0.4f * (float)Math.Sin(completion * Math.PI));
+            var alpha = (int)(150 * Math.Sin(completion * Math.PI));
+            using var glowPath = new GraphicsPath();
+            glowPath.AddEllipse(coreX - radius, coreY - radius, radius * 2, radius * 2);
+            using var glow = new PathGradientBrush(glowPath)
+            {
+                CenterColor = Color.FromArgb(alpha, 120, 200, 255),
+                SurroundColors = new[] { Color.FromArgb(0, 120, 200, 255) },
+            };
+            g.FillEllipse(glow, coreX - radius, coreY - radius, radius * 2, radius * 2);
+        }
+
+        // Two-line status under the progress bar. The artwork's baked-in
+        // caption sits at ~0.91·H, so both lines live along the bottom edge.
+        using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
+        using var secondaryFont = new Font("Segoe UI", 8.5f);
+        var isReady = _progress.ReadyToDismiss || completion > 0;
+        var primaryRect = new Rectangle(0, ClientSize.Height - 46, ClientSize.Width, 20);
+        TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
+            isReady ? Color.FromArgb(140, 240, 200) : Color.FromArgb(90, 215, 255),
+            TextFormatFlags.HorizontalCenter);
+        var secondaryRect = new Rectangle(0, ClientSize.Height - 27, ClientSize.Width, 18);
+        TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
+            Color.FromArgb(150, 170, 200),
+            TextFormatFlags.HorizontalCenter);
+
+        base.OnPaint(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _timer.Dispose();
+            _artwork?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// Application context that owns the startup lifecycle: splash first, hidden
+/// main form prepares behind it, then a seamless swap once both the real
+/// readiness handshake and the minimum display time have elapsed.
+/// </summary>
+internal sealed class NexusCoreApplicationContext : ApplicationContext
+{
+    private readonly string _appDir;
+    private StartupProgress _progress;
+    private SplashForm? _splash;
+    private MainForm? _main;
+
+    public NexusCoreApplicationContext(string appDir)
+    {
+        _appDir = appDir;
+        _progress = new StartupProgress();
+        _splash = new SplashForm(appDir, _progress);
+        _splash.RetryRequested += OnRetry;
+        _splash.ExitRequested += () => Application.Exit();
+        _splash.Show();
+        _ = RunStartupAsync();
+    }
+
+    private void OnRetry()
+    {
+        _splash?.Dispose();
+        _main?.DisposeBackend();
+        _main?.Dispose();
+        _main = null;
+        _progress = new StartupProgress();
+        _splash = new SplashForm(_appDir, _progress);
+        _splash.RetryRequested += OnRetry;
+        _splash.ExitRequested += () => Application.Exit();
+        _splash.Show();
+        _ = RunStartupAsync();
+    }
+
+    private async Task RunStartupAsync()
+    {
+        try
+        {
+            _progress.Report(0.06, "INITIALIZING · NEXUS CORE", "Preparing local application environment");
+
+            // Build the real main window now, still invisible.
+            _main = new MainForm(_appDir);
+            _main.CreateControl(); // handle exists without showing the window
+
+            _progress.Report(0.15, "STARTING · CORE SERVICES", "Launching Nexus Core backend services");
+            await _main.PrepareAsync(_progress);
+
+            // The interface posted its ready handshake; the app is genuinely
+            // usable. Now hold the splash until the minimum display time too,
+            // then play the brief READY + core-glow completion effect before
+            // handing off — still no blank intermediate state.
+            _progress.MarkAppReady();
+            while (!_progress.ReadyToDismiss)
+            {
+                await Task.Delay(60);
+            }
+            _progress.BeginCompletion();
+            while (!_progress.CompletionFinished)
+            {
+                await Task.Delay(33);
+            }
+
+            _splash?.Close();
+            _splash?.Dispose();
+            _splash = null;
+            _main.Show();
+            _main.Activate();
+            _main.BringToFront();
+            MainForm = _main;
+        }
+        catch (Exception ex)
+        {
+            _splash?.ShowFailure(
+                $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");
+        }
+    }
+
+    protected override void ExitThreadCore()
+    {
+        _splash?.Dispose();
+        _main?.DisposeBackend();
+        base.ExitThreadCore();
     }
 }
 
@@ -114,7 +527,7 @@ internal sealed class BackendProcess : IDisposable
         var backendExe = Path.Combine(appDir, "backend", "ChatNexus.Backend.exe");
         if (!File.Exists(backendExe))
         {
-            throw new FileNotFoundException("Chat Nexus backend executable is missing.", backendExe);
+            throw new FileNotFoundException("Nexus Core backend executable is missing.", backendExe);
         }
 
         var workspace = Path.Combine(appDir, "Source");
@@ -172,7 +585,7 @@ internal sealed class BackendProcess : IDisposable
         start.ArgumentList.Add(config);
 
         var process = Process.Start(start)
-            ?? throw new InvalidOperationException("Could not start Chat Nexus backend.");
+            ?? throw new InvalidOperationException("Could not start Nexus Core backend.");
         var backend = new BackendProcess(process, port, logPath);
         backend.WriteLog("HOST", $"started backend pid {process.Id} on port {port}");
         process.BeginOutputReadLine();
@@ -191,7 +604,7 @@ internal sealed class BackendProcess : IDisposable
             if (_process.HasExited)
             {
                 throw new InvalidOperationException(
-                    $"Chat Nexus backend exited during startup with code {_process.ExitCode}."
+                    $"Nexus Core backend exited during startup with code {_process.ExitCode}."
                 );
             }
 
@@ -212,7 +625,7 @@ internal sealed class BackendProcess : IDisposable
         }
 
         throw new TimeoutException(
-            $"Chat Nexus backend did not become ready within {timeout.TotalSeconds:0} seconds. {last?.Message} " +
+            $"Nexus Core backend did not become ready within {timeout.TotalSeconds:0} seconds. {last?.Message} " +
             $"Check {LogPath} for backend errors."
         );
     }
@@ -223,7 +636,7 @@ internal sealed class BackendProcess : IDisposable
         foreach (var route in new[] { "", "image.html", "research.html" })
         {
             var body = await client.GetStringAsync(BaseUrl + route);
-            if (!body.Contains("Chat Nexus", StringComparison.OrdinalIgnoreCase))
+            if (!body.Contains("Nexus Core", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"UI smoke check failed for /{route}");
             }
@@ -276,19 +689,21 @@ internal sealed class MainForm : Form
     private bool _backendRestarting;
     private int _backendRestartCount;
     private DateTimeOffset _lastBackendRestart = DateTimeOffset.MinValue;
+    private readonly TaskCompletionSource<bool> _interfaceReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public MainForm(string appDir)
     {
         _appDir = appDir;
 
-        Text = "Chat Nexus";
+        Text = "Nexus Core";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 1440;
         Height = 900;
         MinimumSize = new Size(980, 640);
         BackColor = Color.FromArgb(7, 16, 31);
 
-        var iconPath = Path.Combine(_appDir, "chat-nexus.ico");
+        var iconPath = Path.Combine(_appDir, "nexus-core.ico");
         if (File.Exists(iconPath))
         {
             Icon = new Icon(iconPath);
@@ -297,7 +712,6 @@ internal sealed class MainForm : Form
         _webView.Dock = DockStyle.Fill;
         Controls.Add(_webView);
 
-        Shown += async (_, _) => await StartAsync();
         FormClosing += (_, _) =>
         {
             _closing = true;
@@ -305,43 +719,89 @@ internal sealed class MainForm : Form
         };
     }
 
-    private async Task StartAsync()
+    /// <summary>
+    /// Backend + WebView2 startup that runs while the form is still hidden.
+    /// Reports real milestones into the splash progress and only completes
+    /// once the interface posts its ready handshake (or a bounded fallback).
+    /// </summary>
+    public async Task PrepareAsync(StartupProgress progress)
     {
+        AttachBackend(BackendProcess.Start(_appDir));
+        progress.Report(0.30, "STARTING · CORE SERVICES", "Waiting for backend health");
+        // Cold starts on machines scanning a fresh unsigned exe (AV) can
+        // exceed 30s even when the backend is healthy.
+        await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
+        progress.Report(0.55, "CONNECTING · LOCAL AI RUNTIME", "Backend healthy — synchronizing runtime state");
+
+        var userDataFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ChatNexus",
+            "WebView2"
+        );
+        Directory.CreateDirectory(userDataFolder);
+
+        var environment = await CoreWebView2Environment.CreateAsync(
+            browserExecutableFolder: null,
+            userDataFolder: userDataFolder
+        );
+
+        await _webView.EnsureCoreWebView2Async(environment);
+        ConfigureWebView();
+        progress.Report(0.72, "INITIALIZING · NEXUS INTERFACE", "Initializing WebView2");
+
+        var ready = WaitForInterfaceReadyAsync();
+        _webView.Source = new Uri(_backend.BaseUrl);
+        progress.Report(0.85, "LOADING · NEXUS INTERFACE", "Rendering the Nexus Core application shell");
+        progress.Report(0.93, "CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake");
+        await ready;
+    }
+
+    /// <summary>
+    /// Waits for the frontend's "nexus-core-ready" postMessage. Navigation
+    /// alone is not sufficient: it only proves a page arrived, not that the
+    /// shell initialized. A bounded NavigationCompleted fallback keeps a
+    /// broken-but-loaded page from hanging startup forever.
+    /// </summary>
+    private async Task WaitForInterfaceReadyAsync()
+    {
+        var core = _webView.CoreWebView2;
+        var navigated = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<CoreWebView2NavigationCompletedEventArgs> onNav = (_, args) =>
+        {
+            if (args.IsSuccess)
+            {
+                navigated.TrySetResult(true);
+            }
+        };
+        core.NavigationCompleted += onNav;
         try
         {
-            AttachBackend(BackendProcess.Start(_appDir));
-            // Cold starts on machines scanning a fresh unsigned exe (AV) can
-            // exceed 30s even when the backend is healthy.
-            await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
-
-            var userDataFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ChatNexus",
-                "WebView2"
-            );
-            Directory.CreateDirectory(userDataFolder);
-
-            var environment = await CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null,
-                userDataFolder: userDataFolder
-            );
-
-            await _webView.EnsureCoreWebView2Async(environment);
-            ConfigureWebView();
-            _webView.Source = new Uri(_backend.BaseUrl);
+            var ready = _interfaceReady.Task;
+            var navTimeout = Task.Delay(TimeSpan.FromSeconds(45));
+            // If the handshake never arrives but navigation succeeded, give
+            // the page up to 15s to post it, then proceed rather than hang.
+            var fallback = Task.Run(async () =>
+            {
+                await navigated.Task;
+                await Task.Delay(TimeSpan.FromSeconds(15));
+            });
+            var winner = await Task.WhenAny(ready, fallback, navTimeout);
+            if (winner == navTimeout)
+            {
+                throw new TimeoutException("Nexus Core interface did not load.");
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _backend?.Dispose();
-            _backend = null;
-            MessageBox.Show(
-                ex.ToString(),
-                "Chat Nexus startup error",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
-            );
-            Close();
+            core.NavigationCompleted -= onNav;
         }
+    }
+
+    public void DisposeBackend()
+    {
+        _backend?.Dispose();
+        _backend = null;
     }
 
     private void AttachBackend(BackendProcess backend)
@@ -390,8 +850,8 @@ internal sealed class MainForm : Form
             if (_backendRestartCount > 3)
             {
                 MessageBox.Show(
-                    $"Chat Nexus backend stopped repeatedly (last exit code {exitCode}).\n\nBackend log: {logPath}",
-                    "Chat Nexus backend error",
+                    $"Nexus Core backend stopped repeatedly (last exit code {exitCode}).\n\nBackend log: {logPath}",
+                    "Nexus Core backend error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
@@ -411,8 +871,8 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"Chat Nexus could not restart its backend.\n\n{ex}\n\nBackend log: {logPath}",
-                "Chat Nexus backend restart error",
+                $"Nexus Core could not restart its backend.\n\n{ex}\n\nBackend log: {logPath}",
+                "Nexus Core backend restart error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
             );
@@ -429,6 +889,23 @@ internal sealed class MainForm : Form
         core.Settings.AreDevToolsEnabled = false;
         core.Settings.AreDefaultScriptDialogsEnabled = true;
         core.Settings.IsStatusBarEnabled = false;
+
+        // Frontend readiness handshake — the shell posts "nexus-core-ready"
+        // after its first real render cycle completes.
+        core.WebMessageReceived += (_, args) =>
+        {
+            try
+            {
+                if (args.TryGetWebMessageAsString().Contains("nexus-core-ready", StringComparison.Ordinal))
+                {
+                    _interfaceReady.TrySetResult(true);
+                }
+            }
+            catch
+            {
+                // A malformed message must never stall startup readiness.
+            }
+        };
 
         core.NewWindowRequested += (_, args) =>
         {
@@ -473,7 +950,7 @@ internal sealed class MainForm : Form
         }
         catch
         {
-            // External navigation failure should not crash Chat Nexus.
+            // External navigation failure should not crash Nexus Core.
         }
     }
 }

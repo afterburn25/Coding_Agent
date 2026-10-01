@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chat Nexus · Trainer</title>
+  <title>Nexus Core · Trainer</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/trainer.css" />
 </head>
@@ -11,7 +11,7 @@
   <div class="trainer-shell">
     <aside class="trainer-side">
       <div class="brand-lockup">
-        <img src="/assets/chat-nexus-emblem.png" alt="" class="brand-emblem" />
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
         <div class="brand-wordmark">Chat <strong>Nexus</strong><small>Trainer / Model Growth</small></div>
       </div>
       <a class="workspace-link" href="/">← Chat</a>
@@ -25,7 +25,7 @@
 
     <main class="trainer-main">
       <header class="trainer-header">
-        <div><h1>Trainer & Model Growth</h1><p>Teach Chat Nexus through normal conversation, inspect what it learned, and curate what becomes model training data.</p></div>
+        <div><h1>Trainer & Model Growth</h1><p>Teach Nexus Core through normal conversation, inspect what it learned, and curate what becomes model training data.</p></div>
         <button id="syncGrowth" class="trainer-primary" type="button">Sync learned items</button>
       </header>
 
@@ -141,7 +141,7 @@
             <select id="growthMethod"><option value="lora">LoRA</option><option value="qlora">QLoRA</option><option value="full_finetune">Full fine-tune</option></select>
           </label>
           <label>Dataset path <input id="growthDataset" placeholder="Export a dataset first" /></label>
-          <label>Output/version name <input id="growthName" placeholder="ChatNexus-Personal-v1" /></label>
+          <label>Output/version name <input id="growthName" placeholder="NexusCore-Personal-v1" /></label>
           <label>Trainer command template <input id="trainerCommand" placeholder="External trainer command using {dataset}, {output}, {base_model}, {method}" /></label>
           <small class="muted">Training never runs automatically. The command is only executed after you explicitly click Run on a planned job.</small>
           <button id="createGrowthJob" class="trainer-primary" type="button">Create versioned training job</button>

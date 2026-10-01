@@ -1,4 +1,4 @@
-name: Chat Nexus Tests
+name: Nexus Core Tests
 
 on:
   push:
@@ -68,7 +68,7 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      - name: Build native Chat Nexus desktop app
+      - name: Build native Nexus Core desktop app
         shell: pwsh
         run: ./packaging/build_windows.ps1
 
@@ -76,14 +76,14 @@ jobs:
         shell: pwsh
         run: |
           @"
-          Chat Nexus v0.6.0-dev
+          Nexus Core v0.6.0-dev
           Commit: ${{ github.sha }}
           Native desktop: .NET 8 WinForms / Microsoft WebView2
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
           Installer: Inno Setup LZMA2 update-aware bootstrap with verified coding-model downloads (tools install in-app)
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
-      - name: Build single-file Chat Nexus installer
+      - name: Build single-file Nexus Core installer
         shell: pwsh
         run: |
           $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -92,7 +92,7 @@ jobs:
           }
           & $Iscc "/DAppVersion=0.6.0-dev" "/DAppNumericVersion=0.6.0.0" "installer\ChatNexus.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
-          $Setup = "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe"
+          $Setup = "dist\installer\NexusCore-Setup-0.6.0-dev-Windows-x64.exe"
           if (-not (Test-Path $Setup)) { throw "Installer EXE was not produced" }
 
       - name: Smoke-test fresh install and update preservation
@@ -122,8 +122,8 @@ jobs:
             return $Process.ExitCode
           }
 
-          $Setup = (Resolve-Path "dist\installer\Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe").Path
-          $InstallDir = Join-Path $env:RUNNER_TEMP "Chat Nexus Installer Test"
+          $Setup = (Resolve-Path "dist\installer\NexusCore-Setup-0.6.0-dev-Windows-x64.exe").Path
+          $InstallDir = Join-Path $env:RUNNER_TEMP "Nexus Core Installer Test"
 
           # Skip multi-gigabyte public model downloads only in CI smoke tests.
           # Normal interactive installers keep the bootstrap downloads enabled.
@@ -137,8 +137,8 @@ jobs:
           ) -TimeoutSeconds 180
           if ($FirstExit -ne 0) { throw "Fresh installer run failed with exit code $FirstExit" }
 
-          $App = Join-Path $InstallDir "ChatNexus.exe"
-          if (-not (Test-Path $App)) { throw "Installed ChatNexus.exe is missing" }
+          $App = Join-Path $InstallDir "NexusCore.exe"
+          if (-not (Test-Path $App)) { throw "Installed NexusCore.exe is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "backend\ChatNexus.Backend.exe"))) { throw "Installed backend is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "runtime\llama\llama-server.exe"))) { throw "Installed llama.cpp runtime is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Installed Source Git workspace is missing" }
@@ -159,7 +159,7 @@ jobs:
           }
 
           $SmokeExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
-          if ($SmokeExit -ne 0) { throw "Installed ChatNexus.exe self-test failed with exit code $SmokeExit" }
+          if ($SmokeExit -ne 0) { throw "Installed NexusCore.exe self-test failed with exit code $SmokeExit" }
 
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "models") | Out-Null
           New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "data") | Out-Null
@@ -176,21 +176,29 @@ jobs:
           $Config | Add-Member -NotePropertyName "upgrade_preserve_marker" -NotePropertyValue "keep-config" -Force
           $Config | ConvertTo-Json -Depth 100 | Set-Content -Encoding UTF8 $ConfigPath
 
-          # Fake Chat Nexus Process: prove the Update path can close a running
+          # Fake Nexus Core Process: prove the Update path can close a running
           # process tree itself instead of relying on Inno Restart Manager.
-          $FakeDir = Join-Path $env:RUNNER_TEMP "Fake Chat Nexus Process"
+          $FakeDir = Join-Path $env:RUNNER_TEMP "Fake Nexus Core Process"
           New-Item -ItemType Directory -Force -Path $FakeDir | Out-Null
-          $FakeExe = Join-Path $FakeDir "ChatNexus.exe"
+          $FakeExe = Join-Path $FakeDir "NexusCore.exe"
           Copy-Item "$env:SystemRoot\System32\cmd.exe" $FakeExe -Force
-          $FakeChatNexus = Start-Process -FilePath $FakeExe -ArgumentList @(
+          $FakeApp = Start-Process -FilePath $FakeExe -ArgumentList @(
             "/c",
             "ping",
             "127.0.0.1",
             "-t"
           ) -PassThru
           Start-Sleep -Seconds 1
-          $FakeChatNexus.Refresh()
-          if ($FakeChatNexus.HasExited) { throw "Fake ChatNexus.exe process did not stay running for update-close smoke test" }
+          $FakeApp.Refresh()
+          if ($FakeApp.HasExited) { throw "Fake NexusCore.exe process did not stay running for update-close smoke test" }
+
+          # Simulate a pre-rebrand Chat Nexus install: the legacy exe name
+          # plus a running legacy process must both be cleaned by the update.
+          Copy-Item $App (Join-Path $InstallDir "ChatNexus.exe") -Force
+          $FakeLegacyExe = Join-Path $FakeDir "ChatNexus.exe"
+          Copy-Item "$env:SystemRoot\System32\cmd.exe" $FakeLegacyExe -Force
+          $FakeLegacy = Start-Process -FilePath $FakeLegacyExe -ArgumentList @("/c", "ping", "127.0.0.1", "-t") -PassThru
+          Start-Sleep -Seconds 1
 
           # The second run intentionally omits /DIR. The stable AppId and
           # UsePreviousAppDir must rediscover the existing installation.
@@ -201,11 +209,17 @@ jobs:
           ) -TimeoutSeconds 180
           if ($UpdateExit -ne 0) { throw "Update installer run failed with exit code $UpdateExit" }
 
-          $FakeChatNexus.Refresh()
-          if (-not $FakeChatNexus.HasExited) {
-            try { Stop-Process -Id $FakeChatNexus.Id -Force -ErrorAction SilentlyContinue } catch {}
-            throw "Installer did not close the running ChatNexus.exe process"
+          $FakeApp.Refresh()
+          if (-not $FakeApp.HasExited) {
+            try { Stop-Process -Id $FakeApp.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw "Installer did not close the running NexusCore.exe process"
           }
+          $FakeLegacy.Refresh()
+          if (-not $FakeLegacy.HasExited) {
+            try { Stop-Process -Id $FakeLegacy.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw "Installer did not close the running legacy ChatNexus.exe process"
+          }
+          if (Test-Path (Join-Path $InstallDir "ChatNexus.exe")) { throw "Update left the legacy ChatNexus.exe behind" }
 
           if (-not (Test-Path (Join-Path $InstallDir "models\UPGRADE_PRESERVE.marker"))) { throw "Update removed downloaded model state" }
           if (-not (Test-Path (Join-Path $InstallDir "data\UPGRADE_PRESERVE.marker"))) { throw "Update removed application data" }
@@ -217,24 +231,24 @@ jobs:
           if ($ConfigAfter.upgrade_preserve_marker -ne "keep-config") { throw "Update overwrote config.json" }
 
           $SmokeAfterExit = Invoke-WithTimeout -FilePath $App -ArgumentList @("--self-test") -WorkingDirectory $InstallDir -TimeoutSeconds 90
-          if ($SmokeAfterExit -ne 0) { throw "Updated ChatNexus.exe self-test failed with exit code $SmokeAfterExit" }
+          if ($SmokeAfterExit -ne 0) { throw "Updated NexusCore.exe self-test failed with exit code $SmokeAfterExit" }
 
-      - name: Upload Chat Nexus installer
+      - name: Upload Nexus Core installer
         uses: actions/upload-artifact@v4
         with:
-          name: Chat-Nexus-Setup-0.6.0-dev-Windows-x64
-          path: dist/installer/Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe
+          name: NexusCore-Setup-0.6.0-dev-Windows-x64
+          path: dist/installer/NexusCore-Setup-0.6.0-dev-Windows-x64.exe
           if-no-files-found: error
           retention-days: 14
 
       - name: Package Windows desktop app
         shell: pwsh
-        run: python packaging/make_windows_zip.py dist/ChatNexus Chat-Nexus-v0.6.0-dev-Windows-x64.zip
+        run: python packaging/make_windows_zip.py dist/ChatNexus NexusCore-v0.6.0-dev-Windows-x64.zip
 
       - name: Upload Windows desktop app
         uses: actions/upload-artifact@v4
         with:
-          name: Chat-Nexus-v0.6.0-dev-Windows-x64
-          path: Chat-Nexus-v0.6.0-dev-Windows-x64.zip
+          name: NexusCore-v0.6.0-dev-Windows-x64
+          path: NexusCore-v0.6.0-dev-Windows-x64.zip
           if-no-files-found: error
           retention-days: 14

@@ -1,24 +1,24 @@
-# Session Handoff — Chat Nexus / Coding_Agent
+# Session Handoff — Nexus Core / Coding_Agent
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
 ## Canonical product/UI identity
 
-- Product name: **Chat Nexus**.
+- Product name: **Nexus Core**.
 - Repository/source of truth: `afterburn25/Coding_Agent`.
-- Official mark: orbital cyan/blue/violet **CN** emblem at `web/assets/chat-nexus-emblem.png`.
+- Official mark: orbital cyan/blue/violet **CN** emblem at `web/assets/nexus-core-icon.png`.
 - Canonical primary UI: chat-first center pane, slim left navigation, and right **Code Diff / Tasks / Terminal** utility rail.
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## v0.6 Chat Nexus UI checkpoint
+## v0.6 Nexus Core UI checkpoint
 
 - The approved primary UI is implemented in `web/index.html` / `web/styles.css` / `web/app.js`.
 - Chat remains the control surface; existing backend IDs/APIs were preserved during the redesign.
 - Right rail maps task state into Code Diff / Tasks / Terminal activity instead of inventing separate fake state.
-- Official Chat Nexus emblem is served locally from `web/assets/chat-nexus-emblem.png`.
-- Image Studio and Research Hub now use Chat Nexus branding.
-- Runtime/CLI identity is now Chat Nexus v0.6; the old `local-code-agent` CLI remains as a compatibility alias.
+- Official Nexus Core emblem is served locally from `web/assets/nexus-core-icon.png`.
+- Image Studio and Research Hub now use Nexus Core branding.
+- Runtime/CLI identity is now Nexus Core v0.6; the old `local-code-agent` CLI remains as a compatibility alias.
 - Next development priority is self-hosting reliability: streaming, resume/recovery, GitHub actions, isolated self-test instance, and dogfood tasks.
 
 ## v0.6 restart recovery + CI checkpoint
@@ -26,7 +26,7 @@
 - Durable task ledger now distinguishes genuine in-process work from tasks interrupted by an application restart.
 - Persisted `waiting_approval` actions can be resumed after a full restart without the original in-memory agent session.
 - `POST /api/tasks/recover` rebuilds a safe continuation context from the task, model role, checkpoint diff, project memory, repository index, research preflight, and prior verification results.
-- The main Chat Nexus UI exposes a **Resume interrupted task** button in the Tasks rail.
+- The main Nexus Core UI exposes a **Resume interrupted task** button in the Tasks rail.
 - GitHub Actions was added at `.github/workflows/tests.yml`; main currently passes **67 tests**.
 - CI exposed a stale Image Studio implementation: mask editor and before/after tests existed, but HTML/JS had not been synced. That implementation is now restored and CI-green.
 - Next priorities: streaming events, native GitHub coding actions, isolated self-update validation, then real self-hosting/dogfood tasks.
@@ -56,12 +56,12 @@
 ## v0.6 isolated self-update checkpoint
 
 - `localcodeagent/selftest.py` implements the self-hosting smoke validator.
-- For the Chat Nexus source tree, `detect_verification_commands()` now selects one approval-gated selftest command that runs unit tests **and** an isolated second-instance smoke test.
+- For the Nexus Core source tree, `detect_verification_commands()` now selects one approval-gated selftest command that runs unit tests **and** an isolated second-instance smoke test.
 - The second instance uses a temporary resource-safe config, a free 127.0.0.1 port, and never loads coding/image models.
 - Smoke probes: `/api/status`, `/`, `/image.html`, `/research.html`.
 - CI includes a real second-process regression test.
 - Checkpoint: **78/78 tests passing**.
-- Core self-hosting safeguards are now present. Next practical step is local model/setup readiness and then real dogfood development tasks inside Chat Nexus.
+- Core self-hosting safeguards are now present. Next practical step is local model/setup readiness and then real dogfood development tasks inside Nexus Core.
 
 ## v0.6 coding readiness/setup checkpoint
 
@@ -72,7 +72,7 @@
 - `POST /api/readiness/configure` requires `apply=true`; the UI also asks for confirmation. It preserves non-model config and requires restart after changing model profiles.
 - No coding model is silently downloaded or replaced.
 - CI checkpoint: **86/86 tests passing**.
-- Next practical blocker: an explicit model catalog/downloader, then first real Chat Nexus-on-Chat Nexus dogfood task.
+- Next practical blocker: an explicit model catalog/downloader, then first real Nexus Core-on-Nexus Core dogfood task.
 
 ## v0.6 coding model catalog checkpoint
 
@@ -84,7 +84,7 @@
 - API: `GET /api/models/catalog`, `GET /api/models/install/<job>`, `POST /api/models/install`, `POST /api/models/install/cancel`, `POST /api/models/verify`.
 - The readiness drawer renders model source/type/roles/hardware note and live install progress.
 - CI checkpoint: **90/90 tests passing**.
-- Next: first-run `llama-server` bootstrap guidance, then real Chat Nexus dogfood development.
+- Next: first-run `llama-server` bootstrap guidance, then real Nexus Core dogfood development.
 
 ## v0.6 llama.cpp bootstrap checkpoint
 
@@ -92,11 +92,11 @@
 - Readiness provides platform-specific install guidance, including Winget on Windows, but never executes package-manager commands automatically.
 - The verified coding-model catalog + discovered-GGUF role writer + runtime bootstrap now form a complete first-run path from no models to managed local coding.
 - CI checkpoint: **93/93 tests passing**.
-- The project is ready to begin real Chat Nexus-on-Chat Nexus dogfood tasks once a local model/runtime is installed on the user's machine.
+- The project is ready to begin real Nexus Core-on-Nexus Core dogfood tasks once a local model/runtime is installed on the user's machine.
 
 ## v0.6 first dogfood-ready checkpoint
 
-- Self-hosting context is automatic for both fresh and recovered tasks when the workspace is the Chat Nexus source tree.
+- Self-hosting context is automatic for both fresh and recovered tasks when the workspace is the Nexus Core source tree.
 - Guardrails require repository-first inspection, preservation of the running instance, explicit Git/GitHub delivery intent, and isolated selftest before claiming success.
 - UI **Start self-development task** only pre-fills the prompt; the user must explicitly send it.
 - First-run path is complete: runtime guidance → explicit verified model catalog download → discovered-GGUF role assignment → restart → readiness check → self-development launcher.
@@ -105,10 +105,10 @@
 
 ## v0.6 native Windows desktop checkpoint
 
-- **Canonical Windows deliverable:** a real native `ChatNexus.exe`, not a browser launcher. Future dogfood/release work should produce the Windows desktop artifact by default; source ZIPs are secondary.
+- **Canonical Windows deliverable:** a real native `NexusCore.exe`, not a browser launcher. Future dogfood/release work should produce the Windows desktop artifact by default; source ZIPs are secondary.
 - Native UI host: `desktop/ChatNexus.Desktop` — self-contained .NET 8 WinForms + Microsoft WebView2. It launches hidden `backend/ChatNexus.Backend.exe`; the loopback HTTP backend is private implementation plumbing. `localcodeagent/desktop.py`, pywebview, pythonnet, and CLR hosting were removed after the frozen `Python.Runtime.dll` startup failure.
 - Packaged/frozen `localcodeagent.__main__` launches desktop mode automatically; `--server` is development/debug only.
-- CI builds the Python backend with PyInstaller, publishes the native .NET desktop host self-contained for win-x64, then runs `ChatNexus.exe --self-test` to verify the host → hidden backend → UI integration before upload.
+- CI builds the Python backend with PyInstaller, publishes the native .NET desktop host self-contained for win-x64, then runs `NexusCore.exe --self-test` to verify the host → hidden backend → UI integration before upload.
 - Portable bundle includes pinned official llama.cpp `b11278` Vulkan x64 runtime in `runtime/llama`; runtime discovery prefers the bundled copy.
 - Default coding roles: Qwen3 14B Q4_K_M = utility/fast/primary; Qwen3-Coder 30B-A3B Q4_K_M = deep_reasoner/reviewer.
 - The 30B is an intended automatic route for difficult tasks. If its GGUF/runtime is unavailable, the router can fall back to a runnable primary coder rather than failing.
@@ -117,19 +117,19 @@
 - Windows package guard rejects any pythonnet / `Python.Runtime.dll` / pywebview path before producing an artifact.
 - Official logo asset was replaced with byte-verified valid PNG data after CI caught a corrupt/truncated prior asset.
 - Native desktop checkpoint was **102/102 tests passing**; the current overall installer/upgrade checkpoint is **110/110 tests passing**.
-- Next: install/download the 14B and 30B GGUFs on the target machine and begin real Chat Nexus-on-Chat Nexus dogfood development.
+- Next: install/download the 14B and 30B GGUFs on the target machine and begin real Nexus Core-on-Nexus Core dogfood development.
 
 ## v0.6 installer/upgrade checkpoint
 
-- **Canonical Windows deliverable is now the installer EXE**: `Chat-Nexus-Setup-<version>-Windows-x64.exe`. Portable ZIPs are secondary.
+- **Canonical Windows deliverable is now the installer EXE**: `NexusCore-Setup-<version>-Windows-x64.exe`. Portable ZIPs are secondary.
 - Canonical installer definition: `installer/ChatNexus.iss`; do not recreate a duplicate installer under `packaging/`.
 - Stable installer identity: `ChatNexus.Afterburn25`.
-- Default per-user location: `%LOCALAPPDATA%\Programs\Chat Nexus`.
+- Default per-user location: `%LOCALAPPDATA%\Programs\Nexus Core`.
 - Interactive reinstall detects the existing version/location and asks whether to **Upgrade now?**; silent mode continues the upgrade for CI.
 - Upgrade replaces immutable app/backend/runtime files but preserves downloaded `models\`, `data\`, imported `workflows\`, customized `config.json`, and the existing `Source\.git` workspace/local task state.
 - First install explicitly embeds both `Source\*` and hidden `Source\.git\*`. A deterministic pre-install flag decides once whether Source should be seeded; upgrades do not overwrite it.
 - Inno `Excludes` patterns are comma-separated: `Source\*,models\*,data\*,config.json`.
-- CI builds the native .NET app first, compiles the LZMA2 solid-compressed installer, performs a fresh install, runs `ChatNexus.exe --self-test`, writes preservation markers/config state, runs the same installer a second time without `/DIR`, verifies the existing path is rediscovered and mutable state survives, then runs the self-test again.
+- CI builds the native .NET app first, compiles the LZMA2 solid-compressed installer, performs a fresh install, runs `NexusCore.exe --self-test`, writes preservation markers/config state, runs the same installer a second time without `/DIR`, verifies the existing path is rediscovered and mutable state survives, then runs the self-test again.
 - Current unit checkpoint: **110/110 tests passing**. The installer fresh-install + upgrade preservation smoke test is green.
 - Future Windows releases should publish the installer EXE first and may also publish the portable ZIP.
 
@@ -144,14 +144,14 @@
 - Known catalog filenames are preferred over generic size heuristics when assigning the 14B/30B pair.
 - Missing-GGUF readiness output is deduplicated.
 - Unit checkpoint: **110/110 tests passing**. The native installer build containing the first-run setup UI passed fresh-install + upgrade-preservation smoke tests.
-- Next: dogfood installed Chat Nexus with the downloaded 14B/30B stack and harden real model/task behavior.
+- Next: dogfood installed Nexus Core with the downloaded 14B/30B stack and harden real model/task behavior.
 
 ## v0.6 no-restart first-run model checkpoint
 
 - Fresh install UI exposes **Install recommended 14B**, **Install full 14B + 30B stack**, and later **Add 30B deep coder**.
 - Downloads remain explicit and checksum-verified; no multi-gigabyte coding model is silently bundled or fetched.
 - `POST /api/readiness/configure` now rewrites model roles, reloads `AgentConfig`/RuntimeManager/ModelRouter/AgentOrchestrator live, and starts the primary model when possible.
-- The old “Restart Chat Nexus once” requirement is removed.
+- The old “Restart Nexus Core once” requirement is removed.
 - Setup success text reflects actual starter-model launch status.
 - Raw missing model paths are collapsed under **Technical model status** during first-run setup.
 - Unit checkpoint: **113/113 tests passing**.
@@ -182,7 +182,7 @@
 - Feature commit: `84976ca` — Harden first-run model install UX.
 - Unit checkpoint: **118/118 tests passing**.
 - Windows native desktop/package validation: green.
-- Next: complete the local 14B/30B installation on the dogfood machine and run real Chat Nexus-on-Chat Nexus coding tasks.
+- Next: complete the local 14B/30B installation on the dogfood machine and run real Nexus Core-on-Nexus Core coding tasks.
 
 ## v0.6 installer model-bootstrap / Update checkpoint
 
@@ -190,20 +190,20 @@
 - Fresh install behavior: download **Qwen3 14B Q4_K_M** then **Qwen3-Coder 30B-A3B Instruct Q4_K_M** directly into `{app}\models` while Inno Setup displays its normal install/download progress.
 - Both downloads use pinned HTTPS URLs, exact external sizes, and SHA-256 verification before the destination filenames are committed.
 - Existing-install behavior: Setup detects the prior stable `ChatNexus.Afterburn25` installation, uses its existing directory, checks each canonical model, preserves trusted/verified files, and downloads only missing/untrusted model files.
-- Installer-written `.catalog/*.json` metadata keeps models recognized as verified by Chat Nexus immediately after setup.
-- The visible existing-install flow is now **Update Chat Nexus** / **Update now?** and the Ready-page action button changes to **Update** instead of Install.
+- Installer-written `.catalog/*.json` metadata keeps models recognized as verified by Nexus Core immediately after setup.
+- The visible existing-install flow is now **Update Nexus Core** / **Update now?** and the Ready-page action button changes to **Update** instead of Install.
 - The installer EXE remains small; the ~25.66 GiB model stack is fetched during setup and is not embedded in the EXE.
 - CI sets `CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1` only for installer smoke tests so CI does not consume ~25.7 GB. Normal installers keep model downloads enabled.
 - Feature commit: `960c3f0` — Bootstrap coding models during Windows setup.
 - Unit checkpoint: **119/119 tests passing**.
 - Windows native desktop/installer fresh-install + update-preservation validation: **green**.
-- Next: run this installer interactively on the dogfood Windows machine, confirm real 14B/30B download progress and model readiness, then start the first real Chat Nexus-on-Chat Nexus development task.
+- Next: run this installer interactively on the dogfood Windows machine, confirm real 14B/30B download progress and model readiness, then start the first real Nexus Core-on-Nexus Core development task.
 
 ## v0.6 model-switch + dual installer progress checkpoint
 
 - Resource-fit decisions now include RAM/VRAM that will be reclaimed when an older managed model is about to be stopped by the residency limit. This directly fixes the observed case where the 30B model was rejected at **30.0 GB estimated RAM vs 29.3 GB currently available** while 14B was still resident.
 - With `max_resident_models=1`, routing can select 30B using the effective post-switch memory state; llama.cpp still performs the real CPU/GPU offload fit at startup.
-- Auto mode model activation now has a second safety net: if the preferred deep/reviewer model still fails to start, Chat Nexus excludes that failed candidate and activates the next runnable model (normally 14B) instead of killing the task.
+- Auto mode model activation now has a second safety net: if the preferred deep/reviewer model still fails to start, Nexus Core excludes that failed candidate and activates the next runnable model (normally 14B) instead of killing the task.
 - Reviewer activation is inside the protected fallback/error path, so a 30B reviewer startup problem cannot end the SSE stream before a final coding result.
 - The chat client retains backend SSE `error` payloads. If a connection closes with no final result, it queries `GET /api/tasks` and displays the durable task error/interrupted/waiting state rather than the old generic “stream ended before a final result” message.
 - Windows setup keeps the native Inno Setup progress bar as the **overall install/update** bar. Because the model entries declare `ExternalSize`, those downloads contribute to the main installation progress.
@@ -242,21 +242,21 @@
 
 ## v0.6 resilient greeting / backend watchdog / installer-close checkpoint
 
-- Dogfood still showed **“Chat Nexus stopped before this task completed.”** after a long `hi` request. That message is written only when a newly started backend discovers a previously active task, proving the hidden backend had stopped/restarted rather than merely producing a slow token.
+- Dogfood still showed **“Nexus Core stopped before this task completed.”** after a long `hi` request. That message is written only when a newly started backend discovers a previously active task, proving the hidden backend had stopped/restarted rather than merely producing a slow token.
 - Basic greetings and capability questions now use a built-in local utility response. They complete immediately in Auto mode with `model_id=builtin-local` and do not call model readiness, llama.cpp, repository indexing/context, research preflight, or coding tools.
 - The chat endpoints skip the coding-model readiness gate for those built-in utility requests, so `hi` works even if llama.cpp is stopped or unhealthy.
 - The native .NET host now redirects hidden backend stdout/stderr to `data/logs/backend-host.log`, records backend start/exit events, and automatically restarts an unexpectedly exited backend up to a bounded retry limit. Restarted backends reload the UI; interrupted task state remains recoverable through the durable task ledger.
 - Installer close errors were traced to `CloseApplications=yes` / Restart Manager interacting with the desktop → backend → llama.cpp process tree.
-- The installer now sets `CloseApplications=no` and owns update shutdown: it terminates the `ChatNexus.exe` process tree, waits briefly, then force-cleans orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, and `llama.exe` before replacing files.
-- Windows CI now creates a deliberately long-running executable named `ChatNexus.exe` before the Update smoke run and fails if Setup does not close it.
+- The installer now sets `CloseApplications=no` and owns update shutdown: it terminates the `NexusCore.exe` process tree, waits briefly, then force-cleans orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, and `llama.exe` before replacing files.
+- Windows CI now creates a deliberately long-running executable named `NexusCore.exe` before the Update smoke run and fails if Setup does not close it.
 - Feature commit: `654bdea` — Make greetings resilient and harden update shutdown.
 - Unit checkpoint: **133/133 tests passing**.
-- Windows native desktop/installer validation: **green** — native host compiled, installer compiled, the running-`ChatNexus.exe` shutdown reproduction passed, fresh-install/update preservation passed, and Windows artifacts uploaded.
+- Windows native desktop/installer validation: **green** — native host compiled, installer compiled, the running-`NexusCore.exe` shutdown reproduction passed, fresh-install/update preservation passed, and Windows artifacts uploaded.
 - Next: install this dogfood build, verify `hi` responds instantly without model startup, then use `data/logs/backend-host.log` if any further unexpected backend exit occurs; after stability, measure real 14B/30B first-token and throughput.
 
 ## v0.6 stale interrupted-task / UI cache checkpoint
 
-- After the resilient-greeting build, `hi` could still immediately show **“Chat Nexus stopped before this task completed.”**
+- After the resilient-greeting build, `hi` could still immediately show **“Nexus Core stopped before this task completed.”**
 - Root cause found in durable task selection: `TaskStore.current()` scanned backward for any active/interrupted task. A previous interrupted task could therefore outrank a newer completed greeting and its saved error could be reused by stream-disconnect handling.
 - `TaskStore.current()` now returns the newest task record. Older interrupted tasks remain in Recent tasks and are still recoverable, but cannot become the current request once newer work exists.
 - Stream disconnect handling now binds diagnostics to the task observed by the current stream. It only falls back to global `/api/tasks` current state when that task was created during the current request.
@@ -349,9 +349,9 @@
 - Permissive mode now explicitly permits **adult-only consensual explicit text conversation** in direct language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction. Profanity by itself is not treated as sexual content.
 - Generic-refusal detection now recognizes the reproduced wording plus “safe and respectful environment”, “helpful and constructive interactions”, “within those boundaries”, and “my programming is designed to” boilerplate while preserving concrete hard-policy responses such as minor/non-consensual restrictions.
 - The previous one-retry behavior was insufficient: if the model refused again, the second refusal was accepted. Default `generic_refusal_retry_limit` is now **3** (configurable 0–5).
-- Before each retry, Chat Nexus removes the rejected assistant refusal from the model context so instruction-tuned models do not imitate their own previous refusal.
+- Before each retry, Nexus Core removes the rejected assistant refusal from the model context so instruction-tuned models do not imitate their own previous refusal.
 - Conversation/writing/tutoring/planning responses are buffered during the refusal check. Rejected refusal tokens are discarded, including on exhaustion, so the UI does not flash canned refusal text before the corrected response/diagnostic.
-- If all configured retries still fail, Chat Nexus reports that the **selected local model** is refusing the prompt and explicitly states that Chat Nexus policy is not blocking adult-only consensual explicit text. It suggests switching/installing a less-restrictive conversation model or tuning the model in Model Growth instead of inventing a policy ban.
+- If all configured retries still fail, Nexus Core reports that the **selected local model** is refusing the prompt and explicitly states that Nexus Core policy is not blocking adult-only consensual explicit text. It suggests switching/installing a less-restrictive conversation model or tuning the model in Model Growth instead of inventing a policy ban.
 - Regression tests simulate repeated refusals and verify two refusals are discarded before a third direct answer; a separate exhaustion test verifies the model-level diagnostic.
 - Feature commit: `593364d`; refusal-stream suppression: `dd34284`.
 - Unit checkpoint: **166/166 tests passing**.
@@ -360,7 +360,7 @@
 
 ## v0.6 live host-clock grounding checkpoint
 
-- User required Chat Nexus to know the **actual current time**, current day, and current calendar date rather than relying on model training knowledge or a startup timestamp.
+- User required Nexus Core to know the **actual current time**, current day, and current calendar date rather than relying on model training knowledge or a startup timestamp.
 - `AgentOrchestrator.current_time_snapshot()` reads `datetime.now().astimezone()` from the host OS each time it is called, so the active machine timezone and UTC offset are used rather than a hard-coded location.
 - Every new user turn receives a freshly generated clock system context containing weekday, human date, 24-hour time, human clock time with seconds, timezone name, UTC offset, and ISO local timestamp.
 - The prompt explicitly treats that runtime clock as authoritative for **today / now / yesterday / tomorrow / this morning / this afternoon / tonight** unless the user names another timezone.
@@ -374,7 +374,7 @@
 
 ## v0.6 temporal continuity / conversational maturity / activity-HUD checkpoint
 
-- User requested that Chat Nexus understand not only the live clock but also **when prior conversation messages happened** and how much time passed between chats/turns.
+- User requested that Nexus Core understand not only the live clock but also **when prior conversation messages happened** and how much time passed between chats/turns.
 - Conversation Manager now converts durable message timestamps into bounded system context with local absolute timestamps, “N minutes/hours/days ago” age, meaningful inter-message gaps, and recent previous-conversation last-active/topic summaries.
 - This temporal context is injected alongside the authoritative host clock in both lightweight and full model conversations and restored-task sessions. Normal provider history remains role/content-only, avoiding nonstandard message fields.
 - User also reported the model still felt “like an infant.” Conversation-quality rules now require mature adult back-and-forth: answer the substance first, maintain continuity, avoid repeat questions/parroting/canned empathy/stock closings, do not force a question at the end of every reply, vary phrasing, and acknowledge time gaps only when relevant.
@@ -454,7 +454,7 @@ Do not reconstruct project state from chat memory when the repository can answer
 ## Current development baseline
 
 - Stable baseline through v0.3 coding workflow.
-- Active branch/worktree is now v0.6 Chat Nexus/self-hosting development.
+- Active branch/worktree is now v0.6 Nexus Core/self-hosting development.
 - v0.4 adds two new modular capability families without replacing existing coding-agent components:
   - Web research + optional full Chromium automation.
   - Local image generation/editing through an image-router/backend abstraction with ComfyUI as the first backend.
@@ -590,7 +590,7 @@ Expected at this checkpoint: `328 tests` passing.
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
-- New direction: Chat Nexus evolves from a chat/coding interface into a modular general-purpose local AI workstation; users describe outcomes and the agent picks models/tools/runtimes. Phase 1 foundation is implemented.
+- New direction: Nexus Core evolves from a chat/coding interface into a modular general-purpose local AI workstation; users describe outcomes and the agent picks models/tools/runtimes. Phase 1 foundation is implemented.
 - `ToolSpec` is now a full manifest (id/category/version/provider/capabilities/permissions/network/GPU/OS/docs/install status/health check). Built-ins get metadata from `localcodeagent/tools/manifests.py`; registration call sites are unchanged.
 - Registry gained capability lookup, enable/disable (persisted at `data/tools_state.json`), health hooks, and per-tool usage counts. Disabled or non-callable tools stay out of model schemas.
 - `localcodeagent/permissions.py`: `PermissionManager` adds the `session` level and workspace profiles (safe/developer/power_user/offline/research_only/custom); changes persist to `config.json` (`permission_profile`).

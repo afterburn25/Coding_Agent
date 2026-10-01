@@ -67,7 +67,7 @@ class TaskStore:
                     task.interrupted_from = task.phase or task.status
                     task.status = "interrupted"
                     task.phase = "interrupted"
-                    task.error = task.error or "Chat Nexus stopped before this task completed."
+                    task.error = task.error or "Nexus Core stopped before this task completed."
                     task.updated_at = time.time()
                     normalized = True
                 self._tasks[task.id] = task
@@ -198,7 +198,7 @@ class TaskStore:
     def current(self) -> TaskRecord | None:
         """Return the newest task record, regardless of status.
 
-        Chat Nexus runs one foreground chat task at a time. Older interrupted tasks
+        Nexus Core runs one foreground chat task at a time. Older interrupted tasks
         remain recoverable in recent history, but they must not overshadow a newer
         completed/error task and get misreported as the current request.
         """

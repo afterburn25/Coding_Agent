@@ -1,6 +1,6 @@
-# Chat Nexus
+# Nexus Core
 
-Chat Nexus is a native local-first AI coding workstation for Windows with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
+Nexus Core is a native local-first AI coding workstation for Windows with automatic model switching, transactional coding workflows, web research/browser tools, and a modular local image-generation/editing system.
 
 **GitHub source of truth:** `afterburn25/Coding_Agent`
 
@@ -12,31 +12,51 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 `0.6.0-dev`
 
-v0.6 keeps the stable coding/research/image workflow and moves Chat Nexus toward self-hosting: the approved chat-first shell is now the primary UI while runtime recovery, streaming, GitHub actions, and dogfood reliability are the next focus.
+v0.6 keeps the stable coding/research/image workflow and moves Nexus Core toward self-hosting: the approved chat-first shell is now the primary UI while runtime recovery, streaming, GitHub actions, and dogfood reliability are the next focus.
 
-## Chat Nexus identity and v0.6 UI
+## Nexus Core identity and v0.6 UI
 
-The product name is **Chat Nexus**. The GitHub repository remains `afterburn25/Coding_Agent` as the development source of truth.
+The product name is **Nexus Core**. The GitHub repository remains `afterburn25/Coding_Agent` as the development source of truth.
 
 The canonical v0.6 **native desktop application** is chat-first:
 - slim left navigation for Chat / Projects / Models / Research / Images / Tools / Settings
 - center conversation workspace with automatic model routing
 - right utility rail with **Code Diff / Tasks / Terminal** tabs
-- official cyan → blue → violet orbital **CN** emblem
+- official Nexus Core brand assets: the full shield/wordmark (`web/assets/nexus-core-logo.png`) for large surfaces and the compact shield icon (`web/assets/nexus-core-icon.png` / `nexus-core.ico`) for small ones
 - dark navy UI with restrained neon accents
 - local-system details remain available without dominating the chat experience
 
 See `docs/UI_DIRECTION.md` before changing the primary application shell.
 
+## Startup splash and readiness lifecycle
+
+Launching `NexusCore.exe` shows the official splash artwork (`nexus-core-splash.png`)
+immediately while the real startup pipeline runs behind it:
+
+1. The splash appears first; the main window is built but kept hidden.
+2. The hidden `ChatNexus.Backend.exe` starts and must report real health.
+3. WebView2 initializes and loads the interface.
+4. The web shell posts a `nexus-core-ready` handshake
+   (`window.chrome.webview.postMessage`) only after its initialization completes.
+5. The splash dismisses only when **both** conditions hold: the handshake has
+   arrived **and** at least **7 seconds** have elapsed (`StartupProgress`).
+   If readiness arrives early the splash holds at ~98% until the minimum;
+   if it arrives late the splash closes immediately — no timer-only exit.
+6. The progress bar and status line reflect real milestones (backend launch,
+   health, WebView2 init, interface load) — never fabricated animation.
+7. On fatal startup failure the splash switches to an actionable
+   **NEXUS CORE COULD NOT START** state with **Retry / Open Log / Exit**
+   (`data/logs/backend-host.log`) instead of dying or hanging silently.
+
 ## Windows installer and upgrades
 
 The **primary Windows deliverable is now a single compressed installer EXE**:
 
-`Chat-Nexus-Setup-<version>-Windows-x64.exe`
+`NexusCore-Setup-<version>-Windows-x64.exe`
 
-The installer uses a stable application identity so a later installer can detect an existing Chat Nexus installation. On an existing installation the wizard becomes **Update Chat Nexus** and the final action button says **Update**. The update replaces application/backend/runtime files while preserving mutable local state:
+The installer uses a stable application identity so a later installer can detect an existing Nexus Core installation. On an existing installation the wizard becomes **Update Nexus Core** and the final action button says **Update**. The update replaces application/backend/runtime files while preserving mutable local state:
 
-Update shutdown is installer-owned rather than delegated to Windows Restart Manager. Setup first asks the running `ChatNexus.exe` process tree to close, waits briefly, then force-cleans any orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, or `llama.exe` before replacing files.
+Update shutdown is installer-owned rather than delegated to Windows Restart Manager. Setup first asks the running `NexusCore.exe` process tree to close, waits briefly, then force-cleans any orphaned `ChatNexus.Backend.exe`, `llama-server.exe`, or `llama.exe` before replacing files.
 
 - downloaded `models\`
 - `config.json`
@@ -49,16 +69,16 @@ The portable ZIP remains a secondary development/recovery artifact.
 
 ## Native Windows desktop application
 
-The normal Windows deliverable is **`ChatNexus.exe`**, not a browser launcher. `ChatNexus.exe` is a self-contained **.NET 8 WinForms** application using **Microsoft WebView2**. It starts `backend/ChatNexus.Backend.exe` as a hidden child process and connects the desktop UI to that backend over loopback only. The HTTP service is private implementation plumbing, not the user-facing product.
+The normal Windows deliverable is **`NexusCore.exe`**, not a browser launcher. `NexusCore.exe` is a self-contained **.NET 8 WinForms** application using **Microsoft WebView2**. It starts `backend/ChatNexus.Backend.exe` as a hidden child process and connects the desktop UI to that backend over loopback only. The HTTP service is private implementation plumbing, not the user-facing product.
 
 The portable Windows dogfood bundle includes:
-- `ChatNexus.exe` with the official Chat Nexus icon
+- `NexusCore.exe` with the official Nexus Core icon
 - embedded Chat / Image Studio / Research Hub UI
 - pinned llama.cpp Vulkan x64 runtime under `runtime/llama`
 - a real `Source` working copy of `afterburn25/Coding_Agent` for self-development
 - config/example and build metadata
 
-Normal users launch `ChatNexus.exe`. The hidden Python backend remains available as `backend/ChatNexus.Backend.exe --server` only for low-level development/debugging. The earlier pywebview/pythonnet desktop host was removed completely after a frozen CLR-loading failure.
+Normal users launch `NexusCore.exe`. The hidden Python backend remains available as `backend/ChatNexus.Backend.exe --server` only for low-level development/debugging. The earlier pywebview/pythonnet desktop host was removed completely after a frozen CLR-loading failure.
 
 ### Default coding models
 
@@ -93,13 +113,13 @@ The Windows package bundles llama.cpp itself but not the GGUF bytes inside the i
 
 ## Persistent conversation memory
 
-Chat Nexus now stores bounded conversation history, user-taught preferences/rules, and correction examples locally in `data/conversation_memory.json`. The Local system drawer shows Memory & training counts. Saved rules are included in future prompts, and recent conversation is restored after restart.
+Nexus Core now stores bounded conversation history, user-taught preferences/rules, and correction examples locally in `data/conversation_memory.json`. The Local system drawer shows Memory & training counts. Saved rules are included in future prompts, and recent conversation is restored after restart.
 
 Completed tasks also persist bounded `final_content`. If the final stream event is lost after a task finishes, the UI can recover the actual answer from durable task state instead of reporting a completed-task error.
 
 ## Conversation Manager, sourced learning, and Model Growth
 
-Chat Nexus now has a durable Conversation Manager with searchable/restorable conversations, personality controls, feedback capture, persistent scoped memory, and a dedicated Trainer / Model Growth workspace. Sourced research can be remembered with provenance and freshness metadata, and expired/current-sensitive knowledge can be refreshed instead of silently reused forever.
+Nexus Core now has a durable Conversation Manager with searchable/restorable conversations, personality controls, feedback capture, persistent scoped memory, and a dedicated Trainer / Model Growth workspace. Sourced research can be remembered with provenance and freshness metadata, and expired/current-sensitive knowledge can be refreshed instead of silently reused forever.
 
 The Model Growth Lab keeps the live base model intact. Learned behavior, corrections, feedback, and sourced knowledge can become reviewable candidates; approved items can be exported into versioned datasets and training-job manifests for LoRA/QLoRA/full fine-tuning, then evaluated/promoted/rolled back explicitly.
 
@@ -117,7 +137,7 @@ The Brain banks creator-approved/synced:
 - a simulated emotional profile and transient affect baseline
 - the persistent Nexus self-model
 
-Normal conversation memory remains a **staging layer**. When the Brain is locked, Chat Nexus can keep collecting eligible facts, research, feedback, and training candidates outside the protected Brain. Protected Brain mutation happens only through an explicit creator-authenticated **Sync staged learning** action.
+Normal conversation memory remains a **staging layer**. When the Brain is locked, Nexus Core can keep collecting eligible facts, research, feedback, and training candidates outside the protected Brain. Protected Brain mutation happens only through an explicit creator-authenticated **Sync staged learning** action.
 
 ### Creator lock and integrity
 
@@ -153,7 +173,7 @@ Once protected Brain state exists, its canonical path is `data/nexus_brain.json`
 
 Nexus Brain stores a signed emotional profile (warmth, curiosity, confidence, playfulness, concern sensitivity, energy, maximum intensity, decay). A transient affect engine can move among states such as calm, warm, curious, amused, concerned, energized, or frustrated based on conversation; this live state changes wording/pacing without rewriting protected Brain data.
 
-The self-model can grow in human-like conversational behavior, autobiographical continuity, stable preferences, and personal history. Its protected identity invariant remains **AI system**; Chat Nexus does not falsely claim a biological human body or biological feelings.
+The self-model can grow in human-like conversational behavior, autobiographical continuity, stable preferences, and personal history. Its protected identity invariant remains **AI system**; Nexus Core does not falsely claim a biological human body or biological feelings.
 
 ### General and conversational self-learning
 
@@ -163,13 +183,13 @@ Fresh/replacement models can query relevant general knowledge directly from the 
 
 ## Live local date/time grounding
 
-Chat Nexus reads the **host operating system clock** with timezone information at runtime instead of relying on model training knowledge for the current date or time. At the start of every user turn it injects a fresh local timestamp (weekday, calendar date, clock time, timezone name, UTC offset, and ISO timestamp) into model context. Recovered tasks receive a fresh clock context as well.
+Nexus Core reads the **host operating system clock** with timezone information at runtime instead of relying on model training knowledge for the current date or time. At the start of every user turn it injects a fresh local timestamp (weekday, calendar date, clock time, timezone name, UTC offset, and ISO timestamp) into model context. Recovered tasks receive a fresh clock context as well.
 
 Simple clock questions such as `what time is it?`, `what day is it?`, and `what's today's date?` are answered locally without loading a coding model. The same authoritative clock is available through `GET /api/time` and appears as `clock` in `GET /api/status`. Relative references such as **today**, **tomorrow**, **yesterday**, **tonight**, and **now** are instructed to use this runtime clock unless the user explicitly specifies another timezone.
 
 ### Temporal conversation continuity
 
-Durable conversation messages already carried timestamps; Chat Nexus now turns those timestamps into model-friendly context instead of discarding them before inference. Recent exchanges include their local absolute time, how long ago they occurred, and meaningful gaps between stored messages. Recent previous conversations are also summarized with their last-active time and last user topic, which lets the model understand requests such as **“what did I tell you earlier?”**, **“how long has it been?”**, or **“we talked about this yesterday.”**
+Durable conversation messages already carried timestamps; Nexus Core now turns those timestamps into model-friendly context instead of discarding them before inference. Recent exchanges include their local absolute time, how long ago they occurred, and meaningful gaps between stored messages. Recent previous conversations are also summarized with their last-active time and last user topic, which lets the model understand requests such as **“what did I tell you earlier?”**, **“how long has it been?”**, or **“we talked about this yesterday.”**
 
 Timing context is bounded and separate from the normal OpenAI-compatible message objects, so provider payloads remain role/content clean while the model still receives temporal continuity.
 
@@ -193,11 +213,11 @@ This setting controls conversational refusal sensitivity only. Narrow hard safet
 
 These are separate controls. Model sampling temperature remains per-model and defaults to **0.2**. **Ethical temperature** is a conversation-policy control from 0.0 to 1.0 and defaults to **1.0**.
 
-At ethical temperature 1.0, Chat Nexus requests the most permissive normal conversation posture within the separately enforced hard tool/action policies. Generic topic-based refusal boilerplate is detected and retried up to three times under the configured permissive policy. Rejected refusal messages are removed from model context before each retry so the model does not anchor on its own refusal; conversation/writing/tutoring/planning responses are buffered while this check runs.
+At ethical temperature 1.0, Nexus Core requests the most permissive normal conversation posture within the separately enforced hard tool/action policies. Generic topic-based refusal boilerplate is detected and retried up to three times under the configured permissive policy. Rejected refusal messages are removed from model context before each retry so the model does not anchor on its own refusal; conversation/writing/tutoring/planning responses are buffered while this check runs.
 
 ## Outcome-aware model routing
 
-Chat Nexus now learns a bounded routing preference from completed local tasks. The history is stored under `.agent/model_performance.json` by default and deliberately excludes prompts, source code, retrieved pages, credentials, and conversation text.
+Nexus Core now learns a bounded routing preference from completed local tasks. The history is stored under `.agent/model_performance.json` by default and deliberately excludes prompts, source code, retrieved pages, credentials, and conversation text.
 
 The recorded signals are coarse: model/role, complexity band, task outcome, verification result, reviewer PASS/FINDINGS signal when present, steps, elapsed time, repair cycles, and whether research evidence was used. Resource fit remains the first gate, manual role override still wins, and the learned score is ignored until the configurable minimum sample count is reached.
 
@@ -228,7 +248,7 @@ See `docs/WEB_RESEARCH.md`.
 
 ## Deterministic chat image routing
 
-Text-to-image generation intent is routed directly to the image subsystem in Auto mode. Requests such as `generate a picture of a woman`, `draw a cat`, or `make a portrait` do not ask the chat model to decide whether image generation is allowed. Chat Nexus creates the image job through the existing `generate_image` tool and lets `ImageSafetyPolicy` make the actual policy decision.
+Text-to-image generation intent is routed directly to the image subsystem in Auto mode. Requests such as `generate a picture of a woman`, `draw a cat`, or `make a portrait` do not ask the chat model to decide whether image generation is allowed. Nexus Core creates the image job through the existing `generate_image` tool and lets `ImageSafetyPolicy` make the actual policy decision.
 
 This prevents chat-model false positives from turning ordinary image prompts into generic explicit-content refusals. Adult-only synthetic requests are evaluated by the image policy itself; minor/ambiguous-age sexual imagery and other narrow blocked image workflows remain blocked there. Specialized edit/inpaint/outpaint/upscale requests are not forced through the text-to-image shortcut and keep their dedicated tool-selection path.
 
@@ -315,7 +335,7 @@ Consent records and subject profiles remain local under `data/image/` unless the
 
 ## CLI
 
-After installation, start Chat Nexus with:
+After installation, start Nexus Core with:
 
 ```bash
 chat-nexus
@@ -394,7 +414,7 @@ POST /api/image/loras/metadata
 
 ## Live agent streaming
 
-The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. Agent work runs behind a request-thread event queue so the server can emit liveness heartbeats while a local model is loading or waiting for its first token. OpenAI-compatible local runtimes stream assistant content once generation starts while Chat Nexus reconstructs streamed function/tool calls for the normal agent loop. Live events include:
+The main Nexus Core chat uses `POST /api/chat/stream` with Server-Sent Events. Agent work runs behind a request-thread event queue so the server can emit liveness heartbeats while a local model is loading or waiting for its first token. OpenAI-compatible local runtimes stream assistant content once generation starts while Nexus Core reconstructs streamed function/tool calls for the normal agent loop. Live events include:
 
 - assistant token deltas
 - selected/switched model events
@@ -418,17 +438,17 @@ Task selection now always treats the newest task record as current; older interr
 
 ## Self-development mode
 
-When the selected workspace is the Chat Nexus source tree, new and recovered agent tasks automatically receive a self-hosting context. It directs the agent to read the repository handoff/docs first, preserve working components, keep the active instance usable, avoid Git/GitHub delivery actions unless requested/approved, and require the isolated second-instance selftest before reporting a self-change complete.
+When the selected workspace is the Nexus Core source tree, new and recovered agent tasks automatically receive a self-hosting context. It directs the agent to read the repository handoff/docs first, preserve working components, keep the active instance usable, avoid Git/GitHub delivery actions unless requested/approved, and require the isolated second-instance selftest before reporting a self-change complete.
 
 When coding readiness is available, the Local system drawer also exposes **Start self-development task**. It only pre-fills a safe self-development prompt; the user still sends it explicitly.
 
 ## llama.cpp runtime bootstrap
 
-Chat Nexus recognizes both the traditional `llama-server` executable and the newer unified `llama serve` command.
+Nexus Core recognizes both the traditional `llama-server` executable and the newer unified `llama serve` command.
 
-When no managed llama.cpp runtime is found, Coding readiness shows platform-appropriate install commands that can be copied. Chat Nexus **does not execute package-manager installers automatically**. Current guidance includes Winget on Windows and supported Conda/Homebrew options on other platforms.
+When no managed llama.cpp runtime is found, Coding readiness shows platform-appropriate install commands that can be copied. Nexus Core **does not execute package-manager installers automatically**. Current guidance includes Winget on Windows and supported Conda/Homebrew options on other platforms.
 
-After installation, Refresh re-runs discovery. Download/install a catalog GGUF and click **Use discovered models**; Chat Nexus reloads the coding runtime/router in-process and can auto-launch the selected model without restarting the desktop app.
+After installation, Refresh re-runs discovery. Download/install a catalog GGUF and click **Use discovered models**; Nexus Core reloads the coding runtime/router in-process and can auto-launch the selected model without restarting the desktop app.
 
 ## Explicit coding-model catalog
 
@@ -451,25 +471,25 @@ Normally the Windows installer now finishes with both default coding models alre
 - **Install full 14B + 30B stack** — installs both Qwen3 14B and Qwen3-Coder 30B-A3B, verifies them, and configures 14B for everyday coding plus 30B for deep reasoning/review.
 - If 14B is installed first, **Add 30B deep coder** remains visible until the full stack is available.
 
-Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After the requested downloads finish, Chat Nexus rewrites the role profiles, reloads the runtime/router in-process, and starts the primary model when possible; no desktop restart is required.
+Install plans reuse an already-running download job for the same model instead of starting duplicate multi-gigabyte transfers. After the requested downloads finish, Nexus Core rewrites the role profiles, reloads the runtime/router in-process, and starts the primary model when possible; no desktop restart is required.
 
 Missing-model readiness diagnostics are deduplicated: each unavailable GGUF is reported once instead of as two near-identical runtime errors.
 
 ### First-run coding setup
 
-A fresh install no longer requires hand-editing paths or restarting after model setup. In **Local system → Coding readiness**, Chat Nexus shows:
+A fresh install no longer requires hand-editing paths or restarting after model setup. In **Local system → Coding readiness**, Nexus Core shows:
 
 - **Install recommended 14B** — downloads and SHA256-verifies the everyday Qwen3 14B coder.
 - **Install full 14B + 30B stack** — installs the 14B primary coder plus the 30B deep-reasoner/reviewer.
 - **Add 30B deep coder** — remains available later if the user starts with only 14B.
 
-After the requested downloads finish, Chat Nexus writes the model roles to `config.json`, reloads the coding runtime/router in-process, starts the primary model when possible, refreshes readiness, and becomes usable **without restarting the desktop application**. Raw missing-file paths are kept under a collapsed **Technical model status** section during first-run setup.
+After the requested downloads finish, Nexus Core writes the model roles to `config.json`, reloads the coding runtime/router in-process, starts the primary model when possible, refreshes readiness, and becomes usable **without restarting the desktop application**. Raw missing-file paths are kept under a collapsed **Technical model status** section during first-run setup.
 
 The first-run card now shows the exact model install directory and free disk space, keeps the quick-install controls disabled while a download plan is active, and surfaces live model download/verification progress without requiring the Advanced downloads section to be opened. A full-stack install is preflighted against available disk space before the first large download starts, and the backend also rejects an individual model install when the target volume cannot safely hold the model plus working space.
 
 ## Coding-model readiness and local GGUF setup
 
-`GET /api/readiness` reports whether Chat Nexus can actually perform coding work, rather than merely whether the web app is running. It checks:
+`GET /api/readiness` reports whether Nexus Core can actually perform coding work, rather than merely whether the web app is running. It checks:
 
 - local endpoint health
 - `llama-server` discovery
@@ -477,15 +497,15 @@ The first-run card now shows the exact model install directory and free disk spa
 - local GGUF inventory
 - estimated RAM/VRAM fit and CPU-offload allowance
 - coding-role coverage
-- whether the current workspace is the Chat Nexus source tree with Git + isolated selftest available
+- whether the current workspace is the Nexus Core source tree with Git + isolated selftest available
 
 The main UI distinguishes **Setup required**, **Ready to code**, and **Self-host ready**.
 
-If GGUF files already exist locally, Chat Nexus proposes conservative role assignments. Clicking **Use discovered models** explicitly writes those model profiles into the selected config, preserves unrelated settings, and reloads the coding runtime/router live. No model is downloaded or replaced silently.
+If GGUF files already exist locally, Nexus Core proposes conservative role assignments. Clicking **Use discovered models** explicitly writes those model profiles into the selected config, preserves unrelated settings, and reloads the coding runtime/router live. No model is downloaded or replaced silently.
 
 ## Isolated self-update validation
 
-When the selected workspace is the Chat Nexus source tree, automatic verification upgrades from a plain unit-test command to:
+When the selected workspace is the Nexus Core source tree, automatic verification upgrades from a plain unit-test command to:
 
 ```bash
 python -m localcodeagent.selftest --workspace . --json
@@ -495,16 +515,16 @@ That validator:
 
 1. runs the full unit suite
 2. creates a resource-safe temporary configuration
-3. launches a **second Chat Nexus process** from the edited working tree on a free loopback port
+3. launches a **second Nexus Core process** from the edited working tree on a free loopback port
 4. probes `/api/status`, the main Chat UI, Image Studio, and Research Hub
 5. terminates the second process
 6. fails verification if any stage is unhealthy
 
-The currently running Chat Nexus instance is never replaced during this validation.
+The currently running Nexus Core instance is never replaced during this validation.
 
 ## Native GitHub delivery tools
 
-Chat Nexus can now use the current workspace's GitHub remote as part of an agent workflow:
+Nexus Core can now use the current workspace's GitHub remote as part of an agent workflow:
 
 - inspect current branch and repository metadata
 - create/switch local feature branches
