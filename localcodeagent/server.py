@@ -2054,16 +2054,6 @@ class Handler(BaseHTTPRequestHandler):
                         self.state.jobs.update(jid, state="running", status="benchmarking")
                         try:
                             result = tuner.benchmark(p)
-                            try:
-                                bench_dir = self.state.runtime.base_dir / "data" / "benchmarks"
-                                bench_dir.mkdir(parents=True, exist_ok=True)
-                                stamp = time.strftime("runtime-%Y%m%d-%H%M%S")
-                                (bench_dir / f"{stamp}-{p.id}.json").write_text(
-                                    json.dumps(result, indent=2, default=str) + "\n",
-                                    encoding="utf-8",
-                                )
-                            except OSError:
-                                pass
                             best = result.get("best")
                             self.state.jobs.update(
                                 jid, state="completed", status="finished", progress=1.0,

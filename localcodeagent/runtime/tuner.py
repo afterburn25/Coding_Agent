@@ -27,7 +27,7 @@ from ..config import AgentConfig, ModelProfile
 
 
 TUNER_VERSION = 1
-PROBE_TIMEOUT = 8.0
+PROBE_TIMEOUT = 20.0
 
 
 @dataclass(slots=True)
@@ -111,10 +111,21 @@ class RuntimeTuner:
         exe = self._find_llama()
         if exe:
             try:
-                proc = subprocess.run(
-                    [exe, "--help"], capture_output=True, text=True, timeout=PROBE_TIMEOUT,
-                )
-                help_text = (proc.stdout or "") + (proc.stderr or "")
+                help_text = ""
+                # Cold binary loads (first run, AV/Defender scan) can exceed the
+                # short probe timeout; retry once so capabilities don't silently
+                # degrade to 'unavailable' for the whole session.
+                for _attempt in range(2):
+                    try:
+                        proc = subprocess.run(
+                            [exe, "--help"], capture_output=True, text=True, timeout=PROBE_TIMEOUT,
+                        )
+                        help_text = (proc.stdout or "") + (proc.stderr or "")
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                if not help_text:
+                    raise TimeoutError("llama --help probe timed out")
                 supported = set()
                 for flag in (
                     "--flash-attn", "--cache-reuse", "--batch-size", "--ubatch-size",
@@ -270,7 +281,17 @@ class RuntimeTuner:
         if best is not None:
             self.record_result(profile, best["args"], best["metrics"])
         self._save()
-        return {"status": "ok" if best is not None else "all_failed", "results": results, "best": best}
+        out = {"status": "ok" if best is not None else "all_failed", "results": results, "best": best}
+        try:
+            bench_dir = self.runtime_root / "data" / "benchmarks"
+            bench_dir.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("runtime-%Y%m%d-%H%M%S")
+            artifact = bench_dir / f"{stamp}-{profile.id}.json"
+            artifact.write_text(json.dumps(out, indent=2, default=str) + "\n", encoding="utf-8")
+            out["artifact"] = str(artifact)
+        except OSError:
+            pass
+        return out
 
     def _default_candidates(self) -> list[list[str]]:
         base = self.tuned_flags_heuristic_safe()
