@@ -1120,6 +1120,22 @@ class AppState:
         if approve and self.permission_manager.level("packages.install") == "session":
             self.permission_manager.grant_session("packages.install")
         if str(install.get("method") or "").strip().lower() == "archive":
+            size = int(install.get("size_bytes") or 0)
+            if size:
+                import shutil
+                free = shutil.disk_usage(str(self.runtime.base_dir)).free
+                if free < size:
+                    return {"ok": False,
+                            "error": f"not enough disk space — the download alone needs "
+                                     f"{size / 1e9:.1f} GB, only {free / 1e9:.1f} GB free"}
+                result = self.tool_downloads.install(
+                    spec.name, spec.display_name, install, version=spec.version)
+                # Archive + extracted payload coexist at peak; warn when tight.
+                if result.get("ok") and free < size * 3:
+                    result["warning"] = (
+                        f"disk may be tight — {free / 1e9:.1f} GB free; extraction could "
+                        f"need ~{size * 2 / 1e9:.1f} GB more")
+                return result
             return self.tool_downloads.install(
                 spec.name, spec.display_name, install, version=spec.version)
         cmd = install_command(install, install_root=self.runtime.base_dir)
@@ -1409,10 +1425,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tools":
             self.state.tools.refresh_install_status()
+            import shutil
             self._json({
                 "tools": self.state.tools.manifests(),
                 "categories": TOOL_CATEGORIES,
                 "plugins": self.state.plugin_manifests,
+                "disk_free_bytes": shutil.disk_usage(str(self.state.runtime.base_dir)).free,
             })
             return
         if path.startswith("/api/tools/health/"):

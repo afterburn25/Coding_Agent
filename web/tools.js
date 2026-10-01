@@ -6,6 +6,7 @@
   let jobs = [];
   let imageStatus = [];
   let imageEnabled = false;
+  let diskFreeBytes = 0;
 
   const api = async (path, options) => {
     const res = await fetch(path, options);
@@ -63,8 +64,10 @@
     const data = await api("/api/tools");
     tools = data.tools || [];
     categories = data.categories || [];
+    diskFreeBytes = data.disk_free_bytes || 0;
     renderCategories();
     renderTools();
+    renderInstalls();
   }
 
   const INSTALL_KINDS = new Set(["tool_install", "tool_remove", "image_install", "model_install"]);
@@ -87,13 +90,13 @@
     if (!active.length) {
       overall.hidden = true;
       $("installSummary").textContent =
-        "No installs running. Optional tools (ComfyUI, image packs) install from this page — nothing is downloaded by the app installer.";
+        `No installs running. Optional tools (ComfyUI, image packs) install from this page — nothing is downloaded by the app installer.${diskFreeBytes ? ` ${fmtBytes(diskFreeBytes)} free.` : ""}`;
       return;
     }
     overall.hidden = false;
     const pct = Math.round((active.reduce((s, j) => s + (Number(j.progress) || 0), 0) / active.length) * 100);
     $("installOverallFill").style.width = `${pct}%`;
-    $("installOverallLabel").textContent = `Overall install · ${active.length} active · ${pct}%`;
+    $("installOverallLabel").textContent = `Overall install · ${active.length} active · ${pct}%${diskFreeBytes ? ` · ${fmtBytes(diskFreeBytes)} free` : ""}`;
     const cur = active[0];
     const m = cur.metadata || {};
     const phase = m.phase || cur.status || "working";
@@ -180,6 +183,7 @@
             res = await post("/api/tools/install", { tool: btn.dataset.install, approve: true });
           }
           if (!res.ok) { alert(res.error || "install not available"); return; }
+          if (res.warning) alert(res.warning);
           btn.textContent = "Installing…";
           setTimeout(() => { loadTools(); loadJobs(); }, 800);
         } catch (e) {
@@ -269,9 +273,11 @@
       ...t.capabilities.slice(0, 4).map((c) => `<span class="chip cap">${esc(c)}</span>`),
     ].join("");
     const sizeHint = spec.size_bytes ? ` · ${fmtBytes(spec.size_bytes)}` : "";
-    const installTitle = spec.method === "archive"
+    const installTitle = (spec.method === "archive"
       ? `Download & extract to ${spec.dest || "app dir"}${sizeHint}`
-      : `via ${spec.method}${sizeHint}`;
+      : `via ${spec.method}${sizeHint}`)
+      + (spec.size_bytes && diskFreeBytes && spec.size_bytes > diskFreeBytes
+        ? " — LOW DISK SPACE" : "");
     return `
       <div class="tool-card${t.enabled ? "" : " disabled"}">
         <div>

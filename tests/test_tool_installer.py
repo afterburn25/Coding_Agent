@@ -354,6 +354,18 @@ class ServerInstallFlowTests(unittest.TestCase):
                 (root / "demo_tool" / ".chatnexus-version").write_text("1.0\n", encoding="utf-8")
                 self.assertTrue(state.tools.manifest("demo")["update_available"])
 
+                # Disk preflight: absurd size_bytes refuses before any download.
+                orig_manifest = state.tools.manifest
+                huge_install = {**orig_manifest("demo")["install"], "size_bytes": 10**15}
+                state.tools.manifest = lambda name: {
+                    **orig_manifest(name), "install": huge_install}
+                try:
+                    denied = state.install_tool("demo", approve=True)
+                finally:
+                    state.tools.manifest = orig_manifest
+                self.assertFalse(denied["ok"])
+                self.assertIn("disk space", denied["error"])
+
                 # Full lifecycle: uninstall removes files and status flips back.
                 rm = state.uninstall_tool("demo")
                 if rm.get("needs_approval"):
