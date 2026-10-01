@@ -969,6 +969,58 @@ class AutonomousContinuationTests(unittest.TestCase):
             self.assertEqual(result.task["status"], "step_limit")
             self.assertEqual(provider.calls, 2)
 
+    def test_task_cancellation_skips_remaining_tool_calls(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"probe.execute": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+            )
+            tasks = TaskStore(root)
+            tools = ToolRegistry(config.permissions)
+            marks = []
+
+            def cancel_now(args):
+                tasks.update(tools.context.get("task_id", ""), status="cancelled")
+                return "CANCELLED_TASK"
+
+            tools.register(ToolSpec("cancel_tool", "test", {"type": "object", "properties": {}},
+                                    "probe.execute", cancel_now))
+            tools.register(ToolSpec("mark_tool", "test", {"type": "object", "properties": {}},
+                                    "probe.execute", lambda args: marks.append(1) or "MARKED"))
+            index = RepositoryIndex(root)
+            index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=tasks, checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+
+            class _CancelProvider:
+                def complete(self, *, messages, tools=None):
+                    return ProviderResponse(message={
+                        "role": "assistant", "content": "",
+                        "tool_calls": [
+                            {"id": "c1", "type": "function",
+                             "function": {"name": "cancel_tool", "arguments": "{}"}},
+                            {"id": "c2", "type": "function",
+                             "function": {"name": "mark_tool", "arguments": "{}"}},
+                        ],
+                    }, raw={})
+
+            agent._provider_for = lambda _: _CancelProvider()
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "cancelled")
+            self.assertEqual(marks, [])
+
 
 if __name__ == "__main__":
     unittest.main()

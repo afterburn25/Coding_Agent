@@ -403,6 +403,31 @@ class TerminalToolTests(unittest.TestCase):
         tracker = register_terminal_tools(reg, ws, jobs=jobs, log_dir=ws / ".logs")
         return reg, tracker
 
+    def test_terminal_run_streams_output_to_sink(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg, _ = self._reg(Path(td))
+            chunks = []
+            reg.context["stream_sink"] = lambda name, chunk: chunks.append((name, chunk))
+            result = reg.execute("terminal_run", {"command": "echo live-chunk-marker"})
+            data = json.loads(result)
+            self.assertEqual(data["exit_code"], 0)
+            self.assertIn("live-chunk-marker", data["stdout"])
+            self.assertTrue(any("live-chunk-marker" in c for n, c in chunks if n == "terminal_run"))
+            reg.context.pop("stream_sink", None)
+            chunks.clear()
+            reg.execute("terminal_run", {"command": "echo no-sink"})
+            self.assertEqual(chunks, [])
+
+    def test_run_process_streaming_timeout(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.tools.terminal import run_process_streaming
+            code, out, err, timed_out = run_process_streaming(
+                [sys.executable, "-u", "-c", "import time;print('hi',flush=True);time.sleep(30)"],
+                cwd=Path(td), timeout=1,
+            )
+            self.assertTrue(timed_out)
+            self.assertIn("hi", out)
+
     def test_resolve_shell_auto_and_invalid(self):
         shell_id, argv = resolve_shell("auto")
         self.assertIn(shell_id, {"powershell", "cmd", "bash"})

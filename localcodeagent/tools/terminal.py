@@ -115,6 +115,64 @@ class TerminalTracker:
             return {"job_id": entry["job_id"], "pid": entry["pid"], "exit_code": proc.returncode}
 
 
+def run_process_streaming(
+    argv,
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    timeout: float = 120,
+    shell: bool = False,
+    sink=None,
+    creationflags: int = 0,
+) -> tuple[int | None, str, str, bool]:
+    """Run a process and stream stdout/stderr chunks to sink(which, chunk).
+
+    Returns (exit_code, stdout, stderr, timed_out). The full output is always
+    returned; sink receives the same text incrementally while the process runs
+    so callers can render a live terminal without waiting for exit.
+    """
+    out_parts: list[str] = []
+    err_parts: list[str] = []
+
+    def _reader(stream, parts, which) -> None:
+        while True:
+            chunk = stream.read(1024)
+            if not chunk:
+                break
+            parts.append(chunk)
+            if sink is not None:
+                try:
+                    sink(which, chunk)
+                except Exception:
+                    pass
+
+    proc = subprocess.Popen(
+        argv, cwd=str(cwd), env=env, shell=shell, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags,
+    )
+    threads = [
+        threading.Thread(target=_reader, args=(proc.stdout, out_parts, "stdout"), daemon=True),
+        threading.Thread(target=_reader, args=(proc.stderr, err_parts, "stderr"), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait(timeout=10)
+    for t in threads:
+        t.join(timeout=5)
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            stream.close()
+        except Exception:
+            pass
+    return proc.returncode, "".join(out_parts), "".join(err_parts), timed_out
+
+
 def _resolve_cwd(workspace: Path, raw: str) -> Path:
     cwd = (workspace / raw).resolve() if raw else workspace
     if not cwd.is_relative_to(workspace.resolve()):
@@ -164,23 +222,28 @@ def register_terminal_tools(
             return json.dumps({"ok": True, "background": True, "shell": shell_id, **info, "state": "running"}, ensure_ascii=False)
 
         started = time.time()
-        try:
-            proc = subprocess.run(argv, cwd=str(cwd), env=merged_env, capture_output=True, text=True, timeout=timeout)
-            payload = {
-                "exit_code": proc.returncode,
-                "stdout": (proc.stdout or "")[-MAX_OUTPUT:],
-                "stderr": (proc.stderr or "")[-8000:],
-                "timed_out": False,
-            }
-        except subprocess.TimeoutExpired as exc:
-            payload = {
-                "exit_code": None,
-                "stdout": (exc.stdout or "")[-MAX_OUTPUT:] if isinstance(exc.stdout, str) else "",
-                "stderr": (exc.stderr or "")[-8000:] if isinstance(exc.stderr, str) else "",
-                "timed_out": True,
-            }
-        payload["elapsed_seconds"] = round(time.time() - started, 3)
-        payload["shell"] = shell_id
+        sink = registry.context.get("stream_sink")
+
+        def _emit_chunk(which: str, chunk: str) -> None:
+            if sink is None:
+                return
+            try:
+                sink("terminal_run", chunk)
+            except Exception:
+                pass
+
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        code, stdout, stderr, timed_out = run_process_streaming(
+            argv, cwd=cwd, env=merged_env, timeout=timeout, sink=_emit_chunk, creationflags=flags
+        )
+        payload = {
+            "exit_code": code,
+            "stdout": stdout[-MAX_OUTPUT:],
+            "stderr": stderr[-8000:],
+            "timed_out": timed_out,
+            "elapsed_seconds": round(time.time() - started, 3),
+            "shell": shell_id,
+        }
         return json.dumps(payload, ensure_ascii=False)
 
     def terminal_processes(args: dict[str, Any]) -> str:

@@ -292,6 +292,15 @@ function handleAgentStreamEvent(name,data,state){
   }
   if(name==='research'){const p=data.research?.plan||data.research||{};nexusThinkingStep(state,'Sensor sweep',p.mode||'Researching external evidence','research');appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
   if(name==='tool_start'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' '),'tool:'+String(t.name||'unknown'));toolStartBlock(t);return;}
+  if(name==='tool_output'){
+    const name=String(data.tool||'');
+    const entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];
+    if(entry){
+      const out=entry.el.querySelector('.term-out');
+      if(out){out.textContent+=String(data.chunk||'');activity.scrollTop=activity.scrollHeight;}
+    }
+    return;
+  }
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.completion_tokens?p.completion_tokens+' tok':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}

@@ -1000,6 +1000,8 @@ class AgentOrchestrator:
 
     def _process_pending_calls(self, session: _AgentSession) -> AgentResult | None:
         while session.pending_call_index < len(session.pending_calls):
+            if self._task_cancelled(session):
+                return self._cancel_result(session)
             call = session.pending_calls[session.pending_call_index]
             name, args = self._parse_call(call)
             brain_block = self._tool_blocked_by_brain(name)
@@ -1039,7 +1041,12 @@ class AgentOrchestrator:
                 with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
                     results = list(pool.map(lambda item: self.tools.execute(item[1], item[2]), batch))
             else:
-                results = [self.tools.execute(n, a) for _, n, a in batch]
+                results = []
+                for _, n, a in batch:
+                    if self._task_cancelled(session):
+                        results.append("CANCELLED: task cancelled by user before this call ran")
+                        continue
+                    results.append(self.tools.execute(n, a))
             for (c, n, a), result in zip(batch, results):
                 self._append_tool_result(session, c, n, a, result)
             session.pending_call_index = j
@@ -1064,6 +1071,8 @@ class AgentOrchestrator:
         if session.verification_index == 0:
             session.verification_round_start = len(task.verification)
         while session.verification_index < len(session.verification_commands):
+            if self._task_cancelled(session):
+                return self._cancel_result(session)
             item = session.verification_commands[session.verification_index]
             args = {"command": item["command"], "timeout": 300}
             requires, permission = self.tools.requires_approval("run_shell")
@@ -1249,13 +1258,38 @@ class AgentOrchestrator:
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
+    def _task_cancelled(self, session: _AgentSession) -> bool:
+        try:
+            return str(self.tasks.get(session.task_id).status or "") == "cancelled"
+        except Exception:
+            return False
+
+    def _cancel_result(self, session: _AgentSession) -> AgentResult:
+        session.main_content = "Task cancelled."
+        self.tasks.update(
+            session.task_id,
+            status="cancelled",
+            phase="done",
+            summary=session.main_content,
+            final_content=session.main_content,
+            steps=session.steps,
+        )
+        self._record_outcome(session, "cancelled")
+        self._sessions.pop(session.task_id, None)
+        return self._result(session)
+
     def _drive(self, session: _AgentSession) -> AgentResult:
         self._task_context(session.task_id)
+        self.tools.context["stream_sink"] = lambda tool_name, chunk: self._emit(
+            session, "tool_output", tool=tool_name, chunk=chunk
+        )
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
         self._emit(session, "task", task=working_task.as_dict())
         session.pending_approval = None
 
         while session.steps < self.config.max_agent_steps:
+            if self._task_cancelled(session):
+                return self._cancel_result(session)
             paused = self._process_pending_calls(session)
             if paused:
                 return paused

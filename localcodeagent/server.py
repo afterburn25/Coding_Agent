@@ -2121,6 +2121,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not job_id:
                     self._json({"error": "job_id is required"}, 400)
                     return
+                if job_id.startswith("task-"):
+                    task_id = job_id[len("task-"):]
+                    try:
+                        task = self.state.tasks.update(
+                            task_id, status="cancelled", phase="done",
+                            summary="Cancelled by user.",
+                        )
+                    except KeyError:
+                        self._json({"error": "agent task not found"}, 404)
+                        return
+                    self._json({"ok": True, "job": task.as_dict()})
+                    return
                 if job_id.startswith("image-"):
                     job = self.state.images.cancel(job_id[len("image-"):])
                     self._json({"ok": True, "job": job.as_dict()})

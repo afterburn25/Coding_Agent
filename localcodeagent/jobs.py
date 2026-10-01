@@ -30,6 +30,8 @@ _TASK_STATE_MAP = {
     "done": "completed",
     "error": "failed",
     "interrupted": "cancelled",
+    "cancelled": "cancelled",
+    "step_limit": "failed",
     "reverted": "completed",
 }
 
