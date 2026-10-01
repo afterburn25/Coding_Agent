@@ -101,3 +101,5 @@
 .term-out:empty{display:none}
 .autonomy-toggle{display:flex;align-items:center;gap:7px;margin-top:9px;font-size:11px;color:#c9d5e7;cursor:pointer}
 .autonomy-toggle input{accent-color:#11cfff}
+
+.recent-task{cursor:pointer}
