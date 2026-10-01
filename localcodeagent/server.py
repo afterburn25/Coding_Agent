@@ -928,6 +928,28 @@ class AppState:
         self._expire_stale_approvals()
         self._retry_failed_tasks()
         self._dequeue_next()
+        self._check_disk_space()
+
+    def _check_disk_space(self) -> None:
+        """Warn when the drive holding durable state is nearly full — writes
+        fail silently on a full disk and unattended runs would corrupt.
+        Throttled to one event per hour."""
+        import shutil
+        now = time.monotonic()
+        if now - getattr(self, "_disk_warn_at", 0.0) < 3600:
+            return
+        try:
+            usage = shutil.disk_usage(self.state.workspace)
+            free_gb = usage.free / (1024 ** 3)
+        except OSError:
+            return
+        if free_gb < 2.0:
+            self._disk_warn_at = now
+            self._bus_emit({"type": "model", "event": {
+                "type": "disk_low",
+                "free_gb": round(free_gb, 2),
+                "path": str(self.state.workspace),
+            }})
 
     def _bus_emit(self, event: dict) -> None:
         """Publish an agent event to the shared bus.
