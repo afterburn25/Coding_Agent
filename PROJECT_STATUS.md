@@ -267,9 +267,11 @@ Unit checkpoint: **282 tests passing**.
 
 ## Next milestone
 
-**First dogfood-ready checkpoint reached.** Move directly into real self-hosting/dogfooding:
+**Modular workstation core is in place** (287 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
-2. add research-outcome plus measured load-time/tokens-per-second telemetry to refine routing
-3. extend live streaming to dedicated long-running image/browser workflows where useful
-4. surface learned routing statistics in the Models UI when enough samples exist
-5. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
+2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
+3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)
+4. richer resource-manager extraction and runtime controls
+5. tree-sitter/LSP indexing upgrade for code intelligence
+
+Done since this list was written: measured generation telemetry (TPS/TTFT in `ModelPerformanceTelemetry.record_generation`, surfaced via `/api/model-telemetry` and the Models page Performance card — `17895b7`), learned routing statistics in the Tools UI and Models UI, SSE event bus for tool/job updates, MCP Streamable HTTP transport (`9a2d793`), vault `secret:` env references for MCP (`c1bd188`), and cooperative workflow cancellation (`e05f7a4`).
