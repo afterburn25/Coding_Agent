@@ -825,25 +825,37 @@ class RuntimeManager:
         creationflags = 0
         if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
             creationflags = subprocess.CREATE_NO_WINDOW
+        log_path = self.logs_dir / f"probe-{profile.id}-{probe_port}.log"
+        try:
+            log_file = open(log_path, "a", encoding="utf-8", errors="replace")
+        except OSError:
+            log_file = subprocess.DEVNULL
         process = subprocess.Popen(
             command,
             cwd=str(self.base_dir),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
             text=True,
             creationflags=creationflags,
         )
-        endpoint = self._profile_endpoint(profile, probe_port)
+        # The probe MUST use its own port — _profile_endpoint would return the
+        # profile's configured endpoint, silently measuring a resident server
+        # (or polling a dead port) instead of the candidate under test.
+        endpoint = f"http://{profile.host}:{probe_port}/v1"
         deadline = time.monotonic() + max(5, profile.startup_timeout)
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                raise RuntimeError(f"probe llama-server exited with code {process.returncode}")
+                raise RuntimeError(
+                    f"probe llama-server exited with code {process.returncode} "
+                    f"(log: {log_path})")
             healthy, _ = self._health(endpoint)
             if healthy:
                 return self._Probe(process, endpoint)
             time.sleep(0.25)
         process.kill()
-        raise TimeoutError("probe llama-server did not become healthy")
+        raise TimeoutError(
+            f"probe llama-server did not become healthy within "
+            f"{max(5, profile.startup_timeout)}s (log: {log_path})")
 
     def ensure_ready(self, profile: ModelProfile) -> str:
         with self._lock:

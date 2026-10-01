@@ -263,6 +263,12 @@ class RuntimeTuner:
                 proc = launch(profile, 0, args)
                 endpoint = getattr(proc, "endpoint", None) or "http://127.0.0.1:0/v1"
                 metrics = self._measure(endpoint, prompt_tokens, gen_tokens, timeout)
+                # Second identical request: --cache-reuse should surface cached
+                # prompt tokens and a faster TTFT, proving prompt caching works.
+                try:
+                    metrics["warm"] = dict(self._measure(endpoint, prompt_tokens, gen_tokens, timeout))
+                except Exception:
+                    pass
                 row.update({"ok": True, "metrics": metrics})
             except Exception as exc:
                 row["error"] = f"{type(exc).__name__}: {exc}"
