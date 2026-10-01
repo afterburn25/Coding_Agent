@@ -328,6 +328,7 @@
         <span class="muted">${esc(w.id)}</span>
         <span class="muted">${(w.steps || []).length} steps</span>
         <span class="muted">${esc((w.steps || []).join(" → "))}</span>
+        ${w.resumable ? `<span class="chip cap" title="Checkpoint saved — run_workflow with resume=true continues here">resumable @ step ${w.resume_step}</span>` : ""}
       </div>`).join("");
     host.classList.remove("muted");
   }

@@ -209,14 +209,20 @@ def run_workflow(registry: ToolRegistry, workflow: dict[str, Any], params: dict[
 def register_workflow_tools(registry: ToolRegistry, workspace: Path, *,
                             workflows_dir: Path | None = None, jobs=None) -> None:
     directory = Path(workflows_dir) if workflows_dir else workspace / "workflows"
+    resume_dir = workspace / ".agent" / "workflow_runs"
 
     def list_workflows(args: dict[str, Any]) -> str:
         workflows = load_workflows(directory)
-        rows = [{"id": w["id"], "name": w.get("name", w["id"]),
-                 "description": (w.get("description") or "")[:200],
-                 "steps": len(w.get("steps") or []),
-                 "params": list((w.get("params") or {}).keys()),
-                 "file": w.get("_path", "")} for w in workflows.values()]
+        rows = []
+        for w in workflows.values():
+            prior = _load_resume(_resume_file(resume_dir, str(w["id"])))
+            rows.append({"id": w["id"], "name": w.get("name", w["id"]),
+                         "description": (w.get("description") or "")[:200],
+                         "steps": len(w.get("steps") or []),
+                         "params": list((w.get("params") or {}).keys()),
+                         "resumable": prior is not None,
+                         "resume_step": prior.get("next_step") if prior else None,
+                         "file": w.get("_path", "")})
         return json.dumps({"workflows": rows, "directory": str(directory)}, ensure_ascii=False)
 
     def run_workflow_tool(args: dict[str, Any]) -> str:
@@ -230,7 +236,7 @@ def register_workflow_tools(registry: ToolRegistry, workspace: Path, *,
         result = run_workflow(
             registry, workflow, params, jobs=jobs,
             approved=bool(args.get("approved", False)),
-            resume_dir=workspace / ".agent" / "workflow_runs",
+            resume_dir=resume_dir,
             resume=bool(args.get("resume", False)),
         )
         return json.dumps(result, ensure_ascii=False)

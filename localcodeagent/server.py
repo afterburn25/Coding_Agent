@@ -1097,19 +1097,22 @@ class Handler(BaseHTTPRequestHandler):
                         "stats": self.state.tool_router.stats()})
             return
         if path == "/api/workflows":
-            from .tools.workflows import load_workflows
+            from .tools.workflows import _load_resume, _resume_file, load_workflows
             workflows = load_workflows(self.state.workflows_dir)
-            self._json({
-                "directory": str(self.state.workflows_dir),
-                "workflows": [
-                    {"id": w["id"], "name": w.get("name", w["id"]),
-                     "description": (w.get("description") or "")[:300],
-                     "steps": [s.get("tool") for s in w.get("steps", [])],
-                     "params": w.get("params") or {},
-                     "file": w.get("_path", "")}
-                    for w in workflows.values()
-                ],
-            })
+            resume_dir = self.state.workspace / ".agent" / "workflow_runs"
+            rows = []
+            for w in workflows.values():
+                prior = _load_resume(_resume_file(resume_dir, str(w["id"])))
+                rows.append({
+                    "id": w["id"], "name": w.get("name", w["id"]),
+                    "description": (w.get("description") or "")[:300],
+                    "steps": [s.get("tool") for s in w.get("steps", [])],
+                    "params": w.get("params") or {},
+                    "resumable": prior is not None,
+                    "resume_step": prior.get("next_step") if prior else None,
+                    "file": w.get("_path", ""),
+                })
+            self._json({"directory": str(self.state.workflows_dir), "workflows": rows})
             return
         if path == "/api/mcp":
             self._json(self.state.mcp.status())
