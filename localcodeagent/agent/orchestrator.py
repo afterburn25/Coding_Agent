@@ -1789,10 +1789,12 @@ class AgentOrchestrator:
             if self.activities is not None:
                 act_id = session.tool_activities.get(tool_name)
                 if act_id:
-                    self.activities.append_output(session.task_id, act_id, shown)
-                    row = self.activities._find(session.task_id, act_id)
+                    # append_output returns the row only on throttle-flush ticks,
+                    # so the timeline row updates periodically rather than once
+                    # per chunk.
+                    row = self.activities.append_output(session.task_id, act_id, shown)
                     if row is not None:
-                        self._emit(session, "activity", activity=row)
+                        self._emit(session, "activity", activity=dict(row))
 
         self.tools.context["stream_sinks"][session.task_id] = _on_tool_output
         if self._task_cancelled(session):

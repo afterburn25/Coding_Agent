@@ -203,6 +203,22 @@ Feedback is also more useful for training. Thumbs-up/down are tied to the exact 
 
 While a response is running, the chat bubble now shows an animated starship-console-style **NEXUS CORE // ACTIVE** HUD driven only by real high-level execution events—not hidden chain-of-thought. It shows elapsed time and a short rolling list such as context link, model routing, task phase, research/sensor sweep, tool/engineering operation, verification diagnostics, review, approval waits, image synthesis, and policy retry state. Once answer tokens begin, the HUD compacts while streaming continues. Reduced-motion OS preferences are respected.
 
+## Fast-lane routing and streaming
+
+Ordinary conversation no longer pays the coding-model cost. Deterministic requests (greetings, time/date, readiness) are answered locally without a model. Stable general questions route to a dedicated **Qwen3 4B Fast General** profile (`utility` role) with bounded history/context, no repository preload, no tool schemas, and a smaller output cap. Research still fires automatically for current/latest/news/weather or explicit search requests. Coding continues to route to Qwen3 14B and deep review to Qwen3-Coder 30B-A3B.
+
+Streaming is coalesced end-to-end: the backend `TokenCoalescer` batches provider deltas into natural word/punctuation chunks (flushing on size/time boundaries, completion, and errors), and the frontend accumulates text in a render buffer flushed once per animation frame — no per-character DOM churn and no fake typewriter delay. Rejected refusal retries never flash rejected text.
+
+## Runtime performance tuner
+
+`localcodeagent/runtime/tuner.py` probes the bundled `llama-server` for supported flags (`--help` scan + build string), fingerprints results per GPU/build/model/context, and persists them to `data/runtime_tuning.json` so tuning survives restarts and invalidates automatically when the stack changes. Tuned flags — flash attention, `--cache-reuse`, batch/ubatch, thread count — merge into launch commands without overriding user `extra_args`, and the launched `--ctx-size` scales by routing role (utility 8K, coding 16K, deep/review 32K). `performance_mode` (auto/quiet/balanced/max) is persisted via `POST /api/tuning`; **Benchmark** on the Models page measures real TTFT/prompt/generation rates on unmanaged probe servers and rolls back to the last stable config on failure. Speculative decoding status is reported honestly (`not_supported`, `no_draft_model`, `available`) and is never enabled without a benchmarked win. Benchmark results also export to `data/benchmarks/runtime-<timestamp>-<model>.json`.
+
+Perf telemetry events carry route, model, TTFT, prompt/generation tok/s, cached-token prompt-cache hits, and the launch surface (GPU layers, threads, batch/ubatch, flash attention, KV cache type, speculative status).
+
+## Live activity timeline
+
+The utility rail renders a Devin-style structured timeline driven by durable `ActivityStore` rows (`data/activity.jsonl`) — not text-log parsing and not hidden reasoning. Real rows only: planning, model routing, model load/warm status, memory retrieval, research (only when it actually runs), each tool call categorized (commands, file reads, edits, tests), verification, review, approval waits, retries, runtime recovery, FREEING VRAM / rewarm decisions, image and download jobs, and a final Complete row with the files/tests/model summary. Running/failed/waiting rows auto-expand with live stdout tails (bounded) and elapsed timers; completed rows collapse to one-line summaries and can be re-expanded. Category filter chips sit above the panel, timelines persist across restarts (interrupted steps are marked), and `GET /api/activity?task_id=` serves history for completed tasks.
+
 ## Conversation policy modes
 
 Normal chat has three visible policy postures: **Permissive**, **Balanced**, and **Strict**. The default is **Permissive**. It tells the model not to refuse, moralize, or redirect merely because a topic is adult, sexual, explicit, vulgar, controversial, embarrassing, or otherwise sensitive, and specifically suppresses generic boilerplate such as “ethical guidelines” / “something more constructive.” Adult-only consensual text conversation may use direct explicit language, including sexual anatomy, acts, fantasies, preferences, and adult erotic fiction.
