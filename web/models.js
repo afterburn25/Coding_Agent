@@ -138,6 +138,35 @@
     $("jobList").classList.remove("muted");
   }
 
+  function renderPerf(telemetry) {
+    const gens = (telemetry.generations || {}).models || [];
+    const groups = telemetry.groups || [];
+    if (!gens.length && !groups.length) {
+      $("perfList").textContent = "No measured performance data yet — stats accumulate as models generate.";
+      $("perfList").classList.add("muted");
+      return;
+    }
+    $("perfList").innerHTML =
+      gens.map((g) => `
+      <div class="proc-row">
+        <span class="name">${esc(g.model_id)}</span>
+        <span>${g.avg_predicted_per_second ? esc(g.avg_predicted_per_second) + " tok/s avg" : "—"}</span>
+        <span>${g.last_predicted_per_second ? "last " + esc(g.last_predicted_per_second) + " tok/s" : ""}</span>
+        <span>${g.avg_time_to_first_token_ms != null ? "TTFT " + esc(g.avg_time_to_first_token_ms) + " ms" : ""}</span>
+        <span class="muted">${g.samples} generation${g.samples === 1 ? "" : "s"}</span>
+      </div>`).join("") +
+      (groups.length ? `<div class="muted small" style="margin-top:8px">Task outcomes (learned routing signal)</div>` +
+        groups.map((g) => `
+      <div class="proc-row">
+        <span class="name">${esc(g.model_id)}</span>
+        <span class="muted">${esc(g.role)} · ${esc(g.complexity_band)}</span>
+        <span>${g.clean_completions}/${g.samples} clean</span>
+        <span>${g.verification_passes || g.verification_failures ? `verify ${g.verification_passes}/${g.verification_passes + g.verification_failures}` : ""}</span>
+        <span class="muted">avg ${esc(g.average_elapsed_seconds)}s</span>
+      </div>`).join("") : "");
+    $("perfList").classList.remove("muted");
+  }
+
   async function loadRuntime() {
     const runtime = await api("/api/runtime");
     renderHardware(runtime.hardware);
@@ -152,8 +181,13 @@
     renderProfiles(data.models || []);
   }
 
+  async function loadPerf() {
+    const data = await api("/api/model-telemetry");
+    renderPerf(data);
+  }
+
   async function loadAll() {
-    await Promise.all([loadRuntime(), loadModels()]).catch((e) => alert(e.message));
+    await Promise.all([loadRuntime(), loadModels(), loadPerf()]).catch((e) => alert(e.message));
   }
 
   $("refreshAll").addEventListener("click", loadAll);

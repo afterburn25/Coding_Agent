@@ -1053,7 +1053,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"models": [asdict(m) for m in self.state.config.models]})
             return
         if path == "/api/model-telemetry":
-            self._json(self.state.model_telemetry.summary())
+            payload = self.state.model_telemetry.summary()
+            payload["generations"] = self.state.model_telemetry.generation_summary()
+            self._json(payload)
             return
         if path == "/api/tools":
             self.state.tools.refresh_install_status()

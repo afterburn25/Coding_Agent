@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable
@@ -39,6 +40,7 @@ class OpenAICompatibleProvider:
                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
             },
         )
+        started_at = time.monotonic()
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
@@ -49,6 +51,7 @@ class OpenAICompatibleProvider:
         choices = raw.get("choices") or []
         if not choices:
             raise RuntimeError(f"Model endpoint returned no choices: {raw}")
+        raw.setdefault("elapsed_seconds", round(time.monotonic() - started_at, 3))
         return ProviderResponse(message=choices[0].get("message", {}), raw=raw)
 
     def complete_stream(
@@ -68,6 +71,7 @@ class OpenAICompatibleProvider:
             "temperature": float(self.profile.temperature),
             "max_tokens": max(128, int(self.profile.max_output_tokens)),
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools and self.profile.tool_calling:
             payload["tools"] = tools
@@ -89,6 +93,10 @@ class OpenAICompatibleProvider:
         tool_calls: dict[int, dict[str, Any]] = {}
         finish_reason = ""
         chunk_count = 0
+        usage: dict[str, Any] = {}
+        timings: dict[str, Any] = {}
+        started_at = time.monotonic()
+        first_token_at = 0.0
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 content_type = str(resp.headers.get("Content-Type") or "").lower()
@@ -114,6 +122,10 @@ class OpenAICompatibleProvider:
                     except json.JSONDecodeError:
                         continue
                     chunk_count += 1
+                    if isinstance(chunk.get("usage"), dict):
+                        usage = dict(chunk["usage"])
+                    if isinstance(chunk.get("timings"), dict):
+                        timings = dict(chunk["timings"])
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue
@@ -124,6 +136,8 @@ class OpenAICompatibleProvider:
                         role = str(delta["role"])
                     text = delta.get("content")
                     if text:
+                        if not first_token_at:
+                            first_token_at = time.monotonic()
                         piece = str(text)
                         content_parts.append(piece)
                         if on_delta is not None:
@@ -154,7 +168,15 @@ class OpenAICompatibleProvider:
         message: dict[str, Any] = {"role": role, "content": "".join(content_parts)}
         if tool_calls:
             message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
-        return ProviderResponse(
-            message=message,
-            raw={"stream": True, "finish_reason": finish_reason, "chunks": chunk_count},
-        )
+        raw: dict[str, Any] = {
+            "stream": True,
+            "finish_reason": finish_reason,
+            "chunks": chunk_count,
+            "elapsed_seconds": round(time.monotonic() - started_at, 3),
+            "time_to_first_token_ms": round((first_token_at - started_at) * 1000, 1) if first_token_at else None,
+        }
+        if usage:
+            raw["usage"] = usage
+        if timings:
+            raw["timings"] = timings
+        return ProviderResponse(message=message, raw=raw)

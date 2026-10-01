@@ -654,6 +654,35 @@ class AgentOrchestrator:
             # Learning signals must never be allowed to break a coding task.
             pass
 
+    def _record_generation(self, session: "_AgentSession", response: Any) -> None:
+        """Persist measured generation speed (TPS/TTFT) from llama.cpp timings/usage."""
+        if self.telemetry is None:
+            return
+        try:
+            raw = getattr(response, "raw", None) or {}
+            usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+            timings = raw.get("timings") if isinstance(raw.get("timings"), dict) else {}
+            completion_tokens = int(usage.get("completion_tokens") or timings.get("predicted_n") or 0)
+            prompt_tokens = int(usage.get("prompt_tokens") or timings.get("prompt_n") or 0)
+            elapsed = float(raw.get("elapsed_seconds") or 0.0)
+            tps = float(timings.get("predicted_per_second") or 0.0)
+            if not tps and completion_tokens and elapsed:
+                tps = completion_tokens / elapsed
+            if not (completion_tokens or tps or elapsed):
+                return
+            self.telemetry.record_generation(
+                model_id=session.profile.id,
+                role=session.decision.role,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                elapsed_seconds=elapsed,
+                predicted_per_second=tps,
+                prompt_per_second=float(timings.get("prompt_per_second") or 0.0),
+                time_to_first_token_ms=raw.get("time_to_first_token_ms"),
+            )
+        except Exception:
+            pass
+
     def _restore_session(self, task_id: str, *, reason: str) -> _AgentSession:
         """Rebuild enough agent context to safely continue a persisted task.
 
@@ -1221,6 +1250,7 @@ class AgentOrchestrator:
                 on_delta=on_delta,
                 event_callback=session.event_callback,
             )
+            self._record_generation(session, response)
             session.steps += 1
             message = response.message
             session.messages.append(message)

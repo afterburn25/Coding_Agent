@@ -39,6 +39,7 @@ class ModelPerformanceTelemetry:
         self.max_events = max(20, int(max_events))
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
+        self._generations: list[dict[str, Any]] = []
         self._load()
 
     def _load(self) -> None:
@@ -49,6 +50,9 @@ class ModelPerformanceTelemetry:
             events = raw.get("events", [])
             if isinstance(events, list):
                 self._events = [dict(item) for item in events if isinstance(item, dict)][-self.max_events:]
+            generations = raw.get("generations", [])
+            if isinstance(generations, list):
+                self._generations = [dict(item) for item in generations if isinstance(item, dict)][-self.max_events:]
         except (OSError, ValueError, TypeError):
             self._events = []
 
@@ -56,7 +60,11 @@ class ModelPerformanceTelemetry:
         if not self.enabled:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "events": self._events[-self.max_events:]}
+        payload = {
+            "version": 1,
+            "events": self._events[-self.max_events:],
+            "generations": self._generations[-self.max_events:],
+        }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
@@ -98,6 +106,90 @@ class ModelPerformanceTelemetry:
             except OSError:
                 # Telemetry is advisory; a read-only/busy disk must never block the agent.
                 pass
+
+    def record_generation(
+        self,
+        *,
+        model_id: str,
+        role: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        elapsed_seconds: float = 0.0,
+        predicted_per_second: float = 0.0,
+        prompt_per_second: float = 0.0,
+        time_to_first_token_ms: float | None = None,
+    ) -> None:
+        """Record measured per-generation speed stats (tokens/sec, TTFT)."""
+        if not self.enabled or not model_id:
+            return
+        event = {
+            "timestamp": round(time.time(), 3),
+            "model_id": str(model_id),
+            "role": str(role),
+            "prompt_tokens": max(0, int(prompt_tokens)),
+            "completion_tokens": max(0, int(completion_tokens)),
+            "elapsed_seconds": round(max(0.0, float(elapsed_seconds)), 3),
+            "predicted_per_second": round(max(0.0, float(predicted_per_second)), 2),
+            "prompt_per_second": round(max(0.0, float(prompt_per_second)), 2),
+            "time_to_first_token_ms": round(float(time_to_first_token_ms), 1)
+            if isinstance(time_to_first_token_ms, (int, float)) else None,
+        }
+        with self._lock:
+            self._generations.append(event)
+            self._generations = self._generations[-self.max_events:]
+            try:
+                self._save()
+            except OSError:
+                pass
+
+    def generation_summary(self) -> dict[str, Any]:
+        """Aggregate measured generation speed per model (avg/last TPS, TTFT)."""
+        with self._lock:
+            grouped: dict[str, dict[str, Any]] = {}
+            for event in self._generations:
+                key = str(event.get("model_id", ""))
+                row = grouped.setdefault(key, {
+                    "model_id": key,
+                    "samples": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "predicted_per_second_sum": 0.0,
+                    "prompt_per_second_sum": 0.0,
+                    "ttft_sum": 0.0,
+                    "ttft_samples": 0,
+                    "elapsed_sum": 0.0,
+                    "last": event,
+                })
+                row["samples"] += 1
+                row["prompt_tokens"] += int(event.get("prompt_tokens", 0) or 0)
+                row["completion_tokens"] += int(event.get("completion_tokens", 0) or 0)
+                row["predicted_per_second_sum"] += float(event.get("predicted_per_second", 0.0) or 0.0)
+                row["prompt_per_second_sum"] += float(event.get("prompt_per_second", 0.0) or 0.0)
+                row["elapsed_sum"] += float(event.get("elapsed_seconds", 0.0) or 0.0)
+                ttft = event.get("time_to_first_token_ms")
+                if isinstance(ttft, (int, float)):
+                    row["ttft_sum"] += float(ttft)
+                    row["ttft_samples"] += 1
+                row["last"] = event
+            rows = []
+            for row in grouped.values():
+                samples = max(1, int(row["samples"]))
+                last = row.pop("last")
+                rows.append({
+                    "model_id": row["model_id"],
+                    "samples": samples,
+                    "avg_predicted_per_second": round(row["predicted_per_second_sum"] / samples, 2),
+                    "avg_prompt_per_second": round(row["prompt_per_second_sum"] / samples, 2),
+                    "avg_time_to_first_token_ms": round(row["ttft_sum"] / row["ttft_samples"], 1)
+                    if row["ttft_samples"] else None,
+                    "avg_completion_tokens": round(row["completion_tokens"] / samples, 1),
+                    "avg_elapsed_seconds": round(row["elapsed_sum"] / samples, 3),
+                    "last_predicted_per_second": last.get("predicted_per_second", 0.0),
+                    "last_completion_tokens": last.get("completion_tokens", 0),
+                    "last_elapsed_seconds": last.get("elapsed_seconds", 0.0),
+                })
+            rows.sort(key=lambda item: item["model_id"])
+            return {"enabled": self.enabled, "generation_count": len(self._generations), "models": rows}
 
     @staticmethod
     def _centered(values: list[float]) -> float:

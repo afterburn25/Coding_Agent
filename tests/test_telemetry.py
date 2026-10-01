@@ -89,6 +89,37 @@ class ModelTelemetryTests(unittest.TestCase):
             decision = router.choose("Update the backend and frontend database flow")
             self.assertEqual(decision.model_id, "a")
 
+    def test_generation_stats_aggregate_per_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            telemetry = ModelPerformanceTelemetry(Path(td))
+            telemetry.record_generation(
+                model_id="qwen3-14b", role="primary_coder",
+                prompt_tokens=512, completion_tokens=128,
+                elapsed_seconds=4.0, predicted_per_second=32.0,
+                prompt_per_second=640.0, time_to_first_token_ms=210.5,
+            )
+            telemetry.record_generation(
+                model_id="qwen3-14b", role="primary_coder",
+                prompt_tokens=256, completion_tokens=64,
+                elapsed_seconds=2.0, predicted_per_second=30.0,
+            )
+            telemetry.record_generation(
+                model_id="coder-7b", completion_tokens=32,
+                elapsed_seconds=1.0, predicted_per_second=55.0,
+            )
+            summary = telemetry.generation_summary()
+            self.assertEqual(summary["generation_count"], 3)
+            rows = {r["model_id"]: r for r in summary["models"]}
+            qwen = rows["qwen3-14b"]
+            self.assertEqual(qwen["samples"], 2)
+            self.assertAlmostEqual(qwen["avg_predicted_per_second"], 31.0)
+            self.assertAlmostEqual(qwen["avg_time_to_first_token_ms"], 210.5)
+            self.assertEqual(qwen["last_completion_tokens"], 64)
+            self.assertEqual(rows["coder-7b"]["avg_time_to_first_token_ms"], None)
+
+            reloaded = ModelPerformanceTelemetry(Path(td))
+            self.assertEqual(reloaded.generation_summary()["generation_count"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
