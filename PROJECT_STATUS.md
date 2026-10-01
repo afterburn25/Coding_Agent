@@ -187,6 +187,49 @@
 - Permissive adult-only consensual text conversation explicitly allows direct sexual language, including anatomy, acts, fantasies, preferences, and adult erotic fiction; profanity alone is never treated as sexual content.
 - If the selected local model still returns a generic topic refusal after the configured retry limit, Chat Nexus reports a **model-level refusal** rather than falsely claiming Chat Nexus policy blocks the topic. Default `generic_refusal_retry_limit` is 3 (bounded 0–5).
 
+## v0.7 modular tool/plugin system — Phase 1 (foundation)
+
+Direction: expand Chat Nexus into a general-purpose local AI workstation where
+the agent chooses models/tools/runtimes automatically. Phase 1 delivers the
+foundation the later phases build on:
+
+- **Unified Tool Registry.** `ToolSpec` now carries a full manifest (id,
+  display name, category, version, provider, capabilities, required
+  permissions, network/GPU requirements, supported OS, docs, install status,
+  health check). Built-in tools are annotated via a central manifest map; the
+  registry is queryable by capability and persists enable/disable state under
+  `data/tools_state.json`. Disabled tools leave the model schema and are
+  blocked at execution.
+- **Tool interfaces.** `localcodeagent/tools/interfaces.py` defines the
+  structural contracts (`ITool`, `IExecutableTool`, `IModelBackend`,
+  `IImageBackend`, `IBrowserBackend`, `IResearchProvider`, `IMediaTool`,
+  `IDataTool`, `IDocumentTool`, `ISandboxProvider`, `IVersionControlProvider`).
+- **Plugin manifests.** Declarative JSON manifests under `tools/manifests/`
+  register external tools with install detection, health checks, and optional
+  subprocess invokers. Non-invocable manifests are catalog entries only and
+  never enter model schemas.
+- **Permission Manager.** `allow`/`session`/`ask`/`deny` levels plus named
+  workspace profiles (`safe`, `developer`, `power_user`, `offline`,
+  `research_only`, `custom`), persisted to `config.json`.
+- **Job Manager.** One normalized async job ledger aggregating agent tasks,
+  image jobs, and model/image installs; state vocabulary matches the Phase 1
+  spec (queued → running → waiting_for_tool/permission → completed/failed/
+  cancelled). Generic provider jobs persist to `data/jobs.json` and are marked
+  failed across restarts.
+- **Process Manager.** Central service registry for llama.cpp runtimes and
+  ComfyUI with live status/uptime and delegated start/stop/restart.
+- **APIs.** `GET /api/tools`, `/api/tools/health/<id>`, `/api/permissions`,
+  `/api/jobs`, `/api/processes`, `/api/resources`; `POST /api/tools/state`,
+  `/api/permissions/level`, `/api/permissions/profile`, `/api/processes/action`,
+  `/api/jobs/cancel`.
+- **UI.** New **Tools & Plugins** page (`/tools.html`): permission profile
+  switcher, per-permission levels, category-filtered tool registry with
+  enable/disable + health checks, process controls, unified job list. Main
+  nav Tools link now points at it.
+- Docs: `TOOLS.md`, `PERMISSIONS.md`.
+
+Unit checkpoint: **210 tests passing** (188 baseline + 22 new).
+
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.
 - At high ethical temperature, generic topic-based refusal responses are detected and retried up to three times. Rejected refusals are removed from context before retrying, and conversational output is buffered so canned refusal text is not flashed to the user.

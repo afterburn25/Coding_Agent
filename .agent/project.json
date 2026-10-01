@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 188,
-  "next_milestone": "Devin takeover: dogfood the verified 188-test Ed25519 Nexus Brain lifecycle end-to-end, verify public seeded install + same-creator signed updates + model-replacement continuity, then implement creator signing-key backup/recovery and signed Brain audit/history.",
+  "test_checkpoint": 210,
+  "next_milestone": "v0.7 modular AI workstation: Phase 1 tool registry/manifests/permission profiles/job manager/process manager/Tools UI landed (210 tests). Next: per-tool health coverage and resource-manager extraction, then Phase 2 developer tools (terminal adapters, ripgrep, tree-sitter, LSP), MCP support, and continued Nexus Brain dogfood/hardening.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -135,7 +135,7 @@
     "preferences_and_rules": true,
     "correction_examples": true,
     "prompt_injection_of_saved_rules": true,
-    "ui": "Local system → Memory & training",
+    "ui": "Local system \u00e2\u2020\u2019 Memory & training",
     "api": "GET /api/conversation-memory"
   },
   "stream_recovery": {
@@ -204,7 +204,7 @@
       "GET /api/policy",
       "POST /api/policy/mode"
     ],
-    "ui": "Local system → Conversation policy",
+    "ui": "Local system \u00e2\u2020\u2019 Conversation policy",
     "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
     "ethical_temperature_default": 1,
     "ethical_temperature_range": [
@@ -429,5 +429,32 @@
       "DEVIN_START_HERE.md when takeover-critical state changes"
     ],
     "takeover_anchor_commit": "21aa4fb0090d7fbd1ef119d5026b5289b6a81e10"
+  },
+  "tool_system": {
+    "registry": "localcodeagent/tools/base.py (manifest-driven ToolSpec)",
+    "builtin_manifests": "localcodeagent/tools/manifests.py",
+    "interfaces": "localcodeagent/tools/interfaces.py",
+    "plugin_manifests_dir": "tools/manifests",
+    "permission_manager": "localcodeagent/permissions.py",
+    "job_manager": "localcodeagent/jobs.py",
+    "process_manager": "localcodeagent/processes.py",
+    "tools_ui": "/tools.html",
+    "state_files": [
+      "data/tools_state.json",
+      "data/jobs.json"
+    ],
+    "apis": [
+      "GET /api/tools",
+      "GET /api/tools/health/<id>",
+      "POST /api/tools/state",
+      "GET /api/permissions",
+      "POST /api/permissions/level",
+      "POST /api/permissions/profile",
+      "GET /api/jobs",
+      "POST /api/jobs/cancel",
+      "GET /api/processes",
+      "POST /api/processes/action",
+      "GET /api/resources"
+    ]
   }
 }

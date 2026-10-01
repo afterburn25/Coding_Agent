@@ -587,3 +587,19 @@ python -m unittest discover -s tests -v
 ```
 
 Expected at this checkpoint: `188 tests` passing.
+
+## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
+
+- New direction: Chat Nexus evolves from a chat/coding interface into a modular general-purpose local AI workstation; users describe outcomes and the agent picks models/tools/runtimes. Phase 1 foundation is implemented.
+- `ToolSpec` is now a full manifest (id/category/version/provider/capabilities/permissions/network/GPU/OS/docs/install status/health check). Built-ins get metadata from `localcodeagent/tools/manifests.py`; registration call sites are unchanged.
+- Registry gained capability lookup, enable/disable (persisted at `data/tools_state.json`), health hooks, and per-tool usage counts. Disabled or non-callable tools stay out of model schemas.
+- `localcodeagent/permissions.py`: `PermissionManager` adds the `session` level and workspace profiles (safe/developer/power_user/offline/research_only/custom); changes persist to `config.json` (`permission_profile`).
+- `localcodeagent/jobs.py`: `JobManager` unified ledger — normalizes agent tasks, image jobs, and installs into queued/preparing/running/waiting_for_tool/waiting_for_permission/completed/failed/cancelled; generic jobs persist to `data/jobs.json` and are marked failed on restart.
+- `localcodeagent/processes.py`: `ProcessManager` registers llama.cpp runtimes and ComfyUI as controllable services with live status/uptime and delegated lifecycle.
+- `localcodeagent/tools/interfaces.py`: structural contracts for executable/model/image/browser/research/media/data/document/sandbox/VCS providers.
+- `localcodeagent/tools/plugins.py`: declarative JSON manifests under `tools/manifests/` (config `tool_manifests_dir`) register external tools — install detection, health checks, optional subprocess invokers. No-invoke manifests are catalog-only and never reach model schemas.
+- New endpoints: `GET /api/tools`, `/api/tools/health/<id>`, `/api/permissions`, `/api/jobs`, `/api/processes`, `/api/resources`; `POST /api/tools/state`, `/api/permissions/level`, `/api/permissions/profile`, `/api/processes/action`, `/api/jobs/cancel`.
+- New **Tools & Plugins** page (`web/tools.html`); main-nav Tools link routes there.
+- Feature commits: `105182a` (registry/permissions/jobs/processes/UI), plugin manifest loader + interfaces commit on top.
+- Unit checkpoint: **210/210 tests passing**.
+- Next Phase 1 remainder: health-check coverage per tool family, resource-manager extraction, then Phase 2 (terminal/git adapters, ripgrep, tree-sitter, LSP) and MCP support.

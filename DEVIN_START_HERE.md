@@ -9,8 +9,9 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
 - Latest fully verified code-changing checkpoint at takeover: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
+- Latest code checkpoint after Phase 1 tool-system foundation: `d55bf52716b01ea266ff6d1fb503ac1f2837078e` (verify with `git rev-parse HEAD`)
 - Current development version: `0.6.0-dev`
-- Verified unit checkpoint: **188 / 188 passing**
+- Verified unit checkpoint: **210 / 210 passing**
 - Verified GitHub Actions run: `36796088939`
 - Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36796088939
 
@@ -566,6 +567,38 @@ Recommended order:
    - inspect whether recall paraphrases naturally
    - identify repetitive/infantile patterns
    - only then decide whether to train a dedicated Conversation LoRA
+
+## v0.7 direction — modular local AI workstation
+
+User direction (2026-09-30): expand Chat Nexus into a modular, general-purpose
+local AI workstation with a unified tool/plugin system. Users describe the
+outcome; the agent chooses the models, tools, runtimes, and external
+applications automatically. Do not build it as one tightly coupled subsystem —
+tools install/remove/update/enable/disable/replace independently through the
+Tool Registry.
+
+Phase plan (see `TOOLS.md` / `PERMISSIONS.md` / `ARCHITECTURE.md`):
+
+1. **Foundation** — Tool Registry + manifests, tool interfaces, permission
+   levels/profiles, Process Manager, Job Manager, resource awareness, Tool
+   Manager UI. **Done**: commits `105182a`, `d55bf52` (210 tests).
+2. **Developer tools** — terminal adapters (PowerShell/CMD/Bash), Git/GitHub
+   depth, ripgrep search, build-system adapters (CMake/MSBuild/npm/cargo/...),
+   test runners, Tree-sitter, LSP.
+3. **Research & browser** — Research Agent on the tool system, Playwright
+   backend, browser testing mode.
+4. **Local AI** — llama.cpp model manager page (roles: chat/coding/research/
+   planning/vision/fast-router/review), GPU policies.
+5. **Image** — ComfyUI manager on the registry, workflow templates, gallery.
+6. **Media** — FFmpeg, whisper.cpp transcription, modular TTS, Media Agent.
+7. **Documents** — OCR (Tesseract), Pandoc, PDF tools, Document Agent.
+8. **Data** — DuckDB/SQLite, Data Agent, chart generation.
+9. **Sandboxing & packages** — Docker sandbox, dependency/package managers.
+10. **Additional** — Blender, generic API tools + OpenAPI import, local
+    RAG/indexing with vector-backend abstraction, more MCP integrations.
+
+Brain hardening (the "Immediate next work" list above) remains a parallel
+track; dogfood the creator Brain lifecycle alongside Phase 2+.
 
 ## Important security boundary
 

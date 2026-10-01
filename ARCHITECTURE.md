@@ -7,12 +7,15 @@
 1. **UI** — local ChatGPT-style interface plus runtime and task workflow panels.
 2. **Agent Core** — conversation/tool loop, durable task state, approval pauses, verification, and reviewer handoff.
 3. **Workflow Services** — checkpoints, task ledger, project memory, persistent/scoped conversation memory, Conversation Manager, sourced knowledge memory, repository index, verification detection.
-4. **Tool System** — permissioned filesystem, transactional patch, shell, Git, and repository-index tools.
-5. **Model Orchestrator** — maps task scope/phase to model roles and resource-fit candidates.
-6. **Runtime Manager** — managed inference processes, health/recovery, hardware telemetry, and residency.
-7. **Model Growth Lab** — review candidates, dataset export, offline training manifests, evaluation, promotion, and rollback.
-8. **Nexus Brain** — model-independent creator-signed long-term memory, general/conversational learning, autobiographical continuity, signed subroutines, emotional profile, self-model, public read-only export/verification, and same-creator signed updates.
-9. **Providers** — normalize OpenAI-compatible inference APIs.
+4. **Tool System** — a manifest-driven Tool Registry over permissioned filesystem, transactional patch, shell, Git, repository-index, research, web, and image tools, plus declarative plugin manifests and (planned) MCP tools.
+5. **Permission Manager** — central action policy: `allow` / `session` / `ask` / `deny` levels plus named workspace profiles (safe, developer, power_user, offline, research_only).
+6. **Job Manager** — one normalized asynchronous job ledger aggregating agent tasks, image jobs, and install/download jobs.
+7. **Process Manager** — central registry of controllable services (llama.cpp runtimes, ComfyUI, future MCP servers) with live status and delegated start/stop/restart.
+8. **Model Orchestrator** — maps task scope/phase to model roles and resource-fit candidates.
+9. **Runtime Manager** — managed inference processes, health/recovery, hardware telemetry, and residency.
+10. **Model Growth Lab** — review candidates, dataset export, offline training manifests, evaluation, promotion, and rollback.
+11. **Nexus Brain** — model-independent creator-signed long-term memory, general/conversational learning, autobiographical continuity, signed subroutines, emotional profile, self-model, public read-only export/verification, and same-creator signed updates.
+12. **Providers** — normalize OpenAI-compatible inference APIs.
 
 ```text
 UI
@@ -52,6 +55,31 @@ OpenAI-compatible provider
  ├─ managed llama-server
  └─ external local endpoint
 ```
+
+## Modular tool/plugin layer (v0.7 foundation)
+
+```text
+Agent Orchestrator
+  ↓
+Tool Registry (manifests, capabilities, enabled state)
+  ├─ built-in tools          localcodeagent/tools/*.py
+  ├─ manifest tools          <runtime>/tools/manifests/*.json
+  └─ MCP tools               planned
+  ↓
+PermissionManager            allow | session | ask | deny + profiles
+  ↓
+JobManager                   unified async job ledger
+ProcessManager               managed service lifecycle
+RuntimeManager               hardware telemetry, residency, VRAM arbitration
+```
+
+Every tool registers a `ToolSpec` manifest (id, category, capabilities,
+required permissions, network/GPU requirements, install status, health check).
+The agent receives OpenAI schemas only for enabled, callable tools; catalog-only
+manifests stay visible in the Tool Manager without entering model context.
+`interfaces.py` defines the structural tool-family contracts (executable,
+model, image, browser, research, media, data, document, sandbox, VCS) so
+providers are interchangeable. See `TOOLS.md` and `PERMISSIONS.md`.
 
 ## v0.3 task state machine
 
