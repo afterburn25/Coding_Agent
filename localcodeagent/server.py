@@ -2081,7 +2081,16 @@ class Handler(BaseHTTPRequestHandler):
                         self.state.history = self.state.conversation_manager.history(limit=32)
                         events.put({"type": "result", **self._agent_payload(result)})
                     except Exception as exc:
-                        events.put({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+                        err = f"{type(exc).__name__}: {exc}"
+                        events.put({"type": "error", "error": err})
+                        try:
+                            current = self.state.tasks.current()
+                            payload = {"error": err}
+                            if current is not None:
+                                payload["task_id"] = current.id
+                            self.state.events.publish("error", payload)
+                        except Exception:
+                            pass
                     finally:
                         done.set()
 
