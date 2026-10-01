@@ -338,12 +338,43 @@ def default_config() -> AgentConfig:
     )
 
 
+def _profile_from_dict(raw: dict[str, Any], cls: type) -> Any:
+    """Build a profile tolerating unknown keys so a config written by a
+    newer build does not crash an older one."""
+    allowed = getattr(cls, "__dataclass_fields__", {})
+    filtered = {k: v for k, v in raw.items() if k in allowed} if allowed else dict(raw)
+    return cls(**filtered)
+
+
 def load_config(path: Path | None) -> AgentConfig:
     if path is None or not path.exists():
         return default_config()
-    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    models = [ModelProfile(**m) for m in raw.get("models", [])]
-    image_models = [ImageModelProfile(**m) for m in raw.get("image_models", [])]
+    try:
+        raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # A damaged config must not crash-loop the backend: quarantine it for
+        # inspection and boot from defaults so the app stays usable.
+        import shutil
+        import time as _time
+        try:
+            shutil.copy2(path, path.with_name(path.name + f".corrupt-{int(_time.time())}"))
+        except OSError:
+            pass
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    models = []
+    for m in raw.get("models", []):
+        try:
+            models.append(_profile_from_dict(m, ModelProfile))
+        except (TypeError, AttributeError):
+            continue
+    image_models = []
+    for m in raw.get("image_models", []):
+        try:
+            image_models.append(_profile_from_dict(m, ImageModelProfile))
+        except (TypeError, AttributeError):
+            continue
     defaults = default_config()
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
     # Fast-lane migration: configs saved before the dedicated utility model

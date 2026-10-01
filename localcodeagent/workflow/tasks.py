@@ -75,9 +75,16 @@ class TaskStore:
             if normalized:
                 self._save()
         except (OSError, ValueError, TypeError):
-            # Do not prevent the coding agent from starting because old task state is damaged.
+            # Do not prevent the coding agent from starting because old task
+            # state is damaged — quarantine the file for diagnosis instead of
+            # silently discarding it.
             self._tasks = {}
             self._order = []
+            try:
+                import shutil
+                shutil.copy2(self.path, self.path.with_name(self.path.name + f".corrupt-{int(time.time())}"))
+            except OSError:
+                pass
 
     def _save(self) -> None:
         payload = {"version": 1, "tasks": [self._tasks[i].as_dict() for i in self._order[-100:]]}

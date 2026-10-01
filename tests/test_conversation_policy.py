@@ -70,6 +70,30 @@ class ConversationPolicyTests(unittest.TestCase):
             cfg = load_config(path)
             self.assertEqual(cfg.conversation_policy_mode, "permissive")
 
+    def test_corrupt_config_self_repairs_to_defaults(self):
+        # A damaged config.json must not crash-loop the backend — it is
+        # quarantined aside and defaults load instead.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.json"
+            path.write_text('{"models": [{"id": "x", "endpoint": ', encoding="utf-8")
+            cfg = load_config(path)
+            self.assertTrue(cfg.models)  # defaults populated
+            backups = list(Path(td).glob("config.json.corrupt-*"))
+            self.assertEqual(len(backups), 1)
+
+    def test_forward_compatible_model_keys_are_ignored(self):
+        # Config written by a newer build (extra keys) must still load here.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.json"
+            path.write_text(json.dumps({
+                "models": [{
+                    "id": "m1", "endpoint": "http://x/v1", "model": "m",
+                    "roles": ["utility"], "future_field": {"nested": True},
+                }],
+            }), encoding="utf-8")
+            cfg = load_config(path)
+            self.assertEqual([m.id for m in cfg.models if m.id == "m1"], ["m1"])
+
     def test_prompt_explicitly_avoids_generic_moralizing(self):
         source = (ROOT / "localcodeagent" / "agent" / "orchestrator.py").read_text(encoding="utf-8")
         self.assertIn("Conversation policy: permissive.", source)

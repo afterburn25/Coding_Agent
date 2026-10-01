@@ -262,6 +262,13 @@ class JobManager:
         try:
             rows = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            # Quarantine a damaged store rather than silently discarding it —
+            # the file stays diagnosable while the app boots clean.
+            try:
+                import shutil
+                shutil.copy2(self.path, self.path.with_name(self.path.name + f".corrupt-{int(time.time())}"))
+            except OSError:
+                pass
             return
         for row in rows if isinstance(rows, list) else []:
             try:
