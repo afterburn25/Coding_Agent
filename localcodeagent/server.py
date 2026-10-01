@@ -1267,6 +1267,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/nexus-brain/audit":
             self._json({"events": self.state.nexus_brain.audit_events(100)})
             return
+        if path == "/api/nexus-brain/history":
+            self._json({"versions": self.state.nexus_brain.settings_history()})
+            return
         if path == "/api/conversations":
             from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)
@@ -1661,6 +1664,12 @@ class Handler(BaseHTTPRequestHandler):
                     str(body.get("backup_passcode", "")),
                     str(body.get("passcode", "")),
                 )
+                self._json({"ok": True, "brain": restored})
+                return
+
+            if path == "/api/nexus-brain/rollback":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                restored = self.state.nexus_brain.rollback_settings(float(body.get("updated_at") or 0))
                 self._json({"ok": True, "brain": restored})
                 return
 

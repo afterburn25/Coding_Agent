@@ -342,6 +342,44 @@ class NexusBrainTests(unittest.TestCase):
                 brain.export_creator_key_backup("wrong-passcode")
             self.assertIn("key_backup_exported", [e["event"] for e in brain.audit_events(100)])
 
+    def test_settings_history_rollback_restores_signed_versions(self):
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "nexus_brain.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            initial_ts = brain.settings_history()[-1]["updated_at"]
+
+            brain.set_subroutines({"adult_content": False})
+            brain.set_emotion_profile({"warmth": 0.9})
+            history = brain.settings_history()
+            self.assertEqual(len(history), 3)  # init + subroutine + emotion saves
+
+            brain.rollback_settings(initial_ts)
+            self.assertTrue(brain.subroutine("adult_content"))
+            self.assertNotEqual(brain.emotion_profile().get("warmth"), 0.9)
+
+            # Rollback itself is a signed version — reversible by rolling forward.
+            latest_ts = brain.settings_history()[-1]["updated_at"]
+            brain.set_subroutines({"adult_content": False})
+            brain.rollback_settings(latest_ts)
+            self.assertTrue(brain.subroutine("adult_content"))
+
+            brain.lock()
+            with self.assertRaises(PermissionError):
+                brain.rollback_settings(initial_ts)
+            self.assertIn("settings_rollback", [e["event"] for e in brain.audit_events(100)])
+
+    def test_settings_history_dedupes_identical_saves_and_bounds(self):
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "nexus_brain.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            # Record-only saves share the same settings → history stays flat.
+            for i in range(5):
+                brain.bank(kind="fact", text=f"fact {i}", source="test")
+            self.assertEqual(len(brain.settings_history()), 1)
+            for i in range(15):
+                brain.set_subroutines({"humor": bool(i % 2)})
+            self.assertEqual(len(brain.settings_history()), NexusBrain._SETTINGS_HISTORY_LIMIT)
+
 
 if __name__ == "__main__":
     unittest.main()

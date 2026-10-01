@@ -79,6 +79,13 @@ function renderBrain(){
     const detail=Object.keys(e).filter(k=>!['ts','event','brain_id'].includes(k)).map(k=>esc(k)+'='+esc(String(e[k]))).join(' · ');
     return '<div class="brain-audit-row"><strong>'+esc(e.event||'')+'</strong><small>'+esc(when)+(detail?' · '+detail:'')+'</small></div>';
   }).join(''):'<span class="muted">No audit events recorded yet.</span>';
+
+  const versions=brainState.settings_history||[];
+  $('#brainHistoryList').innerHTML=versions.length?versions.slice().reverse().map((v,i)=>{
+    const when=v.updated_at?new Date(Number(v.updated_at)*1000).toLocaleString():'';
+    const current=i===0;
+    return '<div class="brain-audit-row"><strong>'+esc(when)+(current?' · current':'')+'</strong><small>sig '+esc(v.signature||'')+'</small>'+(!current&&unlocked?'<button class="mini-button" data-brain-rollback="'+v.updated_at+'">Restore this version</button>':'')+'</div>';
+  }).join(''):'<span class="muted">No signed settings history yet.</span>';
 }
 
 function renderPersonality(){
@@ -182,6 +189,15 @@ $('#brainImportFile').addEventListener('change',async e=>{
     await refresh();
     alert('Locked Nexus Brain imported. Unlock it with the original creator credential to verify and activate it.');
   }catch(err){alert(err.message);}finally{e.target.value='';}
+});
+$('#brainHistoryList').addEventListener('click',async e=>{
+  const btn=e.target.closest('[data-brain-rollback]');
+  if(!btn)return;
+  if(!confirm('Restore signed Brain settings to this version? The current state stays in history.'))return;
+  try{
+    await postJson('/api/nexus-brain/rollback',{creator_token:brainCreatorToken,updated_at:Number(btn.dataset.brainRollback)});
+    await refresh();
+  }catch(err){alert(err.message);}
 });
 $('#brainKeyBackup').addEventListener('click',async()=>{
   const passcode=prompt('Current creator passcode (required to export the signing key):');

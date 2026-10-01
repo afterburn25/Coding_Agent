@@ -320,6 +320,63 @@ class NexusBrain:
         tmp.write_text(json.dumps(auth, indent=2), encoding="utf-8")
         tmp.replace(self.auth_path)
 
+    _SETTINGS_HISTORY_LIMIT = 10
+
+    def _push_settings_history(self) -> None:
+        """Record a bounded, signature-provenance history of signed settings.
+
+        Every signed save captures subroutines/emotion_profile/self_model with
+        the signature that authenticated them. Identical consecutive states
+        collapse into one entry (sync saves do not flood the history). The
+        list lives outside the signed payload — it is a rollback aid, not part
+        of the locked contract — and each entry carries its own signature.
+        """
+        entry = {
+            "updated_at": float(self._data.get("updated_at") or 0),
+            "subroutines": copy.deepcopy(self._data.get("subroutines", {})),
+            "emotion_profile": copy.deepcopy(self._data.get("emotion_profile", {})),
+            "self_model": copy.deepcopy(self._data.get("self_model", {})),
+            "signature": str(self._data.get("signature") or ""),
+        }
+        history = self._data.setdefault("settings_history", [])
+        if not isinstance(history, list):
+            history = []
+            self._data["settings_history"] = history
+        last = history[-1] if history else None
+        if last and all(last.get(k) == entry[k] for k in ("subroutines", "emotion_profile", "self_model")):
+            last["updated_at"] = entry["updated_at"]
+            last["signature"] = entry["signature"]
+            return
+        history.append(entry)
+        del history[:-self._SETTINGS_HISTORY_LIMIT]
+
+    def settings_history(self) -> list[dict[str, Any]]:
+        history = self._data.get("settings_history")
+        return copy.deepcopy(history) if isinstance(history, list) else []
+
+    def rollback_settings(self, updated_at: float) -> dict[str, Any]:
+        """Restore subroutines/emotion_profile/self_model to a signed version.
+
+        Creator-only (requires unlock). The current state is already preserved
+        in the history by its own save, so rollback is itself reversible.
+        Records are untouched — only signed settings revert.
+        """
+        self._require_unlocked()
+        target = None
+        for entry in self.settings_history():
+            if float(entry.get("updated_at") or 0) == float(updated_at):
+                target = entry
+                break
+        if target is None:
+            raise KeyError("No signed settings version at that timestamp")
+        with self._lock:
+            self._data["subroutines"] = copy.deepcopy(target.get("subroutines") or {})
+            self._data["emotion_profile"] = copy.deepcopy(target.get("emotion_profile") or {})
+            self._data["self_model"] = copy.deepcopy(target.get("self_model") or {})
+            self._save_signed()
+            self._audit("settings_rollback", restored_from=target.get("updated_at"))
+        return self.summary()
+
     def _save_signed(self) -> None:
         self._require_unlocked()
         self._data["schema_version"] = SCHEMA_VERSION
@@ -332,6 +389,7 @@ class NexusBrain:
         )
         self._verified_for_session = True
         self._tampered = False
+        self._push_settings_history()
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
@@ -1303,5 +1361,10 @@ class NexusBrain:
                 "integrity": "tampered" if self._tampered else "verified" if self.verified_for_session else "locked_unverified" if self.initialized else "uninitialized",
                 "records": len(records), "counts": counts, "subroutines": self.subroutines(),
                 "emotion_profile": self.emotion_profile(), "self_model": self.self_model(),
+                "settings_history": [
+                    {"updated_at": float(e.get("updated_at") or 0),
+                     "signature": str(e.get("signature") or "")[:16]}
+                    for e in self.settings_history()
+                ],
                 "updated_at": float(self._data.get("updated_at") or 0),
             }
