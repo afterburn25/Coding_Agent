@@ -202,6 +202,13 @@ class ToolRouter:
                 self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.telemetry_path.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                # The file only ever feeds the last-500 tail on load — keep it
+                # bounded so months of runs do not grow it without limit.
+                if self.telemetry_path.stat().st_size > 512 * 1024:
+                    lines = self.telemetry_path.read_text(encoding="utf-8").splitlines()[-2000:]
+                    tmp = self.telemetry_path.with_suffix(".tmp")
+                    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    tmp.replace(self.telemetry_path)
             except OSError:
                 pass
 
