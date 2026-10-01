@@ -1292,8 +1292,10 @@ class AgentOrchestrator:
 
     def _drive(self, session: _AgentSession) -> AgentResult:
         self._task_context(session.task_id)
+        redactor = self.tools.context.get("redactor")
         self.tools.context["stream_sink"] = lambda tool_name, chunk: self._emit(
-            session, "tool_output", tool=tool_name, chunk=chunk
+            session, "tool_output", tool=tool_name,
+            chunk=redactor(chunk) if redactor else chunk,
         )
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
         self._emit(session, "task", task=working_task.as_dict())

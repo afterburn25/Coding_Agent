@@ -203,6 +203,8 @@ class AppState:
         register_build_tools(self.tools, self.workspace)
         register_codeintel_tools(self.tools, self.workspace)
         self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
+        # Mask vaulted values in live tool-output chunks and logs.
+        self.tools.context["redactor"] = self.secrets.redact
         register_api_tools(self.tools, vault=self.secrets)
         register_data_tools(self.tools, self.workspace, artifacts_dir=runtime_root / "data" / "charts")
         register_media_tools(self.tools, self.workspace, jobs=self.jobs)

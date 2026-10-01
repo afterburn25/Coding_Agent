@@ -856,6 +856,16 @@ class SecretVaultTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 vault.set("ok.name", "")
 
+    def test_redact_masks_stored_values(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = SecretVault(Path(td) / "s.vault")
+            vault.set("api.key", "ghp_secret_value_123")
+            vault.set("short", "abc")
+            out = vault.redact("token ghp_secret_value_123 ok; abc stays")
+            self.assertNotIn("ghp_secret_value_123", out)
+            self.assertIn("abc stays", out)
+            self.assertEqual(vault.redact(""), "")
+
 
 class CodeIntelTests(unittest.TestCase):
     def test_extract_symbols_python(self):

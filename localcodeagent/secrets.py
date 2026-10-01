@@ -101,6 +101,21 @@ class SecretVault:
     def has(self, name: str) -> bool:
         return self.get(name) is not None
 
+    def redact(self, text: str) -> str:
+        """Mask stored secret values appearing in tool output or logs.
+
+        Values under 6 characters are skipped so short/common strings do not
+        over-redact unrelated text.
+        """
+        if not text:
+            return text
+        with self._lock:
+            values = [str(v.get("value", "")) for v in self._store.values()]
+        for value in values:
+            if len(value) >= 6:
+                text = text.replace(value, "••••••")
+        return text
+
     def delete(self, name: str) -> bool:
         with self._lock:
             existed = self._store.pop(str(name), None) is not None
