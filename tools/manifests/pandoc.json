@@ -1,0 +1,28 @@
+{
+  "id": "pandoc",
+  "name": "Pandoc",
+  "version": "1.0.0",
+  "category": "documents",
+  "description": "Universal document converter (Markdown/DOCX/HTML/EPUB/LaTeX/...).",
+  "provider": "pandoc",
+  "executables": ["pandoc"],
+  "capabilities": ["convert_document", "markdown_to_docx", "markdown_to_html", "docx_to_markdown", "markdown_to_epub"],
+  "permissions": ["filesystem.read", "filesystem.write"],
+  "requires_network": false,
+  "docs": "https://pandoc.org/MANUAL.html",
+  "install": {"method": "winget", "package": "JohnMacFarlane.Pandoc"},
+  "health_check": {"command": ["pandoc", "--version"]},
+  "invoke": {
+    "command": ["pandoc", "{input}", "-o", "{output}", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "input": {"type": "string"},
+        "output": {"type": "string"},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"-f\",\"markdown\",\"-t\",\"docx\"]"}
+      },
+      "required": ["input", "output"]
+    },
+    "timeout_seconds": 300
+  }
+}

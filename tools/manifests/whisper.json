@@ -1,0 +1,30 @@
+{
+  "id": "whisper",
+  "name": "whisper.cpp",
+  "version": "1.0.0",
+  "category": "audio",
+  "description": "Local speech-to-text via whisper.cpp (whisper-cli). Requires a downloaded GGML model; pass its path with -m.",
+  "provider": "ggerganov",
+  "executables": ["whisper-cli"],
+  "capabilities": ["transcribe_audio", "transcribe_video", "generate_subtitles", "detect_language"],
+  "permissions": ["shell.execute"],
+  "requires_network": false,
+  "requires_gpu": false,
+  "requirements": {"ram_mb": 1024},
+  "docs": "https://github.com/ggerganov/whisper.cpp",
+  "install": {"method": "build", "notes": "Build whisper.cpp or install a release; whisper-cli must be on PATH."},
+  "health_check": {"command": ["whisper-cli", "--help"]},
+  "invoke": {
+    "command": ["whisper-cli", "-m", "{model}", "-f", "{file}", "-oj", "-osrt", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "model": {"type": "string", "description": "path to a GGML whisper model, e.g. models/audio/ggml-base.en.bin"},
+        "file": {"type": "string", "description": "audio/video file (16kHz wav preferred)"},
+        "args": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["model", "file"]
+    },
+    "timeout_seconds": 1800
+  }
+}

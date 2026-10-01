@@ -1,0 +1,26 @@
+{
+  "id": "docker",
+  "name": "Docker",
+  "version": "1.0.0",
+  "category": "devops",
+  "description": "Isolated sandbox execution. Pass raw docker arguments; prefer disposable containers for unfamiliar code.",
+  "provider": "docker",
+  "executables": ["docker"],
+  "capabilities": ["sandbox_run", "isolated_build", "container_exec", "isolated_testing"],
+  "permissions": ["docker.access"],
+  "requires_network": false,
+  "docs": "https://docs.docker.com/",
+  "install": {"method": "winget", "package": "Docker.DockerDesktop"},
+  "health_check": {"command": ["docker", "info"]},
+  "invoke": {
+    "command": ["docker", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "args": {"type": "array", "items": {"type": "string"}, "description": "docker CLI arguments"}
+      },
+      "required": ["args"]
+    },
+    "timeout_seconds": 1800
+  }
+}

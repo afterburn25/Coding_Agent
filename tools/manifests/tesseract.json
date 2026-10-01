@@ -1,0 +1,27 @@
+{
+  "id": "tesseract",
+  "name": "Tesseract OCR",
+  "version": "1.0.0",
+  "category": "documents",
+  "description": "OCR for images and rendered pages. Prints extracted text to stdout.",
+  "provider": "tesseract-ocr",
+  "executables": ["tesseract"],
+  "capabilities": ["ocr_image", "extract_text_from_screenshot", "detect_text_regions"],
+  "permissions": ["filesystem.read"],
+  "requires_network": false,
+  "docs": "https://tesseract-ocr.github.io/",
+  "install": {"method": "winget", "package": "UB-Mannheim.TesseractOCR"},
+  "health_check": {"command": ["tesseract", "--version"]},
+  "invoke": {
+    "command": ["tesseract", "{image}", "stdout", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "image": {"type": "string", "description": "image path to OCR"},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"-l\",\"eng\",\"--psm\",\"6\",\"tsv\"]"}
+      },
+      "required": ["image"]
+    },
+    "timeout_seconds": 300
+  }
+}

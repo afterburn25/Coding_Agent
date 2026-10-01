@@ -868,6 +868,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.model_telemetry.summary())
             return
         if path == "/api/tools":
+            self.state.tools.refresh_install_status()
             self._json({
                 "tools": self.state.tools.manifests(),
                 "categories": TOOL_CATEGORIES,

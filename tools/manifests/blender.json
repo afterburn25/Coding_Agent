@@ -1,0 +1,29 @@
+{
+  "id": "blender",
+  "name": "Blender",
+  "version": "1.0.0",
+  "category": "3d",
+  "description": "3D scene building and rendering via Blender headless Python scripting. Supply a .py script path; script controls the scene/render.",
+  "provider": "blender-foundation",
+  "executables": ["blender"],
+  "capabilities": ["create_blender_scene", "render_scene", "import_model", "export_model", "modify_object"],
+  "permissions": ["shell.execute"],
+  "requires_network": false,
+  "requires_gpu": false,
+  "requirements": {"ram_mb": 2048},
+  "docs": "https://docs.blender.org/api/current/",
+  "install": {"method": "winget", "package": "BlenderFoundation.Blender"},
+  "health_check": {"command": ["blender", "--version"]},
+  "invoke": {
+    "command": ["blender", "--background", "--python", "{script}", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "script": {"type": "string", "description": "path to a Blender Python script inside the workspace"},
+        "args": {"type": "array", "items": {"type": "string"}, "description": "script arguments after --"}
+      },
+      "required": ["script"]
+    },
+    "timeout_seconds": 3600
+  }
+}

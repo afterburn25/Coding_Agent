@@ -1,0 +1,29 @@
+{
+  "id": "ffmpeg",
+  "name": "FFmpeg",
+  "version": "1.0.0",
+  "category": "video",
+  "description": "Media processing engine. Pass raw ffmpeg arguments (the Media Agent translates normal-language requests into validated flags).",
+  "provider": "ffmpeg-project",
+  "executables": ["ffmpeg"],
+  "capabilities": ["convert_video", "trim_video", "merge_video", "merge_audio", "extract_audio", "create_thumbnail", "extract_frames", "resize_video", "compress_video", "normalize_audio", "add_subtitles", "remove_audio", "change_container", "create_slideshow"],
+  "permissions": ["shell.execute"],
+  "requires_network": false,
+  "requires_gpu": false,
+  "requirements": {"ram_mb": 512},
+  "supported_os": [],
+  "docs": "https://ffmpeg.org/documentation.html",
+  "install": {"method": "winget", "package": "Gyan.FFmpeg"},
+  "health_check": {"command": ["ffmpeg", "-version"]},
+  "invoke": {
+    "command": ["ffmpeg", "-hide_banner", "-y", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "args": {"type": "array", "items": {"type": "string"}, "description": "ffmpeg argument list, e.g. [\"-i\",\"in.mp4\",\"-ss\",\"10\",\"-t\",\"5\",\"out.mp4\"]"}
+      },
+      "required": ["args"]
+    },
+    "timeout_seconds": 1800
+  }
+}

@@ -13,8 +13,25 @@ LEVELS = ("allow", "session", "ask", "deny")
 # Workspace permission profiles. Each maps known permission keys to a level.
 # "custom" means the stored per-key map is authoritative and is never applied
 # automatically.
+# Risk-sensitive keys shared by every profile. High-impact actions default to
+# confirmation or denial even for permissive profiles.
+_RISK_DEFAULTS = {
+    "filesystem.delete": "ask",
+    "packages.install": "ask",
+    "docker.access": "ask",
+    "credentials.use": "ask",
+    "git.push": "ask",
+    "browser.submit": "ask",
+    "external_api.call": "ask",
+    "message.send": "ask",
+    "spend.money": "deny",
+    "microphone.use": "deny",
+    "camera.use": "deny",
+}
+
 PROFILES: dict[str, dict[str, str]] = {
     "safe": {
+        **_RISK_DEFAULTS,
         "filesystem.read": "allow",
         "filesystem.write": "ask",
         "shell.execute": "ask",
@@ -26,8 +43,10 @@ PROFILES: dict[str, dict[str, str]] = {
         "browser.control": "ask",
         "github.read": "allow",
         "github.write": "ask",
+        "docker.access": "deny",
     },
     "developer": {
+        **_RISK_DEFAULTS,
         "filesystem.read": "allow",
         "filesystem.write": "ask",
         "shell.execute": "ask",
@@ -41,19 +60,30 @@ PROFILES: dict[str, dict[str, str]] = {
         "github.write": "ask",
     },
     "power_user": {
+        **_RISK_DEFAULTS,
         "filesystem.read": "allow",
         "filesystem.write": "allow",
+        "filesystem.delete": "session",
         "shell.execute": "ask",
         "git.execute": "allow",
+        "git.push": "session",
         "image.read": "allow",
         "image.generate": "allow",
         "image.manage": "allow",
         "network.read": "allow",
         "browser.control": "session",
+        "browser.submit": "session",
+        "packages.install": "session",
+        "docker.access": "session",
+        "credentials.use": "session",
+        "external_api.call": "session",
+        "microphone.use": "ask",
+        "camera.use": "ask",
         "github.read": "allow",
         "github.write": "session",
     },
     "offline": {
+        **_RISK_DEFAULTS,
         "filesystem.read": "allow",
         "filesystem.write": "ask",
         "shell.execute": "ask",
@@ -63,14 +93,24 @@ PROFILES: dict[str, dict[str, str]] = {
         "image.manage": "ask",
         "network.read": "deny",
         "browser.control": "deny",
+        "browser.submit": "deny",
+        "external_api.call": "deny",
+        "message.send": "deny",
         "github.read": "deny",
         "github.write": "deny",
+        "git.push": "deny",
     },
     "research_only": {
+        **_RISK_DEFAULTS,
         "filesystem.read": "allow",
         "filesystem.write": "deny",
+        "filesystem.delete": "deny",
         "shell.execute": "deny",
         "git.execute": "deny",
+        "git.push": "deny",
+        "packages.install": "deny",
+        "docker.access": "deny",
+        "credentials.use": "deny",
         "image.read": "allow",
         "image.generate": "deny",
         "image.manage": "deny",

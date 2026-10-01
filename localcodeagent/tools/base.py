@@ -124,7 +124,9 @@ class ToolRegistry:
         return [
             t.openai_schema()
             for t in self._tools.values()
-            if t.name not in self._disabled and self._plugin_meta.get(t.name, {}).get("invocable", True)
+            if t.name not in self._disabled
+            and self._plugin_meta.get(t.name, {}).get("invocable", True)
+            and t.install_status != "missing"
         ]
 
     def names(self) -> list[str]:
@@ -139,6 +141,26 @@ class ToolRegistry:
             for name, spec in self._tools.items()
             if cap in {str(c).lower() for c in spec.capabilities}
         )
+
+    def refresh_install_status(self) -> dict[str, str]:
+        """Re-scan manifest tools for executable presence (post-install/update)."""
+        changed: dict[str, str] = {}
+        from .plugins import PluginManifest
+        for name, meta in self._plugin_meta.items():
+            manifest_path = meta.get("manifest_path")
+            spec = self._tools.get(name)
+            if not manifest_path or spec is None:
+                continue
+            try:
+                manifest = PluginManifest.from_dict(json.loads(Path(manifest_path).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+            _, missing = manifest.executables_found()
+            new_status = "installed" if not manifest.executables or not missing else "missing"
+            if spec.install_status != new_status:
+                spec.install_status = new_status
+                changed[name] = new_status
+        return changed
 
     def is_enabled(self, name: str) -> bool:
         return name in self._tools and name not in self._disabled
@@ -223,6 +245,8 @@ class ToolRegistry:
             return f"ERROR: unknown tool '{name}'"
         if name in self._disabled:
             return f"TOOL_DISABLED: tool '{name}' is disabled in the Tool Manager"
+        if tool.install_status == "missing":
+            return f"TOOL_NOT_INSTALLED: '{name}' is not installed — see the Tool Manager for install options"
         manager = self.permission_manager
         mode = manager.effective(tool.permission)
         if mode == "deny":

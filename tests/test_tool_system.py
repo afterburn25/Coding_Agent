@@ -235,7 +235,25 @@ class PluginManifestTests(unittest.TestCase):
             self.assertEqual(manifest["install_status"], "missing")
             self.assertFalse(manifest["callable"])
             self.assertNotIn("blender", {s["function"]["name"] for s in reg.schemas()})
-            self.assertIn("ERROR", reg.execute("blender", {}))
+            self.assertIn("TOOL_NOT_INSTALLED", reg.execute("blender", {}))
+
+    def test_installed_manifest_without_invoke_is_not_callable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mdir = root / "manifests"
+            mdir.mkdir()
+            self._write(mdir, "catalog_only.json", {
+                "id": "comfyui",
+                "name": "ComfyUI",
+                "category": "images",
+            })
+            reg = _registry(**{"shell.execute": "allow"})
+            load_plugin_manifests(mdir, reg)
+            manifest = reg.manifest("comfyui")
+            self.assertEqual(manifest["install_status"], "installed")
+            self.assertFalse(manifest["callable"])
+            self.assertNotIn("comfyui", {s["function"]["name"] for s in reg.schemas()})
+            self.assertIn("ERROR", reg.execute("comfyui", {}))
 
     def test_invalid_manifest_reports_error(self):
         with tempfile.TemporaryDirectory() as td:

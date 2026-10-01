@@ -1,0 +1,27 @@
+{
+  "id": "ffprobe",
+  "name": "FFprobe",
+  "version": "1.0.0",
+  "category": "video",
+  "description": "Media inspection/verification. Returns JSON metadata by default.",
+  "provider": "ffmpeg-project",
+  "executables": ["ffprobe"],
+  "capabilities": ["probe_media", "verify_media", "media_metadata"],
+  "permissions": ["filesystem.read"],
+  "requires_network": false,
+  "docs": "https://ffmpeg.org/ffprobe.html",
+  "install": {"method": "winget", "package": "Gyan.FFmpeg"},
+  "health_check": {"command": ["ffprobe", "-version"]},
+  "invoke": {
+    "command": ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", "{file}", "{args}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "file": {"type": "string", "description": "media file path"},
+        "args": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["file"]
+    },
+    "timeout_seconds": 120
+  }
+}

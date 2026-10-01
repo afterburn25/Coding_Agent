@@ -1,0 +1,28 @@
+{
+  "id": "duckdb",
+  "name": "DuckDB",
+  "version": "1.0.0",
+  "category": "data",
+  "description": "Analytical SQL engine for CSV/Parquet/JSON and database files. Runs a SQL statement and returns JSON rows.",
+  "provider": "duckdb",
+  "executables": ["duckdb"],
+  "capabilities": ["query_csv", "query_parquet", "query_json", "query_database", "execute_sql", "summarize_table", "profile_dataset"],
+  "permissions": ["filesystem.read"],
+  "requires_network": false,
+  "requirements": {"ram_mb": 512},
+  "docs": "https://duckdb.org/docs/",
+  "install": {"method": "winget", "package": "DuckDB.cli"},
+  "health_check": {"command": ["duckdb", "--version"]},
+  "invoke": {
+    "command": ["duckdb", "{database}", "-json", "-c", "{sql}"],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "database": {"type": "string", "description": "database file path; omit for in-memory"},
+        "sql": {"type": "string", "description": "SQL statement; can read_csv/read_parquet/read_json files directly"}
+      },
+      "required": ["sql"]
+    },
+    "timeout_seconds": 600
+  }
+}

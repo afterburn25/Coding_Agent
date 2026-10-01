@@ -4,6 +4,22 @@ Chat Nexus routes every tool/action through `PermissionManager`
 (`localcodeagent/permissions.py`). The manager wraps the `permissions` map in
 `config.json`, so existing configs keep working.
 
+## Permission keys
+
+Core keys plus risk-sensitive keys shared across profiles:
+
+`filesystem.read` · `filesystem.write` · `filesystem.delete` ·
+`shell.execute` · `git.execute` · `git.push` · `packages.install` ·
+`docker.access` · `credentials.use` · `network.read` · `browser.control` ·
+`browser.submit` · `external_api.call` · `image.read` · `image.generate` ·
+`image.manage` · `github.read` · `github.write` · `message.send` ·
+`microphone.use` · `camera.use` · `spend.money`
+
+High-impact actions (spending money, sending messages, mic/camera) default
+to `deny` in every shipped profile; installs/deletes/pushes/submissions
+default to `ask`. Manifest tools may introduce additional keys — unknown
+keys default to `ask`.
+
 ## Levels
 
 | level | behavior |
