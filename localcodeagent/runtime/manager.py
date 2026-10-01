@@ -619,6 +619,7 @@ class RuntimeManager:
                 status.state = "running"
                 status.healthy = True
                 self._last_used[profile.id] = time.time()
+                self._warmup(profile, endpoint)
                 return endpoint
             time.sleep(0.25)
 
@@ -627,6 +628,34 @@ class RuntimeManager:
         self._stop_managed(profile.id)
         status.state = "error"
         raise TimeoutError(status.error)
+
+    def _warmup(self, profile: ModelProfile, endpoint: str) -> None:
+        """Fire a 1-token completion so the first real request isn't cold.
+
+        Runs in a daemon thread; failures are irrelevant (the next real request
+        exercises the same path). Skipped when model_warmup is disabled.
+        """
+        if not getattr(self.config, "model_warmup", True):
+            return
+
+        def _ping() -> None:
+            try:
+                req = urllib.request.Request(
+                    endpoint.rstrip("/") + "/chat/completions",
+                    data=json.dumps({
+                        "model": profile.model or profile.id,
+                        "messages": [{"role": "user", "content": "ok"}],
+                        "max_tokens": 1,
+                        "temperature": 0,
+                        "stream": False,
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(req, timeout=120).read()
+            except Exception:
+                pass
+
+        threading.Thread(target=_ping, name=f"warmup-{profile.id}", daemon=True).start()
 
     def ensure_ready(self, profile: ModelProfile) -> str:
         with self._lock:

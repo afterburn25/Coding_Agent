@@ -10,6 +10,7 @@
   "autonomous_resume_interrupted": true,
   "autonomous_max_recoveries": 3,
   "model_idle_unload_seconds": 900,
+  "model_warmup": true,
   "memory_pressure_vram_gb": 0,
   "memory_pressure_ram_gb": 0,
   "models": [

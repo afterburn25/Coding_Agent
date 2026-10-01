@@ -142,6 +142,9 @@ class AgentConfig:
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
+    # Send a 1-token request right after a managed runtime reports healthy so
+    # the first real generation doesn't pay the cold-load cost.
+    model_warmup: bool = True
     # When free memory drops below these floors, the least-recently-used
     # resident model is stopped even inside the idle window (0 disables each).
     memory_pressure_vram_gb: float = 0.0
@@ -341,6 +344,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.autonomous_resume_interrupted = bool(raw.get("autonomous_resume_interrupted", cfg.autonomous_resume_interrupted))
     cfg.autonomous_max_recoveries = max(0, int(raw.get("autonomous_max_recoveries", cfg.autonomous_max_recoveries)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
+    cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
     cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))
