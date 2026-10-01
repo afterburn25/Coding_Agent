@@ -126,6 +126,8 @@
 .tl-row.completed>.tl-head .tl-icon{color:#2be59a}
 .tl-row.complete{border-color:#144734}
 .tl-row.complete>.tl-head .tl-icon{color:#2be59a}
+.tl-children{margin-top:5px;padding-left:10px;border-left:1px solid #16304d}
+.tl-children .tl-row{margin:2px 0}
 .tl-filters{display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px}
 .tl-chip{font-size:10px;padding:2px 8px;border:1px solid #16304d;border-radius:10px;background:#071626;color:#7d9cba;cursor:pointer}
 .tl-chip:hover{border-color:#11cfff;color:#cfe3f5}

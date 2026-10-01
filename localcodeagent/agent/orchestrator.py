@@ -1367,6 +1367,16 @@ class AgentOrchestrator:
         self._emit(session, "task", task=verifying_task.as_dict())
         if session.verification_index == 0:
             session.verification_round_start = len(task.verification)
+        group_id = session.tool_activities.get("verify_group")
+        if group_id is None:
+            group = self._act(
+                session.task_id, "testing", "Verification",
+                f"{len(session.verification_commands) - session.verification_index} check(s) remaining",
+                callback=session.event_callback,
+            )
+            group_id = group["id"] if group else None
+            if group_id:
+                session.tool_activities["verify_group"] = group_id
         while session.verification_index < len(session.verification_commands):
             if self._task_cancelled(session):
                 return self._cancel_result(session)
@@ -1387,6 +1397,7 @@ class AgentOrchestrator:
                 session.task_id, "testing", "Testing",
                 item["command"][:240],
                 details={"command": item["command"], "name": item["name"]},
+                parent=group_id,
                 callback=session.event_callback,
             )
             if act is not None:
@@ -1411,6 +1422,17 @@ class AgentOrchestrator:
             self._emit(session, "tool", tool={**verification_event, "result": shown[-12000:]})
             session.verification_index += 1
         session.verification_done = True
+        if group_id:
+            fresh = self.tasks.get(session.task_id)
+            round_items = fresh.verification[session.verification_round_start:] if fresh.verification else []
+            passed = sum(1 for it in round_items if "EXIT_CODE=0" in str(it.get("result", "")))
+            failed = len(round_items) - passed
+            self._act_update(
+                session.task_id, {"id": group_id},
+                state="failed" if failed else "completed",
+                summary=f"{passed} passed · {failed} failed",
+                callback=session.event_callback,
+            )
         return None
 
     def _run_review(self, session: _AgentSession) -> None:

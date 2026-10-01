@@ -307,14 +307,16 @@ function upsertActivityRow(row){
   if(!rec){
     const el=document.createElement('div');
     el.className='tl-row';
-    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre></div>';
+    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
     el.querySelector('.tl-head').addEventListener('click',()=>{
       const r=tlRows.get(row.id);
       if(r){r.manual=!el.classList.contains('open');el.classList.toggle('open',r.manual);}
     });
     rec={el,row:{},manual:null};
     tlRows.set(row.id,rec);
-    activity.appendChild(el);_activityPrune();
+    const parent=row.parent?tlRows.get(row.parent):null;
+    (parent?parent.el.querySelector('.tl-children'):activity).appendChild(el);
+    _activityPrune();
   }
   rec.row=row;
   const el=rec.el;
