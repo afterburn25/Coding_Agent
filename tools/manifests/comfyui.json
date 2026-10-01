@@ -2,7 +2,7 @@
   "id": "comfyui",
   "name": "ComfyUI Portable",
   "version": "v0.38.0",
-  "category": "image",
+  "category": "images",
   "description": "Local ComfyUI image-generation backend (NVIDIA portable build). Downloads the official portable archive and extracts it inside the app directory; required for the Image workspace's local generation.",
   "provider": "Comfy-Org",
   "supported_os": ["windows"],
