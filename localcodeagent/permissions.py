@@ -24,6 +24,7 @@ _RISK_DEFAULTS = {
     "browser.submit": "ask",
     "external_api.call": "ask",
     "message.send": "ask",
+    "tasks.queue": "ask",
     "spend.money": "deny",
     "microphone.use": "deny",
     "camera.use": "deny",

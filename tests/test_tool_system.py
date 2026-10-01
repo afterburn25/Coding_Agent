@@ -1455,6 +1455,7 @@ class AppStateWiringTests(unittest.TestCase):
                 "knowledge_index", "knowledge_search", "python_exec",
                 "docker_run", "blender_render", "list_workflows", "run_workflow",
                 "find_tools", "use_capability", "install_tool", "system_resources",
+                "queue_task", "queue_list", "queue_cancel",
             ):
                 self.assertIn(expected, names, f"missing registered tool: {expected}")
 
