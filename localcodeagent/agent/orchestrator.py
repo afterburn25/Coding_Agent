@@ -1066,7 +1066,7 @@ class AgentOrchestrator:
                 for _, n, _ in batch
             )
             for _, n, a in batch:
-                self._emit(session, "tool_start", tool={"name": n, "arguments": a})
+                self._emit_tool_start(session, n, a)
             if readonly:
                 with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
                     results = list(pool.map(lambda item: self.tools.execute(item[1], item[2]), batch))
@@ -1115,8 +1115,8 @@ class AgentOrchestrator:
                     permission=permission,
                     detail=item["command"],
                 )
-            self._emit(session, "tool_start", tool={"name": "run_shell", "arguments": args})
-            result = self.tools.execute("run_shell", args)
+            self._emit_tool_start(session, "run_shell", args)
+            result = self._execute_tool("run_shell", args)
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(session.task_id)
             self.tasks.update(session.task_id, verification=[*task.verification, entry])
@@ -1307,6 +1307,20 @@ class AgentOrchestrator:
         self._record_outcome(session, "cancelled")
         self._sessions.pop(session.task_id, None)
         return self._result(session)
+
+    def _emit_tool_start(self, session: _AgentSession, name: str, args: dict[str, Any]) -> None:
+        redactor = self.tools.context.get("redactor")
+
+        def scrub(value: Any) -> Any:
+            if isinstance(value, str):
+                return redactor(value) if redactor else value
+            if isinstance(value, dict):
+                return {k: scrub(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [scrub(v) for v in value]
+            return value
+
+        self._emit(session, "tool_start", tool={"name": name, "arguments": scrub(args)})
 
     def _drive(self, session: _AgentSession) -> AgentResult:
         self._task_context(session.task_id)
@@ -2067,7 +2081,7 @@ class AgentOrchestrator:
             call = session.pending_calls[session.pending_call_index]
             name, args = self._parse_call(call)
             if approved:
-                self._emit(session, "tool_start", tool={"name": name, "arguments": args})
+                self._emit_tool_start(session, name, args)
             result = self.tools.execute(name, args, approved=True) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1
