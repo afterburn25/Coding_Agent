@@ -761,6 +761,10 @@ internal sealed class MainForm : Form
         }
 
         _webView.Dock = DockStyle.Fill;
+        // WebView2's default first-paint background is white — it flashes for
+        // a frame when the window first becomes visible even with the page
+        // already loaded. Match the app theme so the reveal is seamless.
+        _webView.DefaultBackgroundColor = Color.FromArgb(7, 16, 31);
         Controls.Add(_webView);
 
         FormClosing += (_, _) =>
