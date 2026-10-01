@@ -628,7 +628,7 @@ class AgentOrchestrator:
             pass
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
-        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error"}:
+        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job"}:
             self._log_terminal(session, event_type, payload)
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
 
@@ -658,6 +658,14 @@ class AgentOrchestrator:
             elif event_type == "approval":
                 ap = payload.get("approval") or {}
                 line = f"## approval required: {ap.get('name', 'tool')} ({ap.get('permission', '')})\n"
+            elif event_type == "image_job":
+                job = payload.get("job") or {}
+                state = f"{job.get('operation', 'job')}/{job.get('state', '')}/{job.get('stage', '')}"
+                if state != session.logged_task_state:
+                    session.logged_task_state = state
+                    line = f"## image {state}\n"
+                else:
+                    line = ""
             else:
                 line = f"## error: {str(payload.get('error') or '')[:300]}\n"
             if line:
