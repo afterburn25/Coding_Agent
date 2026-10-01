@@ -27,6 +27,7 @@ from localcodeagent.tools.media import (build_add_subtitles, build_convert, buil
 from localcodeagent.tools.documents import extract_document_text, register_document_tools
 from localcodeagent.tools.knowledge import KnowledgeIndex, register_knowledge_tools
 from localcodeagent.tools.sandbox import run_python, register_sandbox_tools
+from localcodeagent.events import EventBus, make_emitter
 
 
 def _registry(**permissions):
@@ -887,6 +888,36 @@ class SandboxToolTests(unittest.TestCase):
             out = run_python("import sys, json; print(json.dumps(sys.flags.isolated))", Path(td) / "sb")
             self.assertTrue(out["ok"])
             self.assertIn("1", out["stdout"])
+
+
+class EventBusTests(unittest.TestCase):
+    def test_publish_subscribe_replay(self):
+        bus = EventBus(history=50)
+        bus.publish("job", {"id": "1"})
+        sub = bus.subscribe(replay=10)
+        first = sub.get(timeout=1)
+        self.assertEqual(first["type"], "job")
+        bus.publish("tool", {"tool": "x"})
+        second = sub.get(timeout=1)
+        self.assertEqual(second["type"], "tool")
+        bus.unsubscribe(sub)
+        self.assertEqual(bus.subscriber_count(), 0)
+
+    def test_jobs_and_registry_emit(self):
+        bus = EventBus()
+        with tempfile.TemporaryDirectory() as td:
+            jobs = JobManager(Path(td) / "jobs.json")
+            jobs.on_change = make_emitter(bus, "job")
+            reg = ToolRegistry({"filesystem.read": "allow"})
+            reg.on_event = make_emitter(bus, "tool")
+            reg.register(ToolSpec("ok_tool", "d", {"type": "object", "properties": {}},
+                                  "filesystem.read", lambda a: "done"))
+            sub = bus.subscribe(replay=0)
+            job = jobs.submit("media", "test")
+            jobs.update(job.id, state="completed")
+            reg.execute("ok_tool", {})
+            seen = [sub.get(timeout=1)["type"] for _ in range(3)]
+            self.assertEqual(seen, ["job", "job", "tool"])
 
 
 if __name__ == "__main__":

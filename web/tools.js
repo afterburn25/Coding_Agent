@@ -299,4 +299,20 @@
   }
   refreshAll();
   setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp()]).catch(() => {}), 5000);
+
+  // Live updates: job/tool events stream over SSE; polling above stays as the
+  // fallback if EventSource is unavailable or the connection drops.
+  try {
+    const events = new EventSource("/api/events");
+    let refreshTimer = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        Promise.all([loadJobs(), loadTools()]).catch(() => {});
+      }, 400);
+    };
+    events.addEventListener("job", scheduleRefresh);
+    events.addEventListener("tool", scheduleRefresh);
+  } catch (e) { /* EventSource unsupported — interval polling still applies */ }
 })();

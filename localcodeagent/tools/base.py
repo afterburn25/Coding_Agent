@@ -255,15 +255,31 @@ class ToolRegistry:
             return f"APPROVAL_REQUIRED: permission '{tool.permission}' must be approved by the user before running {name}"
         if approved and manager.level(tool.permission) == "session":
             manager.grant_session(tool.permission)
+        started = time.time()
         try:
             result = tool.handler(arguments)
         except Exception as exc:
-            return f"ERROR: {type(exc).__name__}: {exc}"
+            result = f"ERROR: {type(exc).__name__}: {exc}"
+            self._emit({"tool": name, "ok": False, "elapsed_seconds": round(time.time() - started, 3),
+                        "detail": result[:200]})
+            return result
         with self._lock:
             usage = self._usage.setdefault(name, {"count": 0, "last_used_at": None})
             usage["count"] = int(usage.get("count", 0)) + 1
             usage["last_used_at"] = time.time()
+        self._emit({"tool": name, "ok": not result.startswith(("ERROR", "PERMISSION", "TOOL_", "APPROVAL")),
+                    "elapsed_seconds": round(time.time() - started, 3)})
         return result
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        """Optional event callback — wired to the server EventBus."""
+        emitter = getattr(self, "on_event", None)
+        if emitter is None:
+            return
+        try:
+            emitter(payload)
+        except Exception:
+            pass
 
     # -- persisted tool state ------------------------------------------------
 

@@ -94,7 +94,18 @@ class JobManager:
         self.limit = max(20, int(limit))
         self._jobs: dict[str, JobRecord] = {}
         self._lock = threading.RLock()
+        # Optional callback invoked with {"job": record.as_dict()} after every
+        # submit/update/cancel — wired to the server EventBus for live UI.
+        self.on_change = None
         self._load()
+
+    def _emit(self, record: JobRecord) -> None:
+        if self.on_change is None:
+            return
+        try:
+            self.on_change({"job": record.as_dict()})
+        except Exception:
+            pass
 
     def submit(self, kind: str, title: str, *, metadata: dict[str, Any] | None = None) -> JobRecord:
         record = JobRecord(
@@ -109,6 +120,7 @@ class JobManager:
             self._jobs[record.id] = record
             self._trim()
             self._save()
+        self._emit(record)
         return record
 
     def update(self, job_id: str, **fields: Any) -> JobRecord:
@@ -130,7 +142,8 @@ class JobManager:
             if job.state in {"completed", "failed", "cancelled"}:
                 job.finished_at = job.finished_at or time.time()
             self._save()
-            return job
+        self._emit(job)
+        return job
 
     def cancel(self, job_id: str) -> JobRecord:
         return self.update(job_id, state="cancelled", status="cancelled")

@@ -33,6 +33,7 @@ from .tools.api import register_api_tools
 from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
 from .tools.data import register_data_tools
+from .events import EventBus, make_emitter
 from .tools.documents import register_document_tools
 from .tools.knowledge import register_knowledge_tools
 from .tools.sandbox import register_sandbox_tools
@@ -178,6 +179,9 @@ class AppState:
         if not jobs_path.is_absolute():
             jobs_path = runtime_root / jobs_path
         self.jobs = JobManager(jobs_path)
+        self.events = EventBus()
+        self.jobs.on_change = make_emitter(self.events, "job")
+        self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
         self._register_processes()
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
@@ -976,6 +980,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/processes":
             self._json({"processes": self.state.processes.list()})
+            return
+        if path == "/api/events":
+            # Long-lived SSE stream of job/tool events for live UI updates.
+            self._sse_begin()
+            subscription = self.state.events.subscribe(replay=20)
+            try:
+                while True:
+                    try:
+                        event = subscription.get(timeout=15.0)
+                    except queue.Empty:
+                        event = {"type": "heartbeat", "ts": time.time(),
+                                 "subscribers": self.state.events.subscriber_count()}
+                    if not self._sse_event(str(event.pop("type", "message")), event):
+                        break
+            finally:
+                self.state.events.unsubscribe(subscription)
+            self.close_connection = True
             return
         if path == "/api/resources":
             runtime = self.state.runtime.summary(probe_external=True)
