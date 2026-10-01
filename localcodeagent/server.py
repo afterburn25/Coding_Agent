@@ -774,6 +774,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/nexus-brain":
             self._json(self.state.nexus_brain.summary())
             return
+        if path == "/api/nexus-brain/audit":
+            self._json({"events": self.state.nexus_brain.audit_events(100)})
+            return
         if path == "/api/conversations":
             from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)

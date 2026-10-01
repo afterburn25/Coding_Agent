@@ -221,6 +221,56 @@ class NexusBrainTests(unittest.TestCase):
             self.assertIn("persistent identity fact", brain.prompt_context())
             self.assertFalse(brain.unlocked)
 
+    def test_audit_log_records_lifecycle_events(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "brain.json"
+            brain = NexusBrain(path)
+            brain.initialize_creator("Creator", "example-passcode")
+            brain.bank(kind="fact", text="audit me", source="test")
+            brain.lock()
+            with self.assertRaises(PermissionError):
+                brain.unlock("Creator", "wrong-passcode-123")
+            brain.unlock("Creator", "example-passcode")
+
+            events = brain.audit_events(100)
+            names = [e["event"] for e in events]
+            self.assertIn("creator_initialized", names)
+            self.assertIn("signed_save", names)
+            self.assertIn("locked", names)
+            self.assertIn("unlocked", names)
+            bad = [e for e in events if e["event"] == "unlock_failed"]
+            self.assertTrue(bad)
+            self.assertEqual(bad[-1]["reason"], "bad_passcode")
+            # No secrets in the audit log
+            raw = path.with_name("brain.audit.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn("example-passcode", raw)
+            self.assertNotIn("wrong-passcode", raw)
+
+    def test_audit_log_records_signed_update_decisions(self):
+        with tempfile.TemporaryDirectory() as td:
+            creator = NexusBrain(Path(td) / "creator.json")
+            creator.initialize_creator("Creator", "example-passcode")
+            creator.bank(kind="fact", text="v1", source="test")
+            first = creator.export_payload()
+            recipient = NexusBrain(Path(td) / "recipient.json")
+            recipient.install_locked_export(first)
+
+            other = NexusBrain(Path(td) / "other.json")
+            other.initialize_creator("Other", "other-passcode")
+            other.bank(kind="fact", text="hostile", source="test")
+            with self.assertRaises(PermissionError):
+                recipient.install_signed_update(other.export_payload())
+
+            events = [e["event"] for e in recipient.audit_events(100)]
+            self.assertIn("distribution_installed", events)
+            rejected = [e for e in recipient.audit_events(100) if e["event"] == "signed_update_rejected"]
+            self.assertTrue(rejected)
+            self.assertEqual(rejected[-1]["reason"], "different_creator_key")
+
+            stale = recipient.install_signed_update(first)
+            self.assertFalse(stale["updated"])
+            self.assertIn("signed_update_stale", [e["event"] for e in recipient.audit_events(100)])
+
 
 if __name__ == "__main__":
     unittest.main()

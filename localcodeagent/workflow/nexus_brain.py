@@ -77,6 +77,7 @@ class NexusBrain:
         self.path = path.expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.auth_path = self.path.with_name(self.path.stem + ".auth.json")
+        self.audit_path = self.path.with_name(self.path.stem + ".audit.jsonl")
         self.enabled = bool(enabled)
         self.max_records = max(100, int(max_records))
         self._lock = threading.RLock()
@@ -201,6 +202,8 @@ class NexusBrain:
                 except (InvalidSignature, ValueError, TypeError, RuntimeError):
                     self._verified_for_session = False
                     self._tampered = True
+                if self._tampered:
+                    self._audit("tamper_detected", source="load")
         except (OSError, ValueError, TypeError):
             pass
 
@@ -283,6 +286,33 @@ class NexusBrain:
         }
         return auth, private_key
 
+    def _audit(self, event: str, **fields: Any) -> None:
+        """Append a tamper-evident lifecycle event to the Brain audit log.
+
+        Best-effort by design — audit failure must never break Brain operation.
+        Never log passcodes, keys, or record contents.
+        """
+        try:
+            row = {"ts": time.time(), "event": str(event), "brain_id": str(self._data.get("brain_id") or "")}
+            row.update({k: v for k, v in fields.items() if isinstance(v, (str, int, float, bool, type(None)))})
+            with open(self.audit_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    def audit_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        try:
+            lines = self.audit_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        events = []
+        for line in lines[-max(1, int(limit)):]:
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+        return events
+
     def _save_auth(self, auth: dict[str, Any]) -> None:
         tmp = self.auth_path.with_suffix(self.auth_path.suffix + ".tmp")
         tmp.write_text(json.dumps(auth, indent=2), encoding="utf-8")
@@ -303,6 +333,8 @@ class NexusBrain:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
+        self._audit("signed_save", updated_at=self._data["updated_at"],
+                    payload_sha256=hashlib.sha256(self._canonical(self._unsigned_payload())).hexdigest()[:16])
 
     def initialize_creator(self, creator_name: str, passcode: str) -> dict[str, Any]:
         if not self.enabled:
@@ -323,6 +355,7 @@ class NexusBrain:
             self._verified_for_session = True
             self._tampered = False
             self._save_signed()
+            self._audit("creator_initialized", creator=creator)
             return self.summary()
 
     def _migrate_legacy_unlock(self, auth: dict[str, Any], creator: str, secret: str) -> dict[str, Any]:
@@ -356,6 +389,7 @@ class NexusBrain:
         auth = self._auth()
         creator = self._clean(creator_name, 120)
         if creator.casefold() != str(auth.get("creator_name") or "").casefold():
+            self._audit("unlock_failed", reason="creator_name_mismatch")
             raise PermissionError("Creator authentication failed")
         secret = str(passcode or "")
         if int(auth.get("version") or 1) < 2:
@@ -363,6 +397,7 @@ class NexusBrain:
                 return self._migrate_legacy_unlock(auth, creator, secret)
         encrypted_pem = str(auth.get("encrypted_private_key_pem") or "").encode("utf-8")
         if not encrypted_pem:
+            self._audit("unlock_failed", reason="read_only_distribution")
             raise PermissionError(
                 "This is a public read-only Nexus Brain distribution. "
                 "Creator modifications must be made on a creator installation that holds the private signing key."
@@ -373,11 +408,13 @@ class NexusBrain:
                 password=secret.encode("utf-8"),
             )
         except (ValueError, TypeError) as exc:
+            self._audit("unlock_failed", reason="bad_passcode")
             raise PermissionError("Creator authentication failed") from exc
         if not isinstance(private_key, Ed25519PrivateKey):
             raise RuntimeError("Nexus Brain creator signing key is not Ed25519")
         public_key = private_key.public_key()
         if self._public_fingerprint(public_key) != str(auth.get("public_key_sha256") or ""):
+            self._audit("unlock_failed", reason="key_fingerprint_mismatch")
             raise PermissionError("Creator signing key does not match the locked Nexus Brain")
         with self._lock:
             try:
@@ -388,6 +425,7 @@ class NexusBrain:
                 self._signing_key = None
                 self._unlocked = False
                 self._verified_for_session = False
+                self._audit("unlock_failed", reason="integrity_verification_failed")
                 raise PermissionError(
                     "Nexus Brain integrity verification failed; protected data appears to have been modified"
                 ) from exc
@@ -397,12 +435,14 @@ class NexusBrain:
             self._tampered = False
             if not str(self._data.get("signature") or ""):
                 self._save_signed()
+            self._audit("unlocked", creator=str(auth.get("creator_name") or ""))
             return self.summary()
 
     def lock(self) -> dict[str, Any]:
         with self._lock:
             self._signing_key = None
             self._unlocked = False
+            self._audit("locked")
             return self.summary()
 
     def _require_unlocked(self) -> None:
@@ -1002,8 +1042,10 @@ class NexusBrain:
         self._load()
         summary = self.summary()
         if not summary.get("verified_for_session"):
+            self._audit("install_rejected", reason="post_install_verify_failed")
             raise PermissionError("Installed Nexus Brain failed public signature verification")
         summary["installed_fingerprint"] = verified["fingerprint"]
+        self._audit("distribution_installed", fingerprint=verified["fingerprint"])
         return summary
 
     def install_signed_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1013,18 +1055,24 @@ class NexusBrain:
             return {"updated": True, "reason": "installed_initial_brain", "brain": summary}
         current = self.summary()
         if not current.get("verified_for_session"):
+            self._audit("signed_update_rejected", reason="current_not_verified")
             raise PermissionError("Current Nexus Brain is not verified; refusing signed update")
         if current.get("creator_signing_key_available"):
+            self._audit("signed_update_rejected", reason="creator_installation")
             raise PermissionError("Creator installation will not be auto-overwritten by a distribution Brain update")
         if not current.get("distribution_read_only"):
+            self._audit("signed_update_rejected", reason="not_read_only_distribution")
             raise PermissionError("Only public read-only Nexus Brain distributions accept automatic signed updates")
         verified = self.verify_locked_export(payload)
         current_fingerprint = str(current.get("creator_key_fingerprint") or "")
         if not current_fingerprint or verified["fingerprint"] != current_fingerprint:
+            self._audit("signed_update_rejected", reason="different_creator_key",
+                        fingerprint=verified["fingerprint"])
             raise PermissionError("Nexus Brain update was not signed by the existing creator key")
         incoming_updated = float(verified.get("updated_at") or 0)
         current_updated = float(self._data.get("updated_at") or 0)
         if incoming_updated <= current_updated:
+            self._audit("signed_update_stale", incoming_updated_at=incoming_updated)
             return {"updated": False, "reason": "current_brain_is_same_or_newer", "brain": current}
         brain_payload = payload.get("brain")
         auth_payload = payload.get("creator_lock")
@@ -1039,7 +1087,10 @@ class NexusBrain:
         self._load()
         updated = self.summary()
         if not updated.get("verified_for_session"):
+            self._audit("signed_update_rejected", reason="post_update_verify_failed")
             raise PermissionError("Updated Nexus Brain failed public signature verification")
+        self._audit("signed_update_accepted", fingerprint=verified["fingerprint"],
+                    incoming_updated_at=incoming_updated)
         return {"updated": True, "reason": "newer_creator_signed_brain", "brain": updated}
 
     def summary(self) -> dict[str, Any]:
