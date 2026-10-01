@@ -1107,6 +1107,10 @@ class AppState:
             spec = self.tools.get(match["name"])
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
+        if manifest.get("os_supported") is False:
+            return {"ok": False,
+                    "error": f"{spec.display_name} is not supported on this OS "
+                             f"({', '.join(manifest.get('supported_os') or ['other'])} only)"}
         mode = self.permission_manager.effective("packages.install")
         if mode == "deny":
             return {"ok": False, "error": "packages.install permission is denied"}

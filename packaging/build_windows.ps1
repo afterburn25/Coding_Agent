@@ -39,6 +39,10 @@ Write-Host "Building hidden Python agent backend..."
     --add-data "$Root\web;web" `
     --add-data "$Root\tools;tools" `
     --collect-submodules localcodeagent `
+    --collect-submodules py7zr `
+    --hidden-import pybcj --hidden-import pyppmd --hidden-import pyzstd `
+    --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `
+    --hidden-import multivolumefile --hidden-import Cryptodome `
     "packaging/chat_nexus_backend_entry.py"
 if ($LASTEXITCODE -ne 0) { throw "Chat Nexus backend PyInstaller build failed" }
 $BackendSource = Join-Path $BackendDist "ChatNexus.Backend"

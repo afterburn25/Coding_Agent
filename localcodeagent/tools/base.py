@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -225,6 +226,13 @@ class ToolRegistry:
             "requires_gpu": bool(spec.requires_gpu),
             "requirements": dict(spec.requirements),
             "supported_os": list(spec.supported_os),
+            "os_supported": (
+                not spec.supported_os
+                or ("windows" if sys.platform.startswith("win")
+                    else "linux" if sys.platform.startswith("linux")
+                    else sys.platform) in {s.lower() for s in spec.supported_os}
+                or sys.platform in {s.lower() for s in spec.supported_os}
+            ),
             "docs": spec.docs,
             "source": spec.source,
             "install_status": spec.install_status,

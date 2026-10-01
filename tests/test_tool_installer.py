@@ -231,6 +231,74 @@ class ManagedPythonTests(unittest.TestCase):
                     sys.frozen = old
 
 
+class ServerInstallFlowTests(unittest.TestCase):
+    """AppState.install_tool → archive job → registry install_status flips."""
+
+    def test_archive_install_via_app_state_marks_tool_installed(self):
+        from localcodeagent.config import AgentConfig
+        from localcodeagent.server import AppState
+
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            blob = _make_zip(root / "pkg.zip", {"demo/main.py": b"x"})
+            _FileHandler.payload = blob
+            _FileHandler.chunk_delay = 0.0
+            server = ThreadingHTTPServer(("127.0.0.1", 0), _FileHandler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                port = server.server_address[1]
+                manifests = root / "tools" / "manifests"
+                manifests.mkdir(parents=True)
+                (manifests / "demo.json").write_text(json.dumps({
+                    "id": "demo", "name": "Demo Tool",
+                    "install": {
+                        "method": "archive",
+                        "url": f"http://127.0.0.1:{port}/pkg.zip",
+                        "format": "zip", "dest": "demo_tool",
+                    },
+                    "detect": {"files": ["demo_tool/demo/main.py"]},
+                }), encoding="utf-8")
+                from localcodeagent.config import ModelProfile
+                state = AppState(
+                    AgentConfig(
+                        models=[ModelProfile(
+                            id="fake", endpoint="http://127.0.0.1:1/v1",
+                            model="fake-model",
+                            roles=["primary_coder", "utility", "fast_coder"],
+                            runtime="external")],
+                        process_watchdog=False, research_enabled=False),
+                    root / "workspace", root)
+            except Exception:
+                server.shutdown()
+                server.server_close()
+                raise
+            try:
+                spec = state.tools.get("demo")
+                self.assertIsNotNone(spec)
+                self.assertEqual(spec.install_status, "missing")
+
+                first = state.install_tool("demo")
+                if first.get("needs_approval"):
+                    first = state.install_tool("demo", approve=True)
+                self.assertTrue(first.get("ok"), first)
+                job_id = first["job_id"]
+
+                ok = _wait(
+                    lambda: state.jobs.get(job_id).state in {"completed", "failed"},
+                    15)
+                self.assertTrue(ok)
+                self.assertEqual(state.jobs.get(job_id).state, "completed",
+                                 state.jobs.get(job_id).error)
+                # on_done refreshes install status asynchronously
+                self.assertTrue(_wait(
+                    lambda: state.tools.get("demo").install_status == "installed", 5))
+                self.assertTrue((root / "demo_tool" / ".chatnexus-version").is_file())
+            finally:
+                state.tool_downloads.shutdown()
+                server.shutdown()
+                server.server_close()
+
+
 class ManifestDetectTests(unittest.TestCase):
     def test_comfyui_manifest_has_archive_install_and_detection(self):
         raw = json.loads(

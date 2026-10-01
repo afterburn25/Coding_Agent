@@ -224,13 +224,16 @@
     const job = installJobFor("tool_install", "tool", t.id) ||
       installJobFor("tool_install", "tool", t.name);
     const installable = spec.package || spec.method === "archive";
+    const osOk = t.os_supported !== false;
     const statusChip = job
       ? '<span class="chip installing">Installing…</span>'
-      : t.install_status === "installed"
-        ? '<span class="chip installed">Installed</span>'
-        : installable
-          ? '<span class="chip missing">Not installed</span>'
-          : "";
+      : !osOk
+        ? `<span class="chip missing">${esc((t.supported_os || []).join("/") || "other OS")} only</span>`
+        : t.install_status === "installed"
+          ? '<span class="chip installed">Installed</span>'
+          : installable
+            ? '<span class="chip missing">Not installed</span>'
+            : "";
     const chips = [
       statusChip,
       `<span class="chip perm ${esc(t.permission_mode)}">${esc(t.permission)}: ${esc(t.permission_mode)}</span>`,
@@ -253,7 +256,7 @@
         <div class="tool-actions">
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
           ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
-          ${!job && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
+          ${!job && osOk && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
       </div>`;
