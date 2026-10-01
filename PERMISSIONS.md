@@ -79,6 +79,11 @@ Two companion settings bound autonomous runs:
 
 - `autonomous_max_continuations` (default 5) — how many times the agent may
   extend past `max_agent_steps` without finishing.
+- `autonomous_approval_timeout_seconds` (default 3600) — a task parked on a
+  hard-gated approval is failed after this wait instead of stalling an
+  unattended run (0 waits forever; ignored when autonomous mode is off).
+- `agent_tool_timeout_seconds` (default 1800) — hard cap per tool call; a
+  hung tool returns a timeout error instead of blocking the run.
 - `model_idle_unload_seconds` (default 900) plus `memory_pressure_vram_gb` /
   `memory_pressure_ram_gb` — idle or pressured managed models are unloaded by
   the process watchdog tick; models pinned by a running task are never

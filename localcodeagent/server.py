@@ -193,7 +193,7 @@ class AppState:
         self.processes.on_event = make_emitter(self.events, "process")
         self._register_processes()
         if getattr(config, "process_watchdog", True):
-            self.processes.start_watchdog(on_tick=self._evict_idle_models)
+            self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         self.terminal_tracker = register_terminal_tools(
@@ -822,6 +822,40 @@ class AppState:
             spec = self.tools.get(name)
             if spec and spec.health_check is None:
                 spec.health_check = always_ok("native subprocess execution")
+
+    def _watchdog_maintenance(self) -> None:
+        self._evict_idle_models()
+        self._expire_stale_approvals()
+
+    def _expire_stale_approvals(self) -> None:
+        """Fail approval-parked tasks that outlived the autonomous wait bound.
+
+        Only applies in autonomous mode; with autonomy off, waiting_approval
+        tasks wait for a human indefinitely, as before.
+        """
+        timeout = float(getattr(self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
+        if not getattr(self.config, "autonomous_mode", False) or timeout <= 0:
+            return
+        try:
+            now = time.time()
+            for item in self.tasks.recent(50):
+                if item.get("status") != "waiting_approval":
+                    continue
+                if now - float(item.get("updated_at") or now) < timeout:
+                    continue
+                task = self.tasks.update(
+                    item["id"],
+                    status="error",
+                    phase="done",
+                    pending_approval=None,
+                    error=(
+                        f"Approval timed out after {int(timeout)}s in autonomous mode; "
+                        f"the {item.get('pending_approval', {}).get('name', 'action')} action was not approved."
+                    ),
+                )
+                self.events.publish("task", {"task": task.as_dict(), "event": "approval_timeout"})
+        except Exception:
+            pass
 
     def _evict_idle_models(self) -> None:
         """Watchdog tick: reclaim memory from managed models that are not in use.

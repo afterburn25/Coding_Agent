@@ -1495,6 +1495,42 @@ class AppStateWiringTests(unittest.TestCase):
                     time.sleep(0.05)
             self.assertEqual(calls, [task.id])
 
+    def test_autonomous_approval_timeout_fails_stale_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="ext", endpoint="http://x/v1", model="m",
+                    roles=["primary_coder"], runtime="external")],
+                autonomous_mode=True,
+                autonomous_approval_timeout_seconds=0.01,
+                process_watchdog=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            task = state.tasks.create("risky work", "auto")
+            state.tasks.update(task.id, status="waiting_approval",
+                               pending_approval={"name": "spend.money"})
+            time.sleep(0.05)
+
+            state._expire_stale_approvals()
+
+            updated = state.tasks.get(task.id)
+            self.assertEqual(updated.status, "error")
+            self.assertIn("Approval timed out", updated.error)
+
+    def test_approval_waits_forever_without_autonomous_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            task = state.tasks.create("risky work", "auto")
+            state.tasks.update(task.id, status="waiting_approval",
+                               pending_approval={"name": "spend.money"})
+
+            state._expire_stale_approvals()
+
+            self.assertEqual(state.tasks.get(task.id).status, "waiting_approval")
+
     def test_auto_resume_stays_off_without_autonomous_mode(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.workflow.tasks import TaskStore

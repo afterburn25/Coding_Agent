@@ -143,6 +143,10 @@ class AgentConfig:
     # forever. Tools with their own timeouts (terminal_run, run_shell) finish
     # well inside this bound.
     agent_tool_timeout_seconds: float = 1800.0
+    # In autonomous mode, a task parked on a hard-gated approval is failed
+    # after this many seconds so an unattended run cannot stall all night
+    # (0 waits forever, the pre-autonomy behavior).
+    autonomous_approval_timeout_seconds: float = 3600.0
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -348,6 +352,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.autonomous_resume_interrupted = bool(raw.get("autonomous_resume_interrupted", cfg.autonomous_resume_interrupted))
     cfg.autonomous_max_recoveries = max(0, int(raw.get("autonomous_max_recoveries", cfg.autonomous_max_recoveries)))
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
+    cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
