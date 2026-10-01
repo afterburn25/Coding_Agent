@@ -168,8 +168,9 @@ A later workflow phase (for example review) can route to a different model, caus
 ## Autonomous operation layer
 
 ```text
-POST /api/queue (durable .agent/queue.json, FIFO)
-  ↓ watchdog tick — dequeue only when no task is active
+POST /api/queue (durable .agent/queue.json, FIFO, 200-item bound)
+  ↓ dequeue only when no task is active — triggered on enqueue,
+  task completion, and resume/recover (lock-serialized single-flight)
 agent.run / recover (single-flight)
   ↓
 live terminal: tool_start → tool_output chunks → tool completion
