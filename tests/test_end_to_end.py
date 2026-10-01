@@ -339,6 +339,38 @@ class EndToEndAgentTests(unittest.TestCase):
                         if "Recovered pending tool action" in str(m.get("content", ""))]
             self.assertIn("WROTE", json.dumps(recovery))
 
+    def test_mini_soak_mixed_outcomes(self):
+        """Queue several tasks while the endpoint alternately succeeds and
+        fails — every task must reach a terminal state and the queue must
+        drain, which is the 'run all night' invariant."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            state.config.runtime_recovery_attempts = 1
+            state.agent.config.runtime_recovery_attempts = 1
+            for i in range(6):
+                state.queue.enqueue(f"soak task {i}")
+            state._dequeue_next()
+
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                terminal = {"completed", "error", "cancelled"}
+                recent = state.tasks.recent(10)
+                done = [t for t in recent if t.get("status") in terminal]
+                if len(done) >= 6 and not len(state.queue):
+                    break
+                # Inject a transient blip mid-run: some tasks see a 500 first.
+                if len(fake.requests) % 3 == 0:
+                    fake.fail_next = 1
+                time.sleep(0.2)
+            self.assertEqual(len(state.queue), 0)
+            done = [t for t in state.tasks.recent(10) if t.get("status") in {"completed", "error", "cancelled"}]
+            self.assertEqual(len(done), 6)
+            for t in done:
+                log = state.tasks.read_log(t["id"])
+                self.assertTrue(log.strip(), f"task {t['id']} wrote no transcript")
+
     def test_full_stack_sse_stream_end_to_end(self):
         """Real HTTP server + SSE + event bus + fake model — the exact path
         the desktop UI drives."""
