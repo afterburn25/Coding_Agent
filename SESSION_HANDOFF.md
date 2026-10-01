@@ -51,6 +51,30 @@
   active/failed/waiting auto-expand, completed auto-collapse, live elapsed
   ticking, bounded stdout tail, and restores timelines on reconnect/task click.
 
+### Follow-up hardening (commits `3f82fc2`, `39e18e4`)
+
+- Per-command stop: foreground `run_shell`/`terminal_run` subprocesses poll a
+  per-task `cancel_check`, so task Stop kills the live command; cancelled rows
+  close as `interrupted` with a `[cancelled]` marker. Task recovery opens a
+  `Recovering Task` row. Command rows show a Stop button while running.
+- Fixed a probe-endpoint bug in `launch_probe`: `_profile_endpoint` returns
+  the profile's configured endpoint, so probes were health-checked and
+  measured on the resident server port instead of their own. Probes now bind
+  and poll their own free port; stdout/stderr goes to
+  `.agent/runtime/probe-<model>-<port>.log`.
+- Capability probe hardened: `PROBE_TIMEOUT` 8s→20s with one retry — a cold
+  binary load (AV scan) previously timed out and silently degraded the whole
+  session to `unavailable`.
+- Benchmark artifact export (`data/benchmarks/runtime-*-<model>.json`) moved
+  into `tuner.benchmark()`; each candidate now runs a warm second pass so
+  `--cache-reuse` shows up as TTFT improvement even when the build omits
+  `usage.cached_tokens`.
+- Real-hardware results (RTX 3080 Ti, resident 14B loaded — heavy CPU
+  offload): qwen3-14b probe measured `--flash-attn auto` at 2.86 tok/s gen /
+  12.1s cold TTFT vs 0.63 tok/s without; warm-pass TTFT dropped to 349 ms.
+  Persisted to the install's `data/runtime_tuning.json` as `benchmarked`.
+  Numbers are contention-skewed; re-benchmark when the GPU is free.
+
 ## v0.6 restart recovery + CI checkpoint
 
 - Durable task ledger now distinguishes genuine in-process work from tasks interrupted by an application restart.
