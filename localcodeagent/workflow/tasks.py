@@ -47,6 +47,7 @@ class TaskStore:
         self._lock = threading.RLock()
         self._tasks: dict[str, TaskRecord] = {}
         self._order: list[str] = []
+        self._log_buffers: dict[str, list[str]] = {}
         self._load()
         self._prune_logs()
 
@@ -145,6 +146,27 @@ class TaskStore:
         path = self._log_path(self.root, task_id)
         if path is None:
             return
+        # Buffer small appends so chatty tool output does not hammer the
+        # filesystem with an open/write/stat cycle per chunk.
+        with self._lock:
+            buf = self._log_buffers.setdefault(task_id, [])
+            buf.append(text)
+            pending = "".join(buf)
+            if len(pending) < 8192:
+                return
+            buf.clear()
+        self._flush_log(path, pending)
+
+    def flush_log(self, task_id: str) -> None:
+        """Write any buffered transcript text for a task (call on completion)."""
+        with self._lock:
+            buf = self._log_buffers.pop(task_id, None)
+        if buf:
+            path = self._log_path(self.root, task_id)
+            if path is not None:
+                self._flush_log(path, "".join(buf))
+
+    def _flush_log(self, path: Path, text: str) -> None:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8", errors="replace") as fh:
@@ -159,16 +181,19 @@ class TaskStore:
         path = self._log_path(self.root, task_id)
         if path is None:
             return ""
+        with self._lock:
+            pending = "".join(self._log_buffers.get(task_id, []))
         try:
-            if not path.exists():
-                return ""
-            size = path.stat().st_size
-            with path.open("rb") as fh:
-                if size > max_bytes:
-                    fh.seek(-max_bytes, 2)
-                return fh.read().decode("utf-8", errors="replace")
+            text = ""
+            if path.exists():
+                size = path.stat().st_size
+                with path.open("rb") as fh:
+                    if size > max_bytes:
+                        fh.seek(-max_bytes, 2)
+                    text = fh.read().decode("utf-8", errors="replace")
+            return (text + pending)[-max_bytes:]
         except OSError:
-            return ""
+            return pending[-max_bytes:]
 
     def current(self) -> TaskRecord | None:
         """Return the newest task record, regardless of status.

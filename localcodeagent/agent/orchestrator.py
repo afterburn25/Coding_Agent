@@ -1426,6 +1426,10 @@ class AgentOrchestrator:
         sinks = self.tools.context.get("stream_sinks")
         if sinks is not None:
             sinks.pop(task_id, None)
+        try:
+            self.tasks.flush_log(task_id)
+        except Exception:
+            pass
 
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
