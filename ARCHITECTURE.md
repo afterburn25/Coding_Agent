@@ -207,7 +207,9 @@ failure → autonomous_error_retry_seconds backoff, bounded by
 - `RuntimeManager.evict_idle` on the watchdog tick unloads models idle past
   `model_idle_unload_seconds` or under `memory_pressure_*` floors, while
   pinning models serving active tasks — `ensure_ready` restarts them
-  transparently.
+  transparently. Managed ComfyUI likewise stops after
+  `comfyui_idle_unload_seconds` with no active image jobs (external installs
+  are never touched); image-job events stream over `image_job` bus events.
 - Growth bounds for unattended runs: task ledger keeps 100 records; orphaned
   terminal logs and `.agent/checkpoints/` snapshots are pruned on startup;
   queue is capped at 200; `routing_telemetry.jsonl` compacts past 512 KiB

@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `fdf7804`; verified suite: **329/329**; CI green on latest push.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `551c9e5`; verified suite: **330/330**; CI green on latest push.
 
 ## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
 
@@ -75,7 +75,7 @@
 
 ### Tests
 
-`329` automated tests passing.
+`330` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -84,7 +84,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 329 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 330 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -145,7 +145,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **329 tests passing**.
+- Current automated checkpoint: **330 tests passing**.
 
 
 
@@ -252,7 +252,7 @@ Phase 2 kickoff (developer tools):
   gated on `shell.execute` (or a stricter dedicated key such as
   `docker.access`) regardless of declared read/write keys.
 
-Unit checkpoint: **329 tests passing**.
+Unit checkpoint: **330 tests passing**.
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.
@@ -267,7 +267,7 @@ Unit checkpoint: **329 tests passing**.
 
 ## Next milestone
 
-**Modular workstation core is in place** (329 tests). Priorities:
+**Modular workstation core is in place** (330 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Chat Nexus repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)
