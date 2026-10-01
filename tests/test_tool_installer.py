@@ -16,28 +16,36 @@ from localcodeagent.tools.plugins import PluginManifest
 
 
 class _FileHandler(BaseHTTPRequestHandler):
-    """Serves test fixtures; /slow streams bytes with delays for cancel tests."""
+    """Serves test fixtures; /slow streams bytes with delays for cancel tests.
+    Honors Range requests so resume behavior is observable."""
 
     payload: bytes = b""
     chunk_delay: float = 0.0
+    ranges_seen: list = []
 
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
-        if self.path.startswith("/slow"):
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(self.payload)))
-            self.end_headers()
-            for i in range(0, len(self.payload), 4096):
-                if self.chunk_delay:
-                    time.sleep(self.chunk_delay)
-                try:
-                    self.wfile.write(self.payload[i:i + 4096])
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                    return
-            return
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(self.payload)))
+        offset = 0
+        range_header = self.headers.get("Range") or ""
+        if range_header.startswith("bytes="):
+            try:
+                offset = int(range_header[6:].split("-")[0])
+            except ValueError:
+                offset = 0
+            if offset:
+                type(self).ranges_seen.append(range_header)
+        slow = self.path.startswith("/slow")
+        body = self.payload[offset:]
+        self.send_response(206 if offset else 200)
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(self.payload)
+        step = 4096 if slow else len(body) or 1
+        for i in range(0, len(body), step):
+            if slow and self.chunk_delay:
+                time.sleep(self.chunk_delay)
+            try:
+                self.wfile.write(body[i:i + step])
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                return
 
     def log_message(self, *args):  # silence
         pass
@@ -148,7 +156,7 @@ class ToolDownloadManagerTests(unittest.TestCase):
         job = self._wait_job(first["job_id"], timeout=30)
         self.assertEqual(job.state, "completed")
 
-    def test_cancel_stops_download_and_cleans_part_file(self):
+    def test_cancel_stops_download_and_keeps_part_for_resume(self):
         _FileHandler.chunk_delay = 0.05
         _FileHandler.payload = b"x" * (1024 * 1024)
         result, _ = self._install(
@@ -158,10 +166,22 @@ class ToolDownloadManagerTests(unittest.TestCase):
         self.assertTrue(self.mgr.cancel(job_id))
         job = self._wait_job(job_id, states=("cancelled",), timeout=15)
         self.assertEqual(job.state, "cancelled")
-        downloads_dir = self.root / ".agent" / "downloads"
-        self.assertTrue(_wait(
-            lambda: not any(downloads_dir.glob("*.part")), 10),
-            "cancelled install did not clean up its .part file")
+        # The .part survives so a retried install can resume with Range.
+        self.assertTrue((self.root / ".agent" / "downloads" / "demo.part").is_file())
+
+    def test_retry_resumes_partial_download(self):
+        part = self.root / ".agent" / "downloads" / "demo.part"
+        part.parent.mkdir(parents=True, exist_ok=True)
+        blob = _make_zip(self.root / "pkg.zip", {"demo/a.txt": b"payload"})
+        # Seed a truncated .part — the retry must request a Range and append.
+        part.write_bytes(blob[: len(blob) // 2])
+        _FileHandler.ranges_seen.clear()
+        result, _ = self._install(blob, size_bytes=len(blob),
+                                  sha256=hashlib.sha256(blob).hexdigest())
+        job = self._wait_job(result["job_id"])
+        self.assertEqual(job.state, "completed", job.error)
+        self.assertIn(f"bytes={len(blob) // 2}-", _FileHandler.ranges_seen)
+        self.assertEqual((self.root / "tools_x" / "demo" / "a.txt").read_bytes(), b"payload")
 
     def test_http_urls_require_localhost(self):
         result, _ = self._install(b"x", url="http://example.com/pkg.zip")

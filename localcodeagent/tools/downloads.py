@@ -6,6 +6,7 @@ import shutil
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 import zipfile
@@ -189,7 +190,10 @@ class ToolDownloadManager:
     def _run(self, job_id: str, tool_id: str, name: str, url: str, dest: Path,
              fmt: str, size: int | None, sha256: str, version: str,
              flag: threading.Event) -> None:
-        archive = self.install_root / ".agent" / "downloads" / f"{tool_id}-{job_id}.part"
+        # Per-tool stable .part name: a cancelled/failed download keeps its
+        # partial file so a later install resumes via HTTP Range instead of
+        # restarting a multi-GB fetch from zero.
+        archive = self.install_root / ".agent" / "downloads" / f"{tool_id}.part"
         try:
             archive.parent.mkdir(parents=True, exist_ok=True)
             self._download(job_id, url, archive, size, flag)
@@ -225,14 +229,14 @@ class ToolDownloadManager:
                                  "extract_progress": 1.0, "current_file": "",
                                  "current_path": str(dest)})
         except _Cancelled:
-            archive.unlink(missing_ok=True)
+            # Keep the .part file — the next install resumes from it.
             try:
                 self.jobs.update(job_id, state="cancelled", status="cancelled",
                                  error="Install cancelled")
             except KeyError:
                 pass
         except Exception as exc:
-            archive.unlink(missing_ok=True)
+            # Keep the .part file — the next install resumes from it.
             try:
                 self.jobs.update(job_id, state="failed", status="failed",
                                  error=str(exc)[:300])
@@ -250,12 +254,29 @@ class ToolDownloadManager:
 
     def _download(self, job_id: str, url: str, archive: Path,
                   expected: int | None, flag: threading.Event) -> None:
-        req = urllib.request.Request(url, headers={"User-Agent": "chat-nexus-tool-installer"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            total = expected or int(resp.headers.get("Content-Length") or 0)
-            done = 0
+        have = archive.stat().st_size if archive.is_file() else 0
+        if expected and have >= expected:
+            return  # previous attempt already fetched the full payload
+        headers = {"User-Agent": "chat-nexus-tool-installer"}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            resp = urllib.request.urlopen(req, timeout=60)
+        except urllib.error.HTTPError as exc:
+            # 416 = range unsatisfiable — a stale .part bigger than the real
+            # resource. Drop it and restart clean rather than failing forever.
+            if exc.code == 416 and have:
+                archive.unlink(missing_ok=True)
+                return self._download(job_id, url, archive, expected, flag)
+            raise
+        with resp:
+            resumed = have > 0 and resp.status == 206
+            done = have if resumed else 0
+            remaining = int(resp.headers.get("Content-Length") or 0)
+            total = expected or (done + remaining)
             last_emit = 0.0
-            with archive.open("wb") as out:
+            with archive.open("ab" if resumed else "wb") as out:
                 while True:
                     if flag.is_set():
                         raise _Cancelled()
