@@ -2239,7 +2239,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not task_id:
                     self._json({"error": "task_id is required"}, 400)
                     return
-                result = self.state.agent.resume(task_id, approved=approved, event_callback=self.state._bus_emit)
+                try:
+                    result = self.state.agent.resume(task_id, approved=approved, event_callback=self.state._bus_emit)
+                finally:
+                    try:
+                        self.state._dequeue_next()
+                    except Exception:
+                        pass
                 if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
                     self.state.history.append({"role": "assistant", "content": result.content})
                 self._agent_response(result)
@@ -2250,7 +2256,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not task_id:
                     self._json({"error": "task_id is required"}, 400)
                     return
-                result = self.state.agent.recover(task_id, event_callback=self.state._bus_emit)
+                try:
+                    result = self.state.agent.recover(task_id, event_callback=self.state._bus_emit)
+                finally:
+                    try:
+                        self.state._dequeue_next()
+                    except Exception:
+                        pass
                 if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
                     self.state.history.append({"role": "assistant", "content": result.content})
                 self._agent_response(result)
