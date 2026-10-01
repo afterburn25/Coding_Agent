@@ -157,14 +157,17 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None, default_t
     if not template:
         return None
     timeout = max(1, min(3600, int(invoke.get("timeout_seconds", default_timeout))))
+    stdin_key = str(invoke.get("stdin") or "")  # argument name piped to process stdin
 
     def handler(arguments: dict[str, Any]) -> str:
         cmd = _substitute(template, arguments)
+        stdin_data = str(arguments.get(stdin_key, "")) if stdin_key else None
         started = time.time()
         try:
             proc = subprocess.run(
                 cmd,
                 cwd=str(workspace) if workspace else None,
+                input=stdin_data,
                 capture_output=True,
                 text=True,
                 timeout=timeout,

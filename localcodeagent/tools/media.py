@@ -126,6 +126,17 @@ def default_whisper_model(workspace: Path) -> str | None:
     return None
 
 
+def default_voice_model(workspace: Path) -> str | None:
+    """Find a piper voice .onnx under models/tts or models/."""
+    for base in (workspace / "models" / "tts", workspace / "models"):
+        if not base.is_dir():
+            continue
+        for candidate in sorted(base.rglob("*.onnx")):
+            if candidate.with_suffix(".onnx.json").exists():
+                return str(candidate)
+    return None
+
+
 def register_media_tools(registry: ToolRegistry, workspace: Path, *, jobs=None) -> None:
 
     def _src_dst(args: dict[str, Any]) -> tuple[Path, Path] | str:
@@ -295,4 +306,48 @@ def register_media_tools(registry: ToolRegistry, workspace: Path, *, jobs=None) 
         media_transcribe,
         category="audio",
         capabilities=["transcribe_video", "transcribe_audio", "generate_subtitles", "media_pipeline"],
+    ))
+
+    def speak_text(args: dict[str, Any]) -> str:
+        """Text -> speech via the piper manifest tool (stdin-driven)."""
+        text = str(args.get("text", ""))
+        if not text.strip():
+            return "ERROR: 'text' is required"
+        model = str(args.get("model", "") or "") or (default_voice_model(workspace) or "")
+        if not model:
+            return "ERROR: no piper voice model — set 'model' or place a voice .onnx (+ .onnx.json) under models/tts/"
+        model_path = Path(model)
+        if not model_path.is_absolute():
+            model_path = _resolve(workspace, model) or Path(model)
+        if not model_path.is_file():
+            return f"ERROR: voice model not found: {model}"
+        out_rel = str(args.get("output", "") or f".agent/media/tts-{int(time.time())}.wav")
+        out = _resolve(workspace, out_rel, must_exist=False)
+        if out is None:
+            return "ERROR: output must stay inside the workspace"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        result = registry.execute("piper", {
+            "text": text, "model": str(model_path), "output": str(out),
+        }, approved=bool(args.get("approved", False)))
+        if result.startswith(("ERROR", "PERMISSION", "TOOL_", "APPROVAL")):
+            return result
+        return json.dumps({"ok": True, "output": str(out), "characters": len(text), "detail": result[:300]},
+                          ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "speak_text",
+        "Generate speech from text with Piper TTS (delegates through the registry; auto-detects a voice .onnx under models/tts/). Outputs a WAV file.",
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "model": {"type": "string", "description": "piper voice .onnx path (auto-detected)"},
+                "output": {"type": "string", "description": "output wav path (default .agent/media/tts-<ts>.wav)"},
+            },
+            "required": ["text"],
+        },
+        "shell.execute",
+        speak_text,
+        category="audio",
+        capabilities=["speak_text", "generate_speech", "tts"],
     ))

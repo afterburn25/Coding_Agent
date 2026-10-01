@@ -785,6 +785,34 @@ class MediaToolTests(unittest.TestCase):
                 self.assertFalse(out["ok"])
                 self.assertEqual(out.get("failed_step"), "extract_audio")
 
+    def test_speak_text_requires_voice_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg = ToolRegistry({"shell.execute": "allow"})
+            register_media_tools(reg, Path(td))
+            out = reg.execute("speak_text", {"text": "hello"})
+            self.assertTrue(out.startswith("ERROR"))
+            self.assertIn("voice model", out)
+
+    def test_manifest_invoker_stdin(self):
+        import sys
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            manifest = {
+                "id": "echo_in", "name": "Echo In", "executables": [sys.executable],
+                "permissions": ["shell.execute"],
+                "invoke": {
+                    "command": [sys.executable, "-c", "import sys;print(sys.stdin.read().upper())"],
+                    "stdin": "text",
+                    "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                },
+            }
+            (ws / "echo_in.json").write_text(json.dumps(manifest))
+            reg = ToolRegistry({"shell.execute": "allow"})
+            result = load_plugin_manifests(ws, reg, workspace=ws)
+            self.assertIn("echo_in", result["loaded"])
+            out = json.loads(reg.execute("echo_in", {"text": "hello piper"}))
+            self.assertIn("HELLO PIPER", out["stdout"])
+
 
 class DocumentToolTests(unittest.TestCase):
     def setUp(self):

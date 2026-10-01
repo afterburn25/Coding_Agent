@@ -44,6 +44,7 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "normalize_audio": {"category": "audio", "capabilities": ["normalize_audio"], "provider": "ffmpeg-project"},
     "add_subtitles": {"category": "video", "capabilities": ["add_subtitles"], "provider": "ffmpeg-project"},
     "media_transcribe": {"category": "audio", "capabilities": ["transcribe_video", "transcribe_audio", "generate_subtitles", "media_pipeline"], "provider": "nexus"},
+    "speak_text": {"category": "audio", "capabilities": ["speak_text", "generate_speech", "tts"], "provider": "rhasspy"},
     # -- documents -------------------------------------------------------------
     "extract_text": {"category": "documents", "capabilities": ["extract_text", "read_document", "read_pdf", "parse_csv", "html_to_text"], "provider": "nexus"},
     "ocr_image": {"category": "documents", "capabilities": ["ocr_image", "extract_text_from_screenshot", "detect_text_regions"], "provider": "tesseract-ocr"},

@@ -1,0 +1,29 @@
+{
+  "id": "piper",
+  "name": "Piper TTS",
+  "version": "1.0.0",
+  "category": "audio",
+  "description": "Fast local neural text-to-speech. Reads text from stdin, writes a WAV file. Voice models (.onnx + .onnx.json) go under models/tts/.",
+  "provider": "rhasspy",
+  "executables": ["piper"],
+  "capabilities": ["speak_text", "generate_speech", "tts"],
+  "permissions": ["shell.execute", "filesystem.write"],
+  "requires_network": false,
+  "docs": "https://github.com/rhasspy/piper",
+  "install": {"method": "pip", "package": "piper-tts"},
+  "health_check": {"command": ["piper", "--help"]},
+  "invoke": {
+    "command": ["piper", "--model", "{model}", "--output_file", "{output}", "--quiet"],
+    "stdin": "text",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string", "description": "text to speak (piped to stdin)"},
+        "model": {"type": "string", "description": "voice model .onnx path"},
+        "output": {"type": "string", "description": "output .wav path"}
+      },
+      "required": ["text", "model", "output"]
+    },
+    "timeout_seconds": 300
+  }
+}
