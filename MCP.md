@@ -28,7 +28,7 @@ Add servers to `config.json` (`mcp_servers`):
     "id": "fs",
     "name": "Filesystem tools",
     "command": ["python", "servers/fs_server.py"],
-    "env": {"API_KEY": "..."},
+    "env": {"API_KEY": "secret:mcp_fs_key"},
     "cwd": "",
     "enabled": true,
     "auto_start": true,
@@ -43,7 +43,7 @@ Add servers to `config.json` (`mcp_servers`):
 | `command` | argv launched as a subprocess (stdio transport) |
 | `url` | HTTP endpoint for the `http` transport (Streamable HTTP) |
 | `transport` | `stdio` (default) or `http` — auto-set when `url` is present |
-| `env` | extra environment variables (secrets by reference recommended) |
+| `env` | extra environment variables; values of the form `secret:<name>` are resolved through the credential vault at launch (unresolved references fail the launch instead of leaking the placeholder) |
 | `enabled` / `auto_start` | whether the server may run / is connected at backend startup |
 | `permission` | permission key applied to every imported tool (default `shell.execute` for stdio, `external_api.call` for http) |
 
@@ -78,7 +78,8 @@ tools.
   never override system policies or user intent.
 - Every imported tool goes through the permission system. Use a dedicated
   permission key (or `ask` level) for risky servers.
-- Keep credentials out of `mcp_servers.env` in shared configs; prefer
-  environment-variable references provided by the launch environment.
+- Keep credentials out of `mcp_servers.env` in shared configs; use
+  `secret:<name>` references resolved through the encrypted credential vault
+  (`localcodeagent/secrets.py`) so the raw value never appears in config.
 - Downloaded/community MCP servers are third-party executables — only run
   servers from sources you trust.

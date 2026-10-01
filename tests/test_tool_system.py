@@ -603,6 +603,36 @@ class MCPManagerTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             mgr.connect("nope")
 
+    def test_secret_env_resolution(self):
+        from localcodeagent.secrets import SecretVault
+        tmp = Path(tempfile.mkdtemp())
+        vault = SecretVault(tmp / "secrets.vault")
+        vault.set("MY_KEY", "sk-test-123")
+        server_path = tmp / "env_server.py"
+        server_path.write_text(
+            "import sys, json, os\n"
+            "for line in sys.stdin:\n"
+            "    msg = json.loads(line)\n"
+            "    if msg.get('id') is None: continue\n"
+            "    print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':{'tools':[]}}), flush=True)\n",
+            encoding="utf-8")
+        cfg = MCPServerConfig.from_dict({
+            "id": "envsrv", "command": [sys.executable, str(server_path)],
+            "env": {"API_TOKEN": "secret:MY_KEY", "PLAIN": "value"}})
+        # resolve via a client directly
+        from localcodeagent.mcp import MCPClient
+        c = MCPClient(cfg, env_resolver=vault.get)
+        env = c._resolved_env()
+        self.assertEqual(env["API_TOKEN"], "sk-test-123")
+        self.assertEqual(env["PLAIN"], "value")
+        # unresolvable secret → launch fails
+        cfg2 = MCPServerConfig.from_dict({
+            "id": "bad", "command": [sys.executable, "-c", "pass"],
+            "env": {"X": "secret:MISSING"}})
+        c2 = MCPClient(cfg2, env_resolver=vault.get)
+        with self.assertRaises(Exception):
+            c2.start()
+
 
 class MCPHTTPTests(unittest.TestCase):
     def _http_server(self):

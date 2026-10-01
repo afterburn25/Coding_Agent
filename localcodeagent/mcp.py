@@ -33,6 +33,7 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     cwd: str = ""
     url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"  # stdio | http
     enabled: bool = True
     auto_start: bool = True
@@ -68,9 +69,11 @@ class MCPError(Exception):
 class MCPClient:
     """Synchronous stdio JSON-RPC client for one MCP server process."""
 
-    def __init__(self, config: MCPServerConfig, *, timeout: float = 30.0) -> None:
+    def __init__(self, config: MCPServerConfig, *, timeout: float = 30.0,
+                 env_resolver: Any = None) -> None:
         self.config = config
         self.timeout = timeout
+        self._env_resolver = env_resolver
         self._proc: subprocess.Popen | None = None
         self._next_id = 0
         self._pending: dict[int, queue.Queue] = {}
@@ -88,7 +91,7 @@ class MCPClient:
         if not self.config.command:
             raise MCPError(f"MCP server '{self.config.id}' has no command")
         env = dict(os.environ)
-        env.update(self.config.env)
+        env.update(self._resolved_env())
         cwd = self.config.cwd or None
         flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
@@ -107,6 +110,25 @@ class MCPClient:
             raise MCPError(f"failed to launch MCP server '{self.config.id}': {exc}") from exc
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+
+    def _resolved_env(self) -> dict[str, str]:
+        """Resolve ``secret:<name>`` env values through the credential vault.
+
+        Unresolvable references fail the launch rather than leaking the
+        literal placeholder to the server.
+        """
+        resolved: dict[str, str] = {}
+        for key, value in self.config.env.items():
+            if str(value).startswith("secret:"):
+                name = str(value)[7:].strip()
+                secret = self._env_resolver(name) if self._env_resolver else None
+                if secret is None:
+                    raise MCPError(
+                        f"env '{key}' references unresolved secret '{name}' — set it in the credential vault")
+                resolved[key] = secret
+            else:
+                resolved[key] = value
+        return resolved
         threading.Thread(target=self._drain_stderr, daemon=True).start()
         # MCP handshake
         self.request("initialize", {
@@ -323,8 +345,10 @@ class MCPHTTPClient:
 class MCPManager:
     """Lifecycle manager for configured MCP servers; imports tools into the registry."""
 
-    def __init__(self, registry: ToolRegistry, configs: list[MCPServerConfig] | None = None, *, timeout: float = 30.0) -> None:
+    def __init__(self, registry: ToolRegistry, configs: list[MCPServerConfig] | None = None, *,
+                 timeout: float = 30.0, vault: Any = None) -> None:
         self.registry = registry
+        self._vault = vault
         self._configs = {c.id: c for c in (configs or []) if c.id}
         self._clients: dict[str, MCPClient] = {}
         self._status: dict[str, dict[str, Any]] = {}
@@ -347,8 +371,10 @@ class MCPManager:
                 return self._status_row(server_id)
             if client is not None:
                 client.close()
+            resolver = self._vault.get if self._vault is not None else None
             client = (MCPHTTPClient if config.transport == "http" else MCPClient)(
-                config, timeout=self._timeout)
+                config, timeout=self._timeout,
+                **({"env_resolver": resolver} if config.transport != "http" else {}))
             try:
                 client.start()
             except Exception as exc:

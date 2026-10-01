@@ -231,7 +231,8 @@ class AppState:
             prefer=getattr(config, "preferred_tools", []),
             telemetry_path=runtime_root / "data" / "routing_telemetry.jsonl",
         )
-        self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])))
+        self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])),
+                              vault=self.secrets)
         try:
             self.mcp.connect_all()
         except Exception:

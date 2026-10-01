@@ -1,0 +1,22 @@
+{
+  "id": "ask_workspace",
+  "name": "Index the workspace, then answer a question",
+  "description": "Refreshes the local knowledge index (incremental) and runs a TF-IDF search — a self-contained local RAG step that answers from workspace docs/code with file citations.",
+  "params": {
+    "path": "",
+    "query": "",
+    "limit": 8
+  },
+  "steps": [
+    {
+      "tool": "knowledge_index",
+      "args": {"path": "{params.path}"},
+      "save_as": "index"
+    },
+    {
+      "tool": "knowledge_search",
+      "args": {"query": "{params.query}", "limit": "{params.limit}"},
+      "save_as": "answer"
+    }
+  ]
+}
