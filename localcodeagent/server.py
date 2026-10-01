@@ -297,6 +297,29 @@ class AppState:
             capabilities=["system_resources", "hardware_status", "resource_check"],
         ))
 
+        def install_tool_call(args: dict[str, Any]) -> str:
+            tool_id = str(args.get("tool", "")).strip()
+            if not tool_id:
+                return "ERROR: 'tool' is required (tool id from find_tools or the Tool Manager)"
+            try:
+                outcome = self.install_tool(tool_id, approve=bool(args.get("approved", False)))
+            except KeyError as exc:
+                return f"ERROR: {exc}"
+            return json.dumps(outcome, ensure_ascii=False)
+
+        self.tools.register(ToolSpec(
+            "install_tool",
+            "Install a missing manifest tool via its package manager (winget/choco/pip/uv/npm/apt/brew) as a tracked job. Requires packages.install approval. Use after find_tools/use_capability reports a tool as not installed.",
+            {
+                "type": "object",
+                "properties": {"tool": {"type": "string", "description": "tool id to install"}},
+                "required": ["tool"],
+            },
+            "packages.install", install_tool_call,
+            category="utilities", provider="nexus",
+            capabilities=["install_tool", "package_install", "provision_tool"],
+        ))
+
         self.tools.register(ToolSpec(
             "use_capability",
             "Request a capability (e.g. 'ocr_image', 'convert_video', 'execute_code') and let the Tool Router pick the best installed/permitted tool for it. Prefer this when the exact tool name is unknown — the router ranks candidates, applies resource/permission checks, and falls back automatically. Pass 'arguments' matching the resolved tool's schema.",
