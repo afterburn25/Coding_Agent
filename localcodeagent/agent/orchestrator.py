@@ -2132,6 +2132,13 @@ class AgentOrchestrator:
             self.tasks.update(task_id, verification=[*task.verification, entry], pending_approval=None)
             session.tool_events.append({"name": "run_shell", "arguments": args, "result": result, "phase": "verification"})
             session.verification_index += 1
-            return self._finalize(session)
+            try:
+                return self._finalize(session)
+            except Exception as exc:
+                error_task = self.tasks.update(task_id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
+                self._emit(session, "task", task=error_task.as_dict())
+                self._emit(session, "error", error=error_task.error)
+                self._sessions.pop(task_id, None)
+                raise
 
         raise ValueError(f"Unknown approval kind {pending['kind']}")
