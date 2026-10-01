@@ -10,6 +10,7 @@
   "autonomous_resume_interrupted": true,
   "autonomous_max_recoveries": 3,
   "autonomous_error_retry_seconds": 120,
+  "chat_queue_when_busy": true,
   "autonomous_approval_timeout_seconds": 3600,
   "agent_tool_timeout_seconds": 1800,
   "model_idle_unload_seconds": 900,

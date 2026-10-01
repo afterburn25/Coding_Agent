@@ -143,6 +143,10 @@ class AgentConfig:
     # autonomous mode (0 disables mid-session error retry; recovery_count
     # still bounds total attempts).
     autonomous_error_retry_seconds: float = 120.0
+    # A chat message sent while a task is active is enqueued into the work
+    # queue instead of racing the running task (false restores the old
+    # concurrent-behavior, which is racy on the shared workspace).
+    chat_queue_when_busy: bool = True
     # Hard cap per tool call so a hung tool cannot stall an unattended run
     # forever. Tools with their own timeouts (terminal_run, run_shell) finish
     # well inside this bound.
@@ -356,6 +360,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.autonomous_resume_interrupted = bool(raw.get("autonomous_resume_interrupted", cfg.autonomous_resume_interrupted))
     cfg.autonomous_max_recoveries = max(0, int(raw.get("autonomous_max_recoveries", cfg.autonomous_max_recoveries)))
     cfg.autonomous_error_retry_seconds = max(0.0, float(raw.get("autonomous_error_retry_seconds", cfg.autonomous_error_retry_seconds)))
+    cfg.chat_queue_when_busy = bool(raw.get("chat_queue_when_busy", cfg.chat_queue_when_busy))
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))

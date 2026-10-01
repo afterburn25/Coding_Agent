@@ -1999,6 +1999,30 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
+                if getattr(self.state.config, "chat_queue_when_busy", True):
+                    current = self.state.tasks.current()
+                    if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
+                        item = self.state.queue.enqueue(message, mode=mode)
+                        self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                        self._sse_begin()
+                        self._sse_event("ready", {"mode": mode, "queued": True})
+                        self._sse_event("task", {"event": "queued", "queue_item": item})
+                        self._sse_event("result", {
+                            "content": (
+                                f"Queued behind the running task (position {len(self.state.queue)}). "
+                                "It starts automatically when the current task finishes."
+                            ),
+                            "queued": True,
+                            "queue_item": item,
+                            "task": current.as_dict(),
+                            "tool_events": [],
+                            "model_events": [{"type": "queued", "queue_item": item}],
+                            "pending_approval": None,
+                            "verification": [],
+                            "steps": 0,
+                            "runtime": self.state.runtime.summary(probe_external=False),
+                        })
+                        return
                 coding_model_optional = (
                     mode == "auto"
                     and self.state.agent.can_run_without_coding_model(message)
@@ -2079,6 +2103,27 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     self._json({"error": "message is required"}, 400)
                     return
+                if getattr(self.state.config, "chat_queue_when_busy", True):
+                    current = self.state.tasks.current()
+                    if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
+                        item = self.state.queue.enqueue(message, mode=mode)
+                        self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                        self._json({
+                            "content": (
+                                f"Queued behind the running task (position {len(self.state.queue)}). "
+                                "It starts automatically when the current task finishes."
+                            ),
+                            "queued": True,
+                            "queue_item": item,
+                            "task": current.as_dict(),
+                            "tool_events": [],
+                            "model_events": [{"type": "queued", "queue_item": item}],
+                            "pending_approval": None,
+                            "verification": [],
+                            "steps": 0,
+                            "runtime": self.state.runtime.summary(probe_external=False),
+                        })
+                        return
                 coding_model_optional = (
                     mode == "auto"
                     and self.state.agent.can_run_without_coding_model(message)
