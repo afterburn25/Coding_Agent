@@ -942,7 +942,9 @@ class AgentOrchestrator:
             session.failures += 1
         event = {"name": name, "arguments": args, "result": result}
         session.tool_events.append(event)
-        self._emit(session, "tool", tool={**event, "result": result[-12000:]})
+        redactor = self.tools.context.get("redactor")
+        shown = redactor(result) if redactor else result
+        self._emit(session, "tool", tool={**event, "result": shown[-12000:]})
         self._emit_image_job_from_tool_result(session.event_callback, name, result)
         session.messages.append({
             "role": "tool",
@@ -1122,7 +1124,9 @@ class AgentOrchestrator:
             self.tasks.update(session.task_id, verification=[*task.verification, entry])
             verification_event = {"name": "run_shell", "arguments": args, "result": result, "phase": "verification"}
             session.tool_events.append(verification_event)
-            self._emit(session, "tool", tool={**verification_event, "result": result[-12000:]})
+            redactor = self.tools.context.get("redactor")
+            shown = redactor(result) if redactor else result
+            self._emit(session, "tool", tool={**verification_event, "result": shown[-12000:]})
             session.verification_index += 1
         session.verification_done = True
         return None
