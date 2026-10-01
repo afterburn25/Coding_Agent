@@ -176,13 +176,22 @@ def validate_self_update(
                     ("main_ui", "/", "Chat Nexus"),
                     ("image_ui", "/image.html", "Chat Nexus"),
                     ("research_ui", "/research.html", "Chat Nexus"),
-                    ("trainer_ui", "/trainer.html", "Trainer"),
+                    ("trainer_ui", "/trainer.html", "Chat Nexus"),
+                    ("queue_api", "/api/queue", '"items"'),
                 ):
                     try:
                         code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")
                         checks[name] = {"ok": code == 200 and marker in body, "status": code}
                     except Exception as exc:
                         checks[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                # The shared event bus is a long-lived SSE stream — verify the
+                # handshake headers and first bytes rather than reading to EOF.
+                try:
+                    with urlopen(f"http://127.0.0.1:{port}/api/events", timeout=3) as sse:
+                        sse_ok = sse.status == 200 and "text/event-stream" in str(sse.headers.get("Content-Type") or "")
+                    checks["events_bus"] = {"ok": sse_ok}
+                except Exception as exc:
+                    checks["events_bus"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
                 if not all(bool(item.get("ok")) for item in checks.values()):
                     error = error or "One or more isolated smoke checks failed."
             result["smoke"] = {
