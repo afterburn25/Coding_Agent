@@ -259,7 +259,7 @@ class ModelStreamingTests(unittest.TestCase):
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
         # Agent events are republished on the shared bus with task attribution.
-        self.assertIn('payload.setdefault("task_id", current.id)', server)
+        self.assertIn('payload.setdefault("task_id", task_id)', server)
         self.assertIn('self.events.publish(etype or "task", payload)', server)
         self.assertIn('if etype in {"token", "result"}:', server)
         self.assertIn('self.state._bus_emit(event)', server)
