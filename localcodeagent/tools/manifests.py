@@ -56,6 +56,7 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "python_exec": {"category": "utilities", "capabilities": ["execute_code", "run_python", "sandbox_eval"], "provider": "nexus"},
     "list_workflows": {"category": "utilities", "capabilities": ["list_workflows", "automation"], "provider": "nexus"},
     "run_workflow": {"category": "utilities", "capabilities": ["run_workflow", "multi_step_automation", "orchestrate_tools"], "provider": "nexus"},
+    "blender_render": {"category": "3d", "capabilities": ["render_3d_scene", "blender_render", "create_3d"], "provider": "blender"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

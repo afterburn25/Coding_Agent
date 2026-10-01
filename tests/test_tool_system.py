@@ -29,6 +29,7 @@ from localcodeagent.tools.knowledge import KnowledgeIndex, register_knowledge_to
 from localcodeagent.tools.sandbox import run_python, register_sandbox_tools
 from localcodeagent.events import EventBus, make_emitter
 from localcodeagent.tools.workflows import load_workflows, register_workflow_tools, run_workflow
+from localcodeagent.tools.blender3d import build_scene_script, register_blender_tools
 
 
 def _registry(**permissions):
@@ -1003,6 +1004,35 @@ class WorkflowToolTests(unittest.TestCase):
         out = self.reg.execute("run_workflow", {"workflow": "nope"})
         self.assertIn("ERROR", out)
         self.assertIn("unknown workflow", out)
+
+
+class BlenderToolTests(unittest.TestCase):
+    def test_scene_script_builder(self):
+        script = build_scene_script({
+            "objects": [
+                {"type": "cube", "location": [0, 0, 1], "scale": [2, 1, 1], "color": [1, 0, 0]},
+                {"type": "sphere", "location": [3, 0, 1]},
+                {"type": "bogus"},  # unknown type skipped
+            ],
+            "resolution": [320, 240],
+        }, Path("/tmp/out.png"))
+        self.assertIn("primitive_cube_add", script)
+        self.assertIn("primitive_uv_sphere_add", script)
+        self.assertNotIn("bogus", script)
+        self.assertIn("resolution_x = 320", script)
+        self.assertIn("camera_add", script)
+        self.assertIn("out.png", script)
+        compile(script, "<blender-scene>", "exec")  # generated script is valid Python
+
+    def test_blender_render_delegates_cleanly(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            reg = ToolRegistry({"shell.execute": "allow", "filesystem.write": "allow"})
+            register_blender_tools(reg, ws, jobs=JobManager(ws / "jobs.json"))
+            out = json.loads(reg.execute("blender_render", {"objects": [{"type": "cube"}]}))
+            self.assertFalse(out["ok"])  # blender manifest not registered here
+            self.assertTrue((ws / out["script"]).exists())
+            self.assertIn("ERROR", out["detail"])
 
 
 if __name__ == "__main__":
