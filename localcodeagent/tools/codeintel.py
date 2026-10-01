@@ -1,10 +1,12 @@
 """Code intelligence tools: symbol maps and outlines.
 
-Uses a lightweight per-language regex scanner today; a tree-sitter backend can
-replace ``extract_symbols`` behind the same interface without touching callers.
+Python files are parsed with the stdlib ``ast`` module (precise: nested
+classes, methods, imports). Other languages use a per-language regex scanner;
+a tree-sitter backend can replace either behind the same interface.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -70,6 +72,46 @@ _COMPILED = {
 }
 
 
+def _extract_python(text: str) -> list[dict[str, Any]] | None:
+    """AST-based extraction for Python; None signals fallback to regex."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    symbols: list[dict[str, Any]] = []
+
+    def walk(node: ast.AST, depth: int = 0) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                kind = "method" if depth else "function"
+                entry: dict[str, Any] = {"kind": kind, "name": child.name[:120], "line": child.lineno}
+                decorators = [ast.unparse(d) for d in child.decorator_list if d is not None]
+                if decorators:
+                    entry["decorators"] = decorators[:5]
+                symbols.append(entry)
+                walk(child, depth + 1)
+            elif isinstance(child, ast.ClassDef):
+                bases = [ast.unparse(b) for b in child.bases if b is not None]
+                entry = {"kind": "class", "name": child.name[:120], "line": child.lineno}
+                if bases:
+                    entry["bases"] = bases[:5]
+                symbols.append(entry)
+                walk(child, depth + 1)
+            elif isinstance(child, ast.Import):
+                symbols.append({"kind": "import", "name": ", ".join(a.name for a in child.names)[:120],
+                                "line": child.lineno})
+            elif isinstance(child, ast.ImportFrom):
+                mod = "." * child.level + (child.module or "")
+                symbols.append({"kind": "import", "name": f"{mod}: {', '.join(a.name for a in child.names)}"[:120],
+                                "line": child.lineno})
+            elif depth == 0:
+                walk(child, depth)
+
+    walk(tree)
+    symbols.sort(key=lambda s: s["line"])
+    return symbols
+
+
 def extract_symbols(path: Path) -> dict[str, Any]:
     ext = path.suffix.lower()
     rules = _COMPILED.get(ext)
@@ -81,6 +123,11 @@ def extract_symbols(path: Path) -> dict[str, Any]:
         return {"file": str(path), "symbols": [], "error": str(exc)}
     if len(text.encode("utf-8", errors="ignore")) > MAX_FILE_BYTES:
         return {"file": str(path), "symbols": [], "error": "file_too_large"}
+    if ext == ".py":
+        ast_symbols = _extract_python(text)
+        if ast_symbols is not None:
+            return {"file": str(path), "symbols": ast_symbols, "lines": text.count("\n") + 1,
+                    "backend": "ast"}
     symbols = []
     for kind, regex in rules:
         for m in regex.finditer(text):
@@ -111,7 +158,7 @@ def register_codeintel_tools(registry: ToolRegistry, workspace: Path) -> None:
         sub = _resolve(str(args.get("path", ""))) or workspace
         if not sub.is_dir():
             return "ERROR: path must be a directory inside the workspace"
-        kinds = set(args.get("kinds") or ["class", "function"])
+        kinds = set(args.get("kinds") or ["class", "function", "method"])
         limit = max(1, min(int(args.get("max_files", MAX_FILES)), 2000))
         files: dict[str, Any] = {}
         count = 0

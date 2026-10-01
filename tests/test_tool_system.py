@@ -1106,5 +1106,32 @@ class RouterTelemetryTests(unittest.TestCase):
             self.assertEqual(row["success_rate"], 1.0)
 
 
+class CodeIntelAstTests(unittest.TestCase):
+    def test_python_ast_backend(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "mod.py"
+            p.write_text(
+                "import os\nfrom typing import Any\n\n"
+                "class Foo(Base):\n    def method(self):\n        pass\n\n"
+                "@decorator\ndef top():\n    pass\n",
+                encoding="utf-8")
+            out = extract_symbols(p)
+            self.assertEqual(out.get("backend"), "ast")
+            kinds = {s["name"]: s["kind"] for s in out["symbols"]}
+            self.assertEqual(kinds.get("Foo"), "class")
+            self.assertEqual(kinds.get("method"), "method")
+            self.assertEqual(kinds.get("top"), "function")
+            foo = next(s for s in out["symbols"] if s["name"] == "Foo")
+            self.assertEqual(foo.get("bases"), ["Base"])
+
+    def test_python_syntax_error_falls_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "bad.py"
+            p.write_text("class Broken(:\n    def nope(\n", encoding="utf-8")
+            out = extract_symbols(p)
+            # regex fallback still returns something rather than crashing
+            self.assertIn("symbols", out)
+
+
 if __name__ == "__main__":
     unittest.main()
