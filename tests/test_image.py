@@ -144,6 +144,83 @@ class ComfyRuntimeOnDemandTests(unittest.TestCase):
                 runtime.ensure_ready()
                 start.assert_called_once()
 
+    def test_healthy_orphaned_managed_comfyui_is_reclaimed(self):
+        # Backend crash left our spawned ComfyUI alive: it answers health as
+        # "external" and would escape idle eviction forever while holding VRAM.
+        # The pid marker identifies it as ours → kill and respawn managed.
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            comfy = root / "ComfyUI"
+            comfy.mkdir()
+            (comfy / "main.py").write_text("# test", encoding="utf-8")
+            config = SimpleNamespace(
+                comfyui_auto_start=False,
+                comfyui_start_on_image_request=True,
+                comfyui_dir=str(comfy),
+                comfyui_python=sys.executable,
+                comfyui_logs_dir=".agent/runtime",
+                comfyui_startup_timeout=10,
+                comfyui_extra_args=[],
+            )
+
+            class _HealthyBackend:
+                endpoint = "http://127.0.0.1:8188"
+                calls = 0
+
+                def health(self):
+                    self.calls += 1
+                    return (self.calls == 1), "ok"  # healthy, then dead after kill
+
+            runtime = ComfyUIRuntime(base_dir=root, backend=_HealthyBackend(), config=config)
+            marker_dir = root / ".agent" / "runtime"
+            marker_dir.mkdir(parents=True)
+            (marker_dir / "comfyui-managed.json").write_text(
+                json.dumps({"pid": 12345, "exe": sys.executable}), encoding="utf-8"
+            )
+            runtime._pid_cmdline_matches = lambda pid, exe: pid == 12345 and exe == sys.executable
+            killed: list[int] = []
+            runtime._kill_orphan = killed.append
+            with patch.object(runtime, "start") as start:
+                runtime.ensure_ready()
+            self.assertEqual(killed, [12345])
+            start.assert_called_once()
+
+    def test_healthy_foreign_comfyui_stays_external(self):
+        # A user's own ComfyUI on the endpoint (no marker / different exe) is
+        # adopted as external — never killed, never respawned.
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = SimpleNamespace(
+                comfyui_auto_start=False,
+                comfyui_start_on_image_request=True,
+                comfyui_dir=str(root / "ComfyUI"),
+                comfyui_python=sys.executable,
+                comfyui_logs_dir=".agent/runtime",
+                comfyui_startup_timeout=10,
+                comfyui_extra_args=[],
+            )
+
+            class _HealthyBackend:
+                endpoint = "http://127.0.0.1:8188"
+
+                def health(self):
+                    return True, "ok"
+
+            runtime = ComfyUIRuntime(base_dir=root, backend=_HealthyBackend(), config=config)
+            marker_dir = root / ".agent" / "runtime"
+            marker_dir.mkdir(parents=True)
+            (marker_dir / "comfyui-managed.json").write_text(
+                json.dumps({"pid": 12345, "exe": "D:\\other\\python.exe"}), encoding="utf-8"
+            )
+            runtime._pid_cmdline_matches = lambda pid, exe: False
+            killed: list[int] = []
+            runtime._kill_orphan = killed.append
+            runtime.ensure_ready()
+            self.assertEqual(killed, [])
+            self.assertEqual(runtime.status.state, "external")
+
     def test_missing_comfyui_reports_setup_required(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -93,9 +94,67 @@ class ComfyUIRuntime:
         cmd.extend(str(x) for x in extra)
         return cmd, directory
 
+    def _managed_marker_path(self) -> Path:
+        return self._resolve(str(getattr(self.config, "comfyui_logs_dir", ".agent/runtime"))) / "comfyui-managed.json"
+
+    def _orphaned_managed_pid(self) -> int | None:
+        """PID of a ComfyUI this app spawned that outlived a dead backend.
+
+        The marker records the exact python executable path so a PID that was
+        reused by an unrelated process (or a user's own ComfyUI on the same
+        port) is never mistaken for our orphan.
+        """
+        try:
+            data = json.loads(self._managed_marker_path().read_text(encoding="utf-8"))
+            pid = int(data.get("pid") or 0)
+            exe = str(data.get("exe") or "")
+        except Exception:
+            return None
+        if pid <= 0 or not exe:
+            return None
+        return pid if self._pid_cmdline_matches(pid, exe) else None
+
+    def _pid_cmdline_matches(self, pid: int, exe: str) -> bool:
+        try:
+            if os.name == "nt":
+                out = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                    capture_output=True, text=True, timeout=10,
+                ).stdout
+            else:
+                raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+                out = raw.replace(b"\0", b" ").decode("utf-8", "replace")
+        except Exception:
+            return False
+        return "main.py" in out and exe.lower() in out.lower()
+
+    def _kill_orphan(self, pid: int) -> None:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True, timeout=10)
+            else:
+                os.kill(pid, 9)
+        except Exception:
+            pass
+
     def ensure_ready(self) -> None:
         with self._lock:
             healthy, detail = self.backend.health()
+            if healthy and self._process is None:
+                # A ComfyUI this app spawned may have survived a backend
+                # restart — it would be adopted as "external" and escape idle
+                # eviction forever while still holding VRAM. Reclaim it so the
+                # managed lifecycle owns it again.
+                orphan = self._orphaned_managed_pid()
+                if orphan is not None:
+                    self._kill_orphan(orphan)
+                    try:
+                        self._managed_marker_path().unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    healthy, detail = self.backend.health()
             if healthy:
                 self.status.healthy = True
                 self.status.state = "running" if self._process else "external"
@@ -143,6 +202,16 @@ class ComfyUIRuntime:
             if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
                 flags = subprocess.CREATE_NO_WINDOW
             self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
+            try:
+                # Marker lets a restarted backend recognize this process as our
+                # orphan (exe path ties the pid to this install's ComfyUI).
+                marker = self._managed_marker_path()
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                tmp = marker.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"pid": self._process.pid, "exe": cmd[0]}), encoding="utf-8")
+                tmp.replace(marker)
+            except OSError:
+                pass
             self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
             deadline = time.monotonic() + max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
             last = ""
@@ -177,6 +246,10 @@ class ComfyUIRuntime:
                 try: self._log_handle.close()
                 except Exception: pass
                 self._log_handle = None
+            try:
+                self._managed_marker_path().unlink(missing_ok=True)
+            except OSError:
+                pass
             self.status.state = "stopped"
             self.status.healthy = False
             self.status.pid = None
