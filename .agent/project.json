@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 249,
+  "test_checkpoint": 256,
   "next_milestone": "v0.7 modular AI workstation: Phase 1 tool foundation landed; Phase 2 started with controlled terminal tools, ripgrep search, and build-system adapters (221 tests). Next: tree-sitter/LSP indexing, MCP support, then Playwright browser backend, llama.cpp model page, and continued Nexus Brain hardening.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -135,7 +135,7 @@
     "preferences_and_rules": true,
     "correction_examples": true,
     "prompt_injection_of_saved_rules": true,
-    "ui": "Local system \u00e2\u2020\u2019 Memory & training",
+    "ui": "Local system â†’ Memory & training",
     "api": "GET /api/conversation-memory"
   },
   "stream_recovery": {
@@ -204,7 +204,7 @@
       "GET /api/policy",
       "POST /api/policy/mode"
     ],
-    "ui": "Local system \u00e2\u2020\u2019 Conversation policy",
+    "ui": "Local system â†’ Conversation policy",
     "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
     "ethical_temperature_default": 1,
     "ethical_temperature_range": [
@@ -386,7 +386,7 @@
     "installer_seed_public_only": true,
     "installer_seed_build_validation": true,
     "adult_content_image_gate": true,
-    "audit_log": "data/nexus_brain.audit.jsonl \u2014 signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit"
+    "audit_log": "data/nexus_brain.audit.jsonl — signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit"
   },
   "takeover": {
     "owner": "Devin",
@@ -463,12 +463,14 @@
     ],
     "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
     "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
-    "browser": "localcodeagent/webtools/browser.py \u2014 Playwright runner w/ sessions, console+network capture, extended actions, health probe",
-    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u2014 live install status in Tool Manager",
-    "install_manager": "POST /api/tools/install \u2014 packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
-    "secrets": "localcodeagent/secrets.py \u2014 Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
-    "codeintel": "localcodeagent/tools/codeintel.py \u2014 code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
-    "data": "localcodeagent/tools/data.py \u2014 data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
-    "models_ui": "/models.html"
+    "browser": "localcodeagent/webtools/browser.py — Playwright runner w/ sessions, console+network capture, extended actions, health probe",
+    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep — live install status in Tool Manager",
+    "install_manager": "POST /api/tools/install — packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
+    "secrets": "localcodeagent/secrets.py — Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
+    "codeintel": "localcodeagent/tools/codeintel.py — code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
+    "data": "localcodeagent/tools/data.py — data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
+    "models_ui": "/models.html",
+    "media": "localcodeagent/tools/media.py — media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
+    "documents": "localcodeagent/tools/documents.py — extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest"
   }
 }

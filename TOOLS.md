@@ -33,6 +33,20 @@ PermissionManager  (localcodeagent/permissions.py)
   `build_project`, `configure_project`, `run_tests`, `clean_project` detect
   CMake/Meson/Cargo/.NET/MSBuild/npm/pnpm/yarn/Gradle/Maven/Make/Python and
   run the right command through the permission gate.
+- **Media** (`localcodeagent/tools/media.py`): high-level FFmpeg wrappers —
+  `media_probe` (ffprobe JSON), `extract_audio`, `trim_video`,
+  `convert_video`, `create_thumbnail`, `normalize_audio`, `add_subtitles`
+  (mux or burn). All build validated argv behind `shell.execute` and report
+  clean installable errors when ffmpeg is missing. `media_transcribe` is a
+  Media Agent recipe that chains `extract_audio` → `whisper` through the
+  registry as a tracked Job Manager job.
+- **Data** (`localcodeagent/tools/data.py`): `data_query`,
+  `profile_dataset`, `chart_generate` — DuckDB-preferred engine with
+  SQLite/CSV fallback and dependency-free SVG charts under
+  `.agent/data/charts/`.
+- **Documents** (`localcodeagent/tools/documents.py`): `extract_text`
+  (txt/md/html/csv/json/pdf), `ocr_image` (delegates to the Tesseract
+  manifest), `convert_document` (delegates to Pandoc).
 - Existing filesystem, shell (`run_shell`), git, github, research, web, and
   image families are unchanged.
 

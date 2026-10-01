@@ -240,7 +240,19 @@ Phase 2 kickoff (developer tools):
   `configure_project`, `run_tests`, `clean_project` cover CMake, Meson, Cargo,
   .NET, MSBuild, npm/pnpm/yarn, Gradle, Maven, Make, and Python.
 
-Unit checkpoint: **249 tests passing** (188 baseline + 44 new).
+- **Media tools.** `media_probe`/`extract_audio`/`trim_video`/`convert_video`/
+  `create_thumbnail`/`normalize_audio`/`add_subtitles` wrap FFmpeg with
+  validated argv behind `shell.execute`; `media_transcribe` chains
+  extract→whisper→subtitles through the registry as a tracked job.
+- **Document tools.** `extract_text` (txt/md/html/csv/json/pdf),
+  `ocr_image` → Tesseract manifest, `convert_document` → Pandoc manifest.
+- **Data tools.** `data_query`/`profile_dataset`/`chart_generate` —
+  DuckDB-preferred engine, SQLite/CSV fallback, pure-Python SVG charts.
+- **Permission hardening.** Manifest invokers that spawn subprocesses are
+  gated on `shell.execute` (or a stricter dedicated key such as
+  `docker.access`) regardless of declared read/write keys.
+
+Unit checkpoint: **256 tests passing**.
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.
