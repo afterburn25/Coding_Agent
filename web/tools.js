@@ -285,6 +285,43 @@
     });
   }
 
+  async function loadQueue() {
+    const data = await api("/api/queue");
+    const rows = (data.items || []).slice(0, 60);
+    const host = $("queueList");
+    if (!rows.length) {
+      host.textContent = "Queue is empty — prompts sent while a task runs land here.";
+      host.classList.add("muted");
+      return;
+    }
+    host.innerHTML = rows
+      .map(
+        (q, i) => `
+        <div class="job-row">
+          <span class="muted">#${i + 1}</span>
+          <span class="name" title="${esc(q.prompt || "")}">${esc((q.prompt || "").slice(0, 90)) || "(empty)"}</span>
+          <span class="state queued">${esc(q.status || "queued")}</span>
+          <span>${esc(q.mode || "auto")}</span>
+          <span class="muted">${fmtTime(q.enqueued_at)}</span>
+          <span class="row-actions"><button data-queue="${esc(q.id)}">Cancel</button></span>
+        </div>`
+      )
+      .join("");
+    host.classList.remove("muted");
+    host.querySelectorAll("[data-queue]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await post("/api/queue/cancel", { id: btn.dataset.queue });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          setTimeout(loadQueue, 400);
+        }
+      });
+    });
+  }
+
   async function loadTelemetry() {
     const data = await api("/api/tools/telemetry");
     const stats = (data.stats && data.stats.routes) || [];
@@ -370,10 +407,10 @@
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {
-    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch((e) => alert(e.message));
+    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadQueue(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch((e) => alert(e.message));
   }
   refreshAll();
-  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch(() => {}), 5000);
+  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadQueue(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch(() => {}), 5000);
 
   // Live updates: job/tool events stream over SSE; polling above stays as the
   // fallback if EventSource is unavailable or the connection drops.
@@ -384,10 +421,11 @@
       if (refreshTimer) return;
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        Promise.all([loadJobs(), loadTools()]).catch(() => {});
+        Promise.all([loadJobs(), loadTools(), loadQueue()]).catch(() => {});
       }, 400);
     };
     events.addEventListener("job", scheduleRefresh);
     events.addEventListener("tool", scheduleRefresh);
+    events.addEventListener("task", scheduleRefresh);
   } catch (e) { /* EventSource unsupported — interval polling still applies */ }
 })();
