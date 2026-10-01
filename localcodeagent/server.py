@@ -64,6 +64,7 @@ from .workflow.nexus_brain import NexusBrain
 from .training import ModelGrowthLab
 from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
+from .workflow.activity import ActivityStore
 
 
 VERSION = "0.6.0-dev"
@@ -383,6 +384,8 @@ class AppState:
             category="utilities", provider="nexus",
             capabilities=["use_capability", "capability_dispatch", "auto_tool_selection"],
         ))
+        self.activities = ActivityStore(runtime_root / "data" / "activity.jsonl")
+        self.activities.on_row = lambda row: self.events.publish("activity", row)
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -399,6 +402,7 @@ class AppState:
             knowledge_memory=self.knowledge_memory,
             model_growth=self.model_growth,
             nexus_brain=self.nexus_brain,
+            activities=self.activities,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -1712,6 +1716,9 @@ class Handler(BaseHTTPRequestHandler):
             self.state.runtime.refresh_hardware()
             self._json(self.state.runtime.summary(probe_external=True))
             return
+        if path == "/api/tuning":
+            self._json(self.state.runtime.tuner.status())
+            return
         if path == "/api/readiness":
             self._json(self.state.readiness_payload(probe_external=True))
             return
@@ -1721,6 +1728,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/task-log":
             task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]
             self._json({"task_id": task_id, "log": self.state.tasks.read_log(task_id) if task_id else ""})
+            return
+        if path == "/api/activity":
+            query = parse_qs(urlparse(self.path).query)
+            task_id = query.get("task_id", [""])[0]
+            if task_id:
+                rows = self.state.activities.for_task(task_id)
+            else:
+                latest = self.state.tasks.recent(1)
+                rows = self.state.activities.for_task(str(latest[0]["id"])) if latest else []
+                task_id = str(latest[0]["id"]) if latest else ""
+            self._json({"task_id": task_id, "activities": rows})
             return
         if path == "/api/queue":
             self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})
@@ -1975,6 +1993,55 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 result = self.state.runtime.model_catalog.verify(catalog_id, deep_hash=bool(body.get("deep_hash", True)))
                 self._json({"ok": True, "model": result})
+                return
+
+            if path == "/api/tuning":
+                action = str(body.get("action", "status")).strip().lower()
+                if action == "reset":
+                    self.state.runtime.tuner.reset(str(body.get("model_id") or "") or None)
+                    self._json({"ok": True, "tuning": self.state.runtime.tuner.status()})
+                    return
+                if action == "mode":
+                    mode = str(body.get("mode", "")).strip().lower()
+                    if mode not in {"auto", "quiet", "balanced", "max"}:
+                        self._json({"error": "mode must be auto|quiet|balanced|max"}, 400)
+                        return
+                    self.state.config.performance_mode = mode
+                    self.state._update_config_file({"performance_mode": mode})
+                    self._json({"ok": True, "performance_mode": mode})
+                    return
+                if action in {"benchmark", "retune"}:
+                    model_id = str(body.get("model_id") or "").strip()
+                    profiles = {m.id: m for m in self.state.config.models if m.runtime == "llama_cpp"}
+                    target = profiles.get(model_id) or next(iter(profiles.values()), None)
+                    if target is None:
+                        self._json({"error": "no managed llama.cpp model profile configured"}, 400)
+                        return
+                    job = self.state.jobs.submit(
+                        "runtime_tune", f"Benchmark {target.id}", metadata={"model_id": target.id})
+                    tuner = self.state.runtime.tuner
+
+                    def _bench(p: ModelProfile = target, jid: str = job.id) -> None:
+                        self.state.jobs.update(jid, state="running", status="benchmarking")
+                        try:
+                            result = tuner.benchmark(p)
+                            best = result.get("best")
+                            self.state.jobs.update(
+                                jid, state="completed", status="finished", progress=1.0,
+                                detail=json.dumps(result.get("results", []))[-300:],
+                            )
+                            self.state.events.publish("model", {"event": {
+                                "type": "tuning_complete", "model_id": p.id,
+                                "status": result.get("status"),
+                                "tps": (best or {}).get("metrics", {}).get("predicted_per_second"),
+                            }})
+                        except Exception as exc:  # noqa: BLE001
+                            self.state.jobs.update(jid, state="failed", error=str(exc)[:300])
+
+                    threading.Thread(target=_bench, name="runtime-tune", daemon=True).start()
+                    self._json({"ok": True, "job": job.as_dict()})
+                    return
+                self._json({"error": "unknown tuning action"}, 400)
                 return
             if path == "/api/readiness/configure":
                 if body.get("apply") is not True:

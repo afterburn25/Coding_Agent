@@ -282,6 +282,77 @@ function flushStreamText(state){
   state.flushScheduled=false;
   if(state.pendingText){state.text.textContent+=state.pendingText;state.pendingText='';chat.scrollTop=chat.scrollHeight;}
 }
+
+/* ---------- structured activity timeline ---------- */
+const tlRows=new Map();
+const TL_ICONS={planning:'◌',thinking:'◌',routing:'⇄',model:'▣',vram:'▣',memory:'◈',brain:'◈',investigating:'⌕',file:'⌕',search:'⌕',research:'◎',fetch:'◎',tool:'⚙',command:'$',editing:'✎',diff:'±',building:'⚒',testing:'✓',review:'◉',download:'↓',install:'↓',service:'▶',approval:'!',model_wait:'▣',recovery:'↻',retry:'↻',image:'▨',artifact:'◻',git:'⑂',github:'⑂',complete:'●',error:'✕'};
+const TL_CATS={all:'All',reasoning:'Reasoning',file:'Files',command:'Commands',research:'Research',model:'Models',tool:'Tools',testing:'Tests',error:'Errors'};
+function tlCategoryGroup(cat){
+  if(['planning','thinking','routing'].includes(cat))return'reasoning';
+  if(['file','search','investigating'].includes(cat))return'file';
+  if(['command','editing','diff','building','git','github'].includes(cat))return'command';
+  if(['research','fetch'].includes(cat))return'research';
+  if(['model','vram','model_wait','download','install','service','image'].includes(cat))return'model';
+  if(['testing','review'].includes(cat))return'testing';
+  if(['error','retry','recovery'].includes(cat))return'error';
+  if(['tool','memory','brain','approval','artifact','complete'].includes(cat))return'tool';
+  return'tool';
+}
+let tlFilter='all';
+function tlElapsed(row){if(row.elapsed!=null)return Number(row.elapsed);if(row.started_at)return Math.max(0,Date.now()/1000-row.started_at);return 0;}
+function upsertActivityRow(row){
+  if(!row||!row.id)return;
+  _activityInit();
+  let rec=tlRows.get(row.id);
+  if(!rec){
+    const el=document.createElement('div');
+    el.className='tl-row';
+    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre></div>';
+    el.querySelector('.tl-head').addEventListener('click',()=>{
+      const r=tlRows.get(row.id);
+      if(r){r.manual=!el.classList.contains('open');el.classList.toggle('open',r.manual);}
+    });
+    rec={el,row:{},manual:null};
+    tlRows.set(row.id,rec);
+    activity.appendChild(el);_activityPrune();
+  }
+  rec.row=row;
+  const el=rec.el;
+  el.dataset.group=tlCategoryGroup(row.category);
+  el.className='tl-row '+String(row.state||'running')+(el.classList.contains('open')?' open':'');
+  el.style.display=(tlFilter==='all'||el.dataset.group===tlFilter)?'':'none';
+  el.querySelector('.tl-icon').textContent=TL_ICONS[row.category]||'⚙';
+  el.querySelector('.tl-title').textContent=row.title||row.category||'activity';
+  const tt=el.querySelector('.tl-time');
+  tt.textContent=tlElapsed(row).toFixed(row.elapsed!=null?1:0)+'s';
+  const open=(rec.manual!=null)?rec.manual:['running','failed','waiting'].includes(row.state);
+  el.classList.toggle('open',open);
+  el.querySelector('.tl-summary').textContent=row.summary||'';
+  const det=row.details||{};
+  const kv=Object.entries(det).filter(([k])=>k!=='output_tail').map(([k,v])=>'<div class="tl-kv"><b>'+esc(k)+'</b><span>'+esc(typeof v==='object'?JSON.stringify(v):String(v)).slice(0,400)+'</span></div>').join('');
+  el.querySelector('.tl-details').innerHTML=kv;
+  const out=el.querySelector('.tl-out');
+  const tail=String(det.output_tail||'');
+  if(tail){out.style.display='';out.textContent=tail.slice(-6000);}else out.style.display='none';
+  activity.scrollTop=activity.scrollHeight;
+  setUtilityPanel('terminal');
+}
+setInterval(()=>{
+  for(const rec of tlRows.values()){
+    if(rec.row&&['running','waiting'].includes(rec.row.state)){
+      const t=rec.el.querySelector('.tl-time');
+      if(t)t.textContent=tlElapsed(rec.row).toFixed(0)+'s';
+    }
+  }
+},1000);
+function renderActivityTimeline(rows){
+  if(!Array.isArray(rows))return;
+  for(const row of rows)upsertActivityRow(row);
+}
+async function restoreActivityTimeline(taskId){
+  if(!taskId)return;
+  try{const r=await fetch('/api/activity?task_id='+encodeURIComponent(taskId));if(!r.ok)return;const d=await r.json();renderActivityTimeline(d.activities);}catch{}
+}
 function scheduleStreamFlush(state){
   // Render buffer: SSE deltas accumulate in memory and land on the DOM at most
   // once per animation frame — word/chunk bursts instead of per-character
@@ -297,6 +368,7 @@ function handleAgentStreamEvent(name,data,state){
     if(!state.receivedToken){state.receivedToken=true;state.hud?.classList.add('compact');nexusThinkingStep(state,'Synthesis stream online','Composing response','synthesis');}
     state.pendingText=(state.pendingText||'')+String(data.text||'');scheduleStreamFlush(state);return;
   }
+  if(name==='activity'){upsertActivityRow(data.activity||data);return;}
   if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));chat.scrollTop=chat.scrollHeight;return;}
   if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);if(data.event==='queued'||data.event==='dequeued'||data.event==='queue_item_cancelled')refreshQueue();nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
   if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
@@ -319,7 +391,7 @@ function handleAgentStreamEvent(name,data,state){
     return;
   }
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
-  if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.completion_tokens?p.completion_tokens+' tok':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);return;}
+  if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
   if(name==='result'){agentStreamActive=false;state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
   if(name==='error'){agentStreamActive=false;state.pendingText='';state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
@@ -337,7 +409,7 @@ function connectAgentEvents(){
     const es=new EventSource('/api/events');
     // tool_output chunks can flood the bus replay history on long runs, so
     // recover the current task card directly once the stream opens.
-    es.onopen=async()=>{try{const data=await fetch('/api/tasks').then(r=>r.json());const cur=data.current;if(cur&&cur.id&&cur.id!==lastTask?.id&&!['completed','error','cancelled'].includes(cur.status)){lastTask=cur;renderTask(cur);renderDiff(cur);}const tid=cur?.id||lastTask?.id||'';if(tid){const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(tid));if(lr.ok){const lg=await lr.json();const tail=String((cur?.final_content||cur?.summary)||'').trim();const baseLog=lg.log||'';const body=baseLog+((tail&&!baseLog.includes('## result\n'))?'\n\n--- task result ---\n'+tail.slice(0,8000):'');if(body.trim()){connectAgentEvents.loggedTask=tid;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[tid];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">restored task log</code><span class="term-state">replay</span></div><pre class="term-out"></pre>';blocks[tid]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=body;_activityPrune();}}}refreshQueue();}catch{}};
+    es.onopen=async()=>{try{const data=await fetch('/api/tasks').then(r=>r.json());const cur=data.current;if(cur&&cur.id&&cur.id!==lastTask?.id&&!['completed','error','cancelled'].includes(cur.status)){lastTask=cur;renderTask(cur);renderDiff(cur);}const tid=cur?.id||lastTask?.id||'';if(tid){const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(tid));if(lr.ok){const lg=await lr.json();const tail=String((cur?.final_content||cur?.summary)||'').trim();const baseLog=lg.log||'';const body=baseLog+((tail&&!baseLog.includes('## result\n'))?'\n\n--- task result ---\n'+tail.slice(0,8000):'');if(body.trim()){connectAgentEvents.loggedTask=tid;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[tid];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">restored task log</code><span class="term-state">replay</span></div><pre class="term-out"></pre>';blocks[tid]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=body;_activityPrune();}}restoreActivityTimeline(tid);}refreshQueue();}catch{}};
     const on=(n,f)=>es.addEventListener(n,e=>{if(agentStreamActive)return;let d={};try{d=JSON.parse(e.data);}catch{return;}f(d);});
     on('tool_start',d=>{if(d.tool)toolStartBlock(d.tool);});
     on('tool_output',d=>{const name=String(d.tool||'');let entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];if(!entry&&name){toolStartBlock({name});entry=liveToolBlocks[liveToolBlocks.length-1];}if(entry){const out=entry.el.querySelector('.term-out');if(out){out.textContent=(out.textContent+String(d.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}}});
@@ -346,6 +418,7 @@ function connectAgentEvents(){
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
+    on('activity',d=>{upsertActivityRow(d.activity||d);});
     on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}});
     on('image_job',d=>{if(d.job)renderImageJobs([d.job]);});
     on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
@@ -421,7 +494,7 @@ async function streamAgent(message){
 async function undoTask(taskId){if(!confirm('Restore files to their state before this task?'))return;const res=await fetch('/api/tasks/undo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok){addMessage('assistant',`Undo error: ${data.error||'failed'}`);return;}addMessage('assistant',`Restored ${data.restored.length} file(s) from the task checkpoint.`);await loadStatus(false);}
 async function cancelTask(taskId){if(!confirm('Stop this task? The agent will halt at the next checkpoint; file changes stay in place.'))return;try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`task-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');appendLiveActivity(`TASK · ${taskId} · cancelled`);}catch(e){addMessage('assistant',`Cancel error: ${e.message}`);}}
 $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-approve]');if(a){resumeTask(a.dataset.approve==='1');return;}const r=e.target.closest('[data-recover]');if(r){recoverTask(r.dataset.recover);return;}const u=e.target.closest('[data-undo]');if(u){undoTask(u.dataset.undo);return;}const c=e.target.closest('[data-cancel-task]');if(c)cancelTask(c.dataset.cancelTask);});
-$('#recentTasks').addEventListener('click',async e=>{const row=e.target.closest('[data-task-id]');if(!row)return;const t=recentTaskCache[row.dataset.taskId];if(!t)return;lastTask=t;renderTask(t);renderDiff(t);try{const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(t.id));if(!lr.ok)return;const lg=await lr.json();const log=String(lg.log||'');if(!log.trim())return;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[t.id];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">task log '+esc(t.id)+'</code><span class="term-state">'+esc(t.status)+'</span></div><pre class="term-out"></pre>';blocks[t.id]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=log;setUtilityPanel('terminal');activity.scrollTop=activity.scrollHeight;}catch{}});
+$('#recentTasks').addEventListener('click',async e=>{const row=e.target.closest('[data-task-id]');if(!row)return;const t=recentTaskCache[row.dataset.taskId];if(!t)return;lastTask=t;renderTask(t);renderDiff(t);try{const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(t.id));if(!lr.ok)return;const lg=await lr.json();const log=String(lg.log||'');if(!log.trim())return;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[t.id];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">task log '+esc(t.id)+'</code><span class="term-state">'+esc(t.status)+'</span></div><pre class="term-out"></pre>';blocks[t.id]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=log;setUtilityPanel('terminal');activity.scrollTop=activity.scrollHeight;restoreActivityTimeline(t.id);}catch{}});
 $('#models').addEventListener('click',async e=>{const btn=e.target.closest('.runtime-action');if(!btn)return;btn.disabled=true;try{await runtimeAction(btn.dataset.action,btn.dataset.model);}catch(err){addMessage('assistant',`Runtime error: ${err.message}`);}finally{btn.disabled=false;}});
 $('#readinessPanel').addEventListener('click',e=>{const plan=e.target.closest('[data-model-plan]');if(plan){installModelPlan(plan.dataset.modelPlan);return;}if(e.target.closest('#startSelfDevelopment')){prepareSelfDevelopmentTask();return;}if(e.target.closest('#applyModelSetup')){applySuggestedModelSetup();return;}const copy=e.target.closest('.copy-runtime-command'),install=e.target.closest('.catalog-install'),repair=e.target.closest('.catalog-repair'),cancel=e.target.closest('.catalog-cancel');if(copy)copyText(copy.dataset.command);else if(install)startCatalogInstall(install.dataset.catalog,false);else if(repair)startCatalogInstall(repair.dataset.catalog,true);else if(cancel)cancelCatalogInstall(cancel.dataset.job);});
 $('#refreshRuntime').addEventListener('click',async()=>{await loadStatus(true);await loadReadiness();});

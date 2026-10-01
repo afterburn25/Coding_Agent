@@ -76,6 +76,8 @@ class RuntimeManager:
         # resources free up again.
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
+        from .tuner import RuntimeTuner
+        self.tuner = RuntimeTuner(self.base_dir, config, runtime=self)
         for model in config.models:
             endpoint = self._profile_endpoint(model)
             self._status[model.id] = RuntimeStatus(
@@ -366,7 +368,7 @@ class RuntimeManager:
             f"fits effective available RAM{switch_note}{ram_note}"
         )
 
-    def _build_command(self, profile: ModelProfile, port: int) -> list[str]:
+    def _build_command(self, profile: ModelProfile, port: int, *, apply_tuning: bool = True, extra_args: list[str] | None = None) -> list[str]:
         exe = self.discover_llama_server(profile)
         if not exe:
             raise RuntimeError(
@@ -382,11 +384,18 @@ class RuntimeManager:
         cmd = [exe]
         if self._is_unified_llama(exe):
             cmd.append("serve")
+        ctx = profile.context_window
+        if apply_tuning and getattr(self.config, "runtime_dynamic_context", True):
+            try:
+                from .tuner import recommended_context
+                ctx = recommended_context(profile)
+            except Exception:
+                ctx = profile.context_window
         cmd.extend([
             "--model", str(model_path),
             "--host", profile.host,
             "--port", str(port),
-            "--ctx-size", str(profile.context_window),
+            "--ctx-size", str(ctx),
         ])
         if profile.gpu_layers:
             cmd.extend(["--gpu-layers", str(profile.gpu_layers)])
@@ -409,7 +418,33 @@ class RuntimeManager:
         if qwen14 and not has_reasoning_override:
             cmd.extend(["--reasoning", "off"])
 
+        # Tuned flags: persisted benchmark results or capability-gated
+        # heuristics. User-supplied extra_args always win on conflicts.
+        try:
+            tuned = self.tuner.tuned_flags(
+                profile, mode=str(getattr(self.config, "performance_mode", "auto"))) if apply_tuning else []
+        except Exception:
+            tuned = []
+        if tuned:
+            present = {
+                str(a).split("=")[0]
+                for a in [*cmd, *profile.extra_args]
+                if str(a).startswith("-")
+            }
+            idx = 0
+            while idx < len(tuned):
+                flag = tuned[idx]
+                if str(flag).startswith("-") and str(flag).split("=")[0] not in present:
+                    cmd.append(flag)
+                    if idx + 1 < len(tuned) and not str(tuned[idx + 1]).startswith("-"):
+                        cmd.append(tuned[idx + 1])
+                        idx += 2
+                        continue
+                idx += 1
+
         cmd.extend(profile.extra_args)
+        if extra_args:
+            cmd.extend(extra_args)
         return cmd
 
     def _health(self, endpoint: str, timeout: float = 1.5) -> tuple[bool, str]:
@@ -744,6 +779,54 @@ class RuntimeManager:
 
         threading.Thread(target=_ping, name=f"warmup-{profile.id}", daemon=True).start()
 
+    class _Probe:
+        """Unmanaged llama-server process used by the tuner benchmark."""
+
+        def __init__(self, process, endpoint: str):
+            self.process = process
+            self.endpoint = endpoint
+
+        def stop(self) -> None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+
+    def launch_probe(self, profile: ModelProfile, port: int, extra_args: list[str]) -> "RuntimeManager._Probe":
+        """Start an unmanaged llama-server for candidate benchmarking.
+
+        Tuned flags are NOT applied — the candidate list is the thing under
+        test. Returns once healthy or raises on crash/timeout.
+        """
+        probe_port = port or self._find_free_port(profile.host)
+        command = self._build_command(profile, probe_port, apply_tuning=False, extra_args=extra_args)
+        creationflags = 0
+        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creationflags = subprocess.CREATE_NO_WINDOW
+        process = subprocess.Popen(
+            command,
+            cwd=str(self.base_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            creationflags=creationflags,
+        )
+        endpoint = self._profile_endpoint(profile, probe_port)
+        deadline = time.monotonic() + max(5, profile.startup_timeout)
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(f"probe llama-server exited with code {process.returncode}")
+            healthy, _ = self._health(endpoint)
+            if healthy:
+                return self._Probe(process, endpoint)
+            time.sleep(0.25)
+        process.kill()
+        raise TimeoutError("probe llama-server did not become healthy")
+
     def ensure_ready(self, profile: ModelProfile) -> str:
         with self._lock:
             self._last_used[profile.id] = time.time()
@@ -888,6 +971,8 @@ class RuntimeManager:
             "inventory": self.inventory(),
             "recommendations": recommendations,
             "runtime_install": self.runtime_install_guidance(),
+            "tuning": self.tuner.status(),
+            "performance_mode": getattr(self.config, "performance_mode", "auto"),
         }
 
     def summary(self, *, probe_external: bool = False) -> dict:

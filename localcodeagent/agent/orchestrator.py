@@ -130,6 +130,7 @@ class _AgentSession:
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
     max_tokens: int | None = None
+    tool_activities: dict[str, str] = field(default_factory=dict)
     started_at: float = field(default_factory=time.time)
 
 
@@ -153,6 +154,7 @@ class AgentOrchestrator:
         knowledge_memory: KnowledgeMemory | None = None,
         model_growth: ModelGrowthLab | None = None,
         nexus_brain: NexusBrain | None = None,
+        activities=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -169,7 +171,43 @@ class AgentOrchestrator:
         self.knowledge_memory = knowledge_memory
         self.model_growth = model_growth
         self.nexus_brain = nexus_brain
+        self.activities = activities
         self._sessions: dict[str, _AgentSession] = {}
+
+    def _act(
+        self,
+        task_id: str,
+        category: str,
+        title: str,
+        summary: str = "",
+        *,
+        details: dict[str, Any] | None = None,
+        parent: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any] | None:
+        """Open a timeline activity row and emit it to the live stream."""
+        if self.activities is None:
+            return None
+        row = self.activities.open(task_id, category, title, summary, details=details, parent=parent)
+        self._safe_emit(callback, {"type": "activity", "task_id": task_id, "activity": dict(row)})
+        return row
+
+    def _act_update(
+        self,
+        task_id: str,
+        act: dict[str, Any] | None,
+        *,
+        state: str | None = None,
+        summary: str | None = None,
+        details: dict[str, Any] | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any] | None:
+        if self.activities is None or act is None:
+            return None
+        row = self.activities.update(task_id, act["id"], state=state, summary=summary, details=details)
+        if row is not None:
+            self._safe_emit(callback, {"type": "activity", "task_id": task_id, "activity": dict(row)})
+        return row
 
     def _brain_subroutine_enabled(self, name: str, default: bool = True) -> bool:
         if self.nexus_brain is None or not self.nexus_brain.initialized:
@@ -597,6 +635,15 @@ class AgentOrchestrator:
                 }
                 model_events.append(recovery_event)
                 self._safe_emit(event_callback, {"type": "model", "event": recovery_event})
+                task_id = self.tools.context.get("task_id")
+                if task_id:
+                    act = self._act(
+                        task_id, "recovery", "Recovering",
+                        f"{event_type.replace('_', ' ')} · restarting {profile.id} (attempt {attempts})",
+                        details={"error": str(exc)[:300]},
+                        callback=event_callback,
+                    )
+                    self._act_update(task_id, act, state="completed", callback=event_callback)
 
     @staticmethod
     def _parse_call(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -811,6 +858,9 @@ class AgentOrchestrator:
                        predicted_per_second=round(tps, 2),
                        completion_tokens=completion_tokens,
                        prompt_tokens=prompt_tokens,
+                       prompt_per_second=round(float(timings.get("prompt_per_second") or 0.0), 2),
+                       cached_tokens=int(usage.get("cached_tokens") or 0),
+                       prompt_cache="hit" if int(usage.get("cached_tokens") or 0) > 0 else "miss",
                        elapsed_seconds=round(elapsed, 3),
                        time_to_first_token_ms=raw.get("time_to_first_token_ms"))
         except Exception:
@@ -1044,6 +1094,16 @@ class AgentOrchestrator:
         session.pending_approval = pending
         task = self.tasks.update(session.task_id, status="waiting_approval", phase="waiting_approval", pending_approval=pending)
         self._emit(session, "approval", approval=pending, task=task.as_dict())
+        act = self._act(
+            session.task_id, "approval", "Waiting for Approval",
+            f"{name} requires {permission} authorization",
+            details={"tool": name, "permission": permission,
+                     "arguments": {k: str(v)[:200] for k, v in list(arguments.items())[:8]}},
+            callback=session.event_callback,
+        )
+        if act is not None:
+            self._act_update(session.task_id, act, state="waiting", callback=session.event_callback)
+            session.tool_activities.setdefault(f"approval:{call_id or name}", act["id"])
         return self._result(
             session,
             f"Approval required to run {name} ({permission}). Approve or deny the pending action to continue this task.",
@@ -1216,6 +1276,15 @@ class AgentOrchestrator:
             )
             for _, n, a in batch:
                 self._emit_tool_start(session, n, a)
+                act = self._act(
+                    session.task_id,
+                    self._tool_activity_category(n),
+                    self._tool_activity_title(n),
+                    self._tool_activity_summary(n, a),
+                    callback=session.event_callback,
+                )
+                if act is not None:
+                    session.tool_activities[n] = act["id"]
             if readonly:
                 with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
                     results = list(pool.map(lambda item: self._execute_tool(item[1], item[2], session=session), batch))
@@ -1228,6 +1297,15 @@ class AgentOrchestrator:
                     results.append(self._execute_tool(n, a, session=session))
             for (c, n, a), result in zip(batch, results):
                 self._append_tool_result(session, c, n, a, result)
+                act_id = session.tool_activities.pop(n, None)
+                if act_id is not None:
+                    failed = result.startswith(("ERROR", "PERMISSION_DENIED", "CANCELLED"))
+                    self._act_update(
+                        session.task_id, {"id": act_id},
+                        state="failed" if failed else "completed",
+                        summary=str(result).replace("\n", " ")[:240],
+                        callback=session.event_callback,
+                    )
             session.pending_call_index = j
             self._maybe_escalate(session)
         session.pending_calls = []
@@ -1265,7 +1343,24 @@ class AgentOrchestrator:
                     detail=item["command"],
                 )
             self._emit_tool_start(session, "run_shell", args)
+            act = self._act(
+                session.task_id, "testing", "Testing",
+                item["command"][:240],
+                details={"command": item["command"], "name": item["name"]},
+                callback=session.event_callback,
+            )
+            if act is not None:
+                session.tool_activities["run_shell"] = act["id"]
             result = self._execute_tool("run_shell", args, session=session)
+            session.tool_activities.pop("run_shell", None)
+            if act is not None:
+                passed = "EXIT_CODE=0" in str(result)
+                self._act_update(
+                    session.task_id, act,
+                    state="completed" if passed else "failed",
+                    summary=("passed" if passed else "failed") + f" · {item['name']}",
+                    callback=session.event_callback,
+                )
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(session.task_id)
             self.tasks.update(session.task_id, verification=[*task.verification, entry])
@@ -1292,6 +1387,12 @@ class AgentOrchestrator:
 
         reviewing_task = self.tasks.update(session.task_id, status="reviewing", phase="reviewing")
         self._emit(session, "task", task=reviewing_task.as_dict())
+        review_act = self._act(
+            session.task_id, "review", "Review",
+            "Checking modified files for regressions",
+            details={"files": list(task.files_changed)[:20]},
+            callback=session.event_callback,
+        )
         review_decision = self.router.choose(
             session.user_text,
             phase="review",
@@ -1341,8 +1442,17 @@ class AgentOrchestrator:
                 event_callback=session.event_callback,
             )
             session.review_content = str(response.message.get("content") or "")
+            self._act_update(
+                session.task_id, review_act, state="completed",
+                summary=(session.review_content.splitlines() or ["no findings"])[0][:240],
+                callback=session.event_callback,
+            )
         except Exception as exc:
             session.review_content = f"Review unavailable: {type(exc).__name__}: {exc}"
+            self._act_update(
+                session.task_id, review_act, state="failed",
+                summary=session.review_content[:240], callback=session.event_callback,
+            )
         session.review_done = True
         self.tasks.update(session.task_id, review=session.review_content)
 
@@ -1387,6 +1497,12 @@ class AgentOrchestrator:
             session.main_content = ""
             repair_task = self.tasks.update(session.task_id, status="running", phase="researching_failure")
             self._emit(session, "task", task=repair_task.as_dict())
+            act = self._act(
+                session.task_id, "retry", "Retrying",
+                f"Verification failed — starting repair round {session.repair_cycles}",
+                callback=session.event_callback,
+            )
+            self._act_update(session.task_id, act, state="completed", callback=session.event_callback)
             return None
 
         self._run_review(session)
@@ -1404,6 +1520,23 @@ class AgentOrchestrator:
         )
         task = self.tasks.get(session.task_id)
         self._emit(session, "task", task=task.as_dict())
+        summary_bits = [
+            f"{len(task.files_changed)} file(s) modified",
+            f"{len(current_round)} verification(s)",
+            f"{session.profile.id}",
+            f"{session.steps} step(s)",
+        ]
+        act = self._act(
+            session.task_id, "complete",
+            "Complete" if status == "completed" else "Completed with Warnings",
+            " · ".join(summary_bits),
+            details={"status": status, "files_changed": list(task.files_changed)[:40],
+                     "model_id": session.profile.id},
+            callback=session.event_callback,
+        )
+        self._act_update(session.task_id, act, state="completed", callback=session.event_callback)
+        if self.activities is not None:
+            self.activities.close_open(session.task_id, "completed")
         self.memory.remember_task(
             task_id=task.id,
             prompt=task.prompt,
@@ -1456,6 +1589,8 @@ class AgentOrchestrator:
             steps=session.steps,
         )
         self._emit(session, "task", task=task.as_dict())
+        if self.activities is not None:
+            self.activities.close_open(session.task_id, "interrupted")
         self._record_outcome(session, "cancelled")
         self._close_session(session.task_id)
         return self._result(session)
@@ -1468,6 +1603,12 @@ class AgentOrchestrator:
         tool_call pairing are preserved for providers that require them).
         """
         budget_tokens = int(getattr(session.profile, "context_window", 0) or 0) or 8192
+        if getattr(self.config, "runtime_dynamic_context", True):
+            try:
+                from ..runtime.tuner import recommended_context
+                budget_tokens = recommended_context(session.profile) or budget_tokens
+            except Exception:
+                pass
         char_budget = max(8000, int(budget_tokens * 3.0))
         msgs = session.messages
         total = sum(len(str(m.get("content") or "")) for m in msgs)
@@ -1524,9 +1665,47 @@ class AgentOrchestrator:
             )
             self._emit(session, "task", task=error_task.as_dict())
             self._emit(session, "error", error=error_task.error)
+            if self.activities is not None:
+                self.activities.close_open(session.task_id, "failed")
+            act = self._act(
+                session.task_id, "error", "Error",
+                error_task.error[:240], callback=session.event_callback,
+            )
+            self._act_update(session.task_id, act, state="failed", callback=session.event_callback)
             self._record_outcome(session, "error")
             self._close_session(session.task_id)
             raise
+
+    _TOOL_ACTIVITY_CATEGORY = {
+        "run_shell": "command", "terminal_run": "command", "shell": "command",
+        "read_file": "file", "list_files": "file", "open_file": "file",
+        "search_files": "search", "grep": "search", "find": "search",
+        "write_file": "editing", "apply_patch": "editing", "edit_file": "editing",
+        "web_search": "research", "fetch_url": "fetch", "search_documentation": "research",
+        "run_tests": "testing", "run_build": "building",
+        "git_status": "git", "git_diff": "git", "git_commit": "git",
+        "image_generate": "image", "generate_image": "image",
+    }
+
+    def _tool_activity_category(self, name: str) -> str:
+        return self._TOOL_ACTIVITY_CATEGORY.get(name, "tool")
+
+    def _tool_activity_title(self, name: str) -> str:
+        cat = self._tool_activity_category(name)
+        return {
+            "command": "Command", "file": "Reading File", "search": "Searching Files",
+            "editing": "Editing", "research": "Researching", "fetch": "Fetching URL",
+            "testing": "Testing", "building": "Building", "git": "Git",
+            "image": "Image Generation",
+        }.get(cat, "Tool")
+
+    @staticmethod
+    def _tool_activity_summary(name: str, args: dict[str, Any]) -> str:
+        for key in ("command", "path", "file", "query", "url"):
+            value = args.get(key)
+            if value:
+                return str(value)[:240]
+        return name.replace("_", " ")
 
     def _emit_tool_start(self, session: _AgentSession, name: str, args: dict[str, Any]) -> None:
         redactor = self.tools.context.get("redactor")
@@ -1564,16 +1743,26 @@ class AgentOrchestrator:
                     sink(tool_name, chunk)
 
             self.tools.context["stream_sink"] = dispatch
-        self.tools.context["stream_sinks"][session.task_id] = (
-            lambda tool_name, chunk: self._emit(
-                session, "tool_output", tool=tool_name,
-                chunk=redactor(chunk) if redactor else chunk,
-            )
-        )
+        def _on_tool_output(tool_name: str, chunk: str) -> None:
+            shown = redactor(chunk) if redactor else chunk
+            self._emit(session, "tool_output", tool=tool_name, chunk=shown)
+            if self.activities is not None:
+                act_id = session.tool_activities.get(tool_name)
+                if act_id:
+                    self.activities.append_output(session.task_id, act_id, shown)
+                    row = self.activities._find(session.task_id, act_id)
+                    if row is not None:
+                        self._emit(session, "activity", activity=row)
+
+        self.tools.context["stream_sinks"][session.task_id] = _on_tool_output
         if self._task_cancelled(session):
             return self._cancel_result(session)
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
         self._emit(session, "task", task=working_task.as_dict())
+        for key in [k for k in session.tool_activities if k.startswith("approval:")]:
+            act_id = session.tool_activities.pop(key)
+            self._act_update(session.task_id, {"id": act_id}, state="completed",
+                             summary="approved — continuing", callback=session.event_callback)
         session.pending_approval = None
 
         while session.steps < self.config.max_agent_steps:
@@ -1643,6 +1832,12 @@ class AgentOrchestrator:
                         }
                         session.model_events.append(retry_event)
                         self._emit(session, "model", event=retry_event)
+                        act = self._act(
+                            session.task_id, "retry", "Retrying",
+                            f"Rejected answer discarded — retry {session.refusal_retries}/{refusal_retry_limit}",
+                            callback=session.event_callback,
+                        )
+                        self._act_update(session.task_id, act, state="completed", callback=session.event_callback)
                         session.messages.append({
                             "role": "system",
                             "content": (
@@ -1970,6 +2165,11 @@ class AgentOrchestrator:
         event_callback = self._logging_callback(task.id, event_callback)
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")
+        plan_act = self._act(
+            task.id, "planning", "Planning",
+            "Inspecting request and selecting workflow",
+            callback=event_callback,
+        )
 
         project_id = str(self.checkpoints.workspace)
         conversation_id = (
@@ -2077,13 +2277,43 @@ class AgentOrchestrator:
             "reasons": decision.reasons,
         }]
         self._safe_emit(event_callback, {"type": "model", "event": model_events[0]})
+        self._act_update(
+            task.id, plan_act, state="completed",
+            summary=f"Routed to {decision.role} · {decision.model_id}",
+            callback=event_callback,
+        )
+        routing_act = self._act(
+            task.id, "routing", "Model Routing",
+            f"{decision.model_id} · {decision.role} · complexity {decision.complexity}",
+            details={"model_id": decision.model_id, "role": decision.role,
+                     "complexity": decision.complexity, "reasons": list(decision.reasons)[:6]},
+            callback=event_callback,
+        )
+        self._act_update(task.id, routing_act, state="completed", callback=event_callback)
         try:
+            try:
+                warm = decision.model_id in set(self.runtime.resident_model_ids())
+            except Exception:
+                warm = False
+            model_act = self._act(
+                task.id, "model",
+                "Model Ready" if warm else "Loading Model",
+                f"{decision.model_id} already resident" if warm else f"Starting {decision.model_id} runtime",
+                callback=event_callback,
+            )
+            activate_started = time.monotonic()
             decision, profile, provider = self._activate_with_fallback(
                 decision,
                 user_text=user_text,
                 mode=mode,
                 model_events=model_events,
                 event_callback=event_callback,
+            )
+            self._act_update(
+                task.id, model_act, state="completed",
+                summary=(f"{profile.id} ready in {time.monotonic() - activate_started:.1f}s"),
+                details={"model_id": profile.id, "role": decision.role, "warm": warm},
+                callback=event_callback,
             )
         except Exception as exc:
             error_task = self.tasks.update(
@@ -2094,6 +2324,10 @@ class AgentOrchestrator:
             )
             self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
             self._safe_emit(event_callback, {"type": "error", "error": error_task.error})
+            if self.activities is not None:
+                self.activities.close_open(task.id, "failed")
+            act = self._act(task.id, "error", "Error", error_task.error[:240], callback=event_callback)
+            self._act_update(task.id, act, state="failed", callback=event_callback)
             raise
         lightweight = decision.role == "utility"
         if self.nexus_brain is not None and self.nexus_brain.initialized:
@@ -2137,6 +2371,18 @@ class AgentOrchestrator:
             if self.nexus_brain is not None and self.nexus_brain.initialized
             else ""
         )
+        if persistent_context or knowledge_context:
+            mem_act = self._act(
+                task.id, "memory", "Searching Memory",
+                "Looking for relevant conversation and project context",
+                callback=event_callback,
+            )
+            memory_bits = sum(1 for ctx in (persistent_context, knowledge_context) if ctx)
+            self._act_update(
+                task.id, mem_act, state="completed",
+                summary=f"{memory_bits} relevant context source(s) applied",
+                callback=event_callback,
+            )
         policy_context = self.policy_prompt()
         clock_context = self.current_time_context()
         timing_context = (
@@ -2162,6 +2408,11 @@ class AgentOrchestrator:
             and (not lightweight or request_class != "stable")
         ):
             try:
+                research_act = self._act(
+                    task.id, "research", "Researching",
+                    f"Checking whether '{user_text[:60]}' needs current evidence",
+                    callback=event_callback,
+                )
                 plan = self.research.plan(user_text, mode=self.config.research_mode)
                 if plan.needed or (
                     self.knowledge_memory is not None
@@ -2170,10 +2421,21 @@ class AgentOrchestrator:
                     research_context = self._auto_research(user_text)
                     self.tasks.update(task.id, research=research_context)
                     self._safe_emit(event_callback, {"type": "research", "research": research_context})
+                    self._act_update(
+                        task.id, research_act, state="completed",
+                        summary=str(research_context.get("summary") or "external evidence retrieved")[:300],
+                        callback=event_callback,
+                    )
                     knowledge_context = (
                         self.knowledge_memory.prompt_context(user_text)
                         if self.knowledge_memory is not None
                         else ""
+                    )
+                else:
+                    self._act_update(
+                        task.id, research_act, state="completed",
+                        summary="existing knowledge is sufficient — no external fetch",
+                        callback=event_callback,
                     )
             except Exception as exc:
                 research_context = {"error": f"{type(exc).__name__}: {exc}"}

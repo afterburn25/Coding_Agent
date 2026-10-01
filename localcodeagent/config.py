@@ -172,6 +172,13 @@ class AgentConfig:
     fast_general_context_chars: int = 9000
     fast_general_output_tokens: int = 1024
     fast_general_long_output_tokens: int = 2048
+    # Performance profile for managed llama.cpp runtimes:
+    # auto (benchmarked/intelligent), quiet, balanced, max.
+    performance_mode: str = "auto"
+    # Scale the launched llama.cpp context window to the model's routing role
+    # (fast general 8K, coding 16K, deep/review 32K) instead of always using
+    # the profile's maximum. Never exceeds the configured context_window.
+    runtime_dynamic_context: bool = True
     # When free memory drops below these floors, the least-recently-used
     # resident model is stopped even inside the idle window (0 disables each).
     memory_pressure_vram_gb: float = 0.0
@@ -252,7 +259,7 @@ def default_config() -> AgentConfig:
                 model="Qwen3-14B-Q4_K_M",
                 model_path="models/Qwen3-14B-Q4_K_M.gguf",
                 roles=["fast_coder", "primary_coder"],
-                context_window=32768,
+                context_window=16384,
                 max_output_tokens=2048,
                 priority=90,
                 runtime="llama_cpp",
@@ -416,6 +423,9 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.fast_general_context_chars = max(500, int(raw.get("fast_general_context_chars", cfg.fast_general_context_chars)))
     cfg.fast_general_output_tokens = max(128, int(raw.get("fast_general_output_tokens", cfg.fast_general_output_tokens)))
     cfg.fast_general_long_output_tokens = max(256, int(raw.get("fast_general_long_output_tokens", cfg.fast_general_long_output_tokens)))
+    perf_mode = str(raw.get("performance_mode", cfg.performance_mode)).strip().lower()
+    cfg.performance_mode = perf_mode if perf_mode in {"auto", "quiet", "balanced", "max"} else "auto"
+    cfg.runtime_dynamic_context = bool(raw.get("runtime_dynamic_context", cfg.runtime_dynamic_context))
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
     cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))

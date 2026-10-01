@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `0cbe0ab`; verified suite: **362 / 362**; CI green on latest push.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **475 / 475** (2 environment skips); see SESSION_HANDOFF.md for the v0.7 fast-lane/tuner/timeline checkpoint.
 
 ## Active version: 0.6.0-dev — Native Nexus Core Desktop Dogfood
 

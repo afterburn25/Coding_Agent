@@ -186,11 +186,66 @@
     renderPerf(data);
   }
 
+  function renderTuning(tuning, mode, models) {
+    const box = $("tuningList");
+    if (!tuning) { box.textContent = "Runtime tuner unavailable."; return; }
+    const caps = tuning.capabilities || [];
+    const spec = tuning.speculative_decoding || "unknown";
+    const results = tuning.results || {};
+    const rows = (models || []).filter((m) => m.runtime === "llama_cpp").map((m) => {
+      const r = results[m.id];
+      const metrics = (r && r.metrics) || {};
+      const bits = [
+        r ? esc(r.source || "heuristic") : "heuristic",
+        metrics.predicted_per_second ? esc(metrics.predicted_per_second) + " tok/s" : "",
+        metrics.ttft_ms != null ? "TTFT " + esc(metrics.ttft_ms) + " ms" : "",
+        metrics.prompt_per_second ? "prompt " + esc(metrics.prompt_per_second) + " tok/s" : "",
+      ].filter(Boolean).join(" · ");
+      return `
+      <div class="proc-row">
+        <span class="name">${esc(m.id)}</span>
+        <span class="muted">${bits || "not yet benchmarked"}</span>
+        <span>
+          <button class="mini-button" data-tune="${esc(m.id)}">Benchmark</button>
+          <button class="mini-button" data-tune-reset="${esc(m.id)}">Reset</button>
+        </span>
+      </div>`;
+    }).join("");
+    box.innerHTML = `
+      <div class="proc-row"><span class="name">llama.cpp</span><span class="muted">${esc(tuning.build || "unknown build")}</span></div>
+      <div class="proc-row"><span class="name">Capabilities</span><span class="muted">${caps.length ? esc(caps.join(" ")) : "not probed"}</span></div>
+      <div class="proc-row"><span class="name">Speculative decoding</span><span class="muted">${esc(String(spec).replaceAll("_", " "))}</span></div>
+      ${rows || '<div class="proc-row muted">No managed llama.cpp profiles.</div>'}`;
+    box.classList.remove("muted");
+    if ($("perfMode")) $("perfMode").value = mode || "auto";
+  }
+
+  async function loadTuning() {
+    const data = await api("/api/tuning");
+    const models = await api("/api/models").catch(() => ({ models: [] }));
+    renderTuning(data, data.performance_mode || "auto", models.models || []);
+  }
+
+  async function tuningAction(body) {
+    await post("/api/tuning", body);
+    await loadTuning();
+  }
+
   async function loadAll() {
-    await Promise.all([loadRuntime(), loadModels(), loadPerf()]).catch((e) => alert(e.message));
+    await Promise.all([loadRuntime(), loadModels(), loadPerf(), loadTuning()]).catch((e) => alert(e.message));
   }
 
   $("refreshAll").addEventListener("click", loadAll);
+  $("tuningList").addEventListener("click", async (e) => {
+    const bench = e.target.closest("[data-tune]");
+    const reset = e.target.closest("[data-tune-reset]");
+    if (bench) { bench.disabled = true; try { await tuningAction({ action: "benchmark", model_id: bench.dataset.tune }); } catch (err) { alert(err.message); } finally { bench.disabled = false; } }
+    if (reset) { reset.disabled = true; try { await tuningAction({ action: "reset", model_id: reset.dataset.tuneReset }); } catch (err) { alert(err.message); } finally { reset.disabled = false; } }
+  });
+  if ($("perfMode")) $("perfMode").addEventListener("change", async (e) => {
+    e.target.disabled = true;
+    try { await tuningAction({ action: "mode", mode: e.target.value }); } catch (err) { alert(err.message); } finally { e.target.disabled = false; }
+  });
   loadAll();
   setInterval(() => loadRuntime().catch(() => {}), 8000);
 })();

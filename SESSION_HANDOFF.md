@@ -21,6 +21,36 @@
 - Runtime/CLI identity is now Nexus Core v0.6; the old `local-code-agent` CLI remains as a compatibility alias.
 - Next development priority is self-hosting reliability: streaming, resume/recovery, GitHub actions, isolated self-test instance, and dogfood tasks.
 
+## v0.7 fast-lane + runtime tuner + activity timeline checkpoint
+
+- Commit `c4fd91a`: fast-lane routing tier — Tier 0 instant answers, dedicated
+  Qwen3-4B utility model (`bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF`, Q4_K_M,
+  2,497,280,736 bytes, sha256 `2fde00ce…464e`), stable/volatile research
+  classification, bounded fast-general context, backend token coalescing
+  (`localcodeagent/streaming.py`), frontend render buffer (rAF flush),
+  structured backend boot markers for the native splash.
+- `localcodeagent/runtime/tuner.py`: capability probe of the bundled
+  llama-server (`--help` flag scan + build string), hardware/model-fingerprinted
+  tuning persistence in `data/runtime_tuning.json`, heuristic +
+  benchmarked flag resolution, safe benchmark runner with rollback, and
+  speculative-decoding status reporting (never enabled without benchmarks).
+- `RuntimeManager._build_command` merges tuned flags (flash attention,
+  `--cache-reuse`, batch/ubatch, threads) without overriding user
+  `extra_args`; `recommended_context()` scales launched `--ctx-size` by role
+  (utility 8K, coding 16K, deep/review 32K) and `_trim_context` budgets to the
+  same window. `launch_probe()` runs unmanaged benchmark servers.
+- `performance_mode` (auto/quiet/balanced/max) persisted via
+  `POST /api/tuning`; `GET /api/tuning` exposes capabilities, speculative
+  status, and per-model results. Models page gained a Runtime Tuning panel
+  with Benchmark/Reset actions and a mode selector.
+- `localcodeagent/workflow/activity.py`: durable structured activity rows
+  (JSONL, bounded output tail, interrupted-on-reload). Orchestrator emits
+  planning/routing/model-load/memory/research/tool/testing/review/retry/
+  approval/error/complete rows; `GET /api/activity` serves them per task.
+- `web/app.js` renders the timeline as expandable rows in the utility rail:
+  active/failed/waiting auto-expand, completed auto-collapse, live elapsed
+  ticking, bounded stdout tail, and restores timelines on reconnect/task click.
+
 ## v0.6 restart recovery + CI checkpoint
 
 - Durable task ledger now distinguishes genuine in-process work from tasks interrupted by an application restart.

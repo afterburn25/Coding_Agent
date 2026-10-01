@@ -538,9 +538,9 @@
       ]
     }
   },
-  "verified_tests": 349,
-  "head": "7f23a22",
-  "test_count": 366,
+  "verified_tests": 475,
+  "head": "pending commit — runtime tuner + activity timeline",
+  "test_count": 475,
   "branding": {
     "canonical_name": "Nexus Core",
     "full_logo": "web/assets/nexus-core-logo.png",
