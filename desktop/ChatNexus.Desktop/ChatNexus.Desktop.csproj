@@ -13,6 +13,9 @@
     <FileVersion>0.6.0.0</FileVersion>
     <AssemblyVersion>0.6.0.0</AssemblyVersion>
     <Authors>Afterburn25</Authors>
+    <Company>Afterburn25</Company>
+    <Copyright>Nexus Core</Copyright>
+    <AssemblyTitle>Nexus Core</AssemblyTitle>
     <Product>Nexus Core</Product>
     <Description>Nexus Core local AI workstation</Description>
   </PropertyGroup>

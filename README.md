@@ -67,6 +67,27 @@ The installer is per-user under Local AppData, creates Start Menu shortcuts, opt
 
 The portable ZIP remains a secondary development/recovery artifact.
 
+### SmartScreen / antivirus download warnings
+
+Windows may show **"Windows protected your PC"** or mark the download as suspicious. That happens because release builds ship **unsigned** — SmartScreen has no publisher reputation for the installer — not because the installer does anything unusual. Mitigations already in the build:
+
+- `NexusCore.exe` carries full assembly metadata (company, product, version).
+- `ChatNexus.Backend.exe` embeds a PyInstaller version resource
+  (`packaging/backend_version.txt`) with publisher/product identity.
+- The Inno installer declares publisher/version info and supports signing.
+
+To ship signed builds, add repository secrets and CI signs `NexusCore.exe`,
+`ChatNexus.Backend.exe`, the installer, and the uninstaller automatically:
+
+- `NEXUS_CODESIGN_PFX_B64` — base64-encoded Authenticode PFX
+- `NEXUS_CODESIGN_PASSWORD` — the PFX password
+- *or* `NEXUS_CODESIGN_THUMBPRINT` — SHA-1 thumbprint of a cert already in
+  the runner's store
+
+For unsigned builds: click **More info → Run anyway**. You can also submit
+the installer to Microsoft's false-positive review so Defender/SmartScreen
+stops flagging it: <https://www.microsoft.com/en-us/wdsi/filesubmission>
+
 ## Native Windows desktop application
 
 The normal Windows deliverable is **`NexusCore.exe`**, not a browser launcher. `NexusCore.exe` is a self-contained **.NET 8 WinForms** application using **Microsoft WebView2**. It starts `backend/ChatNexus.Backend.exe` as a hidden child process and connects the desktop UI to that backend over loopback only. The HTTP service is private implementation plumbing, not the user-facing product.

@@ -83,6 +83,27 @@ jobs:
           Installer: Inno Setup LZMA2 update-aware bootstrap with verified coding-model downloads (tools install in-app)
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
+      - name: Prepare code-signing certificate (optional)
+        shell: pwsh
+        env:
+          NEXUS_CODESIGN_PFX_B64: ${{ secrets.NEXUS_CODESIGN_PFX_B64 }}
+          NEXUS_CODESIGN_PASSWORD: ${{ secrets.NEXUS_CODESIGN_PASSWORD }}
+          NEXUS_CODESIGN_THUMBPRINT: ${{ secrets.NEXUS_CODESIGN_THUMBPRINT }}
+        run: |
+          # Signing is optional: without secrets the build ships unsigned, which
+          # is what SmartScreen/Defender flags. Provide either a base64-encoded
+          # PFX (+ password) or a thumbprint for a cert already in the store.
+          if ($env:NEXUS_CODESIGN_PFX_B64) {
+            $PfxPath = Join-Path $env:RUNNER_TEMP "nexus-codesign.pfx"
+            [IO.File]::WriteAllBytes($PfxPath, [Convert]::FromBase64String($env:NEXUS_CODESIGN_PFX_B64))
+            Add-Content -Path $env:GITHUB_ENV -Value "NEXUS_CODESIGN_PFX=$PfxPath"
+            Write-Host "Code-signing PFX materialized (path recorded in env)."
+          } elseif ($env:NEXUS_CODESIGN_THUMBPRINT) {
+            Write-Host "Code-signing via certificate thumbprint."
+          } else {
+            Write-Host "No signing secrets configured — build will be unsigned."
+          }
+
       - name: Build single-file Nexus Core installer
         shell: pwsh
         run: |
@@ -90,10 +111,35 @@ jobs:
           if (-not (Test-Path $Iscc)) {
             $Iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
           }
-          & $Iscc "/DAppVersion=0.6.0-dev" "/DAppNumericVersion=0.6.0.0" "installer\ChatNexus.iss"
+          $IssArgs = @("/DAppVersion=0.6.0-dev", "/DAppNumericVersion=0.6.0.0")
+          $SignTool = $null
+          $KitsBin = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          if (Test-Path $KitsBin) {
+            $SignTool = Get-ChildItem $KitsBin -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -like "*x64*" } | Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $SignTool) {
+            $SignToolCmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($SignToolCmd) { $SignTool = $SignToolCmd.Source }
+          }
+          $CertPart = $null
+          if ($env:NEXUS_CODESIGN_THUMBPRINT) {
+            $CertPart = "/sha1 $($env:NEXUS_CODESIGN_THUMBPRINT)"
+          } elseif ($env:NEXUS_CODESIGN_PFX -and (Test-Path $env:NEXUS_CODESIGN_PFX)) {
+            $CertPart = "/f `"$($env:NEXUS_CODESIGN_PFX)`""
+            if ($env:NEXUS_CODESIGN_PASSWORD) { $CertPart += " /p `"$($env:NEXUS_CODESIGN_PASSWORD)`"" }
+          }
+          if ($SignTool -and $CertPart) {
+            $IssArgs += "/DWithSign"
+            $IssArgs += "/Sstandard=`"$SignTool`" sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 $CertPart `$f"
+          }
+          & $Iscc @IssArgs "installer\ChatNexus.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
           $Setup = "dist\installer\NexusCore-Setup-0.6.0-dev-Windows-x64.exe"
           if (-not (Test-Path $Setup)) { throw "Installer EXE was not produced" }
+          # With /DWithSign, Inno's SignTool=standard already signed the setup
+          # EXE and the embedded uninstaller during compilation.
 
       - name: Smoke-test fresh install and update preservation
         shell: pwsh

@@ -36,6 +36,7 @@ Write-Host "Building hidden Python agent backend..."
     --onedir `
     --console `
     --name "ChatNexus.Backend" `
+    --version-file "$Root\packaging\backend_version.txt" `
     --distpath $BackendDist `
     --workpath $BackendWork `
     --specpath "build" `
@@ -131,5 +132,41 @@ if (-not (Test-Path (Join-Path $PackageRoot "Source\.git\HEAD"))) { throw "Bundl
 Write-Host "Smoke testing native NexusCore.exe -> hidden backend integration..."
 $Smoke = Start-Process -FilePath (Join-Path $PackageRoot "NexusCore.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
 if ($Smoke.ExitCode -ne 0) { throw "Native NexusCore.exe self-test failed with exit code $($Smoke.ExitCode)" }
+
+# Optional Authenticode signing. Unsigned binaries are what SmartScreen and
+# AV heuristics flag on download — set NEXUS_CODESIGN_THUMBPRINT (a cert in
+# the machine/user store) or NEXUS_CODESIGN_PFX (+ NEXUS_CODESIGN_PASSWORD)
+# to sign the shipped executables. Without a cert this step is skipped.
+$SignTool = $null
+$KitsBin = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+if (Test-Path $KitsBin) {
+    $SignTool = Get-ChildItem $KitsBin -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -like "*x64*" } |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $SignTool) {
+    $SignToolCmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($SignToolCmd) { $SignTool = $SignToolCmd.Source }
+}
+$SignCertArgs = @()
+if ($env:NEXUS_CODESIGN_THUMBPRINT) {
+    $SignCertArgs = @("/sha1", $env:NEXUS_CODESIGN_THUMBPRINT)
+} elseif ($env:NEXUS_CODESIGN_PFX -and (Test-Path $env:NEXUS_CODESIGN_PFX)) {
+    $SignCertArgs = @("/f", $env:NEXUS_CODESIGN_PFX)
+    if ($env:NEXUS_CODESIGN_PASSWORD) { $SignCertArgs += @("/p", $env:NEXUS_CODESIGN_PASSWORD) }
+}
+if ($SignTool -and $SignCertArgs.Count -gt 0) {
+    foreach ($Target in @(
+        (Join-Path $PackageRoot "NexusCore.exe"),
+        (Join-Path $PackageRoot "backend\ChatNexus.Backend.exe")
+    )) {
+        Write-Host "Signing $Target..."
+        & $SignTool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /v @SignCertArgs $Target
+        if ($LASTEXITCODE -ne 0) { throw "signtool failed for $Target" }
+    }
+} else {
+    Write-Host "No code-signing certificate configured (NEXUS_CODESIGN_THUMBPRINT or NEXUS_CODESIGN_PFX) — binaries ship unsigned."
+}
 
 Write-Host "Native Nexus Core desktop package ready: $PackageRoot"

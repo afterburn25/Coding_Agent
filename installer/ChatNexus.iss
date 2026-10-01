@@ -64,6 +64,10 @@ MinVersion=10.0.17763
 ChangesEnvironment=no
 ChangesAssociations=no
 Uninstallable=yes
+#ifdef WithSign
+SignTool=standard
+SignedUninstaller=yes
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked

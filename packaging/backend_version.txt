@@ -1,0 +1,30 @@
+# PyInstaller Windows version resource for ChatNexus.Backend.exe.
+# Unsigned binaries with no version info score worst on SmartScreen/AV
+# heuristics — this gives the backend a proper publisher/product identity.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 6, 0, 0),
+    prodvers=(0, 6, 0, 0),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [StringStruct('CompanyName', 'Afterburn25'),
+         StringStruct('FileDescription', 'Nexus Core Backend'),
+         StringStruct('FileVersion', '0.6.0.0'),
+         StringStruct('InternalName', 'ChatNexus.Backend'),
+         StringStruct('LegalCopyright', 'Nexus Core'),
+         StringStruct('OriginalFilename', 'ChatNexus.Backend.exe'),
+         StringStruct('ProductName', 'Nexus Core'),
+         StringStruct('ProductVersion', '0.6.0.0')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
