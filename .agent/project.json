@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 345,
+  "test_checkpoint": 346,
   "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling — MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -513,7 +513,7 @@
       ]
     }
   },
-  "verified_tests": 345,
-  "head": "a804bc9",
-  "test_count": 345
+  "verified_tests": 346,
+  "head": "7acfc8e",
+  "test_count": 346
 }
