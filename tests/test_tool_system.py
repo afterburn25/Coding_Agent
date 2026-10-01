@@ -3,11 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import sys
+
 from localcodeagent.jobs import JobManager, normalize_state
 from localcodeagent.permissions import KNOWN_PERMISSIONS, PROFILES, PermissionManager
 from localcodeagent.processes import ManagedService, ProcessManager
 from localcodeagent.tools.base import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from localcodeagent.tools.filesystem import register_filesystem_tools
+from localcodeagent.tools.plugins import PluginManifest, load_plugin_manifests
 
 
 def _registry(**permissions):
@@ -160,6 +163,86 @@ class JobManagerTests(unittest.TestCase):
         self.assertEqual(normalize_state("generating"), "running")
         self.assertEqual(normalize_state("finished"), "completed")
         self.assertEqual(normalize_state(""), "queued")
+
+
+class PluginManifestTests(unittest.TestCase):
+    def _write(self, directory: Path, name: str, payload: dict) -> Path:
+        path = directory / name
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_manifest_requires_id_and_name(self):
+        with self.assertRaises(ValueError):
+            PluginManifest.from_dict({"id": "x"})
+        manifest = PluginManifest.from_dict({"id": "ffmpeg", "name": "FFmpeg"})
+        self.assertEqual(manifest.category, "utilities")
+
+    def test_manifest_tool_registers_and_invokes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mdir = root / "manifests"
+            mdir.mkdir()
+            self._write(mdir, "echo.json", {
+                "id": "echo_tool",
+                "name": "Echo Tool",
+                "version": "1.2.3",
+                "category": "utilities",
+                "capabilities": ["echo"],
+                "executables": [sys.executable],
+                "permissions": ["shell.execute"],
+                "invoke": {
+                    "command": [sys.executable, "-c", "import sys; print(' '.join(sys.argv[1:]))", "{args}"],
+                    "input_schema": {"type": "object", "properties": {"args": {"type": "array"}}},
+                    "timeout_seconds": 30,
+                },
+            })
+            reg = _registry(**{"shell.execute": "allow"})
+            result = load_plugin_manifests(mdir, reg, workspace=root)
+            self.assertEqual(result["loaded"], ["echo_tool"])
+            self.assertEqual(result["errors"], [])
+
+            manifest = reg.manifest("echo_tool")
+            self.assertEqual(manifest["source"], "manifest")
+            self.assertEqual(manifest["version"], "1.2.3")
+            self.assertEqual(manifest["install_status"], "installed")
+            self.assertTrue(manifest["callable"])
+
+            out = json.loads(reg.execute("echo_tool", {"args": ["hello", "nexus"]}))
+            self.assertEqual(out["exit_code"], 0)
+            self.assertIn("hello nexus", out["stdout"])
+
+    def test_manifest_without_invoke_is_not_callable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mdir = root / "manifests"
+            mdir.mkdir()
+            self._write(mdir, "catalog_only.json", {
+                "id": "blender",
+                "name": "Blender",
+                "category": "3d",
+                "executables": ["definitely-not-a-real-exe-xyz"],
+            })
+            reg = _registry(**{"shell.execute": "allow"})
+            result = load_plugin_manifests(mdir, reg)
+            self.assertEqual(result["loaded"], ["blender"])
+            manifest = reg.manifest("blender")
+            self.assertEqual(manifest["category"], "3d")
+            self.assertEqual(manifest["install_status"], "missing")
+            self.assertFalse(manifest["callable"])
+            self.assertNotIn("blender", {s["function"]["name"] for s in reg.schemas()})
+            self.assertIn("ERROR", reg.execute("blender", {}))
+
+    def test_invalid_manifest_reports_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            mdir = Path(td)
+            self._write(mdir, "bad.json", {"name": "no id"})
+            result = load_plugin_manifests(mdir, _registry())
+            self.assertEqual(result["loaded"], [])
+            self.assertEqual(len(result["errors"]), 1)
+
+    def test_missing_directory_is_clean(self):
+        result = load_plugin_manifests(Path("does/not/exist"), _registry())
+        self.assertEqual(result, {"loaded": [], "errors": []})
 
 
 class ProcessManagerTests(unittest.TestCase):

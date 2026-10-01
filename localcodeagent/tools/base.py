@@ -95,6 +95,9 @@ class ToolRegistry:
         self._tools: dict[str, ToolSpec] = {}
         self._disabled: set[str] = set()
         self._usage: dict[str, dict[str, Any]] = {}
+        # Registry-owned metadata for manifest/plugin tools (invocable flag,
+        # install spec, manifest path). Built-in tools have no entry.
+        self._plugin_meta: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self.state_path = Path(state_path).resolve() if state_path else None
         # Mutable execution context is set by the orchestrator before tool calls.
@@ -118,7 +121,11 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def schemas(self) -> list[dict[str, Any]]:
-        return [t.openai_schema() for t in self._tools.values() if t.name not in self._disabled]
+        return [
+            t.openai_schema()
+            for t in self._tools.values()
+            if t.name not in self._disabled and self._plugin_meta.get(t.name, {}).get("invocable", True)
+        ]
 
     def names(self) -> list[str]:
         return sorted(self._tools)
@@ -201,6 +208,9 @@ class ToolRegistry:
             "has_health_check": spec.health_check is not None,
             "use_count": int(usage.get("count", 0)),
             "last_used_at": usage.get("last_used_at"),
+            "callable": bool(self._plugin_meta.get(name, {}).get("invocable", True)),
+            "install": dict(self._plugin_meta.get(name, {}).get("install") or {}),
+            "manifest_path": str(self._plugin_meta.get(name, {}).get("manifest_path") or ""),
         }
 
     def manifests(self) -> list[dict[str, Any]]:

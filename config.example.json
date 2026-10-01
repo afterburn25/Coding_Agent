@@ -80,6 +80,7 @@
   "permission_profile": "custom",
   "tools_state_path": "data/tools_state.json",
   "jobs_path": "data/jobs.json",
+  "tool_manifests_dir": "tools/manifests",
   "max_agent_steps": 12,
   "review_after_changes": true,
   "auto_verify_after_changes": true,

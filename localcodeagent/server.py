@@ -26,6 +26,7 @@ from .permissions import PermissionManager
 from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
 from .tools.base import TOOL_CATEGORIES, ToolRegistry
+from .tools.plugins import load_plugin_manifests
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.github import register_github_tools
@@ -176,6 +177,10 @@ class AppState:
         register_web_tools(self.tools, runtime_root=runtime_root)
         if config.image_enabled:
             register_image_tools(self.tools, self.images)
+        manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
+        if not manifests_dir.is_absolute():
+            manifests_dir = runtime_root / manifests_dir
+        self.plugin_manifests = load_plugin_manifests(manifests_dir, self.tools, workspace=self.workspace)
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -786,6 +791,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "tools": self.state.tools.manifests(),
                 "categories": TOOL_CATEGORIES,
+                "plugins": self.state.plugin_manifests,
             })
             return
         if path.startswith("/api/tools/health/"):
