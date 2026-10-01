@@ -1,5 +1,7 @@
 # Session Handoff — Chat Nexus / Coding_Agent
 
+> **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
+
 ## Canonical product/UI identity
 
 - Product name: **Chat Nexus**.

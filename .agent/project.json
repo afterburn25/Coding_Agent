@@ -5,7 +5,7 @@
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
   "test_checkpoint": 188,
-  "next_milestone": "Dogfood the verified 188-test Ed25519 Nexus Brain end-to-end: initialize creator Brain, sync staged learning, export public read-only Brain, build a private seeded installer, verify clean-install continuity and same-creator signed updates, then add creator-key backup/recovery and Brain audit/history tooling.",
+  "next_milestone": "Devin takeover: dogfood the verified 188-test Ed25519 Nexus Brain lifecycle end-to-end, verify public seeded install + same-creator signed updates + model-replacement continuity, then implement creator signing-key backup/recovery and signed Brain audit/history.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -386,5 +386,47 @@
     "installer_seed_public_only": true,
     "installer_seed_build_validation": true,
     "adult_content_image_gate": true
+  },
+  "takeover": {
+    "owner": "Devin",
+    "start_here": "DEVIN_START_HERE.md",
+    "branch": "main",
+    "repository_head": "f19fc58bc047c3aa822e441226c4fcb8f6663c2b",
+    "verified_code_checkpoint": "b1d9a079a08a2aec5cf8a80485083e2c10388456",
+    "verified_test_count": 188,
+    "verified_ci_run_id": 36796088939,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36796088939",
+    "verified_artifacts": [
+      {
+        "id": 11133807708,
+        "name": "Chat-Nexus-Setup-0.6.0-dev-Windows-x64",
+        "size_bytes": 75555341
+      },
+      {
+        "id": 11133708132,
+        "name": "Chat-Nexus-v0.6.0-dev-Windows-x64",
+        "size_bytes": 118918524
+      },
+      {
+        "id": 11134055863,
+        "name": "chat-nexus-v0.6-dogfood",
+        "size_bytes": 346477
+      }
+    ],
+    "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
+    "required_read_order": [
+      "DEVIN_START_HERE.md",
+      "README.md",
+      "PROJECT_STATUS.md",
+      "ARCHITECTURE.md",
+      "SESSION_HANDOFF.md",
+      ".agent/project.json"
+    ],
+    "must_update_before_end": [
+      "PROJECT_STATUS.md",
+      "SESSION_HANDOFF.md",
+      ".agent/project.json",
+      "DEVIN_START_HERE.md when takeover-critical state changes"
+    ]
   }
 }

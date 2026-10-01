@@ -1,5 +1,7 @@
 # Project Status
 
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head at handoff: `f19fc58b`; latest fully verified code checkpoint: `b1d9a079`; verified suite: **188/188**; Windows CI run: `36796088939`.
+
 ## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
 
 ### Stable capabilities retained from v0.1–v0.3

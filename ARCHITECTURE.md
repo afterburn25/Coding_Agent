@@ -1,5 +1,7 @@
 # Architecture
 
+> For the current Devin takeover checkpoint, security invariants, CI/artifacts, and next steps, read `DEVIN_START_HERE.md` first.
+
 ## Core layers
 
 1. **UI** — local ChatGPT-style interface plus runtime and task workflow panels.
@@ -9,7 +11,8 @@
 5. **Model Orchestrator** — maps task scope/phase to model roles and resource-fit candidates.
 6. **Runtime Manager** — managed inference processes, health/recovery, hardware telemetry, and residency.
 7. **Model Growth Lab** — review candidates, dataset export, offline training manifests, evaluation, promotion, and rollback.
-8. **Providers** — normalize OpenAI-compatible inference APIs.
+8. **Nexus Brain** — model-independent creator-signed long-term memory, general/conversational learning, autobiographical continuity, signed subroutines, emotional profile, self-model, public read-only export/verification, and same-creator signed updates.
+9. **Providers** — normalize OpenAI-compatible inference APIs.
 
 ```text
 UI

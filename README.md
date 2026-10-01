@@ -4,7 +4,9 @@ Chat Nexus is a native local-first AI coding workstation for Windows with automa
 
 **GitHub source of truth:** `afterburn25/Coding_Agent`
 
-Future development sessions should begin with `README.md`, `PROJECT_STATUS.md`, `ARCHITECTURE.md`, and `SESSION_HANDOFF.md`.
+> **Devin takeover:** start with `DEVIN_START_HERE.md`. It records the exact current head, verified code checkpoint, CI/artifacts, Brain security invariants, important source files, and next executable work.
+
+Future development sessions should begin with `DEVIN_START_HERE.md`, then `README.md`, `PROJECT_STATUS.md`, `ARCHITECTURE.md`, and `SESSION_HANDOFF.md`.
 
 ## Current development version
 
