@@ -612,6 +612,10 @@ class AgentOrchestrator:
             except RuntimeError as exc:
                 if attempts >= self.config.runtime_recovery_attempts:
                     raise
+                # A 4xx rejection means the server is healthy and answered —
+                # restarting it cannot fix a malformed/oversized request.
+                if getattr(exc, "status", 0) and 400 <= int(exc.status) < 500:
+                    raise
                 attempts += 1
                 if profile.runtime == "llama_cpp":
                     endpoint = self.runtime.recover(profile)
@@ -1679,7 +1683,13 @@ class AgentOrchestrator:
                 budget_tokens = recommended_context(session.profile) or budget_tokens
             except Exception:
                 pass
-        char_budget = max(8000, int(budget_tokens * 3.0))
+        # Reserve the completion budget — llama.cpp rejects when
+        # prompt + max_tokens exceeds n_ctx, so the prompt alone must fit
+        # under (budget - output). ~2.6 chars/token is a safer estimate for
+        # code-heavy content than 3.0.
+        output_reserve = int(getattr(session.profile, "max_output_tokens", 0) or 0) or 2048
+        prompt_tokens = max(2048, budget_tokens - output_reserve)
+        char_budget = max(8000, int(prompt_tokens * 2.6))
         msgs = session.messages
         total = sum(len(str(m.get("content") or "")) for m in msgs)
         if total <= char_budget:

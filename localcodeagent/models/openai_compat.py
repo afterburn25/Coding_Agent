@@ -9,6 +9,89 @@ from typing import Any, Callable
 from .provider import ProviderResponse
 from ..config import ModelProfile
 
+import re
+
+_CONTEXT_OVERFLOW_RE = re.compile(
+    r"exceeds the (available context|maximum context|context size)|"
+    r"context (window|length|size).*exceed|prompt.*too (long|large)|"
+    r"request.*too many tokens",
+    re.IGNORECASE,
+)
+_OVERFLOW_NUMBERS_RE = re.compile(r"\((\d+)\s*tokens\).*?\((\d+)\s*tokens\)", re.DOTALL)
+
+
+class ModelHTTPError(RuntimeError):
+    """HTTP failure from the model endpoint with the server's own reason.
+
+    Distinct from a connection failure — the endpoint was reached and
+    rejected the request, so ``server_message`` carries the model's
+    diagnostic (e.g. context overflow details).
+    """
+
+    def __init__(self, url: str, status: int, server_message: str, raw_body: str = "") -> None:
+        super().__init__(
+            f"Model endpoint {url} rejected the request (HTTP {status}): {server_message or raw_body[:300]}"
+        )
+        self.url = url
+        self.status = status
+        self.server_message = server_message
+        self.raw_body = raw_body
+
+
+def _http_error_detail(exc: urllib.error.HTTPError) -> tuple[str, str]:
+    """Extract (server_message, raw_body) from an HTTPError."""
+    try:
+        raw_body = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        raw_body = ""
+    server_message = ""
+    try:
+        parsed = json.loads(raw_body)
+        err = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(err, dict):
+            server_message = str(err.get("message") or "")
+        elif isinstance(err, str):
+            server_message = err
+        if not server_message and isinstance(parsed, dict):
+            server_message = str(parsed.get("detail") or parsed.get("message") or "")
+    except ValueError:
+        server_message = raw_body[:300]
+    return server_message, raw_body
+
+
+def _shrink_messages_for_context(messages: list[dict[str, Any]], overage_tokens: int) -> list[dict[str, Any]]:
+    """Trim a request to fit the server's reported context.
+
+    System messages are always kept. Oldest non-system bodies are stubbed
+    first (roles/tool_call pairing preserved); if still over budget the
+    oldest whole messages are dropped after the system block.
+    """
+    # ~3 chars/token: convert the token overage into chars to remove, with
+    # a 25% safety margin since our estimate is approximate.
+    chars_to_remove = int(overage_tokens * 3 * 1.25)
+    shrunk = [dict(m) for m in messages]
+    head = 0
+    while head < len(shrunk) and shrunk[head].get("role") == "system":
+        head += 1
+    stub = "[elided to fit context window]"
+    removed = 0
+    for m in shrunk[head:]:
+        if removed >= chars_to_remove:
+            break
+        content = str(m.get("content") or "")
+        if len(content) > 400:
+            removed += len(content) - len(stub)
+            m["content"] = stub
+    if removed < chars_to_remove:
+        # Still over: drop the oldest non-system messages entirely.
+        keep = shrunk[:head]
+        tail = shrunk[head:]
+        while tail and removed < chars_to_remove:
+            dropped = tail.pop(0)
+            removed += len(str(dropped.get("content") or "")) + 40
+        shrunk = keep + tail
+    return shrunk
+
 
 class OpenAICompatibleProvider:
     def __init__(self, profile: ModelProfile, timeout: int = 300, endpoint: str | None = None) -> None:
@@ -41,13 +124,37 @@ class OpenAICompatibleProvider:
             },
         )
         started_at = time.monotonic()
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                raw = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
-            ) from exc
+        repaired = 0
+        while True:
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                server_message, raw_body = _http_error_detail(exc)
+                # Self-repair: the server tells us exactly how oversized the
+                # request was — shrink the prompt to fit and retry instead
+                # of failing the task.
+                if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
+                    repaired += 1
+                    nums = _OVERFLOW_NUMBERS_RE.search(server_message)
+                    overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
+                    payload["messages"] = _shrink_messages_for_context(messages, overage)
+                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                    messages = payload["messages"]
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                    continue
+                raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(
+                    f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
+                ) from exc
+        if repaired:
+            raw.setdefault("auto_repaired", {"context_shrink": repaired})
         choices = raw.get("choices") or []
         if not choices:
             raise RuntimeError(f"Model endpoint returned no choices: {raw}")
@@ -98,8 +205,34 @@ class OpenAICompatibleProvider:
         timings: dict[str, Any] = {}
         started_at = time.monotonic()
         first_token_at = 0.0
+        repaired = 0
+        while True:
+            try:
+                resp = urllib.request.urlopen(req, timeout=self.timeout)
+                break
+            except urllib.error.HTTPError as exc:
+                server_message, raw_body = _http_error_detail(exc)
+                if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
+                    repaired += 1
+                    nums = _OVERFLOW_NUMBERS_RE.search(server_message)
+                    overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
+                    payload["messages"] = _shrink_messages_for_context(messages, overage)
+                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                    messages = payload["messages"]
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                 "Accept": "text/event-stream"})
+                    continue
+                raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(
+                    f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
+                ) from exc
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with resp:
                 content_type = str(resp.headers.get("Content-Type") or "").lower()
                 if "text/event-stream" not in content_type:
                     raw = json.loads(resp.read().decode("utf-8"))
@@ -160,8 +293,9 @@ class OpenAICompatibleProvider:
                         if fn.get("arguments"):
                             current["function"]["arguments"] += str(fn["arguments"])
         except urllib.error.URLError as exc:
+            # Mid-stream connection drops still surface as reachability errors.
             raise RuntimeError(
-                f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
+                f"Lost connection to model endpoint {url} mid-stream. Details: {exc}"
             ) from exc
 
         if chunk_count == 0:
@@ -172,6 +306,7 @@ class OpenAICompatibleProvider:
         raw: dict[str, Any] = {
             "stream": True,
             "finish_reason": finish_reason,
+            **({"auto_repaired": {"context_shrink": repaired}} if repaired else {}),
             "chunks": chunk_count,
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "time_to_first_token_ms": round((first_token_at - started_at) * 1000, 1) if first_token_at else None,

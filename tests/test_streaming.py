@@ -110,6 +110,59 @@ class ModelStreamingTests(unittest.TestCase):
 
         self.assertEqual(captured["payload"]["temperature"], 0.65)
 
+    def test_context_overflow_400_self_repairs_and_retries(self):
+        """llama.cpp's 'exceeds the available context size' 400 must trigger
+        an automatic shrink+retry instead of failing the task."""
+        import io
+        import urllib.error
+
+        err_body = json.dumps({"error": {"message":
+            "request (16718 tokens) exceeds the available context size (16384 tokens), try increasing it"}})
+        http_err = urllib.error.HTTPError(
+            "http://127.0.0.1:9999/v1/chat/completions", 400, "Bad Request", {}, io.BytesIO(err_body.encode()))
+        ok = _Response(lines=[
+            _line({"choices": [{"delta": {"content": "recovered"}, "finish_reason": "stop"}]}),
+            b"data: [DONE]\n",
+        ])
+        attempts = []
+
+        def fake_urlopen(req, timeout):
+            attempts.append(json.loads(req.data.decode("utf-8")))
+            if len(attempts) == 1:
+                raise http_err
+            return ok
+
+        big_messages = [{"role": "system", "content": "sys"}] + [
+            {"role": "assistant", "content": "x" * 5000} for _ in range(6)
+        ] + [{"role": "user", "content": "latest"}]
+        with patch("localcodeagent.models.openai_compat.urllib.request.urlopen", side_effect=fake_urlopen):
+            result = self._provider().complete_stream(messages=big_messages)
+
+        self.assertEqual(result.message["content"], "recovered")
+        self.assertEqual(result.raw["auto_repaired"]["context_shrink"], 1)
+        self.assertEqual(len(attempts), 2)
+        # System + latest user survive; oldest bodies were stubbed or dropped.
+        retry_msgs = attempts[1]["messages"]
+        self.assertEqual(retry_msgs[0]["content"], "sys")
+        self.assertEqual(retry_msgs[-1]["content"], "latest")
+        retry_chars = sum(len(str(m.get("content") or "")) for m in retry_msgs)
+        orig_chars = sum(len(str(m.get("content") or "")) for m in attempts[0]["messages"])
+        self.assertLess(retry_chars, orig_chars)
+
+    def test_non_overflow_400_raises_with_server_message(self):
+        import io
+        import urllib.error
+        from localcodeagent.models.openai_compat import ModelHTTPError
+
+        err_body = json.dumps({"error": {"message": "invalid tool schema"}})
+        http_err = urllib.error.HTTPError(
+            "http://127.0.0.1:9999/v1/chat/completions", 400, "Bad Request", {}, io.BytesIO(err_body.encode()))
+        with patch("localcodeagent.models.openai_compat.urllib.request.urlopen", side_effect=[http_err]):
+            with self.assertRaises(ModelHTTPError) as ctx:
+                self._provider().complete(messages=[{"role": "user", "content": "hi"}])
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertIn("invalid tool schema", str(ctx.exception))
+
     def test_streamed_tool_call_fragments_are_reassembled(self):
         response = _Response(lines=[
             _line({"choices": [{"delta": {"role": "assistant", "tool_calls": [{
