@@ -124,6 +124,10 @@ class EndToEndAgentTests(unittest.TestCase):
                 id="fake", endpoint=endpoint, model="fake-model",
                 roles=["primary_coder", "utility", "fast_coder"], runtime="external")],
             process_watchdog=False,
+            # Auto-research would try a real outbound GitHub request with a
+            # ~15s timeout on every coding prompt — orthogonal to what these
+            # tests exercise and the reason each run stalls ~15s.
+            research_enabled=False,
         )
         return AppState(cfg, Path(td), Path(td) / ".runtime")
 

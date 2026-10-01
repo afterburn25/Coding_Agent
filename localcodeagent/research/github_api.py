@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -49,6 +50,10 @@ class GitHubApiClient:
         self._token = token or os.environ.get(token_env, "")
         self.timeout = max(3, int(timeout))
         self._opener = opener
+        # After a transport-level failure (offline, DNS dead, firewall drop)
+        # every subsequent call would pay the full timeout again. Remember
+        # unavailability briefly so consecutive tasks fail fast instead.
+        self._down_until = 0.0
 
     @property
     def authenticated(self) -> bool:
@@ -77,12 +82,15 @@ class GitHubApiClient:
             path = "/" + path
         query = urlencode({k: v for k, v in (params or {}).items() if v not in {None, ""}})
         url = self.base_url + path + ("?" + query if query else "")
+        if self._down_until > time.monotonic():
+            raise GitHubApiError("GitHub API unavailable (recent transport failure)")
         request = Request(url, headers=self._headers(), method="GET")
         try:
             if self._opener is None:
                 response = urlopen(request, timeout=self.timeout)
             else:
                 response = self._opener(request, self.timeout)
+            self._down_until = 0.0
             with response as handle:
                 raw = handle.read()
                 data = json.loads(raw.decode("utf-8")) if raw else None
@@ -106,6 +114,7 @@ class GitHubApiClient:
                 detail = f"GitHub API rate limit exhausted; reset={reset or 'unknown'}"
             raise GitHubApiError(detail, status=exc.code, rate_remaining=remaining, rate_reset=reset) from exc
         except (URLError, TimeoutError, OSError) as exc:
+            self._down_until = time.monotonic() + 120.0
             raise GitHubApiError(f"GitHub API unavailable: {exc}") from exc
 
     @staticmethod

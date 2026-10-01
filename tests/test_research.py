@@ -179,6 +179,22 @@ class GitHubApiTests(unittest.TestCase):
         self.assertEqual(rate["remaining"], 4999)
         self.assertNotIn("TEST_TOKEN", str(rate))
 
+    def test_transport_failure_marks_client_down_briefly(self):
+        from urllib.error import URLError
+        calls = []
+        def dead_opener(request, timeout):
+            calls.append(1)
+            raise URLError("no route to host")
+
+        client = GitHubApiClient(opener=dead_opener)
+        with self.assertRaises(GitHubApiError):
+            client.request("/rate_limit")
+        # Second call fails fast without touching the network again.
+        with self.assertRaises(GitHubApiError) as ctx:
+            client.request("/rate_limit")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("unavailable", str(ctx.exception))
+
     def test_api_provider_maps_repo_scoped_issue_as_upstream_evidence(self):
         class Client:
             authenticated = False
