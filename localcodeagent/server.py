@@ -2330,7 +2330,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "Cannot undo a task while it is actively running or waiting for approval."}, 409)
                     return
                 restored = self.state.checkpoints.restore(task_id)
-                self.state.tasks.update(task_id, reverted=True, status="reverted", phase="done")
+                task = self.state.tasks.update(task_id, reverted=True, status="reverted", phase="done")
+                self.state.events.publish("task", {"event": "reverted", "task": task.as_dict()})
+                try:
+                    self.state.tasks.append_log(task_id, "## task reverted/done\n")
+                    self.state.tasks.flush_log(task_id)
+                except Exception:
+                    pass
                 try:
                     self.state.repository_index.build()
                 except Exception:
