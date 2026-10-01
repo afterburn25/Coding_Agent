@@ -2120,6 +2120,13 @@ class Handler(BaseHTTPRequestHandler):
                             if current is not None:
                                 payload["task_id"] = current.id
                             self.state.events.publish("error", payload)
+                            # _drive_or_error already logs errors raised inside the
+                            # drive loop; this covers crashes before a session exists
+                            # (e.g. model-selection failure leaves an empty transcript).
+                            if current is not None and current.status != "error":
+                                self.state.tasks.append_log(
+                                    current.id, f"## error: {err[:300]}\n")
+                                self.state.tasks.flush_log(current.id)
                         except Exception:
                             pass
                     finally:
