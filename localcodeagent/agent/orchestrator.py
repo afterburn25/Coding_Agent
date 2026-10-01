@@ -680,6 +680,12 @@ class AgentOrchestrator:
                 prompt_per_second=float(timings.get("prompt_per_second") or 0.0),
                 time_to_first_token_ms=raw.get("time_to_first_token_ms"),
             )
+            self._emit(session, "perf", model_id=session.profile.id,
+                       predicted_per_second=round(tps, 2),
+                       completion_tokens=completion_tokens,
+                       prompt_tokens=prompt_tokens,
+                       elapsed_seconds=round(elapsed, 3),
+                       time_to_first_token_ms=raw.get("time_to_first_token_ms"))
         except Exception:
             pass
 
