@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -147,7 +148,7 @@ class PerCommandCancelTests(unittest.TestCase):
             threading.Thread(target=click_stop, daemon=True).start()
             started = time.monotonic()
             result = reg.execute("run_shell", {
-                "command": "python -c \"import time; time.sleep(30)\"",
+                "command": f"{sys.executable} -c \"import time; time.sleep(30)\"",
                 "timeout": 45,
             })
             self.assertLess(time.monotonic() - started, 20)

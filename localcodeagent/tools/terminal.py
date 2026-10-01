@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -182,17 +183,22 @@ def run_process_streaming(
                     pass
 
     def _kill_tree() -> None:
-        # shell=True wraps the command in cmd.exe — killing only the wrapper
+        # shell=True wraps the command in a shell — killing only the wrapper
         # orphans the real child and leaves it holding our pipes open, so the
-        # cancel path hangs until the child exits on its own. On Windows
-        # taskkill /T terminates the whole tree; elsewhere kill is sufficient
-        # because there's no shell wrapper between us and the child.
+        # cancel path hangs until the child exits on its own. Windows uses
+        # taskkill /T; POSIX runs the child in its own process group so the
+        # whole tree dies with one killpg.
         if sys.platform.startswith("win"):
             try:
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                     capture_output=True, timeout=10,
                 )
+            except Exception:
+                pass
+        else:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
             except Exception:
                 pass
         try:
@@ -204,6 +210,9 @@ def run_process_streaming(
     proc = subprocess.Popen(
         argv, cwd=str(cwd), env=env, shell=shell, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags,
+        # Own process group on POSIX so _kill_tree can killpg the wrapper and
+        # every child it spawned.
+        start_new_session=not sys.platform.startswith("win"),
     )
     threads = [
         threading.Thread(target=_reader, args=(proc.stdout, out_parts, "stdout"), daemon=True),
@@ -230,13 +239,16 @@ def run_process_streaming(
             break
         time.sleep(min(0.15, remaining))
     timed_out = timed_out or cancelled
-    for t in threads:
-        t.join(timeout=5)
+    # Close our read ends first — a killed child's orphan may hold the write
+    # side open, and closing unblocks the reader threads' read() immediately
+    # instead of waiting out the join timeout.
     for stream in (proc.stdout, proc.stderr):
         try:
             stream.close()
         except Exception:
             pass
+    for t in threads:
+        t.join(timeout=5)
     return proc.returncode, "".join(out_parts), "".join(err_parts), timed_out
 
 
