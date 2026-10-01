@@ -274,6 +274,7 @@ internal sealed class MainForm : Form
     private bool _closing;
     private bool _backendRestarting;
     private int _backendRestartCount;
+    private DateTimeOffset _lastBackendRestart = DateTimeOffset.MinValue;
 
     public MainForm(string appDir)
     {
@@ -371,7 +372,15 @@ internal sealed class MainForm : Form
         _backendRestarting = true;
         try
         {
+            // Reset the counter when the previous crash was a while ago — a
+            // stable backend that dies occasionally over a long session should
+            // keep recovering; only a crash loop hits the limit.
+            if (DateTimeOffset.Now - _lastBackendRestart > TimeSpan.FromMinutes(5))
+            {
+                _backendRestartCount = 0;
+            }
             _backendRestartCount += 1;
+            _lastBackendRestart = DateTimeOffset.Now;
             _backend?.Dispose();
             _backend = null;
 
