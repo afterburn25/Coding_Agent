@@ -2249,6 +2249,8 @@ class Handler(BaseHTTPRequestHandler):
                 ).start()
 
                 stream_open = True
+                seen_model_id = ""
+                seen_model_role = ""
                 while stream_open and (not done.is_set() or not events.empty()):
                     try:
                         event = events.get(timeout=1.0)
@@ -2258,11 +2260,20 @@ class Handler(BaseHTTPRequestHandler):
                             "elapsed_seconds": int(time.monotonic() - started),
                             "phase": current.phase if current else "starting",
                             "status": current.status if current else "starting",
-                            "model_id": current.model_id if current else "",
-                            "model_role": current.model_role if current else "",
+                            "model_id": (current.model_id if current else "") or seen_model_id,
+                            "model_role": (current.model_role if current else "") or seen_model_role,
                         }
                         stream_open = self._sse_event("heartbeat", heartbeat)
                         continue
+
+                    # The task ledger may not stamp model_id until the drive
+                    # loop's first update — remember the selection event so
+                    # heartbeats stop reporting an empty model meanwhile.
+                    if event.get("type") == "model":
+                        inner = event.get("event")
+                        if isinstance(inner, dict):
+                            seen_model_id = str(inner.get("model_id") or inner.get("to") or "") or seen_model_id
+                            seen_model_role = str(inner.get("role") or "") or seen_model_role
 
                     event_type = str(event.get("type") or "message")
                     payload = {k: v for k, v in event.items() if k != "type"}

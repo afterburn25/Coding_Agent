@@ -425,6 +425,10 @@ class EndToEndAgentTests(unittest.TestCase):
             done = [d for k, d in events if k == "task" and isinstance(d.get("task"), dict)
                     and d["task"].get("status") == "completed"]
             self.assertTrue(done, "no completed task event on the stream")
+            # Heartbeats must name the model once routing selected it.
+            heartbeats = [d for k, d in events if k == "heartbeat"]
+            self.assertTrue(any(h.get("model_id") == "fake" for h in heartbeats),
+                            "heartbeats never reported the selected model")
 
             # The API ledger reflects the same completed task.
             with urllib.request.urlopen(f"{base}/api/tasks", timeout=10) as resp:
