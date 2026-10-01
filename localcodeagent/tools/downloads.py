@@ -112,6 +112,9 @@ class ToolDownloadManager:
                 try:
                     job = self.jobs.get(existing)
                     if job.state not in {"completed", "failed", "cancelled"}:
+                        if job.kind == "tool_remove":
+                            return {"ok": False,
+                                    "error": "a removal is running — wait for it to finish"}
                         return {"ok": True, "job_id": job.id, "tool": tool_id, "deduplicated": True}
                 except KeyError:
                     pass
@@ -141,6 +144,58 @@ class ToolDownloadManager:
             return True
         except KeyError:
             return False
+
+    def uninstall(self, tool_id: str, display_name: str,
+                  install: dict[str, Any]) -> dict[str, Any]:
+        """Delete an archive-installed tool's dest dir and partial download."""
+        try:
+            dest = self._resolve_dest(str(install.get("dest") or tool_id))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with self._lock:
+            existing = self._active.get(tool_id)
+            if existing:
+                try:
+                    if self.jobs.get(existing).state not in {
+                            "completed", "failed", "cancelled"}:
+                        return {"ok": False,
+                                "error": "an install is running — cancel it first"}
+                except KeyError:
+                    pass
+            record = self.jobs.submit(
+                "tool_remove", f"Remove {display_name}",
+                metadata={"tool": tool_id, "phase": "queued", "dest": str(dest)})
+            self._active[tool_id] = record.id
+
+        def _run() -> None:
+            part = self.install_root / ".agent" / "downloads" / f"{tool_id}.part"
+            try:
+                self.jobs.update(record.id, state="running", status="removing",
+                                 detail=str(dest))
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                elif dest.exists():
+                    dest.unlink()
+                part.unlink(missing_ok=True)
+                self.jobs.update(record.id, state="completed", status="finished",
+                                 progress=1.0, detail=str(dest))
+            except Exception as exc:
+                try:
+                    self.jobs.update(record.id, state="failed",
+                                     error=str(exc)[:300])
+                except KeyError:
+                    pass
+            finally:
+                with self._lock:
+                    self._active.pop(tool_id, None)
+                if self.on_done is not None:
+                    try:
+                        self.on_done(tool_id)
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": record.id, "tool": tool_id}
 
     def shutdown(self) -> None:
         for flag in self._cancel_flags.values():

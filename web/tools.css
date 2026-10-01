@@ -8,6 +8,8 @@
 .full-select{width:100%;margin:0;background:#171c24;color:#eef1f6;border:1px solid #303744;border-radius:8px;padding:8px}
 .mini-button{border:1px solid #303744;background:#1a2230;color:#dfe7f5;border-radius:8px;padding:7px 12px;font-size:11px;cursor:pointer;margin-top:8px}
 .mini-button:hover{border-color:#2877ff;color:#fff}
+.mini-button.danger{border-color:#5a2b2b;color:#f0a8a8}
+.mini-button.danger:hover{border-color:#d05050;color:#fff}
 .perm-summary{font-size:10px;line-height:1.5;margin-top:8px}
 .category-list{display:grid;gap:4px}
 .category-item{display:flex;justify-content:space-between;font-size:11px;color:#b8c1d0;padding:4px 6px;border-radius:6px;cursor:pointer;border:1px solid transparent}

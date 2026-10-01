@@ -67,7 +67,7 @@
     renderTools();
   }
 
-  const INSTALL_KINDS = new Set(["tool_install", "image_install", "model_install"]);
+  const INSTALL_KINDS = new Set(["tool_install", "tool_remove", "image_install", "model_install"]);
   const ACTIVE_STATES = new Set(["queued", "preparing", "running", "waiting_for_tool"]);
   const activeInstalls = () => jobs.filter((j) => INSTALL_KINDS.has(j.kind) && ACTIVE_STATES.has(j.state));
   const installJobFor = (kind, key, value) =>
@@ -189,6 +189,26 @@
         }
       });
     });
+    $("toolList").querySelectorAll("[data-uninstall]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          if (!confirm(`Remove ${btn.dataset.uninstall}? This deletes its installed files.`)) return;
+          let res = await post("/api/tools/uninstall", { tool: btn.dataset.uninstall });
+          if (res.needs_approval) {
+            if (!confirm(`Removing ${btn.dataset.uninstall} needs the packages.install permission — allow?`)) return;
+            res = await post("/api/tools/uninstall", { tool: btn.dataset.uninstall, approve: true });
+          }
+          if (!res.ok) { alert(res.error || "remove not available"); return; }
+          btn.textContent = "Removing…";
+          setTimeout(() => { loadTools(); loadJobs(); }, 800);
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
     $("toolList").querySelectorAll("[data-cancel-job]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
@@ -223,9 +243,14 @@
     const spec = t.install || {};
     const job = installJobFor("tool_install", "tool", t.id) ||
       installJobFor("tool_install", "tool", t.name);
+    const rmJob = installJobFor("tool_remove", "tool", t.id) ||
+      installJobFor("tool_remove", "tool", t.name);
+    const busy = job || rmJob;
     const installable = spec.package || spec.method === "archive";
     const osOk = t.os_supported !== false;
-    const statusChip = job
+    const statusChip = rmJob
+      ? '<span class="chip installing">Removing…</span>'
+      : job
       ? '<span class="chip installing">Installing…</span>'
       : !osOk
         ? `<span class="chip missing">${esc((t.supported_os || []).join("/") || "other OS")} only</span>`
@@ -251,13 +276,14 @@
           <div class="tool-name">${esc(t.display_name)} <span class="tool-id">${esc(t.id)} · v${esc(t.version)} · ${esc(t.provider)}</span></div>
           <div class="tool-desc">${esc(t.description)}</div>
           <div class="tool-meta">${chips}${t.use_count ? `<span class="chip">used ${t.use_count}×</span>` : ""}</div>
-          ${job ? toolProgressHtml(job) : ""}
+          ${busy ? toolProgressHtml(busy) : ""}
         </div>
         <div class="tool-actions">
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
           ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
-          ${!job && osOk && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
-          ${!job && osOk && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button" data-install="${esc(t.name)}" title="Re-download and reinstall ${esc(installTitle)}">Reinstall</button>` : ""}
+          ${!busy && osOk && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
+          ${!busy && osOk && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button" data-install="${esc(t.name)}" title="Re-download and reinstall ${esc(installTitle)}">Reinstall</button>` : ""}
+          ${!busy && t.install_status === "installed" && spec.method === "archive" ? `<button class="mini-button danger" data-uninstall="${esc(t.name)}" title="Delete ${esc(spec.dest || "installed files")} and any partial download">Remove</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
       </div>`;

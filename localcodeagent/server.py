@@ -1148,6 +1148,33 @@ class AppState:
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name, "method": str(install.get("method") or "")}
 
+    def uninstall_tool(self, tool_id: str, *, approve: bool = False) -> dict:
+        """Remove an archive-installed tool's files (tracked job).
+
+        Only archive-method tools support automated removal — package-manager
+        tools are owned by their managers and report manual instructions.
+        """
+        spec = self.tools.get(tool_id)
+        if spec is None:
+            match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
+            if match is None:
+                raise KeyError(f"unknown tool '{tool_id}'")
+            spec = self.tools.get(match["name"])
+        manifest = self.tools.manifest(spec.name)
+        install = manifest.get("install") or {}
+        if str(install.get("method") or "").strip().lower() != "archive":
+            return {"ok": False,
+                    "error": "automated removal is available for archive-installed tools only"}
+        mode = self.permission_manager.effective("packages.install")
+        if mode == "deny":
+            return {"ok": False, "error": "packages.install permission is denied"}
+        if mode == "ask" and not approve:
+            return {"ok": False, "needs_approval": True, "permission": "packages.install",
+                    "tool": spec.name, "action": "uninstall"}
+        if approve and self.permission_manager.level("packages.install") == "session":
+            self.permission_manager.grant_session("packages.install")
+        return self.tool_downloads.uninstall(spec.name, spec.display_name, install)
+
     def jobs_payload(self) -> dict:
         image = self.images.summary() if self.config.image_enabled else {}
         catalog_jobs: list = []
@@ -2558,6 +2585,21 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 try:
                     result = self.state.install_tool(tool_id, approve=bool(body.get("approve", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                status = 200 if result.get("ok") else (403 if "denied" in str(result.get("error", "")) else 200)
+                self._json(result, status)
+                return
+
+            if path == "/api/tools/uninstall":
+                tool_id = str(body.get("tool", "")).strip()
+                if not tool_id:
+                    self._json({"error": "tool is required"}, 400)
+                    return
+                try:
+                    result = self.state.uninstall_tool(
+                        tool_id, approve=bool(body.get("approve", False)))
                 except KeyError as exc:
                     self._json({"error": str(exc)}, 404)
                     return

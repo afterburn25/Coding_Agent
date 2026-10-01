@@ -183,6 +183,39 @@ class ToolDownloadManagerTests(unittest.TestCase):
         self.assertIn(f"bytes={len(blob) // 2}-", _FileHandler.ranges_seen)
         self.assertEqual((self.root / "tools_x" / "demo" / "a.txt").read_bytes(), b"payload")
 
+    def test_uninstall_removes_dest_marker_and_part(self):
+        blob = _make_zip(self.root / "pkg.zip", {"demo/a.txt": b"x"})
+        result, _ = self._install(blob)
+        self._wait_job(result["job_id"])
+        dest = self.root / "tools_x"
+        self.assertTrue((dest / ".chatnexus-version").is_file())
+        part = self.root / ".agent" / "downloads" / "demo.part"
+        part.write_bytes(b"partial")
+        res = self.mgr.uninstall("demo", "Demo Tool", {"dest": "tools_x"})
+        self.assertTrue(res["ok"], res)
+        job = self._wait_job(res["job_id"])
+        self.assertEqual(job.state, "completed")
+        self.assertFalse(dest.exists())
+        self.assertFalse(part.exists())
+
+    def test_uninstall_refuses_during_active_install(self):
+        _FileHandler.chunk_delay = 0.05
+        _FileHandler.payload = b"x" * (1024 * 1024)
+        result, _ = self._install(
+            _FileHandler.payload, url=f"http://127.0.0.1:{self.port}/slow")
+        self.assertTrue(
+            _wait(lambda: self.jobs.get(result["job_id"]).state == "running", 10))
+        res = self.mgr.uninstall("demo", "Demo Tool", {"dest": "tools_x"})
+        self.assertFalse(res["ok"])
+        self.assertIn("install is running", res["error"])
+        self.mgr.cancel(result["job_id"])
+        self._wait_job(result["job_id"])
+
+    def test_uninstall_dest_must_stay_inside_install_root(self):
+        res = self.mgr.uninstall("demo", "Demo Tool", {"dest": "../escape"})
+        self.assertFalse(res["ok"])
+        self.assertTrue((self.root.parent).is_dir())  # nothing deleted
+
     def test_http_urls_require_localhost(self):
         result, _ = self._install(b"x", url="http://example.com/pkg.zip")
         self.assertFalse(result["ok"])
@@ -313,6 +346,21 @@ class ServerInstallFlowTests(unittest.TestCase):
                 self.assertTrue(_wait(
                     lambda: state.tools.get("demo").install_status == "installed", 5))
                 self.assertTrue((root / "demo_tool" / ".chatnexus-version").is_file())
+
+                # Full lifecycle: uninstall removes files and status flips back.
+                rm = state.uninstall_tool("demo")
+                if rm.get("needs_approval"):
+                    rm = state.uninstall_tool("demo", approve=True)
+                self.assertTrue(rm.get("ok"), rm)
+                ok = _wait(
+                    lambda: state.jobs.get(rm["job_id"]).state in {"completed", "failed"},
+                    15)
+                self.assertTrue(ok)
+                self.assertEqual(state.jobs.get(rm["job_id"]).state, "completed",
+                                 state.jobs.get(rm["job_id"]).error)
+                self.assertTrue(_wait(
+                    lambda: state.tools.get("demo").install_status == "missing", 5))
+                self.assertFalse((root / "demo_tool").exists())
             finally:
                 state.tool_downloads.shutdown()
                 server.shutdown()

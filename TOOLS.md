@@ -142,14 +142,21 @@ Drop JSON files into `tools/manifests/` (configurable via
   `ComfyUI_windows_portable/ComfyUI/main.py`) for payloads that live inside the
   app directory rather than on PATH. All listed files must exist for
   `install_status: "installed"`.
-- `install.method: "archive"` — downloads `url` (HTTPS required) to a `.part`
-  file, verifies `sha256`, extracts `format` (`zip`/`tar.gz`/`tar.bz2`/`7z`,
-  or `file` to install the download verbatim) into `dest` under the app root,
-  then writes a `.chatnexus-version` marker. Progress (overall, download,
-  extraction, current file/path) streams on the job record; `7z` extraction
-  uses the OS `tar.exe` (libarchive) when present, else py7zr. `pip` installs
-  use the backend interpreter in development and a managed runtime (ComfyUI
-  embedded Python, `{app}/python`) in packaged builds.
+- `install.method: "archive"` — downloads `url` (HTTPS required) to a
+  per-tool `.part` file under `.agent/downloads/`, verifies `sha256`, extracts
+  `format` (`zip`/`tar.gz`/`tar.bz2`/`7z`, or `file` to install the download
+  verbatim) into `dest` under the app root, then writes a
+  `.chatnexus-version` marker. A cancelled/failed download keeps its `.part`
+  so a retried install resumes via HTTP `Range` (with 416/restart fallbacks).
+  Progress (overall, download, extraction, current file/path) streams on the
+  job record, throttled to ~4 emissions/sec; `7z` extraction uses the OS
+  `tar.exe` (libarchive) when present, else py7zr. `pip` installs use the
+  backend interpreter in development and a managed runtime (ComfyUI embedded
+  Python, `{app}/python`) in packaged builds.
+- Archive tools can be removed in-app: `POST /api/tools/uninstall` deletes the
+  `dest` tree, the version marker, and any `.part`, as a `tool_remove` job
+  under the same `packages.install` permission gate. Package-manager tools
+  report manual removal (their package manager owns the files).
 
 ## API
 
@@ -160,6 +167,7 @@ GET  /api/tools/route/<capability> ranked routing candidates + exclusion reasons
 GET  /api/tools/telemetry          recent routing decisions
 POST /api/tools/state              {"tool": "read_file", "enabled": false}
 POST /api/tools/install            {"tool": "comfyui"} — package-manager or archive install job
+POST /api/tools/uninstall          {"tool": "comfyui"} — archive tools: delete dest + .part
 GET  /api/permissions              profile + levels + session grants
 POST /api/permissions/level        {"permission": "shell.execute", "level": "session"}
 POST /api/permissions/profile      {"profile": "offline"}
