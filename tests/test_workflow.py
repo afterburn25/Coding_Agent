@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -891,9 +892,11 @@ class _RepeatToolProvider:
         self.remaining = tool_calls
         self.tool_name = tool_name
         self.calls = 0
+        self.messages = []
 
     def complete(self, *, messages, tools=None):
         self.calls += 1
+        self.messages = list(messages)
         if self.remaining > 0:
             self.remaining -= 1
             return ProviderResponse(message={
@@ -1020,6 +1023,45 @@ class AutonomousContinuationTests(unittest.TestCase):
 
             self.assertEqual(result.task["status"], "cancelled")
             self.assertEqual(marks, [])
+
+    def test_hung_tool_times_out_instead_of_stalling(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"probe.execute": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+                agent_tool_timeout_seconds=1,
+            )
+            tools = ToolRegistry(config.permissions)
+
+            def slow(args):
+                time.sleep(3)
+                return "TOO_LATE"
+
+            tools.register(ToolSpec("slow_tool", "test", {"type": "object", "properties": {}},
+                                    "probe.execute", slow))
+            index = RepositoryIndex(root)
+            index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            provider = _RepeatToolProvider(tool_calls=1, tool_name="slow_tool")
+            agent._provider_for = lambda _: provider
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "completed")
+            tool_text = "\n".join(str(m.get("content", "")) for m in provider.messages)
+            self.assertIn("timed out", tool_text)
 
 
 if __name__ == "__main__":

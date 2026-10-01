@@ -1010,6 +1010,24 @@ class AgentOrchestrator:
         "filesystem.read", "network.read", "browser.control", "image.read", "github.read",
     })
 
+    def _execute_tool(self, name: str, args: dict[str, Any]) -> str:
+        """Execute a tool with a hard timeout so a hung tool cannot stall the run.
+
+        Python cannot kill a running thread, so a timed-out call leaks one
+        daemon thread — bounded and preferable to blocking the agent loop
+        indefinitely.
+        """
+        timeout = max(1.0, float(getattr(self.config, "agent_tool_timeout_seconds", 1800.0)))
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(self.tools.execute, name, args)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            return f"ERROR: tool '{name}' timed out after {int(timeout)}s; it may still be running in the background"
+        finally:
+            pool.shutdown(wait=False)
+
     def _process_pending_calls(self, session: _AgentSession) -> AgentResult | None:
         while session.pending_call_index < len(session.pending_calls):
             if self._task_cancelled(session):
@@ -1058,7 +1076,7 @@ class AgentOrchestrator:
                     if self._task_cancelled(session):
                         results.append("CANCELLED: task cancelled by user before this call ran")
                         continue
-                    results.append(self.tools.execute(n, a))
+                    results.append(self._execute_tool(n, a))
             for (c, n, a), result in zip(batch, results):
                 self._append_tool_result(session, c, n, a, result)
             session.pending_call_index = j
