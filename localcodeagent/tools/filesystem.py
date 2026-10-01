@@ -39,7 +39,8 @@ def register_filesystem_tools(
     root = workspace.resolve()
 
     def track_mutation(path: Path) -> None:
-        task_id = str(registry.context.get("task_id", ""))
+        tls = registry.context.get("task_tls")
+        task_id = str(getattr(tls, "task_id", "") or registry.context.get("task_id", ""))
         if not task_id:
             return
         if checkpoints:
