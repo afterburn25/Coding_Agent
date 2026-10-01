@@ -228,7 +228,19 @@ foundation the later phases build on:
   nav Tools link now points at it.
 - Docs: `TOOLS.md`, `PERMISSIONS.md`.
 
-Unit checkpoint: **210 tests passing** (188 baseline + 22 new).
+Phase 2 kickoff (developer tools):
+
+- **Terminal tools.** `terminal_run` executes through powershell/pwsh/cmd/bash/sh
+  with env vars, workspace-bounded cwd, timeouts, and background mode; a
+  `TerminalTracker` ties background processes to Job Manager jobs with
+  `terminal_processes` / `terminal_kill`.
+- **Ripgrep search.** `search_code`, `search_filename`, `search_error` return
+  structured JSON matches and fall back to a built-in scanner when `rg` is absent.
+- **Build adapters.** `detect_build_system`, `build_project`,
+  `configure_project`, `run_tests`, `clean_project` cover CMake, Meson, Cargo,
+  .NET, MSBuild, npm/pnpm/yarn, Gradle, Maven, Make, and Python.
+
+Unit checkpoint: **221 tests passing** (188 baseline + 33 new).
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.

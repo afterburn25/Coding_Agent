@@ -10,12 +10,31 @@ installed, removed, enabled, disabled, and replaced independently.
 Agent Orchestrator
   ↓
 Tool Registry  (localcodeagent/tools/base.py)
-  ├─ built-in tools (filesystem, shell, git, github, research, web, image)
+  ├─ built-in tools (filesystem, shell, terminal, search, build,
+  │                  git, github, research, web, image)
   ├─ manifest tools  (tools/manifests/*.json)
   └─ MCP tools       (planned; same registry surface)
   ↓
 PermissionManager  (localcodeagent/permissions.py)
 ```
+
+## Built-in tool families
+
+- **Terminal** (`localcodeagent/tools/terminal.py`): `terminal_run` executes
+  commands through a chosen shell (powershell/pwsh/cmd/bash/sh/auto) with
+  env vars, workspace-bounded cwd, timeout, and optional background mode.
+  Background processes are tracked by `TerminalTracker`, surfaced as Job
+  Manager jobs, listed by `terminal_processes`, and killed by
+  `terminal_kill`. All gated by `shell.execute`.
+- **Search** (`localcodeagent/tools/search.py`): `search_code`,
+  `search_filename`, `search_error` use ripgrep when on PATH with a Python
+  fallback scanner; results are structured JSON `{path, line, text}`.
+- **Build** (`localcodeagent/tools/buildsys.py`): `detect_build_system`,
+  `build_project`, `configure_project`, `run_tests`, `clean_project` detect
+  CMake/Meson/Cargo/.NET/MSBuild/npm/pnpm/yarn/Gradle/Maven/Make/Python and
+  run the right command through the permission gate.
+- Existing filesystem, shell (`run_shell`), git, github, research, web, and
+  image families are unchanged.
 
 Every registered tool has a manifest:
 

@@ -10,7 +10,10 @@ from localcodeagent.permissions import KNOWN_PERMISSIONS, PROFILES, PermissionMa
 from localcodeagent.processes import ManagedService, ProcessManager
 from localcodeagent.tools.base import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from localcodeagent.tools.filesystem import register_filesystem_tools
+from localcodeagent.tools.buildsys import detect_build_systems, register_build_tools
 from localcodeagent.tools.plugins import PluginManifest, load_plugin_manifests
+from localcodeagent.tools.search import find_ripgrep, register_search_tools
+from localcodeagent.tools.terminal import TerminalTracker, register_terminal_tools, resolve_shell
 
 
 def _registry(**permissions):
@@ -274,6 +277,124 @@ class ProcessManagerTests(unittest.TestCase):
         mgr.register(ManagedService(id="svc:x", name="x", kind="internal"))
         with self.assertRaises(ValueError):
             mgr.action("svc:x", "start")
+
+
+class TerminalToolTests(unittest.TestCase):
+    def _reg(self, ws: Path, jobs=None):
+        reg = ToolRegistry({"shell.execute": "allow"})
+        tracker = register_terminal_tools(reg, ws, jobs=jobs, log_dir=ws / ".logs")
+        return reg, tracker
+
+    def test_resolve_shell_auto_and_invalid(self):
+        shell_id, argv = resolve_shell("auto")
+        self.assertIn(shell_id, {"powershell", "cmd", "bash"})
+        self.assertTrue(argv)
+        with self.assertRaises(ValueError):
+            resolve_shell("fakeshell")
+
+    def test_terminal_run_returns_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            reg, _ = self._reg(ws)
+            out = reg.execute("terminal_run", {"command": "echo hello"})
+            data = json.loads(out)
+            self.assertEqual(data["exit_code"], 0)
+            self.assertIn("hello", data["stdout"])
+            self.assertIn("shell", data)
+
+    def test_terminal_run_rejects_cwd_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            ws.mkdir()
+            reg, _ = self._reg(ws)
+            out = reg.execute("terminal_run", {"command": "echo x", "cwd": ".."})
+            self.assertTrue(out.startswith("ERROR"))
+
+    def test_terminal_background_tracked_and_killable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            jobs = JobManager(ws / "jobs.json")
+            reg, tracker = self._reg(ws, jobs=jobs)
+            shell_id, _ = resolve_shell("auto")
+            command = "ping -n 30 127.0.0.1" if shell_id in {"powershell", "cmd"} else "sleep 30"
+            out = json.loads(reg.execute("terminal_run", {"command": command, "background": True, "shell": shell_id}))
+            self.assertTrue(out["ok"])
+            rows = tracker.list()
+            self.assertEqual(rows[0]["state"], "running")
+            killed = json.loads(reg.execute("terminal_kill", {"job_id": out["job_id"]}))
+            self.assertTrue(killed["ok"])
+            self.assertEqual(jobs.get(out["job_id"]).state, "cancelled")
+
+    def test_permission_denied_blocks_terminal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = ToolRegistry({"shell.execute": "deny"})
+            register_terminal_tools(reg, Path(tmp), log_dir=Path(tmp) / ".logs")
+            out = reg.execute("terminal_run", {"command": "echo nope"})
+            self.assertTrue(out.startswith("PERMISSION_DENIED"))
+
+
+class SearchToolTests(unittest.TestCase):
+    def _ws(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "app.py").write_text("def main():\n    raise ValueError('boom')\n", encoding="utf-8")
+        (tmp / "lib").mkdir()
+        (tmp / "lib" / "helper.py").write_text("VALUE_ERROR_MSG = 'boom'\n", encoding="utf-8")
+        return tmp
+
+    def _reg(self, ws):
+        reg = ToolRegistry({"filesystem.read": "allow"})
+        register_search_tools(reg, ws)
+        return reg
+
+    def test_search_code_finds_matches(self):
+        ws = self._ws()
+        out = json.loads(self._reg(ws).execute("search_code", {"query": "boom"}))
+        self.assertGreaterEqual(out["count"], 2)
+        self.assertIn(out["engine"], {"ripgrep", "python"})
+        paths = {m["path"].replace("\\", "/") for m in out["matches"]}
+        self.assertTrue(any(p.endswith("app.py") for p in paths))
+
+    def test_search_filename(self):
+        ws = self._ws()
+        out = json.loads(self._reg(ws).execute("search_filename", {"pattern": "*.py"}))
+        self.assertEqual(out["count"], 2)
+
+    def test_search_error_extracts_terms(self):
+        ws = self._ws()
+        out = json.loads(self._reg(ws).execute(
+            "search_error", {"error_text": "Traceback...\nValueError: boom\n"}))
+        self.assertTrue(out["terms"])
+        self.assertGreaterEqual(out["count"], 1)
+
+
+class BuildSystemToolTests(unittest.TestCase):
+    def test_detect_python_and_npm(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "package.json").write_text("{}", encoding="utf-8")
+        systems = detect_build_systems(tmp)
+        ids = [s["id"] for s in systems]
+        self.assertIn("npm", ids)
+        (tmp / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+        ids = [s["id"] for s in detect_build_systems(tmp)]
+        self.assertIn("python", ids)
+        # npm should outrank python in auto ordering (listed first)
+        self.assertLess(ids.index("npm"), ids.index("python"))
+
+    def test_detect_tool_and_unknown_system_error(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "Makefile").write_text("all:\n\ttrue\n", encoding="utf-8")
+        reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
+        register_build_tools(reg, tmp)
+        detected = json.loads(reg.execute("detect_build_system", {}))
+        self.assertEqual(detected["primary"], "make")
+        out = reg.execute("build_project", {"system": "cargo"})
+        self.assertTrue(out.startswith("ERROR"))
+
+    def test_no_build_system_reports_error(self):
+        tmp = Path(tempfile.mkdtemp())
+        reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
+        register_build_tools(reg, tmp)
+        self.assertTrue(reg.execute("build_project", {}).startswith("ERROR"))
 
 
 if __name__ == "__main__":

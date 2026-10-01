@@ -27,13 +27,16 @@ from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
 from .tools.base import TOOL_CATEGORIES, ToolRegistry
 from .tools.plugins import load_plugin_manifests
+from .tools.buildsys import register_build_tools
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.github import register_github_tools
 from .tools.image import register_image_tools
 from .tools.repository import register_repository_tools
 from .tools.research import register_research_tools
+from .tools.search import register_search_tools
 from .tools.shell import register_shell_tools
+from .tools.terminal import register_terminal_tools
 from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
 from .workflow.memory import ProjectMemory
@@ -168,6 +171,11 @@ class AppState:
         self._register_processes()
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
+        self.terminal_tracker = register_terminal_tools(
+            self.tools, self.workspace, jobs=self.jobs, log_dir=runtime_root / ".agent" / "runtime"
+        )
+        register_search_tools(self.tools, self.workspace)
+        register_build_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)

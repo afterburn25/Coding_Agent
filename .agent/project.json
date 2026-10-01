@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 210,
-  "next_milestone": "v0.7 modular AI workstation: Phase 1 tool registry/manifests/permission profiles/job manager/process manager/Tools UI landed (210 tests). Next: per-tool health coverage and resource-manager extraction, then Phase 2 developer tools (terminal adapters, ripgrep, tree-sitter, LSP), MCP support, and continued Nexus Brain dogfood/hardening.",
+  "test_checkpoint": 221,
+  "next_milestone": "v0.7 modular AI workstation: Phase 1 tool foundation landed; Phase 2 started with controlled terminal tools, ripgrep search, and build-system adapters (221 tests). Next: tree-sitter/LSP indexing, MCP support, then Playwright browser backend, llama.cpp model page, and continued Nexus Brain hardening.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
