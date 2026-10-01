@@ -65,6 +65,8 @@ class AgentConfig:
     tools_state_path: str = "data/tools_state.json"
     jobs_path: str = "data/jobs.json"
     tool_manifests_dir: str = "tools/manifests"
+    # Preferred tool/provider names for capability routing tiebreaks.
+    preferred_tools: list[str] = field(default_factory=list)
     max_agent_steps: int = 12
     review_after_changes: bool = True
     auto_verify_after_changes: bool = True
@@ -271,6 +273,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.tools_state_path = str(raw.get("tools_state_path", cfg.tools_state_path))
     cfg.jobs_path = str(raw.get("jobs_path", cfg.jobs_path))
     cfg.tool_manifests_dir = str(raw.get("tool_manifests_dir", cfg.tool_manifests_dir))
+    cfg.preferred_tools = [str(x) for x in raw.get("preferred_tools", cfg.preferred_tools)]
     cfg.max_agent_steps = int(raw.get("max_agent_steps", cfg.max_agent_steps))
     cfg.review_after_changes = bool(raw.get("review_after_changes", cfg.review_after_changes))
     cfg.auto_verify_after_changes = bool(raw.get("auto_verify_after_changes", cfg.auto_verify_after_changes))

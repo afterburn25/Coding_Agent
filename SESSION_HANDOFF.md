@@ -601,6 +601,6 @@ Expected at this checkpoint: `188 tests` passing.
 - New endpoints: `GET /api/tools`, `/api/tools/health/<id>`, `/api/permissions`, `/api/jobs`, `/api/processes`, `/api/resources`; `POST /api/tools/state`, `/api/permissions/level`, `/api/permissions/profile`, `/api/processes/action`, `/api/jobs/cancel`.
 - New **Tools & Plugins** page (`web/tools.html`); main-nav Tools link routes there.
 - Feature commits: `105182a` (registry/permissions/jobs/processes/UI), plugin manifest loader + interfaces commit on top.
-- Unit checkpoint: **210/221 tests passing**.
+- Unit checkpoint: **210/227 tests passing**.
 - Phase 2 started: `terminal_run`/`terminal_processes`/`terminal_kill` (controlled shells + tracked background jobs), `search_code`/`search_filename`/`search_error` (ripgrep + fallback), `detect_build_system`/`build_project`/`configure_project`/`run_tests`/`clean_project` (CMake, Meson, Cargo, .NET, MSBuild, npm/pnpm/yarn, Gradle, Maven, Make, Python).
 - Next: health-check coverage per tool family, resource-manager extraction, tree-sitter/LSP indexing, Playwright backend, MCP support, and continued Nexus Brain dogfooding.

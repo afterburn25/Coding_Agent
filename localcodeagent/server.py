@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import os
 import queue
 import secrets
 import threading
@@ -34,9 +35,10 @@ from .tools.github import register_github_tools
 from .tools.image import register_image_tools
 from .tools.repository import register_repository_tools
 from .tools.research import register_research_tools
-from .tools.search import register_search_tools
+from .tools.search import find_ripgrep, register_search_tools
 from .tools.shell import register_shell_tools
 from .tools.terminal import register_terminal_tools
+from .tool_router import ToolRouter
 from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
 from .workflow.memory import ProjectMemory
@@ -189,6 +191,12 @@ class AppState:
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
         self.plugin_manifests = load_plugin_manifests(manifests_dir, self.tools, workspace=self.workspace)
+        self._register_health_checks()
+        self.tool_router = ToolRouter(
+            self.tools,
+            resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
+            prefer=getattr(config, "preferred_tools", []),
+        )
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -570,6 +578,61 @@ class AppState:
                 restart=lambda: self.images.backend_runtime.recover(),
             ))
 
+    def _register_health_checks(self) -> None:
+        """Attach lightweight health probes to built-in tool families."""
+        import shutil
+        import subprocess
+
+        def exe_probe(executable: str, label: str):
+            def check() -> dict:
+                if shutil.which(executable):
+                    try:
+                        proc = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10)
+                        version = (proc.stdout or proc.stderr or "").strip().splitlines()[0] if (proc.stdout or proc.stderr) else "ok"
+                    except Exception:
+                        version = "ok"
+                    return {"ok": True, "status": "healthy", "detail": f"{label}: {version[:120]}"}
+                return {"ok": False, "status": "unhealthy", "detail": f"{executable} not found on PATH"}
+            return check
+
+        def always_ok(detail: str):
+            return lambda: {"ok": True, "status": "healthy", "detail": detail}
+
+        def rg_probe() -> dict:
+            exe = find_ripgrep()
+            if exe:
+                return {"ok": True, "status": "healthy", "detail": f"ripgrep at {exe}"}
+            return {"ok": True, "status": "degraded", "detail": "ripgrep missing; built-in scanner fallback active"}
+
+        probes = {
+            "git": exe_probe("git", "git"),
+            "terminal": always_ok("native shells via subprocess"),
+            "ripgrep": rg_probe,
+            "github": (
+                (lambda: {"ok": True, "status": "healthy", "detail": "github credentials detected"})
+                if (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or shutil.which("gh"))
+                else (lambda: {"ok": False, "status": "unhealthy", "detail": "no GitHub token or gh CLI"})
+            ),
+        }
+        if self.config.image_enabled:
+            def comfy_probe() -> dict:
+                try:
+                    st = self.images.backend_runtime.probe()
+                except Exception as exc:
+                    return {"ok": False, "status": "error", "detail": f"{type(exc).__name__}: {exc}"}
+                return {"ok": bool(st.get("healthy")), "status": str(st.get("state") or "unknown"),
+                        "detail": str(st.get("error") or st.get("state") or "")}
+            probes["comfyui"] = comfy_probe
+        for manifest in self.tools.manifests():
+            probe = probes.get(str(manifest.get("provider") or ""))
+            spec = self.tools.get(manifest["name"])
+            if probe and spec and spec.health_check is None:
+                spec.health_check = probe
+        for name in ("run_shell", "terminal_run", "terminal_processes", "terminal_kill"):
+            spec = self.tools.get(name)
+            if spec and spec.health_check is None:
+                spec.health_check = always_ok("native subprocess execution")
+
     def _update_config_file(self, updates: dict) -> None:
         """Merge keys into config.json atomically, preserving unrelated settings."""
         if self.config_path.exists():
@@ -811,6 +874,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"tool": tool_id, "health": self.state.tools.health(tool_id)})
             except Exception as exc:
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+            return
+        if path.startswith("/api/tools/route/"):
+            capability = unquote(path[len("/api/tools/route/"):]).strip("/")
+            if not capability:
+                self._json({"error": "capability is required"}, 400)
+                return
+            check_health = "health=1" in (self.path.split("?", 1)[-1] if "?" in self.path else "")
+            self._json(self.state.tool_router.explain(capability, check_health=check_health))
+            return
+        if path == "/api/tools/telemetry":
+            self._json({"routing": self.state.tool_router.recent(50)})
             return
         if path == "/api/permissions":
             self._json(self.state.permission_manager.summary())

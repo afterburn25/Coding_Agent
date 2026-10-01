@@ -109,6 +109,8 @@ Drop JSON files into `tools/manifests/` (configurable via
 ```text
 GET  /api/tools                    full registry manifest + plugin load report
 GET  /api/tools/health/<id>        run a tool's health check
+GET  /api/tools/route/<capability> ranked routing candidates + exclusion reasons
+GET  /api/tools/telemetry          recent routing decisions
 POST /api/tools/state              {"tool": "read_file", "enabled": false}
 GET  /api/permissions              profile + levels + session grants
 POST /api/permissions/level        {"permission": "shell.execute", "level": "session"}
@@ -119,6 +121,17 @@ GET  /api/jobs                     unified job queue
 POST /api/jobs/cancel              {"job_id": "image-..."} (kind-aware)
 GET  /api/resources                hardware, residency, image resource mode
 ```
+
+## Tool Router
+
+`localcodeagent/tool_router.py` selects tools by capability instead of name.
+`explain(capability)` returns ranked candidates and exclusion reasons
+(disabled, not_callable, not_installed, permission_denied, offline, no_gpu,
+insufficient_vram/ram, unsupported_os); `execute(capability, args)` walks the
+ranked list with automatic fallback and records routing telemetry (chosen
+tool, attempts, elapsed). Ranking uses `preferred_tools` config, permission
+strength, and cached health checks. The registry remains the execution gate —
+the router only picks, it never bypasses permissions.
 
 ## Job Manager
 

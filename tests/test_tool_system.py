@@ -14,6 +14,7 @@ from localcodeagent.tools.buildsys import detect_build_systems, register_build_t
 from localcodeagent.tools.plugins import PluginManifest, load_plugin_manifests
 from localcodeagent.tools.search import find_ripgrep, register_search_tools
 from localcodeagent.tools.terminal import TerminalTracker, register_terminal_tools, resolve_shell
+from localcodeagent.tool_router import ToolRouter
 
 
 def _registry(**permissions):
@@ -395,6 +396,69 @@ class BuildSystemToolTests(unittest.TestCase):
         reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
         register_build_tools(reg, tmp)
         self.assertTrue(reg.execute("build_project", {}).startswith("ERROR"))
+
+
+class ToolRouterTests(unittest.TestCase):
+    def _reg(self):
+        reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow", "network.read": "allow"})
+        reg.register(ToolSpec("tool_a", "first", {"type": "object"}, "filesystem.read",
+                              lambda a: "ok-a", category="coding", capabilities=["do_x"], provider="prov_a"))
+        reg.register(ToolSpec("tool_b", "second", {"type": "object"}, "filesystem.read",
+                              lambda a: "ok-b", category="coding", capabilities=["do_x"], provider="prov_b"))
+        return reg
+
+    def test_route_picks_ranked_candidate(self):
+        reg = self._reg()
+        router = ToolRouter(reg, prefer=["prov_b"])
+        self.assertEqual(router.route("do_x"), "tool_b")
+        info = router.explain("do_x")
+        self.assertEqual(len(info["candidates"]), 2)
+
+    def test_exclusions(self):
+        reg = self._reg()
+        reg.set_enabled("tool_a", False)
+        router = ToolRouter(reg)
+        info = router.explain("do_x")
+        self.assertEqual([c["tool"] for c in info["candidates"]], ["tool_b"])
+        self.assertEqual(info["excluded"][0]["reason"], "disabled")
+
+    def test_gpu_and_offline_gating(self):
+        reg = self._reg()
+        reg.register(ToolSpec("gpu_tool", "gpu", {"type": "object"}, "filesystem.read",
+                              lambda a: "gpu", capabilities=["do_gpu"], requires_gpu=True))
+        reg.register(ToolSpec("net_tool", "net", {"type": "object"}, "filesystem.read",
+                              lambda a: "net", capabilities=["do_net"], requires_network=True))
+        router = ToolRouter(reg, resources={"gpus": [], "total_vram_gb": 0})
+        reasons = {e["tool"]: e["reason"] for e in router.explain("do_gpu")["excluded"]}
+        self.assertEqual(reasons["gpu_tool"], "no_gpu")
+        reg.permission_manager.set_level("network.read", "deny")
+        reasons = {e["tool"]: e["reason"] for e in router.explain("do_net")["excluded"]}
+        self.assertEqual(reasons["net_tool"], "offline")
+
+    def test_execute_fallback_and_telemetry(self):
+        reg = self._reg()
+        reg.get("tool_a").handler = lambda a: "ERROR: blown up"
+        router = ToolRouter(reg)
+        out = router.execute("do_x", {})
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["result"], "ok-b")
+        self.assertEqual(len(out["attempts"]), 1)
+        self.assertTrue(router.recent(1)[0]["ok"])
+
+    def test_approval_required_is_surfaced(self):
+        reg = ToolRegistry({"filesystem.read": "ask"})
+        reg.register(ToolSpec("ask_tool", "a", {"type": "object"}, "filesystem.read",
+                              lambda a: "ok", capabilities=["do_y"]))
+        router = ToolRouter(reg)
+        out = router.execute("do_y", {})
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["error"], "approval_required")
+
+    def test_no_candidates(self):
+        router = ToolRouter(self._reg())
+        out = router.execute("nonexistent_cap", {})
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["error"], "no_capable_tool")
 
 
 if __name__ == "__main__":
