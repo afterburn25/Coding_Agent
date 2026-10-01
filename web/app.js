@@ -221,6 +221,7 @@ const ACTIVITY_MAX_BLOCKS=80;
 const liveToolBlocks=[];
 function _activityPrune(){
   while(activity.children.length>ACTIVITY_MAX_BLOCKS)activity.firstChild.remove();
+  for(let i=liveToolBlocks.length-1;i>=0;i--)if(!liveToolBlocks[i].el.isConnected)liveToolBlocks.splice(i,1);
 }
 function _activityInit(){
   const muted=activity.querySelector('.muted');
