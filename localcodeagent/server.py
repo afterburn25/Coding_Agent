@@ -79,6 +79,12 @@ class AppState:
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
         self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
+        hw = self.runtime.hardware
+        gpu_label = ", ".join(g.name for g in getattr(hw, "gpus", []) or []) or "CPU only"
+        self._boot(
+            14, "INITIALIZING · NEURAL ENGINE",
+            f"Applying {getattr(config, 'performance_mode', 'auto')} runtime profile · {gpu_label}",
+        )
         self.model_telemetry = ModelPerformanceTelemetry(
             self.workspace,
             enabled=config.model_telemetry_enabled,
@@ -386,6 +392,7 @@ class AppState:
         ))
         self.activities = ActivityStore(runtime_root / "data" / "activity.jsonl")
         self.activities.on_row = lambda row: self.events.publish("activity", row)
+        self.runtime.on_residency_event = self._residency_activity
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -410,6 +417,28 @@ class AppState:
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_resume()
+
+    def _residency_activity(self, event: dict) -> None:
+        """Surface managed-runtime reclaim/rewarm decisions on the timeline."""
+        try:
+            action = str(event.get("action") or "")
+            model_id = str(event.get("model_id") or "")
+            reason = str(event.get("reason") or "")
+            current = self.tasks.current()
+            task_id = current.id if current is not None else "system"
+            if action == "evict":
+                row = self.activities.open(
+                    task_id, "vram", "Freeing VRAM",
+                    f"Unloading {model_id}" + (f" — {reason}" if reason else ""),
+                )
+            else:
+                row = self.activities.open(
+                    task_id, "model", "Starting Model",
+                    f"Rewarming {model_id}" + (f" — {reason}" if reason else ""),
+                )
+            self.activities.update(task_id, row["id"], state="completed")
+        except Exception:
+            pass
 
     def _start_auto_resume(self) -> None:
         """In autonomous mode, restart tasks interrupted by a core restart.
@@ -2025,6 +2054,16 @@ class Handler(BaseHTTPRequestHandler):
                         self.state.jobs.update(jid, state="running", status="benchmarking")
                         try:
                             result = tuner.benchmark(p)
+                            try:
+                                bench_dir = self.state.runtime.base_dir / "data" / "benchmarks"
+                                bench_dir.mkdir(parents=True, exist_ok=True)
+                                stamp = time.strftime("runtime-%Y%m%d-%H%M%S")
+                                (bench_dir / f"{stamp}-{p.id}.json").write_text(
+                                    json.dumps(result, indent=2, default=str) + "\n",
+                                    encoding="utf-8",
+                                )
+                            except OSError:
+                                pass
                             best = result.get("best")
                             self.state.jobs.update(
                                 jid, state="completed", status="finished", progress=1.0,

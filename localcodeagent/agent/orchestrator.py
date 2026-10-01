@@ -853,6 +853,7 @@ class AgentOrchestrator:
                 prompt_per_second=float(timings.get("prompt_per_second") or 0.0),
                 time_to_first_token_ms=raw.get("time_to_first_token_ms"),
             )
+            launch = self._launch_diagnostics(session.profile)
             self._emit(session, "perf", model_id=session.profile.id,
                        role=session.decision.role,
                        predicted_per_second=round(tps, 2),
@@ -862,9 +863,48 @@ class AgentOrchestrator:
                        cached_tokens=int(usage.get("cached_tokens") or 0),
                        prompt_cache="hit" if int(usage.get("cached_tokens") or 0) > 0 else "miss",
                        elapsed_seconds=round(elapsed, 3),
-                       time_to_first_token_ms=raw.get("time_to_first_token_ms"))
+                       time_to_first_token_ms=raw.get("time_to_first_token_ms"),
+                       **launch)
         except Exception:
             pass
+
+    def _launch_diagnostics(self, profile: ModelProfile) -> dict[str, Any]:
+        """Launch-surface fields for perf telemetry: offload/threads/ctx/batch.
+
+        Reads the resolved tuned flags (persisted benchmark or heuristic) so
+        diagnostics show what llama-server is actually running with.
+        """
+        out: dict[str, Any] = {
+            "gpu_layers": str(getattr(profile, "gpu_layers", "") or ""),
+            "threads": int(getattr(profile, "threads", 0) or 0),
+            "context_window": int(getattr(profile, "context_window", 0) or 0),
+        }
+        tuner = getattr(self.runtime, "tuner", None)
+        if tuner is not None:
+            try:
+                args = tuner.tuned_flags(
+                    profile, mode=str(getattr(self.config, "performance_mode", "auto")))
+                flags: dict[str, str] = {}
+                idx = 0
+                while idx < len(args):
+                    flag = str(args[idx])
+                    if flag.startswith("-"):
+                        value = str(args[idx + 1]) if idx + 1 < len(args) and not str(args[idx + 1]).startswith("-") else "on"
+                        flags[flag] = value
+                        idx += 2 if value != "on" else 1
+                    else:
+                        idx += 1
+                out.update({
+                    "batch": flags.get("--batch-size"),
+                    "ubatch": flags.get("--ubatch-size"),
+                    "flash_attn": flags.get("--flash-attn"),
+                    "kv_cache_type": flags.get("--cache-type-k"),
+                    "prompt_cache_reuse": flags.get("--cache-reuse"),
+                    "speculative_decoding": tuner.speculative_status(),
+                })
+            except Exception:
+                pass
+        return out
 
     def _restore_session(self, task_id: str, *, reason: str) -> _AgentSession:
         """Rebuild enough agent context to safely continue a persisted task.

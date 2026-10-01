@@ -199,6 +199,23 @@ class SpeculativeStatusTests(unittest.TestCase):
             self.assertEqual(tuner.speculative_status(), "not_supported")
 
 
+class ResidencyEventTests(unittest.TestCase):
+    def test_hook_receives_eviction(self):
+        from localcodeagent.runtime.manager import RuntimeManager
+        mgr = RuntimeManager.__new__(RuntimeManager)
+        captured = []
+        mgr.on_residency_event = captured.append
+        mgr._emit_residency("evict", "qwen3-4b", "memory pressure")
+        self.assertEqual(captured[0]["action"], "evict")
+        self.assertEqual(captured[0]["model_id"], "qwen3-4b")
+
+    def test_hook_failure_is_safe(self):
+        from localcodeagent.runtime.manager import RuntimeManager
+        mgr = RuntimeManager.__new__(RuntimeManager)
+        mgr.on_residency_event = lambda e: (_ for _ in ()).throw(RuntimeError("x"))
+        mgr._emit_residency("rewarm", "m")  # must not raise
+
+
 class ConfigTests(unittest.TestCase):
     def test_performance_mode_parse(self):
         from localcodeagent.config import load_config

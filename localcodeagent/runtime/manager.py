@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import AgentConfig, ModelProfile
@@ -76,6 +77,10 @@ class RuntimeManager:
         # resources free up again.
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
+        # Optional residency observer: called with {"action", "model_id",
+        # "reason"} when a managed runtime is reclaimed or rewarmed so the UI
+        # timeline can show FREEING VRAM / REWARMING steps.
+        self.on_residency_event: Callable[[dict[str, Any]], None] | None = None
         from .tuner import RuntimeTuner
         self.tuner = RuntimeTuner(self.base_dir, config, runtime=self)
         for model in config.models:
@@ -502,6 +507,15 @@ class RuntimeManager:
         with self._lock:
             return [mid for mid, item in self._managed.items() if item.process.poll() is None]
 
+    def _emit_residency(self, action: str, model_id: str, reason: str = "") -> None:
+        hook = self.on_residency_event
+        if hook is None:
+            return
+        try:
+            hook({"action": action, "model_id": model_id, "reason": reason})
+        except Exception:
+            pass
+
     def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced") -> list[str]:
         """Stop managed LLM runtimes when an image job needs GPU memory.
 
@@ -522,6 +536,7 @@ class RuntimeManager:
             for mid in victims:
                 self._stop_managed(mid)
                 stopped.append(mid)
+                self._emit_residency("evict", mid, f"freeing VRAM ({mode})")
                 self.refresh_hardware()
                 if self.hardware.free_vram_gb >= required_vram_gb and str(mode).lower() not in {"aggressive vram cleanup", "aggressive_vram_cleanup"}:
                     break
@@ -584,6 +599,7 @@ class RuntimeManager:
                 victim = min(candidates, key=lambda m: self._last_used.get(m, 0.0))
                 self._stop_managed(victim)
                 stopped.append(victim)
+                self._emit_residency("evict", victim, "memory pressure")
                 self.refresh_hardware()
         return stopped
 
@@ -622,6 +638,7 @@ class RuntimeManager:
                     self._pending_rewarm.add(p.id)
                     return
             threading.Thread(target=_warm, name=f"chat-nexus-rewarm-{mid}", daemon=True).start()
+            self._emit_residency("rewarm", mid, "resources free — restoring keep-loaded model")
             restarted.append(mid)
         return restarted
 
@@ -671,6 +688,7 @@ class RuntimeManager:
                 break
             self._pending_rewarm.add(victim)
             self._stop_managed(victim)
+            self._emit_residency("evict", victim, f"making room for {target.id}")
             active.remove(victim)
             victim_vram = max(0.0, float(profiles[victim].estimated_vram_gb))
             free_vram += victim_vram

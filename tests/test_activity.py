@@ -146,6 +146,15 @@ class OrchestratorActivityTests(unittest.TestCase):
                 if row["state"] == "completed":
                     self.assertIsNotNone(row["elapsed"], row["title"])
 
+    def test_launch_diagnostics_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = ActivityStore(root / "act.jsonl")
+            agent = _agent(root, store, [])
+            diag = agent._launch_diagnostics(agent.router.get_profile("local"))
+            self.assertIn("gpu_layers", diag)
+            self.assertIn("context_window", diag)
+
     def test_error_marks_rows_failed(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

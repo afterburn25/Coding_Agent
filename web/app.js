@@ -353,6 +353,23 @@ async function restoreActivityTimeline(taskId){
   if(!taskId)return;
   try{const r=await fetch('/api/activity?task_id='+encodeURIComponent(taskId));if(!r.ok)return;const d=await r.json();renderActivityTimeline(d.activities);}catch{}
 }
+/* Map real image-job events onto timeline rows — same backend event, no fake
+   phases: title/summary come straight from the job's reported stage. */
+function imageJobActivityRow(job){
+  const stage=String(job.stage||job.state||'generation');
+  const state={queued:'waiting',completed:'completed',done:'completed',failed:'failed',error:'failed'}[stage]||'running';
+  upsertActivityRow({
+    id:'img:'+String(job.id||'job'),
+    task_id:job.task_id||'',
+    category:'image',
+    title:'Image Generation',
+    summary:stage.replaceAll('_',' ')+(job.progress!=null?' · '+Math.round(job.progress*100)+'%':''),
+    details:{model:job.model_id||job.model||'',size:[job.width,job.height].filter(Boolean).join(' × ')},
+    state,started_at:Number(job.started_at||Date.now()/1000),
+    ended_at:['completed','done','failed','error'].includes(stage)?(job.finished_at||Date.now()/1000):null,
+    elapsed:job.elapsed_seconds!=null?job.elapsed_seconds:null,
+  });
+}
 function scheduleStreamFlush(state){
   // Render buffer: SSE deltas accumulate in memory and land on the DOM at most
   // once per animation frame — word/chunk bursts instead of per-character
@@ -392,7 +409,7 @@ function handleAgentStreamEvent(name,data,state){
   }
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
-  if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
   if(name==='result'){agentStreamActive=false;state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
   if(name==='error'){agentStreamActive=false;state.pendingText='';state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
 }
@@ -420,7 +437,7 @@ function connectAgentEvents(){
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
     on('activity',d=>{upsertActivityRow(d.activity||d);});
     on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}});
-    on('image_job',d=>{if(d.job)renderImageJobs([d.job]);});
+    on('image_job',d=>{if(d.job){renderImageJobs([d.job]);imageJobActivityRow(d.job);}});
     on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
   }catch(e){}
 }
@@ -530,6 +547,13 @@ $('#conversationList').addEventListener('click',e=>{const row=e.target.closest('
 let conversationSearchTimer=null;
 $('#conversationSearch').addEventListener('input',e=>{clearTimeout(conversationSearchTimer);const q=e.target.value.trim();conversationSearchTimer=setTimeout(()=>loadConversations(q),180);});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
+const activityFilters=document.getElementById('activityFilters');
+if(activityFilters)activityFilters.addEventListener('click',e=>{
+  const chip=e.target.closest('[data-tl]');if(!chip)return;
+  tlFilter=chip.dataset.tl;
+  activityFilters.querySelectorAll('.tl-chip').forEach(c=>c.classList.toggle('active',c===chip));
+  for(const rec of tlRows.values())rec.el.style.display=(tlFilter==='all'||rec.el.dataset.group===tlFilter)?'':'none';
+});
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
 connectAgentEvents();
 loadStatus().then(async()=>{const [_,__,convos]=await Promise.all([loadReadiness(),loadConversationMemory(),loadConversations()]);const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);}).finally(()=>{
