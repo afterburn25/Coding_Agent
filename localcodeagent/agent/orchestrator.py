@@ -127,6 +127,7 @@ class _AgentSession:
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
     started_at: float = field(default_factory=time.time)
+    logged_task_state: str = ""
 
 
 class AgentOrchestrator:
@@ -627,7 +628,7 @@ class AgentOrchestrator:
             pass
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
-        if event_type in {"tool_start", "tool_output", "tool"}:
+        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error"}:
             self._log_terminal(session, event_type, payload)
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
 
@@ -643,9 +644,22 @@ class AgentOrchestrator:
                 line = f"$ {tool.get('name', 'tool')}{(' ' + hint) if hint else ''}\n"
             elif event_type == "tool_output":
                 line = str(payload.get("chunk") or "")
-            else:
+            elif event_type == "tool":
                 tool = payload.get("tool") or {}
                 line = f"· {tool.get('name', 'tool')} done\n"
+            elif event_type == "task":
+                task = payload.get("task") or {}
+                status = f"{task.get('status') or ''}/{task.get('phase') or ''}".strip("/")
+                if status and status != session.logged_task_state:
+                    session.logged_task_state = status
+                    line = f"## task {status}\n"
+                else:
+                    line = ""
+            elif event_type == "approval":
+                ap = payload.get("approval") or {}
+                line = f"## approval required: {ap.get('name', 'tool')} ({ap.get('permission', '')})\n"
+            else:
+                line = f"## error: {str(payload.get('error') or '')[:300]}\n"
             if line:
                 self.tasks.append_log(session.task_id, line)
         except Exception:
