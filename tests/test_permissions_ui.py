@@ -271,16 +271,19 @@ class PermissionApiTests(unittest.TestCase):
 
     def test_non_automatable_install_reports_installable_false(self):
         # A manifest whose install method isn't automatable (e.g. manual
-        # "build") must surface installable=False so the UI hides Install.
-        from localcodeagent.server import AppState
-        state = self.state
-        manifests = state.tools.manifests()
+        # "build") must surface installable=False so the UI hides Install;
+        # archive/package-manager methods must surface True.
+        manifests = self.state.tools.manifests()
         by_id = {m["id"]: m for m in manifests}
-        if "whisper" in by_id:  # shipped manifest uses method=build
-            self.assertFalse(by_id["whisper"]["installable"])
-        # The test pkgtool manifest uses winget → automatable.
-        self.assertTrue(by_id.get("pkgtool", {}).get("installable", True)
-                        or "pkgtool" not in by_id)
+        if "whisper" in by_id:  # archive install → automatable
+            self.assertTrue(by_id["whisper"]["installable"])
+        from localcodeagent.tools.plugins import PluginManifest
+        manual = PluginManifest.from_dict(
+            {"id": "manual", "name": "Manual", "install": {"method": "build"}})
+        self.assertIsNone(manual.install.get("package"))
+        # installable is derived from install_command — "build" yields no argv.
+        from localcodeagent.tools.plugins import install_command
+        self.assertIsNone(install_command({"method": "build"}))
 
     def test_creator_level_via_api_gates_install(self):
         self._post("/api/permissions/level", {"permission": "packages.install", "level": "creator"})

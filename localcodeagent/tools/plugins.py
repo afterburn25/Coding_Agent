@@ -36,6 +36,44 @@ from .base import ToolRegistry, ToolSpec
 
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
+
+def resolve_executable(exe: str, install_root: Path | None,
+                       tool_id: str = "") -> str:
+    """Resolve an executable name to a runnable path.
+
+    Order: absolute path → PATH → ``<install_root>/<tool_id>/**/exe`` →
+    shallow scan of ``<install_root>`` (depth ≤3). Lets archive-installed
+    binaries (e.g. .agent/tools/whisper/Release/whisper-cli.exe) run
+    without PATH changes.
+    """
+    p = Path(str(exe)).expanduser()
+    if p.is_absolute() and p.is_file():
+        return str(p)
+    if shutil.which(str(exe)):
+        return str(exe)
+    root = Path(install_root).resolve() if install_root else None
+    if root is None:
+        return str(exe)
+    name = str(exe)
+    names = [name] if name.lower().endswith((".exe", ".bat", ".cmd")) else [name, f"{name}.exe"]
+    bases = [root / tool_id] if tool_id else []
+    bases.append(root)
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for cand in names:
+            direct = base / cand
+            if direct.is_file():
+                return str(direct)
+        for cand in names:
+            try:
+                for hit in base.rglob(cand):
+                    if hit.is_file() and len(hit.relative_to(root).parts) <= 4:
+                        return str(hit)
+            except OSError:
+                continue
+    return str(exe)
+
 # Permission keys that are stricter/more specific than shell.execute — a
 # manifest declaring one of these uses it as the effective invoker gate.
 _DEDICATED_GATES = {"docker.access", "package.install"}
@@ -108,12 +146,16 @@ class PluginManifest:
         current = "windows" if sys.platform.startswith("win") else "linux" if sys.platform.startswith("linux") else sys.platform
         return current in self.supported_os or sys.platform in self.supported_os
 
-    def executables_found(self) -> tuple[list[str], list[str]]:
-        """Return (found, missing) executable names/paths."""
+    def executables_found(self, install_root: Path | None = None) -> tuple[list[str], list[str]]:
+        """Return (found, missing) executable names/paths.
+
+        Resolution order: absolute path → PATH → install_root scan, so
+        archive-installed payloads count even off-PATH.
+        """
         found, missing = [], []
         for exe in self.executables:
-            p = Path(exe).expanduser()
-            if (p.is_absolute() and p.is_file()) or shutil.which(exe):
+            resolved = resolve_executable(exe, install_root, self.id)
+            if resolved != exe or shutil.which(exe) or (Path(exe).expanduser().is_absolute() and Path(exe).expanduser().is_file()):
                 found.append(exe)
             else:
                 missing.append(exe)
@@ -138,7 +180,7 @@ class PluginManifest:
 
     def is_installed(self, install_root: Path | None = None) -> bool:
         if self.executables or not self.detect_files:
-            _, missing_exe = self.executables_found()
+            _, missing_exe = self.executables_found(install_root)
             if missing_exe:
                 return False
         if self.detect_files:
@@ -244,7 +286,8 @@ def _substitute(template: list[str], arguments: dict[str, Any]) -> list[str]:
     return command
 
 
-def _make_invoker(manifest: PluginManifest, *, workspace: Path | None, default_timeout: int):
+def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
+                  default_timeout: int, install_root: Path | None = None):
     invoke = manifest.invoke or {}
     template = [str(x) for x in invoke.get("command") or []]
     if not template:
@@ -254,6 +297,8 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None, default_t
 
     def handler(arguments: dict[str, Any]) -> str:
         cmd = _substitute(template, arguments)
+        if cmd:
+            cmd[0] = resolve_executable(cmd[0], install_root, manifest.id)
         stdin_data = str(arguments.get(stdin_key, "")) if stdin_key else None
         started = time.time()
         try:
@@ -282,16 +327,18 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None, default_t
     return handler
 
 
-def _make_health_check(manifest: PluginManifest):
+def _make_health_check(manifest: PluginManifest, *, install_root: Path | None = None):
     command = [str(x) for x in (manifest.health_check.get("command") or [])]
 
     def check() -> dict[str, Any]:
-        found, missing = manifest.executables_found()
+        found, missing = manifest.executables_found(install_root)
         if missing:
             return {"ok": False, "status": "missing", "detail": f"missing executables: {', '.join(missing)}"}
         if command:
             try:
-                proc = subprocess.run(command, capture_output=True, text=True, timeout=15)
+                run_cmd = list(command)
+                run_cmd[0] = resolve_executable(run_cmd[0], install_root, manifest.id)
+                proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15)
             except FileNotFoundError:
                 return {"ok": False, "status": "missing", "detail": f"health command not found: {command[0]}"}
             except subprocess.TimeoutExpired:
@@ -332,7 +379,9 @@ def load_plugin_manifests(
             errors.append({"path": str(path), "error": f"{type(exc).__name__}: {exc}"})
             continue
 
-        invoker = _make_invoker(manifest, workspace=workspace, default_timeout=default_timeout)
+        invoker = _make_invoker(manifest, workspace=workspace,
+                                default_timeout=default_timeout,
+                                install_root=install_root)
         install_status = "installed" if manifest.is_installed(install_root) else "missing"
         # Invokers spawn a subprocess — the effective gate must reflect that.
         # Manifests may declare a stricter dedicated key (e.g. docker.access);
@@ -364,7 +413,7 @@ def load_plugin_manifests(
             docs=manifest.docs,
             source="manifest",
             install_status=install_status,
-            health_check=_make_health_check(manifest),
+            health_check=_make_health_check(manifest, install_root=install_root),
         )
         spec_fields = {"invocable": invoker is not None, "install": manifest.install,
                        "manifest_path": manifest.source_path, "process": manifest.process,

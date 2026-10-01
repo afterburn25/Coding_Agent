@@ -626,6 +626,33 @@ class UpdateCheckerTests(unittest.TestCase):
             finally:
                 state.tool_downloads.shutdown()
 
+    def test_resolve_executable_finds_archive_installed_binary(self):
+        from localcodeagent.tools.plugins import resolve_executable
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "whisper" / "Release").mkdir(parents=True)
+            (root / "whisper" / "Release" / "whisper-cli.exe").write_text("x")
+            hit = resolve_executable("whisper-cli", root, "whisper")
+            self.assertTrue(hit.endswith("whisper-cli.exe"), hit)
+            self.assertEqual(resolve_executable("definitely-missing-xyz",
+                                                root, "whisper"),
+                             "definitely-missing-xyz")
+
+    def test_offpath_archive_binary_marks_installed_and_invocable(self):
+        from localcodeagent.tools.plugins import PluginManifest
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "t" / "bin").mkdir(parents=True)
+            (root / "t" / "bin" / "t.exe").write_text("x")
+            m = PluginManifest.from_dict({
+                "id": "t", "name": "T", "executables": ["t"],
+                "detect": {"files": ["t/bin/t.exe"]},
+            })
+            self.assertTrue(m.is_installed(root))
+            found, missing = m.executables_found(root)
+            self.assertEqual(found, ["t"])
+            self.assertEqual(missing, [])
+
     def test_check_updates_job_gated_and_runs(self):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import AppState
