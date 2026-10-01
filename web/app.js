@@ -306,8 +306,8 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.completion_tokens?p.completion_tokens+' tok':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='result'){state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='error'){state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='result'){agentStreamActive=false;state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='error'){agentStreamActive=false;state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
 }
 function parseSseBlock(block,state){
   const lines=block.split(/\r?\n/);let name='message';const data=[];
@@ -315,7 +315,23 @@ function parseSseBlock(block,state){
   if(!data.length)return;let payload;const raw=data.join('\n');try{payload=JSON.parse(raw);}catch{payload={text:raw};}
   handleAgentStreamEvent(name,payload,state);
 }
+let agentStreamActive=false;
+function connectAgentEvents(){
+  if(typeof EventSource==='undefined')return;
+  try{
+    const es=new EventSource('/api/events');
+    const on=(n,f)=>es.addEventListener(n,e=>{if(agentStreamActive)return;let d={};try{d=JSON.parse(e.data);}catch{return;}f(d);});
+    on('tool_start',d=>{if(d.tool)toolStartBlock(d.tool);});
+    on('tool_output',d=>{const name=String(d.tool||'');const entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];if(entry){const out=entry.el.querySelector('.term-out');if(out){out.textContent=(out.textContent+String(d.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}}});
+    on('tool',d=>{if(d.tool)toolCompleteBlock(d.tool);});
+    on('task',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);}if(d.event==='queued'||d.event==='dequeued')refreshQueue();});
+    on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
+    on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
+    on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
+  }catch(e){}
+}
 async function streamAgent(message){
+  agentStreamActive=true;
   const state=beginAssistantStream();state.requestMessage=message;
   const res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message,mode:mode.value})});
   if(!res.ok){let detail='Request failed',code='';try{const d=await res.json();detail=d.error||detail;code=d.code||'';}catch{}state.bubble.textContent=detail;state.wrap.classList.remove('streaming');if(code==='coding_model_setup_required'){document.querySelector('#systemBlock')?.setAttribute('open','');loadReadiness();}const err=new Error(detail);err.displayed=true;throw err;}
@@ -329,7 +345,7 @@ async function streamAgent(message){
   if(!state.result){
     let detail='Chat Nexus connection closed before the task returned a final result.';
     try{
-      const statusRes=await fetch('/api/tasks');
+      agentStreamActive=false;const statusRes=await fetch('/api/tasks');
       if(statusRes.ok){
         const statusData=await statusRes.json();
         const current=statusData.current;
@@ -417,4 +433,5 @@ let conversationSearchTimer=null;
 $('#conversationSearch').addEventListener('input',e=>{clearTimeout(conversationSearchTimer);const q=e.target.value.trim();conversationSearchTimer=setTimeout(()=>loadConversations(q),180);});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+connectAgentEvents();
 loadStatus().then(async()=>{const [_,__,convos]=await Promise.all([loadReadiness(),loadConversationMemory(),loadConversations()]);const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});input.focus();

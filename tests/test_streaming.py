@@ -255,6 +255,20 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn('self._sse_event("heartbeat"', server)
         self.assertIn('Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"', server)
 
+    def test_chat_events_mirrored_to_bus_and_ui_reconnects(self):
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        # Agent events are republished on the shared bus with task attribution.
+        self.assertIn('payload.setdefault("task_id", current.id)', server)
+        self.assertIn('self.state.events.publish(etype, payload)', server)
+        self.assertIn('if etype not in {"token", "result"}', server)
+        # The chat page subscribes to the bus so a reload keeps terminal/task
+        # visibility, and ignores duplicates while its own stream is active.
+        self.assertIn("connectAgentEvents()", app)
+        self.assertIn("new EventSource('/api/events')", app)
+        self.assertIn("agentStreamActive", app)
+        self.assertIn("data.event==='queued'", app)
+
 
 if __name__ == "__main__":
     unittest.main()

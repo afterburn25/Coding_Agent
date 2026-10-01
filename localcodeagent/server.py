@@ -862,11 +862,11 @@ class AppState:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
                     self.agent.run(
                         str(entry["prompt"]),
-                        history=self.state.history,
+                        history=self.history,
                         mode=str(entry.get("mode") or "auto"),
                         event_callback=lambda e: self.events.publish(str(e.get("type", "task")), dict(e)),
                     )
-                    self.state.history = self.state.conversation_manager.history(limit=32)
+                    self.history = self.conversation_manager.history(limit=32)
                 except Exception as exc:
                     self.events.publish("task", {
                         "event": "queue_item_failed", "queue_item": entry,
@@ -2055,6 +2055,20 @@ class Handler(BaseHTTPRequestHandler):
                     # Queue events back to the request thread so socket writes remain
                     # serialized and the request thread can send idle heartbeats.
                     events.put(dict(event))
+                    # Mirror non-token events onto the shared bus so a reloaded
+                    # page (or the Tools UI) can follow the run live via
+                    # /api/events instead of losing visibility with the request.
+                    etype = str(event.get("type", ""))
+                    if etype not in {"token", "result"}:
+                        try:
+                            current = self.state.tasks.current()
+                            payload = dict(event)
+                            payload.pop("type", None)
+                            if current is not None:
+                                payload.setdefault("task_id", current.id)
+                            self.state.events.publish(etype, payload)
+                        except Exception:
+                            pass
 
                 def run_agent() -> None:
                     try:
