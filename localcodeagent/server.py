@@ -28,7 +28,10 @@ from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
 from .tools.base import TOOL_CATEGORIES, ToolRegistry
 from .tools.plugins import load_plugin_manifests
+from .secrets import SecretVault
+from .tools.api import register_api_tools
 from .tools.buildsys import register_build_tools
+from .tools.codeintel import register_codeintel_tools
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
 from .tools.github import register_github_tools
@@ -179,6 +182,9 @@ class AppState:
         )
         register_search_tools(self.tools, self.workspace)
         register_build_tools(self.tools, self.workspace)
+        register_codeintel_tools(self.tools, self.workspace)
+        self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
+        register_api_tools(self.tools, vault=self.secrets)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)
@@ -948,6 +954,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/mcp":
             self._json(self.state.mcp.status())
+            return
+        if path == "/api/secrets":
+            self._json({"secrets": self.state.secrets.list()})
             return
         if path == "/api/permissions":
             self._json(self.state.permission_manager.summary())
@@ -1848,6 +1857,28 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 status = 200 if result.get("ok") else (403 if "denied" in str(result.get("error", "")) else 200)
                 self._json(result, status)
+                return
+
+            if path in {"/api/secrets/set", "/api/secrets/delete"}:
+                mode = self.state.permission_manager.effective("credentials.use")
+                if mode == "deny":
+                    self._json({"error": "credentials.use permission is denied"}, 403)
+                    return
+                if mode == "ask" and not body.get("approve"):
+                    self._json({"ok": False, "needs_approval": True, "permission": "credentials.use"})
+                    return
+                if body.get("approve") and self.state.permission_manager.level("credentials.use") == "session":
+                    self.state.permission_manager.grant_session("credentials.use")
+                try:
+                    if path.endswith("/set"):
+                        self._json(self.state.secrets.set(
+                            str(body.get("name", "")), str(body.get("value", "")),
+                            description=str(body.get("description", ""))))
+                    else:
+                        deleted = self.state.secrets.delete(str(body.get("name", "")))
+                        self._json({"ok": True, "deleted": deleted})
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
                 return
 
             if path == "/api/mcp/action":

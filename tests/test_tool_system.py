@@ -17,6 +17,9 @@ from localcodeagent.tools.terminal import TerminalTracker, register_terminal_too
 from localcodeagent.tool_router import ToolRouter
 from localcodeagent.mcp import MCPManager, MCPServerConfig, load_mcp_configs
 from localcodeagent.tools.plugins import install_command
+from localcodeagent.secrets import SecretVault
+from localcodeagent.tools.api import register_api_tools
+from localcodeagent.tools.codeintel import extract_symbols, register_codeintel_tools
 
 
 def _registry(**permissions):
@@ -606,6 +609,86 @@ class BrowserRunnerTests(unittest.TestCase):
             h = runner.health()
             self.assertIn("ok", h)
             self.assertEqual(h["ok"], runner.available())
+
+
+class SecretVaultTests(unittest.TestCase):
+    def test_set_get_list_delete_and_persist(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "secrets.vault"
+            vault = SecretVault(path)
+            vault.set("github.personal", "ghp_secret_value_123", description="GitHub PAT")
+            vault.set("openai.api", "sk-test")
+            names = [r["name"] for r in vault.list()]
+            self.assertEqual(names, ["github.personal", "openai.api"])
+            self.assertNotIn("ghp_secret_value_123", json.dumps(vault.list()))
+            # values live only behind get()
+            self.assertEqual(vault.get("github.personal"), "ghp_secret_value_123")
+            # encrypted at rest
+            raw = path.read_text()
+            self.assertNotIn("ghp_secret_value_123", raw)
+            self.assertIn('"data"', raw)
+            # reload
+            vault2 = SecretVault(path)
+            self.assertEqual(vault2.get("github.personal"), "ghp_secret_value_123")
+            self.assertTrue(vault2.delete("openai.api"))
+            self.assertIsNone(vault2.get("openai.api"))
+
+    def test_name_validation(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = SecretVault(Path(td) / "s.vault")
+            with self.assertRaises(ValueError):
+                vault.set("../evil", "x")
+            with self.assertRaises(ValueError):
+                vault.set("name with spaces", "x")
+            with self.assertRaises(ValueError):
+                vault.set("ok.name", "")
+
+
+class CodeIntelTests(unittest.TestCase):
+    def test_extract_symbols_python(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "mod.py"
+            p.write_text("import os\n\nclass Foo:\n    pass\n\ndef bar():\n    pass\n", encoding="utf-8")
+            info = extract_symbols(p)
+            kinds = {(s["kind"], s["name"]) for s in info["symbols"]}
+            self.assertIn(("class", "Foo"), kinds)
+            self.assertIn(("function", "bar"), kinds)
+            self.assertIn(("import", "os"), kinds)
+
+    def test_code_map_scans_tree(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "a.py").write_text("class A:\n    pass\n", encoding="utf-8")
+            (ws / "skip.txt").write_text("class X", encoding="utf-8")
+            reg = ToolRegistry({"filesystem.read": "allow"})
+            register_codeintel_tools(reg, ws)
+            out = json.loads(reg.execute("code_map", {}))
+            self.assertEqual(out["files"], 1)
+            self.assertIn("a.py", out["symbols"])
+            self.assertTrue(reg.execute("code_symbols", {"path": "../outside.py"}).startswith("ERROR"))
+
+
+class ApiToolTests(unittest.TestCase):
+    def test_method_and_url_validation(self):
+        reg = ToolRegistry({"external_api.call": "allow"})
+        register_api_tools(reg, vault=None)
+        out = json.loads(reg.execute("api_request", {"method": "TRACE", "url": "https://x"}))
+        self.assertIn("error", out)
+        out = json.loads(reg.execute("api_request", {"url": "file:///etc/passwd"}))
+        self.assertIn("error", out)
+
+    def test_auth_secret_reference(self):
+        with tempfile.TemporaryDirectory() as td:
+            vault = SecretVault(Path(td) / "v.vault")
+            vault.set("svc.key", "supersecret")
+            reg = ToolRegistry({"external_api.call": "allow", "credentials.use": "allow"})
+            register_api_tools(reg, vault=vault)
+            # unknown secret name is reported, real ones resolve at call time
+            out = json.loads(reg.execute("api_request", {"url": "https://x", "auth": {"secret": "nope"}}))
+            self.assertIn("unknown secret", out["error"])
+            out = json.loads(reg.execute("secrets_list", {}))
+            self.assertEqual(out["secrets"][0]["name"], "svc.key")
+            self.assertNotIn("supersecret", json.dumps(out))
 
 
 if __name__ == "__main__":
