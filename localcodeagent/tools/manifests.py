@@ -48,6 +48,11 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "extract_text": {"category": "documents", "capabilities": ["extract_text", "read_document", "read_pdf", "parse_csv", "html_to_text"], "provider": "nexus"},
     "ocr_image": {"category": "documents", "capabilities": ["ocr_image", "extract_text_from_screenshot", "detect_text_regions"], "provider": "tesseract-ocr"},
     "convert_document": {"category": "documents", "capabilities": ["convert_document", "markdown_to_docx", "markdown_to_html", "docx_to_markdown"], "provider": "pandoc"},
+    # -- knowledge + sandbox ----------------------------------------------------
+    "knowledge_index": {"category": "research", "capabilities": ["index_knowledge", "build_rag_index", "embed_documents"], "provider": "nexus"},
+    "knowledge_search": {"category": "research", "capabilities": ["search_knowledge", "local_rag", "recall_documents"], "provider": "nexus"},
+    "knowledge_forget": {"category": "research", "capabilities": ["forget_knowledge", "manage_index"], "provider": "nexus"},
+    "python_exec": {"category": "utilities", "capabilities": ["execute_code", "run_python", "sandbox_eval"], "provider": "nexus"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

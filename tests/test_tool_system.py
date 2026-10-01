@@ -25,6 +25,8 @@ from localcodeagent.tools.media import (build_add_subtitles, build_convert, buil
                                         build_merge, build_normalize, build_thumbnail, build_trim,
                                         find_ffmpeg, find_ffprobe, register_media_tools)
 from localcodeagent.tools.documents import extract_document_text, register_document_tools
+from localcodeagent.tools.knowledge import KnowledgeIndex, register_knowledge_tools
+from localcodeagent.tools.sandbox import run_python, register_sandbox_tools
 
 
 def _registry(**permissions):
@@ -827,6 +829,64 @@ class DocumentToolTests(unittest.TestCase):
         self.assertTrue(out.startswith(("TOOL_NOT_FOUND", "ERROR", "PERMISSION")))
         out = self.reg.execute("convert_document", {"input": "note.md", "output": "note.html"})
         self.assertTrue(out.startswith(("TOOL_NOT_FOUND", "ERROR", "PERMISSION")))
+
+
+class KnowledgeToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        self.reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow"})
+        self.index = register_knowledge_tools(self.reg, self.ws)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_index_and_search(self):
+        (self.ws / "notes.md").write_text("Python asyncio uses coroutines and event loops for concurrency. " * 30)
+        (self.ws / "rust.md").write_text("Rust uses ownership and borrowing for memory safety. " * 30)
+        out = json.loads(self.reg.execute("knowledge_index", {}))
+        self.assertEqual(out["files_indexed"], 2)
+        out = json.loads(self.reg.execute("knowledge_search", {"query": "asyncio coroutines"}))
+        self.assertEqual(out["results"][0]["file"], "notes.md")
+        out = json.loads(self.reg.execute("knowledge_search", {"query": "ownership borrowing"}))
+        self.assertEqual(out["results"][0]["file"], "rust.md")
+
+    def test_incremental_index(self):
+        f = self.ws / "a.md"
+        f.write_text("alpha beta gamma " * 50)
+        json.loads(self.reg.execute("knowledge_index", {}))
+        first = self.index.entries["a.md"]["mtime"]
+        out = json.loads(self.reg.execute("knowledge_index", {}))
+        self.assertEqual(out["files_indexed"], 0)  # unchanged → skipped
+        f.write_text("delta epsilon " * 50)
+        out = json.loads(self.reg.execute("knowledge_index", {}))
+        self.assertEqual(out["files_indexed"], 1)
+
+    def test_forget_and_empty_query(self):
+        (self.ws / "x.md").write_text("unique zzq token " * 20)
+        json.loads(self.reg.execute("knowledge_index", {}))
+        self.assertIn("removed", self.reg.execute("knowledge_forget", {"file": "x.md"}))
+        self.assertIn("ERROR", self.reg.execute("knowledge_forget", {"file": "x.md"}))
+        self.assertIn("ERROR", self.reg.execute("knowledge_search", {"query": ""}))
+
+
+class SandboxToolTests(unittest.TestCase):
+    def test_python_exec(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg = ToolRegistry({"shell.execute": "allow"})
+            register_sandbox_tools(reg, Path(td))
+            out = json.loads(reg.execute("python_exec", {"code": "print(6*7)"}))
+            self.assertTrue(out["ok"])
+            self.assertIn("42", out["stdout"])
+            out = json.loads(reg.execute("python_exec", {"code": "raise SystemExit(3)"}))
+            self.assertFalse(out["ok"])
+            self.assertEqual(out["exit_code"], 3)
+
+    def test_python_exec_isolated(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = run_python("import sys, json; print(json.dumps(sys.flags.isolated))", Path(td) / "sb")
+            self.assertTrue(out["ok"])
+            self.assertIn("1", out["stdout"])
 
 
 if __name__ == "__main__":
