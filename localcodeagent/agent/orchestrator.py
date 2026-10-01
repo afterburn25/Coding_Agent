@@ -2264,7 +2264,7 @@ class AgentOrchestrator:
         )
         session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
-        self.tasks.update(
+        resumed = self.tasks.update(
             task_id,
             status="running",
             phase="working",
@@ -2272,6 +2272,7 @@ class AgentOrchestrator:
             pending_approval=None,
             recovery_count=task.recovery_count + 1,
         )
+        self._emit(session, "task", task=resumed.as_dict())
         return self._drive_or_error(session)
 
     def resume(
