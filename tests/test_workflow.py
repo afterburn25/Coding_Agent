@@ -64,6 +64,22 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(tasks.read_log("../escape"), "")
             self.assertFalse((Path(td) / ".agent" / "escape.log").exists())
 
+    def test_orphan_checkpoints_pruned_on_load(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            tasks = TaskStore(ws)
+            live = tasks.create("live", "auto")
+            checkpoints = CheckpointManager(ws)
+            checkpoints.snapshot(live.id, ws / "kept.txt")
+            # Simulate an orphaned snapshot from a task that aged out.
+            orphan_dir = ws / ".agent" / "checkpoints" / "deadbeef1234" / "files"
+            orphan_dir.mkdir(parents=True)
+            (orphan_dir / "old.txt").write_text("stale", encoding="utf-8")
+            removed = checkpoints.prune_orphans({t["id"] for t in tasks.recent(1_000_000)})
+            self.assertEqual(removed, 1)
+            self.assertTrue((ws / ".agent" / "checkpoints" / live.id).exists())
+            self.assertFalse((ws / ".agent" / "checkpoints" / "deadbeef1234").exists())
+
     def test_patchset_validates_before_writing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

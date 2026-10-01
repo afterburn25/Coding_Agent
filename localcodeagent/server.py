@@ -91,6 +91,9 @@ class AppState:
         from .workqueue import WorkQueue
         self.queue = WorkQueue(self.workspace)
         self.checkpoints = CheckpointManager(self.workspace)
+        # Drop snapshots whose task aged out of the ledger — checkpoints
+        # hold per-file copies and would otherwise grow without bound.
+        self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
         self.memory = ProjectMemory(self.workspace)
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():

@@ -96,6 +96,20 @@ class CheckpointManager:
             diff = "".join(lines)
             return diff[:max_chars] + ("\n...diff truncated..." if len(diff) > max_chars else "")
 
+    def prune_orphans(self, keep: set[str]) -> int:
+        """Remove checkpoint dirs whose task fell out of the task ledger —
+        task records are capped but snapshots would otherwise grow forever."""
+        removed = 0
+        with self._lock:
+            try:
+                for path in self.root.iterdir():
+                    if path.is_dir() and path.name not in keep:
+                        shutil.rmtree(path, ignore_errors=True)
+                        removed += 1
+            except OSError:
+                pass
+        return removed
+
     def restore(self, task_id: str) -> list[str]:
         with self._lock:
             manifest = self._load_manifest(task_id)
