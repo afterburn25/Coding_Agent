@@ -147,6 +147,7 @@ def run_process_streaming(
     timeout: float = 120,
     shell: bool = False,
     sink=None,
+    cancel_check=None,
     creationflags: int = 0,
 ) -> tuple[int | None, str, str, bool]:
     """Run a process and stream stdout/stderr chunks to sink(which, chunk).
@@ -181,12 +182,26 @@ def run_process_streaming(
     for t in threads:
         t.start()
     timed_out = False
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        proc.kill()
-        proc.wait(timeout=10)
+    cancelled = False
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None:
+        if cancel_check is not None:
+            try:
+                if cancel_check():
+                    cancelled = True
+                    proc.kill()
+                    proc.wait(timeout=10)
+                    break
+            except Exception:
+                pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            proc.kill()
+            proc.wait(timeout=10)
+            break
+        time.sleep(min(0.15, remaining))
+    timed_out = timed_out or cancelled
     for t in threads:
         t.join(timeout=5)
     for stream in (proc.stdout, proc.stderr):
@@ -256,15 +271,27 @@ def register_terminal_tools(
             except Exception:
                 pass
 
+        checks = registry.context.get("cancel_checks") or {}
+        tls = registry.context.get("task_tls")
+        tid = str(getattr(tls, "task_id", "") or registry.context.get("task_id") or "")
+        cancel_check = checks.get(tid)
         flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         code, stdout, stderr, timed_out = run_process_streaming(
-            argv, cwd=cwd, env=merged_env, timeout=timeout, sink=_emit_chunk, creationflags=flags
+            argv, cwd=cwd, env=merged_env, timeout=timeout, sink=_emit_chunk,
+            cancel_check=cancel_check, creationflags=flags
         )
+        cancelled = False
+        if timed_out:
+            try:
+                cancelled = bool(cancel_check and cancel_check())
+            except Exception:
+                pass
         payload = {
             "exit_code": code,
             "stdout": stdout[-MAX_OUTPUT:],
             "stderr": stderr[-8000:],
-            "timed_out": timed_out,
+            "timed_out": timed_out and not cancelled,
+            "cancelled": cancelled,
             "elapsed_seconds": round(time.time() - started, 3),
             "shell": shell_id,
         }

@@ -8,6 +8,7 @@ from localcodeagent.config import AgentConfig
 from localcodeagent.tools.base import ToolRegistry
 from localcodeagent.tools.filesystem import register_filesystem_tools
 from localcodeagent.tools.github import _repo_slug_from_remote, register_github_tools
+from localcodeagent.tools.terminal import run_process_streaming
 
 
 class ToolTests(unittest.TestCase):
@@ -96,6 +97,28 @@ class GitHubCodingToolTests(unittest.TestCase):
             result = reg.execute("git_push", {"remote": "origin", "branch": "main"})
             self.assertTrue(result.startswith("APPROVAL_REQUIRED"))
             self.assertIn("github.write", result)
+
+
+class ProcessStreamingTests(unittest.TestCase):
+    def test_cancel_check_kills_running_process(self):
+        with tempfile.TemporaryDirectory() as td:
+            polls = []
+            code, out, err, killed = run_process_streaming(
+                ["python", "-c", "import time; print('start'); time.sleep(30)"],
+                cwd=Path(td), timeout=60,
+                cancel_check=lambda: (polls.append(1), True)[1],
+            )
+            self.assertTrue(killed)
+            self.assertTrue(polls)
+
+    def test_no_cancel_check_runs_to_completion(self):
+        with tempfile.TemporaryDirectory() as td:
+            code, out, err, killed = run_process_streaming(
+                ["python", "-c", "print('done')"], cwd=Path(td), timeout=60,
+            )
+            self.assertFalse(killed)
+            self.assertEqual(code, 0)
+            self.assertIn("done", out)
 
 
 if __name__ == "__main__":

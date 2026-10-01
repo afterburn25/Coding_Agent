@@ -1339,10 +1339,11 @@ class AgentOrchestrator:
                 self._append_tool_result(session, c, n, a, result)
                 act_id = session.tool_activities.pop(n, None)
                 if act_id is not None:
+                    cancelled = "[cancelled]" in str(result)
                     failed = result.startswith(("ERROR", "PERMISSION_DENIED", "CANCELLED"))
                     self._act_update(
                         session.task_id, {"id": act_id},
-                        state="failed" if failed else "completed",
+                        state="interrupted" if cancelled else ("failed" if failed else "completed"),
                         summary=str(result).replace("\n", " ")[:240],
                         callback=session.event_callback,
                     )
@@ -1705,6 +1706,9 @@ class AgentOrchestrator:
         sinks = self.tools.context.get("stream_sinks")
         if sinks is not None:
             sinks.pop(task_id, None)
+        checks = self.tools.context.get("cancel_checks")
+        if checks is not None:
+            checks.pop(task_id, None)
         try:
             self.tasks.flush_log(task_id)
         except Exception:
@@ -1819,6 +1823,12 @@ class AgentOrchestrator:
                         self._emit(session, "activity", activity=dict(row))
 
         self.tools.context["stream_sinks"][session.task_id] = _on_tool_output
+        # Foreground shell/terminal calls poll this while their subprocess runs
+        # so task cancellation kills the live command instead of only stopping
+        # between tool calls.
+        self.tools.context.setdefault("cancel_checks", {})[session.task_id] = (
+            lambda: self._task_cancelled(session)
+        )
         if self._task_cancelled(session):
             return self._cancel_result(session)
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
@@ -2673,6 +2683,13 @@ class AgentOrchestrator:
             recovery_count=task.recovery_count + 1,
         )
         self._emit(session, "task", task=resumed.as_dict())
+        act = self._act(
+            task_id, "recovery", "Recovering Task",
+            f"Resuming from '{task.status}' — recovery #{task.recovery_count + 1}",
+            details={"previous_phase": task.interrupted_from or task.phase},
+            callback=session.event_callback,
+        )
+        self._act_update(task_id, act, state="completed", callback=session.event_callback)
         return self._drive_or_error(session)
 
     def resume(

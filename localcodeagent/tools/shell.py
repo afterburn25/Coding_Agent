@@ -22,14 +22,23 @@ def register_shell_tools(registry: ToolRegistry, workspace: Path) -> None:
             except Exception:
                 pass
 
+        checks = registry.context.get("cancel_checks") or {}
+        tls = registry.context.get("task_tls")
+        tid = str(getattr(tls, "task_id", "") or registry.context.get("task_id") or "")
+        cancel_check = checks.get(tid)
         flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         code, stdout, stderr, timed_out = run_process_streaming(
             command, cwd=workspace, timeout=timeout, shell=True, sink=_emit_chunk,
-            creationflags=flags,
+            cancel_check=cancel_check, creationflags=flags,
         )
         output = stdout + (("\nSTDERR:\n" + stderr) if stderr else "")
         if timed_out:
-            output += "\n[timed out]"
+            cancelled = False
+            try:
+                cancelled = bool(cancel_check and cancel_check())
+            except Exception:
+                pass
+            output += "\n[cancelled]" if cancelled else "\n[timed out]"
         return f"EXIT_CODE={code}\n{output[-20000:]}"
 
     registry.register(ToolSpec("run_shell", "Run a shell command in the current workspace and return its exit code and output.", {

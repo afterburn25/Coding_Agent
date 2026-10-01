@@ -307,7 +307,7 @@ function upsertActivityRow(row){
   if(!rec){
     const el=document.createElement('div');
     el.className='tl-row';
-    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
+    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><button class="tl-stop" type="button" title="Stop task">Stop</button><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
     el.querySelector('.tl-head').addEventListener('click',()=>{
       const r=tlRows.get(row.id);
       if(r){r.manual=!el.classList.contains('open');el.classList.toggle('open',r.manual);}
@@ -327,6 +327,10 @@ function upsertActivityRow(row){
   el.querySelector('.tl-title').textContent=row.title||row.category||'activity';
   const tt=el.querySelector('.tl-time');
   tt.textContent=tlElapsed(row).toFixed(row.elapsed!=null?1:0)+'s';
+  const stop=el.querySelector('.tl-stop');
+  const stoppable=row.state==='running'&&row.category==='command'&&row.task_id&&row.task_id!=='system';
+  stop.style.display=stoppable?'':'none';
+  if(stoppable)stop.onclick=(ev)=>{ev.stopPropagation();cancelTask(row.task_id);};
   const open=(rec.manual!=null)?rec.manual:['running','failed','waiting'].includes(row.state);
   el.classList.toggle('open',open);
   el.querySelector('.tl-summary').textContent=row.summary||'';
