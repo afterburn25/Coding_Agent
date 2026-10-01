@@ -828,7 +828,13 @@ class AgentOrchestrator:
         )
         return session
 
-    def _resume_persisted_approval(self, task_id: str, *, approved: bool) -> AgentResult:
+    def _resume_persisted_approval(
+        self,
+        task_id: str,
+        *,
+        approved: bool,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         task = self.tasks.get(task_id)
         pending = task.pending_approval
         if task.status != "waiting_approval" or not pending:
@@ -845,11 +851,13 @@ class AgentOrchestrator:
             return self._direct_image_result(
                 task_id=task_id,
                 user_text=task.prompt,
-                event_callback=None,
+                event_callback=event_callback,
                 approved=approved,
             )
 
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
+        if event_callback is not None:
+            session.event_callback = event_callback
         self._sessions[task_id] = session
         self.tasks.update(
             task_id,
@@ -2187,10 +2195,19 @@ class AgentOrchestrator:
         )
         return self._drive_or_error(session)
 
-    def resume(self, task_id: str, *, approved: bool) -> AgentResult:
+    def resume(
+        self,
+        task_id: str,
+        *,
+        approved: bool,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         session = self._sessions.get(task_id)
         if session is None:
-            return self._resume_persisted_approval(task_id, approved=approved)
+            return self._resume_persisted_approval(
+                task_id, approved=approved, event_callback=event_callback)
+        if event_callback is not None:
+            session.event_callback = event_callback
         if str(self.tasks.get(task_id).status or "") == "cancelled":
             raise KeyError(f"Task {task_id} was cancelled and cannot be resumed")
         if not session.pending_approval:
