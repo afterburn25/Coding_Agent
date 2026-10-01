@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -125,6 +126,31 @@ class ResearchCacheTests(unittest.TestCase):
             cache.put("web", "query", [{"title": "x"}], "1.0")
             self.assertEqual(cache.get("web", "query", "1.0"), [{"title": "x"}])
             self.assertIsNone(cache.get("web", "query", "2.0"))
+
+    def test_cache_prunes_expired_and_caps_file_count(self):
+        import os
+        with tempfile.TemporaryDirectory() as td:
+            cache = ResearchCache(Path(td), ttl_hours=1)
+            for i in range(cache._CACHE_FILE_LIMIT + 20):
+                cache.put("web", f"q{i}", [{"title": "x"}])
+            self.assertLessEqual(len(list(cache.cache_dir.glob("*.json"))), cache._CACHE_FILE_LIMIT)
+
+            # Force-expire all entries, then a single put sweeps them.
+            old = time.time() - cache.ttl - 10
+            for p in cache.cache_dir.glob("*.json"):
+                os.utime(p, (old, old))
+            cache.put("web", "fresh", [{"title": "y"}])
+            self.assertEqual(len(list(cache.cache_dir.glob("*.json"))), 1)
+            self.assertIsNotNone(cache.get("web", "fresh"))
+
+    def test_sessions_are_bounded_and_written_atomically(self):
+        with tempfile.TemporaryDirectory() as td:
+            cache = ResearchCache(Path(td))
+            for i in range(cache._SESSION_FILE_LIMIT + 10):
+                cache.save_session({"id": f"s{i}", "summary": "x"})
+            self.assertEqual(len(list(cache.sessions_dir.glob("*.json"))), cache._SESSION_FILE_LIMIT)
+            sessions = cache.recent_sessions(5)
+            self.assertEqual(len(sessions), 5)
 
 
 class GitHubApiTests(unittest.TestCase):

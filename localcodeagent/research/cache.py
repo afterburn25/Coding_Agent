@@ -8,6 +8,9 @@ from typing import Any
 
 
 class ResearchCache:
+    _CACHE_FILE_LIMIT = 500
+    _SESSION_FILE_LIMIT = 100
+
     def __init__(self, root: Path, *, ttl_hours: int = 168) -> None:
         self.root = root.resolve()
         self.cache_dir = self.root / "cache"
@@ -41,11 +44,29 @@ class ResearchCache:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
+        self._prune(self.cache_dir, self._CACHE_FILE_LIMIT, expire=True)
+
+    def _prune(self, directory: Path, limit: int, *, expire: bool) -> None:
+        """Delete expired entries (cache only) and files beyond the newest-N cap."""
+        try:
+            entries = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return
+        now = time.time()
+        for index, path in enumerate(entries):
+            try:
+                if index >= limit or (expire and now - path.stat().st_mtime > self.ttl):
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def save_session(self, session: dict[str, Any]) -> None:
         sid = str(session.get("id") or "session")
         path = self.sessions_dir / f"{sid}.json"
-        path.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+        self._prune(self.sessions_dir, self._SESSION_FILE_LIMIT, expire=False)
 
     def recent_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
