@@ -826,6 +826,57 @@ class AppState:
     def _watchdog_maintenance(self) -> None:
         self._evict_idle_models()
         self._expire_stale_approvals()
+        self._retry_failed_tasks()
+
+    def _retry_failed_tasks(self) -> None:
+        """Re-drive error tasks in autonomous mode after a backoff.
+
+        recover() rebuilds the session from durable ledger/checkpoint state,
+        so a task that failed while unattended (e.g. the model runtime died
+        past in-drive recovery) gets another bounded attempt instead of
+        sitting dead until someone notices. Bounded by
+        autonomous_max_recoveries; single-flight: never runs while any task
+        is active, waiting, or already being retried.
+        """
+        if not getattr(self.config, "autonomous_mode", False):
+            return
+        retry_after = float(getattr(self.config, "autonomous_error_retry_seconds", 120.0) or 0.0)
+        max_recoveries = max(0, int(getattr(self.config, "autonomous_max_recoveries", 3)))
+        if retry_after <= 0 or max_recoveries <= 0:
+            return
+        if not hasattr(self, "_retrying_tasks"):
+            self._retrying_tasks = set()
+        try:
+            now = time.time()
+            recent = self.tasks.recent(50)
+            if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
+                return
+            stale = [
+                t for t in recent
+                if t.get("status") == "error"
+                and int(t.get("recovery_count") or 0) < max_recoveries
+                and now - float(t.get("updated_at") or now) >= retry_after
+                and str(t.get("id")) not in self._retrying_tasks
+            ]
+            for item in stale[:1]:  # one retry per tick
+                task_id = str(item["id"])
+                self._retrying_tasks.add(task_id)
+
+                def retry(tid: str = task_id) -> None:
+                    try:
+                        self.events.publish("task", {"event": "auto_retry", "task_id": tid})
+                        self.agent.recover(tid)
+                    except Exception as exc:
+                        self.events.publish("task", {
+                            "event": "auto_retry_failed", "task_id": tid,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        })
+                    finally:
+                        self._retrying_tasks.discard(tid)
+
+                threading.Thread(target=retry, name=f"auto-retry-{task_id}", daemon=True).start()
+        except Exception:
+            pass
 
     def _expire_stale_approvals(self) -> None:
         """Fail approval-parked tasks that outlived the autonomous wait bound.

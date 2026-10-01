@@ -1531,6 +1531,33 @@ class AppStateWiringTests(unittest.TestCase):
 
             self.assertEqual(state.tasks.get(task.id).status, "waiting_approval")
 
+    def test_autonomous_error_retry_recovers_stale_error_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            from localcodeagent.agent.orchestrator import AgentOrchestrator
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="ext", endpoint="http://x/v1", model="m",
+                    roles=["primary_coder"], runtime="external")],
+                autonomous_mode=True,
+                autonomous_error_retry_seconds=0.01,
+                process_watchdog=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            task = state.tasks.create("flaky work", "auto")
+            state.tasks.update(task.id, status="error", error="transient boom")
+            time.sleep(0.05)
+
+            with patch.object(AgentOrchestrator, "recover",
+                              lambda self, task_id: None) as _:
+                state._retry_failed_tasks()
+                deadline = time.time() + 5
+                while task.id in getattr(state, "_retrying_tasks", set()) and time.time() < deadline:
+                    time.sleep(0.05)
+            self.assertNotIn(task.id, getattr(state, "_retrying_tasks", set()))
+
     def test_auto_resume_stays_off_without_autonomous_mode(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.workflow.tasks import TaskStore
