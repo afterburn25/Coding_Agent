@@ -88,6 +88,8 @@ class AppState:
         )
         self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
         self.tasks = TaskStore(self.workspace)
+        from .workqueue import WorkQueue
+        self.queue = WorkQueue(self.workspace)
         self.checkpoints = CheckpointManager(self.workspace)
         self.memory = ProjectMemory(self.workspace)
         conversation_path = Path(config.conversation_memory_path).expanduser()
@@ -827,6 +829,52 @@ class AppState:
         self._evict_idle_models()
         self._expire_stale_approvals()
         self._retry_failed_tasks()
+        self._dequeue_next()
+
+    def _dequeue_next(self) -> None:
+        """Start the next queued prompt when no task is active.
+
+        Runs regardless of autonomous mode — queued work is explicit user
+        intent; autonomous mode only affects permission levels inside it.
+        Single-flight: skipped while any task is running or being retried.
+        """
+        if not len(self.queue):
+            return
+        if not hasattr(self, "_queue_running"):
+            self._queue_running = set()
+        try:
+            recent = self.tasks.recent(20)
+            if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
+                return
+            if getattr(self, "_retrying_tasks", None) or self._queue_running:
+                return
+            item = self.queue.pop()
+            if item is None:
+                return
+            item_id = str(item["id"])
+            if item_id in self._queue_running:
+                return
+
+            def run_item(entry: dict) -> None:
+                try:
+                    self.events.publish("task", {"event": "dequeued", "queue_item": entry})
+                    self.agent.run(
+                        str(entry["prompt"]),
+                        mode=str(entry.get("mode") or "auto"),
+                        event_callback=lambda e: self.events.publish(str(e.get("type", "task")), dict(e)),
+                    )
+                except Exception as exc:
+                    self.events.publish("task", {
+                        "event": "queue_item_failed", "queue_item": entry,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    })
+                finally:
+                    self._queue_running.discard(entry["id"])
+
+            self._queue_running.add(item_id)
+            threading.Thread(target=run_item, args=(item,), name=f"queue-{item_id}", daemon=True).start()
+        except Exception:
+            pass
 
     def _retry_failed_tasks(self) -> None:
         """Re-drive error tasks in autonomous mode after a backoff.
@@ -1339,6 +1387,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tasks":
             self._json(self.state.task_payload())
+            return
+        if path == "/api/queue":
+            self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})
             return
         if path == "/api/index":
             self._json(self.state.repository_index.summary())
@@ -2043,6 +2094,21 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.state.agent.run(message, history=self.state.history, mode=mode)
                 self.state.history = self.state.conversation_manager.history(limit=32)
                 self._agent_response(result)
+                return
+
+            if path == "/api/queue":
+                prompt = str(body.get("prompt", "")).strip()
+                if not prompt:
+                    self._json({"error": "prompt is required"}, 400)
+                    return
+                item = self.state.queue.enqueue(prompt, mode=str(body.get("mode", "auto")))
+                self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                self._json({"ok": True, "item": item})
+                return
+
+            if path == "/api/queue/cancel":
+                item_id = str(body.get("id", "")).strip()
+                self._json({"ok": self.state.queue.remove(item_id)})
                 return
 
             if path == "/api/tasks/resume":

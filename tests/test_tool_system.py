@@ -1558,6 +1558,53 @@ class AppStateWiringTests(unittest.TestCase):
                     time.sleep(0.05)
             self.assertNotIn(task.id, getattr(state, "_retrying_tasks", set()))
 
+    def test_work_queue_persists_and_pops_fifo(self):
+        from localcodeagent.workqueue import WorkQueue
+        with tempfile.TemporaryDirectory() as td:
+            q = WorkQueue(Path(td))
+            first = q.enqueue("task one")
+            q.enqueue("task two")
+            self.assertEqual(len(q), 2)
+
+            reloaded = WorkQueue(Path(td))
+            self.assertEqual([i["prompt"] for i in reloaded.list()], ["task one", "task two"])
+            self.assertEqual(reloaded.pop()["id"], first["id"])
+            self.assertTrue(reloaded.remove(reloaded.list()[0]["id"]))
+            self.assertEqual(len(reloaded), 0)
+
+    def test_queue_dequeues_when_idle(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            from localcodeagent.agent.orchestrator import AgentOrchestrator
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="ext", endpoint="http://x/v1", model="m",
+                    roles=["primary_coder"], runtime="external")],
+                process_watchdog=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            state.queue.enqueue("queued work")
+            ran = []
+            with patch.object(AgentOrchestrator, "run",
+                              lambda self, prompt, **kw: ran.append(prompt)):
+                state._dequeue_next()
+                deadline = time.time() + 5
+                while not ran and time.time() < deadline:
+                    time.sleep(0.05)
+            self.assertEqual(ran, ["queued work"])
+            self.assertEqual(len(state.queue), 0)
+
+    def test_queue_waits_while_task_running(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            state.queue.enqueue("queued work")
+            task = state.tasks.create("busy", "auto")
+            state.tasks.update(task.id, status="running")
+            state._dequeue_next()
+            self.assertEqual(len(state.queue), 1)
+
     def test_auto_resume_stays_off_without_autonomous_mode(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.workflow.tasks import TaskStore
