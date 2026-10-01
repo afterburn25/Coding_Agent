@@ -1133,5 +1133,53 @@ class CodeIntelAstTests(unittest.TestCase):
             self.assertIn("symbols", out)
 
 
+class AppStateWiringTests(unittest.TestCase):
+    """Full-stack registry wiring — guards against registration regressions."""
+
+    def _state(self, td: str):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState
+        cfg = AgentConfig(models=[ModelProfile(
+            id="ext", endpoint="http://x/v1", model="m",
+            roles=["primary_coder"], runtime="external")])
+        return AppState(cfg, Path(td), Path(td) / ".runtime")
+
+    def test_core_tool_families_registered(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            names = {m["name"] for m in state.tools.manifests()}
+            for expected in (
+                "read_file", "write_file", "terminal_run", "search_code",
+                "build_project", "git_status", "git_commit", "browser_run",
+                "research_topic", "web_search", "api_request", "secrets_list",
+                "code_symbols", "code_map", "data_query", "chart_generate",
+                "media_probe", "extract_audio", "media_transcribe", "speak_text",
+                "extract_text", "ocr_image", "convert_document",
+                "knowledge_index", "knowledge_search", "python_exec",
+                "docker_run", "blender_render", "list_workflows", "run_workflow",
+                "find_tools", "use_capability", "install_tool", "system_resources",
+            ):
+                self.assertIn(expected, names, f"missing registered tool: {expected}")
+
+    def test_use_capability_routes_through_router(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            out = json.loads(state.tools.execute(
+                "use_capability",
+                {"capability": "read_file", "arguments": {}},
+            ))
+            # capability resolves to a real tool (read_file) — args may error but routing works
+            self.assertTrue(out["ok"] or out.get("attempts"), out)
+
+    def test_events_bus_wired(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            sub = state.events.subscribe(replay=0)
+            job = state.jobs.submit("test", "probe")
+            event = sub.get(timeout=2)
+            self.assertEqual(event["type"], "job")
+            self.assertEqual(event["job"]["id"], job.id)
+
+
 if __name__ == "__main__":
     unittest.main()
