@@ -651,3 +651,31 @@ Expected at this checkpoint: `328 tests` passing.
 - Verified checkpoint: **336 tests** (2 skips). Remaining work is
   hardware-bound: real Qwen3-14B/30B runs, ComfyUI/FLUX interop, overnight
   unattended queue soak; plus interactive Brain dogfood on a real install.
+
+## 2026-11 — GPU-independent end-to-end harness (343 tests)
+
+`tests/test_end_to_end.py` adds `_FakeModelServer`: an in-process
+OpenAI-compatible endpoint (`GET /health`, `POST /v1/chat/completions`,
+stream + non-stream, scripted tool_call then final-answer turns). Knobs:
+`tool_name`/`tool_args` (which call to emit), `fail_next` (N 500s),
+`delay` (stall responses). It drives the real `AppState` + orchestrator +
+tool registry + task ledger + transcripts — no GPU needed.
+
+Coverage:
+- happy path: real `system_resources` call -> tool result -> final answer
+  -> `$`/ok/`## result` transcript markers
+- queue drain: two chained tasks through the real work-queue worker
+- transient 500 -> `ensure_ready` retry -> `transient_retry` model event
+- persistent failure -> bounded calls, `error` status, `## error` marker
+- mid-run cancel -> `cancelled` result (found+fixed a resurrection bug:
+  `_drive` re-marked `running` at loop entry, losing cancels that landed
+  during the first in-flight model call)
+- approval gate: `write_file` pauses `waiting_approval` with persisted
+  call; approve executes + feeds result to model; deny sends
+  `PERMISSION_DENIED`
+
+Use it for the soak: script N tasks, `fail_next`, delays, and restarts on
+the GPU box to exercise the overnight path deterministically before real
+inference.
+
+Verified checkpoint: **343 tests** (2 skips), head `b9f24e9`.
