@@ -14,11 +14,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
-from typing import Any
+from typing import Any, Callable
 
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
-from .config import AgentConfig, load_config
+from .config import AgentConfig, ModelProfile, load_config
 from .models.router import ModelRouter
 from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
@@ -70,10 +70,13 @@ VERSION = "0.6.0-dev"
 
 
 class AppState:
-    def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None) -> None:
+    def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None, boot: Callable[[float, str, str], None] | None = None) -> None:
         self.config = config
         self.workspace = workspace.resolve()
         self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
+        self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
+        self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
+        self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
         self.model_telemetry = ModelPerformanceTelemetry(
             self.workspace,
@@ -89,6 +92,7 @@ class AppState:
             performance_advisor=self.model_telemetry.score,
         )
         self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
+        self._boot(30, "RESTORING · TASK QUEUE", "Recovering queued or interrupted work")
         self.tasks = TaskStore(self.workspace)
         from .workqueue import WorkQueue
         self.queue = WorkQueue(self.workspace)
@@ -97,6 +101,7 @@ class AppState:
         # hold per-file copies and would otherwise grow without bound.
         self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
         self.memory = ProjectMemory(self.workspace)
+        self._boot(38, "RESTORING · MEMORY & KNOWLEDGE", "Preparing conversation and learned knowledge continuity")
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():
             conversation_path = runtime_root / conversation_path
@@ -131,6 +136,7 @@ class AppState:
         self.model_growth = ModelGrowthLab(growth_dir)
         # Protected Nexus Brain state has one canonical location. Mutable
         # config.json cannot redirect an initialized Brain to an unprotected file.
+        self._boot(52, "LOADING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
         brain_path = (runtime_root / "data" / "nexus_brain.json").resolve()
         brain_auth_path = brain_path.with_name(brain_path.stem + ".auth.json")
         protected_brain_exists = brain_path.is_file() or brain_auth_path.is_file()
@@ -178,8 +184,10 @@ class AppState:
                         max_records=max(10000, int(config.nexus_brain_record_limit)),
                     )
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
+        self._boot(64, "PREPARING · WORKSPACE", "Restoring project and repository context")
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
+        self._boot(68, "INITIALIZING · PERMISSION SYSTEM", "Applying Nexus Core authorization policies")
         self.permission_manager = PermissionManager(
             config.permissions,
             profile=getattr(config, "permission_profile", "custom"),
@@ -207,6 +215,7 @@ class AppState:
         self._register_processes()
         if getattr(config, "process_watchdog", True):
             self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
+        self._boot(74, "REGISTERING · TOOLS & PLUGINS", "Loading installed capabilities and tool manifests")
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         self.terminal_tracker = register_terminal_tools(
@@ -266,6 +275,8 @@ class AppState:
         )
         self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])),
                               vault=self.secrets)
+        if getattr(config, "mcp_servers", None):
+            self._boot(86, "CONNECTING · MCP SERVICES", "Connecting configured external tool servers")
         try:
             self.mcp.connect_all()
         except Exception:
@@ -392,6 +403,7 @@ class AppState:
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
+        self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_resume()
 
@@ -437,6 +449,28 @@ class AppState:
     def _start_primary_prewarm(self) -> None:
         if not self.config.runtime_auto_start:
             return
+        # Warm the fast-lane utility model first: it is small, cheap, and the
+        # model ordinary conversation hits before anything else.
+        utility = next(
+            (
+                profile
+                for profile in self.config.models
+                if profile.enabled and profile.keep_loaded and "utility" in profile.roles
+            ),
+            None,
+        )
+        if utility is not None and utility.runtime == "llama_cpp":
+            u_fits, _s, _r = self.runtime.resource_fit(utility)
+            if u_fits:
+                self._boot(95, "INITIALIZING · NEURAL ENGINE", "Preparing fast conversational intelligence")
+
+                def warm_utility(p: ModelProfile = utility) -> None:
+                    try:
+                        self.runtime.ensure_ready(p)
+                    except Exception:
+                        pass
+
+                threading.Thread(target=warm_utility, name="chat-nexus-utility-prewarm", daemon=True).start()
         starter = next(
             (
                 profile
@@ -2895,8 +2929,9 @@ def create_server(
     web_root: Path,
     runtime_root: Path,
     config_path: Path | None = None,
+    boot: Callable[[float, str, str], None] | None = None,
 ) -> tuple[ThreadingHTTPServer, AppState]:
-    state = AppState(config, workspace, runtime_root, config_path=config_path)
+    state = AppState(config, workspace, runtime_root, config_path=config_path, boot=boot)
     handler = type("ChatNexusHandler", (Handler,), {"state": state, "web_root": web_root})
     server = ThreadingHTTPServer((host, port), handler)
     return server, state
@@ -2918,8 +2953,14 @@ def stop_state(state: AppState) -> None:
 
 
 def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
-    server, state = create_server(config, workspace, host, port, web_root, runtime_root, config_path=config_path)
+    from .boot import boot_report, reporter_from_env
+    boot = reporter_from_env()
+    if boot is not None:
+        boot(2, "STARTING · CORE SERVICES", "Launching Nexus Core backend services")
+    server, state = create_server(config, workspace, host, port, web_root, runtime_root, config_path=config_path, boot=boot)
     actual_port = int(server.server_address[1])
+    if boot is not None:
+        boot_report(98, "STARTING · CORE SERVICES", "Backend interface online — synchronizing runtime state")
     print(f"Nexus Core v{VERSION}")
     print(f"Workspace: {workspace.resolve()}")
     print(f"UI: http://{host}:{actual_port}")

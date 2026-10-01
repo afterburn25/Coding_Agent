@@ -16,7 +16,7 @@ class OpenAICompatibleProvider:
         self.timeout = timeout
         self.endpoint = (endpoint or profile.endpoint).rstrip("/")
 
-    def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> ProviderResponse:
+    def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int | None = None) -> ProviderResponse:
         if not self.endpoint:
             raise RuntimeError(f"No endpoint is available for model profile '{self.profile.id}'.")
         url = self.endpoint + "/chat/completions"
@@ -24,7 +24,7 @@ class OpenAICompatibleProvider:
             "model": self.profile.model,
             "messages": messages,
             "temperature": float(self.profile.temperature),
-            "max_tokens": max(128, int(self.profile.max_output_tokens)),
+            "max_tokens": max(128, int(max_tokens if max_tokens is not None else self.profile.max_output_tokens)),
             "stream": False,
         }
         if tools and self.profile.tool_calling:
@@ -60,6 +60,7 @@ class OpenAICompatibleProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         on_delta: Callable[[str], None] | None = None,
+        max_tokens: int | None = None,
     ) -> ProviderResponse:
         """Stream a chat completion and reconstruct content plus tool calls."""
         if not self.endpoint:
@@ -69,7 +70,7 @@ class OpenAICompatibleProvider:
             "model": self.profile.model,
             "messages": messages,
             "temperature": float(self.profile.temperature),
-            "max_tokens": max(128, int(self.profile.max_output_tokens)),
+            "max_tokens": max(128, int(max_tokens if max_tokens is not None else self.profile.max_output_tokens)),
             "stream": True,
             "stream_options": {"include_usage": True},
         }

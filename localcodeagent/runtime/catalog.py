@@ -36,6 +36,20 @@ class CodingModelAsset:
 
 CODING_MODEL_CATALOG: tuple[CodingModelAsset, ...] = (
     CodingModelAsset(
+        id="qwen3-4b-instruct-q4-k-m",
+        title="Qwen3 4B Instruct 2507 · Q4_K_M",
+        filename="Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        url="https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        sha256="2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e",
+        size_bytes=2_497_280_736,
+        license="Apache-2.0 base model",
+        source_repo="bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+        source_type="community quantization of Qwen/Qwen3-4B-Instruct-2507",
+        roles=("utility",),
+        hardware_note="Tiny fast-lane model; fully GPU-resident on ~6 GB VRAM and comfortable on CPU fallback.",
+        description="Non-thinking Qwen3 4B instruct tuned for low-latency general conversation and routing.",
+    ),
+    CodingModelAsset(
         id="qwen3-14b-q4-k-m",
         title="Qwen3 14B · Q4_K_M",
         filename="Qwen3-14B-Q4_K_M.gguf",

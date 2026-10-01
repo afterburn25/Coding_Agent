@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Net;
+using System.Text.Json;
 using System.Net.Http;
 using System.Net.Sockets;
 using Microsoft.Web.WebView2.Core;
@@ -474,6 +475,8 @@ internal sealed class BackendProcess : IDisposable
     public string BaseUrl => $"http://127.0.0.1:{Port}/";
     public string LogPath { get; }
     public event Action<int>? UnexpectedExit;
+    /// <summary>(pct 0-100, primary, secondary) — real backend-internal phase.</summary>
+    public event Action<double, string, string>? BootPhase;
 
     private BackendProcess(Process process, int port, string logPath)
     {
@@ -483,7 +486,15 @@ internal sealed class BackendProcess : IDisposable
         _logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true) { AutoFlush = true });
 
         _process.EnableRaisingEvents = true;
-        _process.OutputDataReceived += (_, e) => WriteLog("OUT", e.Data);
+        _process.OutputDataReceived += (_, e) =>
+        {
+            WriteLog("OUT", e.Data);
+            if (TryParseBootMarker(e.Data, out var pct, out var primary, out var secondary))
+            {
+                try { BootPhase?.Invoke(pct, primary, secondary); }
+                catch { /* splash updates must never break the backend host */ }
+            }
+        };
         _process.ErrorDataReceived += (_, e) => WriteLog("ERR", e.Data);
         _process.Exited += (_, _) =>
         {
@@ -494,6 +505,36 @@ internal sealed class BackendProcess : IDisposable
                 UnexpectedExit?.Invoke(code);
             }
         };
+    }
+
+    /// <summary>
+    /// Parse a "[nexus-boot] {json}" stdout marker emitted by the backend's
+    /// startup reporter. Ordinary log lines return false.
+    /// </summary>
+    internal static bool TryParseBootMarker(
+        string? line, out double pct, out string primary, out string secondary)
+    {
+        pct = 0.0;
+        primary = string.Empty;
+        secondary = string.Empty;
+        const string prefix = "[nexus-boot] ";
+        if (line is null || !line.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(line[prefix.Length..]);
+            var root = doc.RootElement;
+            pct = root.TryGetProperty("pct", out var p) ? p.GetDouble() : 0.0;
+            primary = root.TryGetProperty("primary", out var pr) ? pr.GetString() ?? "" : "";
+            secondary = root.TryGetProperty("secondary", out var s) ? s.GetString() ?? "" : "";
+            return !string.IsNullOrEmpty(primary);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private int SafeExitCode()
@@ -574,6 +615,9 @@ internal sealed class BackendProcess : IDisposable
             RedirectStandardError = true,
         };
         start.Environment["PYTHONUNBUFFERED"] = "1";
+        // Backend emits structured "[nexus-boot] {json}" phase markers on
+        // stdout so the splash can show real backend-internal progress.
+        start.Environment["NEXUS_BOOT_MARKERS"] = "1";
         start.ArgumentList.Add("--server");
         start.ArgumentList.Add("--host");
         start.ArgumentList.Add("127.0.0.1");
@@ -727,6 +771,11 @@ internal sealed class MainForm : Form
     public async Task PrepareAsync(StartupProgress progress)
     {
         AttachBackend(BackendProcess.Start(_appDir));
+        // Backend-internal init phases arrive on stdout as [nexus-boot] markers
+        // while the HTTP server is still coming up; map them into the band the
+        // host owns between "backend launched" and "backend healthy".
+        _backend!.BootPhase += (pct, primary, secondary) =>
+            progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
         progress.Report(0.30, "STARTING · CORE SERVICES", "Waiting for backend health");
         // Cold starts on machines scanning a fresh unsigned exe (AV) can
         // exceed 30s even when the backend is healthy.

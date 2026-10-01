@@ -72,6 +72,10 @@ class RuntimeManager:
         self._status: dict[str, RuntimeStatus] = {}
         self._lock = threading.RLock()
         self._last_used: dict[str, float] = {}
+        # keep_loaded models evicted under real memory pressure — rewarm when
+        # resources free up again.
+        self._pending_rewarm: set[str] = set()
+        self._rewarm_lock = threading.Lock()
         for model in config.models:
             endpoint = self._profile_endpoint(model)
             self._status[model.id] = RuntimeStatus(
@@ -100,6 +104,7 @@ class RuntimeManager:
 
             self._status = {}
             self._last_used = {}
+            self._pending_rewarm = set()
             for model in config.models:
                 endpoint = self._profile_endpoint(model)
                 self._status[model.id] = RuntimeStatus(
@@ -528,12 +533,62 @@ class RuntimeManager:
                     and not profiles[mid].keep_loaded
                 ]
                 if not candidates:
-                    break
+                    # Still under pressure: reclaim keep_loaded residents last —
+                    # they are marked for rewarm once resources free up again.
+                    candidates = [
+                        mid for mid, item in self._managed.items()
+                        if mid not in busy
+                        and item.process.poll() is None
+                        and mid in profiles
+                        and profiles[mid].keep_loaded
+                    ]
+                    if not candidates:
+                        break
+                    self._pending_rewarm.add(min(candidates, key=lambda m: self._last_used.get(m, 0.0)))
+                    candidates = [min(candidates, key=lambda m: self._last_used.get(m, 0.0))]
                 victim = min(candidates, key=lambda m: self._last_used.get(m, 0.0))
                 self._stop_managed(victim)
                 stopped.append(victim)
                 self.refresh_hardware()
         return stopped
+
+    def rewarm_keep_loaded(self) -> list[str]:
+        """Restart keep_loaded models that were reclaimed under memory pressure.
+
+        No-op when nothing is pending or the model is already running. Each
+        restart runs on a daemon thread so callers (watchdog, session close)
+        never block on a model load.
+        """
+        with self._lock:
+            pending = [
+                mid for mid in self._pending_rewarm
+                if mid in {m.id: m for m in self.config.models}
+            ]
+        restarted: list[str] = []
+        profiles = {m.id: m for m in self.config.models}
+        for mid in pending:
+            profile = profiles.get(mid)
+            if profile is None or not profile.keep_loaded or profile.runtime != "llama_cpp":
+                self._pending_rewarm.discard(mid)
+                continue
+            with self._lock:
+                current = self._managed.get(mid)
+                if current is not None and current.process.poll() is None:
+                    self._pending_rewarm.discard(mid)
+                    continue
+
+            self._pending_rewarm.discard(mid)
+
+            def _warm(p: ModelProfile = profile) -> None:
+                try:
+                    self.ensure_ready(p)
+                except Exception:
+                    # Requeue so a later rewarm pass retries once pressure eases.
+                    self._pending_rewarm.add(p.id)
+                    return
+            threading.Thread(target=_warm, name=f"chat-nexus-rewarm-{mid}", daemon=True).start()
+            restarted.append(mid)
+        return restarted
 
     def restore_managed_models(self, model_ids: list[str]) -> list[str]:
         restored: list[str] = []
@@ -552,15 +607,40 @@ class RuntimeManager:
     def _enforce_residency(self, target: ModelProfile) -> None:
         max_resident = max(1, int(self.config.max_resident_models))
         active = [mid for mid, p in self._managed.items() if p.process.poll() is None and mid != target.id]
-        if len(active) < max_resident:
-            return
         profiles = {m.id: m for m in self.config.models}
-        stoppable = [mid for mid in active if not profiles.get(mid, target).keep_loaded]
-        stoppable.sort(key=lambda mid: self._last_used.get(mid, 0.0))
-        while len(active) >= max_resident and stoppable:
-            victim = stoppable.pop(0)
+        if len(active) >= max_resident:
+            stoppable = [mid for mid in active if not profiles.get(mid, target).keep_loaded]
+            stoppable.sort(key=lambda mid: self._last_used.get(mid, 0.0))
+            while len(active) >= max_resident and stoppable:
+                victim = stoppable.pop(0)
+                self._stop_managed(victim)
+                active.remove(victim)
+        # Memory-based reclaim: keep_loaded models are still evictable when the
+        # incoming target genuinely cannot fit alongside them. They are marked
+        # for rewarm once the heavy operation releases VRAM/RAM again.
+        if target.runtime != "llama_cpp":
+            return
+        total_vram = float(getattr(self.hardware, "total_vram_gb", 0.0) or 0.0)
+        if total_vram <= 0 or not active:
+            return
+        self.refresh_hardware()
+        resident_vram = sum(max(0.0, float(profiles.get(mid).estimated_vram_gb)) if profiles.get(mid) else 0.0 for mid in active)
+        free_vram = float(self.hardware.free_vram_gb)
+        needed = max(0.0, float(target.estimated_vram_gb)) - free_vram
+        if needed <= 0 and resident_vram + float(target.estimated_vram_gb) <= total_vram * 0.92:
+            return
+        keep_loaded_residents = [mid for mid in active if profiles.get(mid, target).keep_loaded]
+        keep_loaded_residents.sort(key=lambda mid: self._last_used.get(mid, 0.0))
+        for victim in keep_loaded_residents:
+            if free_vram >= float(target.estimated_vram_gb):
+                break
+            self._pending_rewarm.add(victim)
             self._stop_managed(victim)
             active.remove(victim)
+            victim_vram = max(0.0, float(profiles[victim].estimated_vram_gb))
+            free_vram += victim_vram
+            self.refresh_hardware()
+            free_vram = float(self.hardware.free_vram_gb)
 
     def _start_llama_cpp(self, profile: ModelProfile) -> str:
         existing = self._managed.get(profile.id)

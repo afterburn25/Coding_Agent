@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import threading
@@ -12,6 +13,8 @@ from typing import Any, Callable
 from ..config import AgentConfig, ModelProfile
 from ..models.openai_compat import OpenAICompatibleProvider
 from ..models.router import ModelRouter, RoutingDecision
+from ..streaming import TokenCoalescer
+from .classify import research_class, wants_long_form
 from ..models.telemetry import ModelPerformanceTelemetry
 from ..runtime.manager import RuntimeManager
 from ..research import ResearchCoordinator
@@ -126,6 +129,7 @@ class _AgentSession:
     verification_round_start: int = 0
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
+    max_tokens: int | None = None
     started_at: float = field(default_factory=time.time)
 
 
@@ -550,13 +554,23 @@ class AgentOrchestrator:
         model_events: list[dict[str, Any]],
         on_delta: Callable[[str], None] | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
+        max_tokens: int | None = None,
     ):
         attempts = 0
         while True:
+            streaming = on_delta is not None and hasattr(provider, "complete_stream")
+            method = provider.complete_stream if streaming else provider.complete
+            cap: dict[str, Any] = {}
+            if max_tokens is not None:
+                try:
+                    if "max_tokens" in inspect.signature(method).parameters:
+                        cap["max_tokens"] = max_tokens
+                except (ValueError, TypeError):
+                    cap["max_tokens"] = max_tokens
             try:
-                if on_delta is not None and hasattr(provider, "complete_stream"):
-                    return provider.complete_stream(messages=messages, tools=tools, on_delta=on_delta)
-                return provider.complete(messages=messages, tools=tools)
+                if streaming:
+                    return method(messages=messages, tools=tools, on_delta=on_delta, **cap)
+                return method(messages=messages, tools=tools, **cap)
             except RuntimeError as exc:
                 if attempts >= self.config.runtime_recovery_attempts:
                     raise
@@ -793,6 +807,7 @@ class AgentOrchestrator:
                 time_to_first_token_ms=raw.get("time_to_first_token_ms"),
             )
             self._emit(session, "perf", model_id=session.profile.id,
+                       role=session.decision.role,
                        predicted_per_second=round(tps, 2),
                        completion_tokens=completion_tokens,
                        prompt_tokens=prompt_tokens,
@@ -1491,6 +1506,12 @@ class AgentOrchestrator:
             self.tasks.flush_log(task_id)
         except Exception:
             pass
+        try:
+            # If a heavy model reclaimed the resident fast-lane model's VRAM,
+            # bring it back now that the task has finished.
+            self.runtime.rewarm_keep_loaded()
+        except Exception:
+            pass
 
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
@@ -1575,11 +1596,14 @@ class AgentOrchestrator:
                 and refusal_check_intent in {"conversation", "writing", "tutoring", "planning"}
             )
             buffered_deltas: list[str] = []
-            on_delta = (
-                buffered_deltas.append
-                if buffer_for_refusal_check
-                else lambda piece: self._emit(session, "token", text=piece, model_id=session.profile.id)
-            )
+            coalescer = TokenCoalescer()
+
+            def stream_piece(piece: str) -> None:
+                chunk = coalescer.feed(piece)
+                if chunk:
+                    self._emit(session, "token", text=chunk, model_id=session.profile.id)
+
+            on_delta = buffered_deltas.append if buffer_for_refusal_check else stream_piece
             self._trim_context(session)
             response = self._complete_with_recovery(
                 session.provider,
@@ -1589,7 +1613,11 @@ class AgentOrchestrator:
                 model_events=session.model_events,
                 on_delta=on_delta,
                 event_callback=session.event_callback,
+                max_tokens=session.max_tokens,
             )
+            tail = coalescer.flush()
+            if tail:
+                self._emit(session, "token", text=tail, model_id=session.profile.id)
             self._record_generation(session, response)
             session.steps += 1
             message = response.message
@@ -2122,12 +2150,16 @@ class AgentOrchestrator:
             else ""
         )
         research_context: dict[str, Any] = {}
+        # Stable general knowledge goes straight to the fast lane — research
+        # preflight only runs for explicit asks or volatile/current facts.
+        request_class = research_class(user_text)
         if (
             self.config.auto_research_unknown
             and self.research is not None
             and self.config.research_enabled
             and self._brain_subroutine_enabled("web_research", True)
             and not knowledge_context
+            and (not lightweight or request_class != "stable")
         ):
             try:
                 plan = self.research.plan(user_text, mode=self.config.research_mode)
@@ -2146,6 +2178,14 @@ class AgentOrchestrator:
             except Exception as exc:
                 research_context = {"error": f"{type(exc).__name__}: {exc}"}
         if lightweight:
+            # Fast General lane: bounded prompt-evaluation budget. Only relevant
+            # memory/knowledge blocks are injected, each capped, plus a short
+            # recent-turn window — not the full Brain/memory banks.
+            context_cap = max(500, int(getattr(self.config, "fast_general_context_chars", 9000)))
+
+            def cap(text: str) -> str:
+                return text[:context_cap] if len(text) > context_cap else text
+
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": UTILITY_PROMPT},
                 {"role": "system", "content": clock_context},
@@ -2157,17 +2197,15 @@ class AgentOrchestrator:
             if policy_context:
                 messages.append({"role": "system", "content": policy_context})
             if persistent_context:
-                messages.append({"role": "system", "content": persistent_context})
+                messages.append({"role": "system", "content": cap(persistent_context)})
             if personality_context:
                 messages.append({"role": "system", "content": personality_context})
-            if intent_context:
-                messages.append({"role": "system", "content": intent_context})
             if brain_skill_context:
-                messages.append({"role": "system", "content": brain_skill_context})
+                messages.append({"role": "system", "content": cap(brain_skill_context)})
             if brain_behavior_context:
-                messages.append({"role": "system", "content": brain_behavior_context})
+                messages.append({"role": "system", "content": cap(brain_behavior_context)})
             if knowledge_context:
-                messages.append({"role": "system", "content": knowledge_context})
+                messages.append({"role": "system", "content": cap(knowledge_context)})
             if research_context.get("summary"):
                 messages.append({
                     "role": "system",
@@ -2177,8 +2215,9 @@ class AgentOrchestrator:
                         + str(research_context["summary"])
                     ),
                 })
-            if history:
-                messages.extend(history[-12:])
+            history_turns = max(0, int(getattr(self.config, "fast_general_history_turns", 8)))
+            if history and history_turns:
+                messages.extend(history[-history_turns:])
             messages.append({"role": "user", "content": user_text})
         else:
             project_memory = self.memory.context()
@@ -2244,6 +2283,13 @@ class AgentOrchestrator:
             model_events=model_events,
             research_context=research_context,
             event_callback=event_callback,
+            max_tokens=(
+                int(getattr(self.config, "fast_general_long_output_tokens", 2048))
+                if lightweight and wants_long_form(user_text)
+                else int(getattr(self.config, "fast_general_output_tokens", 1024))
+                if lightweight
+                else None
+            ),
         )
         self._sessions[task.id] = session
         routed_task = self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)

@@ -17,8 +17,12 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertEqual(cfg.conversation_policy_mode, "permissive")
         self.assertEqual(cfg.ethical_temperature, 1.0)
         self.assertEqual(cfg.generic_refusal_retry_limit, 3)
-        self.assertEqual(cfg.models[0].temperature, 0.2)
+        # The utility fast-lane model intentionally runs warmer (0.6) for
+        # natural conversation; coding/deep models stay deterministic (0.2).
+        self.assertEqual(cfg.models[0].id, "qwen3-4b-instruct")
+        self.assertEqual(cfg.models[0].temperature, 0.6)
         self.assertEqual(cfg.models[1].temperature, 0.2)
+        self.assertEqual(cfg.models[2].temperature, 0.2)
 
     def test_generic_model_refusal_is_detected_for_permissive_retry(self):
         self.assertTrue(AgentOrchestrator.generic_topic_refusal(

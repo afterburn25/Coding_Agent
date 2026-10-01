@@ -165,6 +165,13 @@ class AgentConfig:
     # Send a 1-token request right after a managed runtime reports healthy so
     # the first real generation doesn't pay the cold-load cost.
     model_warmup: bool = True
+    # Fast General lane: bounded context + output budget for the small
+    # resident utility model. Long-form keyword requests escalate to the
+    # larger output budget instead of truncating.
+    fast_general_history_turns: int = 8
+    fast_general_context_chars: int = 9000
+    fast_general_output_tokens: int = 1024
+    fast_general_long_output_tokens: int = 2048
     # When free memory drops below these floors, the least-recently-used
     # resident model is stopped even inside the idle window (0 disables each).
     memory_pressure_vram_gb: float = 0.0
@@ -222,11 +229,29 @@ def default_config() -> AgentConfig:
     return AgentConfig(
         models=[
             ModelProfile(
+                id="qwen3-4b-instruct",
+                endpoint="http://127.0.0.1:8080/v1",
+                model="Qwen_Qwen3-4B-Instruct-2507-Q4_K_M",
+                model_path="models/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                roles=["utility"],
+                context_window=8192,
+                max_output_tokens=1024,
+                temperature=0.6,
+                priority=95,
+                runtime="llama_cpp",
+                gpu_layers="auto",
+                keep_loaded=True,
+                allow_cpu_offload=True,
+                estimated_vram_gb=3.0,
+                estimated_ram_gb=4.5,
+                notes="Fast-lane utility/general model; stays resident so ordinary questions start immediately.",
+            ),
+            ModelProfile(
                 id="qwen3-14b",
                 endpoint="http://127.0.0.1:8081/v1",
                 model="Qwen3-14B-Q4_K_M",
                 model_path="models/Qwen3-14B-Q4_K_M.gguf",
-                roles=["utility", "fast_coder", "primary_coder"],
+                roles=["fast_coder", "primary_coder"],
                 context_window=32768,
                 max_output_tokens=2048,
                 priority=90,
@@ -314,6 +339,20 @@ def load_config(path: Path | None) -> AgentConfig:
     image_models = [ImageModelProfile(**m) for m in raw.get("image_models", [])]
     defaults = default_config()
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
+    # Fast-lane migration: configs saved before the dedicated utility model
+    # still route "utility" to the 14B. Graft the small resident profile in;
+    # the 14B drops the role and remains reachable via the primary-coder
+    # fallback when the utility model is not installed.
+    default_utility = next((m for m in defaults.models if set(m.roles) == {"utility"}), None)
+    dedicated_utility = any(
+        "utility" in m.roles and not {"fast_coder", "primary_coder"}.intersection(m.roles)
+        for m in cfg.models
+    )
+    if default_utility is not None and not dedicated_utility:
+        cfg.models.insert(0, default_utility)
+        for profile in cfg.models:
+            if profile.id != default_utility.id and "utility" in profile.roles and len(profile.roles) > 1:
+                profile.roles = [r for r in profile.roles if r != "utility"]
     cfg.permissions.update(raw.get("permissions", {}))
     cfg.permission_profile = str(raw.get("permission_profile", cfg.permission_profile))
     raw_scopes = raw.get("permission_scopes")
@@ -373,6 +412,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
+    cfg.fast_general_history_turns = max(0, int(raw.get("fast_general_history_turns", cfg.fast_general_history_turns)))
+    cfg.fast_general_context_chars = max(500, int(raw.get("fast_general_context_chars", cfg.fast_general_context_chars)))
+    cfg.fast_general_output_tokens = max(128, int(raw.get("fast_general_output_tokens", cfg.fast_general_output_tokens)))
+    cfg.fast_general_long_output_tokens = max(256, int(raw.get("fast_general_long_output_tokens", cfg.fast_general_long_output_tokens)))
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
     cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))

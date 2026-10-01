@@ -213,7 +213,7 @@ function beginAssistantStream(){
   wrap.innerHTML='<div class="role">assistant</div><div class="bubble">'+nexusThinkingMarkup()+'</div>';
   chat.appendChild(wrap);chat.scrollTop=chat.scrollHeight;
   const bubble=wrap.querySelector('.bubble');
-  const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,startedAt:Date.now()/1000,requestMessage:''};
+  const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,pendingText:'',flushScheduled:false,startedAt:Date.now()/1000,requestMessage:''};
   nexusThinkingStep(state,'Context link established','Reading conversation state','context');
   return state;
 }
@@ -278,18 +278,31 @@ function toolCompleteBlock(tool){
   out.textContent=result.slice(-6000);
   activity.scrollTop=activity.scrollHeight;
 }
+function flushStreamText(state){
+  state.flushScheduled=false;
+  if(state.pendingText){state.text.textContent+=state.pendingText;state.pendingText='';chat.scrollTop=chat.scrollHeight;}
+}
+function scheduleStreamFlush(state){
+  // Render buffer: SSE deltas accumulate in memory and land on the DOM at most
+  // once per animation frame — word/chunk bursts instead of per-character
+  // textContent churn. Never an intentional typewriter delay.
+  if(state.flushScheduled)return;
+  state.flushScheduled=true;
+  const raf=(typeof requestAnimationFrame==='function')?requestAnimationFrame:(f)=>setTimeout(f,16);
+  raf(()=>flushStreamText(state));
+}
 function handleAgentStreamEvent(name,data,state){
   if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
   if(name==='token'){
     if(!state.receivedToken){state.receivedToken=true;state.hud?.classList.add('compact');nexusThinkingStep(state,'Synthesis stream online','Composing response','synthesis');}
-    state.text.textContent+=String(data.text||'');chat.scrollTop=chat.scrollHeight;return;
+    state.pendingText=(state.pendingText||'')+String(data.text||'');scheduleStreamFlush(state);return;
   }
   if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));chat.scrollTop=chat.scrollHeight;return;}
   if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);if(data.event==='queued'||data.event==='dequeued'||data.event==='queue_item_cancelled')refreshQueue();nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
   if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
   if(name==='model'){
     const e=data.event||{};
-    if(e.type==='generic_refusal_retry'){state.receivedToken=false;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
+    if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.pendingText='';if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
     else if(e.type==='switch'||e.type==='activation_fallback')nexusThinkingStep(state,'Routing matrix updated',(e.from||'model')+' → '+(e.to||e.model_id||''),'model-switch');
     else nexusThinkingStep(state,'Model route locked',(e.model_id||e.to||'local model')+(e.role?' · '+e.role:''),'model');
     appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;
@@ -308,8 +321,8 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.completion_tokens?p.completion_tokens+' tok':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='result'){agentStreamActive=false;state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
-  if(name==='error'){agentStreamActive=false;state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='result'){agentStreamActive=false;state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());chat.scrollTop=chat.scrollHeight;return;}
+  if(name==='error'){agentStreamActive=false;state.pendingText='';state.error=String(data.error||'Agent stream failed');state.bubble.textContent=state.error;state.wrap.classList.remove('streaming');chat.scrollTop=chat.scrollHeight;return;}
 }
 function parseSseBlock(block,state){
   const lines=block.split(/\r?\n/);let name='message';const data=[];

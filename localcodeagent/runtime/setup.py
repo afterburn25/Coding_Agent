@@ -6,19 +6,23 @@ from typing import Any
 
 
 def _catalog_pair_assignments(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any], list[str], str]]:
-    """Prefer the known Nexus Core 14B/30B pair when those files are present."""
+    """Prefer the known Nexus Core 4B/14B/30B trio when those files are present."""
     by_name = {str(row["name"]).lower(): row for row in rows}
+    q4 = by_name.get("qwen_qwen3-4b-instruct-2507-q4_k_m.gguf")
     q14 = by_name.get("qwen3-14b-q4_k_m.gguf")
     q30 = by_name.get("qwen3-coder-30b-a3b-instruct-q4_k_m.gguf")
+    fast_lane = [(q4, ["utility"], "qwen3-4b-instruct")] if q4 else []
     if q14 and q30:
-        return [
-            (q14, ["utility", "fast_coder", "primary_coder"], "qwen3-14b"),
+        return fast_lane + [
+            (q14, ["fast_coder", "primary_coder"] + (["utility"] if not q4 else []), "qwen3-14b"),
             (q30, ["deep_reasoner", "reviewer"], "qwen3-coder-30b"),
         ]
     if q14:
-        return [(q14, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-14b")]
+        return fast_lane + [(q14, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"] if not q4 else ["fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-14b")]
     if q30:
-        return [(q30, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-coder-30b")]
+        return fast_lane + [(q30, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"] if not q4 else ["fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-coder-30b")]
+    if q4:
+        return [(q4, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-4b-instruct")]
     return []
 
 
@@ -56,7 +60,8 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
 
     seen_paths: set[str] = set()
     suggestions: list[dict[str, Any]] = []
-    port = 8081
+    fixed_ports = {"qwen3-4b-instruct": 8080, "qwen3-14b": 8081, "qwen3-coder-30b": 8082}
+    port = 8083
     for item, roles, profile_id in assignments:
         if item["path"] in seen_paths:
             # Three-way role assignment can converge on the same file with a tiny
@@ -69,26 +74,33 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
         if any(token in name_lower for token in ("vision", "-vl", "_vl", "qwen2-vl", "qwen3-vl")):
             roles = sorted(set(roles + ["vision"]))
         size = item["size_gb"]
+        item_port = fixed_ports.get(profile_id)
+        if item_port is None:
+            item_port = port
+            port += 1
         suggestions.append({
             "id": profile_id,
             "runtime": "llama_cpp",
-            "endpoint": f"http://127.0.0.1:{port}/v1",
+            "endpoint": f"http://127.0.0.1:{item_port}/v1",
             "model": Path(item["path"]).stem,
             "model_path": item["path"],
             "roles": roles,
-            "context_window": 32768,
+            "context_window": 8192 if profile_id == "qwen3-4b-instruct" else 32768,
             "max_output_tokens": (
-                2048 if profile_id == "qwen3-14b"
+                1024 if profile_id == "qwen3-4b-instruct"
+                else 2048 if profile_id == "qwen3-14b"
                 else 8192 if profile_id == "qwen3-coder-30b"
                 else 4096
             ),
             "tool_calling": True,
+            "temperature": 0.6 if profile_id == "qwen3-4b-instruct" else 0.2,
             "vision": "vision" in roles,
             "priority": {
                 "fast-coder": 80,
                 "fast-primary": 90,
                 "primary-coder": 90,
                 "deep-reasoner": 100,
+                "qwen3-4b-instruct": 95,
                 "qwen3-14b": 90,
                 "qwen3-coder-30b": 100,
             }.get(profile_id, 80),
@@ -96,7 +108,7 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "api_key": "local",
             "gpu_layers": "auto",
             "fit_target_mb": 1024,
-            "keep_loaded": False,
+            "keep_loaded": profile_id == "qwen3-4b-instruct" and roles == ["utility"],
             "allow_cpu_offload": True,
             # Estimates are intentionally conservative routing hints, not hard
             # requirements. Runtime auto-fit may choose a different split.
@@ -105,7 +117,6 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "extra_args": ["--reasoning", "off"] if profile_id == "qwen3-14b" else [],
             "notes": f"Auto-suggested from local GGUF: {item['name']}. Review before use.",
         })
-        port += 1
     return suggestions
 
 
