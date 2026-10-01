@@ -129,6 +129,15 @@ class TerminalTracker:
                 entry["handle"] = None
             return {"job_id": entry["job_id"], "pid": entry["pid"], "exit_code": proc.returncode}
 
+    def shutdown(self) -> None:
+        """Terminate all tracked background processes — they are children of
+        this app and should not outlive it."""
+        for job_id in list(self._procs):
+            try:
+                self.kill(job_id)
+            except Exception:
+                pass
+
 
 def run_process_streaming(
     argv,

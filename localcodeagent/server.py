@@ -2618,6 +2618,14 @@ def create_server(
 
 def stop_state(state: AppState) -> None:
     try:
+        state.mcp.shutdown()
+    except Exception:
+        pass
+    try:
+        state.terminal_tracker.shutdown()
+    except Exception:
+        pass
+    try:
         state.images.backend_runtime.stop()
     finally:
         state.runtime.stop_all()
