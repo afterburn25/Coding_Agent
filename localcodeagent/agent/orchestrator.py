@@ -1410,7 +1410,7 @@ class AgentOrchestrator:
 
     def _cancel_result(self, session: _AgentSession) -> AgentResult:
         session.main_content = "Task cancelled."
-        self.tasks.update(
+        task = self.tasks.update(
             session.task_id,
             status="cancelled",
             phase="done",
@@ -1418,6 +1418,7 @@ class AgentOrchestrator:
             final_content=session.main_content,
             steps=session.steps,
         )
+        self._emit(session, "task", task=task.as_dict())
         self._record_outcome(session, "cancelled")
         self._close_session(session.task_id)
         return self._result(session)
