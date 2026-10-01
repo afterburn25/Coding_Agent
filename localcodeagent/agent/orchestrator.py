@@ -128,6 +128,8 @@ class _AgentSession:
     event_callback: Callable[[dict[str, Any]], None] | None = None
     started_at: float = field(default_factory=time.time)
     logged_task_state: str = ""
+    logged_image_state: str = ""
+    logged_model_state: str = ""
 
 
 class AgentOrchestrator:
@@ -628,7 +630,7 @@ class AgentOrchestrator:
             pass
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
-        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job"}:
+        if event_type in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job", "model", "research", "perf"}:
             self._log_terminal(session, event_type, payload)
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
 
@@ -667,11 +669,29 @@ class AgentOrchestrator:
             elif event_type == "image_job":
                 job = payload.get("job") or {}
                 state = f"{job.get('operation', 'job')}/{job.get('state', '')}/{job.get('stage', '')}"
-                if state != session.logged_task_state:
-                    session.logged_task_state = state
+                if state != session.logged_image_state:
+                    session.logged_image_state = state
                     line = f"## image {state}\n"
                 else:
                     line = ""
+            elif event_type == "model":
+                ev = payload.get("event") or {}
+                marker = f"{ev.get('type', 'event')}:{ev.get('model_id') or ev.get('to') or ''}:{ev.get('role') or ''}"
+                if marker != session.logged_model_state:
+                    session.logged_model_state = marker
+                    line = f"## model {ev.get('type', 'event')} {ev.get('model_id') or ev.get('to') or ''} {ev.get('role') or ''}\n".rstrip() + "\n"
+                else:
+                    line = ""
+            elif event_type == "research":
+                plan = (payload.get("research") or {}).get("plan") or payload.get("research") or {}
+                line = f"## research {plan.get('mode', 'preflight')}\n"
+            elif event_type == "perf":
+                bits = []
+                if payload.get("predicted_per_second"):
+                    bits.append(f"{payload['predicted_per_second']} tok/s")
+                if payload.get("time_to_first_token_ms") is not None:
+                    bits.append(f"TTFT {round(payload['time_to_first_token_ms'])}ms")
+                line = f"## perf {payload.get('model_id', 'model')} {' '.join(bits)}\n" if bits else ""
             else:
                 line = f"## error: {str(payload.get('error') or '')[:300]}\n"
             if line:
