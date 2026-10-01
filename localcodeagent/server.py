@@ -2510,6 +2510,10 @@ class Handler(BaseHTTPRequestHandler):
                     except KeyError:
                         self._json({"error": "agent task not found"}, 404)
                         return
+                    try:
+                        self.state.events.publish("task", {"task": task.as_dict(), "event": "cancelled"})
+                    except Exception:
+                        pass
                     self._json({"ok": True, "job": task.as_dict()})
                     return
                 if job_id.startswith("image-"):
