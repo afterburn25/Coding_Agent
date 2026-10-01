@@ -419,6 +419,25 @@ class TerminalToolTests(unittest.TestCase):
             reg.execute("terminal_run", {"command": "echo no-sink"})
             self.assertEqual(chunks, [])
 
+    def test_background_job_cancel_kills_process(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            mgr = JobManager(ws / "jobs.json")
+            reg, tracker = self._reg(ws, jobs=mgr)
+            out = json.loads(reg.execute("terminal_run", {
+                "command": f'"{sys.executable}" -c "import time;time.sleep(60)"'
+                if sys.platform.startswith("win") else
+                f'{sys.executable} -c "import time;time.sleep(60)"',
+                "background": True,
+            }))
+            self.assertTrue(out["ok"])
+            job_id = out["job_id"]
+            mgr.cancel(job_id)
+            tracker.kill(job_id)
+            row = [r for r in tracker.list() if r["job_id"] == job_id][0]
+            self.assertEqual(row["state"], "finished")
+            self.assertEqual(mgr.get(job_id).state, "cancelled")
+
     def test_run_process_streaming_timeout(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.tools.terminal import run_process_streaming

@@ -2192,6 +2192,13 @@ class Handler(BaseHTTPRequestHandler):
                 except KeyError:
                     self._json({"error": "job not found or not cancellable through the Job Manager"}, 404)
                     return
+                # A cancelled background terminal job must actually kill the
+                # process, not just update the ledger row.
+                if job.kind == "terminal":
+                    try:
+                        self.state.terminal_tracker.kill(job.id)
+                    except Exception:
+                        pass
                 self._json({"ok": True, "job": job.as_dict()})
                 return
 
