@@ -1176,6 +1176,7 @@ class AutonomousContinuationTests(unittest.TestCase):
             self.assertIn("$ run_shell echo hello-nexus", log)
             self.assertIn("hello-nexus", log)
             self.assertIn("## task ", log)
+            self.assertIn("## model ", log)
             self.assertIn("· run_shell ok", log)
 
 
