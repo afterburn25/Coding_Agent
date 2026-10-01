@@ -834,3 +834,6 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - **Taskbar icon**: running exe embeds the transparent ico (verified per-layer alpha); Explorer cache cleared via ie4uinit. `new Icon(path)` form icon and exe resource both transparent.
 - `tests/test_mcp.py` (4 tests: stderr-flood handshake, cmd-wrapper tree kill, secret env); streaming tests gained context-overflow repair + non-overflow 4xx surfacing cases.
 - Suite: **495 tests, 2 skips — green**. Commits: `f09ee74` (MCP + reaping), `d43a6a1` (self-repair).
+- **Malformed tool-call args self-repair** (`77d0c32`): `_parse_call` returns (name, args, error). Repairable text (Python literals, trailing commas, truncated braces) executes with recovered args; unrecoverable text feeds "arguments were not valid JSON, re-emit" back to the model instead of executing with `{}`.
+- **Corrupt-state self-repair** (`44becbc`): `load_config` quarantines a damaged `config.json` to `*.corrupt-<ts>` and boots defaults — previously an unguarded JSONDecodeError crash-looped the backend. Per-model entries skip unknown keys (forward-compat). jobs/tasks stores quarantine corrupt files the same way.
+- **First-run note**: a freshly PyInstaller-built unsigned backend gets a one-time ~50s AV scan of `_internal` on first launch — splash sits at CORE SERVICES; subsequent launches are fast.
