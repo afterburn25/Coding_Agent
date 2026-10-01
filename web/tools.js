@@ -285,6 +285,23 @@
     });
   }
 
+  const queueForm = $("queueForm");
+  if (queueForm) {
+    queueForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt = $("queuePrompt").value.trim();
+      if (!prompt) return;
+      try {
+        await post("/api/queue", { prompt, mode: $("queueMode").value });
+        $("queuePrompt").value = "";
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        setTimeout(loadQueue, 300);
+      }
+    });
+  }
+
   async function loadQueue() {
     const data = await api("/api/queue");
     const rows = (data.items || []).slice(0, 60);

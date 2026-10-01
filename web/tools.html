@@ -64,6 +64,11 @@
 
       <section class="tools-card">
         <h2>Work queue</h2>
+        <form id="queueForm" class="row-actions" style="display:flex;gap:8px;margin-bottom:10px">
+          <input id="queuePrompt" type="text" placeholder="Enqueue a prompt — runs when the agent is idle" style="flex:1" required>
+          <select id="queueMode"><option value="auto">auto</option><option value="utility">utility</option><option value="fast_coder">fast_coder</option><option value="primary_coder">primary_coder</option></select>
+          <button type="submit">Enqueue</button>
+        </form>
         <div id="queueList" class="job-list muted">Loading…</div>
       </section>
 
