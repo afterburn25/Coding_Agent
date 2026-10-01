@@ -5,21 +5,51 @@
   "category": "coding",
   "description": "High-speed repository text search backend used by search_code/search_filename/search_error. This entry surfaces install health; direct invocation is also available.",
   "provider": "burntsushi",
-  "executables": ["rg"],
-  "capabilities": ["search_code", "search_text", "repository_search"],
-  "permissions": ["filesystem.read"],
+  "executables": [
+    "rg"
+  ],
+  "capabilities": [
+    "search_code",
+    "search_text",
+    "repository_search"
+  ],
+  "permissions": [
+    "shell.execute",
+    "filesystem.read"
+  ],
   "requires_network": false,
   "docs": "https://github.com/BurntSushi/ripgrep",
-  "install": {"method": "winget", "package": "BurntSushi.ripgrep.MSVC"},
-  "health_check": {"command": ["rg", "--version"]},
+  "install": {
+    "method": "winget",
+    "package": "BurntSushi.ripgrep.MSVC"
+  },
+  "health_check": {
+    "command": [
+      "rg",
+      "--version"
+    ]
+  },
   "invoke": {
-    "command": ["rg", "--line-number", "--color", "never", "{args}"],
+    "command": [
+      "rg",
+      "--line-number",
+      "--color",
+      "never",
+      "{args}"
+    ],
     "input_schema": {
       "type": "object",
       "properties": {
-        "args": {"type": "array", "items": {"type": "string"}}
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
-      "required": ["args"]
+      "required": [
+        "args"
+      ]
     },
     "timeout_seconds": 120
   }

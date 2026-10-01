@@ -36,6 +36,10 @@ from .base import ToolRegistry, ToolSpec
 
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
+# Permission keys that are stricter/more specific than shell.execute — a
+# manifest declaring one of these uses it as the effective invoker gate.
+_DEDICATED_GATES = {"docker.access", "package.install"}
+
 
 @dataclass(slots=True)
 class PluginManifest:
@@ -232,7 +236,16 @@ def load_plugin_manifests(
         invoker = _make_invoker(manifest, workspace=workspace, default_timeout=default_timeout)
         found, missing = manifest.executables_found()
         install_status = "installed" if not manifest.executables or not missing else "missing"
-        permission = manifest.permissions[0] if manifest.permissions else "shell.execute"
+        # Invokers spawn a subprocess — the effective gate must reflect that.
+        # Manifests may declare a stricter dedicated key (e.g. docker.access);
+        # otherwise shell.execute is enforced regardless of declared read/write keys.
+        dedicated = next((p for p in manifest.permissions if p in _DEDICATED_GATES), None)
+        if invoker is not None:
+            permission = dedicated or "shell.execute"
+            required = sorted(set(manifest.permissions) | {"shell.execute"})
+        else:
+            permission = dedicated or (manifest.permissions[0] if manifest.permissions else "shell.execute")
+            required = list(manifest.permissions) or [permission]
         spec = ToolSpec(
             name=manifest.id,
             description=manifest.description or manifest.name,
@@ -245,7 +258,7 @@ def load_plugin_manifests(
             version=manifest.version,
             provider=manifest.provider,
             capabilities=list(manifest.capabilities) or [manifest.id],
-            permissions_required=list(manifest.permissions) or [permission],
+            permissions_required=required,
             requires_network=manifest.requires_network,
             requires_gpu=manifest.requires_gpu,
             requirements=dict(manifest.requirements),

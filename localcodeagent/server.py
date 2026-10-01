@@ -33,6 +33,7 @@ from .tools.api import register_api_tools
 from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
 from .tools.data import register_data_tools
+from .tools.documents import register_document_tools
 from .tools.media import register_media_tools
 from .tools.filesystem import register_filesystem_tools
 from .tools.git import register_git_tools
@@ -189,6 +190,7 @@ class AppState:
         register_api_tools(self.tools, vault=self.secrets)
         register_data_tools(self.tools, self.workspace, artifacts_dir=runtime_root / "data" / "charts")
         register_media_tools(self.tools, self.workspace, jobs=self.jobs)
+        register_document_tools(self.tools, self.workspace, jobs=self.jobs)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)

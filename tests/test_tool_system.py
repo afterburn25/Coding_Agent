@@ -24,6 +24,7 @@ from localcodeagent.tools.data import profile_source, query_source, register_dat
 from localcodeagent.tools.media import (build_add_subtitles, build_convert, build_extract_audio,
                                         build_merge, build_normalize, build_thumbnail, build_trim,
                                         find_ffmpeg, find_ffprobe, register_media_tools)
+from localcodeagent.tools.documents import extract_document_text, register_document_tools
 
 
 def _registry(**permissions):
@@ -780,6 +781,52 @@ class MediaToolTests(unittest.TestCase):
                 out = json.loads(raw)
                 self.assertFalse(out["ok"])
                 self.assertEqual(out.get("failed_step"), "extract_audio")
+
+
+class DocumentToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self.tmp.name)
+        self.reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow"})
+        register_document_tools(self.reg, self.ws)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_extract_markdown_and_csv(self):
+        (self.ws / "note.md").write_text("# Hi\n\nsome text", encoding="utf-8")
+        out = json.loads(self.reg.execute("extract_text", {"file": "note.md"}))
+        self.assertEqual(out["kind"], "text")
+        self.assertIn("some text", out["text"])
+        (self.ws / "t.csv").write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
+        out = json.loads(self.reg.execute("extract_text", {"file": "t.csv"}))
+        self.assertEqual(out["kind"], "csv")
+        self.assertIn("columns (2): a, b", out["text"])
+
+    def test_extract_html_strips_tags(self):
+        (self.ws / "p.html").write_text("<html><style>x{}</style><p>Hello <b>world</b></p><script>bad()</script></html>")
+        out = json.loads(self.reg.execute("extract_text", {"file": "p.html"}))
+        self.assertEqual(out["kind"], "html")
+        self.assertIn("Hello world", out["text"])
+        self.assertNotIn("bad()", out["text"])
+
+    def test_extract_errors(self):
+        self.assertIn("ERROR", self.reg.execute("extract_text", {"file": "../x.txt"}))
+        self.assertIn("ERROR", self.reg.execute("extract_text", {"file": "missing.txt"}))
+        (self.ws / "f.docx").write_bytes(b"PK")
+        out = self.reg.execute("extract_text", {"file": "f.docx"})
+        self.assertIn("ERROR", out)
+        self.assertIn("convert_document", out)
+
+    def test_ocr_and_convert_delegate(self):
+        # Tesseract/pandoc manifests aren't registered here → clean delegation errors
+        out = self.reg.execute("ocr_image", {"image": "missing.png"})
+        self.assertTrue(out.startswith("ERROR"))
+        (self.ws / "img.png").write_bytes(b"png")
+        out = self.reg.execute("ocr_image", {"image": "img.png"})
+        self.assertTrue(out.startswith(("TOOL_NOT_FOUND", "ERROR", "PERMISSION")))
+        out = self.reg.execute("convert_document", {"input": "note.md", "output": "note.html"})
+        self.assertTrue(out.startswith(("TOOL_NOT_FOUND", "ERROR", "PERMISSION")))
 
 
 if __name__ == "__main__":

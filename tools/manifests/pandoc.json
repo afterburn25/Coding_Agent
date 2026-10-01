@@ -5,23 +5,62 @@
   "category": "documents",
   "description": "Universal document converter (Markdown/DOCX/HTML/EPUB/LaTeX/...).",
   "provider": "pandoc",
-  "executables": ["pandoc"],
-  "capabilities": ["convert_document", "markdown_to_docx", "markdown_to_html", "docx_to_markdown", "markdown_to_epub"],
-  "permissions": ["filesystem.read", "filesystem.write"],
+  "executables": [
+    "pandoc"
+  ],
+  "capabilities": [
+    "convert_document",
+    "markdown_to_docx",
+    "markdown_to_html",
+    "docx_to_markdown",
+    "markdown_to_epub"
+  ],
+  "permissions": [
+    "shell.execute",
+    "filesystem.read",
+    "filesystem.write"
+  ],
   "requires_network": false,
   "docs": "https://pandoc.org/MANUAL.html",
-  "install": {"method": "winget", "package": "JohnMacFarlane.Pandoc"},
-  "health_check": {"command": ["pandoc", "--version"]},
+  "install": {
+    "method": "winget",
+    "package": "JohnMacFarlane.Pandoc"
+  },
+  "health_check": {
+    "command": [
+      "pandoc",
+      "--version"
+    ]
+  },
   "invoke": {
-    "command": ["pandoc", "{input}", "-o", "{output}", "{args}"],
+    "command": [
+      "pandoc",
+      "{input}",
+      "-o",
+      "{output}",
+      "{args}"
+    ],
     "input_schema": {
       "type": "object",
       "properties": {
-        "input": {"type": "string"},
-        "output": {"type": "string"},
-        "args": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"-f\",\"markdown\",\"-t\",\"docx\"]"}
+        "input": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "e.g. [\"-f\",\"markdown\",\"-t\",\"docx\"]"
+        }
       },
-      "required": ["input", "output"]
+      "required": [
+        "input",
+        "output"
+      ]
     },
     "timeout_seconds": 300
   }
