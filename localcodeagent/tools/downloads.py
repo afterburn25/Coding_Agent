@@ -331,6 +331,8 @@ class ToolDownloadManager:
             remaining = int(resp.headers.get("Content-Length") or 0)
             total = expected or (done + remaining)
             last_emit = 0.0
+            last_bytes = done
+            last_time = time.monotonic()
             with archive.open("ab" if resumed else "wb") as out:
                 while True:
                     if flag.is_set():
@@ -345,12 +347,15 @@ class ToolDownloadManager:
                     done += len(chunk)
                     now = time.monotonic()
                     if now - last_emit > 0.4:
-                        last_emit = now
+                        rate = (done - last_bytes) / max(now - last_time, 1e-6)
+                        eta = int((total - done) / rate) if total and rate > 0 else None
+                        last_emit, last_bytes, last_time = now, done, now
                         self._progress(
                             job_id, phase="downloading",
                             overall=_W_DOWNLOAD * (done / total if total else 0.0),
                             download_progress=(done / total if total else 0.0),
                             bytes_done=done, bytes_total=total,
+                            bytes_per_sec=int(rate), eta_seconds=eta,
                             current_file=archive.name, current_path=str(archive),
                         )
 

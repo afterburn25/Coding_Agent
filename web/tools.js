@@ -105,6 +105,8 @@
     if (m.current_path) parts.push(`→ ${m.current_path}`);
     if (!parts.length && (m.bytes_done || m.bytes_total))
       parts.push(`${fmtBytes(m.bytes_done)} / ${fmtBytes(m.bytes_total)}`);
+    if (m.bytes_per_sec) parts.push(`${fmtBytes(m.bytes_per_sec)}/s`);
+    if (m.eta_seconds != null) parts.push(`~${fmtUptime(m.eta_seconds)} left`);
     $("installCurrent").textContent =
       `${cur.title} — ${phase}${parts.length ? ` · ${parts.join(" ")}` : ""}`;
   }
@@ -115,10 +117,12 @@
     const file = m.current_file || (j.detail && j.detail !== j.status ? j.detail : "");
     const detail = file ? `${m.phase || j.status}: ${file}` : `${m.phase || j.status || "working"}`;
     const bytes = m.bytes_total ? ` · ${fmtBytes(m.bytes_done)} / ${fmtBytes(m.bytes_total)}` : "";
+    const speed = m.bytes_per_sec ? ` · ${fmtBytes(m.bytes_per_sec)}/s` : "";
+    const eta = m.eta_seconds != null ? ` · ~${fmtUptime(m.eta_seconds)} left` : "";
     return `
       <div class="tool-progress">
         <div class="install-bar"><div class="install-fill" style="width:${dl}%"></div></div>
-        <div class="install-meta"><span>${esc(detail)}${esc(bytes)}</span><span class="muted" title="${esc(m.current_path || "")}">${esc(m.current_path || "")}</span></div>
+        <div class="install-meta"><span>${esc(detail)}${esc(bytes)}${esc(speed)}${esc(eta)}</span><span class="muted" title="${esc(m.current_path || "")}">${esc(m.current_path || "")}</span></div>
       </div>`;
   }
 
