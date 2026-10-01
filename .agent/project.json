@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 271,
+  "test_checkpoint": 282,
   "next_milestone": "v0.7 modular AI workstation: Phase 1 tool foundation landed; Phase 2 started with controlled terminal tools, ripgrep search, and build-system adapters (221 tests). Next: tree-sitter/LSP indexing, MCP support, then Playwright browser backend, llama.cpp model page, and continued Nexus Brain hardening.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -477,6 +477,9 @@
     "workflows": "localcodeagent/tools/workflows.py — declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
     "blender3d": "localcodeagent/tools/blender3d.py — blender_render scene-script generator delegating to blender manifest",
     "events": "localcodeagent/events.py + GET /api/events — SSE bus for job/tool events; tools.js live refresh",
-    "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)"
+    "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)",
+    "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
+    "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
+    "workflows_api": "GET /api/workflows + Tools-page Workflows panel"
   }
 }

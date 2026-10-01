@@ -252,7 +252,7 @@ Phase 2 kickoff (developer tools):
   gated on `shell.execute` (or a stricter dedicated key such as
   `docker.access`) regardless of declared read/write keys.
 
-Unit checkpoint: **271 tests passing**.
+Unit checkpoint: **282 tests passing**.
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.

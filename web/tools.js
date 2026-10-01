@@ -314,6 +314,24 @@
     host.classList.remove("muted");
   }
 
+  async function loadWorkflows() {
+    const data = await api("/api/workflows");
+    const host = $("workflowList");
+    const rows = data.workflows || [];
+    if (!rows.length) {
+      host.textContent = `No workflows in ${data.directory || "workflows/"} — add *.json step pipelines to enable multi-step automation.`;
+      return;
+    }
+    host.innerHTML = rows.map((w) => `
+      <div class="telemetry-row">
+        <span class="name" title="${esc(w.description || "")}">${esc(w.name)}</span>
+        <span class="muted">${esc(w.id)}</span>
+        <span class="muted">${(w.steps || []).length} steps</span>
+        <span class="muted">${esc((w.steps || []).join(" → "))}</span>
+      </div>`).join("");
+    host.classList.remove("muted");
+  }
+
   $("applyProfile").addEventListener("click", async () => {
     if (!confirm(`Apply the "${$("permProfile").value}" permission profile?`)) return;
     try {
@@ -327,10 +345,10 @@
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {
-    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp(), loadTelemetry()]).catch((e) => alert(e.message));
+    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch((e) => alert(e.message));
   }
   refreshAll();
-  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp(), loadTelemetry()]).catch(() => {}), 5000);
+  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch(() => {}), 5000);
 
   // Live updates: job/tool events stream over SSE; polling above stays as the
   // fallback if EventSource is unavailable or the connection drops.
