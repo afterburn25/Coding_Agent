@@ -550,11 +550,15 @@ Recommended order:
    - confirm old/stale export is ignored
    - confirm a different creator key is rejected
 
-5. **Creator-key backup/recovery**
-   - design an explicit encrypted backup/export of the creator signing key
-   - require creator authentication
-   - never include it in public Brain exports
-   - add recovery documentation and tests before relying on Brain signing for long-term distribution
+5. **Creator-key backup/recovery** — DONE (`eb5aa70`)
+   - `POST /api/nexus-brain/key-backup` exports the creator signing key as an
+     encrypted bundle; requires creator session + passcode re-authentication;
+     the key is re-encrypted under a separate backup passphrase
+   - `POST /api/nexus-brain/key-restore` recovers a lost auth sidecar; the
+     restored key must verify the Brain's existing signature and match the
+     pinned fingerprint, so foreign/different-key backups are rejected
+   - never included in public Brain exports; Trainer page has Back up /
+     Restore creator key buttons
 
 6. **Brain audit/history**
    - show what records/settings changed

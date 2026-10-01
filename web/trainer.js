@@ -1,7 +1,7 @@
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-let memoryState=null, knowledgeState=null, growthState=null, conversationState=null, brainState=null, brainCreatorToken='';
+let memoryState=null, knowledgeState=null, growthState=null, conversationState=null, brainState=null, brainAudit=null, brainCreatorToken='';
 
 async function getJson(path){
   const r=await fetch(path); const d=await r.json();
@@ -71,6 +71,14 @@ function renderBrain(){
   $('#saveBrainSubroutines').disabled=!unlocked;
   $('#saveBrainEmotions').disabled=!unlocked;
   $('#saveBrainSelfModel').disabled=!unlocked;
+  $('#brainKeyBackup').disabled=!unlocked;
+
+  const auditRows=brainAudit?.events||[];
+  $('#brainAuditList').innerHTML=auditRows.length?auditRows.slice().reverse().map(e=>{
+    const when=e.ts?new Date(Number(e.ts)*1000).toLocaleString():'';
+    const detail=Object.keys(e).filter(k=>!['ts','event','brain_id'].includes(k)).map(k=>esc(k)+'='+esc(String(e[k]))).join(' · ');
+    return '<div class="brain-audit-row"><strong>'+esc(e.event||'')+'</strong><small>'+esc(when)+(detail?' · '+detail:'')+'</small></div>';
+  }).join(''):'<span class="muted">No audit events recorded yet.</span>';
 }
 
 function renderPersonality(){
@@ -119,12 +127,13 @@ function renderRegistry(){
 
 async function refresh(){
   try{
-    [memoryState,knowledgeState,growthState,conversationState,brainState]=await Promise.all([
+    [memoryState,knowledgeState,growthState,conversationState,brainState,brainAudit]=await Promise.all([
       getJson('/api/conversation-memory'),
       getJson('/api/knowledge-memory'),
       getJson('/api/model-growth'),
       getJson('/api/conversations'),
-      getJson('/api/nexus-brain')
+      getJson('/api/nexus-brain'),
+      getJson('/api/nexus-brain/audit')
     ]);
     renderStats(); renderPersonality(); renderCandidates(); renderKnowledge(); renderRegistry(); renderBrain();
   }catch(e){ document.body.dataset.error=e.message; }
