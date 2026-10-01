@@ -679,3 +679,16 @@ the GPU box to exercise the overnight path deterministically before real
 inference.
 
 Verified checkpoint: **343 tests** (2 skips), head `b9f24e9`.
+
+## CRITICAL regression found by the e2e harness (7acfc8e)
+
+`_sse_event` (introduced 69d3cdc) wrote `f"...\ndata..."` — literal
+backslash-n text on the wire instead of LF. Every SSE frame on
+`/api/chat/stream` AND `/api/events` was one unparseable line; EventSource
+and the frontend `\n\n` splitter never fired. The UI silently fell back
+to task-ledger recovery — live token/tool streaming was dead while
+transcript-level verification kept passing. Header-only selftest checks
+missed it; the new `test_full_stack_sse_stream_end_to_end` parses real
+frames and now guards it. Also added: batched tool_calls, persisted
+approval across AppState restart, catalog-download teardown flake fix.
+Checkpoint: **346 tests**, head `7acfc8e`.
