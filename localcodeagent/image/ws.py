@@ -169,27 +169,39 @@ class ComfyUIProgressListener:
         self._thread.start()
 
     def _loop(self) -> None:
+        failures = 0
         try:
-            self._ws = WSClient(self.url, timeout=self.timeout).connect()
-            self.connected = True
             while not self._stop.is_set():
                 try:
-                    payload = self._ws.recv_message()
-                except (WebSocketError, OSError):
+                    self._ws = WSClient(self.url, timeout=self.timeout).connect()
+                    self.connected = True
+                    failures = 0
+                    while not self._stop.is_set():
+                        try:
+                            payload = self._ws.recv_message()
+                        except (WebSocketError, OSError):
+                            break
+                        try:
+                            message = json.loads(payload)
+                        except ValueError:
+                            continue
+                        if isinstance(message, dict):
+                            self._handle(message)
+                except Exception:
+                    pass
+                finally:
+                    self.connected = False
+                    if self._ws is not None:
+                        self._ws.close()
+                    self._ws = None
+                if self._stop.is_set():
                     break
-                try:
-                    message = json.loads(payload)
-                except ValueError:
-                    continue
-                if isinstance(message, dict):
-                    self._handle(message)
-        except Exception:
-            pass
+                # ComfyUI may restart between jobs — reconnect with capped backoff.
+                failures += 1
+                delay = min(30.0, 2.0 * failures)
+                self._stop.wait(delay)
         finally:
             self.connected = False
-            if self._ws is not None:
-                self._ws.close()
-            self._ws = None
 
     def _handle(self, message: dict[str, Any]) -> None:
         mtype = message.get("type")
