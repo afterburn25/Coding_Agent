@@ -37,6 +37,94 @@ def resolve_shell(name: str) -> tuple[str, list[str]]:
     return shell_id, argv
 
 
+def _assign_kill_job(proc: subprocess.Popen) -> int:
+    """Windows: place ``proc`` in a Job Object so the whole tree dies together.
+
+    ``taskkill /T`` enumerates children at kill time — a child spawned during
+    the window between enumeration and the parent's death escapes and becomes
+    an orphan holding our pipes/log handles open. A Job Object assigned right
+    after Popen catches children the shell spawns later too; closing the last
+    handle (KILL_ON_JOB_CLOSE) or TerminateJobObject kills them atomically.
+    Returns the job handle, or 0 when unsupported — callers keep taskkill as
+    the fallback path.
+    """
+    if not sys.platform.startswith("win"):
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return 0
+
+        class _Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+        class _ExtendedLimit(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _Basic),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        info = _ExtendedLimit()
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        JobObjectExtendedLimitInformation = 9
+        ok = kernel32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info),
+        )
+        if ok:
+            handle = int(getattr(proc, "_handle", 0) or 0)
+            ok = bool(handle) and bool(kernel32.AssignProcessToJobObject(job, handle))
+        if not ok:
+            kernel32.CloseHandle(job)
+            return 0
+        return int(job)
+    except Exception:
+        return 0
+
+
+def _terminate_kill_job(job: int, exit_code: int = 1) -> None:
+    """Kill every process in ``job`` and release the handle.
+
+    Waits on the job object first — it signals once every member process has
+    exited — so inherited pipe/log handles are actually released before we
+    return, not ~50ms later in kernel rundown.
+    """
+    if not job or not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.TerminateJobObject(job, exit_code)
+        kernel32.WaitForSingleObject(job, 10000)
+        kernel32.CloseHandle(job)
+    except Exception:
+        pass
+
+
 class TerminalTracker:
     """Tracks background terminal processes with log capture and kill support."""
 
@@ -79,6 +167,7 @@ class TerminalTracker:
                 "log_path": str(log_path),
                 "process": proc,
                 "handle": handle,
+                "job": _assign_kill_job(proc),
             }
         return {"job_id": job_id, "pid": proc.pid, "log_path": str(log_path)}
 
@@ -95,6 +184,14 @@ class TerminalTracker:
                     except Exception:
                         pass
                     entry["handle"] = None
+                if not running and entry.get("job"):
+                    job = int(entry["job"])
+                    entry["job"] = 0
+                    try:
+                        import ctypes
+                        ctypes.WinDLL("kernel32").CloseHandle(job)
+                    except Exception:
+                        pass
                 rows.append({
                     "job_id": job_id,
                     "pid": entry["pid"],
@@ -117,8 +214,14 @@ class TerminalTracker:
             proc: subprocess.Popen = entry["process"]
             if proc.poll() is None:
                 # Kill the whole tree — a stopped job's children must not be
-                # orphaned holding inherited pipes/handles open.
-                if sys.platform.startswith("win"):
+                # orphaned holding inherited pipes/handles open. Prefer the
+                # Job Object (atomic, catches children spawned after this
+                # call); taskkill /T is the fallback when job setup failed.
+                job = int(entry.get("job") or 0)
+                if job:
+                    _terminate_kill_job(job)
+                    entry["job"] = 0
+                elif sys.platform.startswith("win"):
                     try:
                         subprocess.run(
                             ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
@@ -132,6 +235,14 @@ class TerminalTracker:
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=3)
+            elif entry.get("job"):
+                # Already exited — release the job handle without killing.
+                import ctypes
+                try:
+                    ctypes.WinDLL("kernel32").CloseHandle(int(entry["job"]))
+                except Exception:
+                    pass
+                entry["job"] = 0
             if entry["handle"]:
                 try:
                     entry["handle"].close()
@@ -185,10 +296,15 @@ def run_process_streaming(
     def _kill_tree() -> None:
         # shell=True wraps the command in a shell — killing only the wrapper
         # orphans the real child and leaves it holding our pipes open, so the
-        # cancel path hangs until the child exits on its own. Windows uses
-        # taskkill /T; POSIX runs the child in its own process group so the
-        # whole tree dies with one killpg.
-        if sys.platform.startswith("win"):
+        # cancel path hangs until the child exits on its own. A Job Object
+        # kills the whole tree atomically (including children spawned after
+        # the kill starts); taskkill /T is the fallback. POSIX runs the child
+        # in its own process group so the whole tree dies with one killpg.
+        nonlocal job_handle
+        if job_handle:
+            _terminate_kill_job(job_handle)
+            job_handle = 0
+        elif sys.platform.startswith("win"):
             try:
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
@@ -214,6 +330,7 @@ def run_process_streaming(
         # every child it spawned.
         start_new_session=not sys.platform.startswith("win"),
     )
+    job_handle = _assign_kill_job(proc)
     threads = [
         threading.Thread(target=_reader, args=(proc.stdout, out_parts, "stdout"), daemon=True),
         threading.Thread(target=_reader, args=(proc.stderr, err_parts, "stderr"), daemon=True),
@@ -249,6 +366,11 @@ def run_process_streaming(
             pass
     for t in threads:
         t.join(timeout=5)
+    if job_handle:
+        # Process exited normally — release the job handle (KILL_ON_JOB_CLOSE
+        # only fires when the job still has live members; an empty job closing
+        # is a no-op).
+        _terminate_kill_job(job_handle, exit_code=0)
     return proc.returncode, "".join(out_parts), "".join(err_parts), timed_out
 
 

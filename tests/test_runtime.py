@@ -342,6 +342,34 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertEqual(stopped, ["old"])
             self.assertEqual(manager.resident_model_ids(), ["new"])
 
+    def test_evict_idle_pressure_never_evicts_keep_loaded(self):
+        # Regression: keep_loaded residents are exempt from ambient pressure
+        # eviction. On a GPU where the resident baseline itself leaves less
+        # free VRAM than the floor, evicting it just to rewarm it is a thrash
+        # loop (evict -> rewarm -> pressure -> evict every watchdog tick).
+        with tempfile.TemporaryDirectory() as td:
+            pinned = self._profile(id="pinned", model_path="models/pinned.gguf", keep_loaded=True)
+            cfg = AgentConfig(
+                models=[pinned],
+                model_idle_unload_seconds=0,
+                memory_pressure_vram_gb=4,
+            )
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64, available_ram_gb=32,
+                gpus=[GPUInfo(0, "GPU", 12288, 1024, 11264)],
+                nvidia_smi_available=True,
+            )
+            manager.refresh_hardware = lambda: manager.hardware
+            proc = _attach_fake_managed(manager, pinned, last_used=time.time() - 3600)
+
+            stopped = manager.evict_idle()
+
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+            self.assertEqual(manager.resident_model_ids(), ["pinned"])
+            self.assertEqual(manager._pending_rewarm, set())
+
     @unittest.skipIf(os.name == "nt", "fake executable uses POSIX permissions")
     def test_missing_deep_model_falls_back_to_available_primary(self):
         with tempfile.TemporaryDirectory() as td:

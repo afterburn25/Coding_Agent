@@ -575,6 +575,11 @@ class RuntimeManager:
             self.refresh_hardware()
             while (self.hardware.free_vram_gb < vram_floor
                    or self.hardware.available_ram_gb < ram_floor):
+                # keep_loaded models are exempt from ambient pressure eviction:
+                # they are the declared baseline — if the floor is below what
+                # the baseline leaves free, evicting the resident just to evict
+                # it back on rewarm is a thrash loop. Incoming-model contention
+                # is handled separately by _enforce_residency at launch time.
                 candidates = [
                     mid for mid, item in self._managed.items()
                     if mid not in busy
@@ -583,19 +588,7 @@ class RuntimeManager:
                     and not profiles[mid].keep_loaded
                 ]
                 if not candidates:
-                    # Still under pressure: reclaim keep_loaded residents last —
-                    # they are marked for rewarm once resources free up again.
-                    candidates = [
-                        mid for mid, item in self._managed.items()
-                        if mid not in busy
-                        and item.process.poll() is None
-                        and mid in profiles
-                        and profiles[mid].keep_loaded
-                    ]
-                    if not candidates:
-                        break
-                    self._pending_rewarm.add(min(candidates, key=lambda m: self._last_used.get(m, 0.0)))
-                    candidates = [min(candidates, key=lambda m: self._last_used.get(m, 0.0))]
+                    break
                 victim = min(candidates, key=lambda m: self._last_used.get(m, 0.0))
                 self._stop_managed(victim)
                 stopped.append(victim)
