@@ -185,6 +185,18 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(len(done), 2)
             # Each task used two model calls (tool turn + answer turn).
             self.assertEqual(len(fake.requests), 4)
+            # Queue workers write .agent/ bookkeeping after the status flips to
+            # completed — join them before the tempdir teardown or rmtree races
+            # a late file create ("Directory not empty: '.agent'").
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                workers = [
+                    t for t in threading.enumerate()
+                    if t.name.startswith("queue-") and t.is_alive()
+                ]
+                if not workers:
+                    break
+                time.sleep(0.05)
 
     def test_transient_model_failure_recovers(self):
         fake = _FakeModelServer()
