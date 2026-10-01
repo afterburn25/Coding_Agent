@@ -849,9 +849,13 @@ class AppState:
         payload = dict(event)
         payload.pop("type", None)
         try:
+            # Prefer the id carried by the event itself (e.g. an approval
+            # timeout on an older task) over the newest ledger record.
+            event_task_id = str((event.get("task") or {}).get("id") or "")
             current = self.tasks.current()
-            if current is not None:
-                payload.setdefault("task_id", current.id)
+            task_id = event_task_id or (current.id if current is not None else "")
+            if task_id:
+                payload.setdefault("task_id", task_id)
         except Exception:
             pass
         self.events.publish(etype or "task", payload)
