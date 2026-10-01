@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .tools.base import ToolRegistry, ToolSpec
+from .tools.terminal import _assign_kill_job, _terminate_kill_job
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
@@ -111,6 +112,18 @@ class MCPClient:
             raise MCPError(f"failed to launch MCP server '{self.config.id}': {exc}") from exc
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        # Job Object lets close() kill the whole tree — an MCP server whose
+        # command is a shell wrapper would otherwise orphan its child holding
+        # our pipes, and a crashed backend would leave the server running.
+        self._kill_job = _assign_kill_job(self._proc)
+        # MCP handshake
+        self.request("initialize", {
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "chat-nexus", "version": "0.7.0"},
+        })
+        self.notify("notifications/initialized", {})
 
     def _resolved_env(self) -> dict[str, str]:
         """Resolve ``secret:<name>`` env values through the credential vault.
@@ -130,14 +143,6 @@ class MCPClient:
             else:
                 resolved[key] = value
         return resolved
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
-        # MCP handshake
-        self.request("initialize", {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "chat-nexus", "version": "0.7.0"},
-        })
-        self.notify("notifications/initialized", {})
 
     def is_alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -145,9 +150,19 @@ class MCPClient:
     def close(self) -> None:
         proc = self._proc
         self._proc = None
+        job = getattr(self, "_kill_job", 0)
+        self._kill_job = 0
         if proc is None:
+            if job:
+                _terminate_kill_job(job)
             return
-        if proc.poll() is None:
+        if job:
+            _terminate_kill_job(job)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        elif proc.poll() is None:
             try:
                 proc.terminate()
                 proc.wait(timeout=5)

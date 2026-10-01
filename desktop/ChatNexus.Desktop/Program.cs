@@ -589,6 +589,13 @@ internal sealed class BackendProcess : IDisposable
 
         var logDir = Path.Combine(appDir, "data", "logs");
         Directory.CreateDirectory(logDir);
+
+        // If a previous host died without reaping its backend (force-kill,
+        // crash), the orphaned backend keeps running forever — holding its
+        // port, model servers, and VRAM. The pidfile identifies it as ours
+        // (path must match this install) so the new instance can reap it
+        // along with its whole child tree instead of double-running.
+        ReapOrphanedBackend(appDir, backendExe, logDir);
         var logPath = Path.Combine(logDir, "backend-host.log");
         // The host log appends every backend stdout/stderr line forever —
         // keep only a tail so long unattended sessions cannot grow it.
@@ -637,6 +644,14 @@ internal sealed class BackendProcess : IDisposable
 
         var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start Nexus Core backend.");
+        try
+        {
+            File.WriteAllText(BackendPidPath(logDir), $"{process.Id}|{backendExe}");
+        }
+        catch
+        {
+            // Best-effort bookkeeping — never block startup on it.
+        }
         var backend = new BackendProcess(process, port, logPath);
         backend.WriteLog("HOST", $"started backend pid {process.Id} on port {port}");
         process.BeginOutputReadLine();
@@ -713,6 +728,58 @@ internal sealed class BackendProcess : IDisposable
         {
             try { _logWriter.Dispose(); } catch { }
             _process.Dispose();
+        }
+    }
+
+    private static string BackendPidPath(string logDir) =>
+        Path.Combine(logDir, "backend.pid");
+
+    private static void ReapOrphanedBackend(string appDir, string backendExe, string logDir)
+    {
+        try
+        {
+            var pidFile = BackendPidPath(logDir);
+            if (!File.Exists(pidFile))
+            {
+                return;
+            }
+            var parts = (File.ReadAllText(pidFile).Trim()).Split('|');
+            if (parts.Length < 2 || !int.TryParse(parts[0], out var pid))
+            {
+                return;
+            }
+            // Path check is the safety latch: a reused pid belonging to an
+            // unrelated process is never killed.
+            if (!string.Equals(parts[1], backendExe, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            using var orphan = Process.GetProcessById(pid);
+            var orphanPath = orphan.MainModule?.FileName ?? "";
+            if (!string.Equals(orphanPath, backendExe, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            // taskkill /T takes the orphan's children (llama-server, ComfyUI
+            // python, MCP servers) with it — killing only the parent would
+            // orphan them holding ports/VRAM.
+            var tk = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill",
+                Arguments = $"/F /T /PID {pid}",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            });
+            tk?.WaitForExit(10000);
+            if (!orphan.HasExited)
+            {
+                orphan.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Stale pidfile, dead process, access denied — all fine; launch
+            // proceeds regardless.
         }
     }
 
