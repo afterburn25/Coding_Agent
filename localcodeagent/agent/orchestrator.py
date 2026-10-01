@@ -556,13 +556,25 @@ class AgentOrchestrator:
                     return provider.complete_stream(messages=messages, tools=tools, on_delta=on_delta)
                 return provider.complete(messages=messages, tools=tools)
             except RuntimeError as exc:
-                if profile.runtime != "llama_cpp" or attempts >= self.config.runtime_recovery_attempts:
+                if attempts >= self.config.runtime_recovery_attempts:
                     raise
                 attempts += 1
-                endpoint = self.runtime.recover(profile)
+                if profile.runtime == "llama_cpp":
+                    endpoint = self.runtime.recover(profile)
+                    event_type = "runtime_recovery"
+                else:
+                    # External runtimes cannot be restarted; re-check the
+                    # endpoint and retry once after a short settle so a
+                    # transient network blip does not fail the whole task.
+                    time.sleep(min(2.0 * attempts, 5.0))
+                    try:
+                        endpoint = self.runtime.ensure_ready(profile)
+                    except Exception:
+                        endpoint = self.runtime._profile_endpoint(profile)
+                    event_type = "transient_retry"
                 provider = OpenAICompatibleProvider(profile, endpoint=endpoint)
                 recovery_event = {
-                    "type": "runtime_recovery",
+                    "type": event_type,
                     "model_id": profile.id,
                     "attempt": attempts,
                     "reason": str(exc),

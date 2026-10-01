@@ -364,6 +364,46 @@ class AppState:
         self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
         self._start_primary_prewarm()
+        self._start_auto_resume()
+
+    def _start_auto_resume(self) -> None:
+        """In autonomous mode, restart tasks interrupted by a core restart.
+
+        The task ledger already marks orphaned 'running' tasks as
+        'interrupted' on load. recover() rebuilds the session from durable
+        task/checkpoint state and re-inspects the repository, so no model
+        context is required. Bounded by autonomous_max_recoveries so a
+        crash-looping task cannot resume forever.
+        """
+        if not (getattr(self.config, "autonomous_mode", False)
+                and getattr(self.config, "autonomous_resume_interrupted", True)):
+            return
+        max_recoveries = max(0, int(getattr(self.config, "autonomous_max_recoveries", 3)))
+
+        def resume() -> None:
+            try:
+                candidates = [
+                    t for t in self.tasks.recent(50)
+                    if t.get("status") == "interrupted"
+                    and int(t.get("recovery_count") or 0) < max_recoveries
+                ]
+                for task in candidates:
+                    try:
+                        self.events.publish("task", {
+                            "event": "auto_resume",
+                            "task_id": task.get("id"),
+                        })
+                        self.agent.recover(str(task["id"]))
+                    except Exception as exc:
+                        self.events.publish("task", {
+                            "event": "auto_resume_failed",
+                            "task_id": task.get("id"),
+                            "error": f"{type(exc).__name__}: {exc}",
+                        })
+            except Exception:
+                pass
+
+        threading.Thread(target=resume, name="auto-resume-interrupted", daemon=True).start()
 
     def _start_primary_prewarm(self) -> None:
         if not self.config.runtime_auto_start:

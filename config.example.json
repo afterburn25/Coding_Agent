@@ -7,6 +7,8 @@
   "max_resident_models": 1,
   "autonomous_mode": false,
   "autonomous_max_continuations": 5,
+  "autonomous_resume_interrupted": true,
+  "autonomous_max_recoveries": 3,
   "model_idle_unload_seconds": 900,
   "memory_pressure_vram_gb": 0,
   "memory_pressure_ram_gb": 0,

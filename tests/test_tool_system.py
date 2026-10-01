@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import sys
@@ -1438,6 +1439,47 @@ class AppStateWiringTests(unittest.TestCase):
                              + sum(1 for t in state.tools.manifests()
                                    if t["install_status"] == "not_applicable"),
                              summary["total"])
+
+    def test_autonomous_mode_auto_resumes_interrupted_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            from localcodeagent.workflow.tasks import TaskStore
+            from localcodeagent.agent.orchestrator import AgentOrchestrator
+            ws = Path(td)
+            tasks = TaskStore(ws)
+            task = tasks.create("unfinished work", "auto")
+            tasks.update(task.id, status="interrupted")
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="ext", endpoint="http://x/v1", model="m",
+                    roles=["primary_coder"], runtime="external")],
+                autonomous_mode=True,
+                process_watchdog=False,
+            )
+            calls = []
+            with patch.object(AgentOrchestrator, "recover",
+                              lambda self, task_id: calls.append(task_id)):
+                AppState(cfg, ws, ws / ".runtime")
+                deadline = time.time() + 5
+                while not calls and time.time() < deadline:
+                    time.sleep(0.05)
+            self.assertEqual(calls, [task.id])
+
+    def test_auto_resume_stays_off_without_autonomous_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.workflow.tasks import TaskStore
+            from localcodeagent.agent.orchestrator import AgentOrchestrator
+            ws = Path(td)
+            tasks = TaskStore(ws)
+            task = tasks.create("unfinished work", "auto")
+            tasks.update(task.id, status="interrupted")
+            calls = []
+            with patch.object(AgentOrchestrator, "recover",
+                              lambda self, task_id: calls.append(task_id)):
+                self._state(td)
+                time.sleep(0.3)
+            self.assertEqual(calls, [])
 
     def test_use_capability_routes_through_router(self):
         with tempfile.TemporaryDirectory() as td:

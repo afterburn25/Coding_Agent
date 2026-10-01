@@ -135,6 +135,10 @@ class AgentConfig:
     # camera.use) and explicit "deny" levels always stay gated.
     autonomous_mode: bool = False
     autonomous_max_continuations: int = 5
+    # In autonomous mode, tasks interrupted by a core restart resume
+    # automatically on startup (bounded by recovery_count in the task ledger).
+    autonomous_resume_interrupted: bool = True
+    autonomous_max_recoveries: int = 3
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -334,6 +338,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.runtime_recovery_attempts = max(0, int(raw.get("runtime_recovery_attempts", cfg.runtime_recovery_attempts)))
     cfg.autonomous_mode = bool(raw.get("autonomous_mode", cfg.autonomous_mode))
     cfg.autonomous_max_continuations = max(0, int(raw.get("autonomous_max_continuations", cfg.autonomous_max_continuations)))
+    cfg.autonomous_resume_interrupted = bool(raw.get("autonomous_resume_interrupted", cfg.autonomous_resume_interrupted))
+    cfg.autonomous_max_recoveries = max(0, int(raw.get("autonomous_max_recoveries", cfg.autonomous_max_recoveries)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
     cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
