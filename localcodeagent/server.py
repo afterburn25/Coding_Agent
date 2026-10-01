@@ -862,9 +862,11 @@ class AppState:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
                     self.agent.run(
                         str(entry["prompt"]),
+                        history=self.state.history,
                         mode=str(entry.get("mode") or "auto"),
                         event_callback=lambda e: self.events.publish(str(e.get("type", "task")), dict(e)),
                     )
+                    self.state.history = self.state.conversation_manager.history(limit=32)
                 except Exception as exc:
                     self.events.publish("task", {
                         "event": "queue_item_failed", "queue_item": entry,
