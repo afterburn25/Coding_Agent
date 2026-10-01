@@ -197,6 +197,7 @@ class ToolRouter:
         }
         with self._lock:
             self.telemetry.append(entry)
+            del self.telemetry[:-2000]
         if self.telemetry_path:
             try:
                 self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
