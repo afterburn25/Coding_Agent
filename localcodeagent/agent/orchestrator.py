@@ -838,8 +838,10 @@ class AgentOrchestrator:
             name = str(pending.get("name", ""))
             args = dict(pending.get("arguments") or {})
             permission = str(pending.get("permission", ""))
+            if approved:
+                self._emit_tool_start(session, name, args)
             result = (
-                self.tools.execute(name, args, approved=True)
+                self._execute_tool(name, args, approved=True)
                 if approved
                 else f"PERMISSION_DENIED: user denied {permission} for {name}"
             )
@@ -848,6 +850,12 @@ class AgentOrchestrator:
                 "arguments": args,
                 "result": result,
                 "phase": "recovered_approval",
+            })
+            redactor = self.tools.context.get("redactor")
+            shown = redactor(result) if redactor else result
+            self._emit(session, "tool", tool={
+                "name": name, "arguments": args,
+                "result": shown[-12000:], "phase": "recovered_approval",
             })
             if result.startswith(("ERROR", "PERMISSION_DENIED")):
                 session.failures += 1
@@ -860,7 +868,7 @@ class AgentOrchestrator:
             })
             self.tasks.update(task_id, status="running", phase="working", pending_approval=None)
             self._maybe_escalate(session)
-            return self._drive(session)
+            return self._drive_or_error(session)
 
         if pending["kind"] == "verification":
             commands = detect_verification_commands(self.checkpoints.workspace)
@@ -1335,6 +1343,21 @@ class AgentOrchestrator:
                 continue
             m["content"] = stub
         session.model_events.append({"type": "context_trim", "model_id": session.profile.id})
+
+    def _drive_or_error(self, session: _AgentSession) -> AgentResult:
+        """Run the drive loop; on unexpected failure mark the task and re-raise."""
+        try:
+            return self._drive(session)
+        except Exception as exc:
+            error_task = self.tasks.update(
+                session.task_id, status="error", phase="done",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            self._emit(session, "task", task=error_task.as_dict())
+            self._emit(session, "error", error=error_task.error)
+            self._record_outcome(session, "error")
+            self._sessions.pop(session.task_id, None)
+            raise
 
     def _emit_tool_start(self, session: _AgentSession, name: str, args: dict[str, Any]) -> None:
         redactor = self.tools.context.get("redactor")
@@ -2053,15 +2076,7 @@ class AgentOrchestrator:
         self._sessions[task.id] = session
         routed_task = self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)
         self._safe_emit(event_callback, {"type": "task", "task": routed_task.as_dict()})
-        try:
-            return self._drive(session)
-        except Exception as exc:
-            error_task = self.tasks.update(task.id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
-            self._safe_emit(event_callback, {"type": "task", "task": error_task.as_dict()})
-            self._safe_emit(event_callback, {"type": "error", "error": f"{type(exc).__name__}: {exc}"})
-            self._record_outcome(session, "error")
-            self._sessions.pop(task.id, None)
-            raise
+        return self._drive_or_error(session)
 
     def recover(self, task_id: str) -> AgentResult:
         """Continue an interrupted/error task from durable workspace state."""
@@ -2081,18 +2096,7 @@ class AgentOrchestrator:
             pending_approval=None,
             recovery_count=task.recovery_count + 1,
         )
-        try:
-            return self._drive(session)
-        except Exception as exc:
-            self.tasks.update(
-                task_id,
-                status="error",
-                phase="done",
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            self._record_outcome(session, "error")
-            self._sessions.pop(task_id, None)
-            raise
+        return self._drive_or_error(session)
 
     def resume(self, task_id: str, *, approved: bool) -> AgentResult:
         session = self._sessions.get(task_id)
@@ -2115,12 +2119,14 @@ class AgentOrchestrator:
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1
             self._maybe_escalate(session)
-            return self._drive(session)
+            return self._drive_or_error(session)
 
         if pending["kind"] == "verification":
             item = session.verification_commands[session.verification_index]
             args = pending["arguments"]
-            result = self.tools.execute("run_shell", args, approved=True) if approved else f"PERMISSION_DENIED: user skipped verification command {item['name']}"
+            if approved:
+                self._emit_tool_start(session, "run_shell", args)
+            result = self._execute_tool("run_shell", args, approved=True) if approved else f"PERMISSION_DENIED: user skipped verification command {item['name']}"
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(task_id)
             self.tasks.update(task_id, verification=[*task.verification, entry], pending_approval=None)
