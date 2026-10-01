@@ -307,7 +307,7 @@ function upsertActivityRow(row){
   if(!rec){
     const el=document.createElement('div');
     el.className='tl-row';
-    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><button class="tl-stop" type="button" title="Stop task">Stop</button><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
+    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><button class="tl-stop" type="button" title="Stop this command — the task continues">Stop</button><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
     el.querySelector('.tl-head').addEventListener('click',()=>{
       const r=tlRows.get(row.id);
       if(r){r.manual=!el.classList.contains('open');el.classList.toggle('open',r.manual);}
@@ -330,7 +330,7 @@ function upsertActivityRow(row){
   const stop=el.querySelector('.tl-stop');
   const stoppable=row.state==='running'&&row.category==='command'&&row.task_id&&row.task_id!=='system';
   stop.style.display=stoppable?'':'none';
-  if(stoppable)stop.onclick=(ev)=>{ev.stopPropagation();cancelTask(row.task_id);};
+  if(stoppable)stop.onclick=(ev)=>{ev.stopPropagation();cancelCommand(row.task_id);};
   const open=(rec.manual!=null)?rec.manual:['running','failed','waiting'].includes(row.state);
   el.classList.toggle('open',open);
   el.querySelector('.tl-summary').textContent=row.summary||'';
@@ -526,6 +526,7 @@ async function streamAgent(message){
   return state.result;
 }
 async function undoTask(taskId){if(!confirm('Restore files to their state before this task?'))return;const res=await fetch('/api/tasks/undo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok){addMessage('assistant',`Undo error: ${data.error||'failed'}`);return;}addMessage('assistant',`Restored ${data.restored.length} file(s) from the task checkpoint.`);await loadStatus(false);}
+async function cancelCommand(taskId){try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`command-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');}catch(e){addMessage('assistant',`Command stop error: ${e.message}`);}}
 async function cancelTask(taskId){if(!confirm('Stop this task? The agent will halt at the next checkpoint; file changes stay in place.'))return;try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`task-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');appendLiveActivity(`TASK · ${taskId} · cancelled`);}catch(e){addMessage('assistant',`Cancel error: ${e.message}`);}}
 $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-approve]');if(a){resumeTask(a.dataset.approve==='1');return;}const r=e.target.closest('[data-recover]');if(r){recoverTask(r.dataset.recover);return;}const u=e.target.closest('[data-undo]');if(u){undoTask(u.dataset.undo);return;}const c=e.target.closest('[data-cancel-task]');if(c)cancelTask(c.dataset.cancelTask);});
 $('#recentTasks').addEventListener('click',async e=>{const row=e.target.closest('[data-task-id]');if(!row)return;const t=recentTaskCache[row.dataset.taskId];if(!t)return;lastTask=t;renderTask(t);renderDiff(t);try{const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(t.id));if(!lr.ok)return;const lg=await lr.json();const log=String(lg.log||'');if(!log.trim())return;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[t.id];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">task log '+esc(t.id)+'</code><span class="term-state">'+esc(t.status)+'</span></div><pre class="term-out"></pre>';blocks[t.id]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=log;setUtilityPanel('terminal');activity.scrollTop=activity.scrollHeight;restoreActivityTimeline(t.id);}catch{}});

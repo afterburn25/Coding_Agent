@@ -115,6 +115,16 @@ class TerminalTracker:
                 raise KeyError(f"unknown terminal process '{job_id_or_pid}'")
             proc: subprocess.Popen = entry["process"]
             if proc.poll() is None:
+                # Kill the whole tree — a stopped job's children must not be
+                # orphaned holding inherited pipes/handles open.
+                if sys.platform.startswith("win"):
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            capture_output=True, timeout=10,
+                        )
+                    except Exception:
+                        pass
                 proc.terminate()
                 try:
                     proc.wait(timeout=8)
@@ -171,6 +181,26 @@ def run_process_streaming(
                 except Exception:
                     pass
 
+    def _kill_tree() -> None:
+        # shell=True wraps the command in cmd.exe — killing only the wrapper
+        # orphans the real child and leaves it holding our pipes open, so the
+        # cancel path hangs until the child exits on its own. On Windows
+        # taskkill /T terminates the whole tree; elsewhere kill is sufficient
+        # because there's no shell wrapper between us and the child.
+        if sys.platform.startswith("win"):
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass
+        try:
+            proc.kill()
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+
     proc = subprocess.Popen(
         argv, cwd=str(cwd), env=env, shell=shell, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags,
@@ -189,16 +219,14 @@ def run_process_streaming(
             try:
                 if cancel_check():
                     cancelled = True
-                    proc.kill()
-                    proc.wait(timeout=10)
+                    _kill_tree()
                     break
             except Exception:
                 pass
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            proc.kill()
-            proc.wait(timeout=10)
+            _kill_tree()
             break
         time.sleep(min(0.15, remaining))
     timed_out = timed_out or cancelled

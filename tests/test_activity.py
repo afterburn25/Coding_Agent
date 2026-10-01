@@ -9,6 +9,7 @@ from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.models.provider import ProviderResponse
 from localcodeagent.models.router import ModelRouter
 from localcodeagent.tools.base import ToolRegistry
+from localcodeagent.tools.shell import register_shell_tools
 from localcodeagent.workflow.activity import OUTPUT_TAIL_LIMIT, ActivityStore
 from localcodeagent.workflow.checkpoint import CheckpointManager
 from localcodeagent.workflow.memory import ProjectMemory
@@ -154,6 +155,31 @@ class OrchestratorActivityTests(unittest.TestCase):
             diag = agent._launch_diagnostics(agent.router.get_profile("local"))
             self.assertIn("gpu_layers", diag)
             self.assertIn("context_window", diag)
+
+    def test_stale_command_cancel_flag_does_not_kill_next_command(self):
+        # A Stop click landing between tool calls must not leak into the next
+        # command: _execute_tool clears the per-task flag at entry.
+        import threading
+
+        class _FakeSession:
+            task_id = "t-stale"
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = ActivityStore(root / "act.jsonl")
+            agent = _agent(root, store, [])
+            agent.tools.permissions["shell.execute"] = "allow"
+            register_shell_tools(agent.tools, root)
+            flag = threading.Event()
+            flag.set()  # stale click before this command started
+            agent.tools.context["command_cancel"] = {"t-stale": flag}
+            agent.tools.context["cancel_checks"] = {"t-stale": flag.is_set}
+            agent.tools.context["task_tls"] = threading.local()
+            agent.tools.context["task_id"] = "t-stale"
+            out = agent._execute_tool("run_shell", {"command": "echo hi"},
+                                      session=_FakeSession())
+            self.assertIn("EXIT_CODE=0", out)
+            self.assertFalse(flag.is_set())
 
     def test_error_marks_rows_failed(self):
         with tempfile.TemporaryDirectory() as td:

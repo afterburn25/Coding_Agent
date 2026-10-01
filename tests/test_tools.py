@@ -1,6 +1,8 @@
 import json
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from localcodeagent.config import AgentConfig
 from localcodeagent.tools.base import ToolRegistry
 from localcodeagent.tools.filesystem import register_filesystem_tools
 from localcodeagent.tools.github import _repo_slug_from_remote, register_github_tools
+from localcodeagent.tools.shell import register_shell_tools
 from localcodeagent.tools.terminal import run_process_streaming
 
 
@@ -119,6 +122,40 @@ class ProcessStreamingTests(unittest.TestCase):
             self.assertFalse(killed)
             self.assertEqual(code, 0)
             self.assertIn("done", out)
+
+
+class PerCommandCancelTests(unittest.TestCase):
+    """The timeline Stop button sets command_cancel[task_id]; the shared
+    cancel_check must kill the live subprocess without cancelling the task."""
+
+    def test_command_flag_kills_subprocess_not_task(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg = ToolRegistry({"shell.execute": "allow"})
+            register_shell_tools(reg, Path(td))
+            flag = threading.Event()
+            task_cancelled = threading.Event()
+            reg.context["command_cancel"] = {"t1": flag}
+            reg.context["cancel_checks"] = {
+                "t1": lambda: task_cancelled.is_set() or flag.is_set()
+            }
+            reg.context["task_id"] = "t1"
+
+            def click_stop():
+                time.sleep(0.6)
+                flag.set()
+
+            threading.Thread(target=click_stop, daemon=True).start()
+            started = time.monotonic()
+            result = reg.execute("run_shell", {
+                "command": "python -c \"import time; time.sleep(30)\"",
+                "timeout": 45,
+            })
+            self.assertLess(time.monotonic() - started, 20)
+            self.assertIn("[cancelled]", result)
+            # Task-level cancel never fired — the task continues.
+            self.assertFalse(task_cancelled.is_set())
+
+
 
 
 if __name__ == "__main__":

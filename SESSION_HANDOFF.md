@@ -75,6 +75,31 @@
   Persisted to the install's `data/runtime_tuning.json` as `benchmarked`.
   Numbers are contention-skewed; re-benchmark when the GPU is free.
 
+### Packaged-app boot + Windows trust hardening (commits `c603a66`, `418a65c`, `cc0ab31`, `ff302ef`)
+
+- Boot hang root cause: two unbounded recursive scans at tool registration —
+  `plugins.resolve_executable` (`base.rglob` over the whole install root,
+  which now contains `ComfyUI_windows_portable`, `Source`, `models`, `.git`)
+  and `tools/base.install_size` (recursive per-payload walk every cold boot).
+  Both now use bounded `os.walk` with depth/entry caps and directory pruning;
+  install sizes persist in tool state so only misses rescan. Installed app
+  boots 74%→98% in ~0.3s (previously died at the host's 60s timeout).
+- Splash double progress bar: the artwork PNG has a grey/cyan bar baked in;
+  `SplashForm.OnPaint` now paints an opaque cover over the baked region
+  before drawing the custom gradient/glow indicator — one visible bar.
+- Windows "malicious download" (unsigned-binary SmartScreen/Defender):
+  backend PyInstaller build now embeds version metadata
+  (`packaging/backend_version.txt`); `build_windows.ps1` + workflow support
+  optional Authenticode signing via `NEXUS_CODESIGN_PFX_B64` /
+  `NEXUS_CODESIGN_PASSWORD` / `NEXUS_CODESIGN_THUMBPRINT` repo secrets
+  (signtool + DigiCert timestamp; Inno `SignTool=standard` signs setup.exe
+  and the uninstaller). Until a cert is configured, artifacts ship unsigned —
+  the workflow now publishes `.sha256` + `CHECKSUMS.txt` (commit, hash,
+  signature status) alongside the installer and zip so downloads are
+  verifiable. SmartScreen reputation still needs a real CA-chained cert.
+- In-app tool downloads were already HTTPS-only with manifest SHA-256
+  verification, path-traversal-safe extraction, and resumable `.part` files.
+
 ## v0.6 restart recovery + CI checkpoint
 
 - Durable task ledger now distinguishes genuine in-process work from tasks interrupted by an application restart.

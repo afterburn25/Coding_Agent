@@ -1262,6 +1262,13 @@ class AgentOrchestrator:
             tls = self.tools.context.get("task_tls")
             if tls is not None:
                 tls.task_id = task_id
+            # A per-command cancel clicked before this call must not leak into
+            # it — the flag targets the command that was running when clicked.
+            flags = self.tools.context.get("command_cancel")
+            if flags is not None:
+                flag = flags.get(task_id)
+                if flag is not None:
+                    flag.clear()
             try:
                 return self.tools.execute(name, args, approved=approved)
             finally:
@@ -1709,6 +1716,9 @@ class AgentOrchestrator:
         checks = self.tools.context.get("cancel_checks")
         if checks is not None:
             checks.pop(task_id, None)
+        cmd_flags = self.tools.context.get("command_cancel")
+        if cmd_flags is not None:
+            cmd_flags.pop(task_id, None)
         try:
             self.tasks.flush_log(task_id)
         except Exception:
@@ -1825,9 +1835,13 @@ class AgentOrchestrator:
         self.tools.context["stream_sinks"][session.task_id] = _on_tool_output
         # Foreground shell/terminal calls poll this while their subprocess runs
         # so task cancellation kills the live command instead of only stopping
-        # between tool calls.
+        # between tool calls. command_cancel is the per-command variant: the
+        # timeline's Stop button sets it, killing the current subprocess while
+        # the task itself continues with a [cancelled] tool result.
+        cmd_flags = self.tools.context.setdefault("command_cancel", {})
+        cmd_flag = cmd_flags.setdefault(session.task_id, threading.Event())
         self.tools.context.setdefault("cancel_checks", {})[session.task_id] = (
-            lambda: self._task_cancelled(session)
+            lambda: self._task_cancelled(session) or cmd_flag.is_set()
         )
         if self._task_cancelled(session):
             return self._cancel_result(session)

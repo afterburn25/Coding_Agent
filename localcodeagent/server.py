@@ -2975,6 +2975,18 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     self._json({"ok": True, "job": task.as_dict()})
                     return
+                if job_id.startswith("command-"):
+                    task_id = job_id[len("command-"):]
+                    # Per-command stop: kill the running foreground subprocess
+                    # only — the task continues with a [cancelled] tool result.
+                    flags = self.state.agent.tools.context.get("command_cancel") or {}
+                    flag = flags.get(task_id)
+                    if flag is None:
+                        self._json({"error": "no running command for this task"}, 404)
+                        return
+                    flag.set()
+                    self._json({"ok": True, "task_id": task_id})
+                    return
                 if job_id.startswith("image-"):
                     job = self.state.images.cancel(job_id[len("image-"):])
                     self._json({"ok": True, "job": job.as_dict()})
