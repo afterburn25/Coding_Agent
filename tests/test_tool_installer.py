@@ -638,6 +638,20 @@ class UpdateCheckerTests(unittest.TestCase):
                                                 root, "whisper"),
                              "definitely-missing-xyz")
 
+    def test_resolve_executable_skips_huge_and_deep_dirs(self):
+        from localcodeagent.tools.plugins import resolve_executable
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            # Payloads inside pruned trees or below depth 4 must not be found —
+            # scanning them is what hung packaged-app startup for minutes.
+            (root / "ComfyUI_windows_portable" / "deep").mkdir(parents=True)
+            (root / "ComfyUI_windows_portable" / "deep" / "hidden-a.exe").write_text("x")
+            deep = root / "a" / "b" / "c" / "d" / "e" / "f"
+            deep.mkdir(parents=True)
+            (deep / "hidden-b.exe").write_text("x")
+            self.assertEqual(resolve_executable("hidden-a", root), "hidden-a")
+            self.assertEqual(resolve_executable("hidden-b", root), "hidden-b")
+
     def test_offpath_archive_binary_marks_installed_and_invocable(self):
         from localcodeagent.tools.plugins import PluginManifest
         with TemporaryDirectory() as td:

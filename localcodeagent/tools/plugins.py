@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -37,14 +39,55 @@ from .base import ToolRegistry, ToolSpec
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
+# Directories a tool-payload executable will never legitimately live in —
+# pruned from the install-root scan so a ComfyUI portable tree or a cloned
+# Source workspace can't turn boot into a multi-minute filesystem crawl.
+_SCAN_SKIP_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    "env", ".tox", ".mypy_cache", ".pytest_cache", "comfyui_windows_portable",
+    "comfyui", "models", "source", "$recycle.bin", "system volume information",
+}
+_SCAN_MAX_DEPTH = 4
+_SCAN_MAX_ENTRIES = 60_000
+
+
+@lru_cache(maxsize=512)
+def _scan_for_executable(base: str, root: str, names_key: str) -> str:
+    """Bounded depth-first scan for any of `names_key` (| separated) under
+    `base`, never descending below `_SCAN_MAX_DEPTH` relative to `root` or
+    into `_SCAN_SKIP_DIRS`, and giving up after `_SCAN_MAX_ENTRIES` entries.
+
+    Path.rglob looks cheap but walks the ENTIRE subtree first — under a
+    packaged install root with ComfyUI/models/Source that hung startup.
+    """
+    wanted = {n.lower() for n in names_key.split("|") if n}
+    base_p, root_p = Path(base), Path(root)
+    visited = 0
+    for dirpath, dirnames, filenames in os.walk(base_p):
+        visited += len(filenames)
+        if visited > _SCAN_MAX_ENTRIES:
+            return ""
+        depth = len(Path(dirpath).relative_to(root_p).parts)
+        if depth >= _SCAN_MAX_DEPTH:
+            dirnames[:] = []
+        else:
+            dirnames[:] = [d for d in dirnames if d.lower() not in _SCAN_SKIP_DIRS]
+        for fname in filenames:
+            if fname.lower() in wanted:
+                hit = Path(dirpath) / fname
+                if hit.is_file():
+                    return str(hit)
+    return ""
+
+
 def resolve_executable(exe: str, install_root: Path | None,
                        tool_id: str = "") -> str:
     """Resolve an executable name to a runnable path.
 
-    Order: absolute path → PATH → ``<install_root>/<tool_id>/**/exe`` →
-    shallow scan of ``<install_root>`` (depth ≤3). Lets archive-installed
-    binaries (e.g. .agent/tools/whisper/Release/whisper-cli.exe) run
-    without PATH changes.
+    Order: absolute path → PATH → ``<install_root>/<tool_id>`` scan →
+    bounded scan of ``<install_root>`` (depth ≤4, pruned). Lets
+    archive-installed binaries (e.g. .agent/tools/whisper/Release/
+    whisper-cli.exe) run without PATH changes.
     """
     p = Path(str(exe)).expanduser()
     if p.is_absolute() and p.is_file():
@@ -65,13 +108,12 @@ def resolve_executable(exe: str, install_root: Path | None,
             direct = base / cand
             if direct.is_file():
                 return str(direct)
-        for cand in names:
-            try:
-                for hit in base.rglob(cand):
-                    if hit.is_file() and len(hit.relative_to(root).parts) <= 4:
-                        return str(hit)
-            except OSError:
-                continue
+        try:
+            hit = _scan_for_executable(str(base), str(root), "|".join(names))
+            if hit:
+                return hit
+        except OSError:
+            continue
     return str(exe)
 
 # Permission keys that are stricter/more specific than shell.execute — a
