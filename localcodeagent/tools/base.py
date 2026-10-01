@@ -98,6 +98,9 @@ class ToolRegistry:
         # Registry-owned metadata for manifest/plugin tools (invocable flag,
         # install spec, manifest path). Built-in tools have no entry.
         self._plugin_meta: dict[str, dict[str, Any]] = {}
+        # Install root for manifest `detect.files` markers (set by
+        # load_plugin_manifests); used when refreshing install status.
+        self.install_root: Path | None = None
         self._lock = threading.RLock()
         self.state_path = Path(state_path).resolve() if state_path else None
         # Mutable execution context is set by the orchestrator before tool calls.
@@ -155,8 +158,7 @@ class ToolRegistry:
                 manifest = PluginManifest.from_dict(json.loads(Path(manifest_path).read_text(encoding="utf-8")))
             except (OSError, ValueError):
                 continue
-            _, missing = manifest.executables_found()
-            new_status = "installed" if not manifest.executables or not missing else "missing"
+            new_status = "installed" if manifest.is_installed(self.install_root) else "missing"
             if spec.install_status != new_status:
                 spec.install_status = new_status
                 changed[name] = new_status

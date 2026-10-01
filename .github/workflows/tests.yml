@@ -80,7 +80,7 @@ jobs:
           Commit: ${{ github.sha }}
           Native desktop: .NET 8 WinForms / Microsoft WebView2
           Bundled inference runtime: llama.cpp b11278 Vulkan x64
-          Installer: Inno Setup LZMA2 update-aware bootstrap with verified coding + ComfyUI/image-stack downloads
+          Installer: Inno Setup LZMA2 update-aware bootstrap with verified coding-model downloads (tools install in-app)
           "@ | Set-Content -Encoding UTF8 dist/ChatNexus/BUILD_INFO.txt
 
       - name: Build single-file Chat Nexus installer

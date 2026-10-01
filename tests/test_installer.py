@@ -62,17 +62,17 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WizardForm.ProgressGauge", self.installer)
         self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
         self.assertIn("procedure CurInstallProgressChanged", self.installer)
-        self.assertIn("Downloading component ' + IntToStr(ModelNumber) + ' of 9", self.installer)
+        self.assertIn("Downloading component ' + IntToStr(ModelNumber) + ' of 2", self.installer)
         self.assertIn("LargestTemporaryFileSize", self.installer)
         self.assertIn("CurrentModelProgressNumber <> ModelNumber", self.installer)
         self.assertIn("Bootstrap downloads complete", self.installer)
-        self.assertIn("9 of 9 default runtime/model components ready", self.installer)
+        self.assertIn("2 of 2 default model components ready", self.installer)
 
-    def test_installer_bootstraps_comfyui_and_default_image_stack(self):
-        self.assertIn("ArchiveExtraction=enhanced/nopassword", self.installer)
-        self.assertIn("ComfyUI_windows_portable_nvidia.7z", self.installer)
-        self.assertIn("8f137eac345707fd7e42bcf8e29377415243011ca15522a86aed6c77331fbd56", self.installer)
-        self.assertIn("extractarchive", self.installer)
+    def test_optional_tools_not_downloaded_by_installer(self):
+        # ComfyUI and image model packs moved to the in-app Tools page so Setup
+        # stays fast; none of these artifacts may ship as installer downloads.
+        self.assertNotIn("extractarchive", self.installer)
+        self.assertNotIn("ComfyUI_windows_portable_nvidia.7z", self.installer)
         for filename in (
             "qwen_image_2.1_int8_convrot.safetensors",
             "qwen3vl_8b_int8_convrot.safetensors",
@@ -81,7 +81,7 @@ class InstallerContractTests(unittest.TestCase):
             "qwen_3_4b.safetensors",
             "flux2-vae.safetensors",
         ):
-            self.assertIn(filename, self.installer)
+            self.assertNotIn(filename, self.installer)
         for check in (
             "ShouldDownloadComfyUI",
             "ShouldDownloadQwenImageDiff",
@@ -91,8 +91,8 @@ class InstallerContractTests(unittest.TestCase):
             "ShouldDownloadFluxText",
             "ShouldDownloadFluxVae",
         ):
-            self.assertIn(check, self.installer)
-        self.assertIn("ComfyUI_windows_portable\\.chatnexus-version", self.installer)
+            self.assertNotIn(check, self.installer)
+        self.assertIn("in-app Tools page", self.installer)
 
     def test_windows_build_bundles_default_image_api_workflows(self):
         self.assertIn("Bundling default ComfyUI API workflows", self.build)

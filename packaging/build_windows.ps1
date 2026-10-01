@@ -37,6 +37,7 @@ Write-Host "Building hidden Python agent backend..."
     --workpath $BackendWork `
     --specpath "build" `
     --add-data "$Root\web;web" `
+    --add-data "$Root\tools;tools" `
     --collect-submodules localcodeagent `
     "packaging/chat_nexus_backend_entry.py"
 if ($LASTEXITCODE -ne 0) { throw "Chat Nexus backend PyInstaller build failed" }

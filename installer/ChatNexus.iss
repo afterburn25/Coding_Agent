@@ -25,37 +25,8 @@
 #define Qwen30Size 18556688384
 #define Qwen30SourceRepo "lm-kit/qwen3-coder-30b-a3b-instruct-gguf"
 
-#define ComfyVersion "v0.38.0"
-#define ComfyArchiveName "ComfyUI_windows_portable_nvidia.7z"
-#define ComfyUrl "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.38.0/ComfyUI_windows_portable_nvidia.7z"
-#define ComfySha256 "8f137eac345707fd7e42bcf8e29377415243011ca15522a86aed6c77331fbd56"
-#define ComfySize 1994326521
-
-#define QwenImageDiffFile "qwen_image_2.1_int8_convrot.safetensors"
-#define QwenImageDiffUrl "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"
-#define QwenImageDiffSha256 "cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d"
-#define QwenImageDiffSize 7256783064
-#define QwenImageTextFile "qwen3vl_8b_int8_convrot.safetensors"
-#define QwenImageTextUrl "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"
-#define QwenImageTextSha256 "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f"
-#define QwenImageTextSize 9350798360
-#define QwenImageVaeFile "qwen_image_2.1_vae_bf16.safetensors"
-#define QwenImageVaeUrl "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
-#define QwenImageVaeSha256 "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
-#define QwenImageVaeSize 675509688
-
-#define FluxDiffFile "flux-2-klein-4b.safetensors"
-#define FluxDiffUrl "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors"
-#define FluxDiffSha256 "ec3d4e733a771f61c052fb4856c48b336c55eaf2c65487c2a1faeb9bbda7a343"
-#define FluxDiffSize 7751105712
-#define FluxTextFile "qwen_3_4b.safetensors"
-#define FluxTextUrl "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors"
-#define FluxTextSha256 "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a"
-#define FluxTextSize 8044982048
-#define FluxVaeFile "flux2-vae.safetensors"
-#define FluxVaeUrl "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors"
-#define FluxVaeSha256 "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
-#define FluxVaeSize 336213556
+; Optional tools (ComfyUI, image model packs, etc.) are intentionally NOT
+; downloaded by Setup — they install on demand from the in-app Tools page.
 
 [Setup]
 AppId={#StableAppId}
@@ -116,24 +87,11 @@ Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: 
 Source: "{#Qwen14Url}"; DestDir: "{app}\models"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
 Source: "{#Qwen30Url}"; DestDir: "{app}\models"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
 
-; Default local image runtime and model stack. These remain external downloads so
-; Setup.exe stays small while a clean install finishes ready for image generation.
-Source: "{#ComfyUrl}"; DestDir: "{app}"; DestName: "{#ComfyArchiveName}"; ExternalSize: {#ComfySize}; Hash: "{#ComfySha256}"; Flags: external download extractarchive ignoreversion recursesubdirs createallsubdirs nocompression; Check: ShouldDownloadComfyUI
-Source: "{#QwenImageDiffUrl}"; DestDir: "{app}\models\image\qwen\diffusion_models"; DestName: "{#QwenImageDiffFile}"; ExternalSize: {#QwenImageDiffSize}; Hash: "{#QwenImageDiffSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwenImageDiff
-Source: "{#QwenImageTextUrl}"; DestDir: "{app}\models\image\qwen\text_encoders"; DestName: "{#QwenImageTextFile}"; ExternalSize: {#QwenImageTextSize}; Hash: "{#QwenImageTextSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwenImageText
-Source: "{#QwenImageVaeUrl}"; DestDir: "{app}\models\image\qwen\vae"; DestName: "{#QwenImageVaeFile}"; ExternalSize: {#QwenImageVaeSize}; Hash: "{#QwenImageVaeSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwenImageVae
-Source: "{#FluxDiffUrl}"; DestDir: "{app}\models\image\flux\diffusion_models"; DestName: "{#FluxDiffFile}"; ExternalSize: {#FluxDiffSize}; Hash: "{#FluxDiffSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadFluxDiff
-Source: "{#FluxTextUrl}"; DestDir: "{app}\models\image\flux\text_encoders"; DestName: "{#FluxTextFile}"; ExternalSize: {#FluxTextSize}; Hash: "{#FluxTextSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadFluxText
-Source: "{#FluxVaeUrl}"; DestDir: "{app}\models\image\flux\vae"; DestName: "{#FluxVaeFile}"; ExternalSize: {#FluxVaeSize}; Hash: "{#FluxVaeSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadFluxVae
+; Optional tools (ComfyUI portable, image model packs) are downloaded by the
+; in-app Tools page instead of Setup, keeping installation fast.
 
 [Dirs]
 Name: "{app}\models"
-Name: "{app}\models\image\qwen\diffusion_models"
-Name: "{app}\models\image\qwen\text_encoders"
-Name: "{app}\models\image\qwen\vae"
-Name: "{app}\models\image\flux\diffusion_models"
-Name: "{app}\models\image\flux\text_encoders"
-Name: "{app}\models\image\flux\vae"
 Name: "{app}\data"
 
 [InstallDelete]
@@ -244,7 +202,7 @@ begin
   ModelBytesLabel.Visible := True;
 
   ModelProgressLabel.Caption :=
-    'Downloading component ' + IntToStr(ModelNumber) + ' of 9 - ' + DisplayName;
+    'Downloading component ' + IntToStr(ModelNumber) + ' of 2 - ' + DisplayName;
 
   BytesDone := LargestTemporaryFileSize(DownloadDirectory);
   if BytesDone < LastModelBytesDone then
@@ -273,7 +231,7 @@ begin
 
   ModelProgressLabel.Caption := 'Bootstrap downloads complete';
   ModelProgressBar.Position := ModelProgressBar.Max;
-  ModelBytesLabel.Caption := '9 of 9 default runtime/model components ready';
+  ModelBytesLabel.Caption := '2 of 2 default model components ready';
   LastModelBytesDone := 0;
   CurrentModelProgressNumber := 0;
 end;
@@ -395,74 +353,6 @@ begin
     '{#Qwen30Sha256}',
     {#Qwen30Size},
     '{#Qwen30SourceRepo}');
-end;
-
-function BootstrapFilePresent(const RelativePath: String; const ExpectedSize: Int64): Boolean;
-var
-  Target: String;
-  Size: Int64;
-begin
-  Target := ExpandConstant('{app}\') + RelativePath;
-  Result := FileExists(Target) and FileSize64(Target, Size) and (Size = ExpectedSize);
-  if Result then
-    Log('Bootstrap component already present with expected size: ' + Target);
-end;
-
-function ShouldDownloadComfyUI(): Boolean;
-var
-  Marker: String;
-  VersionText: AnsiString;
-begin
-  if SkipModelDownloads then
-  begin
-    Result := False;
-    Exit;
-  end;
-
-  Marker := ExpandConstant('{app}\ComfyUI_windows_portable\.chatnexus-version');
-  if FileExists(ExpandConstant('{app}\ComfyUI_windows_portable\ComfyUI\main.py')) and
-     FileExists(ExpandConstant('{app}\ComfyUI_windows_portable\python_embeded\python.exe')) and
-     LoadStringFromFile(Marker, VersionText) and
-     (Pos('{#ComfyVersion}', VersionText) > 0) then
-    Result := False
-  else
-    Result := True;
-end;
-
-function ShouldDownloadQwenImageDiff(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\qwen\diffusion_models\{#QwenImageDiffFile}', {#QwenImageDiffSize}));
-end;
-
-function ShouldDownloadQwenImageText(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\qwen\text_encoders\{#QwenImageTextFile}', {#QwenImageTextSize}));
-end;
-
-function ShouldDownloadQwenImageVae(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\qwen\vae\{#QwenImageVaeFile}', {#QwenImageVaeSize}));
-end;
-
-function ShouldDownloadFluxDiff(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\flux\diffusion_models\{#FluxDiffFile}', {#FluxDiffSize}));
-end;
-
-function ShouldDownloadFluxText(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\flux\text_encoders\{#FluxTextFile}', {#FluxTextSize}));
-end;
-
-function ShouldDownloadFluxVae(): Boolean;
-begin
-  Result := (not SkipModelDownloads) and
-    (not BootstrapFilePresent('models\image\flux\vae\{#FluxVaeFile}', {#FluxVaeSize}));
 end;
 
 function InstalledUninstallKey(): String;
@@ -638,21 +528,7 @@ begin
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
     ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{app}\models'), 1, {#Qwen14Size})
   else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{app}\models'), 2, {#Qwen30Size})
-  else if Pos('{#ComfyArchiveName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('ComfyUI {#ComfyVersion} NVIDIA runtime', ExpandConstant('{app}'), 3, {#ComfySize})
-  else if Pos('{#QwenImageDiffFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen Image 2.1 diffusion model', ExpandConstant('{app}\models\image\qwen\diffusion_models'), 4, {#QwenImageDiffSize})
-  else if Pos('{#QwenImageTextFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen Image 2.1 text encoder', ExpandConstant('{app}\models\image\qwen\text_encoders'), 5, {#QwenImageTextSize})
-  else if Pos('{#QwenImageVaeFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen Image 2.1 VAE', ExpandConstant('{app}\models\image\qwen\vae'), 6, {#QwenImageVaeSize})
-  else if Pos('{#FluxDiffFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Flux.2 Klein 4B diffusion model', ExpandConstant('{app}\models\image\flux\diffusion_models'), 7, {#FluxDiffSize})
-  else if Pos('{#FluxTextFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Flux.2 Klein text encoder', ExpandConstant('{app}\models\image\flux\text_encoders'), 8, {#FluxTextSize})
-  else if Pos('{#FluxVaeFile}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Flux.2 VAE', ExpandConstant('{app}\models\image\flux\vae'), 9, {#FluxVaeSize});
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{app}\models'), 2, {#Qwen30Size});
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -669,12 +545,6 @@ begin
     // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
-
-    if FileExists(ExpandConstant('{app}\ComfyUI_windows_portable\ComfyUI\main.py')) then
-      SaveStringToFile(
-        ExpandConstant('{app}\ComfyUI_windows_portable\.chatnexus-version'),
-        '{#ComfyVersion}' + #13#10,
-        False);
 
     MarkModelDownloadsComplete();
 

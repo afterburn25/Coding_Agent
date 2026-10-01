@@ -3,6 +3,9 @@
   let tools = [];
   let categories = [];
   let activeCategory = "";
+  let jobs = [];
+  let imageStatus = [];
+  let imageEnabled = false;
 
   const api = async (path, options) => {
     const res = await fetch(path, options);
@@ -64,6 +67,58 @@
     renderTools();
   }
 
+  const INSTALL_KINDS = new Set(["tool_install", "image_install", "model_install"]);
+  const ACTIVE_STATES = new Set(["queued", "preparing", "running", "waiting_for_tool"]);
+  const activeInstalls = () => jobs.filter((j) => INSTALL_KINDS.has(j.kind) && ACTIVE_STATES.has(j.state));
+  const installJobFor = (kind, key, value) =>
+    jobs.find((j) => j.kind === kind && ACTIVE_STATES.has(j.state) && (j.metadata || {})[key] === value);
+  const fmtBytes = (n) => {
+    n = Number(n) || 0;
+    if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+    if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+    if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${n} B`;
+  };
+
+  function renderInstalls() {
+    const active = activeInstalls();
+    const overall = $("installOverall");
+    if (!overall) return;
+    if (!active.length) {
+      overall.hidden = true;
+      $("installSummary").textContent =
+        "No installs running. Optional tools (ComfyUI, image packs) install from this page — nothing is downloaded by the app installer.";
+      return;
+    }
+    overall.hidden = false;
+    const pct = Math.round((active.reduce((s, j) => s + (Number(j.progress) || 0), 0) / active.length) * 100);
+    $("installOverallFill").style.width = `${pct}%`;
+    $("installOverallLabel").textContent = `Overall install · ${active.length} active · ${pct}%`;
+    const cur = active[0];
+    const m = cur.metadata || {};
+    const phase = m.phase || cur.status || "working";
+    const parts = [];
+    if (m.current_file) parts.push(m.current_file);
+    if (m.current_path) parts.push(`→ ${m.current_path}`);
+    if (!parts.length && (m.bytes_done || m.bytes_total))
+      parts.push(`${fmtBytes(m.bytes_done)} / ${fmtBytes(m.bytes_total)}`);
+    $("installCurrent").textContent =
+      `${cur.title} — ${phase}${parts.length ? ` · ${parts.join(" ")}` : ""}`;
+  }
+
+  function toolProgressHtml(j) {
+    const m = j.metadata || {};
+    const dl = Math.round((Number(m.download_progress ?? j.progress) || 0) * 100);
+    const file = m.current_file || (j.detail && j.detail !== j.status ? j.detail : "");
+    const detail = file ? `${m.phase || j.status}: ${file}` : `${m.phase || j.status || "working"}`;
+    const bytes = m.bytes_total ? ` · ${fmtBytes(m.bytes_done)} / ${fmtBytes(m.bytes_total)}` : "";
+    return `
+      <div class="tool-progress">
+        <div class="install-bar"><div class="install-fill" style="width:${dl}%"></div></div>
+        <div class="install-meta"><span>${esc(detail)}${esc(bytes)}</span><span class="muted" title="${esc(m.current_path || "")}">${esc(m.current_path || "")}</span></div>
+      </div>`;
+  }
+
   function renderCategories() {
     const used = [...new Set(tools.map((t) => t.category))].sort();
     const list = ["", ...used];
@@ -119,16 +174,30 @@
         try {
           let res = await post("/api/tools/install", { tool: btn.dataset.install });
           if (res.needs_approval) {
-            if (!confirm(`Install ${btn.dataset.install} via ${res.install.method || "package manager"}?`)) return;
+            const method = (res.install || {}).method || "package manager";
+            const size = (res.install || {}).size_bytes ? ` (${fmtBytes(res.install.size_bytes)})` : "";
+            if (!confirm(`Install ${btn.dataset.install} via ${method}${size}?`)) return;
             res = await post("/api/tools/install", { tool: btn.dataset.install, approve: true });
           }
           if (!res.ok) { alert(res.error || "install not available"); return; }
           btn.textContent = "Installing…";
-          setTimeout(() => { loadTools(); loadJobs(); }, 2000);
+          setTimeout(() => { loadTools(); loadJobs(); }, 800);
         } catch (e) {
           alert(e.message);
         } finally {
           btn.disabled = false;
+        }
+      });
+    });
+    $("toolList").querySelectorAll("[data-cancel-job]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await post("/api/jobs/cancel", { job_id: btn.dataset.cancelJob });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          setTimeout(() => { loadJobs(); loadTools(); }, 400);
         }
       });
     });
@@ -151,22 +220,40 @@
   }
 
   function renderTool(t) {
+    const spec = t.install || {};
+    const job = installJobFor("tool_install", "tool", t.id) ||
+      installJobFor("tool_install", "tool", t.name);
+    const installable = spec.package || spec.method === "archive";
+    const statusChip = job
+      ? '<span class="chip installing">Installing…</span>'
+      : t.install_status === "installed"
+        ? '<span class="chip installed">Installed</span>'
+        : installable
+          ? '<span class="chip missing">Not installed</span>'
+          : "";
     const chips = [
+      statusChip,
       `<span class="chip perm ${esc(t.permission_mode)}">${esc(t.permission)}: ${esc(t.permission_mode)}</span>`,
       t.requires_network ? '<span class="chip net">network</span>' : "",
       t.requires_gpu ? '<span class="chip gpu">GPU</span>' : "",
       ...t.capabilities.slice(0, 4).map((c) => `<span class="chip cap">${esc(c)}</span>`),
     ].join("");
+    const sizeHint = spec.size_bytes ? ` · ${fmtBytes(spec.size_bytes)}` : "";
+    const installTitle = spec.method === "archive"
+      ? `Download & extract to ${spec.dest || "app dir"}${sizeHint}`
+      : `via ${spec.method}${sizeHint}`;
     return `
       <div class="tool-card${t.enabled ? "" : " disabled"}">
         <div>
           <div class="tool-name">${esc(t.display_name)} <span class="tool-id">${esc(t.id)} · v${esc(t.version)} · ${esc(t.provider)}</span></div>
           <div class="tool-desc">${esc(t.description)}</div>
           <div class="tool-meta">${chips}${t.use_count ? `<span class="chip">used ${t.use_count}×</span>` : ""}</div>
+          ${job ? toolProgressHtml(job) : ""}
         </div>
         <div class="tool-actions">
           <button class="tool-toggle ${t.enabled ? "on" : "off"}" data-tool="${esc(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "Enabled" : "Disabled"}</button>
-          ${t.install_status === "missing" && t.install && t.install.package ? `<button class="mini-button" data-install="${esc(t.name)}" title="via ${esc(t.install.method)}">Install</button>` : ""}
+          ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
+          ${!job && t.install_status === "missing" && installable ? `<button class="mini-button" data-install="${esc(t.name)}" title="${esc(installTitle)}">Install</button>` : ""}
           ${t.has_health_check ? `<button class="mini-button" data-health="${esc(t.name)}">Check</button>` : '<span class="tool-health">no health check</span>'}
         </div>
       </div>`;
@@ -250,9 +337,21 @@
     });
   }
 
+  const installSig = (list) => (list || [])
+    .filter((j) => INSTALL_KINDS.has(j.kind) && ACTIVE_STATES.has(j.state))
+    .map((j) => `${j.id}:${Math.round((Number(j.progress) || 0) * 200)}:${(j.metadata || {}).current_file || ""}`)
+    .join("|");
+
   async function loadJobs() {
+    const prev = jobs;
     const data = await api("/api/jobs");
-    const rows = (data.jobs || []).slice(0, 60);
+    jobs = data.jobs || [];
+    renderInstalls();
+    if (installSig(prev) !== installSig(jobs)) {
+      if (tools.length) renderTools();
+      if (imageStatus.length) renderImagePacks();
+    }
+    const rows = jobs.slice(0, 60);
     if (!rows.length) {
       $("jobList").textContent = "No jobs yet.";
       return;
@@ -283,6 +382,87 @@
         }
       });
     });
+  }
+
+  async function loadImagePacks() {
+    const host = $("imagePackList");
+    if (!host) return;
+    try {
+      const data = await api("/api/image");
+      imageEnabled = !!data.enabled;
+      imageStatus = data.model_status || [];
+    } catch (e) {
+      imageStatus = [];
+      host.textContent = `Image workspace unavailable: ${e.message}`;
+      return;
+    }
+    renderImagePacks();
+  }
+
+  function renderImagePacks() {
+    const host = $("imagePackList");
+    if (!host) return;
+    if (!imageEnabled) {
+      host.textContent = "Image generation is disabled in config.json.";
+      return;
+    }
+    if (!imageStatus.length) {
+      host.textContent = "No image model packs configured.";
+      return;
+    }
+    host.innerHTML = imageStatus.map(renderImagePack).join("");
+    host.classList.remove("muted");
+    host.querySelectorAll("[data-pack-install]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await post("/api/image/models/install", { model_id: btn.dataset.packInstall });
+          btn.textContent = "Installing…";
+          setTimeout(() => { loadJobs(); loadImagePacks(); }, 800);
+        } catch (e) {
+          alert(e.message);
+          btn.disabled = false;
+        }
+      });
+    });
+    host.querySelectorAll("[data-cancel-job]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await post("/api/jobs/cancel", { job_id: btn.dataset.cancelJob });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          setTimeout(() => { loadJobs(); loadImagePacks(); }, 400);
+        }
+      });
+    });
+  }
+
+  function renderImagePack(s) {
+    const job = installJobFor("image_install", "model_id", s.id);
+    const components = s.components || [];
+    const totalBytes = components.reduce((a, c) => a + (Number(c.expected_size_bytes) || 0), 0);
+    const doneCount = components.filter((c) => c.ok).length;
+    const chip = job
+      ? '<span class="chip installing">Installing…</span>'
+      : s.status === "installed"
+        ? '<span class="chip installed">Installed</span>'
+        : s.status === "partial"
+          ? '<span class="chip missing">Partial</span>'
+          : '<span class="chip missing">Not installed</span>';
+    return `
+      <div class="tool-card">
+        <div>
+          <div class="tool-name">${esc(s.id)} <span class="tool-id">${esc(s.family || "image")} · ${doneCount}/${components.length} components · ${fmtBytes(totalBytes)}</span></div>
+          <div class="tool-meta">${chip}</div>
+          ${job ? toolProgressHtml(job) : ""}
+        </div>
+        <div class="tool-actions">
+          ${job ? `<button class="mini-button" data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
+          ${!job && s.status !== "installed" ? `<button class="mini-button" data-pack-install="${esc(s.id)}">Install</button>` : ""}
+        </div>
+      </div>`;
   }
 
   const queueForm = $("queueForm");
@@ -424,10 +604,12 @@
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {
-    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadQueue(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch((e) => alert(e.message));
+    await Promise.all([loadPermissions(), loadTools(), loadImagePacks(), loadProcesses(), loadJobs(), loadQueue(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch((e) => alert(e.message));
   }
   refreshAll();
   setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadQueue(), loadMcp(), loadTelemetry(), loadWorkflows()]).catch(() => {}), 5000);
+  // Install progress needs faster updates than the 5s housekeeping poll.
+  setInterval(() => Promise.all([loadJobs(), loadImagePacks()]).catch(() => {}), 1500);
 
   // Live updates: job/tool events stream over SSE; polling above stays as the
   // fallback if EventSource is unavailable or the connection drops.

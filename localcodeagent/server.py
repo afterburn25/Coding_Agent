@@ -6,6 +6,7 @@ import mimetypes
 import os
 import queue
 import secrets
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -28,6 +29,7 @@ from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
 from .tools.base import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from .tools.plugins import load_plugin_manifests
+from .tools.downloads import ToolDownloadManager
 from .secrets import SecretVault
 from .tools.api import register_api_tools
 from .tools.buildsys import register_build_tools
@@ -237,7 +239,16 @@ class AppState:
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
-        self.plugin_manifests = load_plugin_manifests(manifests_dir, self.tools, workspace=self.workspace)
+        if not manifests_dir.is_dir():
+            # Packaged builds bundle the manifests inside the backend payload
+            # (PyInstaller _MEIPASS) rather than next to config.json.
+            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "tools" / "manifests"
+            if bundled.is_dir():
+                manifests_dir = bundled
+        self.plugin_manifests = load_plugin_manifests(
+            manifests_dir, self.tools, workspace=self.workspace, install_root=runtime_root)
+        self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
+        self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
         self._register_health_checks()
         self.tool_router = ToolRouter(
             self.tools,
@@ -1104,7 +1115,10 @@ class AppState:
                     "tool": spec.name, "install": install}
         if approve and self.permission_manager.level("packages.install") == "session":
             self.permission_manager.grant_session("packages.install")
-        cmd = install_command(install)
+        if str(install.get("method") or "").strip().lower() == "archive":
+            return self.tool_downloads.install(
+                spec.name, spec.display_name, install, version=spec.version)
+        cmd = install_command(install, install_root=self.runtime.base_dir)
         if cmd is None:
             return {"ok": False, "error": "no automated install method — manual install required",
                     "install": install}
@@ -2625,10 +2639,15 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": True, "job": job})
                     return
                 try:
-                    job = self.state.jobs.cancel(job_id)
+                    job = self.state.jobs.get(job_id)
                 except KeyError:
                     self._json({"error": "job not found or not cancellable through the Job Manager"}, 404)
                     return
+                if job.kind == "tool_install":
+                    self.state.tool_downloads.cancel(job_id)
+                    job = self.state.jobs.get(job_id)
+                else:
+                    job = self.state.jobs.cancel(job_id)
                 # A cancelled background terminal job must actually kill the
                 # process, not just update the ledger row.
                 if job.kind == "terminal":

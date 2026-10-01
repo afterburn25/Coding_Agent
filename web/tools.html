@@ -42,6 +42,23 @@
         <button id="refreshAll" class="mini-button">Refresh</button>
       </header>
 
+      <section class="tools-card" id="installCard">
+        <h2>Installations</h2>
+        <div id="installSummary" class="muted">No installs running. Optional tools (ComfyUI, image packs) install from this page — nothing is downloaded by the app installer.</div>
+        <div class="install-overall" id="installOverall" hidden>
+          <div class="install-bar"><div class="install-fill" id="installOverallFill"></div></div>
+          <div class="install-meta">
+            <span id="installOverallLabel">0%</span>
+            <span class="muted" id="installCurrent"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="tools-card">
+        <h2>Image model packs</h2>
+        <div id="imagePackList" class="tool-list muted">Loading…</div>
+      </section>
+
       <section class="tools-card">
         <h2>Permissions</h2>
         <div id="permTable" class="perm-table muted">Loading…</div>

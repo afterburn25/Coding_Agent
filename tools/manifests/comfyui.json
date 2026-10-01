@@ -1,0 +1,28 @@
+{
+  "id": "comfyui",
+  "name": "ComfyUI Portable",
+  "version": "v0.38.0",
+  "category": "image",
+  "description": "Local ComfyUI image-generation backend (NVIDIA portable build). Downloads the official portable archive and extracts it inside the app directory; required for the Image workspace's local generation.",
+  "provider": "Comfy-Org",
+  "supported_os": ["windows"],
+  "requires_gpu": true,
+  "requires_network": true,
+  "permissions": ["packages.install"],
+  "capabilities": ["image_generation_backend", "comfyui_runtime"],
+  "install": {
+    "method": "archive",
+    "url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.38.0/ComfyUI_windows_portable_nvidia.7z",
+    "sha256": "8f137eac345707fd7e42bcf8e29377415243011ca15522a86aed6c77331fbd56",
+    "size_bytes": 1994326521,
+    "format": "7z",
+    "dest": "."
+  },
+  "detect": {
+    "files": [
+      "ComfyUI_windows_portable/ComfyUI/main.py",
+      "ComfyUI_windows_portable/python_embeded/python.exe"
+    ]
+  },
+  "docs": "Official ComfyUI portable package. After install, the Image workspace detects it automatically (comfyui_dir)."
+}

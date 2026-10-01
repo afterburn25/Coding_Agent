@@ -58,6 +58,7 @@ class PluginManifest:
     supported_os: list[str] = field(default_factory=list)
     docs: str = ""
     install: dict[str, Any] = field(default_factory=dict)
+    detect_files: list[str] = field(default_factory=list)
     health_check: dict[str, Any] = field(default_factory=dict)
     invoke: dict[str, Any] | None = None
     config: dict[str, Any] = field(default_factory=dict)
@@ -87,6 +88,9 @@ class PluginManifest:
             supported_os=[str(x).lower() for x in raw.get("supported_os") or []],
             docs=str(raw.get("docs") or ""),
             install=dict(raw.get("install") or {}),
+            detect_files=[
+                str(x) for x in (raw.get("detect") or {}).get("files") or []
+            ],
             health_check=dict(raw.get("health_check") or {}),
             invoke=raw.get("invoke") if isinstance(raw.get("invoke"), dict) else None,
             config=dict(raw.get("config") or {}),
@@ -111,11 +115,38 @@ class PluginManifest:
                 missing.append(exe)
         return found, missing
 
+    def detect_files_found(self, install_root: Path | None) -> tuple[list[str], list[str]]:
+        """Return (found, missing) install-root-relative marker files.
+
+        Lets manifests detect payloads that live inside the app directory rather
+        than on PATH (e.g. the bundled ComfyUI portable tree).
+        """
+        found, missing = [], []
+        root = Path(install_root).resolve() if install_root else None
+        for rel in self.detect_files:
+            p = Path(rel).expanduser()
+            target = p if p.is_absolute() else (root / p if root is not None else p)
+            if target.exists():
+                found.append(rel)
+            else:
+                missing.append(rel)
+        return found, missing
+
+    def is_installed(self, install_root: Path | None = None) -> bool:
+        if self.executables or not self.detect_files:
+            _, missing_exe = self.executables_found()
+            if missing_exe:
+                return False
+        if self.detect_files:
+            _, missing_files = self.detect_files_found(install_root)
+            if missing_files:
+                return False
+        return True
+
 
 INSTALL_METHODS = {
     "winget": lambda pkg: ["winget", "install", "--id", pkg, "-e", "--accept-source-agreements", "--accept-package-agreements"],
     "choco": lambda pkg: ["choco", "install", pkg, "-y"],
-    "pip": lambda pkg: [sys.executable, "-m", "pip", "install", pkg],
     "uv": lambda pkg: ["uv", "pip", "install", pkg],
     "npm": lambda pkg: ["npm", "install", "-g", pkg],
     "apt": lambda pkg: ["apt", "install", "-y", pkg],
@@ -124,12 +155,38 @@ INSTALL_METHODS = {
 }
 
 
-def install_command(install: dict[str, Any]) -> list[str] | None:
+def managed_python(install_root: Path | None) -> str | None:
+    """Best Python interpreter for pip-based tool installs.
+
+    sys.executable is only a real interpreter in development; under a frozen
+    PyInstaller backend it is the app exe. In packaged builds we reuse the
+    managed runtimes installed by other tools (ComfyUI portable's embedded
+    Python, or a standalone runtime at {app}/python).
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    root = Path(install_root) if install_root else None
+    candidates = [
+        root / "ComfyUI_windows_portable" / "python_embeded" / "python.exe",
+        root / "python" / "python.exe",
+    ] if root else []
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def install_command(install: dict[str, Any], *, install_root: Path | None = None) -> list[str] | None:
     """Translate a manifest install spec into an argv, or None if not automatable."""
     if not isinstance(install, dict):
         return None
     method = str(install.get("method") or "").strip().lower()
     package = str(install.get("package") or "").strip()
+    if method == "pip":
+        if not package:
+            return None
+        python = managed_python(install_root)
+        return [python, "-m", "pip", "install", package] if python else None
     builder = INSTALL_METHODS.get(method)
     if builder is None or not package:
         return None
@@ -215,6 +272,7 @@ def load_plugin_manifests(
     registry: ToolRegistry,
     *,
     workspace: Path | None = None,
+    install_root: Path | None = None,
     default_timeout: int = 300,
 ) -> dict[str, Any]:
     """Load `*.json` tool manifests from a directory into the registry.
@@ -226,6 +284,8 @@ def load_plugin_manifests(
     directory = Path(directory)
     loaded: list[str] = []
     errors: list[dict[str, str]] = []
+    if install_root is not None:
+        registry.install_root = Path(install_root).resolve()
     if not directory.is_dir():
         return {"loaded": loaded, "errors": errors}
 
@@ -237,8 +297,7 @@ def load_plugin_manifests(
             continue
 
         invoker = _make_invoker(manifest, workspace=workspace, default_timeout=default_timeout)
-        found, missing = manifest.executables_found()
-        install_status = "installed" if not manifest.executables or not missing else "missing"
+        install_status = "installed" if manifest.is_installed(install_root) else "missing"
         # Invokers spawn a subprocess — the effective gate must reflect that.
         # Manifests may declare a stricter dedicated key (e.g. docker.access);
         # otherwise shell.execute is enforced regardless of declared read/write keys.

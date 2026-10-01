@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+import unittest
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from localcodeagent.jobs import JobManager
+from localcodeagent.tools.downloads import ToolDownloadManager
+from localcodeagent.tools.plugins import PluginManifest
+
+
+class _FileHandler(BaseHTTPRequestHandler):
+    """Serves test fixtures; /slow streams bytes with delays for cancel tests."""
+
+    payload: bytes = b""
+    chunk_delay: float = 0.0
+
+    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path.startswith("/slow"):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(self.payload)))
+            self.end_headers()
+            for i in range(0, len(self.payload), 4096):
+                if self.chunk_delay:
+                    time.sleep(self.chunk_delay)
+                try:
+                    self.wfile.write(self.payload[i:i + 4096])
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    return
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(self.payload)))
+        self.end_headers()
+        self.wfile.write(self.payload)
+
+    def log_message(self, *args):  # silence
+        pass
+
+
+def _make_zip(path: Path, members: dict[str, bytes]) -> bytes:
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return path.read_bytes()
+
+
+def _wait(pred, timeout: float = 15.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        time.sleep(0.03)
+    return False
+
+
+class ToolDownloadManagerTests(unittest.TestCase):
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.root = Path(self._td.name)
+        self.jobs = JobManager(self.root / "jobs.json")
+        self.mgr = ToolDownloadManager(self.jobs, install_root=self.root)
+        self.addCleanup(self.mgr.shutdown)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _FileHandler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        _FileHandler.chunk_delay = 0.0
+
+    def _install(self, payload: bytes, **overrides):
+        _FileHandler.payload = payload
+        install = {
+            "method": "archive",
+            "url": f"http://127.0.0.1:{self.port}/pkg.zip",
+            "format": "zip",
+            "dest": "tools_x",
+        }
+        install.update(overrides)
+        return self.mgr.install("demo", "Demo Tool", install, version="1.0"), install
+
+    def _wait_job(self, job_id: str, states=("completed", "failed", "cancelled"), timeout=15.0):
+        ok = _wait(lambda: self.jobs.get(job_id).state in states, timeout)
+        self.assertTrue(ok, f"job {job_id} never reached {states}")
+        return self.jobs.get(job_id)
+
+    def test_archive_install_downloads_extracts_and_marks_installed(self):
+        blob = _make_zip(self.root / "pkg.zip", {
+            "demo/main.py": b"print('hi')\n",
+            "demo/lib/util.txt": b"data",
+        })
+        result, _ = self._install(blob, sha256=hashlib.sha256(blob).hexdigest())
+        self.assertTrue(result["ok"])
+        job = self._wait_job(result["job_id"])
+        self.assertEqual(job.state, "completed")
+        self.assertEqual((self.root / "tools_x" / "demo" / "main.py").read_text(), "print('hi')\n")
+        self.assertEqual((self.root / "tools_x" / "demo" / "lib" / "util.txt").read_text(), "data")
+        marker = self.root / "tools_x" / ".chatnexus-version"
+        self.assertTrue(marker.is_file())
+        self.assertIn("1.0", marker.read_text())
+
+    def test_extraction_reports_current_file_and_progress_phases(self):
+        seen_phases = set()
+        seen_files = set()
+        self.jobs.on_change = lambda evt: (
+            seen_phases.add((evt["job"].get("metadata") or {}).get("phase")),
+            seen_files.add((evt["job"].get("metadata") or {}).get("current_file")),
+        )
+        blob = _make_zip(self.root / "pkg.zip", {f"f{i}.txt": b"x" * 64 for i in range(5)})
+        result, _ = self._install(blob)
+        self._wait_job(result["job_id"])
+        self.assertIn("downloading", seen_phases)
+        self.assertIn("extracting", seen_phases)
+        self.assertTrue(any(f and f.startswith("f") for f in seen_files))
+
+    def test_sha256_mismatch_fails_without_extracting(self):
+        blob = _make_zip(self.root / "pkg.zip", {"a.txt": b"x"})
+        result, _ = self._install(blob, sha256="0" * 64)
+        job = self._wait_job(result["job_id"])
+        self.assertEqual(job.state, "failed")
+        self.assertIn("SHA-256", job.error)
+        self.assertFalse((self.root / "tools_x" / "a.txt").exists())
+
+    def test_path_traversal_members_are_skipped(self):
+        blob = _make_zip(self.root / "evil.zip", {
+            "../escape.txt": b"bad",
+            "safe/ok.txt": b"fine",
+        })
+        result, _ = self._install(blob)
+        self._wait_job(result["job_id"])
+        self.assertFalse((self.root / "escape.txt").exists())
+        self.assertEqual((self.root / "tools_x" / "safe" / "ok.txt").read_text(), "fine")
+
+    def test_duplicate_install_reuses_active_job(self):
+        blob = _make_zip(self.root / "pkg.zip", {"a.txt": b"x" * 4096})
+        _FileHandler.chunk_delay = 0.05
+        first, _ = self._install(blob)
+        second, _ = self._install(blob)
+        self.assertEqual(first["job_id"], second["job_id"])
+        self.assertTrue(second.get("deduplicated"))
+        job = self._wait_job(first["job_id"], timeout=30)
+        self.assertEqual(job.state, "completed")
+
+    def test_cancel_stops_download_and_cleans_part_file(self):
+        _FileHandler.chunk_delay = 0.05
+        _FileHandler.payload = b"x" * (1024 * 1024)
+        result, _ = self._install(
+            _FileHandler.payload, url=f"http://127.0.0.1:{self.port}/slow")
+        job_id = result["job_id"]
+        self.assertTrue(_wait(lambda: self.jobs.get(job_id).state == "running", 10))
+        self.assertTrue(self.mgr.cancel(job_id))
+        job = self._wait_job(job_id, states=("cancelled",), timeout=15)
+        self.assertEqual(job.state, "cancelled")
+        downloads_dir = self.root / ".agent" / "downloads"
+        self.assertTrue(_wait(
+            lambda: not any(downloads_dir.glob("*.part")), 10),
+            "cancelled install did not clean up its .part file")
+
+    def test_http_urls_require_localhost(self):
+        result, _ = self._install(b"x", url="http://example.com/pkg.zip")
+        self.assertFalse(result["ok"])
+        self.assertIn("HTTPS", result["error"])
+
+    def test_detect_files_marks_manifest_installed(self):
+        blob = _make_zip(self.root / "pkg.zip", {"demo/main.py": b"x", "demo/py.exe": b"y"})
+        result, _ = self._install(blob)
+        self._wait_job(result["job_id"])
+        manifest = PluginManifest.from_dict({
+            "id": "demo", "name": "Demo",
+            "detect": {"files": ["tools_x/demo/main.py", "tools_x/demo/py.exe"]},
+        })
+        self.assertTrue(manifest.is_installed(self.root))
+        missing = PluginManifest.from_dict({
+            "id": "demo", "name": "Demo",
+            "detect": {"files": ["tools_x/demo/main.py", "tools_x/absent.bin"]},
+        })
+        self.assertFalse(missing.is_installed(self.root))
+        self.assertFalse(manifest.is_installed(self.root / "nonexistent"))
+
+
+class ManagedPythonTests(unittest.TestCase):
+    def test_pip_install_uses_sys_executable_when_not_frozen(self):
+        import sys
+        from localcodeagent.tools.plugins import install_command
+        cmd = install_command({"method": "pip", "package": "demo-pkg"})
+        self.assertEqual(cmd[:3], [sys.executable, "-m", "pip"])
+        self.assertEqual(cmd[-1], "demo-pkg")
+
+    def test_frozen_build_uses_managed_runtime_python(self):
+        import sys
+        from localcodeagent.tools import plugins
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            comfy_py = root / "ComfyUI_windows_portable" / "python_embeded" / "python.exe"
+            comfy_py.parent.mkdir(parents=True)
+            comfy_py.write_text("")
+            old = getattr(sys, "frozen", None)
+            sys.frozen = True
+            try:
+                self.assertEqual(plugins.managed_python(root), str(comfy_py))
+                cmd = plugins.install_command(
+                    {"method": "pip", "package": "piper-tts"}, install_root=root)
+                self.assertEqual(cmd[:3], [str(comfy_py), "-m", "pip"])
+            finally:
+                if old is None:
+                    del sys.frozen
+                else:
+                    sys.frozen = old
+
+    def test_frozen_build_without_runtime_returns_none(self):
+        import sys
+        from localcodeagent.tools import plugins
+        with TemporaryDirectory() as td:
+            old = getattr(sys, "frozen", None)
+            sys.frozen = True
+            try:
+                self.assertIsNone(plugins.managed_python(Path(td)))
+                self.assertIsNone(plugins.install_command(
+                    {"method": "pip", "package": "x"}, install_root=Path(td)))
+            finally:
+                if old is None:
+                    del sys.frozen
+                else:
+                    sys.frozen = old
+
+
+class ManifestDetectTests(unittest.TestCase):
+    def test_comfyui_manifest_has_archive_install_and_detection(self):
+        raw = json.loads(
+            (Path(__file__).resolve().parents[1] / "tools" / "manifests" / "comfyui.json")
+            .read_text(encoding="utf-8"))
+        m = PluginManifest.from_dict(raw)
+        self.assertEqual(m.install.get("method"), "archive")
+        self.assertEqual(m.install.get("format"), "7z")
+        self.assertTrue(m.install.get("url", "").startswith("https://"))
+        self.assertTrue(m.install.get("sha256"))
+        self.assertIn("ComfyUI_windows_portable/ComfyUI/main.py", m.detect_files)
+
+
+if __name__ == "__main__":
+    unittest.main()

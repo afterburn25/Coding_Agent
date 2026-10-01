@@ -72,3 +72,16 @@
 .telemetry-row{display:grid;grid-template-columns:140px 130px 90px 60px 1fr;gap:10px;align-items:center;font-size:11px;padding:5px 8px;border:1px solid #20262f;border-radius:8px;margin-bottom:4px}
 .telemetry-row .name{color:#dfe7f5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ok{color:#4ade80}.warn{color:#fbbf24}
+
+/* Tool install progress */
+.install-overall{margin-top:10px}
+.install-bar{height:10px;background:#131926;border:1px solid #2a3446;border-radius:6px;overflow:hidden}
+.install-fill{height:100%;width:0%;background:linear-gradient(90deg,#2877ff,#4ade80);transition:width .4s ease}
+.install-meta{display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:11px;align-items:baseline}
+.install-meta .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%}
+.tool-progress{margin-top:8px}
+.tool-progress .install-bar{height:6px}
+.tool-progress .install-meta{font-size:9.5px;margin-top:3px}
+.chip.installed{border-color:#23543e;color:#65deb1}
+.chip.missing{border-color:#4d3b1f;color:#f0cd8a}
+.chip.installing{border-color:#33507e;color:#8fc1ff}
