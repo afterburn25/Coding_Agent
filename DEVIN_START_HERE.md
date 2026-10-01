@@ -11,7 +11,7 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Latest fully verified code-changing checkpoint at takeover: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
 - Latest code checkpoint after Phase 1 tool-system foundation: `d55bf52716b01ea266ff6d1fb503ac1f2837078e` (verify with `git rev-parse HEAD`)
 - Current development version: `0.6.0-dev`
-- Verified unit checkpoint: **330 / 330 passing** (2 skips)
+- Verified unit checkpoint: **332 / 332 passing** (2 skips)
 - Verified GitHub Actions run: `36796088939`
 - Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36796088939
 
