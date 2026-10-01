@@ -468,6 +468,81 @@ class RuntimeManager:
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return False, str(exc)
 
+    def _reclaim_orphaned_port(self, port: int) -> None:
+        """Kill orphaned runtime processes squatting on a model's port.
+
+        A previous backend that died without reaping this model's server
+        leaves an orphan holding the port and its VRAM — the next spawn
+        would fail to bind (or double-load the model). Only kills listeners
+        whose image looks like our runtime, and never pids still owned by
+        ``self._managed`` (a port collision between profiles must not kill
+        a healthy sibling).
+        """
+        managed_pids = {item.process.pid for item in self._managed.values()}
+        for pid in self._listening_pids(port):
+            if pid in managed_pids:
+                continue
+            name = self._process_image_name(pid)
+            if name and "llama" in name.lower():
+                self._kill_pid(pid)
+
+    def _listening_pids(self, port: int) -> set[int]:
+        """PIDs holding a TCP LISTEN on ``port`` — best-effort, empty on
+        failure so callers never block a launch on a probe hiccup."""
+        pids: set[int] = set()
+        try:
+            if os.name == "nt":
+                out = subprocess.run(
+                    ["netstat", "-ano", "-p", "tcp"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+                for line in out.splitlines():
+                    parts = line.split()
+                    if (len(parts) >= 5 and parts[0].upper() == "TCP"
+                            and parts[3].upper() == "LISTENING"
+                            and parts[1].rsplit(":", 1)[-1] == str(port)):
+                        pids.add(int(parts[-1]))
+            else:
+                out = subprocess.run(
+                    ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+                for line in out.splitlines():
+                    if line.strip().isdigit():
+                        pids.add(int(line.strip()))
+        except Exception:
+            pass
+        return pids
+
+    def _process_image_name(self, pid: int) -> str:
+        """Best-effort process image name, used to confirm an orphan is
+        actually a llama-server before killing it."""
+        try:
+            if os.name == "nt":
+                out = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                    capture_output=True, text=True, timeout=10,
+                ).stdout.strip()
+                if out.startswith('"'):
+                    return out.split('","')[0].strip('"')
+            else:
+                return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        return ""
+
+    def _kill_pid(self, pid: int) -> None:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True, timeout=10,
+                )
+            else:
+                os.kill(pid, 9)
+        except Exception:
+            pass
+
     def _stop_managed(self, model_id: str) -> None:
         item = self._managed.pop(model_id, None)
         if not item:
@@ -700,6 +775,7 @@ class RuntimeManager:
 
         self._enforce_residency(profile)
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
+        self._reclaim_orphaned_port(port)
         endpoint = self._profile_endpoint(profile, port)
         log_path = self.logs_dir / f"{profile.id}.log"
         try:

@@ -370,6 +370,31 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertEqual(manager.resident_model_ids(), ["pinned"])
             self.assertEqual(manager._pending_rewarm, set())
 
+    def test_reclaim_orphaned_port_kills_only_llama_orphans(self):
+        # Backend crash leaves an unmanaged llama-server holding the model's
+        # port; a managed sibling sharing the port must never be killed, and
+        # neither must a foreign process squatting there.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(keep_loaded=False)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            sibling = _attach_fake_managed(manager, profile)
+            sibling_pid = 4242
+            manager._managed[profile.id].process.pid = sibling_pid
+
+            killed: list[int] = []
+            manager._listening_pids = lambda port: {sibling_pid, 7777, 8888}
+            manager._process_image_name = lambda pid: {
+                sibling_pid: "llama-server.exe",   # ours — managed, must survive
+                7777: "llama-server.exe",          # orphan — kill
+                8888: "chrome.exe",                # foreign — leave alone
+            }[pid]
+            manager._kill_pid = killed.append
+
+            manager._reclaim_orphaned_port(8080)
+
+            self.assertEqual(killed, [7777])
+
     def test_prewarm_retries_until_model_fits(self):
         # A failed resource_fit at boot must not leave the app cold — VRAM is
         # often still draining the previous session's models for the first
