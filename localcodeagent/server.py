@@ -2199,8 +2199,14 @@ class Handler(BaseHTTPRequestHandler):
                             "readiness": readiness,
                         }, 409)
                         return
-                result = self.state.agent.run(message, history=self.state.history, mode=mode,
-                                              event_callback=self.state._bus_emit)
+                try:
+                    result = self.state.agent.run(message, history=self.state.history, mode=mode,
+                                                  event_callback=self.state._bus_emit)
+                finally:
+                    try:
+                        self.state._dequeue_next()
+                    except Exception:
+                        pass
                 self.state.history = self.state.conversation_manager.history(limit=32)
                 self._agent_response(result)
                 return
