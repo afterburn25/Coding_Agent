@@ -38,3 +38,11 @@ ComfyUI/
 data/
 desktop/**/bin/
 desktop/**/obj/
+
+# UI debug artifacts
+cdp_shot.js
+*_shot.png
+*_detail.png
+nexus_welcome.png
+splash_preview.png
+tools_*.png
