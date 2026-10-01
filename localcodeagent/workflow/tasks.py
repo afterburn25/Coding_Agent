@@ -48,6 +48,7 @@ class TaskStore:
         self._tasks: dict[str, TaskRecord] = {}
         self._order: list[str] = []
         self._load()
+        self._prune_logs()
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -115,6 +116,17 @@ class TaskStore:
             task.updated_at = time.time()
             self._save()
             return task
+
+    def _prune_logs(self) -> None:
+        """Drop terminal transcripts whose task fell out of the ledger."""
+        terminal = self.root / "terminal"
+        try:
+            keep = set(self._tasks)
+            for path in terminal.glob("*.log"):
+                if path.stem not in keep:
+                    path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def append_log(self, task_id: str, text: str) -> None:
         """Append to the task's terminal transcript under .agent/terminal/.
