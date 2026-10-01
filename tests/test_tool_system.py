@@ -1117,6 +1117,39 @@ class WorkflowToolTests(unittest.TestCase):
         self.assertEqual(self.jobs.get([j["id"] for j in self.jobs.list_jobs()
                                         if j["kind"] == "workflow"][0]).state, "cancelled")
 
+    def test_workflow_resume_from_failed_step(self):
+        from localcodeagent.tools.workflows import run_workflow as rw
+        resume_dir = self.ws / ".agent" / "workflow_runs"
+        self._stub("produce", json.dumps({"seed": "abc"}))
+        calls = {"n": 0}
+        captured = {}
+
+        def flaky(args):
+            calls["n"] += 1
+            captured.update(args)
+            if calls["n"] == 1:
+                return "ERROR: transient failure"
+            return "recovered:" + str(args.get("seed"))
+
+        self.reg.register(ToolSpec("flaky", "d",
+                                   {"type": "object", "properties": {"seed": {"type": "string"}}},
+                                   "filesystem.read", flaky))
+        wf = {"id": "resumable", "steps": [
+            {"tool": "produce", "save_as": "p"},
+            {"tool": "flaky", "args": {"seed": "{steps.p.seed}"}, "save_as": "f"},
+        ]}
+        first = rw(self.reg, wf, {}, jobs=self.jobs, resume_dir=resume_dir)
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["failed_step"], 1)
+        self.assertTrue(Path(first["resume_file"]).exists())
+
+        second = rw(self.reg, wf, {}, jobs=self.jobs, resume_dir=resume_dir, resume=True)
+        self.assertTrue(second["ok"])
+        self.assertEqual(second["resumed_from_step"], 1)
+        self.assertEqual(captured["seed"], "abc")  # context restored from checkpoint
+        self.assertEqual(calls["n"], 2)
+        self.assertFalse(Path(first["resume_file"]).exists())  # cleared on success
+
 
 class BlenderToolTests(unittest.TestCase):
     def test_scene_script_builder(self):

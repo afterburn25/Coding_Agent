@@ -28,4 +28,5 @@ ComfyUI/
 .agent/media/
 .agent/blender/
 .agent/data/
+.agent/workflow_runs/
 .agent/knowledge_index.json

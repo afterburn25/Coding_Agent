@@ -84,6 +84,12 @@ button in the Tools UI) stops the pipeline at the next step boundary —
 in-flight steps finish, remaining steps are skipped and the job lands in
 `cancelled` state.
 
+Failed or cancelled runs write a resume checkpoint to
+`.agent/workflow_runs/<id>.resume.json` (merged params, completed-step
+outputs, and the step index to re-enter at). Pass `{"resume": true}` to
+`run_workflow` to continue from the failed step — caller params override
+the saved ones, and the checkpoint is cleared on success.
+
 ## Tool interfaces
 
 `localcodeagent/tools/interfaces.py` defines structural (duck-typed) contracts:
