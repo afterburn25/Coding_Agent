@@ -26,7 +26,7 @@ from .research import ResearchCoordinator
 from .permissions import PermissionManager
 from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
-from .tools.base import TOOL_CATEGORIES, ToolRegistry
+from .tools.base import TOOL_CATEGORIES, ToolRegistry, ToolSpec
 from .tools.plugins import load_plugin_manifests
 from .secrets import SecretVault
 from .tools.api import register_api_tools
@@ -230,6 +230,31 @@ class AppState:
             self.mcp.connect_all()
         except Exception:
             pass
+
+        def use_capability(args: dict[str, Any]) -> str:
+            capability = str(args.get("capability", "")).strip()
+            if not capability:
+                return "ERROR: 'capability' is required"
+            arguments = args.get("arguments") if isinstance(args.get("arguments"), dict) else {}
+            outcome = self.tool_router.execute(
+                capability, arguments, approved=bool(args.get("approved", False)))
+            return json.dumps(outcome, ensure_ascii=False, default=str)[:20000]
+
+        self.tools.register(ToolSpec(
+            "use_capability",
+            "Request a capability (e.g. 'ocr_image', 'convert_video', 'execute_code') and let the Tool Router pick the best installed/permitted tool for it. Prefer this when the exact tool name is unknown — the router ranks candidates, applies resource/permission checks, and falls back automatically. Pass 'arguments' matching the resolved tool's schema.",
+            {
+                "type": "object",
+                "properties": {
+                    "capability": {"type": "string", "description": "semantic capability tag"},
+                    "arguments": {"type": "object", "description": "arguments for the resolved tool"},
+                },
+                "required": ["capability"],
+            },
+            "filesystem.read", use_capability,
+            category="utilities", provider="nexus",
+            capabilities=["use_capability", "capability_dispatch", "auto_tool_selection"],
+        ))
         self.agent = AgentOrchestrator(
             config,
             self.router,
