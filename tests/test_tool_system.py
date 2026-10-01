@@ -31,6 +31,7 @@ from localcodeagent.events import EventBus, make_emitter
 from localcodeagent.tools.workflows import load_workflows, register_workflow_tools, run_workflow
 from localcodeagent.tools.blender3d import build_scene_script, register_blender_tools
 from localcodeagent.tools.docker_tool import register_docker_tools
+from localcodeagent.tools.git import register_git_tools
 
 
 def _registry(**permissions):
@@ -1179,6 +1180,37 @@ class AppStateWiringTests(unittest.TestCase):
             event = sub.get(timeout=2)
             self.assertEqual(event["type"], "job")
             self.assertEqual(event["job"]["id"], job.id)
+
+
+class GitWorktreeTests(unittest.TestCase):
+    def _repo(self, td: str) -> Path:
+        ws = Path(td)
+        import subprocess as sp
+        sp.run(["git", "init", "-q"], cwd=ws, check=True)
+        sp.run(["git", "config", "user.email", "t@t"], cwd=ws, check=True)
+        sp.run(["git", "config", "user.name", "t"], cwd=ws, check=True)
+        (ws / "f.txt").write_text("x")
+        sp.run(["git", "add", "."], cwd=ws, check=True)
+        sp.run(["git", "commit", "-qm", "init"], cwd=ws, check=True)
+        return ws
+
+    def test_worktree_lifecycle(self):
+        import shutil
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._repo(td)
+            reg = ToolRegistry({"filesystem.read": "allow", "git.execute": "allow"})
+            register_git_tools(reg, ws)
+            out = json.loads(reg.execute("git_worktree_add", {"branch": "agent/test"}))
+            self.assertIn("agent", out["path"])
+            self.assertTrue(Path(out["path"]).is_dir())
+            listed = json.loads(reg.execute("git_worktree_list", {}))
+            self.assertTrue(any("agent" in w.get("worktree", "") for w in listed["worktrees"]))
+            out = json.loads(reg.execute("git_worktree_remove",
+                                         {"path": "agent/test", "force": True}))
+            self.assertIn("removed", out)
+            self.assertIn("ERROR", reg.execute("git_worktree_add", {"branch": "../bad"}))
 
 
 if __name__ == "__main__":
