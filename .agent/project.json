@@ -167,9 +167,12 @@
     "dry_humor_when_appropriate": true,
     "lower_forced_followups": true,
     "feedback_exact_message_pairing": true,
-    "verified_code_checkpoint": "d3e3dd08",
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
     "general_fact_commands": true,
-    "brain_autobiographical_sync": true
+    "brain_autobiographical_sync": true,
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "knowledge_memory": {
     "enabled": true,
@@ -194,7 +197,10 @@
     "negative_feedback_excluded_from_sft_targets": true,
     "brain_training_signal_sync": true,
     "portable_approved_skill_context": true,
-    "verified_code_checkpoint": "d3e3dd08"
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "conversation_policy": {
     "default": "permissive",
@@ -227,7 +233,10 @@
     "rejected_refusal_removed_from_context": true,
     "refusal_stream_buffering": true,
     "refusal_exhaustion_reports_model_blocker": true,
-    "verified_code_checkpoint": "dd34284"
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "direct_image_routing": {
     "auto_text_to_image": true,
@@ -249,8 +258,11 @@
     "coding_model_preflight_bypass": true,
     "natural_request_prefixes": true,
     "source_image_edit_exclusion": true,
-    "verified_code_checkpoint": "b1d9a079",
-    "nexus_brain_adult_content_gate": true
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "nexus_brain_adult_content_gate": true,
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "live_clock": {
     "source": "host OS local clock via datetime.now().astimezone()",
@@ -279,7 +291,10 @@
       "this afternoon",
       "tonight"
     ],
-    "verified_code_checkpoint": "948bec1"
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "activity_hud": {
     "enabled": true,
@@ -303,7 +318,10 @@
     ],
     "compacts_on_token_stream": true,
     "reduced_motion_support": true,
-    "verified_code_checkpoint": "2781447"
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "nexus_brain": {
     "enabled": true,
@@ -372,7 +390,7 @@
       "biological_human_claim": false
     },
     "hard_tool_safety_bypass": false,
-    "verified_code_checkpoint": "b1d9a079",
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
     "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
     "canonical_path_enforced": true,
     "config_redirect_or_disable_after_initialization": false,
@@ -390,17 +408,20 @@
     "installer_seed_public_only": true,
     "installer_seed_build_validation": true,
     "adult_content_image_gate": true,
-    "audit_log": "data/nexus_brain.audit.jsonl \u2014 signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit"
+    "audit_log": "data/nexus_brain.audit.jsonl \u2014 signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
   },
   "takeover": {
     "owner": "Devin",
     "start_here": "DEVIN_START_HERE.md",
     "branch": "main",
     "repository_head": "main (pull latest; do not pin to documentation commit)",
-    "verified_code_checkpoint": "b1d9a079a08a2aec5cf8a80485083e2c10388456",
-    "verified_test_count": 188,
-    "verified_ci_run_id": 36796088939,
-    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36796088939",
+    "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388",
     "verified_artifacts": [
       {
         "id": 11133807708,
