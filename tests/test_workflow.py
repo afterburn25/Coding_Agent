@@ -1169,6 +1169,15 @@ class AutonomousContinuationTests(unittest.TestCase):
             chunks = "".join(str(e.get("chunk", "")) for e in events if e["type"] == "tool_output")
             self.assertIn("hello-nexus", chunks)
 
+            # The run's transcript should have been persisted with command,
+            # output, lifecycle markers, and completion state.
+            tasks = agent.tasks
+            log = tasks.read_log(result.task["id"])
+            self.assertIn("$ run_shell echo hello-nexus", log)
+            self.assertIn("hello-nexus", log)
+            self.assertIn("## task ", log)
+            self.assertIn("· run_shell ok", log)
+
 
 if __name__ == "__main__":
     unittest.main()
