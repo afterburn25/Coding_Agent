@@ -208,6 +208,12 @@ failure → autonomous_error_retry_seconds backoff, bounded by
   `model_idle_unload_seconds` or under `memory_pressure_*` floors, while
   pinning models serving active tasks — `ensure_ready` restarts them
   transparently.
+- Growth bounds for unattended runs: task ledger keeps 100 records; orphaned
+  terminal logs and `.agent/checkpoints/` snapshots are pruned on startup;
+  queue is capped at 200; `routing_telemetry.jsonl` compacts past 512 KiB
+  (in-memory deque maxlen 500); JobManager trims at 300 records; request-local
+  SSE queues drop token/output chunks under backpressure while task, tool,
+  and result events always land.
 
 ## v0.4 Web + Image capability layers
 
