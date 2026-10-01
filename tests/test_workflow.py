@@ -45,6 +45,21 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(restored, ["a.txt"])
             self.assertEqual(original.read_text(encoding="utf-8"), "hello world\n")
 
+    def test_task_log_persists_and_reads_tail(self):
+        with tempfile.TemporaryDirectory() as td:
+            tasks = TaskStore(Path(td))
+            task = tasks.create("logged", "auto")
+            tasks.append_log(task.id, "$ run_shell echo hi\n")
+            tasks.append_log(task.id, "hi\n")
+            log = tasks.read_log(task.id)
+            self.assertIn("$ run_shell echo hi", log)
+            self.assertIn("hi", log)
+            # bounded: oversized writes keep only a tail
+            tasks.append_log(task.id, "x" * (600 * 1024))
+            tail = tasks.read_log(task.id)
+            self.assertLess(len(tail), 65 * 1024)
+            self.assertEqual(tasks.read_log("missing"), "")
+
     def test_patchset_validates_before_writing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

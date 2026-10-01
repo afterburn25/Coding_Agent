@@ -1413,6 +1413,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tasks":
             self._json(self.state.task_payload())
             return
+        if path == "/api/task-log":
+            from urllib.parse import parse_qs
+            task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]
+            self._json({"task_id": task_id, "log": self.state.tasks.read_log(task_id) if task_id else ""})
+            return
         if path == "/api/queue":
             self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})
             return

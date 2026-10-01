@@ -116,6 +116,36 @@ class TaskStore:
             self._save()
             return task
 
+    def append_log(self, task_id: str, text: str) -> None:
+        """Append to the task's terminal transcript under .agent/terminal/.
+
+        Bounded at ~512 KiB with a 256 KiB tail kept; failures never break
+        the agent loop.
+        """
+        path = self.root / "terminal" / f"{task_id}.log"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(text)
+            if path.stat().st_size > 512 * 1024:
+                path.write_bytes(path.read_bytes()[-256 * 1024:])
+        except OSError:
+            pass
+
+    def read_log(self, task_id: str, *, max_bytes: int = 64 * 1024) -> str:
+        """Return the tail of a task's terminal transcript."""
+        path = self.root / "terminal" / f"{task_id}.log"
+        try:
+            if not path.exists():
+                return ""
+            size = path.stat().st_size
+            with path.open("rb") as fh:
+                if size > max_bytes:
+                    fh.seek(-max_bytes, 2)
+                return fh.read().decode("utf-8", errors="replace")
+        except OSError:
+            return ""
+
     def current(self) -> TaskRecord | None:
         """Return the newest task record, regardless of status.
 

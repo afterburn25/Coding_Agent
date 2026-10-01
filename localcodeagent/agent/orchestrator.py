@@ -627,7 +627,29 @@ class AgentOrchestrator:
             pass
 
     def _emit(self, session: _AgentSession, event_type: str, **payload: Any) -> None:
+        if event_type in {"tool_start", "tool_output", "tool"}:
+            self._log_terminal(session, event_type, payload)
         self._safe_emit(session.event_callback, {"type": event_type, **payload})
+
+    def _log_terminal(self, session: _AgentSession, event_type: str, payload: dict[str, Any]) -> None:
+        """Persist a bounded terminal transcript so a reloaded page can
+        recover prior command context for long-running tasks."""
+        try:
+            if event_type == "tool_start":
+                tool = payload.get("tool") or {}
+                args = tool.get("arguments") or {}
+                hint = args.get("command") or args.get("cmd") or args.get("path") or args.get("file_path") or ""
+                hint = str(hint).splitlines()[0][:200] if hint else ""
+                line = f"$ {tool.get('name', 'tool')}{(' ' + hint) if hint else ''}\n"
+            elif event_type == "tool_output":
+                line = str(payload.get("chunk") or "")
+            else:
+                tool = payload.get("tool") or {}
+                line = f"· {tool.get('name', 'tool')} done\n"
+            if line:
+                self.tasks.append_log(session.task_id, line)
+        except Exception:
+            pass
 
     @staticmethod
     def _review_outcome(review: str) -> bool | None:
