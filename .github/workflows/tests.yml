@@ -141,6 +141,25 @@ jobs:
           # With /DWithSign, Inno's SignTool=standard already signed the setup
           # EXE and the embedded uninstaller during compilation.
 
+      - name: Generate artifact checksums
+        shell: pwsh
+        run: |
+          $Setup = "dist\installer\NexusCore-Setup-0.6.0-dev-Windows-x64.exe"
+          $Hash = (Get-FileHash -Algorithm SHA256 $Setup).Hash.ToLowerInvariant()
+          "$Hash  NexusCore-Setup-0.6.0-dev-Windows-x64.exe" |
+            Set-Content -Encoding ASCII "dist\installer\NexusCore-Setup-0.6.0-dev-Windows-x64.exe.sha256"
+          $Sig = & {
+            try { (Get-AuthenticodeSignature $Setup).Status.ToString() } catch { "Unknown" }
+          }
+          @"
+          Nexus Core installer
+          Commit: ${{ github.sha }}
+          SHA-256: $Hash
+          Authenticode: $Sig
+          Verify on Windows:  Get-FileHash .\NexusCore-Setup-0.6.0-dev-Windows-x64.exe
+          "@ | Set-Content -Encoding UTF8 "dist\installer\CHECKSUMS.txt"
+          Write-Host "Installer SHA-256: $Hash (signature: $Sig)"
+
       - name: Smoke-test fresh install and update preservation
         shell: pwsh
         run: |
@@ -283,18 +302,27 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NexusCore-Setup-0.6.0-dev-Windows-x64
-          path: dist/installer/NexusCore-Setup-0.6.0-dev-Windows-x64.exe
+          path: |
+            dist/installer/NexusCore-Setup-0.6.0-dev-Windows-x64.exe
+            dist/installer/NexusCore-Setup-0.6.0-dev-Windows-x64.exe.sha256
+            dist/installer/CHECKSUMS.txt
           if-no-files-found: error
           retention-days: 14
 
       - name: Package Windows desktop app
         shell: pwsh
-        run: python packaging/make_windows_zip.py dist/ChatNexus NexusCore-v0.6.0-dev-Windows-x64.zip
+        run: |
+          python packaging/make_windows_zip.py dist/ChatNexus NexusCore-v0.6.0-dev-Windows-x64.zip
+          $Hash = (Get-FileHash -Algorithm SHA256 "NexusCore-v0.6.0-dev-Windows-x64.zip").Hash.ToLowerInvariant()
+          "$Hash  NexusCore-v0.6.0-dev-Windows-x64.zip" |
+            Set-Content -Encoding ASCII "NexusCore-v0.6.0-dev-Windows-x64.zip.sha256"
 
       - name: Upload Windows desktop app
         uses: actions/upload-artifact@v4
         with:
           name: NexusCore-v0.6.0-dev-Windows-x64
-          path: NexusCore-v0.6.0-dev-Windows-x64.zip
+          path: |
+            NexusCore-v0.6.0-dev-Windows-x64.zip
+            NexusCore-v0.6.0-dev-Windows-x64.zip.sha256
           if-no-files-found: error
           retention-days: 14
