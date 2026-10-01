@@ -644,6 +644,14 @@ class AgentOrchestrator:
             if etype in {"tool_start", "tool_output", "tool", "task", "approval", "error", "image_job", "model", "research", "perf"}:
                 payload = {k: v for k, v in event.items() if k != "type"}
                 self._log_terminal(task_id, etype, payload, dedup)
+                # Terminal task states mark the end of a run — flush so early
+                # return paths (no session => no _close_session) still persist.
+                status = str((event.get("task") or {}).get("status") or "")
+                if etype in {"task", "error"} and status in {"completed", "completed_with_warnings", "step_limit", "failed", "cancelled", "error", "reverted"}:
+                    try:
+                        self.tasks.flush_log(task_id)
+                    except Exception:
+                        pass
             if callback is not None:
                 callback(event)
 
