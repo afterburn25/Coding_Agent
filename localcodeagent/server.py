@@ -905,6 +905,10 @@ class AppState:
                     ),
                 )
                 self.events.publish("task", {"task": task.as_dict(), "event": "approval_timeout"})
+                try:
+                    self.agent._close_session(str(item["id"]))
+                except Exception:
+                    pass
         except Exception:
             pass
 
