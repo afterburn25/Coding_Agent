@@ -22,3 +22,10 @@ ComfyUI/
 # Local model-routing outcome telemetry
 .agent/model_performance.json
 .agent/model_performance.json.tmp
+# Tool runtime dirs (worktrees, sandbox, media pipelines, charts, indexes)
+.agent/sandbox/
+.agent/worktrees/
+.agent/media/
+.agent/blender/
+.agent/data/
+.agent/knowledge_index.json
