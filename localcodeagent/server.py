@@ -243,6 +243,60 @@ class AppState:
                 capability, arguments, approved=bool(args.get("approved", False)))
             return json.dumps(outcome, ensure_ascii=False, default=str)[:20000]
 
+        def find_tools(args: dict[str, Any]) -> str:
+            """Registry introspection for the model — discover tools by capability/keyword."""
+            query = str(args.get("query", "") or args.get("capability", "")).strip().lower()
+            limit = max(1, min(int(args.get("limit", 10)), 30))
+            rows = []
+            for m in self.tools.manifests():
+                if not m.get("callable", True):
+                    continue
+                haystack = " ".join([m["name"], m.get("display_name", ""), m.get("category", ""),
+                                     " ".join(m.get("capabilities", [])), m.get("description", "")]).lower()
+                if query and query not in haystack and query not in [c.lower() for c in m.get("capabilities", [])]:
+                    continue
+                rows.append({
+                    "name": m["name"], "description": m["description"][:160],
+                    "category": m["category"], "capabilities": m.get("capabilities", [])[:8],
+                    "permission": m.get("permission_mode"), "enabled": m.get("enabled"),
+                    "install": m.get("install_status"),
+                })
+            if not rows:
+                return json.dumps({"tools": [], "hint": "no matching callable tools — try a broader term or check the Tool Manager"})
+            return json.dumps({"tools": rows[:limit], "total": len(rows)}, ensure_ascii=False)
+
+        self.tools.register(ToolSpec(
+            "find_tools",
+            "Discover available tools by keyword or capability tag. Use before use_capability when unsure what capabilities exist — returns name, description, permission mode, and install state of matching tools.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "keyword or capability to search for"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+            },
+            "filesystem.read", find_tools,
+            category="utilities", provider="nexus",
+            capabilities=["find_tools", "tool_discovery"],
+        ))
+
+        def system_resources(args: dict[str, Any]) -> str:
+            summary = self.runtime.summary() or {}
+            return json.dumps({
+                "hardware": summary.get("hardware"),
+                "runtimes": summary.get("runtimes"),
+                "processes": self.processes.list(),
+            }, ensure_ascii=False, default=str)[:15000]
+
+        self.tools.register(ToolSpec(
+            "system_resources",
+            "Report local hardware and runtime resource status — CPUs/GPUs/VRAM/RAM, running model runtimes and managed processes. Use before picking GPU-heavy tools or large models.",
+            {"type": "object", "properties": {}},
+            "filesystem.read", system_resources,
+            category="utilities", provider="nexus",
+            capabilities=["system_resources", "hardware_status", "resource_check"],
+        ))
+
         self.tools.register(ToolSpec(
             "use_capability",
             "Request a capability (e.g. 'ocr_image', 'convert_video', 'execute_code') and let the Tool Router pick the best installed/permitted tool for it. Prefer this when the exact tool name is unknown — the router ranks candidates, applies resource/permission checks, and falls back automatically. Pass 'arguments' matching the resolved tool's schema.",
