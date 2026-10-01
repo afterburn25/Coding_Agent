@@ -22,11 +22,17 @@ class _FakeModelServer:
     def __init__(self) -> None:
         outer = self
         self.requests: list[dict] = []
+        self.fail_next = 0  # when >0, respond 500 to that many POSTs
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 outer.requests.append(body)
+                if self.path == "/v1/chat/completions" and outer.fail_next > 0:
+                    outer.fail_next -= 1
+                    self.send_response(500)
+                    self.end_headers()
+                    return
                 if self.path != "/v1/chat/completions":
                     self.send_response(404)
                     self.end_headers()
@@ -160,6 +166,24 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(len(done), 2)
             # Each task used two model calls (tool turn + answer turn).
             self.assertEqual(len(fake.requests), 4)
+
+    def test_transient_model_failure_recovers(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            state.config.runtime_recovery_attempts = 2
+            state.agent.config.runtime_recovery_attempts = 2
+            fake.fail_next = 1  # first chat request 500s; recovery retries
+            events: list[dict] = []
+            result = state.agent.run("recover from a transient error", event_callback=events.append)
+
+            self.assertEqual(result.task.get("status"), "completed")
+            # 1 failed + 2 successful turns.
+            self.assertEqual(len(fake.requests), 3)
+            model_kinds = [e["event"]["type"] for e in events
+                           if e.get("type") == "model" and isinstance(e.get("event"), dict)]
+            self.assertIn("transient_retry", model_kinds)
 
 
 if __name__ == "__main__":
