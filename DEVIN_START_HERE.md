@@ -6,14 +6,15 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 
 - Repository: `afterburn25/Coding_Agent`
 - Branch to continue from: `main`
-- Current repository head at handoff: `f19fc58bc047c3aa822e441226c4fcb8f6663c2b`
-- Latest fully verified code-changing checkpoint: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
+- Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
+- Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
+- Latest fully verified code-changing checkpoint at takeover: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
 - Current development version: `0.6.0-dev`
 - Verified unit checkpoint: **188 / 188 passing**
 - Verified GitHub Actions run: `36796088939`
 - Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36796088939
 
-The current `main` includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint.**
+The `main` branch includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint or takeover anchor.**
 
 ## Read these files before changing code
 

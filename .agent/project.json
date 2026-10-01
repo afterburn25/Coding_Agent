@@ -391,7 +391,7 @@
     "owner": "Devin",
     "start_here": "DEVIN_START_HERE.md",
     "branch": "main",
-    "repository_head": "f19fc58bc047c3aa822e441226c4fcb8f6663c2b",
+    "repository_head": "main (pull latest; do not pin to documentation commit)",
     "verified_code_checkpoint": "b1d9a079a08a2aec5cf8a80485083e2c10388456",
     "verified_test_count": 188,
     "verified_ci_run_id": 36796088939,
@@ -427,6 +427,7 @@
       "SESSION_HANDOFF.md",
       ".agent/project.json",
       "DEVIN_START_HERE.md when takeover-critical state changes"
-    ]
+    ],
+    "takeover_anchor_commit": "21aa4fb0090d7fbd1ef119d5026b5289b6a81e10"
   }
 }
