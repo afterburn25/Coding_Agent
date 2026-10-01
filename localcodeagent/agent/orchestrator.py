@@ -661,6 +661,10 @@ class AgentOrchestrator:
                 if status and status != session.logged_task_state:
                     session.logged_task_state = status
                     line = f"## task {status}\n"
+                    content = str(task.get("final_content") or "")
+                    if task.get("status") in {"completed", "failed", "cancelled", "error"} and content:
+                        preview = content if len(content) <= 4000 else content[:4000] + "\n…"
+                        line += f"## result\n{preview}\n## end result\n"
                 else:
                     line = ""
             elif event_type == "approval":
