@@ -1012,7 +1012,7 @@ class AgentOrchestrator:
         "filesystem.read", "network.read", "browser.control", "image.read", "github.read",
     })
 
-    def _execute_tool(self, name: str, args: dict[str, Any]) -> str:
+    def _execute_tool(self, name: str, args: dict[str, Any], approved: bool = False) -> str:
         """Execute a tool with a hard timeout so a hung tool cannot stall the run.
 
         Python cannot kill a running thread, so a timed-out call leaks one
@@ -1021,7 +1021,7 @@ class AgentOrchestrator:
         """
         timeout = max(1.0, float(getattr(self.config, "agent_tool_timeout_seconds", 1800.0)))
         pool = ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(self.tools.execute, name, args)
+        future = pool.submit(self.tools.execute, name, args, approved=approved)
         try:
             return future.result(timeout=timeout)
         except TimeoutError:
@@ -1071,7 +1071,7 @@ class AgentOrchestrator:
                 self._emit_tool_start(session, n, a)
             if readonly:
                 with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
-                    results = list(pool.map(lambda item: self.tools.execute(item[1], item[2]), batch))
+                    results = list(pool.map(lambda item: self._execute_tool(item[1], item[2]), batch))
             else:
                 results = []
                 for _, n, a in batch:
@@ -2086,7 +2086,7 @@ class AgentOrchestrator:
             name, args = self._parse_call(call)
             if approved:
                 self._emit_tool_start(session, name, args)
-            result = self.tools.execute(name, args, approved=True) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
+            result = self._execute_tool(name, args, approved=True) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1
             self._maybe_escalate(session)
