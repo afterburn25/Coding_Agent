@@ -82,6 +82,7 @@
   "jobs_path": "data/jobs.json",
   "tool_manifests_dir": "tools/manifests",
   "workflows_dir": "workflows",
+  "process_watchdog": true,
   "preferred_tools": [],
   "mcp_servers": [
     {

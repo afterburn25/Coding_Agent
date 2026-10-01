@@ -186,7 +186,10 @@ class AppState:
         self.jobs.on_change = make_emitter(self.events, "job")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
+        self.processes.on_event = make_emitter(self.events, "process")
         self._register_processes()
+        if getattr(config, "process_watchdog", True):
+            self.processes.start_watchdog()
         register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
         register_shell_tools(self.tools, self.workspace)
         self.terminal_tracker = register_terminal_tools(
@@ -701,7 +704,8 @@ class AppState:
                 describe=describe,
                 start=lambda p=profile: self.runtime.ensure_ready(p),
                 stop=lambda mid=model_id: self.runtime.stop_model(mid).as_dict(),
-                metadata={"roles": list(profile.roles), "model_path": profile.model_path},
+                metadata={"roles": list(profile.roles), "model_path": profile.model_path,
+                          "auto_restart": True},
             ))
         if self.config.image_enabled:
             endpoint = str(getattr(self.config, "comfyui_endpoint", ""))
@@ -714,6 +718,7 @@ class AppState:
                 start=lambda: self.images.backend_runtime.ensure_ready(),
                 stop=lambda: self.images.backend_runtime.stop(),
                 restart=lambda: self.images.backend_runtime.recover(),
+                metadata={"auto_restart": True},
             ))
 
     def _register_health_checks(self) -> None:

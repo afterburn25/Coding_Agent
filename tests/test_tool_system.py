@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -1211,6 +1212,34 @@ class GitWorktreeTests(unittest.TestCase):
                                          {"path": "agent/test", "force": True}))
             self.assertIn("removed", out)
             self.assertIn("ERROR", reg.execute("git_worktree_add", {"branch": "../bad"}))
+
+
+class ProcessWatchdogTests(unittest.TestCase):
+    def test_watchdog_restarts_crashed_not_stopped(self):
+        from localcodeagent.processes import ProcessManager, ManagedService
+        mgr = ProcessManager()
+        states = {"crashed": 0, "stopped": 0}
+        descs = {"crashy": {"state": "crashed"}, "calm": {"state": "stopped"}}
+        mgr.register(ManagedService(
+            id="crashy", name="c", kind="internal",
+            describe=lambda: dict(descs["crashy"]),
+            restart=lambda: states.__setitem__("crashed", states["crashed"] + 1),
+            metadata={"auto_restart": True}))
+        mgr.register(ManagedService(
+            id="calm", name="s", kind="internal",
+            describe=lambda: dict(descs["calm"]),
+            restart=lambda: states.__setitem__("stopped", states["stopped"] + 1),
+            metadata={"auto_restart": True}))
+        events = []
+        mgr.on_event = events.append
+        mgr.start_watchdog(interval=0.05, window_seconds=60, max_restarts=2)
+        try:
+            time.sleep(0.35)
+        finally:
+            mgr.stop_watchdog()
+        self.assertEqual(states["crashed"], 2)   # bounded by max_restarts
+        self.assertEqual(states["stopped"], 0)   # user-stopped never restarted
+        self.assertTrue(any(e.get("event") == "auto_restart" for e in events))
 
 
 if __name__ == "__main__":

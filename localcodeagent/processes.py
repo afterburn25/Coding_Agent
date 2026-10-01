@@ -29,12 +29,77 @@ class ManagedService:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+FAILED_STATES = {"crashed", "error", "exited", "failed", "dead"}
+
+
 class ProcessManager:
     """Central registry of Chat Nexus-managed and attached services."""
 
     def __init__(self) -> None:
         self._services: dict[str, ManagedService] = {}
         self._lock = threading.RLock()
+        # Optional event callback — wired to the server EventBus.
+        self.on_event: Callable[[dict[str, Any]], None] | None = None
+        self._watchdog: threading.Thread | None = None
+        self._watchdog_running = False
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self.on_event is None:
+            return
+        try:
+            self.on_event(payload)
+        except Exception:
+            pass
+
+    # -- auto-restart watchdog ------------------------------------------------
+    #
+    # Services opt in via metadata["auto_restart"] = True. The watchdog only
+    # restarts services whose describe() reports a crash-class state — a
+    # user-requested "stopped" is never restarted.
+
+    def start_watchdog(self, *, interval: float = 30.0, window_seconds: float = 600.0,
+                       max_restarts: int = 3) -> None:
+        if self._watchdog is not None and self._watchdog.is_alive():
+            return
+        self._watchdog_running = True
+        restarts: dict[str, list[float]] = {}
+
+        def loop() -> None:
+            while self._watchdog_running:
+                time.sleep(max(0.05, interval))
+                with self._lock:
+                    services = list(self._services.values())
+                for service in services:
+                    if not service.metadata.get("auto_restart"):
+                        continue
+                    try:
+                        status = service.describe() if service.describe else {}
+                    except Exception:
+                        status = {"state": "error"}
+                    state = str(status.get("state") or "")
+                    if state not in FAILED_STATES:
+                        continue
+                    recent = [t for t in restarts.get(service.id, []) if time.time() - t < window_seconds]
+                    if len(recent) >= max_restarts:
+                        continue
+                    action = service.restart or service.start
+                    if action is None:
+                        continue
+                    try:
+                        result = action()
+                        recent.append(time.time())
+                        restarts[service.id] = recent
+                        self._emit({"service": service.id, "event": "auto_restart",
+                                    "state": state, "attempt": len(recent)})
+                    except Exception as exc:
+                        self._emit({"service": service.id, "event": "auto_restart_failed",
+                                    "error": f"{type(exc).__name__}: {exc}"})
+
+        self._watchdog = threading.Thread(target=loop, name="process-watchdog", daemon=True)
+        self._watchdog.start()
+
+    def stop_watchdog(self) -> None:
+        self._watchdog_running = False
 
     def register(self, service: ManagedService) -> None:
         with self._lock:
