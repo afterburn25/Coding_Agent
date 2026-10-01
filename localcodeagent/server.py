@@ -930,6 +930,10 @@ class AppState:
         if not hasattr(self, "_retrying_tasks"):
             self._retrying_tasks = set()
         try:
+            # A popped queue item may not have created its task row yet —
+            # respect the in-flight set so retry never races a dequeue.
+            if getattr(self, "_queue_running", None):
+                return
             now = time.time()
             recent = self.tasks.recent(50)
             if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
