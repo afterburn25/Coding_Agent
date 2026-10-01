@@ -464,6 +464,14 @@ class DirectImageRoutingTests(unittest.TestCase):
             self.assertEqual(second.routing.role, "image")
             self.assertEqual(second.tool_events[0]["name"], "generate_image")
 
+            # The direct-image route uses _safe_emit directly — transcript
+            # markers must still persist via the wrapped logging callback.
+            log = agent.tasks.read_log(first.task["id"])
+            self.assertIn("## model direct_image_route", log)
+            self.assertIn("## approval required: generate_image", log)
+            self.assertIn("## task waiting_approval", log)
+            self.assertIn("## task completed", log)
+
 
 class ConversationMemoryTests(unittest.TestCase):
     def test_taught_rules_and_facts_survive_restart(self):
