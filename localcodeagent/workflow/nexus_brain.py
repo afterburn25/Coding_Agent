@@ -485,6 +485,149 @@ class NexusBrain:
             self._audit("unlocked", creator=str(auth.get("creator_name") or ""))
             return self.summary()
 
+    # -- encrypted creator-key backup / recovery ------------------------------
+
+    _KEY_BACKUP_KIND = "nexus_brain_creator_key_backup"
+
+    def _decrypt_creator_key(self, encrypted_pem: bytes, secret: str, *, on_fail=None) -> Ed25519PrivateKey:
+        try:
+            private_key = serialization.load_pem_private_key(encrypted_pem, password=secret.encode("utf-8"))
+        except (ValueError, TypeError) as exc:
+            if on_fail is not None:
+                on_fail("bad_passcode")
+            raise PermissionError("Creator authentication failed") from exc
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise RuntimeError("Nexus Brain creator signing key is not Ed25519")
+        return private_key
+
+    def export_creator_key_backup(self, passcode: str, backup_passcode: str = "") -> dict[str, Any]:
+        """Export the creator signing key as a portable encrypted bundle.
+
+        Authenticates by decrypting the private key with the current unlock
+        passcode (even when a session is already unlocked — export is a
+        sensitive operation). The bundle re-encrypts the key under
+        `backup_passcode`, which may differ from the unlock passcode; if left
+        empty the unlock passcode is reused.
+        """
+        if not self.initialized:
+            raise RuntimeError("Nexus Brain creator lock has not been initialized")
+        secret = str(passcode or "")
+        backup_secret = str(backup_passcode or "") or secret
+        if len(backup_secret) < 8:
+            raise ValueError("Backup passcode must be at least 8 characters")
+        auth = self._auth()
+        encrypted_pem = str(auth.get("encrypted_private_key_pem") or "")
+        if not encrypted_pem:
+            self._audit("key_backup_denied", reason="read_only_distribution")
+            raise PermissionError(
+                "This is a public read-only Nexus Brain distribution; there is no private signing key to back up."
+            )
+        private_key = self._decrypt_creator_key(
+            encrypted_pem.encode("utf-8"), secret, on_fail=self._record_unlock_failure)
+        fingerprint = self._public_fingerprint(private_key.public_key())
+        if fingerprint != str(auth.get("public_key_sha256") or ""):
+            self._record_unlock_failure("key_fingerprint_mismatch")
+            raise PermissionError("Creator signing key does not match the locked Nexus Brain")
+        public_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        reencrypted = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.BestAvailableEncryption(backup_secret.encode("utf-8")),
+        ).decode("utf-8")
+        bundle = {
+            "kind": self._KEY_BACKUP_KIND,
+            "version": 1,
+            "brain_id": str(self._data.get("brain_id") or ""),
+            "creator_name": str(auth.get("creator_name") or ""),
+            "key_type": "Ed25519",
+            "public_key_pem": public_pem,
+            "public_key_sha256": fingerprint,
+            "encrypted_private_key_pem": reencrypted,
+            "created_at": time.time(),
+        }
+        self._audit("key_backup_exported", creator=bundle["creator_name"], fingerprint=fingerprint[:16])
+        return bundle
+
+    def restore_creator_key_backup(
+        self,
+        bundle: dict[str, Any],
+        backup_passcode: str,
+        new_passcode: str = "",
+    ) -> dict[str, Any]:
+        """Restore the creator signing key from a backup bundle.
+
+        Authentication is key possession: the backup passphrase must decrypt
+        the bundle's private key, the key's public half must match the bundle
+        fingerprint, and — when the Brain payload is signed — the restored key
+        must verify the existing signature, which rejects backups that belong
+        to a different Brain. When the auth sidecar still exists, the bundle
+        fingerprint must additionally match the pinned creator fingerprint,
+        so a restore can never swap in a different key.
+
+        `new_passcode` becomes the unlock passcode going forward (the recovery
+        path for a forgotten passcode); it defaults to the backup passcode.
+        """
+        # The brain payload must exist — `initialized` tracks the auth sidecar,
+        # whose absence is exactly the recovery case this method exists for.
+        if not self.path.is_file():
+            raise RuntimeError("No Nexus Brain data to restore the creator key into")
+        if not isinstance(bundle, dict) or str(bundle.get("kind") or "") != self._KEY_BACKUP_KIND:
+            raise ValueError("Not a Nexus Brain creator key backup")
+        secret = str(backup_passcode or "")
+        next_secret = str(new_passcode or "") or secret
+        if len(next_secret) < 8:
+            raise ValueError("New passcode must be at least 8 characters")
+        private_key = self._decrypt_creator_key(
+            str(bundle.get("encrypted_private_key_pem") or "").encode("utf-8"), secret,
+            on_fail=self._record_unlock_failure)
+        public_key = private_key.public_key()
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        fingerprint = self._public_fingerprint(public_key)
+        if (str(bundle.get("public_key_sha256") or "") != fingerprint
+                or str(bundle.get("public_key_pem") or "").strip() != public_pem.strip()):
+            self._audit("key_backup_rejected", reason="bundle_integrity_mismatch")
+            raise PermissionError("Creator key backup integrity check failed")
+        bundle_brain = str(bundle.get("brain_id") or "")
+        if bundle_brain and bundle_brain != str(self._data.get("brain_id") or ""):
+            self._audit("key_backup_rejected", reason="brain_id_mismatch")
+            raise PermissionError("Creator key backup belongs to a different Nexus Brain")
+        signature = str(self._data.get("signature") or "")
+        if signature:
+            try:
+                public_key.verify(self._unb64(signature), self._canonical(self._unsigned_payload()))
+            except (InvalidSignature, ValueError, TypeError) as exc:
+                self._audit("key_backup_rejected", reason="signature_mismatch")
+                raise PermissionError("Creator key backup does not match this Nexus Brain") from exc
+        existing = self._auth()
+        if existing and str(existing.get("public_key_sha256") or "") != fingerprint:
+            self._audit("key_backup_rejected", reason="fingerprint_mismatch")
+            raise PermissionError("Creator key backup does not match the locked Nexus Brain")
+        encrypted_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.BestAvailableEncryption(next_secret.encode("utf-8")),
+        ).decode("utf-8")
+        auth = dict(existing)
+        auth.update({
+            "version": 2,
+            "creator_name": str(existing.get("creator_name") or bundle.get("creator_name") or ""),
+            "key_type": "Ed25519",
+            "encrypted_private_key_pem": encrypted_pem,
+            "public_key_pem": public_pem,
+            "public_key_sha256": fingerprint,
+        })
+        recovered = not bool(existing)
+        self._save_auth(auth)
+        self._audit("key_backup_restored", creator=str(auth.get("creator_name") or ""),
+                    fingerprint=fingerprint[:16], recovered_auth=recovered)
+        return self.summary()
+
     def lock(self) -> dict[str, Any]:
         with self._lock:
             self._signing_key = None

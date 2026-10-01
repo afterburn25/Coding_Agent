@@ -299,6 +299,49 @@ class NexusBrainTests(unittest.TestCase):
             self.assertFalse(stale["updated"])
             self.assertIn("signed_update_stale", [e["event"] for e in recipient.audit_events(100)])
 
+    def test_creator_key_backup_recovers_lost_auth_sidecar(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "nexus_brain.json"
+            brain = NexusBrain(path)
+            brain.initialize_creator("Creator", "example-passcode")
+            bundle = brain.export_creator_key_backup("example-passcode", "backup-secret-1")
+
+            # Disaster: the auth sidecar holding the encrypted key is lost.
+            brain.auth_path.unlink()
+            self.assertFalse(NexusBrain(path).initialized)
+
+            recovered = NexusBrain(path)
+            recovered.restore_creator_key_backup(bundle, "backup-secret-1", new_passcode="new-passcode-2")
+            self.assertTrue(recovered.initialized)
+            self.assertTrue(recovered.auth_path.is_file())
+
+            reloaded = NexusBrain(path)
+            reloaded.unlock("Creator", "new-passcode-2")
+            self.assertTrue(reloaded.verified_for_session)
+            events = [e["event"] for e in reloaded.audit_events(100)]
+            self.assertIn("key_backup_exported", events)
+            self.assertIn("key_backup_restored", events)
+
+    def test_creator_key_backup_rejects_wrong_passcode_and_foreign_brain(self):
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "first.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            bundle = brain.export_creator_key_backup("example-passcode", "backup-secret-1")
+
+            with self.assertRaises(PermissionError):
+                brain.restore_creator_key_backup(bundle, "wrong-backup-pass")
+
+            foreign = NexusBrain(Path(td) / "second.json")
+            foreign.initialize_creator("Other", "other-passcode")
+            with self.assertRaises(PermissionError):
+                foreign.restore_creator_key_backup(bundle, "backup-secret-1")
+            rejected = [e for e in foreign.audit_events(100) if e["event"] == "key_backup_rejected"]
+            self.assertTrue(rejected)
+
+            with self.assertRaises(PermissionError):
+                brain.export_creator_key_backup("wrong-passcode")
+            self.assertIn("key_backup_exported", [e["event"] for e in brain.audit_events(100)])
+
 
 if __name__ == "__main__":
     unittest.main()

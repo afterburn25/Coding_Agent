@@ -1638,6 +1638,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "self_model": saved, "brain": self.state.nexus_brain.summary()})
                 return
 
+            if path == "/api/nexus-brain/key-backup":
+                self.state.require_brain_creator_session(str(body.get("creator_token", "")))
+                bundle = self.state.nexus_brain.export_creator_key_backup(
+                    str(body.get("passcode", "")),
+                    str(body.get("backup_passcode", "")),
+                )
+                self._json({"ok": True, "backup": bundle})
+                return
+
+            if path == "/api/nexus-brain/key-restore":
+                # No creator session required — this is the recovery path for a
+                # lost/corrupt auth sidecar, where no session can exist. The
+                # restore itself authenticates via backup-passphrase decryption
+                # and rejects keys that did not sign this Brain.
+                bundle = body.get("backup")
+                if not isinstance(bundle, dict):
+                    self._json({"error": "backup object is required"}, 400)
+                    return
+                restored = self.state.nexus_brain.restore_creator_key_backup(
+                    bundle,
+                    str(body.get("backup_passcode", "")),
+                    str(body.get("passcode", "")),
+                )
+                self._json({"ok": True, "brain": restored})
+                return
+
             if path == "/api/nexus-brain/export":
                 self.state.require_brain_creator_session(str(body.get("creator_token", "")))
                 self._json({"ok": True, "brain": self.state.nexus_brain.export_payload()})
