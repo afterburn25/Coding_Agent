@@ -650,17 +650,61 @@ class AgentOrchestrator:
                     self._act_update(task_id, act, state="completed", callback=event_callback)
 
     @staticmethod
-    def _parse_call(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _repair_tool_args(raw: str) -> dict[str, Any] | None:
+        """Best-effort recovery of malformed tool-call JSON.
+
+        Local models regularly emit Python literals (single quotes,
+        True/False/None), trailing commas, or a truncated object missing
+        its closing brace. ``None`` means the text is not recoverable.
+        """
+        import ast
+        text = str(raw or "").strip()
+        if not text:
+            return {}
+        candidates = [text, re.sub(r",\s*([}\]])", r"\1", text)]
+        for cand in candidates:
+            try:
+                value = json.loads(cand)
+                return value if isinstance(value, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            try:
+                value = ast.literal_eval(cand)
+                if isinstance(value, dict):
+                    return value
+            except (ValueError, SyntaxError, TypeError):
+                pass
+        # Truncated object — model hit the token/streaming cut mid-arguments.
+        if text.startswith("{") and text.count("{") > text.count("}"):
+            fixed = text + "}" * (text.count("{") - text.count("}"))
+            fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+            try:
+                value = json.loads(fixed)
+                return value if isinstance(value, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    @classmethod
+    def _parse_call(cls, call: dict[str, Any]) -> tuple[str, dict[str, Any], str | None]:
+        """Returns (name, args, parse_error). A non-None error means the
+        arguments could not be recovered — feed it back to the model rather
+        than executing the tool with empty arguments."""
         fn = call.get("function", {})
         name = str(fn.get("name", ""))
         raw_args = fn.get("arguments") or "{}"
+        if isinstance(raw_args, dict):
+            return name, raw_args, None
         try:
-            args = raw_args if isinstance(raw_args, dict) else json.loads(raw_args)
-            if not isinstance(args, dict):
-                args = {}
+            args = json.loads(raw_args)
+            return name, (args if isinstance(args, dict) else {}), None
         except (json.JSONDecodeError, TypeError):
-            args = {}
-        return name, args
+            pass
+        repaired = cls._repair_tool_args(raw_args)
+        if repaired is not None:
+            return name, repaired, None
+        preview = str(raw_args).replace("\n", " ")[:120]
+        return name, {}, f"arguments were not valid JSON: {preview!r}"
 
     def _self_hosting_context(self) -> str:
         root = self.checkpoints.workspace
@@ -1293,7 +1337,15 @@ class AgentOrchestrator:
             if self._task_cancelled(session):
                 return self._cancel_result(session)
             call = session.pending_calls[session.pending_call_index]
-            name, args = self._parse_call(call)
+            name, args, perr = self._parse_call(call)
+            if perr is not None:
+                # Malformed arguments are fed back so the model can re-emit
+                # the call — executing with {} would corrupt intent.
+                self._append_tool_result(
+                    session, call, name, args,
+                    f"ERROR: tool call for '{name}' {perr}. Re-emit the call with corrected JSON arguments.")
+                session.pending_call_index += 1
+                continue
             brain_block = self._tool_blocked_by_brain(name)
             if brain_block:
                 self._append_tool_result(session, call, name, args, brain_block)
@@ -1313,19 +1365,20 @@ class AgentOrchestrator:
             # are all read-only they execute in parallel (independent reads,
             # research lookups, fetches); mutating runs stay sequential because
             # later steps often depend on earlier side effects.
-            batch: list[tuple[dict[str, Any], str, dict[str, Any]]] = [(call, name, args)]
+            batch: list[tuple[dict[str, Any], str, dict[str, Any], str | None]] = [(call, name, args, perr)]
             j = session.pending_call_index + 1
             while j < len(session.pending_calls):
-                n2, a2 = self._parse_call(session.pending_calls[j])
-                if self._tool_blocked_by_brain(n2) or self.tools.requires_approval(n2)[0]:
+                n2, a2, e2 = self._parse_call(session.pending_calls[j])
+                if e2 is None and (self._tool_blocked_by_brain(n2) or self.tools.requires_approval(n2)[0]):
                     break
-                batch.append((session.pending_calls[j], n2, a2))
+                batch.append((session.pending_calls[j], n2, a2, e2))
                 j += 1
             readonly = len(batch) > 1 and all(
-                str(self.tools.permission_for(n)[0] or "") in self._READ_ONLY_TOOL_PERMS
-                for _, n, _ in batch
+                e is None
+                and str(self.tools.permission_for(n)[0] or "") in self._READ_ONLY_TOOL_PERMS
+                for _, n, _, e in batch
             )
-            for _, n, a in batch:
+            for _, n, a, _ in batch:
                 self._emit_tool_start(session, n, a)
                 act = self._act(
                     session.task_id,
@@ -1341,12 +1394,16 @@ class AgentOrchestrator:
                     results = list(pool.map(lambda item: self._execute_tool(item[1], item[2], session=session), batch))
             else:
                 results = []
-                for _, n, a in batch:
+                for _, n, a, e in batch:
                     if self._task_cancelled(session):
                         results.append("CANCELLED: task cancelled by user before this call ran")
                         continue
+                    if e is not None:
+                        results.append(
+                            f"ERROR: tool call for '{n}' {e}. Re-emit the call with corrected JSON arguments.")
+                        continue
                     results.append(self._execute_tool(n, a, session=session))
-            for (c, n, a), result in zip(batch, results):
+            for (c, n, a, _), result in zip(batch, results):
                 self._append_tool_result(session, c, n, a, result)
                 act_id = session.tool_activities.pop(n, None)
                 if act_id is not None:
@@ -2738,10 +2795,14 @@ class AgentOrchestrator:
 
         if pending["kind"] == "tool":
             call = session.pending_calls[session.pending_call_index]
-            name, args = self._parse_call(call)
-            if approved:
+            name, args, perr = self._parse_call(call)
+            if perr is not None:
+                result = f"ERROR: tool call for '{name}' {perr}. Re-emit the call with corrected JSON arguments."
+            elif approved:
                 self._emit_tool_start(session, name, args)
-            result = self._execute_tool(name, args, approved=True, session=session) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
+                result = self._execute_tool(name, args, approved=True, session=session)
+            else:
+                result = f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1
             self._maybe_escalate(session)

@@ -181,6 +181,72 @@ class OrchestratorActivityTests(unittest.TestCase):
             self.assertIn("EXIT_CODE=0", out)
             self.assertFalse(flag.is_set())
 
+    def test_malformed_tool_args_feedback_without_executing(self):
+        # A tool call with unrecoverable arguments must not execute with {}
+        # — the error goes back to the model so it can re-emit correctly.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = ActivityStore(root / "act.jsonl")
+            agent = _agent(root, store, [])
+            agent.tools.permissions["fs.read"] = "allow"
+            ran = []
+            agent.tools.register(
+                __import__("localcodeagent.tools.base", fromlist=["ToolSpec"]).ToolSpec(
+                    name="recorder", description="r", parameters={"type": "object"}, permission="fs.read",
+                    handler=lambda args: ran.append(args) or "ok"))
+
+            calls = {"n": 0}
+            seen_messages = []
+
+            class _MalformProvider:
+                def complete(self, *, messages, tools=None, max_tokens=None):
+                    calls["n"] += 1
+                    seen_messages.append(messages)
+                    if calls["n"] == 1:
+                        return ProviderResponse(message={
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{"id": "1", "type": "function",
+                                            "function": {"name": "recorder",
+                                                         "arguments": "{'broken': "}}]}, raw={})
+                    return ProviderResponse(message={"role": "assistant", "content": "done"}, raw={})
+
+            agent._provider_for = lambda _: _MalformProvider()
+            agent.run("record something")
+            self.assertEqual(ran, [])
+            self.assertEqual(calls["n"], 2)
+            self.assertTrue(any("not valid JSON" in str(m.get("content") or "")
+                                for m in seen_messages[-1]))
+
+    def test_repairable_tool_args_execute(self):
+        # Python-literal arguments (single quotes, True/None) recover and run.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = ActivityStore(root / "act.jsonl")
+            agent = _agent(root, store, [])
+            agent.tools.permissions["fs.read"] = "allow"
+            ran = []
+            agent.tools.register(
+                __import__("localcodeagent.tools.base", fromlist=["ToolSpec"]).ToolSpec(
+                    name="recorder", description="r", parameters={"type": "object"}, permission="fs.read",
+                    handler=lambda args: ran.append(args) or "ok"))
+
+            calls = {"n": 0}
+
+            class _PyLiteralProvider:
+                def complete(self, *, messages, tools=None, max_tokens=None):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        return ProviderResponse(message={
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{"id": "1", "type": "function",
+                                            "function": {"name": "recorder",
+                                                         "arguments": "{'flag': True, 'n': None,}"}}]}, raw={})
+                    return ProviderResponse(message={"role": "assistant", "content": "done"}, raw={})
+
+            agent._provider_for = lambda _: _PyLiteralProvider()
+            agent.run("record something")
+            self.assertEqual(ran, [{"flag": True, "n": None}])
+
     def test_error_marks_rows_failed(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
