@@ -2092,6 +2092,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Agent/model work may run for a while before the first token.
                     # Queue events back to the request thread so socket writes remain
                     # serialized and the request thread can send idle heartbeats.
+                    # Mirror onto the shared bus first — a stalled direct-stream
+                    # client must not suppress updates for other viewers.
+                    try:
+                        self.state._bus_emit(event)
+                    except Exception:
+                        pass
                     # Token deltas and live-output chunks are drop-safe under
                     # backpressure (a disconnected or stalled client must not
                     # grow memory for the rest of the task); everything else —
@@ -2099,12 +2105,6 @@ class Handler(BaseHTTPRequestHandler):
                     if event.get("type") in {"token", "tool_output"} and events.qsize() > 2000:
                         return
                     events.put(dict(event))
-                    # Mirror onto the shared bus so a reloaded page (or the
-                    # Tools UI) can follow the run live via /api/events.
-                    try:
-                        self.state._bus_emit(event)
-                    except Exception:
-                        pass
 
                 def run_agent() -> None:
                     try:
