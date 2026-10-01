@@ -8,6 +8,9 @@ config.json
 models/**/*.gguf
 models/*.gguf
 .agent/tasks.json
+.agent/queue.json
+.agent/queue.json.tmp
+.agent/terminal/
 .agent/memory.json
 .agent/repo_index.json
 .agent/checkpoints/
