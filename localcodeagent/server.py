@@ -894,6 +894,9 @@ class AppState:
                     })
                 finally:
                     self._queue_running.discard(entry["id"])
+                    # Chain the next queued prompt immediately instead of
+                    # waiting up to a full watchdog interval.
+                    self._dequeue_next()
 
             self._queue_running.add(item_id)
             threading.Thread(target=run_item, args=(item,), name=f"queue-{item_id}", daemon=True).start()
@@ -2115,6 +2118,10 @@ class Handler(BaseHTTPRequestHandler):
                             pass
                     finally:
                         done.set()
+                        try:
+                            self.state._dequeue_next()
+                        except Exception:
+                            pass
 
                 threading.Thread(
                     target=run_agent,
@@ -2199,6 +2206,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 item = self.state.queue.enqueue(prompt, mode=str(body.get("mode", "auto")))
                 self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                try:
+                    self.state._dequeue_next()
+                except Exception:
+                    pass
                 self._json({"ok": True, "item": item})
                 return
 
