@@ -77,7 +77,12 @@ install checks, and Job Manager tracking apply per step. Steps can pass data
 via `{params.name}` and `{steps.save_as.field}` placeholders (parsed from JSON
 step output). `list_workflows` / `run_workflow` expose them to the agent —
 e.g. the bundled `clip_transcribe` chains thumbnail → audio extract →
-whisper transcription.
+whisper transcription, and `ask_workspace` indexes then searches local docs.
+
+Workflow jobs are `cancellable`: `POST /api/jobs/cancel` (or the Cancel
+button in the Tools UI) stops the pipeline at the next step boundary —
+in-flight steps finish, remaining steps are skipped and the job lands in
+`cancelled` state.
 
 ## Tool interfaces
 

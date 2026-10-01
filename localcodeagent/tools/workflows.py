@@ -90,9 +90,16 @@ def run_workflow(registry: ToolRegistry, workflow: dict[str, Any], params: dict[
     context: dict[str, Any] = {"params": merged, "steps": {}}
     step_log: list[dict[str, Any]] = []
     job = jobs.submit("workflow", f"{workflow.get('name') or workflow['id']}") if jobs is not None else None
+    if job:
+        jobs.update(job.id, cancellable=True)
     started = time.time()
 
     for i, step in enumerate(workflow["steps"]):
+        if job and jobs.get(job.id).state == "cancelled":
+            step_log.append({"index": i, "tool": str(step.get("tool", "")), "ok": False,
+                             "output": "cancelled before step start"})
+            return {"ok": False, "cancelled": True, "cancelled_at_step": i,
+                    "workflow": workflow.get("id"), "steps": step_log}
         tool_name = str(step.get("tool", ""))
         if not tool_name:
             return {"ok": False, "failed_step": i, "error": f"step {i} has no tool", "steps": step_log}

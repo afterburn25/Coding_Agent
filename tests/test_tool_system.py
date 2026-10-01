@@ -1048,8 +1048,9 @@ class WorkflowToolTests(unittest.TestCase):
         self.wdir = self.ws / "workflows"
         self.wdir.mkdir()
         self.reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
+        self.jobs = JobManager(self.ws / "jobs.json")
         register_workflow_tools(self.reg, self.ws, workflows_dir=self.wdir,
-                                jobs=JobManager(self.ws / "jobs.json"))
+                                jobs=self.jobs)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -1095,6 +1096,26 @@ class WorkflowToolTests(unittest.TestCase):
         out = self.reg.execute("run_workflow", {"workflow": "nope"})
         self.assertIn("ERROR", out)
         self.assertIn("unknown workflow", out)
+
+    def test_workflow_cancellation_between_steps(self):
+        self._stub("ok_step", "done")
+
+        def cancel_step(args):
+            for j in self.jobs.list_jobs():
+                if j["kind"] == "workflow" and j["state"] == "running":
+                    self.jobs.cancel(j["id"])
+            return "ok"
+
+        self.reg.register(ToolSpec("cancel_step", "d", {"type": "object", "properties": {}},
+                                   "filesystem.read", cancel_step))
+        wf = {"id": "c", "steps": [{"tool": "ok_step"}, {"tool": "cancel_step"}, {"tool": "ok_step"}]}
+        out = run_workflow(self.reg, wf, {}, jobs=self.jobs)
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["cancelled"])
+        self.assertEqual(out["cancelled_at_step"], 2)
+        self.assertEqual(out["steps"][-1]["output"], "cancelled before step start")
+        self.assertEqual(self.jobs.get([j["id"] for j in self.jobs.list_jobs()
+                                        if j["kind"] == "workflow"][0]).state, "cancelled")
 
 
 class BlenderToolTests(unittest.TestCase):
