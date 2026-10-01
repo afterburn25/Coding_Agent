@@ -58,3 +58,13 @@
 .state.stopped,.state.cancelled,.state.external_offline{color:#77839a}
 .row-actions button{font-size:9.5px;border:1px solid #303744;background:#1a2230;color:#cfd9ec;border-radius:6px;padding:3px 8px;cursor:pointer;margin-left:4px}
 .row-actions button:hover{border-color:#2877ff;color:#fff}
+.mcp-list{display:grid;gap:8px}
+.mcp-row{border:1px solid #20262f;border-radius:8px;padding:8px;font-size:11px}
+.mcp-head{display:flex;justify-content:space-between;align-items:center}
+.mcp-head .name{color:#dfe7f5;font-weight:600}
+.state.connected{color:#65deb1}
+.state.disconnected{color:#77839a}
+.mcp-actions{margin-top:6px;display:flex;gap:5px}
+.mcp-actions button{font-size:9px;border:1px solid #303744;background:#1a2230;color:#cfd9ec;border-radius:6px;padding:3px 7px;cursor:pointer}
+.mcp-actions button:hover{border-color:#2877ff;color:#fff}
+.small{font-size:10px}

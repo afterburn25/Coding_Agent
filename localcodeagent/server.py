@@ -39,6 +39,7 @@ from .tools.search import find_ripgrep, register_search_tools
 from .tools.shell import register_shell_tools
 from .tools.terminal import register_terminal_tools
 from .tool_router import ToolRouter
+from .mcp import MCPManager, load_mcp_configs
 from .tools.web import register_web_tools
 from .workflow.checkpoint import CheckpointManager
 from .workflow.memory import ProjectMemory
@@ -197,6 +198,11 @@ class AppState:
             resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
             prefer=getattr(config, "preferred_tools", []),
         )
+        self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])))
+        try:
+            self.mcp.connect_all()
+        except Exception:
+            pass
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -885,6 +891,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tools/telemetry":
             self._json({"routing": self.state.tool_router.recent(50)})
+            return
+        if path == "/api/mcp":
+            self._json(self.state.mcp.status())
             return
         if path == "/api/permissions":
             self._json(self.state.permission_manager.summary())
@@ -1771,6 +1780,28 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
                     return
                 self._json(result)
+                return
+
+            if path == "/api/mcp/action":
+                server_id = str(body.get("id", "")).strip()
+                action = str(body.get("action", "")).strip().lower()
+                if not server_id or action not in {"connect", "disconnect", "restart"}:
+                    self._json({"error": "id and action (connect|disconnect|restart) are required"}, 400)
+                    return
+                try:
+                    if action == "connect":
+                        row = self.state.mcp.connect(server_id)
+                    elif action == "disconnect":
+                        row = self.state.mcp.disconnect(server_id)
+                    else:
+                        row = self.state.mcp.restart(server_id)
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                except Exception as exc:
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+                    return
+                self._json({"ok": row.get("state") == "connected" or action == "disconnect", "server": row})
                 return
 
             if path == "/api/jobs/cancel":

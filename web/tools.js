@@ -189,6 +189,44 @@
     });
   }
 
+  async function loadMcp() {
+    const data = await api("/api/mcp");
+    const rows = data.servers || [];
+    const box = $("mcpList");
+    if (!rows.length) {
+      box.textContent = "No MCP servers configured. Add mcp_servers entries to config.json.";
+      return;
+    }
+    box.innerHTML = rows
+      .map(
+        (s) => `
+        <div class="mcp-row">
+          <div class="mcp-head"><span class="name">${esc(s.name || s.id)}</span><span class="state ${esc(s.state)}">${esc(s.state)}</span></div>
+          <div class="muted small">${s.tools} tool(s)${s.pid ? ` · pid ${s.pid}` : ""}${s.error ? ` · ${esc(String(s.error).slice(0, 60))}` : ""}</div>
+          <div class="mcp-actions">
+            ${s.state !== "connected" ? `<button data-mcp="${esc(s.id)}" data-action="connect">Connect</button>` : ""}
+            ${s.state === "connected" ? `<button data-mcp="${esc(s.id)}" data-action="disconnect">Disconnect</button>` : ""}
+            <button data-mcp="${esc(s.id)}" data-action="restart">Restart</button>
+          </div>
+        </div>`
+      )
+      .join("");
+    box.classList.remove("muted");
+    box.querySelectorAll("[data-mcp]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await post("/api/mcp/action", { id: btn.dataset.mcp, action: btn.dataset.action });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          btn.disabled = false;
+          setTimeout(loadMcp, 800);
+        }
+      });
+    });
+  }
+
   async function loadJobs() {
     const data = await api("/api/jobs");
     const rows = (data.jobs || []).slice(0, 60);
@@ -237,8 +275,8 @@
   $("refreshAll").addEventListener("click", refreshAll);
 
   async function refreshAll() {
-    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs()]).catch((e) => alert(e.message));
+    await Promise.all([loadPermissions(), loadTools(), loadProcesses(), loadJobs(), loadMcp()]).catch((e) => alert(e.message));
   }
   refreshAll();
-  setInterval(() => Promise.all([loadProcesses(), loadJobs()]).catch(() => {}), 5000);
+  setInterval(() => Promise.all([loadProcesses(), loadJobs(), loadMcp()]).catch(() => {}), 5000);
 })();

@@ -81,6 +81,18 @@
   "tools_state_path": "data/tools_state.json",
   "jobs_path": "data/jobs.json",
   "tool_manifests_dir": "tools/manifests",
+  "preferred_tools": [],
+  "mcp_servers": [
+    {
+      "id": "example",
+      "name": "Example MCP server",
+      "command": ["python", "path/to/server.py"],
+      "env": {},
+      "enabled": false,
+      "auto_start": true,
+      "permission": "shell.execute"
+    }
+  ],
   "max_agent_steps": 12,
   "review_after_changes": true,
   "auto_verify_after_changes": true,

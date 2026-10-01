@@ -240,7 +240,7 @@ Phase 2 kickoff (developer tools):
   `configure_project`, `run_tests`, `clean_project` cover CMake, Meson, Cargo,
   .NET, MSBuild, npm/pnpm/yarn, Gradle, Maven, Make, and Python.
 
-Unit checkpoint: **227 tests passing** (188 baseline + 39 new).
+Unit checkpoint: **232 tests passing** (188 baseline + 44 new).
 
 - Ethical temperature is now a separate 0.0–1.0 conversation control; default **1.0** requests maximum conversational permissiveness within the existing hard tool/action safety boundary.
 - Model sampling temperature remains a separate per-model setting and defaults back to **0.2**.

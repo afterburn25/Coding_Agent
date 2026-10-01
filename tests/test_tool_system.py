@@ -15,6 +15,7 @@ from localcodeagent.tools.plugins import PluginManifest, load_plugin_manifests
 from localcodeagent.tools.search import find_ripgrep, register_search_tools
 from localcodeagent.tools.terminal import TerminalTracker, register_terminal_tools, resolve_shell
 from localcodeagent.tool_router import ToolRouter
+from localcodeagent.mcp import MCPManager, MCPServerConfig, load_mcp_configs
 
 
 def _registry(**permissions):
@@ -459,6 +460,94 @@ class ToolRouterTests(unittest.TestCase):
         out = router.execute("nonexistent_cap", {})
         self.assertFalse(out["ok"])
         self.assertEqual(out["error"], "no_capable_tool")
+
+
+FAKE_MCP_SERVER = r'''
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    if msg.get("id") is None:  # notification
+        continue
+    if method == "initialize":
+        result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "fake-mcp", "version": "1.0"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "echo", "description": "echoes text",
+                             "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]}
+    elif method == "tools/call":
+        args = (msg.get("params") or {}).get("arguments") or {}
+        result = {"content": [{"type": "text", "text": "echo:" + str(args.get("text", ""))}]}
+    else:
+        reply = {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32601, "message": "method not found"}}
+        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.flush()
+        continue
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\n")
+    sys.stdout.flush()
+'''
+
+
+class MCPManagerTests(unittest.TestCase):
+    def _setup(self):
+        tmp = Path(tempfile.mkdtemp())
+        server_path = tmp / "fake_mcp.py"
+        server_path.write_text(FAKE_MCP_SERVER, encoding="utf-8")
+        reg = ToolRegistry({"shell.execute": "allow"})
+        cfg = MCPServerConfig.from_dict({
+            "id": "fake",
+            "name": "Fake MCP",
+            "command": [sys.executable, str(server_path)],
+        })
+        mgr = MCPManager(reg, [cfg], timeout=15)
+        self.addCleanup(mgr.shutdown)
+        return reg, mgr
+
+    def test_config_parsing(self):
+        cfgs = load_mcp_configs([{"id": "a", "command": ["x"], "permission": "network.read"}, {"no_id": True}])
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(cfgs[0].id, "a")
+        self.assertEqual(cfgs[0].permission, "network.read")
+
+    def test_connect_imports_and_invokes_tool(self):
+        reg, mgr = self._setup()
+        row = mgr.connect("fake")
+        self.assertEqual(row["state"], "connected")
+        self.assertEqual(row["tools"], 1)
+        spec = reg.get("mcp__fake__echo")
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.source, "mcp")
+        self.assertEqual(spec.category, "mcp")
+        self.assertIn("mcp__fake__echo", {s["function"]["name"] for s in reg.schemas()})
+        out = reg.execute("mcp__fake__echo", {"text": "hello"})
+        self.assertEqual(out, "echo:hello")
+
+    def test_disconnect_and_status(self):
+        reg, mgr = self._setup()
+        mgr.connect("fake")
+        row = mgr.disconnect("fake")
+        self.assertEqual(row["state"], "disconnected")
+        out = reg.execute("mcp__fake__echo", {"text": "x"})
+        self.assertTrue(out.startswith("ERROR"))
+        status = mgr.status()["servers"][0]
+        self.assertEqual(status["id"], "fake")
+
+    def test_failed_server_is_isolated(self):
+        reg = ToolRegistry({})
+        mgr = MCPManager(reg, [MCPServerConfig.from_dict({
+            "id": "bad", "name": "Bad", "command": ["definitely-not-an-executable-xyz"]})])
+        row = mgr.connect("bad")
+        self.assertEqual(row["state"], "error")
+        self.assertTrue(row["error"])
+        self.assertNotIn("mcp__bad__x", reg.names())
+
+    def test_unknown_server_raises(self):
+        mgr = MCPManager(ToolRegistry({}))
+        with self.assertRaises(KeyError):
+            mgr.connect("nope")
 
 
 if __name__ == "__main__":

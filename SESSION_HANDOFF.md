@@ -601,6 +601,8 @@ Expected at this checkpoint: `188 tests` passing.
 - New endpoints: `GET /api/tools`, `/api/tools/health/<id>`, `/api/permissions`, `/api/jobs`, `/api/processes`, `/api/resources`; `POST /api/tools/state`, `/api/permissions/level`, `/api/permissions/profile`, `/api/processes/action`, `/api/jobs/cancel`.
 - New **Tools & Plugins** page (`web/tools.html`); main-nav Tools link routes there.
 - Feature commits: `105182a` (registry/permissions/jobs/processes/UI), plugin manifest loader + interfaces commit on top.
-- Unit checkpoint: **210/227 tests passing**.
+- Unit checkpoint: **210/232 tests passing**.
 - Phase 2 started: `terminal_run`/`terminal_processes`/`terminal_kill` (controlled shells + tracked background jobs), `search_code`/`search_filename`/`search_error` (ripgrep + fallback), `detect_build_system`/`build_project`/`configure_project`/`run_tests`/`clean_project` (CMake, Meson, Cargo, .NET, MSBuild, npm/pnpm/yarn, Gradle, Maven, Make, Python).
-- Next: health-check coverage per tool family, resource-manager extraction, tree-sitter/LSP indexing, Playwright backend, MCP support, and continued Nexus Brain dogfooding.
+- Tool Router landed: `localcodeagent/tool_router.py` ranks candidates by capability (permission/offline/GPU/VRAM/RAM/OS filters, `preferred_tools` config, cached health), executes with fallback, records telemetry. Endpoints: `GET /api/tools/route/<capability>`, `GET /api/tools/telemetry`. Health probes wired for git/ripgrep/GitHub/ComfyUI/shell families.
+- MCP landed: `localcodeagent/mcp.py` — dependency-free stdio JSON-RPC client + `MCPManager` (connect/disconnect/restart/status), `config.mcp_servers`, registry import as `mcp__<server>__<tool>` with `source="mcp"`, `/api/mcp` + `POST /api/mcp/action`, Tools-page MCP panel. Doc: `MCP.md`.
+- Next: resource-manager extraction, tree-sitter/LSP indexing, Playwright backend, llama.cpp model page, and continued Nexus Brain dogfooding.
