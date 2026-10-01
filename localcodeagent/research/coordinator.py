@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,49 @@ class ResearchCoordinator:
             blocked_domains=list(getattr(config, "research_blocked_domains", []) or []),
         )
         self._last_plan: dict[str, Any] | None = None
+        self._stats_path = data_dir / "provider_stats.json"
+        self._stats_lock = threading.Lock()
+        self._provider_stats: dict[str, dict[str, Any]] = self._load_provider_stats()
+
+    def _load_provider_stats(self) -> dict[str, dict[str, Any]]:
+        try:
+            raw = json.loads(self._stats_path.read_text(encoding="utf-8"))
+            stats = raw.get("providers")
+            return {str(k): dict(v) for k, v in stats.items()} if isinstance(stats, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _record_provider(self, name: str, *, ok: bool, results: int = 0, elapsed: float = 0.0) -> None:
+        """Content-free provider outcome stats — reliability signal for research routing."""
+        with self._stats_lock:
+            row = self._provider_stats.setdefault(name, {
+                "calls": 0, "failures": 0, "empty": 0, "results": 0, "elapsed_sum": 0.0,
+            })
+            row["calls"] += 1
+            if not ok:
+                row["failures"] += 1
+            elif results == 0:
+                row["empty"] += 1
+            row["results"] += max(0, int(results))
+            row["elapsed_sum"] += max(0.0, float(elapsed))
+            try:
+                self._stats_path.write_text(
+                    json.dumps({"version": 1, "providers": self._provider_stats}, ensure_ascii=False),
+                    encoding="utf-8")
+            except OSError:
+                pass
+
+    def provider_stats(self) -> dict[str, Any]:
+        with self._stats_lock:
+            return {
+                name: {
+                    **row,
+                    "failure_rate": round(row["failures"] / max(1, row["calls"]), 3),
+                    "avg_results": round(row["results"] / max(1, row["calls"]), 2),
+                    "avg_elapsed_seconds": round(row["elapsed_sum"] / max(1, row["calls"]), 3),
+                }
+                for name, row in sorted(self._provider_stats.items())
+            }
 
     @staticmethod
     def redact_query(text: str) -> str:
@@ -99,7 +143,13 @@ class ResearchCoordinator:
                 return [ResearchSource(**row) for row in cached]
             except Exception:
                 pass
-        rows = provider.search(query, limit=limit, version=version)
+        started = time.monotonic()
+        try:
+            rows = provider.search(query, limit=limit, version=version)
+        except Exception:
+            self._record_provider(key_provider, ok=False, elapsed=time.monotonic() - started)
+            raise
+        self._record_provider(key_provider, ok=True, results=len(rows), elapsed=time.monotonic() - started)
         self.cache.put(key_provider, query, [x.as_dict() for x in rows], version)
         return rows
 
@@ -134,7 +184,15 @@ class ResearchCoordinator:
                     except Exception:
                         rows = []
                 else:
-                    rows = self.github_api.search(query, limit=limit, version=version, repo=repo, kind=kind)
+                    started = time.monotonic()
+                    try:
+                        rows = self.github_api.search(query, limit=limit, version=version, repo=repo, kind=kind)
+                    except Exception:
+                        self._record_provider(self.github_api.name, ok=False,
+                                              elapsed=time.monotonic() - started)
+                        raise
+                    self._record_provider(self.github_api.name, ok=True, results=len(rows),
+                                          elapsed=time.monotonic() - started)
                     self.cache.put(self.github_api.name, cache_query, [row.as_dict() for row in rows], version)
                 if rows:
                     return rows
@@ -265,4 +323,4 @@ class ResearchCoordinator:
 
     def summary(self) -> dict[str, Any]:
         github = {"api_enabled": self.github_api is not None, "authenticated": bool(self.github_api and self.github_api.client.authenticated), "token_env": str(getattr(self.config, "research_github_token_env", "GITHUB_TOKEN"))}
-        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, "github": github, **self.cache.stats(), "recent": self.cache.recent_sessions(8)}
+        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, "github": github, "provider_stats": self.provider_stats(), **self.cache.stats(), "recent": self.cache.recent_sessions(8)}

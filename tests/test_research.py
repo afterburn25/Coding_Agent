@@ -202,6 +202,30 @@ class GitHubApiTests(unittest.TestCase):
             self.assertTrue(first and second)
             self.assertEqual(api.calls, 1)
 
+    def test_provider_outcome_stats_tracked(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); (root / "README.md").write_text("example", encoding="utf-8")
+            idx = RepositoryIndex(root); idx.build()
+            cfg = AgentConfig(research_data_dir=".agent/research-test", research_github_api_enabled=False)
+            coord = ResearchCoordinator(root, idx, cfg)
+            fake = FakeWeb(); coord.github = fake
+            coord.search_github("library issue", limit=2)
+            stats = coord.provider_stats()
+            self.assertIn("fake-web", stats)
+            self.assertEqual(stats["fake-web"]["calls"], 1)
+            self.assertEqual(stats["fake-web"]["failures"], 0)
+            self.assertEqual(stats["fake-web"]["results"], 1)
+            # failures count and persist across reload
+            failing = FakeWeb(fail=True); coord.github = failing
+            with self.assertRaises(RuntimeError):
+                coord.search_github("another issue", limit=2)
+            stats = coord.provider_stats()
+            self.assertEqual(stats["fake-web"]["failures"], 1)
+            self.assertEqual(stats["fake-web"]["calls"], 2)
+            coord2 = ResearchCoordinator(root, idx, cfg)
+            self.assertEqual(coord2.provider_stats()["fake-web"]["calls"], 2)
+            self.assertIn("provider_stats", coord2.summary())
+
 
 class ResearchCoordinatorTests(unittest.TestCase):
     def make(self, root: Path):
