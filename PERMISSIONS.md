@@ -27,6 +27,7 @@ keys default to `ask`.
 | `allow` | run without asking |
 | `session` | ask once; on approval, allow for the rest of the session |
 | `ask` | require explicit approval every time (default for unknown keys) |
+| `creator` | like `ask`, but approvals also require an unlocked Nexus Brain creator session (fail-closed without it) |
 | `deny` | never run |
 
 ## Known permission keys
@@ -89,14 +90,51 @@ Two companion settings bound autonomous runs:
   the process watchdog tick; models pinned by a running task are never
   evicted, and `ensure_ready()` transparently restarts them on resume.
 
+## Scopes
+
+`permission_scopes` in `config.json` attaches per-key boundaries:
+
+```json
+{"permission_scopes": {"network.read": {"allowed_domains": ["api.github.com"],
+                                        "blocked_domains": []},
+                       "filesystem.write": {"allowed_dirs": ["src/"],
+                                            "workspace_only": true},
+                       "github.write": {"allowed_repos": ["me/repo"]}}}
+```
+
+Domain scopes are enforced at `ToolRegistry.execute` — any tool argument whose
+name contains `url` is checked against the tool's permission scope. Editable
+per permission in Settings → Permissions.
+
+## Audit log
+
+Permission decisions and policy changes are appended to
+`data/permission_audit.jsonl` (bounded to 2000 entries): level/profile/scope
+changes, session grants, autonomy toggles, approvals, denials, scope denials,
+creator-approval requirements, and MCP connect/disconnect/restart. Only event
+names, permission keys, and short sanitized labels are recorded — never tool
+arguments, secrets, tokens, or payloads. Routine executions update an
+in-memory `last_used` stamp (shown in the matrix) without file writes.
+
 ## API
 
 ```text
-GET  /api/permissions             profile, levels, effective map, session grants, autonomy state
+GET  /api/permissions             profile, levels, effective map, session grants,
+                                  categories, per-key info/scopes/last_used, autonomy state
+GET  /api/permissions/audit       {"entries": [...]}  (bounded, newest first)
 POST /api/permissions/level       {"permission": "shell.execute", "level": "session"}
 POST /api/permissions/profile     {"profile": "offline"}
 POST /api/permissions/autonomous  {"enabled": true}
+POST /api/permissions/scope       {"permission": "network.read", "scope": {"allowed_domains": [...]}}
 ```
 
 Changes persist into `config.json` atomically. Session grants are intentionally
 in-memory only and clear on restart or profile change.
+
+## UI
+
+Permissions live under **Settings → Permissions** (`/settings.html#permissions`):
+profile cards, category summaries, a searchable permission matrix, per-key
+detail panel (scope editors, approval rules, recent activity), and the bounded
+activity log. The Tools page is operational only — install/health/runtime
+management — and links to Settings for authorization.

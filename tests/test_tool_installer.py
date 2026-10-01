@@ -435,5 +435,102 @@ class ManifestDetectTests(unittest.TestCase):
         self.assertIn("ComfyUI_windows_portable/ComfyUI/main.py", m.detect_files)
 
 
+class UninstallCommandTests(unittest.TestCase):
+    def test_winget_remove_uses_uninstall_id(self):
+        from localcodeagent.tools.plugins import uninstall_command
+        cmd = uninstall_command({"method": "winget", "package": "BlenderFoundation.Blender"})
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd[:3], ["winget", "uninstall", "--id"])
+        self.assertIn("BlenderFoundation.Blender", cmd)
+
+    def test_pip_remove_uses_managed_python(self):
+        import sys
+        from localcodeagent.tools.plugins import uninstall_command
+        cmd = uninstall_command({"method": "pip", "package": "demo-pkg"})
+        self.assertEqual(cmd[:3], [sys.executable, "-m", "pip"])
+        self.assertIn("uninstall", cmd)
+        self.assertEqual(cmd[-1], "demo-pkg")
+
+    def test_archive_and_unknown_methods_have_no_command(self):
+        from localcodeagent.tools.plugins import uninstall_command
+        # Archive payloads are file deletion, not a manager command.
+        self.assertIsNone(uninstall_command({"method": "archive", "dest": "x"}))
+        self.assertIsNone(uninstall_command({"method": "madeup", "package": "x"}))
+        self.assertIsNone(uninstall_command({"method": "winget"}))  # no package
+        self.assertIsNone(uninstall_command(None))
+
+
+class ServerPackageUninstallTests(unittest.TestCase):
+    """uninstall_tool → package-manager command job (subprocess mocked)."""
+
+    def _state(self, root: Path, manifest_files: dict[str, dict]):
+        # Manifests are loaded at AppState construction — write them first.
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState
+        manifests = root / "tools" / "manifests"
+        manifests.mkdir(parents=True)
+        for name, payload in manifest_files.items():
+            (manifests / f"{name}.json").write_text(
+                json.dumps(payload), encoding="utf-8")
+        return AppState(
+            AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model",
+                    roles=["primary_coder", "utility", "fast_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False),
+            root / "workspace", root)
+
+    def test_package_uninstall_runs_manager_command_as_job(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            state = self._state(root, {"pkgtool": {
+                "id": "pkgtool", "name": "Pkg Tool",
+                "install": {"method": "winget", "package": "Vendor.PkgTool"},
+            }})
+            try:
+                self.assertTrue(state.tools.manifest("pkgtool")["removable"])
+                captured = {}
+
+                def fake_run(cmd, **kwargs):
+                    captured["cmd"] = list(cmd)
+                    return SimpleNamespace(returncode=0, stdout="removed", stderr="")
+
+                with mock.patch("subprocess.run", side_effect=fake_run):
+                    rm = state.uninstall_tool("pkgtool")
+                    if rm.get("needs_approval"):
+                        rm = state.uninstall_tool("pkgtool", approve=True)
+                    self.assertTrue(rm.get("ok"), rm)
+                    ok = _wait(
+                        lambda: state.jobs.get(rm["job_id"]).state
+                        in {"completed", "failed"}, 15)
+                self.assertTrue(ok)
+                self.assertEqual(state.jobs.get(rm["job_id"]).state, "completed",
+                                 state.jobs.get(rm["job_id"]).error)
+                self.assertEqual(captured["cmd"][:2], ["winget", "uninstall"])
+                self.assertIn("Vendor.PkgTool", captured["cmd"])
+            finally:
+                state.tool_downloads.shutdown()
+
+    def test_uninstall_without_automatable_method_reports_manual(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            state = self._state(root, {"manualtool": {
+                "id": "manualtool", "name": "Manual Tool",
+            }})
+            try:
+                self.assertFalse(state.tools.manifest("manualtool")["removable"])
+                rm = state.uninstall_tool("manualtool")
+                if rm.get("needs_approval"):
+                    rm = state.uninstall_tool("manualtool", approve=True)
+                self.assertFalse(rm.get("ok"))
+                self.assertIn("not available", rm["error"])
+            finally:
+                state.tool_downloads.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

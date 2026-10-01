@@ -62,6 +62,8 @@ class PluginManifest:
     health_check: dict[str, Any] = field(default_factory=dict)
     invoke: dict[str, Any] | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    process: str = ""  # Process Manager service id this tool maps to
+    dependencies: list[str] = field(default_factory=list)  # declared deps
     source_path: str = ""
 
     @staticmethod
@@ -94,6 +96,8 @@ class PluginManifest:
             health_check=dict(raw.get("health_check") or {}),
             invoke=raw.get("invoke") if isinstance(raw.get("invoke"), dict) else None,
             config=dict(raw.get("config") or {}),
+            process=str(raw.get("process") or ""),
+            dependencies=[str(x) for x in raw.get("dependencies") or []],
             source_path=source_path,
         )
 
@@ -154,6 +158,19 @@ INSTALL_METHODS = {
     "brew": lambda pkg: ["brew", "install", pkg],
 }
 
+# Package-manager removal for the same methods — lets the Tools page
+# uninstall manager-owned packages (e.g. winget Blender) instead of only
+# archive payloads.
+REMOVE_METHODS = {
+    "winget": lambda pkg: ["winget", "uninstall", "--id", pkg, "-e", "--accept-source-agreements"],
+    "choco": lambda pkg: ["choco", "uninstall", pkg, "-y"],
+    "uv": lambda pkg: ["uv", "pip", "uninstall", pkg],
+    "npm": lambda pkg: ["npm", "uninstall", "-g", pkg],
+    "apt": lambda pkg: ["apt", "remove", "-y", pkg],
+    "dnf": lambda pkg: ["dnf", "remove", "-y", pkg],
+    "brew": lambda pkg: ["brew", "uninstall", pkg],
+}
+
 
 def managed_python(install_root: Path | None) -> str | None:
     """Best Python interpreter for pip-based tool installs.
@@ -188,6 +205,25 @@ def install_command(install: dict[str, Any], *, install_root: Path | None = None
         python = managed_python(install_root)
         return [python, "-m", "pip", "install", package] if python else None
     builder = INSTALL_METHODS.get(method)
+    if builder is None or not package:
+        return None
+    return builder(package)
+
+
+def uninstall_command(install: dict[str, Any], *, install_root: Path | None = None) -> list[str] | None:
+    """Translate a manifest install spec into a removal argv, or None if
+    not automatable. Archive installs are file deletion, not a command —
+    callers handle them through ToolDownloadManager.uninstall."""
+    if not isinstance(install, dict):
+        return None
+    method = str(install.get("method") or "").strip().lower()
+    package = str(install.get("package") or "").strip()
+    if method == "pip":
+        if not package:
+            return None
+        python = managed_python(install_root)
+        return [python, "-m", "pip", "uninstall", "-y", package] if python else None
+    builder = REMOVE_METHODS.get(method)
     if builder is None or not package:
         return None
     return builder(package)
@@ -330,7 +366,11 @@ def load_plugin_manifests(
             install_status=install_status,
             health_check=_make_health_check(manifest),
         )
-        spec_fields = {"invocable": invoker is not None, "install": manifest.install, "manifest_path": manifest.source_path}
+        spec_fields = {"invocable": invoker is not None, "install": manifest.install,
+                       "manifest_path": manifest.source_path, "process": manifest.process,
+                       "dependencies": list(manifest.dependencies),
+                       "detect_files": list(manifest.detect_files),
+                       "executables": list(manifest.executables)}
         registry.register(spec)
         registry._plugin_meta[spec.name] = spec_fields  # noqa: SLF001 - registry-owned metadata
         loaded.append(manifest.id)

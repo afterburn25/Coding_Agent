@@ -212,10 +212,16 @@ knowing process internals.
 
 ## UI
 
-`web/tools.html` — permission profile switcher (incl. the autonomous-mode
-toggle), per-permission levels, category-filtered registry with
-enable/disable + health checks, process controls, the unified job list, and
-the Work queue card (enqueue form, list, per-item cancel).
+`web/tools.html` — the operational **Tools & Plugins** surface: summary cards
+(installed / available / updates / running services), search + filter chips +
+sorting, a responsive card grid, a collapsible Installation Queue (resumable
+`.part` state, speed/ETA, current file/path, cancel/resume), image model packs,
+managed-service controls, jobs, work queue, routing telemetry, and workflows.
+Selecting a tool opens a right-side detail panel with Overview, Capabilities,
+Dependencies, Configuration, and Logs tabs — every field wired to the real
+registry/process/job state. Authorization was intentionally moved out:
+permission profiles, levels, scopes, and the decision audit live under
+**Settings → Permissions** (`web/settings.html`).
 
 The agent can also enqueue follow-up work itself via the `queue_task`,
 `queue_list`, and `queue_cancel` tools (`localcodeagent/tools/queue.py`,

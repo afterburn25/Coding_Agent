@@ -15,6 +15,7 @@ The approved Chat Nexus application shell is the chat-first concept selected on 
 ### Layout
 
 - **Left rail:** official Chat Nexus brand, Chat, Projects, Models, Research, Images, Tools, Settings.
+- **Settings** (`/settings.html`) is its own shell page with secondary nav (General, Permissions, Models, Appearance, Privacy, Notifications, Advanced). **Settings → Permissions** owns authorization: profiles, per-capability matrix, scopes, approval rules, and the audit log. **Tools** (`/tools.html`) owns operations: install/remove/health/runtime management only.
 - **Center:** model selector/status, Chat Nexus conversation, quick actions, and a persistent composer.
 - **Right rail:** tabs for **Code Diff**, **Tasks**, and **Terminal / agent activity**.
 - System/model/hardware details are available but should stay secondary to the conversation.

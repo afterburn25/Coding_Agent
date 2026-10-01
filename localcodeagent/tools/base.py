@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 import threading
 import time
@@ -99,6 +101,10 @@ class ToolRegistry:
         # Registry-owned metadata for manifest/plugin tools (invocable flag,
         # install spec, manifest path). Built-in tools have no entry.
         self._plugin_meta: dict[str, dict[str, Any]] = {}
+        # Cached health-check results (populated by health()).
+        self._health_cache: dict[str, dict[str, Any]] = {}
+        # Cached on-disk sizes for installed payloads: name -> (signature, bytes)
+        self._size_cache: dict[str, tuple[float, int]] = {}
         # Install root for manifest `detect.files` markers (set by
         # load_plugin_manifests); used when refreshing install status.
         self.install_root: Path | None = None
@@ -197,10 +203,12 @@ class ToolRegistry:
         try:
             result = spec.health_check() or {}
         except Exception as exc:
-            return {"ok": False, "status": "error", "detail": f"{type(exc).__name__}: {exc}"}
+            result = {"ok": False, "status": "error", "detail": f"{type(exc).__name__}: {exc}"}
         result.setdefault("ok", True)
         result.setdefault("status", "healthy" if result["ok"] else "unhealthy")
         result.setdefault("detail", "")
+        self._health_cache[name] = {"result": dict(result), "at": time.time()}
+        self.permission_manager.record_use(spec.permission)
         return result
 
     def installed_version(self, name: str) -> str:
@@ -220,13 +228,125 @@ class ToolRegistry:
         except (OSError, IndexError):
             return ""
 
+    def installed_at(self, name: str) -> float | None:
+        """Install timestamp from the archive marker's mtime, if present."""
+        spec = self._tools.get(name)
+        if spec is None or spec.install_status != "installed" or not self.install_root:
+            return None
+        install = self._plugin_meta.get(name, {}).get("install") or {}
+        if str(install.get("method") or "").lower() != "archive":
+            return None
+        dest = str(install.get("dest") or spec.tool_id)
+        try:
+            marker = (self.install_root / dest).resolve() / ".chatnexus-version"
+            if marker.is_relative_to(self.install_root) and marker.is_file():
+                return marker.stat().st_mtime
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def install_path(self, name: str) -> str:
+        """Resolved on-disk install location, when one is known."""
+        spec = self._tools.get(name)
+        meta = self._plugin_meta.get(name, {})
+        install = meta.get("install") or {}
+        if spec is None:
+            return ""
+        root = self.install_root
+        # Prefer the common top-level dir declared by detect.files — e.g.
+        # `ComfyUI_windows_portable/...` resolves to that payload directory even
+        # when install.dest is the app root itself.
+        segments = {
+            str(rel).replace("\\", "/").split("/", 1)[0]
+            for rel in meta.get("detect_files") or [] if rel
+        }
+        if len(segments) == 1 and root:
+            payload = (root / segments.pop()).resolve()
+            try:
+                if payload.is_relative_to(root) and payload.is_dir():
+                    return str(payload)
+            except (OSError, ValueError):
+                pass
+        if str(install.get("method") or "").lower() == "archive" and root:
+            dest = str(install.get("dest") or spec.tool_id)
+            try:
+                resolved = (root / dest).resolve()
+                if resolved.is_relative_to(root):
+                    return str(resolved)
+            except (OSError, ValueError):
+                return ""
+        for rel in meta.get("detect_files") or []:
+            p = Path(rel).expanduser()
+            target = p if p.is_absolute() else (root / p if root else p)
+            if target.exists():
+                return str(target.resolve().parent)
+        for exe in meta.get("executables") or []:
+            found = shutil.which(str(exe))
+            if found:
+                return str(Path(found).resolve().parent)
+        return ""
+
+    def install_size(self, name: str) -> int:
+        """Bytes on disk for the installed payload (cached; 0 if unknown)."""
+        spec = self._tools.get(name)
+        meta = self._plugin_meta.get(name, {})
+        install = meta.get("install") or {}
+        if spec is None:
+            return 0
+        if spec.install_status != "installed":
+            return int(install.get("size_bytes") or 0)
+        path = self.install_path(name)
+        if not path:
+            return int(install.get("size_bytes") or 0)
+        dest = Path(path)
+        if not dest.is_dir():
+            try:
+                return dest.stat().st_size
+            except OSError:
+                return 0
+        try:
+            signature = max((p.stat().st_mtime for p in [dest, *dest.iterdir()]
+                            if p.exists()), default=0.0)
+        except OSError:
+            signature = 0.0
+        cached = self._size_cache.get(name)
+        if cached and cached[0] == signature:
+            return cached[1]
+        total = 0
+        try:
+            for entry in os.scandir(dest):
+                if entry.is_dir(follow_symlinks=False):
+                    stack = [entry.path]
+                    while stack:
+                        for sub in os.scandir(stack.pop()):
+                            if sub.is_dir(follow_symlinks=False):
+                                stack.append(sub.path)
+                            else:
+                                try:
+                                    total += sub.stat(follow_symlinks=False).st_size
+                                except OSError:
+                                    pass
+                else:
+                    try:
+                        total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        self._size_cache[name] = (signature, total)
+        return total
+
     def manifest(self, name: str) -> dict[str, Any]:
+        # plugins imports this module — keep the uninstall_command lookup lazy.
+        from .plugins import uninstall_command
+
         spec = self._tools.get(name)
         if spec is None:
             raise KeyError(name)
         permission, mode = self.permission_for(name)
         usage = self._usage.get(name) or {}
         installed_version = self.installed_version(name)
+        install = self._plugin_meta.get(name, {}).get("install") or {}
         return {
             "id": spec.tool_id,
             "name": spec.name,
@@ -263,8 +383,23 @@ class ToolRegistry:
             "use_count": int(usage.get("count", 0)),
             "last_used_at": usage.get("last_used_at"),
             "callable": bool(self._plugin_meta.get(name, {}).get("invocable", True)),
-            "install": dict(self._plugin_meta.get(name, {}).get("install") or {}),
+            "install": dict(install),
+            "removable": (
+                str(install.get("method") or "").strip().lower() == "archive"
+                or uninstall_command(install, install_root=self.install_root)
+                is not None
+            ),
             "manifest_path": str(self._plugin_meta.get(name, {}).get("manifest_path") or ""),
+            "process_id": str(self._plugin_meta.get(name, {}).get("process") or ""),
+            "dependencies": list(self._plugin_meta.get(name, {}).get("dependencies") or []),
+            "executables": list(self._plugin_meta.get(name, {}).get("executables") or []),
+            "detect_files": list(self._plugin_meta.get(name, {}).get("detect_files") or []),
+            "install_path": self.install_path(name),
+            "install_size_bytes": self.install_size(name),
+            "installed_at": self.installed_at(name),
+            "latest_version": str(spec.version or ""),
+            "health": dict(self._health_cache.get(name) or {}),
+            "mcp_server": str(self._plugin_meta.get(name, {}).get("mcp_server") or ""),
         }
 
     def manifests(self) -> list[dict[str, Any]]:
@@ -282,11 +417,31 @@ class ToolRegistry:
         manager = self.permission_manager
         mode = manager.effective(tool.permission)
         if mode == "deny":
+            manager.record_event("denied", tool.permission, name)
             return f"PERMISSION_DENIED: {tool.permission} is disabled"
-        if mode == "ask" and not approved:
-            return f"APPROVAL_REQUIRED: permission '{tool.permission}' must be approved by the user before running {name}"
+        if mode in ("ask", "creator") and not approved:
+            manager.record_event("approval_requested", tool.permission, name)
+            extra = " (creator approval required)" if mode == "creator" else ""
+            return f"APPROVAL_REQUIRED: permission '{tool.permission}' must be approved by the user before running {name}{extra}"
+        if approved and manager.level(tool.permission) == "creator" and not manager.creator_ok():
+            manager.record_event("creator_required", tool.permission, name)
+            return ("CREATOR_APPROVAL_REQUIRED: permission "
+                    f"'{tool.permission}' requires an unlocked Nexus Brain creator session")
+        if mode == "creator":
+            manager.record_event("approved", tool.permission, name)
+        elif approved and mode == "ask":
+            manager.record_event("approved", tool.permission, name)
         if approved and manager.level(tool.permission) == "session":
             manager.grant_session(tool.permission)
+        # Domain/scope enforcement: any URL argument is checked against the
+        # permission's configured allowed/blocked domain list.
+        for key, value in arguments.items():
+            if isinstance(value, str) and "url" in key.lower() and "://" in value:
+                reason = manager.check_url(tool.permission, value)
+                if reason:
+                    manager.record_event("scope_denied", tool.permission, name)
+                    return f"SCOPE_DENIED: {reason}"
+        manager.record_use(tool.permission)
         started = time.time()
         try:
             result = tool.handler(arguments)

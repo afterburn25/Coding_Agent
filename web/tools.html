@@ -1,91 +1,91 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chat Nexus · Tools &amp; Plugins</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/tools.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat Nexus — Tools &amp; Plugins</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/tools.css">
 </head>
 <body>
   <div class="tools-shell">
     <aside class="tools-side">
-      <div class="brand">Chat Nexus <span>Tools &amp; Plugins</span></div>
-      <a class="workspace-link" href="/">← Chat</a>
-      <a class="workspace-link" href="/models.html">Local Models</a>
-      <a class="workspace-link" href="/research.html">Research Hub</a>
-      <a class="workspace-link" href="/image.html">Image workspace</a>
-      <a class="workspace-link" href="/trainer.html">Trainer</a>
-
-      <div class="section-title">Permission profile</div>
-      <select id="permProfile" class="full-select"></select>
-      <button id="applyProfile" class="mini-button">Apply profile</button>
-      <label class="autonomy-toggle" title="Auto-approve ask/session permissions for reversible workspace actions. Spending, messaging, mic, and camera still require explicit approval.">
-        <input type="checkbox" id="autonomousMode" />
-        Autonomous mode
-      </label>
-      <div id="permSummary" class="perm-summary muted"></div>
-
-      <div class="section-title">Categories</div>
-      <div id="categoryList" class="category-list"></div>
-
-      <div class="section-title">MCP servers</div>
-      <div id="mcpList" class="mcp-list muted">Loading…</div>
+      <div class="brand">
+        <img class="brand-logo" src="/assets/chat-nexus-emblem.png" alt="Chat Nexus">
+        <div>
+          <div class="brand-title">CHAT <span>NEXUS</span></div>
+          <div class="brand-sub">CONTROL CENTER</div>
+        </div>
+      </div>
+      <nav class="side-links">
+        <a href="/">Chat</a>
+        <a href="/models.html">Models</a>
+        <a href="/image.html">Images</a>
+        <a href="/research.html">Research</a>
+        <a class="active" href="/tools.html">Tools</a>
+        <a href="/trainer.html">Trainer</a>
+        <a href="/settings.html">Settings</a>
+      </nav>
+      <div class="side-block">
+        <div class="side-block-title">Categories</div>
+        <div id="categoryList" class="muted">Loading…</div>
+      </div>
+      <div class="side-block">
+        <div class="side-block-title">MCP Servers</div>
+        <div id="mcpList" class="muted">Loading…</div>
+      </div>
+      <div class="side-note">Authorization &amp; approvals live under <a href="/settings.html#permissions">Settings → Permissions</a>.</div>
     </aside>
 
     <main class="tools-main">
       <header class="tools-header">
         <div>
           <h1>Tools &amp; Plugins</h1>
-          <p>Every capability registers a manifest. The agent queries this registry instead of hard-coding tools.</p>
+          <p class="subtitle">Extend Chat Nexus with local tools, integrations, runtimes, and external services.</p>
         </div>
-        <button id="refreshAll" class="mini-button">Refresh</button>
+        <div id="diskFree" class="disk-free muted"></div>
       </header>
 
-      <section class="tools-card" id="installCard">
-        <h2>Installations</h2>
-        <div id="installSummary" class="muted">No installs running. Optional tools (ComfyUI, image packs) install from this page — nothing is downloaded by the app installer.</div>
-        <div class="install-overall" id="installOverall" hidden>
-          <div class="install-bar"><div class="install-fill" id="installOverallFill"></div></div>
-          <div class="install-meta">
-            <span id="installOverallLabel">0%</span>
-            <span class="muted" id="installCurrent"></span>
-          </div>
+      <section class="summary-cards" id="summaryCards"></section>
+
+      <div class="tools-toolbar">
+        <input type="search" id="toolSearch" placeholder="Search tools, plugins, or capabilities...">
+        <select id="toolSort">
+          <option value="name">Sort: Name</option>
+          <option value="status">Sort: Status</option>
+          <option value="category">Sort: Category</option>
+          <option value="used">Sort: Recently used</option>
+          <option value="installed">Sort: Recently installed</option>
+        </select>
+      </div>
+      <div class="chip-row" id="filterChips"></div>
+
+      <section id="installQueue" class="install-queue collapsed">
+        <div class="install-queue-head" id="installQueueHead">
+          <span>Installation Queue</span><span id="installQueueMeta" class="muted"></span>
         </div>
+        <div id="installList" class="install-list"></div>
       </section>
 
-      <section class="tools-card" id="availableCard" hidden>
-        <h2>Available to install</h2>
-        <div id="installableList" class="tool-list"></div>
+      <section id="toolGrid" class="tool-grid muted">Loading…</section>
+
+      <section class="panel">
+        <div class="panel-head"><h3>Image Model Packs</h3><span id="imageSummary" class="muted"></span></div>
+        <div id="imagePackList" class="image-packs muted">Loading…</div>
       </section>
 
-      <section class="tools-card">
-        <h2>Image model packs</h2>
-        <div id="imagePackList" class="tool-list muted">Loading…</div>
+      <section class="panel">
+        <div class="panel-head"><h3>Running Services</h3><span class="muted">Managed processes — start/stop/restart</span></div>
+        <div id="processList" class="process-list muted">Loading…</div>
       </section>
 
-      <section class="tools-card">
-        <h2>Permissions</h2>
-        <div id="permTable" class="perm-table muted">Loading…</div>
-      </section>
-
-      <section class="tools-card">
-        <h2>Tool registry</h2>
-        <div id="toolList" class="tool-list muted">Loading…</div>
-      </section>
-
-      <section class="tools-card">
-        <h2>Processes</h2>
-        <div id="processList" class="proc-list muted">Loading…</div>
-      </section>
-
-      <section class="tools-card">
-        <h2>Jobs</h2>
+      <section class="panel">
+        <div class="panel-head"><h3>Jobs</h3><span class="muted">Downloads, installs, and background work</span></div>
         <div id="jobList" class="job-list muted">Loading…</div>
       </section>
 
-      <section class="tools-card">
-        <h2>Work queue</h2>
+      <section class="panel">
+        <div class="panel-head"><h3>Work Queue</h3><span class="muted">Prompts waiting for the agent</span></div>
         <form id="queueForm" class="row-actions" style="display:flex;gap:8px;margin-bottom:10px">
           <input id="queuePrompt" type="text" placeholder="Enqueue a prompt — runs when the agent is idle" style="flex:1" required>
           <select id="queueMode"><option value="auto">auto</option><option value="utility">utility</option><option value="fast_coder">fast_coder</option><option value="primary_coder">primary_coder</option></select>
@@ -94,17 +94,33 @@
         <div id="queueList" class="job-list muted">Loading…</div>
       </section>
 
-      <section class="tools-card">
-        <h2>Routing telemetry</h2>
+      <section class="panel">
+        <div class="panel-head"><h3>Routing Telemetry</h3><span class="muted">Tool Router decisions and success rates</span></div>
         <div id="telemetryList" class="telemetry-list muted">Loading…</div>
       </section>
 
-      <section class="tools-card">
-        <h2>Workflows</h2>
+      <section class="panel">
+        <div class="panel-head"><h3>Workflows</h3><span class="muted">Multi-step pipelines</span></div>
         <div id="workflowList" class="telemetry-list muted">Loading…</div>
       </section>
     </main>
   </div>
+
+  <aside id="toolDetail" class="tool-detail hidden">
+    <div class="tool-detail-head">
+      <div><h3 id="detailName"></h3><div id="detailSub" class="muted small"></div></div>
+      <button id="detailClose" class="detail-close">✕</button>
+    </div>
+    <div class="detail-tabs" id="detailTabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="capabilities">Capabilities</button>
+      <button data-tab="dependencies">Dependencies</button>
+      <button data-tab="config">Configuration</button>
+      <button data-tab="logs">Logs</button>
+    </div>
+    <div id="detailBody" class="tool-detail-body"></div>
+  </aside>
+
   <script src="/tools.js"></script>
 </body>
 </html>

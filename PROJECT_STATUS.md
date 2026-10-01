@@ -228,6 +228,21 @@ foundation the later phases build on:
   nav Tools link now points at it.
 - Docs: `TOOLS.md`, `PERMISSIONS.md`.
 
+Latest UI restructure (current main):
+
+- **Tools & Plugins** is now the operational catalog/runtime surface: summary
+  cards (installed/available/updates/running), search + filter chips + sort,
+  responsive card grid, per-tool detail panel (Overview/Capabilities/
+  Dependencies/Configuration/Logs), collapsible Installation Queue with
+  resumable-download state, speed/ETA, current file/path. Image packs,
+  processes, jobs, work queue, routing telemetry, workflows preserved.
+- **Permissions moved to Settings → Permissions** (`/settings.html`):
+  profiles, category summaries, searchable matrix, per-key detail panel with
+  approval rules (incl. new `creator` level — requires unlocked Nexus Brain),
+  domain/dir/repo scope editors, and a persisted bounded audit log
+  (`data/permission_audit.jsonl`). Tool installation and permission control
+  are intentionally separate surfaces.
+
 Phase 2 kickoff (developer tools):
 
 - **Terminal tools.** `terminal_run` executes through powershell/pwsh/cmd/bash/sh

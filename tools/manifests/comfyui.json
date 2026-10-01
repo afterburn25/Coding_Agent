@@ -10,6 +10,8 @@
   "requires_network": true,
   "permissions": ["packages.install"],
   "capabilities": ["image_generation_backend", "comfyui_runtime"],
+  "process": "comfyui",
+  "dependencies": ["python_embeded (bundled)", "NVIDIA GPU driver"],
   "install": {
     "method": "archive",
     "url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.38.0/ComfyUI_windows_portable_nvidia.7z",

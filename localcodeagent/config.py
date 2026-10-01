@@ -59,8 +59,12 @@ class AgentConfig:
         "github.write": "ask",
     })
     # Named workspace permission profile; "custom" means the permissions map
-    # above is authoritative. Levels: allow | session | ask | deny.
+    # above is authoritative. Levels: allow | session | ask | creator | deny.
     permission_profile: str = "custom"
+    # Per-permission scope limits (domain allow/block lists, allowed dirs/repos,
+    # workspace_only). Enforced generically at tool execution and editable via
+    # Settings > Permissions. Keyed by permission key.
+    permission_scopes: dict = field(default_factory=dict)
     # Modular tool/plugin system state.
     tools_state_path: str = "data/tools_state.json"
     jobs_path: str = "data/jobs.json"
@@ -312,6 +316,9 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
     cfg.permissions.update(raw.get("permissions", {}))
     cfg.permission_profile = str(raw.get("permission_profile", cfg.permission_profile))
+    raw_scopes = raw.get("permission_scopes")
+    if isinstance(raw_scopes, dict):
+        cfg.permission_scopes = {str(k): dict(v) for k, v in raw_scopes.items() if isinstance(v, dict)}
     cfg.tools_state_path = str(raw.get("tools_state_path", cfg.tools_state_path))
     cfg.jobs_path = str(raw.get("jobs_path", cfg.jobs_path))
     cfg.tool_manifests_dir = str(raw.get("tool_manifests_dir", cfg.tool_manifests_dir))

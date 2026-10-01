@@ -13,7 +13,7 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any
 
 from .agent.orchestrator import AgentOrchestrator
@@ -184,7 +184,12 @@ class AppState:
             config.permissions,
             profile=getattr(config, "permission_profile", "custom"),
             autonomous=getattr(config, "autonomous_mode", False),
+            scopes=getattr(config, "permission_scopes", None),
+            audit_path=runtime_root / "data" / "permission_audit.jsonl",
         )
+        # The "creator" approval level requires an unlocked Nexus Brain session.
+        self.permission_manager.creator_verified = (
+            lambda: bool(self.nexus_brain.verified_for_session))
         tools_state_path = Path(getattr(config, "tools_state_path", "data/tools_state.json")).expanduser()
         if not tools_state_path.is_absolute():
             tools_state_path = runtime_root / tools_state_path
@@ -1111,14 +1116,11 @@ class AppState:
             return {"ok": False,
                     "error": f"{spec.display_name} is not supported on this OS "
                              f"({', '.join(manifest.get('supported_os') or ['other'])} only)"}
-        mode = self.permission_manager.effective("packages.install")
-        if mode == "deny":
-            return {"ok": False, "error": "packages.install permission is denied"}
-        if mode == "ask" and not approve:
-            return {"ok": False, "needs_approval": True, "permission": "packages.install",
-                    "tool": spec.name, "install": install}
-        if approve and self.permission_manager.level("packages.install") == "session":
-            self.permission_manager.grant_session("packages.install")
+        gate = self._permission_gate("packages.install", approve, spec.name)
+        if gate is not None:
+            if gate.get("needs_approval"):
+                gate["install"] = install
+            return gate
         if str(install.get("method") or "").strip().lower() == "archive":
             size = int(install.get("size_bytes") or 0)
             if size:
@@ -1164,12 +1166,41 @@ class AppState:
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name, "method": str(install.get("method") or "")}
 
-    def uninstall_tool(self, tool_id: str, *, approve: bool = False) -> dict:
-        """Remove an archive-installed tool's files (tracked job).
+    def _permission_gate(self, key: str, approve: bool, label: str = "") -> dict | None:
+        """Shared approval gate for gated API actions.
 
-        Only archive-method tools support automated removal — package-manager
-        tools are owned by their managers and report manual instructions.
+        Returns a response dict when the action must stop (denied / needs
+        approval / needs creator verification), else None. On approval it also
+        records session grants and an audit entry.
         """
+        manager = self.permission_manager
+        mode = manager.effective(key)
+        if mode == "deny":
+            manager.record_event("denied", key, label)
+            return {"ok": False, "error": f"{key} permission is denied"}
+        if mode in ("ask", "creator") and not approve:
+            manager.record_event("approval_requested", key, label)
+            return {"ok": False, "needs_approval": True, "permission": key,
+                    "needs_creator": mode == "creator"}
+        if approve and manager.level(key) == "creator" and not manager.creator_ok():
+            manager.record_event("creator_required", key, label)
+            return {"ok": False, "needs_creator": True, "permission": key,
+                    "error": "requires an unlocked Nexus Brain creator session"}
+        if approve and manager.level(key) == "session":
+            manager.grant_session(key)
+        if approve or mode == "creator":
+            manager.record_event("approved", key, label)
+        return None
+
+    def uninstall_tool(self, tool_id: str, *, approve: bool = False) -> dict:
+        """Remove a manifest tool (tracked job).
+
+        Archive installs delete their payload directory; package-manager
+        installs run the manager's own remove command. Tools without an
+        automatable removal report manual instructions.
+        """
+        from .tools.plugins import uninstall_command
+
         spec = self.tools.get(tool_id)
         if spec is None:
             match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
@@ -1178,18 +1209,46 @@ class AppState:
             spec = self.tools.get(match["name"])
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
-        if str(install.get("method") or "").strip().lower() != "archive":
+        is_archive = str(install.get("method") or "").strip().lower() == "archive"
+        cmd = None if is_archive else uninstall_command(
+            install, install_root=self.runtime.base_dir)
+        if not is_archive and cmd is None:
             return {"ok": False,
-                    "error": "automated removal is available for archive-installed tools only"}
-        mode = self.permission_manager.effective("packages.install")
-        if mode == "deny":
-            return {"ok": False, "error": "packages.install permission is denied"}
-        if mode == "ask" and not approve:
-            return {"ok": False, "needs_approval": True, "permission": "packages.install",
-                    "tool": spec.name, "action": "uninstall"}
-        if approve and self.permission_manager.level("packages.install") == "session":
-            self.permission_manager.grant_session("packages.install")
-        return self.tool_downloads.uninstall(spec.name, spec.display_name, install)
+                    "error": "automated removal is not available for this tool "
+                             "— remove it with its package manager manually"}
+        gate = self._permission_gate("packages.install", approve, spec.name)
+        if gate is not None:
+            if gate.get("needs_approval"):
+                gate["action"] = "uninstall"
+            return gate
+        if is_archive:
+            return self.tool_downloads.uninstall(spec.name, spec.display_name, install)
+        job = self.jobs.submit("tool_remove", f"Remove {spec.display_name}",
+                               metadata={"tool": spec.name, "phase": "queued"})
+
+        def _run_remove() -> None:
+            import subprocess
+            self.jobs.update(job.id, state="running", status="removing",
+                             detail=" ".join(cmd[:3]))
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                if proc.returncode == 0:
+                    self.jobs.update(job.id, state="completed", status="finished",
+                                     progress=1.0, detail=(proc.stdout or "")[-300:])
+                else:
+                    self.jobs.update(job.id, state="failed",
+                                     error=(proc.stderr or proc.stdout or "uninstall failed")[-300:])
+            except FileNotFoundError:
+                self.jobs.update(job.id, state="failed", error=f"package manager not found: {cmd[0]}")
+            except subprocess.TimeoutExpired:
+                self.jobs.update(job.id, state="failed", error="uninstall timed out")
+            changed = self.tools.refresh_install_status()
+            if changed:
+                self.jobs.update(job.id, detail=f"install status updated: {changed}")
+
+        threading.Thread(target=_run_remove, daemon=True).start()
+        return {"ok": True, "job_id": job.id, "tool": spec.name,
+                "method": str(install.get("method") or "")}
 
     def jobs_payload(self) -> dict:
         image = self.images.summary() if self.config.image_enabled else {}
@@ -1332,7 +1391,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"versions": self.state.nexus_brain.settings_history()})
             return
         if path == "/api/conversations":
-            from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)
             query = str((q.get("q") or [""])[0]).strip()
             if query:
@@ -1341,7 +1399,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.state.conversation_manager.snapshot())
             return
         if path == "/api/knowledge-memory":
-            from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)
             query = str((q.get("q") or [""])[0]).strip()
             payload = self.state.knowledge_memory.snapshot()
@@ -1350,7 +1407,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(payload)
             return
         if path == "/api/model-growth":
-            from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query)
             status = str((q.get("status") or [""])[0]).strip()
             payload = self.state.model_growth.summary()
@@ -1426,11 +1482,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tools":
             self.state.tools.refresh_install_status()
             import shutil
+            manifests = self.state.tools.manifests()
+            # Resumable partial downloads: tool name -> bytes kept in .part.
+            downloads_dir = self.state.runtime.base_dir / ".agent" / "downloads"
+            partials: dict[str, int] = {}
+            for t in manifests:
+                if str((t.get("install") or {}).get("method") or "").lower() != "archive":
+                    continue
+                part = downloads_dir / f"{t['name']}.part"
+                try:
+                    if part.is_file():
+                        partials[t["name"]] = part.stat().st_size
+                except OSError:
+                    pass
             self._json({
-                "tools": self.state.tools.manifests(),
+                "tools": manifests,
                 "categories": TOOL_CATEGORIES,
                 "plugins": self.state.plugin_manifests,
                 "disk_free_bytes": shutil.disk_usage(str(self.state.runtime.base_dir)).free,
+                "partials": partials,
             })
             return
         if path.startswith("/api/tools/health/"):
@@ -1482,16 +1552,45 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/permissions":
             self._json(self.state.permission_manager.summary())
             return
+        if path == "/api/permissions/audit":
+            try:
+                limit = int(urlparse(self.path).query.split("limit=")[-1].split("&")[0] or "200")
+            except (ValueError, IndexError):
+                limit = 200
+            self._json({"entries": self.state.permission_manager.audit_entries(
+                limit=max(1, min(500, limit)))})
+            return
         if path == "/api/jobs":
             self._json(self.state.jobs_payload())
             return
         if path == "/api/processes":
             self._json({"processes": self.state.processes.list()})
             return
+        if path == "/api/processes/log":
+            params = parse_qs(urlparse(self.path).query)
+            service_id = str(params.get("id", [""])[0]).strip()
+            row = next((p for p in self.state.processes.list()
+                        if p.get("id") == service_id), None)
+            if row is None:
+                self._json({"error": f"unknown service '{service_id}'"}, 404)
+                return
+            log_path = str(row.get("log_path") or "")
+            if not log_path or not Path(log_path).is_file():
+                self._json({"id": service_id, "log": "",
+                            "detail": "no log file for this service"})
+                return
+            try:
+                text = Path(log_path).read_text(encoding="utf-8", errors="replace")[-20000:]
+                # Redact vaulted secrets before any log content leaves the process.
+                text = self.state.secrets.redact(text) if hasattr(self.state.secrets, "redact") else text
+            except OSError as exc:
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+                return
+            self._json({"id": service_id, "path": log_path, "log": text})
+            return
         if path == "/api/events":
             # Long-lived SSE stream of job/tool events for live UI updates.
             self._sse_begin()
-            from urllib.parse import parse_qs
             try:
                 replay = int(parse_qs(urlparse(self.path).query).get("replay", ["20"])[0])
             except ValueError:
@@ -1549,7 +1648,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.task_payload())
             return
         if path == "/api/task-log":
-            from urllib.parse import parse_qs
             task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]
             self._json({"task_id": task_id, "log": self.state.tasks.read_log(task_id) if task_id else ""})
             return
@@ -1560,7 +1658,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.repository_index.summary())
             return
         if path == "/api/research":
-            from urllib.parse import parse_qs
             q = parse_qs(urlparse(self.path).query).get("q", [""])[0]
             payload = self.state.research.cached(q) if q else self.state.research.summary()
             self._json(payload)
@@ -1582,7 +1679,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/image/history":
             query = urlparse(self.path).query
-            from urllib.parse import parse_qs
             q = parse_qs(query).get("q", [""])[0]
             self._json({"history": self.state.images.history(query=q)})
             return
@@ -2579,6 +2675,21 @@ class Handler(BaseHTTPRequestHandler):
                             "manager": self.state.permission_manager.summary()})
                 return
 
+            if path == "/api/permissions/scope":
+                permission = str(body.get("permission", "")).strip()
+                scope = body.get("scope")
+                try:
+                    self.state.permission_manager.set_scope(permission, scope)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self.state._update_config_file({
+                    "permission_scopes": dict(self.state.permission_manager.scopes),
+                })
+                self._json({"ok": True, "permission": permission,
+                            "scope": self.state.permission_manager.scope(permission)})
+                return
+
             if path == "/api/processes/action":
                 service_id = str(body.get("id", "")).strip()
                 action = str(body.get("action", "")).strip().lower()
@@ -2626,15 +2737,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path in {"/api/secrets/set", "/api/secrets/delete"}:
-                mode = self.state.permission_manager.effective("credentials.use")
-                if mode == "deny":
-                    self._json({"error": "credentials.use permission is denied"}, 403)
+                gate = self.state._permission_gate(
+                    "credentials.use", bool(body.get("approve")), path.rsplit("/", 1)[-1])
+                if gate is not None:
+                    status = 403 if gate.get("error") and not gate.get("needs_approval") else 200
+                    self._json(gate, status)
                     return
-                if mode == "ask" and not body.get("approve"):
-                    self._json({"ok": False, "needs_approval": True, "permission": "credentials.use"})
-                    return
-                if body.get("approve") and self.state.permission_manager.level("credentials.use") == "session":
-                    self.state.permission_manager.grant_session("credentials.use")
                 try:
                     if path.endswith("/set"):
                         self._json(self.state.secrets.set(
@@ -2660,6 +2768,8 @@ class Handler(BaseHTTPRequestHandler):
                         row = self.state.mcp.disconnect(server_id)
                     else:
                         row = self.state.mcp.restart(server_id)
+                    self.state.permission_manager.record_event(
+                        f"mcp_{action}", "mcp.servers", server_id)
                 except KeyError as exc:
                     self._json({"error": str(exc)}, 404)
                     return
