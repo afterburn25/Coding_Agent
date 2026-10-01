@@ -398,11 +398,17 @@ The main Chat Nexus chat uses `POST /api/chat/stream` with Server-Sent Events. A
 
 - assistant token deltas
 - selected/switched model events
-- tool calls and bounded output
+- tool calls rendered as terminal blocks with the command shown before it runs and **live stdout/stderr streaming** while it runs (`tool_start`/`tool_output`/`tool` events, with per-command elapsed time)
 - task/phase changes
 - research preflight state
 - approval state
 - liveness heartbeats with elapsed time, task phase, and selected model
+
+Non-token agent events are also mirrored onto the shared `/api/events` bus with `task_id` attribution, so a page that reloads mid-task resubscribes and keeps watching live — the UI additionally restores the persisted per-task terminal log (`GET /api/task-log`) and the current task card from `/api/tasks` on reconnect.
+
+**Work queue.** `POST /api/queue` enqueues prompts that run FIFO on the agent whenever it is idle; messages sent while a task is running auto-enqueue (`chat_queue_when_busy`, default on). Queue state lives in `.agent/queue.json`, shows in the chat task card and the Tools page Work queue card, and items can be cancelled via `POST /api/queue/cancel`.
+
+**Autonomous mode.** `POST /api/permissions/autonomous` (or the Tools-page toggle) auto-approves `ask`/`session` workspace actions for unattended runs — hard gates (`spend.money`, `message.send`, `microphone.use`, `camera.use`) always wait, and `deny` stays denied. Idle managed models are evicted on a timer to free VRAM/RAM, interrupted tasks auto-resume after a restart, stale errors retry with backoff, and tool calls have a hard timeout — all bounded by `autonomous_*` config keys documented in `config.example.json`.
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat/events drive the animated NEXUS activity HUD with phase/model/elapsed seconds and real high-level operations instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 
