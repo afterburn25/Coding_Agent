@@ -25,14 +25,24 @@ def register_web_tools(registry: ToolRegistry, *, runtime_root: Path) -> None:
         "network.read",
         lambda args: json.dumps(research.fetch(str(args["url"]), max_chars=int(args.get("max_chars", 30000))), ensure_ascii=False),
     ))
-    registry.register(ToolSpec(
+    spec = ToolSpec(
         "browser_run",
-        "Use a real local Chromium browser for websites that require JavaScript or interaction. Can navigate, click, type, press keys, wait, and optionally save a screenshot.",
+        "Use a real local Chromium browser for websites that require JavaScript or interaction. Actions: click, type, press, wait, wait_for, goto, select, hover, evaluate, upload, scroll. Returns page text, console output, console errors, and failed network requests. Supports persistent sessions (cookies/login) via 'session'.",
         {"type": "object", "properties": {
             "url": {"type": "string"},
             "actions": {"type": "array", "items": {"type": "object"}},
-            "screenshot": {"type": "boolean"}
+            "screenshot": {"type": "boolean"},
+            "session": {"type": "string", "description": "named persistent session (saves cookies/storage state)"},
+            "save_session": {"type": "boolean", "default": False},
         }, "required": ["url"]},
         "browser.control",
-        lambda args: json.dumps(browser.run(url=str(args["url"]), actions=list(args.get("actions") or []), screenshot=bool(args.get("screenshot", False))), ensure_ascii=False),
-    ))
+        lambda args: json.dumps(browser.run(
+            url=str(args["url"]),
+            actions=list(args.get("actions") or []),
+            screenshot=bool(args.get("screenshot", False)),
+            session=str(args.get("session", "") or ""),
+            save_session=bool(args.get("save_session", False)),
+        ), ensure_ascii=False),
+    )
+    spec.health_check = browser.health
+    registry.register(spec)

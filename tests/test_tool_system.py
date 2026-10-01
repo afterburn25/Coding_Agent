@@ -550,5 +550,25 @@ class MCPManagerTests(unittest.TestCase):
             mgr.connect("nope")
 
 
+class BrowserRunnerTests(unittest.TestCase):
+    def test_session_path_sanitized(self):
+        from localcodeagent.webtools.browser import BrowserRunner
+        with tempfile.TemporaryDirectory() as td:
+            runner = BrowserRunner(artifacts_dir=Path(td))
+            p = runner.session_path("my session/../evil")
+            self.assertEqual(p.parent, Path(td))
+            self.assertNotIn("..", p.name)
+            with self.assertRaises(ValueError):
+                runner.session_path("")
+
+    def test_health_reports_playwright_state(self):
+        from localcodeagent.webtools.browser import BrowserRunner
+        with tempfile.TemporaryDirectory() as td:
+            runner = BrowserRunner(artifacts_dir=Path(td))
+            h = runner.health()
+            self.assertIn("ok", h)
+            self.assertEqual(h["ok"], runner.available())
+
+
 if __name__ == "__main__":
     unittest.main()
