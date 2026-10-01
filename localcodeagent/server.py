@@ -1112,15 +1112,15 @@ class AppState:
             spec = self.tools.get(match["name"])
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
-        if manifest.get("os_supported") is False:
-            return {"ok": False,
-                    "error": f"{spec.display_name} is not supported on this OS "
-                             f"({', '.join(manifest.get('supported_os') or ['other'])} only)"}
         gate = self._permission_gate("packages.install", approve, spec.name)
         if gate is not None:
             if gate.get("needs_approval"):
                 gate["install"] = install
             return gate
+        if manifest.get("os_supported") is False:
+            return {"ok": False,
+                    "error": f"{spec.display_name} is not supported on this OS "
+                             f"({', '.join(manifest.get('supported_os') or ['other'])} only)"}
         if str(install.get("method") or "").strip().lower() == "archive":
             size = int(install.get("size_bytes") or 0)
             if size:
