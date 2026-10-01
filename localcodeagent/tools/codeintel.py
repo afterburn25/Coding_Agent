@@ -1,8 +1,10 @@
 """Code intelligence tools: symbol maps and outlines.
 
 Python files are parsed with the stdlib ``ast`` module (precise: nested
-classes, methods, imports). Other languages use a per-language regex scanner;
-a tree-sitter backend can replace either behind the same interface.
+classes, methods, imports). Other languages use an optional tree-sitter
+backend when the `tree-sitter` core pack plus a language pack are installed
+(lazy-loaded, no hard dependency), falling back to a per-language regex
+scanner. The result's ``backend`` field reports which path ran.
 """
 from __future__ import annotations
 
@@ -71,6 +73,99 @@ _COMPILED = {
     for ext, pats in _PATTERNS.items()
 }
 
+# Optional tree-sitter upgrade: ext -> (pip module, language-factory attr).
+# Loaded lazily; missing packs simply fall back to the regex scanner.
+_TS_LANG_SPECS = {
+    ".js": ("tree_sitter_javascript", "language"),
+    ".jsx": ("tree_sitter_javascript", "language"),
+    ".ts": ("tree_sitter_typescript", "language_typescript"),
+    ".tsx": ("tree_sitter_typescript", "language_tsx"),
+    ".c": ("tree_sitter_c", "language"),
+    ".h": ("tree_sitter_c", "language"),
+    ".cpp": ("tree_sitter_cpp", "language"),
+    ".hpp": ("tree_sitter_cpp", "language"),
+    ".rs": ("tree_sitter_rust", "language"),
+    ".go": ("tree_sitter_go", "language"),
+    ".java": ("tree_sitter_java", "language"),
+}
+_TS_FUNCTION_NODES = {
+    "function_definition", "function_declaration", "function_item",
+    "method_definition", "method_declaration", "function_signature",
+}
+_TS_CLASS_NODES = {
+    "class_definition", "class_declaration", "struct_item", "impl_item",
+    "interface_declaration", "enum_declaration", "enum_item",
+}
+_TS_IMPORT_NODES = {
+    "import_statement", "import_from_statement", "import_declaration",
+    "use_declaration", "use_clause",
+}
+_TS_LANGUAGES: dict[str, Any] = {}
+
+
+def _ts_language(ext: str):
+    """Return a tree-sitter Language for `ext`, or None when unavailable."""
+    if ext in _TS_LANGUAGES:
+        return _TS_LANGUAGES[ext]
+    lang = None
+    spec = _TS_LANG_SPECS.get(ext)
+    if spec:
+        try:
+            import importlib
+            import tree_sitter
+            module = importlib.import_module(spec[0])
+            factory = getattr(module, spec[1])
+            lang = tree_sitter.Language(factory())
+        except Exception:
+            lang = None
+    _TS_LANGUAGES[ext] = lang
+    return lang
+
+
+def _extract_treesitter(text: str, ext: str) -> list[dict[str, Any]] | None:
+    """Tree-sitter extraction for non-Python languages; None → regex fallback."""
+    lang = _ts_language(ext)
+    if lang is None:
+        return None
+    try:
+        import tree_sitter
+        parser = tree_sitter.Parser(lang)
+        tree = parser.parse(text.encode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+    symbols: list[dict[str, Any]] = []
+
+    def node_name(node) -> str:
+        named = node.child_by_field_name("name")
+        if named is not None:
+            return text[named.start_byte:named.end_byte][:120]
+        for child in node.children:
+            if child.type in {"identifier", "type_identifier", "field_identifier",
+                              "property_identifier", "qualified_identifier"}:
+                return text[child.start_byte:child.end_byte][:120]
+        return "?"
+
+    def walk(node) -> None:
+        for child in node.children:
+            if child.type in _TS_FUNCTION_NODES:
+                symbols.append({"kind": "function", "name": node_name(child),
+                                "line": child.start_point[0] + 1})
+                walk(child)
+            elif child.type in _TS_CLASS_NODES:
+                symbols.append({"kind": "class", "name": node_name(child),
+                                "line": child.start_point[0] + 1})
+                walk(child)
+            elif child.type in _TS_IMPORT_NODES:
+                symbols.append({"kind": "import",
+                                "name": text[child.start_byte:child.end_byte].split("\n")[0].strip()[:120],
+                                "line": child.start_point[0] + 1})
+            else:
+                walk(child)
+
+    walk(tree.root_node)
+    symbols.sort(key=lambda s: s["line"])
+    return symbols
+
 
 def _extract_python(text: str) -> list[dict[str, Any]] | None:
     """AST-based extraction for Python; None signals fallback to regex."""
@@ -128,13 +223,19 @@ def extract_symbols(path: Path) -> dict[str, Any]:
         if ast_symbols is not None:
             return {"file": str(path), "symbols": ast_symbols, "lines": text.count("\n") + 1,
                     "backend": "ast"}
+    else:
+        ts_symbols = _extract_treesitter(text, ext)
+        if ts_symbols is not None:
+            return {"file": str(path), "symbols": ts_symbols, "lines": text.count("\n") + 1,
+                    "backend": "tree-sitter"}
     symbols = []
     for kind, regex in rules:
         for m in regex.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
             symbols.append({"kind": kind, "name": m.group(1).strip()[:120], "line": line})
     symbols.sort(key=lambda s: s["line"])
-    return {"file": str(path), "symbols": symbols, "lines": text.count("\n") + 1}
+    return {"file": str(path), "symbols": symbols, "lines": text.count("\n") + 1,
+            "backend": "regex"}
 
 
 def register_codeintel_tools(registry: ToolRegistry, workspace: Path) -> None:

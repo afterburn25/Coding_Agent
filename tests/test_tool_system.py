@@ -780,6 +780,18 @@ class CodeIntelTests(unittest.TestCase):
             self.assertIn(("function", "bar"), kinds)
             self.assertIn(("import", "os"), kinds)
 
+    def test_backend_field_reports_extraction_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            py = Path(td) / "m.py"
+            py.write_text("def f():\n    pass\n", encoding="utf-8")
+            js = Path(td) / "m.js"
+            js.write_text("function helper() { return 1; }\n", encoding="utf-8")
+            self.assertEqual(extract_symbols(py)["backend"], "ast")
+            js_info = extract_symbols(js)
+            # tree-sitter when the optional packs exist, regex otherwise
+            self.assertIn(js_info["backend"], {"tree-sitter", "regex"})
+            self.assertTrue(any(s["name"] == "helper" for s in js_info["symbols"]))
+
     def test_code_map_scans_tree(self):
         with tempfile.TemporaryDirectory() as td:
             ws = Path(td)
