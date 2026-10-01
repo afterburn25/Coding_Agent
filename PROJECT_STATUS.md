@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `ab97bac`; verified suite: **336/336**; CI green on latest push.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Current repository head: `e7dbe63`; verified suite: **336/336**; CI green on latest push.
 
 ## Active version: 0.6.0-dev — Native Chat Nexus Desktop Dogfood
 

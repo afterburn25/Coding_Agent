@@ -140,8 +140,11 @@ class NexusBrainTests(unittest.TestCase):
             self.assertTrue(payload["creator_lock"]["distribution_read_only"])
             self.assertIn("PUBLIC KEY", payload["creator_lock"]["public_key_pem"])
 
+            # An injected unsigned history field must be stripped on install.
+            payload["brain"]["settings_history"] = [{"updated_at": 1, "self_model": {"name": "Forged"}}]
             second = NexusBrain(Path(td) / "second.json")
             second.install_locked_export(payload)
+            self.assertEqual(second.settings_history(), [])
             self.assertTrue(second.initialized)
             self.assertFalse(second.unlocked)
             self.assertTrue(second.verified_for_session)

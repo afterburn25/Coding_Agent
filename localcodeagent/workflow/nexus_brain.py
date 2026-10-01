@@ -1271,6 +1271,9 @@ class NexusBrain:
         verified = self.verify_locked_export(payload)
         brain = payload.get("brain")
         auth = payload.get("creator_lock")
+        # settings_history is local rollback state and never part of the
+        # signed contract — drop any injected copies from incoming payloads.
+        brain = {k: v for k, v in brain.items() if k != "settings_history"}
         # Ed25519 public verification lets a shipped Brain activate read-only
         # without exposing the creator's passcode/private signing key.
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -1322,7 +1325,7 @@ class NexusBrain:
         if incoming_updated <= current_updated:
             self._audit("signed_update_stale", incoming_updated_at=incoming_updated)
             return {"updated": False, "reason": "current_brain_is_same_or_newer", "brain": current}
-        brain_payload = payload.get("brain")
+        brain_payload = {k: v for k, v in payload.get("brain").items() if k != "settings_history"}
         auth_payload = payload.get("creator_lock")
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(brain_payload, indent=2, ensure_ascii=False), encoding="utf-8")
