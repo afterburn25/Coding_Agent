@@ -56,7 +56,8 @@ def _load_into_sqlite(source: Path) -> sqlite3.Connection:
             rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         keys = sorted({k for row in rows if isinstance(row, dict) for k in row})
         cols = ", ".join(f'"{k}" TEXT' for k in keys)
-        conn.execute(f'CREATE TABLE "data" ({cols or "\"empty\" TEXT"})')
+        col_spec = cols or '"empty" TEXT'
+        conn.execute(f'CREATE TABLE "data" ({col_spec})')
         if keys:
             marks = ", ".join("?" for _ in keys)
             conn.executemany(
