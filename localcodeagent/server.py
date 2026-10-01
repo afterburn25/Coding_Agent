@@ -2080,20 +2080,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Queue events back to the request thread so socket writes remain
                     # serialized and the request thread can send idle heartbeats.
                     events.put(dict(event))
-                    # Mirror non-token events onto the shared bus so a reloaded
-                    # page (or the Tools UI) can follow the run live via
-                    # /api/events instead of losing visibility with the request.
-                    etype = str(event.get("type", ""))
-                    if etype not in {"token", "result"}:
-                        try:
-                            current = self.state.tasks.current()
-                            payload = dict(event)
-                            payload.pop("type", None)
-                            if current is not None:
-                                payload.setdefault("task_id", current.id)
-                            self.state.events.publish(etype, payload)
-                        except Exception:
-                            pass
+                    # Mirror onto the shared bus so a reloaded page (or the
+                    # Tools UI) can follow the run live via /api/events.
+                    try:
+                        self.state._bus_emit(event)
+                    except Exception:
+                        pass
 
                 def run_agent() -> None:
                     try:

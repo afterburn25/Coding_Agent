@@ -260,8 +260,9 @@ class ModelStreamingTests(unittest.TestCase):
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
         # Agent events are republished on the shared bus with task attribution.
         self.assertIn('payload.setdefault("task_id", current.id)', server)
-        self.assertIn('self.state.events.publish(etype, payload)', server)
-        self.assertIn('if etype not in {"token", "result"}', server)
+        self.assertIn('self.events.publish(etype or "task", payload)', server)
+        self.assertIn('if etype in {"token", "result"}:', server)
+        self.assertIn('self.state._bus_emit(event)', server)
         # The chat page subscribes to the bus so a reload keeps terminal/task
         # visibility, and ignores duplicates while its own stream is active.
         self.assertIn("connectAgentEvents()", app)
