@@ -136,6 +136,7 @@ class NexusBrainTests(unittest.TestCase):
             )
             payload = first.export_payload()
             self.assertNotIn("encrypted_private_key_pem", payload["creator_lock"])
+            self.assertNotIn("settings_history", payload["brain"])
             self.assertTrue(payload["creator_lock"]["distribution_read_only"])
             self.assertIn("PUBLIC KEY", payload["creator_lock"]["public_key_pem"])
 

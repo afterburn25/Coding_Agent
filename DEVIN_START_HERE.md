@@ -560,7 +560,7 @@ Recommended order:
    - never included in public Brain exports; Trainer page has Back up /
      Restore creator key buttons
 
-6. **Brain audit/history** — DONE (, )
+6. **Brain audit/history** — DONE (fc0db5e, e5e0d92)
    - Trainer page renders the tamper-evident audit log (events + metadata)
    - bounded 10-version signed settings history with per-version signatures
    - creator-only rollback via POST /api/nexus-brain/rollback; rollback is
