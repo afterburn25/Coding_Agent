@@ -30,6 +30,7 @@ from localcodeagent.tools.sandbox import run_python, register_sandbox_tools
 from localcodeagent.events import EventBus, make_emitter
 from localcodeagent.tools.workflows import load_workflows, register_workflow_tools, run_workflow
 from localcodeagent.tools.blender3d import build_scene_script, register_blender_tools
+from localcodeagent.tools.docker_tool import register_docker_tools
 
 
 def _registry(**permissions):
@@ -1033,6 +1034,42 @@ class BlenderToolTests(unittest.TestCase):
             self.assertFalse(out["ok"])  # blender manifest not registered here
             self.assertTrue((ws / out["script"]).exists())
             self.assertIn("ERROR", out["detail"])
+
+
+class DockerToolTests(unittest.TestCase):
+    def _registry_with_docker(self, ws: Path):
+        # Register a stub 'docker' manifest tool to capture delegated argv
+        captured = {}
+        reg = ToolRegistry({"docker.access": "allow"})
+        register_docker_tools(reg, ws)
+        reg.register(ToolSpec("docker", "d", {"type": "object", "properties": {}},
+                              "docker.access",
+                              lambda a: captured.setdefault("argv", a.get("args")) or "ok"))
+        return reg, captured
+
+    def test_docker_run_builds_safe_argv(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg, captured = self._registry_with_docker(Path(td))
+            reg.execute("docker_run", {"image": "python:3.12", "command": "python -V"})
+            argv = captured["argv"]
+            self.assertEqual(argv[:2], ["run", "--rm"])
+            self.assertIn("--network", argv)
+            self.assertIn("none", argv)
+            self.assertIn("/work", argv[argv.index("-w") + 1])
+            self.assertIn("python:3.12", argv)
+            self.assertEqual(argv[-3:], ["sh", "-c", "python -V"])
+
+    def test_docker_run_requires_image_and_command(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg, _ = self._registry_with_docker(Path(td))
+            self.assertIn("image", reg.execute("docker_run", {"command": "x"}))
+            self.assertIn("command", reg.execute("docker_run", {"image": "python"}))
+
+    def test_docker_network_opt_in(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg, captured = self._registry_with_docker(Path(td))
+            reg.execute("docker_run", {"image": "alpine", "command": ["ls"], "network": True})
+            self.assertNotIn("--network", captured["argv"])
 
 
 if __name__ == "__main__":

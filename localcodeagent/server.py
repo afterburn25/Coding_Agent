@@ -34,6 +34,7 @@ from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
 from .tools.data import register_data_tools
 from .events import EventBus, make_emitter
+from .tools.docker_tool import register_docker_tools
 from .tools.documents import register_document_tools
 from .tools.knowledge import register_knowledge_tools
 from .tools.sandbox import register_sandbox_tools
@@ -206,6 +207,7 @@ class AppState:
             wf_dir = self.workspace / wf_dir
         register_workflow_tools(self.tools, self.workspace, workflows_dir=wf_dir, jobs=self.jobs)
         register_blender_tools(self.tools, self.workspace, jobs=self.jobs)
+        register_docker_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace)
         if config.github_enabled:
             register_github_tools(self.tools, self.workspace, config)

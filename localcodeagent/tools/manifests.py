@@ -57,6 +57,8 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "list_workflows": {"category": "utilities", "capabilities": ["list_workflows", "automation"], "provider": "nexus"},
     "run_workflow": {"category": "utilities", "capabilities": ["run_workflow", "multi_step_automation", "orchestrate_tools"], "provider": "nexus"},
     "blender_render": {"category": "3d", "capabilities": ["render_3d_scene", "blender_render", "create_3d"], "provider": "blender"},
+    "docker_run": {"category": "devops", "capabilities": ["run_container", "isolated_execute", "docker_run"], "provider": "docker"},
+    "docker_images": {"category": "devops", "capabilities": ["list_images", "docker_manage"], "provider": "docker"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},
