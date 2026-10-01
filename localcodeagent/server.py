@@ -1361,7 +1361,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/events":
             # Long-lived SSE stream of job/tool events for live UI updates.
             self._sse_begin()
-            subscription = self.state.events.subscribe(replay=20)
+            from urllib.parse import parse_qs
+            try:
+                replay = int(parse_qs(urlparse(self.path).query).get("replay", ["20"])[0])
+            except ValueError:
+                replay = 20
+            subscription = self.state.events.subscribe(replay=max(0, min(100, replay)))
             try:
                 while True:
                     try:

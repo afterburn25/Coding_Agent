@@ -1656,6 +1656,22 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(event["type"], "job")
             self.assertEqual(event["job"]["id"], job.id)
 
+    def test_bus_emit_filters_tokens_and_tags_task(self):
+        import queue as _queue
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            task = state.tasks.create("running work", "auto")
+            state.tasks.update(task.id, status="running")
+            sub = state.events.subscribe(replay=0)
+            state._bus_emit({"type": "token", "delta": "x"})
+            state._bus_emit({"type": "result", "content": "done"})
+            with self.assertRaises(_queue.Empty):
+                sub.get(timeout=0.2)
+            state._bus_emit({"type": "tool_start", "tool": {"name": "run_shell"}})
+            event = sub.get(timeout=1)
+            self.assertEqual(event["type"], "tool_start")
+            self.assertEqual(event["task_id"], task.id)
+
 
 class GitWorktreeTests(unittest.TestCase):
     def _repo(self, td: str) -> Path:
