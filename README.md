@@ -119,9 +119,11 @@ Normal conversation memory remains a **staging layer**. When the Brain is locked
 
 ### Creator lock and integrity
 
-The creator passcode is entered locally through Trainer and is **not stored in plaintext or committed to the repository**. The current implementation stores salted slow-hash creator authentication metadata and signs protected Brain state with a passcode-derived integrity key. Brain mutations, subroutine changes, emotion/self-model changes, sync, and export require an ephemeral creator session token issued after local authentication. Manual edits to protected Brain state fail integrity verification.
+The creator passcode is entered locally through Trainer and is **not stored in plaintext or committed to the repository**. Creator installations use an **Ed25519 signing key**: the private signing key is stored only in the local creator-auth file in encrypted PKCS#8 form, while protected Brain state is signed and can be verified with the corresponding public key. Brain mutations, subroutine changes, emotion/self-model changes, sync, and creator export require an ephemeral creator session token issued after local authentication. Manual edits to protected Brain state fail signature verification.
 
-A locked Brain export carries its protected records/settings plus creator-lock metadata. Importing it does not silently make the importer the creator. With the current HMAC-based design, a fresh process/install must be creator-verified once before protected settings/memory are trusted; after verification, changes can be re-locked while the verified Brain remains readable for that running process. A future distribution hardening milestone is **asymmetric/public-key Brain signing**, so shipped Brains can verify/activate without the creator present while only the creator can re-sign modifications.
+A distribution export is deliberately **public/read-only**: it contains the signed Brain plus creator public verification key/fingerprint, but **does not contain the encrypted private signing key**. A fresh install can therefore verify and use the creator-signed Brain without knowing the creator passcode. Recipients cannot unlock it for mutation. A newer Brain package is accepted automatically only when it is signed by the **same creator public key** and has a newer signed timestamp; stale packages are ignored and a Brain signed by another key is rejected.
+
+Private Windows builds can set `CHAT_NEXUS_BRAIN_SEED` to a public signed Brain export. The package validates the export at build time, places it under `brain-seed/nexus-brain-locked.json`, and a clean install verifies/imports it on startup. Existing Brains are never replaced by an unrelated key. Creator installations that hold the private signing key are never auto-overwritten by distribution updates.
 
 This is an application-level protection boundary. A machine administrator who can replace the application/backend itself can ultimately bypass local controls.
 
@@ -141,7 +143,9 @@ Creator-locked subroutine switches currently include:
 - simulated emotions
 - persistent self-model
 
-Disabled image/research/Model Growth routes are enforced in code, not merely suggested to the model. The adult-content subroutine can narrow normal conversation behavior, but Brain settings do **not** disable or bypass separate hard tool/action safety and permission gates.
+Disabled image/research/Model Growth routes are enforced in code, not merely suggested to the model. The adult-content subroutine also gates explicit image requests inside `ImageManager` itself, so direct chat routing, model tool calls, and Image Studio cannot bypass it. Ordinary non-explicit image generation remains available when image generation itself is enabled. Brain settings do **not** disable or bypass separate hard tool/action safety and permission gates.
+
+Once protected Brain state exists, its canonical path is `data/nexus_brain.json`. Mutable `config.json` cannot redirect, disable, or shrink the initialized protected Brain during live config reload.
 
 ### Emotional state and self-model
 
@@ -347,7 +351,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **185 tests passing**.
+Current expected result: **188 tests passing**.
 
 ## API highlights
 
@@ -507,7 +511,7 @@ Remote writes use the `github.write` permission, which defaults to **Ask**. GitH
 
 ## Continuous verification
 
-GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **185 passing tests**.
+GitHub Actions now runs the unit suite on every push and pull request. The current main-branch checkpoint is **188 passing tests**.
 
 ## Development state
 

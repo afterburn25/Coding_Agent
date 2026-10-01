@@ -73,7 +73,7 @@
 
 ### Tests
 
-`185` automated tests passing.
+`188` automated tests passing.
 
 ### v0.6 self-hosting progress
 
@@ -82,7 +82,7 @@
 - Pending approval tasks survive restart and can execute/deny the exact persisted action before the agent re-enters the task loop.
 - Interrupted/error tasks can rebuild model/context state from the durable task ledger, checkpoint diff, repository index, project memory, and prior verification results.
 - Chat Nexus UI surfaces a **Resume interrupted task** action.
-- GitHub Actions test workflow runs on push/PR and currently passes all 185 tests.
+- GitHub Actions test workflow runs on push/PR and currently passes all 188 tests.
 - Previously documented Image Studio mask/before-after functionality is now synchronized with the actual shipped HTML/JS and covered by CI.
 - Native GitHub coding/delivery tools are wired into the agent: branch, explicit-path commit, push, repository metadata, issue listing/creation, PR creation, and CI status.
 - `github.write` defaults to approval-gated; `.agent` metadata is blocked from agent-created commits.
@@ -143,7 +143,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **185 tests passing**.
+- Current automated checkpoint: **188 tests passing**.
 
 
 
@@ -172,12 +172,14 @@
 - Model Growth Lab supports review candidates, dataset export, versioned offline training-job manifests, evaluation, promotion, and rollback without mutating the live base model in-place.
 - Nexus Brain is implemented as protected model-independent state under `data/nexus_brain.json` plus creator-auth metadata. Replacing/downloading model weights does not replace the Brain.
 - Brain protected writes are explicit creator actions: staging memories/research/feedback can accumulate while locked, but facts/rules/knowledge/training/autobiography enter the protected Brain only through creator-authenticated Sync.
-- Creator passcodes are never stored in plaintext; protected Brain changes require an ephemeral in-memory creator token after authentication, and manual protected-data edits fail integrity verification.
-- Signed Brain subroutines gate adult-content posture, image generation, web research, long-term memory, self-learning, general-knowledge learning, conversation learning, Model Growth, temporal context, humor, emotions, and the self-model. Tool routes are code-gated where applicable.
+- Creator passcodes are never stored in plaintext; creator installations keep an encrypted Ed25519 private signing key locally, protected writes require an ephemeral in-memory creator token, and manual protected-data edits fail public signature verification.
+- Signed Brain subroutines gate adult-content posture, image generation, web research, long-term memory, self-learning, general-knowledge learning, conversation learning, Model Growth, temporal context, humor, emotions, and the self-model. Image/research/Model Growth routes are code-gated, and adult-content off now blocks explicit image jobs inside ImageManager itself.
 - Brain emotions are simulated affective state, with signed baselines plus transient runtime mood; Nexus may be human-like/autobiographically continuous but retains a non-editable `AI system` identity invariant.
 - General knowledge can be staged with `Learn that ...` / `Fact: ...`, sourced knowledge is banked with freshness/provenance, and fresh models can retrieve relevant Brain knowledge directly.
 - Approved conversation examples/corrections are banked as training signals and can be retrieved as portable in-context conversational skill guidance after a model replacement/export-import cycle.
-- Current locked-export limitation: HMAC verification requires creator verification once per new process/install. Public-key/asymmetric Brain signing is the next distribution-security milestone for creator-absent verification.
+- Brain distribution is Ed25519 public-key verified. Public Brain exports omit the creator private signing key, activate read-only without the passcode, and accept updates only from the same creator key when the signed Brain is newer.
+- Private builds can bundle a signed Brain seed with `CHAT_NEXUS_BRAIN_SEED`; clean installs verify/import it automatically, while existing unrelated/creator Brains are not overwritten.
+- Initialized protected Brain state is canonical at `data/nexus_brain.json`; mutable config reload cannot redirect or disable it.
 - Conversation policy modes are live-configurable: Permissive / Balanced / Strict. Default Permissive suppresses generic adult/sensitive-topic moralizing; narrow hard tool/action safety remains separate and enforced.
 - Policy mode is persisted in `config.json`, surfaced in `/api/status`, and changeable through `POST /api/policy/mode`.
 - Permissive adult-only consensual text conversation explicitly allows direct sexual language, including anatomy, acts, fantasies, preferences, and adult erotic fiction; profanity alone is never treated as sexual content.

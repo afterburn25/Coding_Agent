@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 185,
-  "next_milestone": "Dogfood the verified 185-test Nexus Brain build, then add asymmetric/public-key Brain signing and optional installer Brain seeding so creator-signed Brains can ship preloaded and verify without the creator credential.",
+  "test_checkpoint": 188,
+  "next_milestone": "Dogfood the verified 188-test Ed25519 Nexus Brain end-to-end: initialize creator Brain, sync staged learning, export public read-only Brain, build a private seeded installer, verify clean-install continuity and same-creator signed updates, then add creator-key backup/recovery and Brain audit/history tooling.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -245,7 +245,8 @@
     "coding_model_preflight_bypass": true,
     "natural_request_prefixes": true,
     "source_image_edit_exclusion": true,
-    "verified_code_checkpoint": "fbf328c"
+    "verified_code_checkpoint": "b1d9a079",
+    "nexus_brain_adult_content_gate": true
   },
   "live_clock": {
     "source": "host OS local clock via datetime.now().astimezone()",
@@ -322,11 +323,11 @@
     ],
     "creator_passcode_plaintext_stored": false,
     "creator_session_token": "ephemeral in-memory Trainer token",
-    "integrity": "scrypt creator authentication + passcode-derived HMAC signed Brain payload",
+    "integrity": "Ed25519 signed Brain payload with public verification; creator private signing key encrypted locally",
     "tamper_detection": true,
     "locked_export_import": true,
     "verified_read_after_relock_same_process": true,
-    "fresh_process_requires_creator_verification": true,
+    "fresh_process_requires_creator_verification": false,
     "subroutines": [
       "adult_content",
       "image_generation",
@@ -344,7 +345,8 @@
     "code_gated_routes": [
       "image_generation",
       "web_research",
-      "model_growth"
+      "model_growth",
+      "adult_explicit_image_generation"
     ],
     "general_fact_commands": [
       "Remember that ...",
@@ -366,7 +368,23 @@
       "biological_human_claim": false
     },
     "hard_tool_safety_bypass": false,
-    "verified_code_checkpoint": "d3e3dd08",
-    "next_security_upgrade": "asymmetric/public-key signing for creator-absent verification plus optional installer Brain seed"
+    "verified_code_checkpoint": "b1d9a079",
+    "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
+    "canonical_path_enforced": true,
+    "config_redirect_or_disable_after_initialization": false,
+    "signature_scheme": "ed25519",
+    "legacy_hmac_migration_on_creator_unlock": true,
+    "creator_private_key_in_public_export": false,
+    "public_export_read_only": true,
+    "public_export_creator_absent_verification": true,
+    "signed_update_policy": "newer signed Brain from exact same creator key only",
+    "stale_signed_update_ignored": true,
+    "different_creator_update_rejected": true,
+    "creator_install_auto_overwrite": false,
+    "installer_seed_env": "CHAT_NEXUS_BRAIN_SEED",
+    "installer_seed_path": "brain-seed/nexus-brain-locked.json",
+    "installer_seed_public_only": true,
+    "installer_seed_build_validation": true,
+    "adult_content_image_gate": true
   }
 }

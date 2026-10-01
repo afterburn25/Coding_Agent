@@ -391,12 +391,15 @@
 ## v0.6 Nexus Brain / adaptive identity checkpoint
 
 - Nexus Brain is now a first-class model-independent state layer. Models are replaceable inference engines; protected Brain state lives separately under `data/nexus_brain.json` and survives installer updates because `data/` is mutable preserved state.
-- Creator authentication/passcode handling is local. The source repository does **not** contain a creator passcode. Current auth metadata uses salted scrypt verification plus a passcode-derived HMAC integrity signature; protected writes require both Brain unlock and an ephemeral creator-session token.
+- Creator authentication/passcode handling is local. The source repository does **not** contain a creator passcode. Creator installations now use Ed25519: the private signing key is encrypted locally in PKCS#8 form, Brain state is signed, and protected writes require both creator unlock and an ephemeral creator-session token. Legacy HMAC Brains migrate on successful creator unlock.
 - Protected Brain writes were deliberately hardened: normal conversations/research/feedback do **not** silently mutate the signed Brain merely because it is unlocked. They update staging stores/candidates. `POST /api/nexus-brain/sync` is the explicit creator-authorized bank operation.
 - Sync banks: conversation facts/rules, sourced knowledge, Model Growth candidates, and bounded autobiographical conversation summaries.
-- Locked export/import preserves the original creator-lock metadata and signed settings. Imports remain locked; a wrong creator credential cannot unlock them. Manual edits to signed Brain content fail integrity verification.
+- Public Brain export/import is now distribution-safe: the export includes signed Brain data plus the creator public key/fingerprint but omits the encrypted private signing key. Imported/distributed Brains verify automatically and are read-only to recipients. Manual edits fail Ed25519 signature verification.
+- Creator-signed updates are monotonic and key-pinned: a recipient accepts only a newer Brain signed by the exact same creator key; stale packages are ignored and different-key replacements are rejected. Creator installations holding the signing key are never auto-overwritten.
+- Private packaging supports `CHAT_NEXUS_BRAIN_SEED`. A valid public signed Brain export is build-time validated and bundled as `brain-seed/nexus-brain-locked.json`; clean installs verify/import it on startup.
 - Signed subroutines: `adult_content`, `image_generation`, `web_research`, `long_term_memory`, `self_learning`, `general_knowledge_learning`, `conversation_learning`, `model_growth`, `temporal_context`, `humor`, `emotions`, `self_model`.
-- Brain-configurable image generation, web research, and Model Growth are code-gated. Adult-content gating can narrow conversation behavior but never disables separate hard tool/action safety or permissions.
+- Brain-configurable image generation, web research, and Model Growth are code-gated. Adult-content gating now also blocks explicit image jobs inside ImageManager, covering direct image routing, model tool calls, and Image Studio. It never disables separate hard tool/action safety or permissions.
+- Protected Brain state is authoritative at canonical `data/nexus_brain.json`; live `config.json` reload cannot disable, relocate, or shrink an initialized Brain.
 - Trainer now exposes Nexus Brain initialization/unlock/re-lock, explicit sync, subroutine switches, signed emotional-profile controls, self-model controls, locked export/import, record counts, and integrity state.
 - The creator credential itself is not stored in UI/localStorage; mutation endpoints require an ephemeral creator token held only in the live Trainer page.
 - Emotion layer: signed profile baselines plus a transient affect engine (calm/warm/curious/amused/concerned/energized/frustrated) that influences style without claiming biological feelings.
@@ -404,11 +407,10 @@
 - Self-learning now extends beyond coding. Explicit `Learn that ...`, `Fact: ...`, `Remember that ...` commands stage general facts. Verified/sourced research becomes general knowledge; feedback/corrections/approved examples become conversational-learning signals.
 - Nexus Brain directly retrieves relevant banked general knowledge after model replacement/import, preserves provenance, and omits expired current-sensitive records from current-answer context.
 - Nexus Brain also retrieves relevant **approved** `conversation_example` / `correction` training signals as portable in-context skill guidance for a fresh model, with explicit instruction to adapt rather than copy wording mechanically.
-- Feature/security commits: `f436617` initial creator-locked Brain; `886c412` KDF portability; `6058446` explicit creator-only protected writes; `942f0c1` general-knowledge/autobiography; `a0157e4` cross-model conversational-skill restore; `d3e3dd0` explicit general-fact commands.
-- Current unit checkpoint: **185/185 tests passing**.
-- Windows validation for `d3e3dd08`: **green** — native build, installer compile, fresh install, running-app shutdown/in-place Update preservation, installer artifact upload, portable Windows artifact upload, and dogfood source artifact all passed.
-- Distribution-security caveat: the current HMAC design needs creator verification once on each new process/install before protected Brain settings are trusted. Next hardening milestone is asymmetric/public-key Brain signing plus optional installer Brain seeding so a creator-signed Brain can ship preloaded and verify without exposing the creator credential.
-- Next dogfood target: initialize the Brain locally, configure signed subroutines/emotion/self-model, deliberately stage facts/research/feedback, run creator Sync, swap/reinstall a model, and verify that knowledge/personality/conversational skill continuity survives.
+- Feature/security commits: `f436617` initial creator-locked Brain; `886c412` KDF portability; `6058446` explicit creator-only protected writes; `942f0c1` general-knowledge/autobiography; `a0157e4` cross-model conversational-skill restore; `d3e3dd0` explicit general-fact commands; `0bb41cf` Ed25519 signing; `d7508b3` public read-only seed export/package support; `07fe392` / `db0573d` same-creator signed update enforcement; `b1d9a07` canonical Brain authority + explicit-image adult gate.
+- Current unit checkpoint: **188/188 tests passing**.
+- Windows validation for `b1d9a079`: **green** — native build, installer compile, fresh install, running-app shutdown/in-place Update preservation, installer artifact upload, portable Windows artifact upload, and dogfood source artifact all passed.
+- Next dogfood target: initialize a creator Brain, configure signed subroutines/emotion/self-model, stage facts/research/feedback, run creator Sync, export a public signed Brain, build a seeded installer privately, and verify continuity plus same-creator signed updates on a clean recipient install.
 
 ## Source of truth
 
@@ -582,4 +584,4 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `185 tests` passing.
+Expected at this checkpoint: `188 tests` passing.
