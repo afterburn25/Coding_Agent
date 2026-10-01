@@ -4,9 +4,9 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 396,
+  "test_checkpoint": 423,
   "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling \u2014 MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing.",
-  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official orbital CN logo",
+  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
     "fast_primary": "Qwen3 14B Q4_K_M",
@@ -15,7 +15,7 @@
   "installer": {
     "canonical_script": "installer/ChatNexus.iss",
     "app_id": "ChatNexus.Afterburn25",
-    "default_dir": "%LOCALAPPDATA%\\\\Programs\\\\Nexus Core",
+    "default_dir": "%LOCALAPPDATA%\\Programs\\Nexus Core",
     "interactive_existing_install_action": "Update",
     "preserves_on_update": [
       "models",
@@ -45,10 +45,14 @@
       "graceful NexusCore.exe process-tree close",
       "brief grace period",
       "force NexusCore.exe cleanup",
+      "force legacy ChatNexus.exe cleanup",
       "force orphan ChatNexus.Backend.exe cleanup",
       "force llama-server.exe / llama.exe cleanup"
     ],
-    "ci_running_app_close_smoke": true
+    "ci_running_app_close_smoke": true,
+    "exe": "NexusCore.exe",
+    "setup_name": "NexusCore-Setup-<version>-Windows-x64",
+    "upgrade_identity_note": "AppId ChatNexus.Afterburn25 kept deliberately so existing Chat Nexus installs update in place"
   },
   "first_run_model_setup": {
     "starter": "Install recommended 14B",
@@ -515,5 +519,23 @@
   },
   "verified_tests": 349,
   "head": "7f23a22",
-  "test_count": 366
+  "test_count": 366,
+  "branding": {
+    "canonical_name": "Nexus Core",
+    "full_logo": "web/assets/nexus-core-logo.png",
+    "compact_icon": "web/assets/nexus-core-icon.png",
+    "windows_icon": "desktop/ChatNexus.Desktop/nexus-core.ico (16-256px layers)",
+    "splash_artwork": "web/assets/nexus-core-splash.png + desktop copy",
+    "retired": "chat-nexus-emblem.png (orbital CN) no longer primary identity"
+  },
+  "startup_splash": {
+    "coordinator": "StartupProgress in desktop/ChatNexus.Desktop/Program.cs",
+    "minimum_seconds": 7,
+    "dismiss_rule": "AppReady AND MinimumElapsed; never timer-only",
+    "ready_handshake": "web/app.js posts {type:\"nexus-core-ready\"} via chrome.webview.postMessage after shell init",
+    "two_line_status": "ACTION \u00b7 SUBSYSTEM + secondary description under the progress bar",
+    "completion_effect": "READY \u00b7 NEXUS CORE + ~850ms shield-core glow bloom",
+    "failure_state": "NEXUS CORE COULD NOT START with Retry / Open Log (backend-host.log) / Exit",
+    "navigation_fallback": "NavigationCompleted + 15s bounded fallback prevents hangs on broken pages"
+  }
 }

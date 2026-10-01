@@ -71,6 +71,9 @@ class ProductNamingTests(unittest.TestCase):
         self.assertIn("OutputBaseFilename=NexusCore-Setup", INSTALLER)
         self.assertIn('Name: "{autoprograms}\\Nexus Core"', INSTALLER)
         self.assertIn('Name: "{autodesktop}\\Nexus Core"', INSTALLER)
+        zip_builder = (ROOT / "packaging" / "make_windows_zip.py").read_text(encoding="utf-8")
+        self.assertIn('"NexusCore.exe"', zip_builder)
+        self.assertIn('"ChatNexus/NexusCore.exe"', zip_builder)
 
     def test_no_user_facing_chat_nexus_branding_remains(self):
         # Legacy mentions are only allowed where they preserve upgrade

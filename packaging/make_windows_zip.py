@@ -8,8 +8,8 @@ from pathlib import Path
 def build_zip(source: Path, output: Path) -> None:
     source = source.resolve()
     output = output.resolve()
-    if not (source / "ChatNexus.exe").is_file():
-        raise SystemExit("ChatNexus.exe is missing from the package directory.")
+    if not (source / "NexusCore.exe").is_file():
+        raise SystemExit("NexusCore.exe is missing from the package directory.")
     if not (source / "Source" / ".git" / "HEAD").is_file():
         raise SystemExit("Bundled Source/.git metadata is missing.")
     if not (source / "backend" / "ChatNexus.Backend.exe").is_file():
@@ -54,7 +54,7 @@ def build_zip(source: Path, output: Path) -> None:
         if bad:
             raise SystemExit(f"ZIP CRC validation failed at {bad}")
         required = {
-            "ChatNexus/ChatNexus.exe",
+            "ChatNexus/NexusCore.exe",
             "ChatNexus/runtime/llama/llama-server.exe",
             "ChatNexus/backend/ChatNexus.Backend.exe",
             "ChatNexus/Source/.git/HEAD",
