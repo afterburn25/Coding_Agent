@@ -1505,7 +1505,7 @@ class AppStateWiringTests(unittest.TestCase):
             )
             calls = []
             with patch.object(AgentOrchestrator, "recover",
-                              lambda self, task_id: calls.append(task_id)):
+                              lambda self, task_id, **kw: calls.append(task_id)):
                 AppState(cfg, ws, ws / ".runtime")
                 deadline = time.time() + 5
                 while not calls and time.time() < deadline:
@@ -1632,7 +1632,7 @@ class AppStateWiringTests(unittest.TestCase):
             tasks.update(task.id, status="interrupted")
             calls = []
             with patch.object(AgentOrchestrator, "recover",
-                              lambda self, task_id: calls.append(task_id)):
+                              lambda self, task_id, **kw: calls.append(task_id)):
                 self._state(td)
                 time.sleep(0.3)
             self.assertEqual(calls, [])

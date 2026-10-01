@@ -2138,7 +2138,12 @@ class AgentOrchestrator:
         self._safe_emit(event_callback, {"type": "task", "task": routed_task.as_dict()})
         return self._drive_or_error(session)
 
-    def recover(self, task_id: str) -> AgentResult:
+    def recover(
+        self,
+        task_id: str,
+        *,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         """Continue an interrupted/error task from durable workspace state."""
         task = self.tasks.get(task_id)
         if task.status not in {"interrupted", "error"}:
@@ -2147,6 +2152,8 @@ class AgentOrchestrator:
             task_id,
             reason=f"Previous status was {task.status}; previous phase was {task.interrupted_from or task.phase}.",
         )
+        if event_callback is not None:
+            session.event_callback = event_callback
         self._sessions[task_id] = session
         self.tasks.update(
             task_id,

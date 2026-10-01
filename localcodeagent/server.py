@@ -399,7 +399,7 @@ class AppState:
                             "event": "auto_resume",
                             "task_id": task.get("id"),
                         })
-                        self.agent.recover(str(task["id"]))
+                        self.agent.recover(str(task["id"]), event_callback=self._bus_emit)
                     except Exception as exc:
                         self.events.publish("task", {
                             "event": "auto_resume_failed",
@@ -833,6 +833,26 @@ class AppState:
         self._retry_failed_tasks()
         self._dequeue_next()
 
+    def _bus_emit(self, event: dict) -> None:
+        """Publish an agent event to the shared bus.
+
+        Mirrors the /api/chat/stream policy: tokens and the final result stay
+        off the bus (chat-only), everything else is published with task
+        attribution so reconnecting pages can follow unattended runs.
+        """
+        etype = str(event.get("type", ""))
+        if etype in {"token", "result"}:
+            return
+        payload = dict(event)
+        payload.pop("type", None)
+        try:
+            current = self.tasks.current()
+            if current is not None:
+                payload.setdefault("task_id", current.id)
+        except Exception:
+            pass
+        self.events.publish(etype or "task", payload)
+
     def _dequeue_next(self) -> None:
         """Start the next queued prompt when no task is active.
 
@@ -857,23 +877,6 @@ class AppState:
             if item_id in self._queue_running:
                 return
 
-            def queue_emit(event: dict) -> None:
-                # Mirror the /api/chat/stream policy: tokens and the final
-                # result stay off the bus (chat-only), everything else is
-                # published with task attribution for reconnecting pages.
-                etype = str(event.get("type", ""))
-                if etype in {"token", "result"}:
-                    return
-                payload = dict(event)
-                payload.pop("type", None)
-                try:
-                    current = self.tasks.current()
-                    if current is not None:
-                        payload.setdefault("task_id", current.id)
-                except Exception:
-                    pass
-                self.events.publish(etype or "task", payload)
-
             def run_item(entry: dict) -> None:
                 try:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
@@ -881,7 +884,7 @@ class AppState:
                         str(entry["prompt"]),
                         history=self.history,
                         mode=str(entry.get("mode") or "auto"),
-                        event_callback=queue_emit,
+                        event_callback=self._bus_emit,
                     )
                     self.history = self.conversation_manager.history(limit=32)
                 except Exception as exc:
@@ -934,7 +937,7 @@ class AppState:
                 def retry(tid: str = task_id) -> None:
                     try:
                         self.events.publish("task", {"event": "auto_retry", "task_id": tid})
-                        self.agent.recover(tid)
+                        self.agent.recover(tid, event_callback=self._bus_emit)
                     except Exception as exc:
                         self.events.publish("task", {
                             "event": "auto_retry_failed", "task_id": tid,
