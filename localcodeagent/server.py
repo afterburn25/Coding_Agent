@@ -214,6 +214,7 @@ class AppState:
             jobs_path = runtime_root / jobs_path
         self.jobs = JobManager(jobs_path)
         self.events = EventBus()
+        self._stream_sinks: list = []  # live chat SSE queues that also want voice events
         self.jobs.on_change = make_emitter(self.events, "job")
         self.images.on_change = make_emitter(self.events, "image_job")
         self.tools.on_event = make_emitter(self.events, "tool")
@@ -257,6 +258,40 @@ class AppState:
         register_web_tools(self.tools, runtime_root=runtime_root)
         if config.image_enabled:
             register_image_tools(self.tools, self.images)
+        # Local-first voice/TTS subsystem (Kokoro ONNX, CPU by default).
+        self.voice = None
+        if getattr(config, "voice_enabled", True):
+            try:
+                from .voice.manager import VoiceManager
+                from .voice.tools import register_voice_tools
+                vdir = Path(getattr(config, "voice_assets_dir", "data/voice/assets"))
+                if not vdir.is_absolute():
+                    vdir = runtime_root / vdir
+                pdir = Path(getattr(config, "voice_presets_dir", "data/voice/presets"))
+                if not pdir.is_absolute():
+                    pdir = runtime_root / pdir
+                cdir = Path(getattr(config, "voice_cache_dir", "data/voice/cache"))
+                if not cdir.is_absolute():
+                    cdir = runtime_root / cdir
+                _voice_keys = [k for k in asdict(config) if k.startswith("voice_")]
+
+                def _persist_voice() -> None:
+                    self.persist_config_fields(_voice_keys)
+
+                self.voice = VoiceManager(
+                    config, preset_dir=pdir, cache_dir=cdir, asset_dir=vdir,
+                    publish=lambda kind, payload: self._voice_publish(payload),
+                    persist=_persist_voice,
+                )
+                register_voice_tools(self.tools, self.voice)
+            except Exception as exc:
+                try:
+                    self.events.publish("log",
+                                        {"level": "warn",
+                                         "message": f"voice subsystem unavailable: {exc}"})
+                except Exception:
+                    pass
+                self.voice = None
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
@@ -975,6 +1010,37 @@ class AppState:
             pass
         self.events.publish(etype or "task", payload)
 
+    def persist_config_fields(self, keys) -> None:
+        """Merge selected config fields back into config.json (atomic), so
+        voice settings survive restarts without touching unrelated keys."""
+        try:
+            raw = json.loads(self.config_path.read_text(encoding="utf-8")) \
+                if self.config_path.exists() else {}
+        except Exception:
+            raw = {}
+        full = asdict(self.config)
+        for k in keys:
+            if k in full:
+                raw[k] = full[k]
+        tmp = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(self.config_path)
+
+    def _voice_publish(self, payload: dict) -> None:
+        """Voice events go to the shared bus AND any live chat SSE sinks so
+        playback segments reach the requesting client mid-stream."""
+        event = {"type": "voice", **payload}
+        try:
+            self._bus_emit(event)
+        except Exception:
+            pass
+        for sink in list(getattr(self, "_stream_sinks", [])):
+            try:
+                sink.put(dict(event))
+            except Exception:
+                pass
+
     def _dequeue_next(self, *, blocking: bool = False) -> None:
         """Start the next queued prompt when no task is active.
 
@@ -1475,6 +1541,165 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             return False
 
+    def _handle_voice_post(self, path: str, body: dict) -> None:
+        """Voice subsystem POST endpoints. TTS failures never reach chat —
+        every error returns a concise JSON payload."""
+        voice = self.state.voice
+        try:
+            if path == "/api/voice/mute":
+                self._json(voice.set_muted(bool(body.get("muted"))))
+                return
+            if path == "/api/voice/stop":
+                self._json(voice.stop_all(reason=str(body.get("reason") or "user")))
+                return
+            if path == "/api/voice/speak":
+                text = str(body.get("text", "")).strip()
+                if not text:
+                    self._json({"error": "text is required"}, 400)
+                    return
+                out = voice.speak_text(
+                    text[:20000],
+                    preset_id=body.get("preset_id") or None,
+                    speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                    auto_filter=bool(body.get("auto_filter", True)),
+                )
+                self._json(out)
+                return
+            if path == "/api/voice/preview":
+                from .voice.types import PREVIEW_PHRASE, VoicePreset
+                text = str(body.get("text") or PREVIEW_PHRASE)
+                raw = bool(body.get("raw"))
+                if raw:
+                    # A/B 'A' side — raw base voice, no preset processing.
+                    base_voice = str(body.get("base_voice") or "bf_isabella")
+                    import numpy as np
+                    import uuid as _uuid
+                    from .voice.dsp import wav_bytes
+                    eng = voice.engine(str(body.get("engine") or ""))
+                    audio, sr = eng.synthesize(
+                        text, voice=base_voice,
+                        lang="en-gb" if base_voice.startswith("b") else "en-us")
+                    pcm = np.asarray(audio, dtype=np.float32)
+                    seg = voice.cache.put(
+                        f"raw-{base_voice}-{abs(hash(text))}",
+                        wav_bytes(np.stack([pcm, pcm], axis=1), sr))
+                    seg_id = _uuid.uuid4().hex[:16]
+                    voice.segments[seg_id] = seg
+                    self._json({"ok": True, "segment_id": seg_id,
+                                "url": f"/api/voice/audio/{seg_id}",
+                                "seconds": round(pcm.size / sr, 2)})
+                    return
+                preset_raw = body.get("preset")
+                if isinstance(preset_raw, dict):
+                    preset = VoicePreset.from_dict(preset_raw)
+                    preset.id = preset.id or "_preview"
+                    pcm, sr, seg = voice._synthesize(
+                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))))
+                    seg_id = voice._register_segment(seg, "preview")
+                    self._json({"ok": True, "segment_id": seg_id,
+                                "url": f"/api/voice/audio/{seg_id}",
+                                "seconds": round(pcm.shape[0] / sr, 2)})
+                    return
+                out = voice.speak_text(
+                    text, preset_id=body.get("preset_id") or None,
+                    auto_filter=False)
+                self._json(out)
+                return
+            if path == "/api/voice/config":
+                changed = {}
+                for key in ("voice_enabled", "voice_muted", "voice_mode",
+                            "voice_preset_id", "voice_engine",
+                            "voice_output_device", "voice_device"):
+                    if key in body:
+                        changed[key] = body[key]
+                for key in ("voice_volume", "voice_speed"):
+                    if key in body:
+                        changed[key] = float(body[key])
+                for k, v in changed.items():
+                    if hasattr(self.state.config, k):
+                        setattr(self.state.config, k, v)
+                if body.get("muted") is not None:
+                    self._json(voice.set_muted(bool(body["muted"])))
+                    return
+                try:
+                    self.state.persist_config_fields(changed.keys())
+                except Exception:
+                    pass
+                self._json({"ok": True, "voice": voice.status()})
+                return
+            if path == "/api/voice/preset/save":
+                from .voice.types import VoicePreset
+                raw = body.get("preset")
+                if not isinstance(raw, dict):
+                    self._json({"error": "preset object required"}, 400)
+                    return
+                p = voice.presets.save(VoicePreset.from_dict(raw))
+                self._json({"ok": True, "preset": p.as_dict()})
+                return
+            if path == "/api/voice/preset/duplicate":
+                src = voice.presets.get(str(body.get("preset_id", "")))
+                if src is not None:
+                    name = str(body.get("name", "")).strip()
+                    p = voice.presets.save_as(src, new_name=name) if name \
+                        else voice.presets.duplicate(src.id)
+                else:
+                    p = None
+                if p is None:
+                    self._json({"error": "preset not found"}, 404)
+                    return
+                self._json({"ok": True, "preset": p.as_dict()})
+                return
+            if path == "/api/voice/preset/rename":
+                p = voice.presets.rename(str(body.get("preset_id", "")),
+                                         str(body.get("name", "")))
+                if p is None:
+                    self._json({"error": "preset not found"}, 404)
+                    return
+                self._json({"ok": True, "preset": p.as_dict()})
+                return
+            if path == "/api/voice/preset/delete":
+                removed = voice.presets.delete(str(body.get("preset_id", "")))
+                self._json({"ok": bool(removed)})
+                return
+            if path == "/api/voice/preset/import":
+                p = voice.presets.import_json(str(body.get("json", "")))
+                self._json({"ok": True, "preset": p.as_dict()})
+                return
+            if path == "/api/voice/export":
+                import re as _re
+                seg_id = str(body.get("segment_id", ""))
+                fmt = str(body.get("format", "wav")).lower()
+                name = _re.sub(r"[^\w\-]+", "-",
+                               str(body.get("name", "")).strip())[:80] or \
+                    f"nexus-voice-{seg_id}"
+                export_dir = Path(getattr(self.state.config, "voice_cache_dir",
+                                          "data/voice/cache"))
+                if not export_dir.is_absolute():
+                    export_dir = Path(self.state.config_path).parent / export_dir
+                dest = export_dir / "exports" / f"{name}.{fmt}"
+                out = voice.export_segment(seg_id, fmt, dest)
+                self._json({"ok": True, "path": str(out)})
+                return
+            if path == "/api/voice/assets/install":
+                def _install():
+                    try:
+                        from .voice import assets as _assets
+                        _assets.ensure_assets(
+                            voice.engine().asset_dir,
+                            progress=lambda n, done: self.state._voice_publish(
+                                {"event": "asset_progress", "file": n, "bytes": done}))
+                        self.state._voice_publish({"event": "assets_ready"})
+                    except Exception as exc:
+                        self.state._voice_publish({"event": "asset_error",
+                                                   "error": str(exc)[:200]})
+                threading.Thread(target=_install, name="nexus-voice-assets",
+                                 daemon=True).start()
+                self._json({"ok": True, "started": True})
+                return
+            self._json({"error": f"unknown voice endpoint {path}"}, 404)
+        except Exception as exc:
+            self._json({"ok": False, "error": str(exc)[:300]}, 500)
+
     def _image_job_payload(self, job) -> dict:
         row = job.as_dict()
         urls: list[str] = []
@@ -1809,6 +2034,52 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/image":
             self._json(self.state.images.summary())
             return
+        if path == "/api/voice/status":
+            self._json(self.state.voice.status() if self.state.voice
+                       else {"enabled": False})
+            return
+        if path == "/api/voice/presets":
+            presets = [p.as_dict() for p in self.state.voice.presets.list()] \
+                if self.state.voice else []
+            self._json({"presets": presets})
+            return
+        if path == "/api/voice/voices":
+            try:
+                eng = self.state.voice.engine() if self.state.voice else None
+                self._json({"voices": eng.voices() if eng else []})
+            except Exception as exc:
+                self._json({"voices": [], "error": str(exc)})
+            return
+        if path.startswith("/api/voice/audio/"):
+            seg_id = path[len("/api/voice/audio/"):].strip("/")
+            seg = self.state.voice.segment_path(seg_id) if self.state.voice else None
+            if seg is None or not seg.exists():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            data = seg.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path.startswith("/api/voice/preset/") and path.endswith("/export"):
+            pid = path[len("/api/voice/preset/"):-len("/export")].strip("/")
+            text = self.state.voice.presets.export_json(pid) if self.state.voice else None
+            if text is None:
+                self._json({"error": "preset not found"}, 404)
+                return
+            self._json({"ok": True, "json": text})
+            return
+        if path.startswith("/api/voice/preset/"):
+            pid = path[len("/api/voice/preset/"):].strip("/")
+            p = self.state.voice.presets.get(pid) if self.state.voice else None
+            if p is None:
+                self._json({"error": "preset not found"}, 404)
+                return
+            self._json({"preset": p.as_dict()})
+            return
         if path.startswith("/api/image/job/"):
             job_id = unquote(path[len("/api/image/job/"):]).strip("/")
             if not job_id:
@@ -1882,6 +2153,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             body = self._body()
+            if path.startswith("/api/voice/"):
+                if self.state.voice is None:
+                    self._json({"error": "voice subsystem is disabled"}, 503)
+                    return
+                self._handle_voice_post(path, body)
+                return
             if path == "/api/nexus-brain/initialize":
                 state = self.state.nexus_brain.initialize_creator(
                     str(body.get("creator_name", "")).strip(),
@@ -2538,6 +2815,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 events: queue.Queue[dict] = queue.Queue()
+                self.state._stream_sinks.append(events)
                 done = threading.Event()
                 started = time.monotonic()
 
@@ -2551,6 +2829,27 @@ class Handler(BaseHTTPRequestHandler):
                         self.state._bus_emit(event)
                     except Exception:
                         pass
+                    # Tee assistant tokens into the speech pipeline — filtered,
+                    # sentence-segmented, and queued to the TTS worker. Failures
+                    # here must never affect the text response.
+                    if self.state.voice is not None:
+                        try:
+                            et = event.get("type")
+                            if et == "token":
+                                cur = self.state.tasks.current()
+                                tid = cur.id if cur else ""
+                                if tid:
+                                    self.state.voice.begin_task(tid)
+                                    self.state.voice.feed_token(
+                                        tid, str(event.get("text") or event.get("delta") or ""))
+                            elif et == "result":
+                                cur = self.state.tasks.current()
+                                tid = cur.id if cur else ""
+                                if tid:
+                                    self.state.voice.finish_task(
+                                        tid, str(event.get("content") or ""))
+                        except Exception:
+                            pass
                     # Token deltas and live-output chunks are drop-safe under
                     # backpressure (a disconnected or stalled client must not
                     # grow memory for the rest of the task); everything else —
@@ -2633,6 +2932,10 @@ class Handler(BaseHTTPRequestHandler):
 
                 # If the client disappeared, the daemon worker continues the durable
                 # task to completion; reconnect/status UI can inspect the task ledger.
+                try:
+                    self.state._stream_sinks.remove(events)
+                except ValueError:
+                    pass
                 self.close_connection = True
                 return
             if path == "/api/chat":

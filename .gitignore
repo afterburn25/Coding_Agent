@@ -50,3 +50,6 @@ cdp_shot.js
 nexus_welcome.png
 splash_preview.png
 tools_*.png
+
+# Local PyInstaller output
+/bin/

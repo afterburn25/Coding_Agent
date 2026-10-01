@@ -837,3 +837,31 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - **Malformed tool-call args self-repair** (`77d0c32`): `_parse_call` returns (name, args, error). Repairable text (Python literals, trailing commas, truncated braces) executes with recovered args; unrecoverable text feeds "arguments were not valid JSON, re-emit" back to the model instead of executing with `{}`.
 - **Corrupt-state self-repair** (`44becbc`): `load_config` quarantines a damaged `config.json` to `*.corrupt-<ts>` and boots defaults — previously an unguarded JSONDecodeError crash-looped the backend. Per-model entries skip unknown keys (forward-compat). jobs/tasks stores quarantine corrupt files the same way.
 - **First-run note**: a freshly PyInstaller-built unsigned backend gets a one-time ~50s AV scan of `_internal` on first launch — splash sits at CORE SERVICES; subsequent launches are fast.
+
+
+## v0.8 local voice subsystem checkpoint
+
+- `localcodeagent/voice/`: full local-first TTS stack. `TTSEngine` provider
+  interface; `KokoroEngine` (Kokoro-82M ONNX via `kokoro-onnx 0.6.1`,
+  Apache-2.0; assets SHA-256-pinned in `voice/assets.py` and the installer).
+- `VoicePreset` schema v1 — nondestructive DSP recipes. Official preset
+  `nexus-synthetic-isabella` (bf_isabella; pitch/EQ/exciter/compressor +
+  neural/glass/micro parallel layers + stereo width + limiter; master
+  `synthetic` slider scales everything).
+- `SpeechTextFilter` block classifier (SPEAK/SUMMARIZE/SKIP) — code, logs,
+  diffs, JSON, URLs, hashes never reach TTS. `SentenceStreamer` segments
+  token deltas fence-aware so first sentence speaks early.
+- `VoiceManager`: ordered cancellable queue, mute-stops-now, per-task
+  stale-speech suppression, bounded LRU WAV cache, WAV/MP3 export.
+- API `/api/voice/*` (status/speak/preview/mute/stop/config/presets/audio),
+  voice SSE channel on `/api/chat/stream` + shared bus.
+- `voice_*` tools registered under `audio.read|generate|manage` permissions.
+- `web/voice.html` Voice Studio (A/B compare, Natural↔Synthetic, preset
+  CRUD/import/export) + `web/voice_global.js` global mute/playback on all
+  pages; per-message speaker on assistant replies.
+- Installer ships Kokoro assets into `{app}\modelsoice` (hash-checked,
+  skip-if-verified); `data/voice/presets` survives upgrades.
+- Build: PyInstaller collects onnxruntime/kokoro_onnx/phonemizer/
+  espeakng_loader/numpy; `kokoro-onnx` installed with
+  `--ignore-requires-python` (declared <3.14, verified working on 3.14).
+- Measured: model load ~0.8 s, warm synthesis RTF ~0.43 on CPU.

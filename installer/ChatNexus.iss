@@ -25,6 +25,16 @@
 #define Qwen30Size 18556688384
 #define Qwen30SourceRepo "lm-kit/qwen3-coder-30b-a3b-instruct-gguf"
 
+; Kokoro-82M voice assets (Apache-2.0, hexgrad/Kokoro-82M, ONNX build
+; distributed with kokoro-onnx 0.6.1). Hashes verified against the files
+; Nexus Core actually synthesized with.
+#define KokoroModelUrl "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+#define KokoroModelSha256 "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
+#define KokoroModelSize 325532387
+#define KokoroVoicesUrl "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+#define KokoroVoicesSha256 "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+#define KokoroVoicesSize 28214398
+
 ; Optional tools (ComfyUI, image model packs, etc.) are intentionally NOT
 ; downloaded by Setup — they install on demand from the in-app Tools page.
 
@@ -90,6 +100,11 @@ Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: 
 ; filename is committed, and the Check functions skip already-trusted models.
 Source: "{#Qwen14Url}"; DestDir: "{app}\models"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
 Source: "{#Qwen30Url}"; DestDir: "{app}\models"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
+
+; Local TTS engine assets (Kokoro-82M ONNX + voices). Small enough for Setup;
+; skips download when already installed and hash-verified.
+Source: "{#KokoroModelUrl}"; DestDir: "{app}\models\voice"; DestName: "kokoro-v1.0.onnx"; ExternalSize: {#KokoroModelSize}; Hash: "{#KokoroModelSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroModel
+Source: "{#KokoroVoicesUrl}"; DestDir: "{app}\models\voice"; DestName: "voices-v1.0.bin"; ExternalSize: {#KokoroVoicesSize}; Hash: "{#KokoroVoicesSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroVoices
 
 ; Optional tools (ComfyUI portable, image model packs) are downloaded by the
 ; in-app Tools page instead of Setup, keeping installation fast.
@@ -359,6 +374,38 @@ begin
     '{#Qwen30Sha256}',
     {#Qwen30Size},
     '{#Qwen30SourceRepo}');
+end;
+
+function ShouldDownloadKokoroModel(): Boolean;
+begin
+  if SkipModelDownloads then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    'voice\kokoro-v1.0.onnx',
+    'kokoro-v1-0-onnx',
+    '{#KokoroModelSha256}',
+    {#KokoroModelSize},
+    'hexgrad/Kokoro-82M');
+end;
+
+function ShouldDownloadKokoroVoices(): Boolean;
+begin
+  if SkipModelDownloads then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    'voice\voices-v1.0.bin',
+    'kokoro-voices-v1-0',
+    '{#KokoroVoicesSha256}',
+    {#KokoroVoicesSize},
+    'hexgrad/Kokoro-82M');
 end;
 
 function InstalledUninstallKey(): String;

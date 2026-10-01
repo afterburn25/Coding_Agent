@@ -131,6 +131,7 @@ The Windows package bundles llama.cpp itself but not the GGUF bytes inside the i
 - Reviewer-model handoff.
 - Persistent task ledger, project memory, repository index, and local conversation memory.
 - Interrupted tasks are normalized to a recoverable state after restart; pending approvals can also resume cold from durable task metadata.
+- Local-first TTS voice: Kokoro-82M ONNX engine, official `Nexus Synthetic — Isabella` preset (`bf_isabella` + DSP layers), Voice Studio, global mute, speech filter that never reads code aloud, and `voice_*` tools. See `docs/VOICE_SYSTEM.md`.
 
 ## Persistent conversation memory
 

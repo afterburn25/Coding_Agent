@@ -33,6 +33,20 @@
 - Prompt-injection-resistant untrusted-source wrapping and likely-secret query redaction.
 - Automatic verification failure → diagnose/research/fix/retest loop with bounded repair cycles.
 
+#### Local voice
+
+- Local-first TTS via Kokoro-82M ONNX (`kokoro-onnx 0.6.1`, CPU default, Apache-2.0).
+- Provider abstraction (`TTSEngine`) — Kokoro is the first engine, not the only one.
+- Official preset `Nexus Synthetic — Isabella`: `bf_isabella` shaped by a tunable
+  parallel-layer DSP chain (neural/glass/micro + exciter + compressor + stereo + limiter).
+- Block-level `SpeechTextFilter` — code/logs/diffs/JSON/URLs are never read aloud.
+- Sentence-level streaming speech on `/api/chat/stream`; per-message replay; global
+  mute stops playback instantly everywhere.
+- Voice Studio (`/voice.html`): any base voice, Natural↔Synthetic slider, A/B compare,
+  preset CRUD + import/export; user presets survive upgrades.
+- `voice_*` ToolRegistry entries under `audio.*` permissions; bounded WAV cache;
+  failure can never break text chat.
+
 #### Local images
 
 - Modular `ImageBackend` interface.

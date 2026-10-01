@@ -29,6 +29,13 @@ if (-not (Test-Path $DesktopSplash)) { throw "nexus-core-splash.png missing — 
 & $Python -c "from PIL import Image; im=Image.open(r'$DesktopIcon'); req={(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)}; missing=req-set(im.ico.sizes()); assert not missing, f'ico missing sizes: {missing}'"
 if ($LASTEXITCODE -ne 0) { throw "nexus-core.ico does not contain the required resolution layers" }
 
+Write-Host "Ensuring local voice runtime dependencies (kokoro-onnx stack)..."
+& $Python -m pip install --quiet "onnxruntime==1.30.0" "phonemizer==3.4.0" "espeakng-loader==0.2.4" "numpy>=1.26"
+if ($LASTEXITCODE -ne 0) { throw "voice runtime dependency install failed" }
+# kokoro-onnx declares Python <3.14; verified working on 3.14 locally.
+& $Python -m pip install --quiet --ignore-requires-python "kokoro-onnx==0.6.1"
+if ($LASTEXITCODE -ne 0) { throw "kokoro-onnx install failed" }
+
 Write-Host "Building hidden Python agent backend..."
 & $Python -m PyInstaller `
     --noconfirm `
@@ -45,6 +52,12 @@ Write-Host "Building hidden Python agent backend..."
     --collect-submodules localcodeagent `
     --collect-submodules py7zr `
     --collect-all cryptography `
+    --collect-all onnxruntime `
+    --collect-all kokoro_onnx `
+    --collect-all phonemizer `
+    --collect-all espeakng_loader `
+    --collect-all numpy `
+    --add-data "$Root\localcodeagent\voice\official;localcodeagent/voice/official" `
     --hidden-import pybcj --hidden-import pyppmd --hidden-import pyzstd `
     --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `
     --hidden-import multivolumefile --hidden-import Cryptodome `

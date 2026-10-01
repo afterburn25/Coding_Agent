@@ -206,6 +206,24 @@ class AgentConfig:
     image_auto_run_jobs: bool = True
     image_job_timeout: int = 900
 
+    # Voice / TTS subsystem (local-first; Kokoro ONNX on CPU by default so
+    # speech never competes with coding models for VRAM).
+    voice_enabled: bool = True
+    voice_muted: bool = False
+    voice_engine: str = "kokoro"
+    voice_preset_id: str = "nexus-synthetic-isabella"
+    voice_mode: str = "responses"          # off | responses | responses_activity | manual
+    voice_volume: float = 1.0
+    voice_speed: float = 1.0
+    voice_output_device: str = ""          # empty = default device
+    voice_assets_dir: str = "models/voice"
+    voice_presets_dir: str = "data/voice/presets"
+    voice_cache_dir: str = "data/voice/cache"
+    voice_cache_max_mb: int = 512
+    voice_device: str = "cpu"              # cpu | gpu (best-effort ORT provider)
+    voice_max_concurrency: int = 1
+    voice_idle_unload_seconds: float = 600.0
+
     # v0.5 research/documentation subsystem settings.
     research_enabled: bool = True
     research_mode: str = "auto"  # auto | local_only | official | balanced | deep | offline | none
@@ -480,6 +498,21 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_restore_chat_model = bool(raw.get("image_restore_chat_model", cfg.image_restore_chat_model))
     cfg.image_auto_run_jobs = bool(raw.get("image_auto_run_jobs", cfg.image_auto_run_jobs))
     cfg.image_job_timeout = max(30, int(raw.get("image_job_timeout", cfg.image_job_timeout)))
+    cfg.voice_enabled = bool(raw.get("voice_enabled", cfg.voice_enabled))
+    cfg.voice_muted = bool(raw.get("voice_muted", cfg.voice_muted))
+    cfg.voice_engine = str(raw.get("voice_engine", cfg.voice_engine))
+    cfg.voice_preset_id = str(raw.get("voice_preset_id", cfg.voice_preset_id))
+    cfg.voice_mode = str(raw.get("voice_mode", cfg.voice_mode))
+    cfg.voice_volume = max(0.0, min(2.0, float(raw.get("voice_volume", cfg.voice_volume))))
+    cfg.voice_speed = max(0.5, min(2.0, float(raw.get("voice_speed", cfg.voice_speed))))
+    cfg.voice_output_device = str(raw.get("voice_output_device", cfg.voice_output_device))
+    cfg.voice_assets_dir = str(raw.get("voice_assets_dir", cfg.voice_assets_dir))
+    cfg.voice_presets_dir = str(raw.get("voice_presets_dir", cfg.voice_presets_dir))
+    cfg.voice_cache_dir = str(raw.get("voice_cache_dir", cfg.voice_cache_dir))
+    cfg.voice_cache_max_mb = max(32, int(raw.get("voice_cache_max_mb", cfg.voice_cache_max_mb)))
+    cfg.voice_device = str(raw.get("voice_device", cfg.voice_device))
+    cfg.voice_max_concurrency = max(1, int(raw.get("voice_max_concurrency", cfg.voice_max_concurrency)))
+    cfg.voice_idle_unload_seconds = max(0.0, float(raw.get("voice_idle_unload_seconds", cfg.voice_idle_unload_seconds)))
     cfg.research_enabled = bool(raw.get("research_enabled", cfg.research_enabled))
     cfg.research_mode = str(raw.get("research_mode", cfg.research_mode))
     cfg.research_data_dir = str(raw.get("research_data_dir", cfg.research_data_dir))

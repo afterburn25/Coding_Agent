@@ -1,0 +1,118 @@
+/* Nexus Core — global voice client.
+   Plays backend-synthesized WAV segments in order, tracks global mute,
+   and exposes NexusVoice to every page. Mute stops playback immediately
+   (local stop + server-side queue cancel). */
+(function () {
+  const NV = {
+    muted: false,
+    enabled: true,
+    queue: [],
+    current: null,
+    volume: 1.0,
+    status: null,
+    listeners: [],
+    _playSeq: 0,
+  };
+
+  function api(path, body) {
+    const opt = body === undefined ? {} : {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    };
+    return fetch(path, opt).then(r => r.json()).catch(() => ({}));
+  }
+
+  NV.refresh = async function () {
+    const s = await api('/api/voice/status');
+    if (s && s.enabled !== undefined) {
+      NV.status = s;
+      NV.muted = !!s.muted;
+      NV.enabled = !!s.enabled;
+      if (s.volume != null) NV.volume = s.volume;
+      NV._emit();
+    }
+    return s;
+  };
+
+  NV.setMuted = async function (muted) {
+    NV.muted = !!muted;
+    if (muted) NV.stop();
+    NV._emit();
+    await api('/api/voice/mute', { muted: !!muted });
+  };
+
+  NV.stop = function () {
+    NV.queue.length = 0;
+    if (NV.current) {
+      try { NV.current.pause(); NV.current.src = ''; } catch (e) {}
+      NV.current = null;
+    }
+    NV._playSeq++;
+    NV._emit();
+    api('/api/voice/stop', { reason: 'user' });
+  };
+
+  NV.enqueue = function (url, meta) {
+    if (NV.muted || !NV.enabled) return;
+    NV.queue.push({ url, meta });
+    NV._playNext();
+    NV._emit();
+  };
+
+  NV._playNext = function () {
+    if (NV.current || !NV.queue.length) return;
+    const item = NV.queue.shift();
+    const audio = new Audio(item.url);
+    audio.volume = Math.min(1, Math.max(0, NV.volume));
+    const seq = ++NV._playSeq;
+    audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
+    audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
+    NV.current = audio;
+    audio.play().catch(() => { NV.current = null; NV._playNext(); });
+  };
+
+  NV.speak = async function (text, opts) {
+    if (NV.muted || !NV.enabled) return null;
+    const out = await api('/api/voice/speak', Object.assign({ text: String(text || '') }, opts || {}));
+    if (out && out.url) NV.enqueue(out.url, { manual: true });
+    return out;
+  };
+
+  NV.onEvent = function (data) {
+    const e = data || {};
+    if (e.event === 'segment' && e.url) { NV.enqueue(e.url, e); NV._emit(e); }
+    else if (e.event === 'stop' || e.event === 'muted') { if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; } } NV.refresh(); }
+    else NV._emit(e);
+  };
+
+  NV.on = function (fn) { NV.listeners.push(fn); };
+  NV._emit = function (evt) {
+    for (const fn of NV.listeners) { try { fn(evt, NV); } catch (e) {} }
+    const btn = document.getElementById('voiceToggle');
+    if (btn) {
+      btn.classList.toggle('muted', NV.muted);
+      const label = btn.querySelector('span:last-child');
+      const icon = btn.querySelector('.nav-icon');
+      if (label) label.textContent = NV.muted ? 'Muted' : 'Voice On';
+      if (icon) icon.textContent = NV.muted ? '🔇' : '🔊';
+      btn.title = NV.muted ? 'Voice muted — click to unmute' : 'Voice on — click to mute';
+    }
+  };
+
+  // Wire the global speaker button + shared event bus.
+  document.addEventListener('DOMContentLoaded', async () => {
+    const btn = document.getElementById('voiceToggle');
+    if (btn) btn.addEventListener('click', () => NV.setMuted(!NV.muted));
+    await NV.refresh();
+    // Shared bus mirrors voice stop/segment events so other pages react.
+    try {
+      const es = new EventSource('/api/events');
+      es.addEventListener('voice', ev => {
+        try { NV.onEvent(JSON.parse(ev.data)); } catch (e) {}
+      });
+    } catch (e) {}
+  });
+
+  window.NexusVoice = NV;
+})();

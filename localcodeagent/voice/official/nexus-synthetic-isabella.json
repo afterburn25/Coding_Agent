@@ -1,0 +1,69 @@
+{
+  "id": "nexus-synthetic-isabella",
+  "name": "Nexus Synthetic — Isabella",
+  "description": "Official Nexus Core voice: natural British female (Kokoro bf_isabella) with a controlled futuristic neural texture. A DSP-derived preset — not a retrained model.",
+  "engine": "kokoro",
+  "base_voice": "bf_isabella",
+  "language": "en-GB",
+  "schema_version": 1,
+  "official": true,
+  "pitch_semitones": 1.25,
+  "tempo": 0.98,
+  "formant_preserve": 0.35,
+  "eq": [
+    {"freq_hz": 220, "gain_db": -3.0, "q": 1.1},
+    {"freq_hz": 3400, "gain_db": 5.8, "q": 1.4},
+    {"freq_hz": 7200, "gain_db": 3.2, "q": 1.0}
+  ],
+  "exciter": 0.44,
+  "compression": {
+    "threshold_db": -18.0,
+    "ratio": 3.0,
+    "attack_ms": 4.0,
+    "release_ms": 70.0,
+    "makeup_db": 1.5
+  },
+  "neural": {
+    "enabled": true,
+    "hpf_hz": 700,
+    "lpf_hz": 6900,
+    "bit_depth": 9,
+    "wet": 0.78,
+    "anti_alias": 0.58,
+    "sample_reduction": 1.55,
+    "delay_ms": 1.8,
+    "decay": 0.28,
+    "mod_rate_hz": 0.48,
+    "am_rate_hz": 38,
+    "am_depth": 0.16,
+    "mix": 0.24
+  },
+  "glass": {
+    "enabled": true,
+    "pitch_factor": 1.245,
+    "formant_preserve": 0.8,
+    "hpf_hz": 1900,
+    "lpf_hz": 9200,
+    "delay_ms": 8,
+    "echo": 0.10,
+    "mix": 0.085
+  },
+  "micro": {
+    "enabled": true,
+    "pitch_factor": 0.965,
+    "formant_preserve": 0.8,
+    "hpf_hz": 900,
+    "lpf_hz": 4800,
+    "bit_depth": 12,
+    "wet": 0.3,
+    "delay_ms": 15,
+    "mix": 0.06
+  },
+  "stereo_width": 1.5,
+  "synthetic": 0.8,
+  "limiter_ceiling": 0.89,
+  "output_gain_db": 0.0,
+  "ambience_ms": 0.0,
+  "highpass_hz": 60.0,
+  "lowpass_hz": 0.0
+}

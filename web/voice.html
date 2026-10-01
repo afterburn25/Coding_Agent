@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core — Voice Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/tools.css">
+  <link rel="stylesheet" href="/voice.css">
+</head>
+<body>
+  <div class="tools-shell">
+    <aside class="tools-side">
+      <div class="brand">
+        <img class="brand-logo" src="/assets/nexus-core-icon.png" alt="Nexus Core">
+        <div>
+          <div class="brand-title">NEXUS <span>CORE</span></div>
+          <div class="brand-sub">VOICE STUDIO</div>
+        </div>
+      </div>
+      <nav class="side-links">
+        <a href="/">Chat</a>
+        <a href="/models.html">Models</a>
+        <a href="/image.html">Images</a>
+        <a href="/research.html">Research</a>
+        <a href="/tools.html">Tools</a>
+        <a href="/trainer.html">Trainer</a>
+        <a class="active" href="/voice.html">Voice</a>
+        <button id="voiceToggle" class="voice-toggle side-toggle" type="button">🔊 Voice On</button>
+        <a href="/settings.html">Settings</a>
+      </nav>
+
+      <div class="side-block">
+        <div class="side-block-title">Engine</div>
+        <div id="engineStatus" class="muted">Checking local voice engine…</div>
+      </div>
+      <div class="side-block">
+        <div class="side-block-title">Voice presets</div>
+        <div id="presetList" class="voice-preset-list muted">Loading…</div>
+        <div class="side-actions">
+          <button id="importPreset" class="mini-button" type="button">Import</button>
+          <button id="installAssets" class="mini-button" type="button">Setup engine</button>
+        </div>
+        <input id="presetFile" type="file" accept=".json" hidden>
+      </div>
+      <div class="side-block">
+        <div class="side-block-title">Behavior</div>
+        <label class="voice-check"><input type="checkbox" id="autoRead"> Read responses aloud</label>
+        <label class="voice-check"><input type="checkbox" id="voiceEnabled" checked> Voice enabled</label>
+      </div>
+    </aside>
+
+    <main class="tools-main voice-main">
+      <header class="voice-head">
+        <div>
+          <h1>Voice Studio</h1>
+          <p>Design voices from local Kokoro base voices. Presets are nondestructive DSP recipes — no model retraining.</p>
+        </div>
+        <div id="presetBadge" class="voice-badge">—</div>
+      </header>
+
+      <section class="voice-preview card">
+        <div class="card-title">Preview</div>
+        <input id="previewText" class="voice-input" value="Nexus Core online. I've completed the analysis and everything is ready.">
+        <div class="voice-preview-actions">
+          <button id="previewA" class="mini-button" type="button">A · Raw base voice</button>
+          <button id="previewB" class="mini-button primary" type="button">B · Current preset</button>
+          <button id="previewAB" class="mini-button" type="button">A/B compare</button>
+          <button id="stopPlayback" class="mini-button" type="button">Stop</button>
+          <span id="previewStatus" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Voice character</div>
+        <div class="voice-grid">
+          <label>Base voice<select id="baseVoice"></select></label>
+          <label>Pitch (semitones)<input type="range" id="pitch" min="-6" max="6" step="0.05"><span class="val" id="pitchVal"></span></label>
+          <label>Tempo<input type="range" id="tempo" min="0.8" max="1.2" step="0.01"><span class="val" id="tempoVal"></span></label>
+          <label>Warmth (220 Hz)<input type="range" id="eqWarmth" min="-9" max="6" step="0.1"><span class="val" id="eqWarmthVal"></span></label>
+          <label>Presence (3.4 kHz)<input type="range" id="eqPresence" min="0" max="9" step="0.1"><span class="val" id="eqPresenceVal"></span></label>
+          <label>Air (7.2 kHz)<input type="range" id="eqAir" min="0" max="8" step="0.1"><span class="val" id="eqAirVal"></span></label>
+          <label>Exciter<input type="range" id="exciter" min="0" max="1" step="0.01"><span class="val" id="exciterVal"></span></label>
+          <label>Compression<input type="range" id="compRatio" min="1" max="6" step="0.1"><span class="val" id="compRatioVal"></span></label>
+        </div>
+      </section>
+
+      <section class="card voice-synth-card">
+        <div class="card-title">Synthetic character</div>
+        <div class="synth-slider">
+          <span>NATURAL</span>
+          <input type="range" id="synthetic" min="0" max="1" step="0.01">
+          <span>SYNTHETIC</span>
+          <b id="syntheticVal"></b>
+        </div>
+        <div class="voice-grid">
+          <label>Neural texture<input type="range" id="neuralMix" min="0" max="0.4" step="0.005"><span class="val" id="neuralMixVal"></span></label>
+          <label>Glass harmonic<input type="range" id="glassMix" min="0" max="0.2" step="0.005"><span class="val" id="glassMixVal"></span></label>
+          <label>Micro layer<input type="range" id="microMix" min="0" max="0.15" step="0.005"><span class="val" id="microMixVal"></span></label>
+          <label>Stereo width<input type="range" id="stereoWidth" min="0.8" max="1.8" step="0.05"><span class="val" id="stereoWidthVal"></span></label>
+        </div>
+        <details class="voice-advanced">
+          <summary>Advanced DSP</summary>
+          <div class="voice-grid">
+            <label>Neural bit depth<input type="range" id="neuralBits" min="4" max="16" step="0.5"><span class="val" id="neuralBitsVal"></span></label>
+            <label>Neural wet<input type="range" id="neuralWet" min="0" max="1" step="0.01"><span class="val" id="neuralWetVal"></span></label>
+            <label>Neural phase mod<input type="range" id="neuralDecay" min="0" max="0.6" step="0.01"><span class="val" id="neuralDecayVal"></span></label>
+            <label>Neural AM depth<input type="range" id="neuralAM" min="0" max="0.4" step="0.01"><span class="val" id="neuralAMVal"></span></label>
+            <label>Glass pitch ×<input type="range" id="glassPitch" min="1.05" max="1.5" step="0.005"><span class="val" id="glassPitchVal"></span></label>
+            <label>Micro pitch ×<input type="range" id="microPitch" min="0.9" max="1.05" step="0.005"><span class="val" id="microPitchVal"></span></label>
+            <label>Formant preserve<input type="range" id="formantPreserve" min="0" max="1" step="0.05"><span class="val" id="formantPreserveVal"></span></label>
+            <label>Limiter ceiling<input type="range" id="limiter" min="0.7" max="0.98" step="0.01"><span class="val" id="limiterVal"></span></label>
+            <label>Output gain dB<input type="range" id="outGain" min="-6" max="6" step="0.1"><span class="val" id="outGainVal"></span></label>
+          </div>
+        </details>
+      </section>
+
+      <section class="voice-actions">
+        <button id="savePreset" class="mini-button primary" type="button">Save</button>
+        <button id="saveAsPreset" class="mini-button" type="button">Save As…</button>
+        <button id="duplicatePreset" class="mini-button" type="button">Duplicate</button>
+        <button id="renamePreset" class="mini-button" type="button">Rename</button>
+        <button id="deletePreset" class="mini-button danger" type="button">Delete</button>
+        <button id="exportPreset" class="mini-button" type="button">Export JSON</button>
+        <button id="resetPreset" class="mini-button" type="button">Reset changes</button>
+        <button id="useAsDefault" class="mini-button" type="button">Set as default voice</button>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Export generated speech</div>
+        <div class="voice-preview-actions">
+          <input id="exportName" class="voice-input" placeholder="filename (optional)">
+          <button id="exportWav" class="mini-button" type="button">Export last as WAV</button>
+          <button id="exportMp3" class="mini-button" type="button">Export last as MP3</button>
+          <span id="exportStatus" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">Engine diagnostics</div>
+        <div id="voiceMetrics" class="inventory muted">—</div>
+      </section>
+    </main>
+  </div>
+  <script src="/voice_global.js"></script>
+  <script src="/voice.js"></script>
+</body>
+</html>

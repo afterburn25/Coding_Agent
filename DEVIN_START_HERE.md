@@ -30,6 +30,7 @@ Read in this order:
 7. `MODEL_ROUTING.md` when touching model selection/runtime.
 8. `docs/UI_DIRECTION.md` before changing the primary UI.
 9. `docs/IMAGE_MODULE_SPEC.md` for image work.
+10. `docs/VOICE_SYSTEM.md` for the local TTS/voice subsystem (Kokoro, presets, Voice Studio).
 10. `docs/RESEARCH_SYSTEM.md` and `docs/WEB_RESEARCH.md` for research/browser work.
 
 ## Product direction that must be preserved

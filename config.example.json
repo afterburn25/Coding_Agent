@@ -100,7 +100,10 @@
     {
       "id": "example",
       "name": "Example MCP server",
-      "command": ["python", "path/to/server.py"],
+      "command": [
+        "python",
+        "path/to/server.py"
+      ],
       "env": {},
       "enabled": false,
       "auto_start": true,
@@ -309,5 +312,16 @@
   "conversation_policy_mode": "permissive",
   "ethical_temperature": 1,
   "generic_refusal_retry_limit": 3,
-  "comfyui_start_on_image_request": true
+  "comfyui_start_on_image_request": true,
+  "voice_enabled": true,
+  "voice_muted": false,
+  "voice_engine": "kokoro",
+  "voice_preset_id": "nexus-synthetic-isabella",
+  "voice_mode": "responses",
+  "voice_volume": 1.0,
+  "voice_speed": 1.0,
+  "voice_assets_dir": "models/voice",
+  "voice_presets_dir": "data/voice/presets",
+  "voice_cache_dir": "data/voice/cache",
+  "voice_device": "cpu"
 }
