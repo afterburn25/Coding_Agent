@@ -646,7 +646,13 @@ class AgentOrchestrator:
                 line = str(payload.get("chunk") or "")
             elif event_type == "tool":
                 tool = payload.get("tool") or {}
-                line = f"· {tool.get('name', 'tool')} done\n"
+                result = str(tool.get("result") or "")
+                state = "ok"
+                if result.startswith(("ERROR", "PERMISSION_DENIED")) or "EXIT_CODE=" in result and "EXIT_CODE=0" not in result:
+                    state = "failed"
+                if "timed out" in result.lower():
+                    state = "timeout"
+                line = f"· {tool.get('name', 'tool')} {state}\n"
             elif event_type == "task":
                 task = payload.get("task") or {}
                 status = f"{task.get('status') or ''}/{task.get('phase') or ''}".strip("/")
