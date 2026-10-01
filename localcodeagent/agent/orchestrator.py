@@ -1410,7 +1410,15 @@ class AgentOrchestrator:
 
             def dispatch(tool_name: str, chunk: str) -> None:
                 tls = self.tools.context["task_tls"]
-                sink = self.tools.context["stream_sinks"].get(getattr(tls, "task_id", ""))
+                sinks = self.tools.context["stream_sinks"]
+                sink = sinks.get(getattr(tls, "task_id", ""))
+                if sink is None:
+                    # Reader threads spawned inside a tool (e.g. subprocess
+                    # stdout pumps) are not the executor thread — fall back to
+                    # the ambient task id, then to a sole registered sink.
+                    sink = sinks.get(str(self.tools.context.get("task_id") or ""))
+                if sink is None and len(sinks) == 1:
+                    sink = next(iter(sinks.values()))
                 if sink:
                     sink(tool_name, chunk)
 

@@ -1099,6 +1099,57 @@ class AutonomousContinuationTests(unittest.TestCase):
             self.assertIn("[elided", joined)
             self.assertTrue(any(e.get("type") == "context_trim" for e in result.model_events))
 
+    def test_tool_events_stream_start_output_complete_in_order(self):
+        """Devin-style visibility: tool_start fires before execution, output
+        chunks stream while the tool runs, and the completion event lands last."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"shell.execute": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+            )
+            tools = ToolRegistry(config.permissions)
+            from localcodeagent.tools.shell import register_shell_tools
+            register_shell_tools(tools, root)
+            index = RepositoryIndex(root)
+            index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            provider = _RepeatToolProvider(tool_calls=1, tool_name="run_shell")
+            # run_shell needs a command argument — give the provider one.
+            class _ShellProvider(_RepeatToolProvider):
+                def complete(self, *, messages, tools=None):
+                    resp = super().complete(messages=messages, tools=tools)
+                    for call in resp.message.get("tool_calls") or []:
+                        call["function"]["arguments"] = json.dumps(
+                            {"command": "echo hello-nexus", "timeout": 10})
+                    return resp
+            provider = _ShellProvider(tool_calls=1, tool_name="run_shell")
+            agent._provider_for = lambda _: provider
+
+            events = []
+            result = agent.run("do the thing", event_callback=events.append)
+
+            self.assertEqual(result.task["status"], "completed")
+            kinds = [e["type"] for e in events]
+            self.assertIn("tool_start", kinds)
+            self.assertIn("tool_output", kinds)
+            self.assertIn("tool", kinds)
+            self.assertLess(kinds.index("tool_start"), kinds.index("tool_output"))
+            self.assertLess(kinds.index("tool_output"), kinds.index("tool"))
+            chunks = "".join(str(e.get("chunk", "")) for e in events if e["type"] == "tool_output")
+            self.assertIn("hello-nexus", chunks)
+
 
 if __name__ == "__main__":
     unittest.main()
