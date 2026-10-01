@@ -824,3 +824,13 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - **Windows trust**: backend EXE version metadata, optional Authenticode signing (`NEXUS_CODESIGN_PFX_B64`/`NEXUS_CODESIGN_PASSWORD` or `NEXUS_CODESIGN_THUMBPRINT` secrets), per-artifact `.sha256` + `CHECKSUMS.txt` published with each release.
 - **Real benchmark numbers** (installed app, RTX 3080 Ti, resident model under contention): qwen3-coder-30b → 13.1 tok/s gen, 87.6ms warm TTFT (cache-reuse works, 55× faster than cold), flash-attn selected; qwen3-14b → ~2.9 tok/s dense under contention.
 - Suite: **484 tests, 2 skips — green**. Latest head: `55c265a` (job-object + thrash fixes); prior green CI run `36933655384` (`255323e`).
+
+## Self-repair + orphan reaping (main, latest)
+
+- **Request self-repair** (`localcodeagent/models/openai_compat.py`): HTTP 400 "exceeds the available context size" from llama.cpp now self-heals — the provider parses the server's reported token counts, stubs oldest non-system bodies (system + latest turns preserved), caps max_tokens, and retries (≤2 repairs, `auto_repaired` marked in the response). All HTTP errors surface as `ModelHTTPError` carrying the server's real message instead of the misleading "could not reach" (HTTPError is a URLError subclass; the body was discarded).
+- **Smarter budgeter** (`orchestrator._trim_context`): reserves `max_output_tokens` and uses 2.6 chars/token — prompt+output must fit under the *launched* ctx (tuner's `recommended_context` can be below `context_window`; the overflow that motivated this was a 16.7K request vs a 16384-token launch). 4xx rejections skip `runtime.recover()` — restarting a healthy server can't fix a malformed request.
+- **MCP lifecycle fix** (`localcodeagent/mcp.py`): stderr drain, Job Object assignment, and the initialize handshake were dead code after `_resolved_env`'s `return` — stderr never drained (verbose servers deadlock), handshake never ran, no tree-kill. Moved into `start()`/`close()`; `close()` kills via Job Object so shell-wrapped servers can't orphan children.
+- **Backend singleton** (`Program.cs`): force-killed host left its backend orphaned holding port+VRAM (observed live). `BackendProcess.Start` writes `data/logs/backend.pid` and reaps a path-matching leftover with `taskkill /T` before spawning.
+- **Taskbar icon**: running exe embeds the transparent ico (verified per-layer alpha); Explorer cache cleared via ie4uinit. `new Icon(path)` form icon and exe resource both transparent.
+- `tests/test_mcp.py` (4 tests: stderr-flood handshake, cmd-wrapper tree kill, secret env); streaming tests gained context-overflow repair + non-overflow 4xx surfacing cases.
+- Suite: **495 tests, 2 skips — green**. Commits: `f09ee74` (MCP + reaping), `d43a6a1` (self-repair).
