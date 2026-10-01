@@ -35,6 +35,14 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     # -- external apis / secrets ------------------------------------------------
     "api_request": {"category": "external_apis", "capabilities": ["api_request", "http_client", "external_api"], "requires_network": True},
     "secrets_list": {"category": "utilities", "capabilities": ["secrets_list"]},
+    # -- media -----------------------------------------------------------------
+    "media_probe": {"category": "video", "capabilities": ["probe_media", "verify_media", "media_metadata"], "provider": "ffmpeg-project"},
+    "extract_audio": {"category": "video", "capabilities": ["extract_audio"], "provider": "ffmpeg-project"},
+    "trim_video": {"category": "video", "capabilities": ["trim_video"], "provider": "ffmpeg-project"},
+    "convert_video": {"category": "video", "capabilities": ["convert_video", "change_container"], "provider": "ffmpeg-project"},
+    "create_thumbnail": {"category": "video", "capabilities": ["create_thumbnail", "extract_frames"], "provider": "ffmpeg-project"},
+    "normalize_audio": {"category": "audio", "capabilities": ["normalize_audio"], "provider": "ffmpeg-project"},
+    "add_subtitles": {"category": "video", "capabilities": ["add_subtitles"], "provider": "ffmpeg-project"},
     # -- git / github ----------------------------------------------------------
     "git_status": {"category": "git", "capabilities": ["git_status", "version_control"]},
     "git_diff": {"category": "git", "capabilities": ["git_diff", "version_control"]},

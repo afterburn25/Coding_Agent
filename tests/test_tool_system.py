@@ -21,6 +21,9 @@ from localcodeagent.secrets import SecretVault
 from localcodeagent.tools.api import register_api_tools
 from localcodeagent.tools.codeintel import extract_symbols, register_codeintel_tools
 from localcodeagent.tools.data import profile_source, query_source, register_data_tools, render_chart
+from localcodeagent.tools.media import (build_add_subtitles, build_convert, build_extract_audio,
+                                        build_merge, build_normalize, build_thumbnail, build_trim,
+                                        find_ffmpeg, find_ffprobe, register_media_tools)
 
 
 def _registry(**permissions):
@@ -730,6 +733,39 @@ class DataToolTests(unittest.TestCase):
             self.assertIn("<path", out2.read_text())
             with self.assertRaises(ValueError):
                 render_chart({"type": "nope", "values": [1]}, Path(td) / "n.svg")
+
+
+class MediaToolTests(unittest.TestCase):
+    def test_argv_builders(self):
+        s, d = Path("in.mp4"), Path("out.mp3")
+        self.assertIn("-vn", build_extract_audio(s, d))
+        self.assertIn("mp3", build_extract_audio(s, d))
+        trim = build_trim(s, Path("clip.mp4"), 5.0, 10.0)
+        self.assertIn("-ss", trim)
+        self.assertIn("copy", trim)
+        conv = build_convert(s, Path("out.webm"), "128k")
+        self.assertIn("-b:a", conv)
+        self.assertIn("-frames:v", build_thumbnail(s, Path("t.png"), 3.0))
+        self.assertIn("loudnorm", " ".join(build_normalize(s, Path("n.wav"))))
+        soft = build_add_subtitles(s, Path("subs.srt"), Path("out.mp4"), burn=False)
+        self.assertIn("mov_text", soft)
+        burned = build_add_subtitles(s, Path("subs.srt"), Path("out.mp4"), burn=True)
+        self.assertIn("subtitles", " ".join(burned))
+        merged = build_merge([Path("a.mp4"), Path("b.mp4")], Path("out.mp4"))
+        self.assertIn("concat=n=2", " ".join(merged))
+
+    def test_media_tools_report_missing_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "in.mp4").write_bytes(b"fake")
+            reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow", "shell.execute": "allow"})
+            register_media_tools(reg, ws)
+            out = reg.execute("media_probe", {"source": "in.mp4"})
+            # Either ffprobe ran (installed) or a clean missing-dependency error
+            if not find_ffprobe():
+                self.assertTrue(out.startswith("ERROR"), out)
+            out = reg.execute("trim_video", {"source": "../nope.mp4", "output": "x.mp4"})
+            self.assertTrue(out.startswith("ERROR"))
 
 
 if __name__ == "__main__":
