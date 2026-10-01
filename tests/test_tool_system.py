@@ -1193,6 +1193,22 @@ class EventBusTests(unittest.TestCase):
             seen = [sub.get(timeout=1)["type"] for _ in range(3)]
             self.assertEqual(seen, ["job", "job", "tool"])
 
+    def test_tool_output_chunks_coalesce_in_replay_history(self):
+        bus = EventBus(history=10)
+        sub = bus.subscribe(replay=0)
+        for i in range(30):
+            bus.publish("tool_output", {"tool": "run_shell", "task_id": "t1", "chunk": f"line{i}\n"})
+        bus.publish("task", {"task_id": "t1", "event": "completed"})
+        # Live subscribers still receive every chunk.
+        for i in range(30):
+            self.assertEqual(sub.get(timeout=1)["chunk"], f"line{i}\n")
+        # Replay history merged the run into one entry, preserving the task event.
+        replay = bus.subscribe(replay=10)
+        events = [replay.get(timeout=1) for _ in range(2)]
+        self.assertEqual(events[0]["type"], "tool_output")
+        self.assertIn("line29\n", events[0]["chunk"])
+        self.assertEqual(events[1]["type"], "task")
+
 
 class WorkflowToolTests(unittest.TestCase):
     def setUp(self):

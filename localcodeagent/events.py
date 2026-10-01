@@ -24,7 +24,22 @@ class EventBus:
     def publish(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         event = {"type": event_type, "ts": time.time(), **dict(payload)}
         with self._lock:
-            self._history.append(event)
+            # Coalesce consecutive tool_output chunks for the same tool so a
+            # chatty command does not evict task/tool_start context needed to
+            # reconstruct the view on a reloaded page. Subscribers still get
+            # every chunk live; only the replay history merges.
+            if (
+                event_type == "tool_output"
+                and self._history
+                and self._history[-1].get("type") == "tool_output"
+                and self._history[-1].get("tool") == event.get("tool")
+                and self._history[-1].get("task_id") == event.get("task_id")
+            ):
+                last = self._history[-1]
+                last["chunk"] = ((last.get("chunk") or "") + (event.get("chunk") or ""))[-20000:]
+                last["ts"] = event["ts"]
+            else:
+                self._history.append(event)
             subscribers = list(self._subscribers)
         for sub in subscribers:
             try:
