@@ -857,6 +857,23 @@ class AppState:
             if item_id in self._queue_running:
                 return
 
+            def queue_emit(event: dict) -> None:
+                # Mirror the /api/chat/stream policy: tokens and the final
+                # result stay off the bus (chat-only), everything else is
+                # published with task attribution for reconnecting pages.
+                etype = str(event.get("type", ""))
+                if etype in {"token", "result"}:
+                    return
+                payload = dict(event)
+                payload.pop("type", None)
+                try:
+                    current = self.tasks.current()
+                    if current is not None:
+                        payload.setdefault("task_id", current.id)
+                except Exception:
+                    pass
+                self.events.publish(etype or "task", payload)
+
             def run_item(entry: dict) -> None:
                 try:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
@@ -864,7 +881,7 @@ class AppState:
                         str(entry["prompt"]),
                         history=self.history,
                         mode=str(entry.get("mode") or "auto"),
-                        event_callback=lambda e: self.events.publish(str(e.get("type", "task")), dict(e)),
+                        event_callback=queue_emit,
                     )
                     self.history = self.conversation_manager.history(limit=32)
                 except Exception as exc:
