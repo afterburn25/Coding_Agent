@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -841,7 +842,7 @@ class AgentOrchestrator:
             if approved:
                 self._emit_tool_start(session, name, args)
             result = (
-                self._execute_tool(name, args, approved=True)
+                self._execute_tool(name, args, approved=True, session=session)
                 if approved
                 else f"PERMISSION_DENIED: user denied {permission} for {name}"
             )
@@ -1020,16 +1021,35 @@ class AgentOrchestrator:
         "filesystem.read", "network.read", "browser.control", "image.read", "github.read",
     })
 
-    def _execute_tool(self, name: str, args: dict[str, Any], approved: bool = False) -> str:
+    def _execute_tool(
+        self,
+        name: str,
+        args: dict[str, Any],
+        approved: bool = False,
+        session: "_AgentSession | None" = None,
+    ) -> str:
         """Execute a tool with a hard timeout so a hung tool cannot stall the run.
 
         Python cannot kill a running thread, so a timed-out call leaks one
         daemon thread — bounded and preferable to blocking the agent loop
-        indefinitely.
+        indefinitely. The worker thread is tagged with the session's task id
+        so stream_sink output routes to the right task under concurrent runs.
         """
         timeout = max(1.0, float(getattr(self.config, "agent_tool_timeout_seconds", 1800.0)))
         pool = ThreadPoolExecutor(max_workers=1)
-        future = pool.submit(self.tools.execute, name, args, approved=approved)
+        task_id = session.task_id if session is not None else ""
+
+        def run() -> str:
+            tls = self.tools.context.get("task_tls")
+            if tls is not None:
+                tls.task_id = task_id
+            try:
+                return self.tools.execute(name, args, approved=approved)
+            finally:
+                if tls is not None:
+                    tls.task_id = ""
+
+        future = pool.submit(run)
         try:
             return future.result(timeout=timeout)
         except TimeoutError:
@@ -1079,14 +1099,14 @@ class AgentOrchestrator:
                 self._emit_tool_start(session, n, a)
             if readonly:
                 with ThreadPoolExecutor(max_workers=min(4, len(batch))) as pool:
-                    results = list(pool.map(lambda item: self._execute_tool(item[1], item[2]), batch))
+                    results = list(pool.map(lambda item: self._execute_tool(item[1], item[2], session=session), batch))
             else:
                 results = []
                 for _, n, a in batch:
                     if self._task_cancelled(session):
                         results.append("CANCELLED: task cancelled by user before this call ran")
                         continue
-                    results.append(self._execute_tool(n, a))
+                    results.append(self._execute_tool(n, a, session=session))
             for (c, n, a), result in zip(batch, results):
                 self._append_tool_result(session, c, n, a, result)
             session.pending_call_index = j
@@ -1126,7 +1146,7 @@ class AgentOrchestrator:
                     detail=item["command"],
                 )
             self._emit_tool_start(session, "run_shell", args)
-            result = self._execute_tool("run_shell", args)
+            result = self._execute_tool("run_shell", args, session=session)
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(session.task_id)
             self.tasks.update(session.task_id, verification=[*task.verification, entry])
@@ -1297,7 +1317,7 @@ class AgentOrchestrator:
             and self._brain_subroutine_enabled("model_growth", True)
         ):
             self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
-        self._sessions.pop(session.task_id, None)
+        self._close_session(session.task_id)
         return self._result(session)
 
     def _task_cancelled(self, session: _AgentSession) -> bool:
@@ -1317,7 +1337,7 @@ class AgentOrchestrator:
             steps=session.steps,
         )
         self._record_outcome(session, "cancelled")
-        self._sessions.pop(session.task_id, None)
+        self._close_session(session.task_id)
         return self._result(session)
 
     def _trim_context(self, session: _AgentSession) -> None:
@@ -1344,6 +1364,12 @@ class AgentOrchestrator:
             m["content"] = stub
         session.model_events.append({"type": "context_trim", "model_id": session.profile.id})
 
+    def _close_session(self, task_id: str) -> None:
+        self._sessions.pop(task_id, None)
+        sinks = self.tools.context.get("stream_sinks")
+        if sinks is not None:
+            sinks.pop(task_id, None)
+
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
         try:
@@ -1356,7 +1382,7 @@ class AgentOrchestrator:
             self._emit(session, "task", task=error_task.as_dict())
             self._emit(session, "error", error=error_task.error)
             self._record_outcome(session, "error")
-            self._sessions.pop(session.task_id, None)
+            self._close_session(session.task_id)
             raise
 
     def _emit_tool_start(self, session: _AgentSession, name: str, args: dict[str, Any]) -> None:
@@ -1376,9 +1402,22 @@ class AgentOrchestrator:
     def _drive(self, session: _AgentSession) -> AgentResult:
         self._task_context(session.task_id)
         redactor = self.tools.context.get("redactor")
-        self.tools.context["stream_sink"] = lambda tool_name, chunk: self._emit(
-            session, "tool_output", tool=tool_name,
-            chunk=redactor(chunk) if redactor else chunk,
+        if "task_tls" not in self.tools.context:
+            self.tools.context["task_tls"] = threading.local()
+            self.tools.context["stream_sinks"] = {}
+
+            def dispatch(tool_name: str, chunk: str) -> None:
+                tls = self.tools.context["task_tls"]
+                sink = self.tools.context["stream_sinks"].get(getattr(tls, "task_id", ""))
+                if sink:
+                    sink(tool_name, chunk)
+
+            self.tools.context["stream_sink"] = dispatch
+        self.tools.context["stream_sinks"][session.task_id] = (
+            lambda tool_name, chunk: self._emit(
+                session, "tool_output", tool=tool_name,
+                chunk=redactor(chunk) if redactor else chunk,
+            )
         )
         working_task = self.tasks.update(session.task_id, status="running", phase="working", pending_approval=None)
         self._emit(session, "task", task=working_task.as_dict())
@@ -1572,7 +1611,7 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
             )
-        self._sessions.pop(session.task_id, None)
+        self._close_session(session.task_id)
         return self._result(session)
 
     def _direct_image_result(
@@ -2115,7 +2154,7 @@ class AgentOrchestrator:
             name, args = self._parse_call(call)
             if approved:
                 self._emit_tool_start(session, name, args)
-            result = self._execute_tool(name, args, approved=True) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
+            result = self._execute_tool(name, args, approved=True, session=session) if approved else f"PERMISSION_DENIED: user denied {pending['permission']} for {name}"
             self._append_tool_result(session, call, name, args, result)
             session.pending_call_index += 1
             self._maybe_escalate(session)
@@ -2126,7 +2165,7 @@ class AgentOrchestrator:
             args = pending["arguments"]
             if approved:
                 self._emit_tool_start(session, "run_shell", args)
-            result = self._execute_tool("run_shell", args, approved=True) if approved else f"PERMISSION_DENIED: user skipped verification command {item['name']}"
+            result = self._execute_tool("run_shell", args, approved=True, session=session) if approved else f"PERMISSION_DENIED: user skipped verification command {item['name']}"
             entry = {"name": item["name"], "command": item["command"], "result": result}
             task = self.tasks.get(task_id)
             self.tasks.update(task_id, verification=[*task.verification, entry], pending_approval=None)
@@ -2138,7 +2177,7 @@ class AgentOrchestrator:
                 error_task = self.tasks.update(task_id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
                 self._emit(session, "task", task=error_task.as_dict())
                 self._emit(session, "error", error=error_task.error)
-                self._sessions.pop(task_id, None)
+                self._close_session(task_id)
                 raise
 
         raise ValueError(f"Unknown approval kind {pending['kind']}")
