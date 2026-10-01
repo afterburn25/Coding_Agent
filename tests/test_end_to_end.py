@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from pathlib import Path
 
 
@@ -337,6 +338,67 @@ class EndToEndAgentTests(unittest.TestCase):
             recovery = [m for m in fake.requests[1]["messages"]
                         if "Recovered pending tool action" in str(m.get("content", ""))]
             self.assertIn("WROTE", json.dumps(recovery))
+
+    def test_full_stack_sse_stream_end_to_end(self):
+        """Real HTTP server + SSE + event bus + fake model — the exact path
+        the desktop UI drives."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import create_server, stop_state
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint=fake.endpoint, model="fake-model",
+                    roles=["primary_coder", "utility", "fast_coder"],
+                    runtime="external")],
+                process_watchdog=False,
+            )
+            server, state = create_server(cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            t = threading.Thread(target=server.serve_forever, daemon=True)
+            t.start()
+            self.addCleanup(lambda: (server.shutdown(), server.server_close(), stop_state(state)))
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            req = urllib.request.Request(
+                f"{base}/api/chat/stream",
+                data=json.dumps({
+                    "message": "Inspect the workspace files and check system resources, then report what tools you used",
+                    "mode": "auto"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            events: list[tuple[str, dict]] = []
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                self.assertIn("text/event-stream", resp.headers.get("Content-Type", ""))
+                buf = ""
+                for raw in resp:
+                    buf += raw.decode("utf-8", errors="replace")
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line = line.strip()
+                        if line.startswith("event:"):
+                            events.append((line[6:].strip(), {}))
+                        elif line.startswith("data:") and events:
+                            try:
+                                events[-1] = (events[-1][0], json.loads(line[5:].strip()))
+                            except json.JSONDecodeError:
+                                pass
+
+            kinds = [k for k, _ in events]
+            self.assertIn("tool_start", kinds)
+            self.assertIn("tool", kinds)
+            self.assertIn("result", kinds)
+            done = [d for k, d in events if k == "task" and isinstance(d.get("task"), dict)
+                    and d["task"].get("status") == "completed"]
+            self.assertTrue(done, "no completed task event on the stream")
+
+            # The API ledger reflects the same completed task.
+            with urllib.request.urlopen(f"{base}/api/tasks", timeout=10) as resp:
+                tasks = json.loads(resp.read())
+            rows = tasks.get("recent") or tasks.get("tasks") or []
+            self.assertTrue(any(t.get("status") == "completed" for t in rows))
 
 
 if __name__ == "__main__":

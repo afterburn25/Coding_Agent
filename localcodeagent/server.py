@@ -1219,7 +1219,7 @@ class Handler(BaseHTTPRequestHandler):
     def _sse_event(self, event: str, payload: dict) -> bool:
         try:
             data = json.dumps(payload, ensure_ascii=False, default=str)
-            self.wfile.write(f"event: {event}\\ndata: {data}\\n\\n".encode("utf-8"))
+            self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode("utf-8"))
             self.wfile.flush()
             return True
         except (BrokenPipeError, ConnectionResetError, OSError):
