@@ -100,13 +100,15 @@ class AppState:
         if not growth_dir.is_absolute():
             growth_dir = runtime_root / growth_dir
         self.model_growth = ModelGrowthLab(growth_dir)
-        brain_path = Path(config.nexus_brain_path).expanduser()
-        if not brain_path.is_absolute():
-            brain_path = runtime_root / brain_path
+        # Protected Nexus Brain state has one canonical location. Mutable
+        # config.json cannot redirect an initialized Brain to an unprotected file.
+        brain_path = (runtime_root / "data" / "nexus_brain.json").resolve()
+        brain_auth_path = brain_path.with_name(brain_path.stem + ".auth.json")
+        protected_brain_exists = brain_path.is_file() or brain_auth_path.is_file()
         self.nexus_brain = NexusBrain(
             brain_path,
-            enabled=config.nexus_brain_enabled,
-            max_records=config.nexus_brain_record_limit,
+            enabled=True if protected_brain_exists else config.nexus_brain_enabled,
+            max_records=max(10000, int(config.nexus_brain_record_limit)),
         )
         self.brain_seed_status = {
             "path": str(runtime_root / "brain-seed" / "nexus-brain-locked.json"),
@@ -144,8 +146,9 @@ class AppState:
                     self.nexus_brain = NexusBrain(
                         brain_path,
                         enabled=config.nexus_brain_enabled,
-                        max_records=config.nexus_brain_record_limit,
+                        max_records=max(10000, int(config.nexus_brain_record_limit)),
                     )
+        self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
         self.tools = ToolRegistry(config.permissions)
@@ -214,8 +217,14 @@ class AppState:
         self._prewarm_thread.start()
 
     def reload_model_configuration(self) -> dict:
-        """Reload model profiles from config.json without restarting Chat Nexus."""
+        """Reload model profiles without allowing config.json to bypass a protected Brain."""
         config = load_config(self.config_path if self.config_path.exists() else None)
+        if self.nexus_brain.initialized:
+            # Once creator-protected state exists, mutable config cannot disable,
+            # relocate, or shrink it. Signed Brain controls stay authoritative.
+            config.nexus_brain_enabled = True
+            config.nexus_brain_path = "data/nexus_brain.json"
+            config.nexus_brain_record_limit = max(10000, int(self.nexus_brain.max_records))
         self.runtime.reconfigure_models(config)
 
         model_telemetry = ModelPerformanceTelemetry(
@@ -269,18 +278,19 @@ class AppState:
         if not growth_dir.is_absolute():
             growth_dir = self.runtime.base_dir / growth_dir
         self.model_growth = ModelGrowthLab(growth_dir)
-        brain_path = Path(config.nexus_brain_path).expanduser()
-        if not brain_path.is_absolute():
-            brain_path = self.runtime.base_dir / brain_path
-        if getattr(self.nexus_brain, "path", None) != brain_path.resolve():
+        brain_path = (self.runtime.base_dir / "data" / "nexus_brain.json").resolve()
+        if not self.nexus_brain.initialized and getattr(self.nexus_brain, "path", None) != brain_path:
             self.nexus_brain = NexusBrain(
                 brain_path,
                 enabled=config.nexus_brain_enabled,
-                max_records=config.nexus_brain_record_limit,
+                max_records=max(10000, int(config.nexus_brain_record_limit)),
             )
+        elif self.nexus_brain.initialized:
+            self.nexus_brain.enabled = True
+            self.nexus_brain.max_records = max(10000, int(self.nexus_brain.max_records))
         else:
             self.nexus_brain.enabled = bool(config.nexus_brain_enabled)
-            self.nexus_brain.max_records = max(100, int(config.nexus_brain_record_limit))
+            self.nexus_brain.max_records = max(10000, int(config.nexus_brain_record_limit))
         self.agent.conversation_memory = self.conversation_memory
         self.agent.conversation_manager = self.conversation_manager
         self.agent.knowledge_memory = self.knowledge_memory
@@ -288,6 +298,7 @@ class AppState:
         self.agent.nexus_brain = self.nexus_brain
         self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
+        self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
 
         starter = next(
             (

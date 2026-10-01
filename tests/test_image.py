@@ -100,6 +100,11 @@ class ImagePolicyTests(unittest.TestCase):
             allowed, _ = policy.check("explicit nude minor")
             self.assertFalse(allowed)
 
+    def test_explicit_detection_is_reusable_for_brain_gate(self):
+        self.assertTrue(ImageSafetyPolicy.is_explicit("generate a naked adult woman"))
+        self.assertTrue(ImageSafetyPolicy.is_explicit("explicit adult portrait"))
+        self.assertFalse(ImageSafetyPolicy.is_explicit("portrait of an adult woman in a blue dress"))
+
     def test_adult_synthetic_naked_request_is_allowed_and_minor_is_blocked(self):
         with tempfile.TemporaryDirectory() as td:
             policy = ImageSafetyPolicy(ConsentStore(Path(td) / "consents.json"))
@@ -341,6 +346,26 @@ class ImageLibraryTests(unittest.TestCase):
                 lib.resolve_loras([{"name": "Alice", "version": "1"}], profile)
             with self.assertRaisesRegex(ValueError, "between -4 and 4"):
                 lib.resolve_loras([{"name": "Alice", "strength": 9}], profile)
+
+    def test_creator_locked_adult_subroutine_gates_explicit_images_inside_manager(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ImageModelProfile(
+                id="qwen", family="qwen-image-2.1", capabilities=["text_to_image"],
+                workflows={"text_to_image": "qwen/generate.json"},
+            )
+            config = SimpleNamespace(
+                image_models_dir="models/image", image_data_dir="data/image", image_workflows_dir="workflows/image",
+                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
+                image_auto_run_jobs=False,
+            )
+            manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
+            manager.adult_content_allowed = lambda: False
+            with self.assertRaisesRegex(PermissionError, "creator-locked Nexus Brain"):
+                manager.create_job(ImageRequest(prompt="generate a naked adult woman"))
+
+            safe = manager.create_job(ImageRequest(prompt="portrait of an adult woman in a blue dress"))
+            self.assertEqual(safe.state, "queued")
 
     def test_subject_profile_applies_references_loras_model_and_defaults(self):
         with tempfile.TemporaryDirectory() as td:

@@ -6,7 +6,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .catalog import discover_image_models
 from .comfyui import ComfyUIBackend
@@ -44,6 +44,7 @@ class ImageManager:
         self.profiles = SubjectProfileStore(self.characters_dir)
         self.consents = ConsentStore(self.data_dir / "consent_records.json")
         self.policy = ImageSafetyPolicy(self.consents)
+        self.adult_content_allowed: Callable[[], bool] | None = None
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
         self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
@@ -189,6 +190,14 @@ class ImageManager:
 
     def create_job(self, request: ImageRequest, *, real_person: bool = False) -> ImageJob:
         self._apply_subject_profile(request)
+        if (
+            self.adult_content_allowed is not None
+            and self.policy.is_explicit(request.prompt)
+            and not bool(self.adult_content_allowed())
+        ):
+            raise PermissionError(
+                "Adult/explicit image generation is disabled by the creator-locked Nexus Brain."
+            )
         allowed, reason = self.policy.check(request.prompt, real_person=real_person, subject=request.subject_profile)
         if not allowed:
             raise PermissionError(reason)
