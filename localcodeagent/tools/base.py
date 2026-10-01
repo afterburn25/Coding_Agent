@@ -315,28 +315,35 @@ class ToolRegistry:
         cached = self._size_cache.get(name)
         if cached and cached[0] == signature:
             return cached[1]
+        # Bound the walk: a tool payload can sit inside a very large tree
+        # (e.g. ComfyUI portable) — without a cap, manifests() hangs startup
+        # for minutes while it stats every file.
+        deadline = time.monotonic() + 0.75
+        visited = 0
+        aborted = False
         total = 0
         try:
-            for entry in os.scandir(dest):
-                if entry.is_dir(follow_symlinks=False):
-                    stack = [entry.path]
-                    while stack:
-                        for sub in os.scandir(stack.pop()):
-                            if sub.is_dir(follow_symlinks=False):
-                                stack.append(sub.path)
-                            else:
-                                try:
-                                    total += sub.stat(follow_symlinks=False).st_size
-                                except OSError:
-                                    pass
-                else:
-                    try:
-                        total += entry.stat(follow_symlinks=False).st_size
-                    except OSError:
-                        pass
+            stack = [dest]
+            while stack and not aborted:
+                for entry in os.scandir(stack.pop()):
+                    visited += 1
+                    if visited > 25000 or time.monotonic() > deadline:
+                        aborted = True
+                        break
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(entry.path)
+                    else:
+                        try:
+                            total += entry.stat(follow_symlinks=False).st_size
+                        except OSError:
+                            pass
         except OSError:
             pass
+        if aborted:
+            # Don't cache a truncated figure as if it were real.
+            return 0
         self._size_cache[name] = (signature, total)
+        self._save_state()
         return total
 
     def manifest(self, name: str) -> dict[str, Any]:
@@ -499,6 +506,13 @@ class ToolRegistry:
                     for k, v in usage.items()
                     if isinstance(v, dict)
                 }
+            sizes = raw.get("sizes", {})
+            if isinstance(sizes, dict):
+                self._size_cache = {
+                    str(k): (float(v[0]), int(v[1]))
+                    for k, v in sizes.items()
+                    if isinstance(v, (list, tuple)) and len(v) == 2
+                }
 
     def _save_state(self) -> None:
         if not self.state_path:
@@ -507,6 +521,7 @@ class ToolRegistry:
             "version": 1,
             "disabled": sorted(self._disabled),
             "usage": self._usage,
+            "sizes": {k: [s, b] for k, (s, b) in self._size_cache.items()},
         }
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)

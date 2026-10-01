@@ -306,16 +306,23 @@ internal sealed class SplashForm : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
-        // Progress bar — measured to overlay the artwork's own empty bar
-        // outline (x 392–631, y ~503–509 on the 1024×576 source).
-        var barWidth = (int)(ClientSize.Width * 0.234);
+        // Progress bar — covers the artwork's own baked-in bar (x ~390–660,
+        // y ~502–509 on the 1024×576 source). The artwork ships with a static
+        // half-lit grey fill, so this track is fully opaque and slightly
+        // oversized: the baked bar disappears entirely and only the live
+        // gradient fill reads as the progress indicator.
+        var barWidth = (int)(ClientSize.Width * 0.284);
         var barHeight = 7;
-        var barX = (int)(ClientSize.Width * 0.383);
+        var barX = (int)(ClientSize.Width * 0.372);
         var barY = (int)(ClientSize.Height * 0.873);
-        var track = new Rectangle(barX, barY, barWidth, barHeight);
-        using (var trackBrush = new SolidBrush(Color.FromArgb(90, 12, 22, 40)))
+        var track = new Rectangle(barX, barY - 1, barWidth, barHeight + 2);
+        using (var trackBrush = new SolidBrush(Color.FromArgb(255, 6, 12, 26)))
         {
             g.FillRectangle(trackBrush, track);
+        }
+        using (var edge = new Pen(Color.FromArgb(80, 60, 110, 160)))
+        {
+            g.DrawRectangle(edge, track);
         }
         var fillWidth = (int)(barWidth * Math.Clamp(_progress.Displayed, 0.0, 1.0));
         if (fillWidth > 0)
