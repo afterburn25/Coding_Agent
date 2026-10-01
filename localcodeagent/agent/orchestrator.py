@@ -2525,7 +2525,17 @@ class AgentOrchestrator:
             messages.append({"role": "user", "content": user_text})
         else:
             project_memory = self.memory.context()
+            index_act = self._act(
+                task.id, "investigating", "Investigating",
+                "Scanning repository index and project context",
+                callback=event_callback,
+            )
             index_summary = self.repository_index.ensure()
+            self._act_update(
+                task.id, index_act, state="completed",
+                summary=str(index_summary)[:240] if index_summary else "repository index ready",
+                callback=event_callback,
+            )
             self_hosting = self._self_hosting_context()
             if (
                 self.research is not None
@@ -2533,14 +2543,30 @@ class AgentOrchestrator:
                 and self._brain_subroutine_enabled("web_research", True)
                 and not research_context
             ):
+                research_act = self._act(
+                    task.id, "research", "Researching",
+                    "Preflight: identifying knowledge gaps for this task",
+                    callback=event_callback,
+                )
                 try:
                     research_context = self.research.prepare_task(user_text, mode=self.config.research_mode)
                     self.tasks.update(task.id, research=research_context)
                     self._safe_emit(event_callback, {"type": "research", "research": research_context})
+                    plan = research_context.get("plan") if isinstance(research_context, dict) else {}
+                    self._act_update(
+                        task.id, research_act, state="completed",
+                        summary=str((plan or {}).get("mode") or "preflight complete")[:240],
+                        callback=event_callback,
+                    )
                 except Exception as exc:
                     research_context = {"error": f"{type(exc).__name__}: {exc}"}
                     self.tasks.update(task.id, research=research_context)
                     self._safe_emit(event_callback, {"type": "research", "research": research_context})
+                    self._act_update(
+                        task.id, research_act, state="failed",
+                        summary=research_context["error"][:240],
+                        callback=event_callback,
+                    )
             elif research_context:
                 self.tasks.update(task.id, research=research_context)
             messages = [
