@@ -55,6 +55,7 @@ class MCPServerConfig:
             env={str(k): str(v) for k, v in (raw.get("env") or {}).items()},
             cwd=str(raw.get("cwd") or ""),
             url=url,
+            headers={str(k): str(v) for k, v in (raw.get("headers") or {}).items()},
             transport=transport,
             enabled=bool(raw.get("enabled", True)),
             auto_start=bool(raw.get("auto_start", True)),
@@ -253,13 +254,30 @@ class MCPHTTPClient:
     """Streamable-HTTP MCP client: POSTs JSON-RPC, tolerates plain-JSON or SSE
     (``data:``) responses, and tracks the ``Mcp-Session-Id`` header."""
 
-    def __init__(self, config: MCPServerConfig, *, timeout: float = 30.0) -> None:
+    def __init__(self, config: MCPServerConfig, *, timeout: float = 30.0,
+                 header_resolver: Any = None) -> None:
         self.config = config
         self.timeout = timeout
+        self._header_resolver = header_resolver
         self._next_id = 0
         self._session_id = ""
         self._connected = False
         self._send_lock = threading.Lock()
+
+    def _resolved_headers(self) -> dict[str, str]:
+        """Resolve ``secret:<name>`` header values through the credential vault."""
+        resolved: dict[str, str] = {}
+        for key, value in self.config.headers.items():
+            if str(value).startswith("secret:"):
+                name = str(value)[7:].strip()
+                secret = self._header_resolver(name) if self._header_resolver else None
+                if secret is None:
+                    raise MCPError(
+                        f"header '{key}' references unresolved secret '{name}' — set it in the credential vault")
+                resolved[key] = secret
+            else:
+                resolved[key] = value
+        return resolved
 
     def start(self) -> None:
         if self._connected:
@@ -282,6 +300,7 @@ class MCPHTTPClient:
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
         }
+        headers.update(self._resolved_headers())
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         req = urllib.request.Request(
@@ -374,7 +393,8 @@ class MCPManager:
             resolver = self._vault.get if self._vault is not None else None
             client = (MCPHTTPClient if config.transport == "http" else MCPClient)(
                 config, timeout=self._timeout,
-                **({"env_resolver": resolver} if config.transport != "http" else {}))
+                **({"header_resolver": resolver} if config.transport == "http"
+                   else {"env_resolver": resolver}))
             try:
                 client.start()
             except Exception as exc:

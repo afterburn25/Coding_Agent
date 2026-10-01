@@ -42,6 +42,7 @@ Add servers to `config.json` (`mcp_servers`):
 | `id` | stable server id used in tool names and API calls |
 | `command` | argv launched as a subprocess (stdio transport) |
 | `url` | HTTP endpoint for the `http` transport (Streamable HTTP) |
+| `headers` | extra HTTP request headers for the `http` transport (e.g. `Authorization`); `secret:<name>` values resolve through the credential vault |
 | `transport` | `stdio` (default) or `http` — auto-set when `url` is present |
 | `env` | extra environment variables; values of the form `secret:<name>` are resolved through the credential vault at launch (unresolved references fail the launch instead of leaking the placeholder) |
 | `enabled` / `auto_start` | whether the server may run / is connected at backend startup |

@@ -639,8 +639,11 @@ class MCPHTTPTests(unittest.TestCase):
         import http.server
         import threading
 
+        captured_headers = []
+
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
+                captured_headers.append(dict(self.headers))
                 length = int(self.headers.get("Content-Length", "0"))
                 msg = json.loads(self.rfile.read(length) or b"{}")
                 if msg.get("id") is None:
@@ -670,14 +673,16 @@ class MCPHTTPTests(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
         self.addCleanup(server.server_close)
-        return f"http://127.0.0.1:{server.server_port}/mcp"
+        return f"http://127.0.0.1:{server.server_port}/mcp", captured_headers
 
     def test_http_transport_connects_and_calls(self):
-        url = self._http_server()
+        url, captured_headers = self._http_server()
         reg = ToolRegistry({"external_api.call": "allow"})
-        cfg = MCPServerConfig.from_dict({"id": "webmcp", "url": url})
+        cfg = MCPServerConfig.from_dict({"id": "webmcp", "url": url,
+                                       "headers": {"X-Api-Key": "static-key"}})
         self.assertEqual(cfg.transport, "http")
         self.assertEqual(cfg.permission, "external_api.call")
+        self.assertEqual(cfg.headers["X-Api-Key"], "static-key")
         mgr = MCPManager(reg, [cfg], timeout=10)
         self.addCleanup(mgr.shutdown)
         row = mgr.connect("webmcp")
@@ -690,6 +695,25 @@ class MCPHTTPTests(unittest.TestCase):
         self.assertEqual(out, "pong")
         status = mgr.status()["servers"][0]
         self.assertEqual(status["transport"], "http")
+        self.assertTrue(any(h.get("X-Api-Key") == "static-key" for h in captured_headers))
+
+    def test_http_headers_support_secret_refs(self):
+        from localcodeagent.mcp import MCPHTTPClient
+        from localcodeagent.secrets import SecretVault
+        tmp = Path(tempfile.mkdtemp())
+        vault = SecretVault(tmp / "s.vault")
+        vault.set("mcp_key", "Bearer resolved-token")
+        cfg = MCPServerConfig.from_dict({
+            "id": "h", "url": "http://127.0.0.1:9/mcp",
+            "headers": {"Authorization": "secret:mcp_key", "X-Plain": "v"}})
+        client = MCPHTTPClient(cfg, header_resolver=vault.get)
+        resolved = client._resolved_headers()
+        self.assertEqual(resolved["Authorization"], "Bearer resolved-token")
+        self.assertEqual(resolved["X-Plain"], "v")
+        cfg2 = MCPServerConfig.from_dict({
+            "id": "h2", "url": "http://x/mcp", "headers": {"A": "secret:missing"}})
+        with self.assertRaises(Exception):
+            MCPHTTPClient(cfg2, header_resolver=vault.get)._resolved_headers()
 
 
 class BrowserRunnerTests(unittest.TestCase):
