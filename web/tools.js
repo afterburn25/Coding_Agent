@@ -444,5 +444,6 @@
     events.addEventListener("job", scheduleRefresh);
     events.addEventListener("tool", scheduleRefresh);
     events.addEventListener("task", scheduleRefresh);
+    events.addEventListener("image_job", scheduleRefresh);
   } catch (e) { /* EventSource unsupported — interval polling still applies */ }
 })();
