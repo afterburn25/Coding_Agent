@@ -154,6 +154,10 @@ GET  /api/processes                managed services (llama.cpp, ComfyUI, ...)
 POST /api/processes/action         {"id": "comfyui", "action": "restart"}
 GET  /api/jobs                     unified job queue
 POST /api/jobs/cancel              {"job_id": "image-..."} (kind-aware)
+GET  /api/queue                    durable prompt work queue (FIFO)
+POST /api/queue                    {"prompt": "...", "mode": "auto"}
+POST /api/queue/cancel             {"id": "<queue item id>"}
+GET  /api/task-log?task_id=<id>    per-task terminal transcript tail
 GET  /api/resources                hardware, residency, image resource mode
 ```
 
@@ -187,6 +191,11 @@ knowing process internals.
 
 ## UI
 
-`web/tools.html` — permission profile switcher, per-permission levels,
-category-filtered registry with enable/disable + health checks, process
-controls, and the unified job list.
+`web/tools.html` — permission profile switcher (incl. the autonomous-mode
+toggle), per-permission levels, category-filtered registry with
+enable/disable + health checks, process controls, the unified job list, and
+the Work queue card (list + per-item cancel).
+
+The agent can also enqueue follow-up work itself via the `queue_task`,
+`queue_list`, and `queue_cancel` tools (`localcodeagent/tools/queue.py`,
+permission key `tasks.queue`).
