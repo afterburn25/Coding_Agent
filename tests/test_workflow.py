@@ -1063,6 +1063,42 @@ class AutonomousContinuationTests(unittest.TestCase):
             tool_text = "\n".join(str(m.get("content", "")) for m in provider.messages)
             self.assertIn("timed out", tool_text)
 
+    def test_long_runs_trim_old_tool_output_from_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"],
+                runtime="external", context_window=512,
+            )
+            config = AgentConfig(
+                models=[profile],
+                permissions={"probe.execute": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False,
+                review_after_changes=False,
+                max_agent_steps=40,
+            )
+            tools = ToolRegistry(config.permissions)
+            tools.register(ToolSpec("big_tool", "test", {"type": "object", "properties": {}},
+                                    "probe.execute", lambda args: "X" * 3000))
+            index = RepositoryIndex(root)
+            index.build()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            provider = _RepeatToolProvider(tool_calls=20, tool_name="big_tool")
+            agent._provider_for = lambda _: provider
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "completed")
+            joined = "\n".join(str(m.get("content", "")) for m in provider.messages)
+            self.assertIn("[elided", joined)
+            self.assertTrue(any(e.get("type") == "context_trim" for e in result.model_events))
+
 
 if __name__ == "__main__":
     unittest.main()

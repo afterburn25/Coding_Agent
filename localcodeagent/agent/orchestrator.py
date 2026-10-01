@@ -1312,6 +1312,30 @@ class AgentOrchestrator:
         self._sessions.pop(session.task_id, None)
         return self._result(session)
 
+    def _trim_context(self, session: _AgentSession) -> None:
+        """Bound prompt growth so unattended runs cannot overflow the context window.
+
+        Leading system preamble and user turns are kept intact; older
+        assistant/tool message bodies are replaced by a stub (roles and
+        tool_call pairing are preserved for providers that require them).
+        """
+        budget_tokens = int(getattr(session.profile, "context_window", 0) or 0) or 8192
+        char_budget = max(8000, int(budget_tokens * 3.0))
+        msgs = session.messages
+        total = sum(len(str(m.get("content") or "")) for m in msgs)
+        if total <= char_budget:
+            return
+        head = 0
+        while head < len(msgs) and msgs[head].get("role") == "system":
+            head += 1
+        cutoff = len(msgs) - 24
+        stub = "[elided: earlier output kept out of the context window; full results persist in the task ledger]"
+        for m in msgs[head:cutoff]:
+            if m.get("role") == "user" or len(str(m.get("content") or "")) <= 400:
+                continue
+            m["content"] = stub
+        session.model_events.append({"type": "context_trim", "model_id": session.profile.id})
+
     def _emit_tool_start(self, session: _AgentSession, name: str, args: dict[str, Any]) -> None:
         redactor = self.tools.context.get("redactor")
 
@@ -1362,6 +1386,7 @@ class AgentOrchestrator:
                 if buffer_for_refusal_check
                 else lambda piece: self._emit(session, "token", text=piece, model_id=session.profile.id)
             )
+            self._trim_context(session)
             response = self._complete_with_recovery(
                 session.provider,
                 session.profile,
