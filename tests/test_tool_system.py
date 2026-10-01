@@ -1632,6 +1632,40 @@ class AppStateWiringTests(unittest.TestCase):
             state._dequeue_next()
             self.assertEqual(len(state.queue), 1)
 
+    def test_queue_dequeue_is_single_flight(self):
+        import threading
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            for i in range(3):
+                state.queue.enqueue(f"work {i}")
+            ran = []
+            gate = threading.Event()
+
+            def fake_run(self, prompt, **kw):
+                ran.append(prompt)
+                gate.wait(5)
+
+            with patch.object(AgentOrchestrator, "run", fake_run):
+                # Concurrent callers must not double-pop: only one item runs.
+                threads = [threading.Thread(target=state._dequeue_next) for _ in range(4)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+                deadline = time.time() + 5
+                while not ran and time.time() < deadline:
+                    time.sleep(0.05)
+                self.assertEqual(ran, ["work 0"])
+                self.assertEqual(len(state.queue), 2)
+                # Let the worker finish — the finally hook chains the rest.
+                gate.set()
+                deadline = time.time() + 5
+                while len(ran) < 3 and time.time() < deadline:
+                    time.sleep(0.05)
+            self.assertEqual(ran, ["work 0", "work 1", "work 2"])
+            self.assertEqual(len(state.queue), 0)
+
     def test_auto_resume_stays_off_without_autonomous_mode(self):
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.workflow.tasks import TaskStore

@@ -853,7 +853,7 @@ class AppState:
             pass
         self.events.publish(etype or "task", payload)
 
-    def _dequeue_next(self) -> None:
+    def _dequeue_next(self, *, blocking: bool = False) -> None:
         """Start the next queued prompt when no task is active.
 
         Runs regardless of autonomous mode — queued work is explicit user
@@ -867,8 +867,10 @@ class AppState:
         if not hasattr(self, "_dequeue_lock"):
             self._dequeue_lock = threading.Lock()
         # Called from the watchdog, run-completion handlers, and enqueue —
-        # two callers must not both observe idle and start two tasks.
-        if not self._dequeue_lock.acquire(blocking=False):
+        # two callers must not both observe idle and start two tasks. The
+        # completion-chained call waits briefly: it may lose the lock to the
+        # dequeue that spawned it, and dropping it would stall the queue.
+        if not self._dequeue_lock.acquire(timeout=2 if blocking else 0):
             return
         try:
             recent = self.tasks.recent(20)
@@ -901,8 +903,10 @@ class AppState:
                 finally:
                     self._queue_running.discard(entry["id"])
                     # Chain the next queued prompt immediately instead of
-                    # waiting up to a full watchdog interval.
-                    self._dequeue_next()
+                    # waiting up to a full watchdog interval. Wait briefly for
+                    # the lock — the dequeue that spawned this worker may still
+                    # hold it while spawning, and losing it would stall work.
+                    self._dequeue_next(blocking=True)
 
             self._queue_running.add(item_id)
             threading.Thread(target=run_item, args=(item,), name=f"queue-{item_id}", daemon=True).start()
