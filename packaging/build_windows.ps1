@@ -40,6 +40,7 @@ Write-Host "Building hidden Python agent backend..."
     --add-data "$Root\tools;tools" `
     --collect-submodules localcodeagent `
     --collect-submodules py7zr `
+    --collect-all cryptography `
     --hidden-import pybcj --hidden-import pyppmd --hidden-import pyzstd `
     --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `
     --hidden-import multivolumefile --hidden-import Cryptodome `

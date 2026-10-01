@@ -212,7 +212,8 @@ internal sealed class BackendProcess : IDisposable
         }
 
         throw new TimeoutException(
-            $"Chat Nexus backend did not become ready within {timeout.TotalSeconds:0} seconds. {last?.Message}"
+            $"Chat Nexus backend did not become ready within {timeout.TotalSeconds:0} seconds. {last?.Message} " +
+            $"Check {LogPath} for backend errors."
         );
     }
 
@@ -309,7 +310,9 @@ internal sealed class MainForm : Form
         try
         {
             AttachBackend(BackendProcess.Start(_appDir));
-            await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30));
+            // Cold starts on machines scanning a fresh unsigned exe (AV) can
+            // exceed 30s even when the backend is healthy.
+            await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
 
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -398,7 +401,7 @@ internal sealed class MainForm : Form
             await Task.Delay(350);
             var replacement = BackendProcess.Start(_appDir);
             AttachBackend(replacement);
-            await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30));
+            await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
 
             if (!_closing && _webView.CoreWebView2 is not null)
             {

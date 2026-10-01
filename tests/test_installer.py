@@ -106,6 +106,16 @@ class InstallerContractTests(unittest.TestCase):
         ):
             self.assertIn(workflow, self.build)
 
+    def test_windows_build_collects_native_extension_dependencies(self):
+        # cryptography's _rust.pyd and py7zr's codec deps are extension
+        # modules the frozen backend imports at startup/install time —
+        # partial bundling produces ModuleNotFoundError crashes that surface
+        # to the user only as a startup timeout.
+        self.assertIn("--collect-all cryptography", self.build)
+        self.assertIn("--collect-submodules py7zr", self.build)
+        for dep in ("pybcj", "pyppmd", "pyzstd", "Cryptodome"):
+            self.assertIn(f"--hidden-import {dep}", self.build)
+
     def test_update_uses_installer_owned_process_shutdown(self):
         self.assertIn("CloseApplications=no", self.installer)
         self.assertNotIn("CloseApplicationsFilter=", self.installer)
