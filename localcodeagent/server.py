@@ -1032,8 +1032,8 @@ class AppState:
             busy.discard("")
             stopped = self.runtime.evict_idle(busy_models=busy)
             for model_id in stopped:
-                self.events.publish("model", {"event": "idle_evicted",
-                                              "model_id": model_id})
+                self.events.publish("model", {"event": {"type": "idle_evicted",
+                                                        "model_id": model_id}})
         except Exception:
             pass
 
