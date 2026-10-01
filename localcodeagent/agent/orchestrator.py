@@ -1362,7 +1362,9 @@ class AgentOrchestrator:
             if m.get("role") == "user" or len(str(m.get("content") or "")) <= 400:
                 continue
             m["content"] = stub
-        session.model_events.append({"type": "context_trim", "model_id": session.profile.id})
+        trim_event = {"type": "context_trim", "model_id": session.profile.id}
+        session.model_events.append(trim_event)
+        self._emit(session, "model", event=trim_event)
 
     def _close_session(self, task_id: str) -> None:
         self._sessions.pop(task_id, None)
