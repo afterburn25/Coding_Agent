@@ -513,6 +513,8 @@ class DiagnosticsEndpointTests(unittest.TestCase):
                 self.assertTrue(data["recent_failures"])
                 self.assertEqual(data["recent_failures"][-1]["kind"],
                                  "connection_reset")
+                self.assertIn("crash_history", data)
+                self.assertIsInstance(data["crash_history"], list)
                 self.assertIn("hardware", data)
             finally:
                 server.shutdown()
