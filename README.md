@@ -10,7 +10,9 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 ## Current development version
 
-`0.7.1`
+`0.8.0`
+
+v0.8 gives Nexus Core a modular **cognitive architecture** — the *Nexus Brain* coordinates seven functional regions (Prefrontal Cortex, Hippocampus, Thalamus, Basal Ganglia, Motor Cortex, Cerebellum, Brain Stem) over a typed cognitive event bus, the *Corpus Callosum*. The LLM is not the brain: models are interchangeable inference resources routed by capability, while memory, plans, learned procedures, health, and action history persist in Nexus itself. See [`docs/architecture/NEXUS_BRAIN.md`](docs/architecture/NEXUS_BRAIN.md).
 
 v0.7 turns Nexus Core into a modular local-first AI workstation: measured runtime auto-tuning, a durable Devin-style activity timeline, persistent autonomy, computer use, sandboxes, LSP, repository RAG, skills, multi-agent worktrees, an evaluation lab, artifacts, backups, DPAPI-wrapped secrets, connectors, a knowledge graph, simulation, and a hardware Digital Twin. The canonical version lives in `VERSION`; `scripts/sync_version.py` derives every downstream artifact (pyproject, installer defaults, .NET project, PyInstaller resource, `.agent/project.json`).
 
@@ -172,7 +174,23 @@ The Model Growth Lab keeps the live base model intact. Learned behavior, correct
 - Chat commands `make this a mission` / `stop autonomy` / `resume autonomy` work in both streaming and non-streaming chat without needing a coding model.
 - Full reference: [docs/AUTONOMY.md](docs/AUTONOMY.md)
 
-## Nexus Brain
+## Cognitive architecture
+
+Since v0.8, cognition is organized as brain-like regions over a typed event bus — not a single model call:
+
+- **Thalamus** classifies input, answers trusted-memory and deterministic fast paths (version, status, known answers) with no model at all, and selects a model by *capability* (coding/vision/context/quality/latency) from live catalog + health state.
+- **Hippocampus** unifies episodic, semantic, procedural, and project memory (SQLite + Answer Memory + knowledge graph + conversation memory) with confidence, provenance, freshness, and invalidation.
+- **Prefrontal Cortex** builds and tracks plans, replans after failure, scores strategies, and runs a conflict monitor for loops/repeated failures/contradictions.
+- **Basal Ganglia** scores candidate actions on usefulness, historical success, cost, latency, risk, approval, and resource pressure.
+- **Motor Cortex** executes selected actions through controlled executors and the tool router, emits structured telemetry, and enforces approval gates.
+- **Cerebellum** records performance trends and manages bounded, reversible optimizations (propose → measure → rollback).
+- **Brain Stem** owns health probes, watchdog ticks, crash recovery, and the shared resource snapshot — deterministic, never model-dependent.
+- **Corpus Callosum** is the typed message bus: correlation ids, addressed mailboxes, request/response, cancellation, and a bounded trace ring.
+- **Specialist brains** (coding, research, vision, reviewer, systems, language) are declarative profiles sharing the global bus/memory/stem.
+
+Trace and region state: `GET /api/brain/status`, `GET /api/brain/trace`, and the *Nexus Brain* panel on the System page. Full doc: `docs/architecture/NEXUS_BRAIN.md`.
+
+## Nexus Brain (identity vault)
 
 **Nexus Brain** is the model-independent long-term identity/learning layer under `data/nexus_brain.json`. Model GGUF files are replaceable reasoning engines; the Brain is separate durable state, so replacing Qwen, downloading fresh weights, or rolling back a LoRA does not erase the protected knowledge/personality layer.
 

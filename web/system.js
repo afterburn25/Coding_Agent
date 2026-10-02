@@ -24,6 +24,31 @@ function renderHealth(h){
   ).join('')||'<div class="off">No transitions recorded.</div>';
 }
 
+/* ---------- Nexus Brain ---------- */
+function renderBrain(b,trace){
+  const regions=(b&&b.regions)||{};
+  $('#brainRegions').innerHTML=Object.keys(regions).length
+    ? Object.entries(regions).map(([n,r])=>
+      `<div class="health-card"><div class="name">${esc(n)}</div><span class="state st-${esc(r.state)}">${esc(r.state)}</span>
+       <div class="meta">${esc(r.handled??0)} events${r.errors?' · '+esc(r.errors)+' errors':''}${r.last_error?' · '+esc(r.last_error):''}</div></div>`).join('')
+    : '<div class="off">Nexus Brain not initialized.</div>';
+  const specs=(b&&b.specialists)||{};
+  $('#brainSpecialists').innerHTML=Object.keys(specs).length
+    ? Object.entries(specs).map(([n,s])=>
+      `<div><span class="k">${esc(n)}</span>${esc(s.domain||'')} · caps ${esc((s.capabilities||[]).length)}</div>`).join('')
+    : '<div class="off">—</div>';
+  const events=(trace&&trace.events)||[];
+  $('#brainTrace').innerHTML=events.length
+    ? events.slice(-40).reverse().map(e=>{
+      const c=e.content||{};
+      const det=c.summary||c.route||c.action||c.component||c.event||'';
+      return `<div class="list-row"><b>${esc(e.source||'?')}</b> <span class="pill">${esc(e.type)}</span>
+        ${e.destination?'→ '+esc(e.destination):''}
+        <div class="meta">${esc(det)}${e.correlation_id?' · corr '+esc(e.correlation_id):''} · ${fmtTs(e.ts)}</div></div>`;
+    }).join('')
+    : '<div class="off">No cognitive events traced yet.</div>';
+}
+
 /* ---------- Diagnostics ---------- */
 function renderDiagnostics(d){
   const models=(d.models||[]).map(m=>{
@@ -184,14 +209,14 @@ function renderExperiments(list){
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg,br,tr]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
       api('/api/skills'),api('/api/connectors'),api('/api/jobs'),
       api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments'),
-      api('/api/diagnostics')]);
+      api('/api/diagnostics'),api('/api/brain/status'),api('/api/brain/trace?limit=60')]);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
-    renderDiagnostics(dg);
+    renderDiagnostics(dg);renderBrain(br,tr);
     renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
     renderJobs(jb.jobs||[]);
     renderArtifacts(a.artifacts||[]);

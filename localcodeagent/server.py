@@ -576,6 +576,15 @@ class AppState:
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
         self.queue.enrich = self._queue_enrich_mission
+        self._boot(92, "INITIALIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
+        try:
+            self.brain = self._build_brain(config, runtime_root)
+        except Exception:
+            # Cognition degrades gracefully — a failed region must never
+            # prevent the server itself from starting.
+            import logging
+            logging.getLogger(__name__).exception("Nexus Brain init failed")
+            self.brain = None
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_tune()
@@ -825,6 +834,26 @@ class AppState:
                     out["pending_approval"] = (
                         result.pending_approval
                         or task.get("pending_approval") or {"kind": "task"})
+                # Feed the cognitive architecture: PFC conflict monitoring
+                # (repeated failures/loops) + Hippocampus episodic memory.
+                brain = getattr(self, "brain", None)
+                if brain is not None:
+                    try:
+                        mid = str(mission.get("id") or "")
+                        brain.pfc.record_outcome(
+                            str(node.get("title") or "mission_node"),
+                            bool(out["ok"]), str(out["output"])[:300],
+                            mission_id=mid)
+                        brain.hippocampus.record_episode(
+                            "mission_node",
+                            f"{node.get('title', 'node')}: "
+                            f"{'ok' if out['ok'] else 'failed'}",
+                            detail=str(out["output"])[:2000],
+                            mission_id=mid, task_id=out["task_id"],
+                            project_id=str(self.workspace),
+                            confidence=0.7 if out["ok"] else 0.4)
+                    except Exception:
+                        pass
                 # Tag any pre-stamp rows so /api/activity?mission_id finds the
                 # whole node run even if a row was opened before stamping.
                 if out["task_id"] and mission.get("id"):
@@ -885,6 +914,72 @@ class AppState:
             quiet_hours=quiet_hours,
             enabled=bool(getattr(config, "autonomy_enabled", True)),
         )
+
+    def _build_brain(self, config: AgentConfig, runtime_root: Path):
+        """Construct the cognitive architecture — regions wrap the existing
+        services; nothing here replaces what already works."""
+        from .brain import NexusBrain
+        from .agent.classify import research_class
+        from .workflow.conversation_manager import ConversationManager
+
+        def catalog() -> list[dict]:
+            out = []
+            try:
+                statuses = {s.get("model_id"): s
+                            for s in (self.runtime.statuses() or [])}
+            except Exception:
+                statuses = {}
+            for m in config.models:
+                if not m.enabled:
+                    continue
+                st = statuses.get(m.id) or {}
+                roles = list(getattr(m, "roles", []) or [])
+                out.append({
+                    "id": m.id, "enabled": True,
+                    "role": roles[0] if roles else "general",
+                    "roles": roles,
+                    "context": m.context_window,
+                    "vision": bool(m.vision),
+                    "remote": m.runtime != "llama_cpp",
+                    "healthy": bool(st.get("healthy", st.get("state") in {"running", "external", ""})),
+                    "runnable": st.get("state", "") not in {"error", "crashed"},
+                    "resident": st.get("state") == "running",
+                })
+            return out
+
+        brain = NexusBrain(
+            state_dir=runtime_root / "data",
+            health=self.health,
+            hardware_probe=lambda: (self.runtime.summary() or {}).get("hardware") or {},
+            crash_history=lambda n: netdiag.crash_history(n) if netdiag else [],
+            answer_memory=self.answer_memory,
+            knowledge_graph=lambda: self.knowledge,  # lazy property resolver
+            knowledge_memory=self.knowledge_memory,
+            conversation_memory=self.conversation_memory,
+            locked_vault=self.nexus_brain,
+            activity_source=lambda n: self.tasks.recent(n),
+            mission_planner=self.autonomy.planner,
+            mission_store=self.autonomy.missions,
+            tool_router=self.tool_router,
+            sandbox=getattr(self, "sandbox", None),
+            model_catalog=catalog,
+            model_router=self.router,
+            classify_intent=ConversationManager.classify_intent,
+            research_class=research_class,
+            version_lookup=lambda: VERSION,
+            health_lookup=self.health.summary,
+            twin=self.twin,
+            model_telemetry=lambda: self.model_telemetry.summary()
+                if hasattr(self.model_telemetry, "summary") else {},
+            tool_stats=self.tool_router.stats,
+        )
+        # Structural events flow to the existing UI/activity stream.
+        brain.attach_ui_bus(self.events)
+        # The orchestrator consults the brain for routing and fast paths.
+        self.agent.brain = brain
+        # The autonomy supervisor mirrors missions into the PFC.
+        self.autonomy.pfc = brain.pfc
+        return brain
 
     def _queue_enrich_mission(self, item: dict) -> dict:
         """Attribute a queue_task call made inside a mission agent run back
@@ -3626,6 +3721,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/diagnostics":
             self._json(self.state.diagnostics_payload())
             return
+        if path == "/api/brain/status":
+            brain = getattr(self.state, "brain", None)
+            self._json(brain.status() if brain is not None
+                       else {"error": "brain not initialized"})
+            return
+        if path == "/api/brain/trace":
+            brain = getattr(self.state, "brain", None)
+            q = parse_qs(urlparse(self.path).query)
+            corr = str(q.get("correlation_id", [""])[0])
+            limit = int(q.get("limit", ["100"])[0])
+            if brain is None:
+                self._json({"events": []})
+                return
+            if corr:
+                self._json(brain.trace_summary(corr))
+            else:
+                self._json({"events": brain.trace(limit=limit)})
+            return
         if path == "/api/events":
             # Long-lived SSE stream of job/tool events for live UI updates.
             self._sse_begin()
@@ -5298,6 +5411,11 @@ def stop_state(state: AppState) -> None:
     try:
         if getattr(state, "autonomy", None) is not None:
             state.autonomy.stop()
+    except Exception:
+        pass
+    try:
+        if getattr(state, "brain", None) is not None:
+            state.brain.close()
     except Exception:
         pass
 

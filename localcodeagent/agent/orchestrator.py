@@ -2877,6 +2877,54 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else "conversation"
         )
+        # Cognitive routing: the Nexus Brain classifies the input, consults
+        # memory, and may answer deterministically before any model loads.
+        brain_envelope: dict[str, Any] = {}
+        brain = getattr(self, "brain", None)
+        if brain is not None:
+            try:
+                brain_envelope = brain.process_input(
+                    user_text, project_id=project_id,
+                    conversation_id=conversation_id) or {}
+            except Exception:
+                brain_envelope = {}
+            if brain_envelope.get("answer"):
+                completed = self.tasks.update(
+                    task.id, status="completed", phase="done",
+                    summary=str(brain_envelope["answer"])[:400],
+                    final_content=str(brain_envelope["answer"]),
+                    steps=0, error="", response_source="brain_fast_path")
+                self._act_update(
+                    task.id, plan_act, state="completed",
+                    summary=f"Fast path ({brain_envelope.get('fast_path')}) "
+                            f"— no model invoked",
+                    callback=event_callback)
+                self._safe_emit(event_callback, {
+                    "type": "model", "event": {
+                        "type": "brain_fast_path",
+                        "fast_path": brain_envelope.get("fast_path"),
+                        "correlation_id": brain_envelope.get("correlation_id"),
+                        "latency_ms": brain_envelope.get("latency_ms")}})
+                if self.conversation_memory is not None:
+                    self.conversation_memory.record_exchange(
+                        user_text, str(brain_envelope["answer"]))
+                if self.conversation_manager is not None:
+                    self.conversation_manager.record_exchange(
+                        user_text, str(brain_envelope["answer"]),
+                        intent=conversation_intent,
+                        model_id="nexus-brain",
+                        response_source="brain_fast_path")
+                return AgentResult(
+                    content=str(brain_envelope["answer"]),
+                    routing=RoutingDecision(
+                        role="utility", model_id="nexus-brain",
+                        reasons=[f"brain fast path: {brain_envelope.get('fast_path')}"],
+                        complexity=0),
+                    model_events=[{"type": "brain_fast_path",
+                                   "fast_path": brain_envelope.get("fast_path")}],
+                    steps=0,
+                    task=completed.as_dict() if completed else {},
+                    response_source="brain_fast_path")
         attach = self._prepare_attachments(attachments)
         learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": [], "forgotten": []}
         if (

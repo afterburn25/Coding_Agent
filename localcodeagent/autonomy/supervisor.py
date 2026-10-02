@@ -68,6 +68,9 @@ class AutonomousSupervisor:
         self.recovery = RecoveryManager()
         self.evaluator = MissionEvaluator(self.workspace)
         self.planner = MissionPlanner()
+        # Optional cognitive-architecture hook — set by AppState once the
+        # Nexus Brain is constructed (supervisor builds first).
+        self.pfc = None
         self.budgets = BudgetManager(self.workspace, resources=resources)
         self.policy = AutonomyPolicy(self.store, permission_manager)
         self.notifications = NotificationCenter(
@@ -561,6 +564,20 @@ class AutonomousSupervisor:
                 "ts": time.time(), "event": "plan",
                 "detail": f"{len(tasks)} tasks planned",
             })
+            # The PFC mirrors the mission DAG as a cognitive plan — tracked
+            # for completion assessment and conflict monitoring.
+            if self.pfc is not None:
+                try:
+                    p = self.pfc.plan(str(row.get("objective") or ""),
+                                      mission={**row, "id": mission_id},
+                                      project_id=str(self.workspace))
+                    row.setdefault("history", []).append({
+                        "ts": time.time(), "event": "cognitive_plan",
+                        "detail": f"pfc plan {p.plan_id} "
+                                  f"confidence={p.confidence}"})
+                    row["cognitive_plan_id"] = p.plan_id
+                except Exception:
+                    pass
             row["attempts"] = int(row.get("attempts") or 0) + 1
         self.missions.mutate(mission_id, _fn)
         self._emit("task_graph", {"type": "task_graph_updated",
@@ -697,6 +714,13 @@ class AutonomousSupervisor:
             failed_node = next(
                 (n for n in graph.nodes if n.get("state") == "failed"), None)
         tasks = self.planner.replan(mission, failed_node, reason)
+        # Mirror the replan in the PFC's working plan when one was recorded.
+        if self.pfc is not None and mission.get("cognitive_plan_id"):
+            try:
+                self.pfc.replan(str(mission["cognitive_plan_id"]),
+                                reason=reason[:300])
+            except Exception:
+                pass
         new_ids = []
         for t in tasks:
             graph.add(t)
@@ -730,6 +754,12 @@ class AutonomousSupervisor:
         }
         def _fn(row: dict) -> None:
             row["completion"] = completion
+            if self.pfc is not None and row.get("cognitive_plan_id"):
+                try:
+                    completion["cognitive"] = self.pfc.assess_completion(
+                        str(row["cognitive_plan_id"]))
+                except Exception:
+                    pass
         self.missions.mutate(mission_id, _fn)
         self.missions.transition(
             mission_id,

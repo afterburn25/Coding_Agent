@@ -2,7 +2,14 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **698 / 698** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.6.1-dev — Native Nexus Core Desktop Dogfood
+## Active version: 0.8.0 — Cognitive Architecture (Nexus Brain regions)
+
+v0.8 adds `localcodeagent/brain/` — Corpus Callosum event bus, Brain Stem,
+Hippocampus, Thalamus, Prefrontal Cortex, Basal Ganglia, Motor Cortex,
+Cerebellum, and six specialist brain profiles. Models are capability-routed
+resources; memory/plans/health/action history persist in Nexus itself.
+Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
+`/api/brain/trace`, System page → Nexus Brain panel.
 
 ### Stable capabilities retained from v0.1–v0.3
 
