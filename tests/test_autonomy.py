@@ -773,7 +773,7 @@ class NotificationTests(unittest.TestCase):
     def test_quiet_hours_mutes(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)
-            sup.notifications.quiet_hours = (0, 23)  # always quiet
+            sup.notifications.quiet_hours = (0, 24)  # always quiet (end-exclusive)
             out = sup.notifications.notify("info ping", level="important")
             self.assertEqual(out["level"], "muted")
             # Critical severities still pass.
