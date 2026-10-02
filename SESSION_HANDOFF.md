@@ -864,4 +864,15 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Build: PyInstaller collects onnxruntime/kokoro_onnx/phonemizer/
   espeakng_loader/numpy; `kokoro-onnx` installed with
   `--ignore-requires-python` (declared <3.14, verified working on 3.14).
+- `build_windows.ps1` bundles the SHA-256-verified Kokoro assets into
+  `dist\ChatNexus\models\voice` (cached under `packaging\voice-assets\`),
+  so the portable package works offline; the installer still downloads
+  hash-checked copies with skip-if-verified on upgrade.
+- Commits: `74a44ac` (subsystem) + `092840a` (packaging fixes: asset
+  bundling, 120 s backend health budget, `voice.html` smoke probe,
+  watchdog idle-unload, SSE/bus segment dedupe, UTF-8 BOM).
+- Verified end-to-end on the packaged build: `NexusCore.exe --self-test`
+  green; `/api/voice/speak` synthesized and `/api/voice/audio/<id>`
+  served real WAV from `dist\ChatNexus` (2.87 s audio in ~4.3 s).
 - Measured: model load ~0.8 s, warm synthesis RTF ~0.43 on CPU.
+- Test suite: 537 / 537 (2 environment skips).
