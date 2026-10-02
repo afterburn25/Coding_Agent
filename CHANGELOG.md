@@ -58,6 +58,19 @@ Performance tuning + live activity timeline.
   host.
 - **RAG as agent tool**: `repo_search` is registered in the ToolRegistry
   against the lazy incremental index.
+- **Mission job nodes**: new `job` DAG kind runs async platform work —
+  sandboxed commands (workspace cwd), state backups, incremental RAG
+  refresh (works standalone), and image generation (submits and awaits
+  the job's terminal state). Repository/workspace missions prepend a
+  `rag_update` job node so inspection sees a fresh index.
+- **System page**: `/system.html` — live UI for health, digital twin,
+  RAG search/reindex, LSP pool, skill toggles, artifacts, verified
+  backup create/restore, eval history, and experiments.
+- **Verified on-hardware benchmark** (RTX 3080 Ti 12 GB, Qwen3-14B
+  Q4_K_M, ctx 8192): sweep measured 78.8 t/s generation, 2011 t/s prompt
+  processing, 146 ms TTFT for the winning config; early candidates
+  measured ~3× slower under transient VRAM contention — persisted to
+  `data/runtime_tuning.json` and `data/benchmarks/`.
 - **CI fixes**: worktree merges carry explicit git identity (Linux-runner
   `empty ident` fix); the Windows package workflow resolves `VERSION`
   into `APP_VERSION`/`APP_NUMERIC_VERSION` for Inno defines and artifact

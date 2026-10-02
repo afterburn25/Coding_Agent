@@ -236,7 +236,35 @@
   job.
 - Final commits this wave: `6986514` (0.7.1 perf+timeline), `55c7d66`
   (auto-tuner + CI identity fix), `2df6870` (sandboxed verify + RAG
-  tool), `b6e2572` + `a44905c` (workflow version resolution + contract-test fix).
+  tool), `b6e2572` + `a44905c` (workflow version resolution +
+  contract-test fix), `8e477c8` (System page), `17fdaea` (job nodes).
+
+#### Verified benchmark — user hardware (2026-10-02)
+
+RTX 3080 Ti 12 GB (10.36 GB free), 64 GB RAM, 24 logical cores,
+llama.cpp build 11278, Qwen3-14B Q4_K_M at ctx 8192 with `gpu_layers
+auto` + `fit_target 1024` (full GPU offload). Six bounded candidates,
+each measured cold + warm via a real streamed request:
+
+| Candidate | Prompt t/s | Gen t/s | TTFT ms | Warm TTFT |
+|---|---|---|---|---|
+| FA, batch 512/ubatch 256, 12t | 589 | 20.9 | 576 | 44.9 |
+| FA, batch 1024/512, 12t | 600 | 19.1 | 422 | 27.2 |
+| FA, batch 256/128, 12t | 1286 | 26.7 | 196 | 27.1 |
+| FA, batch 512/256, 23t | **2011** | **78.8** | **146** | 26.9 |
+| FA+KV q8_0, batch 512/256, 12t | 193 | 76.9 | 1239 | 22.2 |
+| no-FA, batch 512/256, 12t | 2004 | 78.7 | 125 | 34.9 |
+
+Winner persisted: `--flash-attn auto --cache-reuse 256 --batch-size 512
+--ubatch-size 256 --threads 23`. Measured finding: the stable ceiling on
+this GPU is ~78-79 t/s, but the first three candidates measured 19-27
+t/s — consistent with transient VRAM contention during the early probes
+(only 10.36 GB was free for a ~10 GB model+KV at ctx 8192). That is
+exactly the class of result static tables miss: the tuner picked the
+config that measured best under real conditions rather than assuming
+more threads or more batch helps. `--cache-reuse` reported
+`cached_tokens=0` on this build; flash-attention was neutral, not a
+regression.
 
 
 
