@@ -254,6 +254,27 @@ def detect_approval_backlog(sources: dict) -> dict | None:
         route="suggestion", signature="approval_backlog")
 
 
+def detect_ram_pressure(sources: dict) -> dict | None:
+    """System RAM under pressure — the twin's live hardware snapshot."""
+    fn = sources.get("ram_free_gb")
+    if not fn:
+        return None
+    try:
+        free = float(fn())
+    except Exception:
+        return None
+    if free <= 0 or free >= 2.0:
+        return None
+    sev = "high" if free < 0.8 else "normal"
+    return new_finding(
+        kind="ram_pressure", severity=sev, confidence=0.85,
+        title=f"RAM free space low: {free:.1f} GB",
+        detail="Memory pressure causes model-load failures and OOM — "
+               "evicting idle models or reducing context may help.",
+        evidence={"ram_free_gb": round(free, 2)},
+        route="repair", signature="ram_pressure")
+
+
 def detect_ci_failures(sources: dict) -> dict | None:
     """Newly-failed GitHub/CI runs — each failed run becomes a repair
     incident once (signature keys on the run id)."""
@@ -287,6 +308,7 @@ DETECTORS: list[Callable[[dict], dict | None]] = [
     detect_mission_failures,
     detect_model_failures,
     detect_disk_pressure,
+    detect_ram_pressure,
     detect_repair_thrash,
     detect_answer_memory_decay,
     detect_startup_regression,

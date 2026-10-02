@@ -1003,6 +1003,9 @@ class AppState:
                 lambda: self.model_telemetry.summary() or {},
             "disk_free_gb":
                 lambda: _shutil.disk_usage(str(self.workspace)).free / 1e9,
+            "ram_free_gb":
+                lambda: float((self.twin.hardware() or {})
+                              .get("ram_free_gb") or 0.0),
             "repairs":
                 lambda: sup.repair.list() if sup.repair else [],
             "startup_ms": _startup,
@@ -1082,6 +1085,9 @@ class AppState:
                                     .get("models") or []},
                 "crash_history": lambda: netdiag.crash_history(20),
                 "logs": _tail_log,
+                # Twin snapshot at detect time — the incident carries the
+                # same hardware sample the twin history records.
+                "twin": lambda: self.twin.sample(),
             },
             # Code repairs run as repair missions whose workspace is the
             # incident's isolated worktree — the existing executor writes

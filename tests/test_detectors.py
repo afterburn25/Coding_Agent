@@ -12,7 +12,8 @@ from localcodeagent.autonomy.detectors import (
     DETECTORS, SignalScanner, detect_answer_memory_decay,
     detect_approval_backlog, detect_ci_failures, detect_crash_storm,
     detect_disk_pressure, detect_mission_failures, detect_model_failures,
-    detect_repair_thrash, detect_startup_regression, new_finding)
+    detect_ram_pressure, detect_repair_thrash, detect_startup_regression,
+    new_finding)
 from localcodeagent.autonomy.state import AutonomyStore
 
 
@@ -140,6 +141,17 @@ class DetectorUnitTests(unittest.TestCase):
         self.assertEqual(f["route"], "suggestion")
         self.assertIsNone(detect_approval_backlog(
             {"pending_approvals": lambda: [{"created_at": NOW}]}))
+
+    def test_ram_pressure(self):
+        f = detect_ram_pressure({"ram_free_gb": lambda: 0.5})
+        self.assertEqual(f["severity"], "high")
+        self.assertEqual(detect_ram_pressure(
+            {"ram_free_gb": lambda: 1.4})["severity"], "normal")
+        self.assertIsNone(detect_ram_pressure(
+            {"ram_free_gb": lambda: 16.0}))
+        self.assertIsNone(detect_ram_pressure(
+            {"ram_free_gb": lambda: 0.0}))   # can't measure → silent
+        self.assertIsNone(detect_ram_pressure({}))
 
     def test_ci_failures(self):
         runs = [{"databaseId": 123, "displayTitle": "v0.11.0",
