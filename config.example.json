@@ -139,6 +139,7 @@
   "image_restore_chat_model": true,
   "image_auto_run_jobs": true,
   "image_job_timeout": 900,
+  "image_output_dir": "output/images",
   "image_models": [
     {
       "id": "juggernaut-x-v10",

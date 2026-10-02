@@ -227,9 +227,14 @@ class ComfyUIRuntime:
         self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
 
     def _wait_ready(self) -> None:
-        deadline = time.monotonic() + max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
+        # Wait out the full boot budget (2x startup timeout since spawn) so a
+        # request that arrives during a cold boot attaches to it instead of
+        # erroring while ComfyUI is still initializing.
+        started = self.status.started_at or time.time()
+        budget = 2 * max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
+        deadline = started + budget
         last = ""
-        while time.monotonic() < deadline:
+        while time.time() < deadline:
             if self._process is None or self._process.poll() is not None:
                 code = self._process.returncode if self._process is not None else "?"
                 self.status.state = "error"

@@ -43,20 +43,48 @@ class ConversationManager:
         if not self._data.get("active_conversation_id"):
             self.create("New chat")
 
-    def _load(self) -> None:
-        if not self.path.exists():
-            return
+    @property
+    def _backup_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".bak")
+
+    def _read_state(self, path: Path) -> dict[str, Any] | None:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                self._data.update(raw)
-                personality = dict(DEFAULT_PERSONALITY)
-                personality.update(raw.get("personality") or {})
-                self._data["personality"] = personality
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
-            pass
+            return None
+        if not isinstance(raw, dict) or not raw.get("conversations"):
+            return None
+        return raw
+
+    def _load(self) -> None:
+        raw = self._read_state(self.path) if self.path.exists() else None
+        backup = self._read_state(self._backup_path) if self._backup_path.exists() else None
+        # If the main file lost conversations relative to the backup (external
+        # truncation/deploy overwrite), prefer the backup — it has more data.
+        if backup is not None and (
+            raw is None
+            or len(backup.get("conversations", [])) > len(raw.get("conversations", []))
+        ):
+            raw = backup
+        if raw is None:
+            return
+        self._data.update(raw)
+        personality = dict(DEFAULT_PERSONALITY)
+        personality.update(raw.get("personality") or {})
+        self._data["personality"] = personality
 
     def _save(self) -> None:
+        if self.path.exists():
+            try:
+                # Keep the last on-disk state as a backup before overwriting so
+                # a failed or clobbered write never destroys chat history.
+                # Skip the backup if the disk file lost conversations — that
+                # means it was externally truncated and must not poison .bak.
+                disk = self._read_state(self.path)
+                if disk is not None and len(disk.get("conversations", [])) >= len(self._data.get("conversations", [])):
+                    self._backup_path.write_bytes(self.path.read_bytes())
+            except OSError:
+                pass
         atomic_write_text(self.path, json.dumps(self._data, indent=2, ensure_ascii=False))
 
     @staticmethod
@@ -235,7 +263,15 @@ class ConversationManager:
             "gaps only when relevant. Do not invent human experiences or claim feelings you do not have."
         )
 
-    def record_exchange(self, user: str, assistant: str, *, intent: str = "conversation", model_id: str = "") -> dict[str, Any]:
+    def record_exchange(
+        self,
+        user: str,
+        assistant: str,
+        *,
+        intent: str = "conversation",
+        model_id: str = "",
+        image_job_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         user = self._clean(user)
         assistant = self._clean(assistant)
         if not user or not assistant:
@@ -245,9 +281,19 @@ class ConversationManager:
             now = time.time()
             if row.get("title") in {"", "New chat"}:
                 row["title"] = self._title(user)
+            assistant_message = {
+                "id": uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": assistant,
+                "timestamp": now,
+                "intent": intent,
+                "model_id": model_id,
+            }
+            if image_job_ids:
+                assistant_message["image_job_ids"] = [str(j) for j in image_job_ids if str(j)]
             row.setdefault("messages", []).extend([
                 {"id": uuid.uuid4().hex[:12], "role": "user", "content": user, "timestamp": now},
-                {"id": uuid.uuid4().hex[:12], "role": "assistant", "content": assistant, "timestamp": now, "intent": intent, "model_id": model_id},
+                assistant_message,
             ])
             row["messages"] = row["messages"][-400:]
             row["updated_at"] = now

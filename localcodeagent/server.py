@@ -2650,7 +2650,7 @@ class Handler(BaseHTTPRequestHandler):
                     "conversation": row,
                     # UI history keeps durable message IDs/timestamps for precise feedback,
                     # while self.state.history remains role/content-only for model APIs.
-                    "history": list(row.get("messages", []))[-32:],
+                    "history": list(row.get("messages", [])),
                 })
                 return
 

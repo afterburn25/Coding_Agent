@@ -176,6 +176,15 @@ Write-Host "Smoke testing native NexusCore.exe -> hidden backend integration..."
 $Smoke = Start-Process -FilePath (Join-Path $PackageRoot "NexusCore.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
 if ($Smoke.ExitCode -ne 0) { throw "Native NexusCore.exe self-test failed with exit code $($Smoke.ExitCode)" }
 
+# The smoke test creates fresh runtime state under the package root. Strip it
+# so deploying/updating never clobbers the installed app's user data
+# (conversations, generated images, voice cache, etc.).
+foreach ($runtimeDir in @("data", ".agent", "output", "logs")) {
+    $p = Join-Path $PackageRoot $runtimeDir
+    if (Test-Path $p) { Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue }
+}
+if (Test-Path (Join-Path $PackageRoot "data")) { throw "Package still contains runtime data/ after cleanup" }
+
 # Optional Authenticode signing. Unsigned binaries are what SmartScreen and
 # AV heuristics flag on download — set NEXUS_CODESIGN_THUMBPRINT (a cert in
 # the machine/user store) or NEXUS_CODESIGN_PFX (+ NEXUS_CODESIGN_PASSWORD)

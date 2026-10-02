@@ -72,6 +72,45 @@ class ConversationManagerTests(unittest.TestCase):
             self.assertIn("Europa has a subsurface ocean", context)
             self.assertIn("project codename is Orion", context)
 
+    def test_history_survives_truncated_or_missing_main_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "conversations.json"
+            manager = ConversationManager(path)
+            # Two exchanges: the rolling .bak lags one save behind, so the
+            # first exchange is what survives a clobbered main file.
+            manager.record_exchange("remember this", "stored reply")
+            manager.record_exchange("second turn", "second reply")
+            conv_id = manager.active()["id"]
+
+            # Simulate a bad overwrite wiping the main file.
+            path.write_text('{"version":1,"conversations":[]}', encoding="utf-8")
+            reloaded = ConversationManager(path)
+            self.assertEqual(reloaded.active()["id"], conv_id)
+            self.assertIn("remember this", str(reloaded.active()["messages"]))
+
+            # Corrupt main file falls back to the backup too.
+            path.write_text("{not json", encoding="utf-8")
+            reloaded2 = ConversationManager(path)
+            self.assertEqual(reloaded2.active()["id"], conv_id)
+
+    def test_exchange_records_image_job_ids_on_assistant_message(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = ConversationManager(Path(td) / "conversations.json")
+            manager.record_exchange("draw a castle", "Image generation started.",
+                                    image_job_ids=["job-abc123"])
+            msgs = manager.active()["messages"]
+            self.assertEqual(msgs[-1]["role"], "assistant")
+            self.assertEqual(msgs[-1]["image_job_ids"], ["job-abc123"])
+
+            reloaded = ConversationManager(Path(td) / "conversations.json")
+            self.assertEqual(reloaded.active()["messages"][-1]["image_job_ids"], ["job-abc123"])
+
+    def test_exchange_without_images_leaves_field_absent(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = ConversationManager(Path(td) / "conversations.json")
+            manager.record_exchange("hello", "hi there")
+            self.assertNotIn("image_job_ids", manager.active()["messages"][-1])
+
     def test_feedback_is_durable(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "conversations.json"

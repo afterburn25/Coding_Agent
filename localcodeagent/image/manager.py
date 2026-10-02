@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
 import threading
 import time
 import uuid
@@ -398,6 +399,23 @@ class ImageManager:
             job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs(job)
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]
+            # Mirror finished outputs into the user-facing output folder so
+            # generated images are easy to find outside the app.
+            try:
+                output_setting = str(getattr(self.config, "image_output_dir", "") or "").strip()
+                if output_setting:
+                    output_dir = self._resolve(output_setting)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    mirrored = []
+                    for p in job.outputs:
+                        src = Path(p)
+                        if src.is_file():
+                            shutil.copy2(src, output_dir / src.name)
+                            mirrored.append(str(output_dir / src.name))
+                    if mirrored:
+                        job.outputs = job.outputs + mirrored
+            except OSError:
+                pass
             job.state="finished"; job.stage="finished"; job.progress=1.0; job.finished_at=time.time()
             if self.runtime is not None:
                 self.runtime.refresh_hardware(); job.vram_after_gb=self.runtime.hardware.free_vram_gb

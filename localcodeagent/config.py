@@ -209,6 +209,7 @@ class AgentConfig:
     image_restore_chat_model: bool = True
     image_auto_run_jobs: bool = True
     image_job_timeout: int = 900
+    image_output_dir: str = "output/images"
 
     # Voice / TTS subsystem (local-first; Kokoro ONNX on CPU by default so
     # speech never competes with coding models for VRAM).
@@ -546,6 +547,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_restore_chat_model = bool(raw.get("image_restore_chat_model", cfg.image_restore_chat_model))
     cfg.image_auto_run_jobs = bool(raw.get("image_auto_run_jobs", cfg.image_auto_run_jobs))
     cfg.image_job_timeout = max(30, int(raw.get("image_job_timeout", cfg.image_job_timeout)))
+    cfg.image_output_dir = str(raw.get("image_output_dir", cfg.image_output_dir))
     cfg.voice_enabled = bool(raw.get("voice_enabled", cfg.voice_enabled))
     cfg.voice_muted = bool(raw.get("voice_muted", cfg.voice_muted))
     cfg.voice_engine = str(raw.get("voice_engine", cfg.voice_engine))

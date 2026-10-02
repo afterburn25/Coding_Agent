@@ -247,7 +247,9 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertIn("recordBuiltinExchange", app)
         self.assertIn("loadConversations", app)
         self.assertIn("/api/conversations/select", app)
-        self.assertIn('"history": list(row.get("messages", []))[-32:]', server)
+        # Selecting a conversation returns its full stored message history so
+        # scrolling back to the top shows every recorded exchange.
+        self.assertIn('"history": list(row.get("messages", []))', server)
         self.assertIn("data-message-id", app)
         self.assertIn("conversationSearch", app)
         self.assertIn("data-feedback", app)

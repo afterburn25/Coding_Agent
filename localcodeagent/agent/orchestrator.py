@@ -1214,6 +1214,22 @@ class AgentOrchestrator:
         except Exception:
             pass
 
+    @staticmethod
+    def _image_job_ids_from_events(tool_events: list[dict[str, Any]]) -> list[str]:
+        ids: list[str] = []
+        for event in tool_events:
+            if str(event.get("name") or "") not in IMAGE_TOOL_NAMES:
+                continue
+            try:
+                payload = json.loads(str(event.get("result") or "{}"))
+            except Exception:
+                continue
+            job = payload.get("job") if isinstance(payload, dict) else None
+            job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
+            if job_id and job_id not in ids:
+                ids.append(job_id)
+        return ids
+
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
@@ -1694,6 +1710,7 @@ class AgentOrchestrator:
                 session.main_content,
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
+                image_job_ids=self._image_job_ids_from_events(session.tool_events),
             )
         if (
             self.model_growth is not None
@@ -2114,13 +2131,12 @@ class AgentOrchestrator:
         )
         self._record_outcome(session, "step_limit")
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(session.user_text, session.main_content)
-        if self.conversation_manager is not None:
-            self.conversation_manager.record_exchange(
+            self.conversation_memory.record_exchange(
                 session.user_text,
                 session.main_content,
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
+                image_job_ids=self._image_job_ids_from_events(session.tool_events),
             )
         self._close_session(session.task_id)
         return self._result(session)
@@ -2293,6 +2309,7 @@ class AgentOrchestrator:
                 content,
                 intent="image",
                 model_id=model_id,
+                image_job_ids=self._image_job_ids_from_events([tool_event]),
             )
         return AgentResult(
             content=content,
