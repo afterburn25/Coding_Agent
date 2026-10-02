@@ -912,6 +912,8 @@ class AppState:
           backup     — create a versioned state backup
           rag_update — incremental repository index refresh
           image      — submit an ImageRequest and wait for completion
+          model_install — download an image model profile's components and
+                          wait for the install job to finish
         """
         meta = dict(node.get("metadata") or {})
         op = str(meta.get("job") or "")
@@ -951,6 +953,29 @@ class AppState:
                         "output": f"index: +{r.get('added', 0)} added, "
                                   f"{r.get('updated', 0)} updated, "
                                   f"{r.get('removed', 0)} removed"}
+            if op == "model_install":
+                model_id = str(meta.get("model") or "")
+                try:
+                    profile = self.images.router.get_profile(model_id)
+                except Exception:
+                    profile = None
+                if profile is None:
+                    return {"ok": False,
+                            "output": f"unknown image model: {model_id!r}"}
+                job = self.images.library.start_install(
+                    profile, repair=bool(meta.get("repair")))
+                deadline = time.time() + float(meta.get("timeout", 3600))
+                while time.time() < deadline:
+                    cur = next((j for j in self.images.library.install_jobs()
+                                if j["id"] == job["id"]), job)
+                    if cur.get("state") in ("finished", "failed"):
+                        return {"ok": cur["state"] == "finished",
+                                "output": f"model install {cur['state']}"
+                                          f"{': ' + cur['error'] if cur.get('error') else ''}",
+                                "job": cur}
+                    time.sleep(2.0)
+                return {"ok": False, "output": "model install timed out",
+                        "job": job}
             if op == "image":
                 from .image.types import ImageRequest
                 req = ImageRequest(

@@ -241,6 +241,40 @@ class JobNodeTests(unittest.TestCase):
                 stop_state(state)
 
 
+    def test_mission_job_model_install_reports_result(self):
+        from types import SimpleNamespace
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                profile = SimpleNamespace(id="sdxl-test")
+                job = {"id": "inst1", "model_id": "sdxl-test",
+                       "state": "finished", "progress": 1.0,
+                       "error": "", "results": [{"status": "downloaded"}]}
+                state.images.router.get_profile = lambda mid: (
+                    profile if mid == "sdxl-test" else None)
+                state.images.library.start_install = lambda p, repair=False: dict(job)
+                state.images.library.install_jobs = lambda: [dict(job)]
+                node = {"id": "n9",
+                        "metadata": {"job": "model_install",
+                                     "model": "sdxl-test"}}
+                res = state._mission_job({"id": "m3"}, node)
+                self.assertTrue(res["ok"], res.get("output"))
+                self.assertEqual(res["job"]["model_id"], "sdxl-test")
+                bad = state._mission_job(
+                    {"id": "m3"},
+                    {"id": "n10",
+                     "metadata": {"job": "model_install", "model": "nope"}})
+                self.assertFalse(bad["ok"])
+                self.assertIn("unknown image model", bad["output"])
+            finally:
+                stop_state(state)
+
+
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
         with tempfile.TemporaryDirectory() as td:
