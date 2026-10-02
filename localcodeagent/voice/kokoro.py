@@ -40,6 +40,7 @@ class KokoroEngine(TTSEngine):
         self._synth_calls = 0
         self._synth_audio_s = 0.0
         self._synth_cpu_s = 0.0
+        self._last_used = 0.0
 
     # -- lifecycle ------------------------------------------------------
     def available(self) -> bool:
@@ -91,6 +92,7 @@ class KokoroEngine(TTSEngine):
                                            lang=lang)
         except Exception as exc:
             raise VoiceEngineError(f"Kokoro synthesis failed: {exc}") from exc
+        self._last_used = time.time()
         dt = time.monotonic() - t0
         audio = np.asarray(audio, dtype=np.float32)
         self._synth_calls += 1
@@ -118,6 +120,7 @@ class KokoroEngine(TTSEngine):
 
         chunks = asyncio.run(_collect()) if not isinstance(stream, list) else stream
         for audio, sr in chunks:
+            self._last_used = time.time()
             yield np.asarray(audio, dtype=np.float32), sr
 
     # -- info ---------------------------------------------------------------

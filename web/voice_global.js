@@ -53,8 +53,17 @@
     api('/api/voice/stop', { reason: 'user' });
   };
 
+  NV._seenSegments = new Set();
   NV.enqueue = function (url, meta) {
     if (NV.muted || !NV.enabled) return;
+    const sid = meta && meta.segment_id;
+    if (sid && NV._seenSegments.has(sid)) return;  // bus + stream dedupe
+    if (sid) {
+      NV._seenSegments.add(sid);
+      if (NV._seenSegments.size > 500) {
+        NV._seenSegments = new Set([...NV._seenSegments].slice(-400));
+      }
+    }
     NV.queue.push({ url, meta });
     NV._playNext();
     NV._emit();

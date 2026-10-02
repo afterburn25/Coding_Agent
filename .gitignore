@@ -19,6 +19,12 @@ models/image/
 data/image/
 ComfyUI/
 
+# Kokoro TTS model binaries + build-time asset cache
+models/voice/
+packaging/voice-assets/
+packaging/llama-runtime.zip
+packaging/llama-runtime/
+
 # Local packaging output (PyInstaller/dotnet dist trees)
 build/
 dist/

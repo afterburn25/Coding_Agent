@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Python = "python",
     [string]$LlamaTag = "b11278"
 )
@@ -99,6 +99,35 @@ if (-not $Server) { throw "Pinned llama.cpp archive did not contain llama-server
 $RuntimeTarget = Join-Path $PackageRoot "runtime\llama"
 New-Item -ItemType Directory -Force -Path $RuntimeTarget | Out-Null
 Copy-Item -Path (Join-Path $Server.Directory.FullName "*") -Destination $RuntimeTarget -Recurse -Force
+
+Write-Host "Bundling verified Kokoro voice assets (hexgrad/Kokoro-82M v1.0, Apache-2.0)..."
+$VoiceAssetCache = Join-Path $Root "packaging\voice-assets"
+New-Item -ItemType Directory -Force -Path $VoiceAssetCache | Out-Null
+$VoiceAssetTarget = Join-Path $PackageRoot "models\voice"
+New-Item -ItemType Directory -Force -Path $VoiceAssetTarget | Out-Null
+# SHA-256 must match localcodeagent/voice/assets.py ASSETS entries.
+$VoiceAssets = @(
+    @{ Name = "kokoro-v1.0.onnx"
+       Url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+       Sha256 = "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5" },
+    @{ Name = "voices-v1.0.bin"
+       Url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+       Sha256 = "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d" }
+)
+foreach ($VoiceAsset in $VoiceAssets) {
+    $Cached = Join-Path $VoiceAssetCache $VoiceAsset.Name
+    $CachedOk = (Test-Path $Cached) -and
+        ((Get-FileHash -Algorithm SHA256 $Cached).Hash.ToLowerInvariant() -eq $VoiceAsset.Sha256)
+    if (-not $CachedOk) {
+        Invoke-WebRequest -Uri $VoiceAsset.Url -OutFile $Cached
+        $Actual = (Get-FileHash -Algorithm SHA256 $Cached).Hash.ToLowerInvariant()
+        if ($Actual -ne $VoiceAsset.Sha256) {
+            Remove-Item $Cached -Force
+            throw "voice asset checksum mismatch for $($VoiceAsset.Name). Expected $($VoiceAsset.Sha256), got $Actual"
+        }
+    }
+    Copy-Item $Cached (Join-Path $VoiceAssetTarget $VoiceAsset.Name) -Force
+}
 
 Copy-Item "config.example.json" (Join-Path $PackageRoot "config.example.json") -Force
 Copy-Item "config.example.json" (Join-Path $PackageRoot "config.json") -Force

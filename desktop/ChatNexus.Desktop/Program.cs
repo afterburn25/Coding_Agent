@@ -22,7 +22,7 @@ internal static class Program
             if (selfTest)
             {
                 using var backend = BackendProcess.Start(appDir);
-                backend.WaitUntilHealthyAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+                backend.WaitUntilHealthyAsync(TimeSpan.FromSeconds(120)).GetAwaiter().GetResult();
                 backend.ProbeUiAsync().GetAwaiter().GetResult();
                 return 0;
             }
@@ -699,7 +699,7 @@ internal sealed class BackendProcess : IDisposable
     public async Task ProbeUiAsync()
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        foreach (var route in new[] { "", "image.html", "research.html" })
+        foreach (var route in new[] { "", "image.html", "research.html", "voice.html" })
         {
             var body = await client.GetStringAsync(BaseUrl + route);
             if (!body.Contains("Nexus Core", StringComparison.OrdinalIgnoreCase))

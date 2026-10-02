@@ -964,6 +964,29 @@ class AppState:
         self._retry_failed_tasks()
         self._dequeue_next()
         self._check_disk_space()
+        self._unload_idle_voice_engine()
+
+    def _unload_idle_voice_engine(self) -> None:
+        """Release the TTS model after voice_idle_unload_seconds of silence —
+        keeps overnight sessions lean without losing anything."""
+        voice = self.voice
+        if voice is None:
+            return
+        idle_s = float(getattr(self.config, "voice_idle_unload_seconds", 600.0))
+        if idle_s <= 0:
+            return
+        try:
+            eng = voice._engines.get("kokoro") or next(
+                iter(voice._engines.values()), None)
+            if eng is None or getattr(eng, "_model", None) is None:
+                return
+            last = getattr(eng, "_last_used", getattr(eng, "_loaded_at", 0.0))
+            if time.time() - last > idle_s:
+                eng.unload()
+                self._voice_publish({"event": "engine_idle_unload",
+                                     "engine": "kokoro"})
+        except Exception:
+            pass
 
     def _check_disk_space(self) -> None:
         """Warn when the drive holding durable state is nearly full — writes
