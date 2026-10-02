@@ -192,6 +192,12 @@ class AppState:
                         max_records=max(10000, int(config.nexus_brain_record_limit)),
                     )
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
+        # Nexus Answer Memory: learned Q&A tier that can answer trusted
+        # repeated questions without invoking a model at all.
+        am_path = Path(getattr(config, "answer_memory_path", "data/nexus_brain/answer_memory.db")).expanduser()
+        if not am_path.is_absolute():
+            am_path = runtime_root / am_path
+        self.answer_memory = self._build_answer_memory(config, am_path)
         self._boot(64, "PREPARING · WORKSPACE", "Restoring project and repository context")
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
@@ -445,6 +451,7 @@ class AppState:
             knowledge_memory=self.knowledge_memory,
             model_growth=self.model_growth,
             nexus_brain=self.nexus_brain,
+            answer_memory=self.answer_memory,
             activities=self.activities,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
@@ -453,6 +460,80 @@ class AppState:
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_resume()
+
+    def exchange_for_message(self, message_id: str) -> tuple[str, str]:
+        """Resolve a message id to (user_question, assistant_answer)."""
+        if not message_id or self.conversation_manager is None:
+            return ("", "")
+        try:
+            for conv in self.conversation_manager.snapshot().get("conversations", []):
+                messages = conv.get("messages", [])
+                for i, msg in enumerate(messages):
+                    if str(msg.get("id")) != message_id:
+                        continue
+                    answer = str(msg.get("content") or "")
+                    question = ""
+                    for prev in reversed(messages[:i]):
+                        if prev.get("role") == "user":
+                            question = str(prev.get("content") or "")
+                            break
+                    return (question, answer)
+        except Exception:
+            pass
+        return ("", "")
+
+    def _build_answer_memory(self, config, am_path: Path):
+        """Construct AnswerMemory with live dependency fingerprints and
+        whitelisted dynamic-answer handlers (no code is ever read from the
+        database — handler keys map to these closures only)."""
+        from .answer_memory import AnswerMemory
+        from .answer_memory import invalidation as _am_inv
+
+        def _installed_text_models() -> str:
+            ids = [m.id for m in self.config.models if m.enabled]
+            return ", ".join(ids) if ids else "No text models are configured."
+
+        def _installed_image_models() -> str:
+            models = getattr(self.config, "image_models", []) or []
+            ids = [m.get("id", "") for m in models if isinstance(m, dict) and m.get("enabled", True)]
+            return ", ".join(ids) if ids else "No image models are configured."
+
+        def _default_image_model() -> str:
+            models = getattr(self.config, "image_models", []) or []
+            t2i = [
+                m for m in models
+                if isinstance(m, dict) and m.get("enabled", True)
+                and "text_to_image" in (m.get("capabilities") or [])
+            ]
+            if not t2i:
+                return "No text-to-image model is configured."
+            best = max(t2i, key=lambda m: int(m.get("priority", 0) or 0))
+            return str(best.get("display_name") or best.get("id") or "unknown")
+
+        return AnswerMemory(
+            am_path,
+            enabled=bool(getattr(config, "answer_memory_enabled", True)),
+            semantic_enabled=bool(getattr(config, "answer_memory_semantic_enabled", True)),
+            auto_learn=bool(getattr(config, "answer_memory_auto_learn", True)),
+            auto_promote=bool(getattr(config, "answer_memory_auto_promote", True)),
+            semantic_threshold=float(getattr(config, "answer_memory_semantic_threshold", 0.50)),
+            possible_threshold=float(getattr(config, "answer_memory_possible_threshold", 0.30)),
+            max_experiences=int(getattr(config, "answer_memory_max_experiences", 20000)),
+            retention_days=int(getattr(config, "answer_memory_experience_retention_days", 90)),
+            max_db_mb=int(getattr(config, "answer_memory_max_db_mb", 256)),
+            workspace=str(self.workspace),
+            config_fingerprint_fn=lambda: _am_inv.config_fingerprint(self.config),
+            repo_head_fn=lambda: _am_inv.repo_head(self.workspace),
+            brain_revision_fn=lambda: str(
+                (self.nexus_brain.summary() or {}).get("schema_version", "")
+            ),
+            handlers={
+                "app_version": lambda: f"Nexus Core {VERSION}",
+                "installed_text_models": _installed_text_models,
+                "installed_image_models": _installed_image_models,
+                "default_image_model": _default_image_model,
+            },
+        )
 
     def _residency_activity(self, event: dict) -> None:
         """Surface managed-runtime reclaim/rewarm decisions on the timeline."""
@@ -653,11 +734,21 @@ class AppState:
         else:
             self.nexus_brain.enabled = bool(config.nexus_brain_enabled)
             self.nexus_brain.max_records = max(10000, int(config.nexus_brain_record_limit))
+        try:
+            if self.answer_memory is not None and getattr(self.answer_memory, "store", None):
+                self.answer_memory.store.close()
+            am_path = Path(getattr(config, "answer_memory_path", "data/nexus_brain/answer_memory.db")).expanduser()
+            if not am_path.is_absolute():
+                am_path = self.runtime.base_dir / am_path
+            self.answer_memory = self._build_answer_memory(config, am_path)
+        except Exception:
+            pass
         self.agent.conversation_memory = self.conversation_memory
         self.agent.conversation_manager = self.conversation_manager
         self.agent.knowledge_memory = self.knowledge_memory
         self.agent.model_growth = self.model_growth
         self.agent.nexus_brain = self.nexus_brain
+        self.agent.answer_memory = self.answer_memory
         self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
@@ -1758,6 +1849,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/nexus-brain/history":
             self._json({"versions": self.state.nexus_brain.settings_history()})
             return
+        if path == "/api/answer-memory":
+            q = parse_qs(urlparse(self.path).query)
+            am = self.state.answer_memory
+            if am is None:
+                self._json({"available": False, "answers": [], "stats": {}})
+                return
+            self._json({
+                "stats": am.stats(),
+                "answers": am.list_answers(
+                    query=str((q.get("q") or [""])[0]).strip(),
+                    trust=str((q.get("trust") or [""])[0]).strip(),
+                    project_id=str(self.state.workspace),
+                ),
+            })
+            return
+        if path == "/api/answer-memory/export":
+            am = self.state.answer_memory
+            self._json(am.export() if am is not None else {"version": 1, "answers": []})
+            return
         if path == "/api/conversations":
             q = parse_qs(urlparse(self.path).query)
             query = str((q.get("q") or [""])[0]).strip()
@@ -2138,6 +2248,78 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _answer_memory_post(self, path: str, body: dict) -> None:
+        am = self.state.answer_memory
+        if am is None or not am.available:
+            self._json({"ok": False, "error": "answer memory unavailable"}, 503)
+            return
+        project_id = str(self.state.workspace)
+        # Optional message_id resolves to the exchange's question/answer.
+        msg_q = msg_a = ""
+        message_id = str(body.get("message_id", ""))
+        if message_id:
+            msg_q, msg_a = self.state.exchange_for_message(message_id)
+
+        if path == "/api/answer-memory/learn":
+            question = str(body.get("question", "") or msg_q)
+            answer = str(body.get("answer", "") or msg_a)
+            if not question or not answer:
+                self._json({"ok": False, "error": "question and answer are required"}, 400)
+                return
+            self._json(am.learn(
+                question, answer,
+                scope=str(body.get("scope", "global")),
+                project_id=project_id,
+                freshness=str(body.get("freshness", "user_defined")),
+            ))
+            return
+        if path == "/api/answer-memory/forget":
+            self._json(am.forget(
+                answer_id=str(body.get("id", "")),
+                question=str(body.get("question", "") or msg_q),
+            ))
+            return
+        if path == "/api/answer-memory/mark-incorrect":
+            conv = self.state.conversation_manager.active()
+            self._json(am.mark_incorrect(
+                answer_id=str(body.get("id", "")),
+                question=str(body.get("question", "") or msg_q),
+                correction=str(body.get("correction", "")),
+                conversation_id=str(conv.get("id") or ""),
+                project_id=project_id,
+            ))
+            return
+        if path == "/api/answer-memory/update":
+            self._json(am.edit(
+                str(body.get("id", "")),
+                answer_text=str(body.get("answer_text", "")),
+                canonical_question=str(body.get("canonical_question", "")),
+                trust_state=str(body.get("trust_state", "")),
+                freshness=str(body.get("freshness", "")),
+            ))
+            return
+        if path == "/api/answer-memory/merge":
+            self._json(am.merge(str(body.get("from_id", "")), str(body.get("into_id", ""))))
+            return
+        if path == "/api/answer-memory/refresh":
+            self._json(am.refresh(str(body.get("id", ""))))
+            return
+        if path == "/api/answer-memory/clear":
+            self._json(am.clear(str(body.get("scope", ""))))
+            return
+        if path == "/api/answer-memory/rebuild-index":
+            self._json(am.rebuild_index())
+            return
+        if path == "/api/answer-memory/vacuum":
+            if am.store is not None:
+                am.store.vacuum()
+            self._json({"ok": True})
+            return
+        if path == "/api/answer-memory/import":
+            self._json(am.import_(body if isinstance(body, dict) else {}))
+            return
+        self._json({"error": "unknown answer-memory endpoint"}, 404)
+
     def _agent_payload(self, result) -> dict:
         return {
             "content": result.content,
@@ -2155,6 +2337,8 @@ class Handler(BaseHTTPRequestHandler):
             "verification": result.verification,
             "review": result.review,
             "research": result.research,
+            "response_source": getattr(result, "response_source", ""),
+            "memory": getattr(result, "memory", {}),
             "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         }
@@ -2673,7 +2857,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
+                # Feed the same signal into Answer Memory trust scoring.
+                try:
+                    am = self.state.answer_memory
+                    if am is not None and am.available:
+                        rating = str(body.get("rating", ""))
+                        q, _a = self.state.exchange_for_message(str(body.get("message_id", "")))
+                        conv_id = str(body.get("conversation_id", "")) or str(
+                            self.state.conversation_manager.active().get("id") or "")
+                        am.apply_feedback(
+                            "up" if rating == "up" else "down",
+                            conversation_id=conv_id,
+                            question=q,
+                        )
+                except Exception:
+                    pass
                 self._json({"ok": True, "feedback": saved})
+                return
+
+            if path.startswith("/api/answer-memory/"):
+                self._answer_memory_post(path, body)
                 return
 
             if path == "/api/model-growth/sync":
@@ -2810,7 +3013,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 coding_model_optional = (
                     mode == "auto"
-                    and self.state.agent.can_run_without_coding_model(message)
+                    and (
+                        self.state.agent.can_run_without_coding_model(message)
+                        or self.state.agent.has_memory_answer(message)
+                    )
                 )
                 if not coding_model_optional:
                     readiness = self.state.runtime.readiness(probe_external=True)
@@ -2990,7 +3196,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 coding_model_optional = (
                     mode == "auto"
-                    and self.state.agent.can_run_without_coding_model(message)
+                    and (
+                        self.state.agent.can_run_without_coding_model(message)
+                        or self.state.agent.has_memory_answer(message)
+                    )
                 )
                 if not coding_model_optional:
                     readiness = self.state.runtime.readiness(probe_external=True)
@@ -3411,6 +3620,11 @@ def stop_state(state: AppState) -> None:
         pass
     try:
         state.terminal_tracker.shutdown()
+    except Exception:
+        pass
+    try:
+        if getattr(state, "answer_memory", None) is not None:
+            state.answer_memory.close()
     except Exception:
         pass
     try:

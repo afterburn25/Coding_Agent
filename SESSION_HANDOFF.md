@@ -955,3 +955,36 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   looping — was +-25% so it clipped at edges); indeterminate progress bar
   reaches +400% so it fully exits right edge.
 - Commits: 301a6c8 (feature), 1b9cc9b (anim fix + RAM est). CI green both.
+
+## 2026-10-02 — Nexus Answer Memory (learned Q&A fast path)
+
+- New package `localcodeagent/answer_memory/` (schema, migrations, store,
+  normalization, embeddings, retrieval, confidence, ttl, validation,
+  feedback, invalidation, learning, service). SQLite at
+  `data/nexus_brain/answer_memory.db`, WAL, per-operation connections so the
+  file is never held open; in-memory answers/aliases snapshot serves lookups
+  in ~0.1 ms; stat writes deferred + batch-flushed.
+- Pipeline: deterministic tier-0 → exact → semantic memory lookup → Brain →
+  utility → deep model. Trusted hits skip `refresh_hardware` + all model
+  loading (`response_source="answer_memory"`, "Answered from memory" badge,
+  timeline activity). Possible-band matches inject as advisory context.
+- Embedder `hashed-ngram-v1` (deterministic, no download) + hard gates:
+  proper/digit tokens, antonym pairs (start/stop, enable/disable…), and
+  symmetric canonical swaps (image/voice, France/Italy, 14B/30B) all block
+  at −1. Deep paraphrases fall to `possible` by design.
+- Trust: observed→candidate→trusted/verified; user learn/correction store
+  directly as trusted. Corrections invalidate the old answer.
+  Confirmed paraphrases self-learn as aliases (equivalent model answer ⇒
+  new phrasing becomes an exact hit next time).
+- Freshness: live questions never bypass; repository/config-dependent rows
+  go stale on HEAD/config-fingerprint change; TTL per answer class.
+- Secrets refused before persistence; no chain-of-thought stored; corrupt
+  DB quarantined (never deleted); export/import supported.
+- API: GET `/api/answer-memory` (+`/export`), POST learn/forget/
+  mark-incorrect/update/merge/refresh/clear/rebuild-index/vacuum/import.
+  Thumbs feedback feeds trust scoring. `stop_state` flushes pending writes.
+- UI: `/answers.html` Learned Answers page linked from every nav; 🧠 Learn
+  button on each assistant message.
+- Tests: `tests/test_answer_memory.py` (48). Full suite 606 passing
+  (2 env skips) on Windows. Bench: exact ≈0.08 ms, semantic ≈0.13 ms @200.
+- Docs: `docs/ANSWER_MEMORY.md`; README/PROJECT_STATUS/this file updated.

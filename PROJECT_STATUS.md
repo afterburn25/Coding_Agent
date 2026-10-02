@@ -295,9 +295,43 @@ Unit checkpoint: **362 tests passing**.
 - Direct text-to-image requests in Auto mode now bypass coding-model readiness at both `/api/chat` and `/api/chat/stream`, so an unavailable coding model cannot block a model-free image job before it reaches the image subsystem.
 - Direct-generation intent is centralized and recognizes natural request prefixes such as “can you”, “could you please”, “please”, and “I would like you to” while keeping source-image edits and non-image outputs out of the shortcut.
 
+## Nexus Answer Memory — learned Q&A fast path
+
+- Persistent SQLite (`data/nexus_brain/answer_memory.db`, WAL, schema v1)
+  stores *experiences* (every exchange, unverified) separately from *trusted
+  answers* — model output is never auto-trusted.
+- Tiered request pipeline: deterministic handlers → exact/semantic Answer
+  Memory lookup → Brain knowledge → utility model → deep model. Trusted hits
+  skip hardware probing and all model loading (measured ≈0.08 ms exact,
+  ≈0.13 ms semantic at 200 answers vs multi-second model inference).
+- Semantic matching uses `hashed-ngram-v1` (deterministic local embedder,
+  no download) with proper-token, antonym, and symmetric-swap conflict gates;
+  precision is favored over recall — borderline matches inject as context
+  instead of bypassing.
+- Trust promotion requires evidence (explicit learn, user correction,
+  repeated confirmation + positive feedback). Corrections invalidate the old
+  answer and store the replacement as trusted user input.
+- Freshness: `live` questions never bypass; `repository_dependent` /
+  `config_dependent` answers go stale automatically when the HEAD or config
+  fingerprint changes.
+- Secrets are refused before persistence; no chain-of-thought is stored;
+  corruption quarantines the DB instead of deleting it; connections are
+  per-operation so the file is never held open (Windows-safe).
+- Confirmed paraphrases self-learn as aliases — verified-equivalent model
+  answers teach the memory new phrasings over time.
+- UI: Learned Answers page (`/answers.html`) with search/filter/learn/
+  forget/mark-incorrect/update/merge/refresh plus export/import, rebuild,
+  vacuum; 🧠 per-message Learn button in chat; "Answered from memory" badge
+  on memory-served responses; Answer Memory activity in the task timeline.
+- HTTP API: `/api/answer-memory` list/stats, `/export`, `/learn`,
+  `/forget`, `/mark-incorrect`, `/update`, `/merge`, `/refresh`, `/clear`,
+  `/rebuild-index`, `/vacuum`, `/import`. Thumbs feedback feeds trust scoring.
+- Reference: `docs/ANSWER_MEMORY.md`. Tests: `tests/test_answer_memory.py`
+  (48 cases); full suite **606 passing** (2 environment skips).
+
 ## Next milestone
 
-**Modular workstation core is in place** (362 tests). Priorities:
+**Modular workstation core + Answer Memory are in place** (606 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Nexus Core repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)

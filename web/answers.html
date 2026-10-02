@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core — Learned Answers</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/tools.css">
+  <link rel="stylesheet" href="/answers.css">
+</head>
+<body>
+  <div class="tools-shell">
+    <aside class="tools-side">
+      <div class="brand">
+        <img class="brand-logo" src="/assets/nexus-core-icon.png" alt="Nexus Core">
+        <div>
+          <div class="brand-title">NEXUS <span>CORE</span></div>
+          <div class="brand-sub">CONTROL CENTER</div>
+        </div>
+      </div>
+      <nav class="side-links">
+        <a href="/">Chat</a>
+        <a href="/models.html">Models</a>
+        <a href="/image.html">Images</a>
+        <a href="/research.html">Research</a>
+        <a href="/tools.html">Tools</a>
+        <a href="/trainer.html">Trainer</a>
+        <a href="/voice.html">Voice</a>
+        <a class="active" href="/answers.html">Answers</a>
+        <a href="/settings.html">Settings</a>
+      </nav>
+      <div class="side-block">
+        <div class="side-block-title">Answer Memory</div>
+        <div class="muted small">Local learned Q&amp;A that answers trusted repeated questions in milliseconds — no model inference. Part of Nexus Brain. Model weights are never modified; offline training stays in the Trainer.</div>
+      </div>
+    </aside>
+
+    <main class="tools-main">
+      <header class="tools-header">
+        <div>
+          <h1>Learned Answers</h1>
+          <p class="subtitle">Persistent answer memory — trust-scored, freshness-aware, locally stored.</p>
+        </div>
+      </header>
+
+      <section class="answer-stats" id="stats">Loading…</section>
+
+      <section class="answer-toolbar">
+        <input id="q" type="search" placeholder="Search learned answers…" />
+        <select id="trustFilter">
+          <option value="">All trust states</option>
+          <option value="verified">verified</option>
+          <option value="trusted">trusted</option>
+          <option value="candidate">candidate</option>
+          <option value="observed">observed</option>
+          <option value="stale">stale</option>
+          <option value="invalidated">invalidated</option>
+        </select>
+        <button id="refresh" class="mini-button" type="button">Refresh</button>
+        <button id="exportBtn" class="mini-button" type="button">Export</button>
+        <button id="importBtn" class="mini-button" type="button">Import</button>
+        <input id="importFile" type="file" accept=".json,.jsonl" hidden />
+        <button id="rebuildBtn" class="mini-button" type="button">Rebuild Index</button>
+      </section>
+
+      <section class="answer-learn">
+        <div class="section-title">Teach an answer</div>
+        <div class="learn-row">
+          <input id="learnQ" type="text" placeholder="When I ask…" />
+          <input id="learnA" type="text" placeholder="…answer with" />
+          <select id="learnScope">
+            <option value="global">Global</option>
+            <option value="project">This project</option>
+            <option value="repository">This repository</option>
+          </select>
+          <select id="learnFreshness">
+            <option value="user_defined">Until I change it</option>
+            <option value="static">Static fact</option>
+            <option value="application_state">App state</option>
+            <option value="configuration_dependent">Config-dependent</option>
+            <option value="repository_dependent">Repo-dependent</option>
+            <option value="time_sensitive">Time-sensitive (72h)</option>
+          </select>
+          <button id="learnBtn" class="mini-button" type="button">Learn</button>
+        </div>
+      </section>
+
+      <section id="list" class="answer-list muted">Loading…</section>
+
+      <section class="answer-danger">
+        <div class="section-title">Maintenance & destructive actions</div>
+        <div class="danger-row">
+          <button class="mini-button" id="vacuumBtn" type="button">Vacuum / Optimize</button>
+          <button class="mini-button warn" id="clearExp" type="button">Clear Experience History</button>
+          <button class="mini-button warn" id="clearCand" type="button">Clear Candidate Answers</button>
+          <button class="mini-button warn" id="clearTrust" type="button">Clear Trusted Answers</button>
+          <button class="mini-button danger" id="clearAll" type="button">Reset Answer Memory</button>
+        </div>
+        <small class="muted">Clearing experience history never deletes trusted answers unless you explicitly clear them.</small>
+      </section>
+    </main>
+  </div>
+  <script src="/answers.js"></script>
+  <script src="/voice_global.js"></script>
+</body>
+</html>

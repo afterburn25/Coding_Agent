@@ -100,6 +100,8 @@ class AgentResult:
     verification: list[dict[str, Any]] = field(default_factory=list)
     review: str = ""
     research: dict[str, Any] = field(default_factory=dict)
+    response_source: str = ""  # e.g. "answer_memory" when inference was skipped
+    memory: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -155,6 +157,7 @@ class AgentOrchestrator:
         knowledge_memory: KnowledgeMemory | None = None,
         model_growth: ModelGrowthLab | None = None,
         nexus_brain: NexusBrain | None = None,
+        answer_memory=None,
         activities=None,
     ) -> None:
         self.config = config
@@ -172,6 +175,7 @@ class AgentOrchestrator:
         self.knowledge_memory = knowledge_memory
         self.model_growth = model_growth
         self.nexus_brain = nexus_brain
+        self.answer_memory = answer_memory
         self.activities = activities
         self._sessions: dict[str, _AgentSession] = {}
 
@@ -219,6 +223,126 @@ class AgentOrchestrator:
         if not self.nexus_brain.verified_for_session:
             return False
         return self.nexus_brain.subroutine(name, default)
+
+    def _last_exchange(self) -> tuple[str, str] | None:
+        """Most recent user/assistant pair in the active conversation."""
+        if self.conversation_manager is None:
+            return None
+        try:
+            messages = self.conversation_manager.active().get("messages", [])
+            last_user = last_assistant = ""
+            for msg in reversed(messages):
+                role = msg.get("role")
+                if role == "assistant" and not last_assistant:
+                    last_assistant = str(msg.get("content") or "")
+                elif role == "user" and not last_user:
+                    last_user = str(msg.get("content") or "")
+                if last_user and last_assistant:
+                    return (last_user, last_assistant)
+        except Exception:
+            pass
+        return None
+
+    def _answer_memory_command(
+        self, user_text: str, conversation_id: str, project_id: str
+    ) -> str | None:
+        """'learn this answer' / 'forget the answer for X' / etc."""
+        if self.answer_memory is None or not getattr(self.answer_memory, "available", False):
+            return None
+        try:
+            return self.answer_memory.handle_command(
+                user_text,
+                conversation_id=conversation_id,
+                project_id=project_id,
+                last_exchange=self._last_exchange(),
+            )
+        except Exception:
+            return None
+
+    def _answer_memory_result(
+        self,
+        task,
+        user_text: str,
+        match,
+        *,
+        event_callback,
+        conversation_id: str,
+        project_id: str,
+        memory_activity,
+    ) -> AgentResult:
+        """Build a completed AgentResult for a trusted Answer Memory hit —
+        no model is loaded or invoked."""
+        answer_row = match.answer or {}
+        answer_text = str(answer_row.get("answer_text") or "")
+        memory_meta = {
+            "response_source": "answer_memory",
+            "memory_match_type": match.kind,
+            "memory_confidence": round(float(answer_row.get("confidence") or 0), 3),
+            "memory_similarity": round(match.similarity, 3),
+            "memory_trust": answer_row.get("trust_state", ""),
+            "memory_canonical_question": answer_row.get("canonical_question", ""),
+            "memory_answer_id": answer_row.get("id", ""),
+            "memory_freshness": answer_row.get("freshness", ""),
+            "model_inference_skipped": True,
+            "latency_ms": round(match.latency_ms, 1),
+        }
+        self._act_update(
+            task.id, memory_activity, state="completed",
+            summary=(
+                f"Matched learned answer · {match.kind} "
+                f"{match.similarity:.0%} · {answer_row.get('trust_state', '')} · "
+                f"{match.latency_ms:.0f} ms · model inference skipped"
+            ),
+            details=memory_meta,
+            callback=event_callback,
+        )
+        decision = RoutingDecision(
+            role="utility",
+            model_id="answer-memory",
+            reasons=["answered from trusted Nexus Answer Memory — no model invoked"],
+            complexity=0,
+        )
+        completed_task = self.tasks.update(
+            task.id,
+            status="completed",
+            phase="done",
+            model_id="answer-memory",
+            model_role="utility",
+            summary=answer_text,
+            final_content=answer_text,
+            steps=0,
+            error="",
+            response_source="answer_memory",
+            memory=memory_meta,
+        )
+        memory_event = {"type": "answer_memory", **memory_meta}
+        self._safe_emit(event_callback, {"type": "model", "event": memory_event})
+        self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(user_text, answer_text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(
+                user_text,
+                answer_text,
+                intent="conversation",
+                model_id="answer-memory",
+                response_source="answer_memory",
+            )
+        if (
+            self.model_growth is not None
+            and self.conversation_memory is not None
+            and self._brain_subroutine_enabled("model_growth", True)
+        ):
+            self.model_growth.import_conversation_memory(self.conversation_memory.snapshot())
+        return AgentResult(
+            content=answer_text,
+            routing=decision,
+            model_events=[memory_event],
+            steps=0,
+            task=completed_task.as_dict(),
+            response_source="answer_memory",
+            memory=memory_meta,
+        )
 
     def _sync_nexus_brain(self) -> None:
         if self.nexus_brain is None or not self.nexus_brain.unlocked:
@@ -464,6 +588,28 @@ class AgentOrchestrator:
             ConversationManager.classify_intent(user_text) == "image"
             and cls.direct_image_generation_intent(user_text)
         )
+
+    def has_memory_answer(self, user_text: str) -> bool:
+        """A trusted Answer Memory hit or memory command needs no model.
+
+        Uses a non-recording peek so gating never double-counts stats ahead of
+        the real lookup in ``run()``.
+        """
+        am = self.answer_memory
+        if am is None or not getattr(am, "available", False):
+            return False
+        try:
+            from ..answer_memory import feedback as _am_feedback
+            if _am_feedback.parse_command(user_text) is not None:
+                return True
+            match = am.lookup(
+                user_text,
+                project_id=str(self.checkpoints.workspace),
+                record=False,
+            )
+            return bool(match is not None and match.hit)
+        except Exception:
+            return False
 
     @staticmethod
     def training_acknowledgement(learned: dict[str, list[Any]]) -> str | None:
@@ -1712,6 +1858,31 @@ class AgentOrchestrator:
                 model_id=session.profile.id,
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
             )
+        if self.answer_memory is not None:
+            try:
+                tool_names = [
+                    str(e.get("name") or "")
+                    for e in session.tool_events
+                    if isinstance(e, dict) and e.get("name")
+                ]
+                self.answer_memory.record_exchange(
+                    session.user_text,
+                    session.main_content,
+                    conversation_id=str(
+                        self.conversation_manager.active().get("id") or ""
+                    ) if self.conversation_manager is not None else "",
+                    model_id=session.profile.id,
+                    model_role=session.decision.role,
+                    inference_time_ms=(time.time() - session.started_at) * 1000,
+                    tools_used=tool_names,
+                    research_used=bool(session.research_context.get("summary")),
+                    sources=list(session.research_context.get("sources") or []),
+                    project_id=str(self.checkpoints.workspace),
+                    repository=str(self.checkpoints.workspace),
+                    outcome=status,
+                )
+            except Exception:
+                pass
         if (
             self.model_growth is not None
             and self.conversation_memory is not None
@@ -2333,7 +2504,6 @@ class AgentOrchestrator:
         mode: str = "auto",
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentResult:
-        self.runtime.refresh_hardware()
         task = self.tasks.create(user_text, mode)
         event_callback = self._logging_callback(task.id, event_callback)
         self._task_context(task.id)
@@ -2368,6 +2538,28 @@ class AgentOrchestrator:
                 conversation_id=conversation_id,
             )
 
+        # Corrections and positive feedback are the strongest Answer Memory
+        # learning signals — apply them before any lookup runs this turn.
+        if (
+            mode == "auto"
+            and self.answer_memory is not None
+            and getattr(self.answer_memory, "available", False)
+        ):
+            try:
+                from ..answer_memory import feedback as _am_feedback
+                if _am_feedback.is_correction(user_text):
+                    self.answer_memory.mark_incorrect(
+                        conversation_id=conversation_id,
+                        correction=user_text,
+                        project_id=project_id,
+                    )
+                elif _am_feedback.is_positive(user_text):
+                    self.answer_memory.apply_feedback(
+                        "up", conversation_id=conversation_id
+                    )
+            except Exception:
+                pass
+
         if (
             mode == "auto"
             and conversation_intent == "image"
@@ -2380,7 +2572,8 @@ class AgentOrchestrator:
                 event_callback=event_callback,
             )
 
-        decision = self.router.choose(user_text, override=mode)
+        # Tier 0: deterministic/local handlers — before any hardware probe or
+        # model routing so cheap answers stay cheap.
         builtin_response = self.builtin_utility_response(user_text) if mode == "auto" else None
         brain_blocked_response = (
             "Image generation is disabled by the creator-locked Nexus Brain."
@@ -2393,12 +2586,19 @@ class AgentOrchestrator:
             else None
         )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
-        local_response = training_response or brain_blocked_response or builtin_response
+        memory_command = (
+            self._answer_memory_command(user_text, conversation_id, project_id)
+            if mode == "auto"
+            else None
+        )
+        local_response = (
+            training_response or brain_blocked_response or builtin_response or memory_command
+        )
         if local_response is not None:
             builtin_decision = RoutingDecision(
                 role="utility",
                 model_id="builtin-local",
-                reasons=[*decision.reasons, "answered locally without loading a model"],
+                reasons=["answered locally without loading a model"],
                 complexity=0,
             )
             completed_task = self.tasks.update(
@@ -2442,6 +2642,64 @@ class AgentOrchestrator:
                 steps=0,
                 task=completed_task.as_dict(),
             )
+
+        # Tier 1/2: Nexus Answer Memory. A trusted learned answer bypasses
+        # model inference entirely; a possible match only contributes context
+        # to the fast lane later on.
+        memory_context = ""
+        if (
+            mode == "auto"
+            and self.answer_memory is not None
+            and self._brain_subroutine_enabled("answer_memory", True)
+        ):
+            try:
+                memory_match = self.answer_memory.lookup(
+                    user_text, project_id=project_id
+                )
+            except Exception:
+                memory_match = None
+            if memory_match is not None:
+                mem_act = self._act(
+                    task.id, "answer_memory", "Answer Memory",
+                    "Checking learned answers for a trusted match",
+                    callback=event_callback,
+                )
+                if memory_match.hit:
+                    return self._answer_memory_result(
+                        task, user_text, memory_match,
+                        event_callback=event_callback,
+                        conversation_id=conversation_id,
+                        project_id=project_id,
+                        memory_activity=mem_act,
+                    )
+                if memory_match.context_answers:
+                    snippets = []
+                    for row in memory_match.context_answers[:3]:
+                        snippets.append(
+                            f"Q: {row.get('canonical_question')}\nA: {row.get('answer_text')}"
+                        )
+                    memory_context = (
+                        "Possibly relevant learned answers (treat as hints, verify before relying on them):\n"
+                        + "\n---\n".join(snippets)
+                    )
+                self._act_update(
+                    task.id, mem_act, state="completed",
+                    summary=(
+                        f"No trusted match ({memory_match.kind}"
+                        + (f" · {memory_match.reason}" if memory_match.reason else "")
+                        + f") in {memory_match.latency_ms:.0f} ms"
+                    ),
+                    details={
+                        "match": memory_match.kind,
+                        "similarity": round(memory_match.similarity, 3),
+                        "latency_ms": round(memory_match.latency_ms, 1),
+                    },
+                    callback=event_callback,
+                )
+
+        # Fast lanes exhausted — probe hardware and route to a model.
+        self.runtime.refresh_hardware()
+        decision = self.router.choose(user_text, override=mode)
 
         model_events = [{
             "type": "selected",
@@ -2643,6 +2901,7 @@ class AgentOrchestrator:
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,
+                memory_context,
             ]
             if research_context.get("summary"):
                 optional_blocks.append(
@@ -2748,6 +3007,7 @@ class AgentOrchestrator:
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,
+                memory_context,
                 self_hosting,
             ]
             if research_context.get("guidance"):

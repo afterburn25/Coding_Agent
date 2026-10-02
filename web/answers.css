@@ -1,0 +1,31 @@
+.answer-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.stat-card{background:var(--panel,#0e1626);border:1px solid var(--edge,#1c2940);border-radius:10px;padding:12px}
+.stat-card .v{font-size:20px;font-weight:600;color:var(--cyan,#5dd39e)}
+.stat-card .l{font-size:11px;color:#7385a1;text-transform:uppercase;letter-spacing:.6px}
+.answer-toolbar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.answer-toolbar input[type=search]{flex:1;min-width:220px;background:#0b1322;border:1px solid #1c2940;border-radius:8px;color:#dce7f7;padding:8px 10px}
+.answer-toolbar select,.learn-row select{background:#0b1322;border:1px solid #1c2940;border-radius:8px;color:#dce7f7;padding:8px}
+.answer-learn{margin-bottom:14px}
+.learn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.learn-row input{flex:1;min-width:200px;background:#0b1322;border:1px solid #1c2940;border-radius:8px;color:#dce7f7;padding:8px 10px}
+.answer-list{display:flex;flex-direction:column;gap:10px}
+.answer-row{background:var(--panel,#0e1626);border:1px solid var(--edge,#1c2940);border-radius:10px;padding:12px 14px}
+.answer-row .q{font-weight:600;color:#dce7f7}
+.answer-row .a{color:#9fb3d1;margin-top:4px;white-space:pre-wrap}
+.answer-row .meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#7385a1}
+.answer-row .meta b{color:#9fb3d1}
+.pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.pill.verified{background:#0d2f1f;color:#5dd39e;border:1px solid #1d5c3d}
+.pill.trusted{background:#0d2f1f;color:#7fdcae;border:1px solid #1d5c3d}
+.pill.candidate{background:#2a2410;color:#e0c56e;border:1px solid #4a3f17}
+.pill.observed{background:#1a2334;color:#8fa3c4;border:1px solid #2a3a55}
+.pill.stale{background:#33210f;color:#e0a35e;border:1px solid #57390f}
+.pill.invalidated{background:#33120f;color:#e0655e;border:1px solid #571f0f}
+.row-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.row-actions button{border:1px solid #22314d;background:#0b1322;color:#9fb3d1;border-radius:7px;padding:4px 10px;font-size:11px;cursor:pointer}
+.row-actions button:hover{background:#142139;color:#dce7f7}
+.row-actions button.danger{border-color:#571f0f;color:#e0655e}
+.answer-danger{margin-top:22px}
+.danger-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.mini-button.warn{border-color:#4a3f17;color:#e0c56e}
+.mini-button.danger{border-color:#571f0f;color:#e0655e}

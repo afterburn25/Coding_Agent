@@ -61,6 +61,7 @@
 .conversation-row small{color:#7789a6;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trainer-link{display:inline-block;margin-top:8px;text-decoration:none}
 .message-feedback{display:flex;gap:5px;margin-top:6px}.message-feedback button{border:0;background:transparent;color:#7385a1;cursor:pointer;padding:3px 5px;border-radius:5px}.message-feedback button:hover{background:#142139;color:#bcd1f0}
+.memory-badge{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:9px;border:1px solid #1d3a2f;background:#0d1f18;color:#5dd39e;font-size:11px;letter-spacing:.2px}
 
 .policy-select{width:100%;background:#0b1728;border:1px solid #263d5d;color:#dceaff;border-radius:8px;padding:7px 8px;font:inherit;font-size:10px;outline:0}
 .policy-select:focus{border-color:#4f6dff;box-shadow:0 0 0 1px rgba(80,109,255,.25)}

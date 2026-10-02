@@ -34,6 +34,8 @@ class TaskRecord:
     reverted: bool = False
     interrupted_from: str = ""
     recovery_count: int = 0
+    response_source: str = ""
+    memory: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

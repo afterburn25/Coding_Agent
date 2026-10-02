@@ -145,6 +145,19 @@ Nexus Core now has a durable Conversation Manager with searchable/restorable con
 
 The Model Growth Lab keeps the live base model intact. Learned behavior, corrections, feedback, and sourced knowledge can become reviewable candidates; approved items can be exported into versioned datasets and training-job manifests for LoRA/QLoRA/full fine-tuning, then evaluated/promoted/rolled back explicitly.
 
+## Nexus Answer Memory
+
+**Nexus Answer Memory** (`data/nexus_brain/answer_memory.db`, SQLite WAL) is a persistent learned Q&A layer inside the Brain architecture. Once Nexus has answered something and the answer has earned trust, asking the same question again — even phrased differently — returns the stored answer in under a millisecond **without loading or calling any model**.
+
+- Every completed exchange is recorded as an *experience*; experiences are observations, not truth.
+- Answers promote from `observed` → `candidate` → `trusted`/`verified` only with evidence: explicit `learn` commands, user corrections, positive feedback, or repeated matching experiences. Only trusted/verified rows bypass inference.
+- Semantic matching uses a deterministic local embedder (`hashed-ngram-v1`, no download) with hard conflict gates so that *France vs Italy*, *Qwen 14B vs 30B*, *start vs stop ComfyUI*, and *image model vs voice model* can never collide.
+- Freshness is enforced per answer: `live` questions (weather, news, latest versions) never bypass, repository-dependent answers go stale when the workspace HEAD moves, config-dependent answers go stale on config changes, and corrections invalidate instantly.
+- Learned answers are scoped per project; secrets (API keys, passwords, tokens) are refused before persistence; no chain-of-thought is ever stored.
+- Commands: `learn that <q> is <a>`, `learn this answer`, `forget the answer for <q>`, `the correct answer is …`, `what have you learned`, `did you answer that from memory`.
+- The **Learned Answers** page (`/answers.html`, linked from every screen) lists/search/filters answers with trust, confidence, freshness, scope and usage, and supports learn/forget/mark-incorrect/update/merge/refresh plus export/import, index rebuild, vacuum, and clear.
+- Full reference: [docs/ANSWER_MEMORY.md](docs/ANSWER_MEMORY.md)
+
 ## Nexus Brain
 
 **Nexus Brain** is the model-independent long-term identity/learning layer under `data/nexus_brain.json`. Model GGUF files are replaceable reasoning engines; the Brain is separate durable state, so replacing Qwen, downloading fresh weights, or rolling back a LoRA does not erase the protected knowledge/personality layer.

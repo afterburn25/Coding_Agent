@@ -271,6 +271,7 @@ class ConversationManager:
         intent: str = "conversation",
         model_id: str = "",
         image_job_ids: list[str] | None = None,
+        response_source: str = "",
     ) -> dict[str, Any]:
         user = self._clean(user)
         assistant = self._clean(assistant)
@@ -291,6 +292,8 @@ class ConversationManager:
             }
             if image_job_ids:
                 assistant_message["image_job_ids"] = [str(j) for j in image_job_ids if str(j)]
+            if response_source:
+                assistant_message["response_source"] = response_source
             row.setdefault("messages", []).extend([
                 {"id": uuid.uuid4().hex[:12], "role": "user", "content": user, "timestamp": now},
                 assistant_message,

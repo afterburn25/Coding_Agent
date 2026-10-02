@@ -11,7 +11,7 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Latest fully verified code-changing checkpoint at takeover: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
 - Latest code checkpoint after Phase 1 tool-system foundation: `d55bf52716b01ea266ff6d1fb503ac1f2837078e` (verify with `git rev-parse HEAD`)
 - Current development version: `0.6.0-dev`
-- Verified unit checkpoint: **478 / 478 passing** (2 environment skips) after the v0.7 fast-lane / runtime-tuner / activity-timeline work
+- Verified unit checkpoint: **606 / 606 passing** (2 environment skips) after the Nexus Answer Memory work
 - Last verified GitHub Actions run before this checkpoint: `36917101388`
 - Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388
 
@@ -32,6 +32,7 @@ Read in this order:
 9. `docs/IMAGE_MODULE_SPEC.md` for image work.
 10. `docs/VOICE_SYSTEM.md` for the local TTS/voice subsystem (Kokoro, presets, Voice Studio).
 10. `docs/RESEARCH_SYSTEM.md` and `docs/WEB_RESEARCH.md` for research/browser work.
+11. `docs/ANSWER_MEMORY.md` for the learned-answer memory subsystem (trust states, semantic gates, freshness/invalidation, API/UI).
 
 ## Product direction that must be preserved
 

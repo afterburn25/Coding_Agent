@@ -102,6 +102,20 @@ class AgentConfig:
     nexus_brain_path: str = "data/nexus_brain.json"
     nexus_brain_record_limit: int = 10000
 
+    # Nexus Answer Memory: learned Q&A that can bypass model inference for
+    # trusted, previously-verified answers. Retrieval learning only — this
+    # never modifies model weights.
+    answer_memory_enabled: bool = True
+    answer_memory_path: str = "data/nexus_brain/answer_memory.db"
+    answer_memory_semantic_enabled: bool = True
+    answer_memory_auto_learn: bool = True
+    answer_memory_auto_promote: bool = True
+    answer_memory_semantic_threshold: float = 0.50
+    answer_memory_possible_threshold: float = 0.30
+    answer_memory_experience_retention_days: int = 90
+    answer_memory_max_experiences: int = 20000
+    answer_memory_max_db_mb: int = 256
+
     # Conversation manager / persistent sessions.
     conversations_path: str = "data/conversations.json"
     conversation_summary_after_messages: int = 24
@@ -487,6 +501,16 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.nexus_brain_enabled = bool(raw.get("nexus_brain_enabled", cfg.nexus_brain_enabled))
     cfg.nexus_brain_path = str(raw.get("nexus_brain_path", cfg.nexus_brain_path))
     cfg.nexus_brain_record_limit = max(100, int(raw.get("nexus_brain_record_limit", cfg.nexus_brain_record_limit)))
+    cfg.answer_memory_enabled = bool(raw.get("answer_memory_enabled", cfg.answer_memory_enabled))
+    cfg.answer_memory_path = str(raw.get("answer_memory_path", cfg.answer_memory_path))
+    cfg.answer_memory_semantic_enabled = bool(raw.get("answer_memory_semantic_enabled", cfg.answer_memory_semantic_enabled))
+    cfg.answer_memory_auto_learn = bool(raw.get("answer_memory_auto_learn", cfg.answer_memory_auto_learn))
+    cfg.answer_memory_auto_promote = bool(raw.get("answer_memory_auto_promote", cfg.answer_memory_auto_promote))
+    cfg.answer_memory_semantic_threshold = max(0.0, min(1.0, float(raw.get("answer_memory_semantic_threshold", cfg.answer_memory_semantic_threshold))))
+    cfg.answer_memory_possible_threshold = max(0.0, min(1.0, float(raw.get("answer_memory_possible_threshold", cfg.answer_memory_possible_threshold))))
+    cfg.answer_memory_experience_retention_days = max(1, int(raw.get("answer_memory_experience_retention_days", cfg.answer_memory_experience_retention_days)))
+    cfg.answer_memory_max_experiences = max(100, int(raw.get("answer_memory_max_experiences", cfg.answer_memory_max_experiences)))
+    cfg.answer_memory_max_db_mb = max(16, int(raw.get("answer_memory_max_db_mb", cfg.answer_memory_max_db_mb)))
     cfg.conversations_path = str(raw.get("conversations_path", cfg.conversations_path))
     cfg.conversation_summary_after_messages = max(8, int(raw.get("conversation_summary_after_messages", cfg.conversation_summary_after_messages)))
     cfg.knowledge_memory_enabled = bool(raw.get("knowledge_memory_enabled", cfg.knowledge_memory_enabled))
