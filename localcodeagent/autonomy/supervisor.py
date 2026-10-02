@@ -59,6 +59,7 @@ class AutonomousSupervisor:
         enabled: bool = True,
         metrics: MetricRegistry | None = None,
         repair: Any = None,
+        signal_sources: dict | None = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -102,6 +103,14 @@ class AutonomousSupervisor:
         # recovery playbook is exhausted the failure becomes a repair
         # incident; on resolution the interrupted mission resumes.
         self.repair = repair
+        # Signal scanner — evidence-based problem/opportunity detection.
+        # Sources are injected (telemetry is measured, never guessed);
+        # routable findings become repair incidents or investigation
+        # missions, the rest queue as suggestions.
+        from .detectors import SignalScanner
+        self.scanner = SignalScanner(
+            self.store, sources=dict(signal_sources or {}),
+            route=self._route_finding)
 
         self._executor = executor
         self._verify_runner = verify_runner or self._default_verify
@@ -586,6 +595,14 @@ class AutonomousSupervisor:
             except Exception:
                 pass
 
+        # 2d. signal detection — problems/opportunities from telemetry;
+        # routable findings feed repair + missions, the rest surface as
+        # suggestions in the findings store.
+        try:
+            self.scanner.tick(now)
+        except Exception:
+            pass
+
         # 3. reclaim expired leases (worker died mid-task)
         for m in self.missions.list():
             graph = TaskGraph(m)
@@ -737,8 +754,10 @@ class AutonomousSupervisor:
             kind = node.get("kind", "agent")
             if kind == "agent":
                 # The agent lane is exclusive and interactive work outranks
-                # background missions.
-                if not self._lane_free():
+                # background missions — except urgent (critical recovery)
+                # work, which may interleave between user turns.
+                if not self._lane_free() and \
+                        str(m.get("priority")) != "urgent":
                     break
                 if not self.locks.acquire("agent_lane", node["id"]):
                     break
@@ -1222,6 +1241,68 @@ class AutonomousSupervisor:
             # treat as escalate to stay bounded.
             self.missions.transition(mission_id, "blocked",
                                      detail=f"no handler for recovery step '{action}'")
+
+    def _route_finding(self, finding: dict) -> str:
+        """Send a routable detector finding to its sink; returns the
+        created object's id (or '' when nothing was created)."""
+        route = str(finding.get("route") or "suggestion")
+        if route == "repair" and self.repair is not None:
+            ev = finding.get("evidence") or {}
+            inc, _ = self.repair.report_failure(
+                source=f"detector:{finding.get('kind')}",
+                subsystem=str(finding.get("kind") or "system"),
+                exc_type=str(finding.get("kind") or ""),
+                error_message=f"{finding.get('title')}. "
+                              f"{finding.get('detail') or ''} "
+                              f"evidence={ev}",
+                stack_trace="")
+            if inc:
+                self._emit("finding", {"type": "finding_routed",
+                                       "finding": finding.get("id"),
+                                       "route": "repair",
+                                       "target": inc.get("id")})
+            return str(inc.get("id")) if inc else ""
+        if route == "mission":
+            # Dedupe: one live investigation mission per signature.
+            sig = str(finding.get("signature") or "")
+            for m in self.missions.list():
+                if str(m.get("source")) == "detector" and \
+                        str(m.get("source_id")) == sig and \
+                        str(m.get("status")) not in TERMINAL_MISSION_STATUSES:
+                    return str(m.get("id"))
+            ev = "; ".join(f"{k}={v}" for k, v in
+                           (finding.get("evidence") or {}).items()
+                           if not isinstance(v, (dict, list)))[:600]
+            priority = {"critical": "urgent", "high": "normal"}.get(
+                str(finding.get("severity")), "background")
+            mission = self.missions.create(
+                objective=(
+                    f"Investigate: {finding.get('title')}. "
+                    f"Evidence: {ev or finding.get('detail')}. "
+                    "Find the root cause, fix it if safely fixable, and "
+                    "verify. If it needs a decision or external action, "
+                    "report findings instead of acting.")[:3900],
+                title=f"[{finding.get('kind')}] "
+                      f"{str(finding.get('title'))[:80]}",
+                scope="one_shot", priority=priority,
+                success_criteria=[{"kind": "all_tasks_completed",
+                                   "description": "investigation done"}],
+                autonomy_profile="local_autonomous",
+                notification_policy="important",
+                source="detector", source_id=sig,
+                created_by="signal_scanner",
+                workspace=str(self.workspace))
+            self.missions.transition(
+                mission["id"], "ready",
+                detail=f"detector:{finding.get('kind')}")
+            self._audit("finding_routed", finding=finding.get("id"),
+                        mission=mission["id"])
+            self._emit("finding", {"type": "finding_routed",
+                                   "finding": finding.get("id"),
+                                   "route": "mission",
+                                   "target": mission["id"]})
+            return str(mission["id"])
+        return ""
 
     def resume_interrupted(self, op: dict) -> None:
         """Self-repair resolved → restart the work it interrupted."""

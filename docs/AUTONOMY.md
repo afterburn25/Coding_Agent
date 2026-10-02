@@ -183,11 +183,56 @@ evaluated goals are durable desired-state records persisted to
   `POST /api/goals` (create), `POST /api/goals/{id}/evaluate|enable|
   disable|archive`. UI: Goals panel on `web/missions.html`.
 
+## Signal detection (SignalScanner)
+
+`localcodeagent/autonomy/detectors.py` runs a bounded periodic scan
+(default 120 s, one pass per `tick()` window) of small pure detectors
+over injected telemetry sources — wired in `server.py` against crash
+history, mission history, Answer Memory stats, model telemetry, disk,
+startup profile, pending approvals, and repair-incident history. A
+detector that cannot measure its signal returns nothing rather than
+guessing.
+
+Each *finding* (`data/autonomy/findings.json`) carries kind, severity,
+evidence, confidence, a stable `signature`, and a `route`:
+
+- `repair` → `SelfRepairCoordinator.report_failure` (deduped upstream by
+  the repair detector's own signature normalization)
+- `mission` → a bounded investigation mission (`source="detector"`,
+  priority mapped from severity: critical→urgent, high→normal,
+  else background), deduplicated — one live mission per signature
+- `suggestion` → stays in the store for the UI; nothing is started
+
+Findings dedupe by signature: repeat sightings refresh the row
+(sightings++, confidence max) instead of re-firing, and re-routing an
+acted-on finding requires a 1 h cooldown. `POST /api/findings/scan`
+forces a pass; `POST /api/findings/{id}/dismiss` closes a row.
+Built-in detectors: crash storms, mission failure rate, model-call
+failures, disk pressure, repair thrash (same signature ≥3 incidents),
+answer-memory decay, startup regression vs the learned profile, and
+stale approval backlog.
+
+## Priority scheduling & fairness
+
+- `MissionStore.list()` orders by priority rank
+  (urgent < interactive < normal < background < maintenance) then
+  recency. `effective_rank()` adds **aging**: background/maintenance
+  missions gain one rank after 4 h waiting and another after 24 h,
+  capped at `normal` — they can never outrank interactive or urgent
+  work, so self-generated work can't starve but also can't preempt
+  the user.
+- Lane arbitration: agent nodes run only when the interactive lane is
+  free — *except* `urgent` missions, which may claim the lane between
+  user turns (critical recovery must not wait behind chat).
+- GPU-bound image jobs yield to the interactive lane in conservative
+  resource mode via `budgets.may_use_gpu`.
+
 ## Integration
 
 - Server APIs: `/api/autonomy/*` (status, missions CRUD, approve/deny,
   pause/resume/cancel/replan, standing goals, schedules, triggers,
-  notifications, stop/resume autonomy), `/api/goals*` (evaluated goals)
+  notifications, stop/resume autonomy), `/api/goals*` (evaluated goals),
+  `/api/findings*` (detector signals), `/api/self-repair*` (incidents)
 - Chat commands: "make this a mission", "stop autonomy", "resume autonomy"
   answered locally without needing a coding model
 - Missions UI: `web/missions.html`

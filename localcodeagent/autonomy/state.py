@@ -117,7 +117,7 @@ class AutonomyStore:
 
     FILES = (
         "missions", "standing_goals", "goals", "triggers", "schedules",
-        "grants", "notifications", "approvals", "repairs",
+        "grants", "notifications", "approvals", "repairs", "findings",
     )
 
     def __init__(self, root: Path) -> None:
@@ -145,6 +145,10 @@ class AutonomyStore:
         # persisted so a crash mid-repair resumes instead of repeating.
         self.repairs = JsonStore(self.root / "repairs.json",
                                  default=None, key="repairs", limit=200)
+        # Detector findings — evidence-based problems/opportunities the
+        # SignalScanner emits (deduped by signature, cooldown-bounded).
+        self.findings = JsonStore(self.root / "findings.json",
+                                  default=None, key="findings", limit=200)
         self.control = JsonStore(self.root / "control.json",
                                  default={"version": SCHEMA_VERSION,
                                           "paused": False,

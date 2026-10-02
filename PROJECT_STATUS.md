@@ -2,7 +2,21 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **698 / 698** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.10.0 — Autonomous self-repair + evaluated goals
+## Active version: 0.11.0 — Signal detection + fair scheduling
+
+v0.11 adds `localcodeagent/autonomy/detectors.py` — `SignalScanner`
+periodically measures live telemetry (crash history, mission outcomes,
+model-call failures, disk, startup profile, approvals, repair history,
+Answer Memory) and emits durable *findings* deduped by signature with a
+1 h re-route cooldown. Routable findings feed self-repair incidents or
+bounded investigation missions; the rest surface as suggestions in the
+new Detected signals panel (`GET /api/findings`, `…/scan`, `…/dismiss`).
+Scheduling gains **priority aging** (`effective_rank`: background work
+promotes toward `normal` after 4 h/24 h waits but can never outrank
+interactive/urgent) and **urgent preemption** (critical recovery may
+claim the agent lane between user turns; everything else still yields).
+
+### Retained from v0.10 — Autonomous self-repair + evaluated goals
 
 v0.10 adds `localcodeagent/self_repair/` — a guarded incident pipeline:
 failure detection with signature dedupe and severity gating → evidence

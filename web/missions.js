@@ -13,7 +13,7 @@ let missions=[],selected=null;
 
 async function refresh(){
   try{
-    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs]=await Promise.all([
+    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings]=await Promise.all([
       api('/api/autonomy/status'),
       api('/api/missions'),
       api('/api/autonomy/approvals?pending=1'),
@@ -24,6 +24,7 @@ async function refresh(){
       api('/api/autonomy/summary'),
       api('/api/goals'),
       api('/api/self-repair'),
+      api('/api/findings'),
     ]);
     renderStatus(st);
     missions=ms.missions||[];
@@ -35,6 +36,7 @@ async function refresh(){
     renderGoals(sgoals.goals||[]);
     renderEvalGoals(goals.goals||[],goals.metrics||[]);
     renderRepairs(repairs.incidents||[]);
+    renderFindings(findings.findings||[]);
     renderSchedules(scheds.schedules||[]);
     renderTriggers(trigs.triggers||[]);
     if(Array.isArray(trigs.signals)&&trigs.signals.length&&
@@ -192,6 +194,19 @@ function renderRepairs(rows){
     `</div></div>`;
   }).join('')||'<div class="hist-row">no incidents</div>';
 }
+const FINDING_SEV_CLASS={critical:'bad',high:'warn',normal:'unknown',low:'unknown'};
+function renderFindings(rows){
+  $('#findingsPanel').innerHTML=rows.slice(0,10).map(f=>{
+    const ev=Object.entries(f.evidence||{}).filter(([k,v])=>typeof v!=='object')
+      .map(([k,v])=>`${esc(k)}=${esc(String(v))}`).join(' ');
+    return `<div class="mission-card"><div class="title">${esc(f.title)}</div>`+
+    `<div class="goal-evidence">${esc(ev)}${f.routed_to?` → ${esc(f.routed_to)}`:''}</div>`+
+    `<div class="meta"><span class="gstatus ${FINDING_SEV_CLASS[f.severity]||'unknown'}">${esc(f.severity)}</span>`+
+    `<span>${esc(f.route)}</span><span>conf ${Math.round((f.confidence||0)*100)}%</span>`+
+    `${f.sightings>1?`<span>×${f.sightings}</span>`:''}`+
+    `<button class="mini-button" data-find="${f.id}:dismiss">Dismiss</button></div></div>`;
+  }).join('')||'<div class="hist-row">no signals</div>';
+}
 function renderGoals(rows){
   $('#standingGoals').innerHTML=rows.map(g=>
     `<div class="mission-card"><div class="title">${esc(g.objective).slice(0,80)}</div>`+
@@ -243,6 +258,10 @@ document.addEventListener('click',async e=>{
   const rp=e.target.closest('[data-rep]');
   if(rp){const[id,verb]=rp.dataset.rep.split(':');
     try{await api(`/api/self-repair/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const fd=e.target.closest('[data-find]');
+  if(fd){const[id,verb]=fd.dataset.find.split(':');
+    try{await api(`/api/findings/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
     return;}
   const sc=e.target.closest('[data-sched]');
   if(sc){const[id,verb]=sc.dataset.sched.split(':');

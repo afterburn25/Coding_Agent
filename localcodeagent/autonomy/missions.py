@@ -34,6 +34,25 @@ MISSION_SCOPES = {
 MISSION_PRIORITIES = {"urgent", "interactive", "normal", "background", "maintenance"}
 _PRIORITY_RANK = {"urgent": 0, "interactive": 1, "normal": 2, "background": 3, "maintenance": 4}
 
+# Priority aging — background/maintenance work that has waited long enough
+# is promoted toward (never past) `normal` so low-priority missions can't
+# starve behind a steady stream of newer work. Interactive and urgent
+# already outrank it; aging can never cross that boundary.
+AGE_PROMOTE_AFTER_S = (4 * 3600, 24 * 3600)  # wait → extra rank per tier
+_AGE_FLOOR = _PRIORITY_RANK["normal"]        # never outrank interactive
+
+
+def effective_rank(mission: dict, now: float | None = None) -> int:
+    """Priority rank after aging. Background-tier missions gain one rank
+    per aging tier waited; everything at/above `normal` is unaffected."""
+    rank = _PRIORITY_RANK.get(str(mission.get("priority")), 9)
+    if rank <= _AGE_FLOOR:
+        return rank
+    now = now or time.time()
+    age = now - float(mission.get("created_at") or now)
+    boost = sum(age > t for t in AGE_PROMOTE_AFTER_S)
+    return max(_AGE_FLOOR, rank - boost)
+
 DEFAULT_BUDGETS = {
     "max_runtime_s": 4 * 3600,
     "max_repair_loops": 5,
@@ -237,8 +256,9 @@ class MissionStore:
         with self._lock:
             rows = [self._public(m) for m in self._rows()
                     if include_archived or m.get("status") != "archived"]
+        now = time.time()
         rows.sort(key=lambda m: (
-            _PRIORITY_RANK.get(str(m.get("priority")), 9),
+            effective_rank(m, now),
             -(m.get("updated_at") or 0)))
         return rows
 

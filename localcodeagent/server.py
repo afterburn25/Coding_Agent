@@ -920,7 +920,46 @@ class AppState:
         self._register_goal_metrics(registry, sup, runtime_root)
         sup.repair = self._build_self_repair(config, sup, runtime_root,
                                              hooks, emit)
+        self._wire_signal_sources(sup, runtime_root)
         return sup
+
+    def _wire_signal_sources(self, sup, runtime_root: Path) -> None:
+        """Bind live telemetry providers to the detector scanner. Every
+        source is measured — a detector that can't measure yields nothing."""
+        import shutil as _shutil
+
+        def _startup():
+            try:
+                last = json.loads(
+                    (runtime_root / "data" / "startup_last.json")
+                    .read_text(encoding="utf-8"))
+                prof = json.loads(
+                    (runtime_root / "data" / "startup_profile.json")
+                    .read_text(encoding="utf-8"))
+                expected = sum(float(v) for k, v in prof.items()
+                               if k != "samples"
+                               and isinstance(v, (int, float))) * 1000
+                return {"total_ms": float(last.get("total_ms") or 0),
+                        "expected_ms": expected}
+            except Exception:
+                return {}
+
+        sup.scanner.sources.update({
+            "crash_history": netdiag.crash_history,
+            "missions": sup.missions.list,
+            "answer_memory_stats":
+                lambda: self.answer_memory.stats() or {},
+            "model_telemetry":
+                lambda: self.model_telemetry.summary() or {},
+            "disk_free_gb":
+                lambda: _shutil.disk_usage(str(self.workspace)).free / 1e9,
+            "repairs":
+                lambda: sup.repair.list() if sup.repair else [],
+            "startup_ms": _startup,
+            "pending_approvals":
+                lambda: [r for r in sup.store.approvals.rows()
+                         if str(r.get("status") or "") == "pending"],
+        })
 
     def _build_self_repair(self, config: AgentConfig, sup,
                            runtime_root: Path, hooks: dict,
@@ -3104,7 +3143,8 @@ class Handler(BaseHTTPRequestHandler):
 
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
                           "/api/schedules", "/api/standing-goals",
-                          "/api/goals", "/api/self-repair")
+                          "/api/goals", "/api/self-repair",
+                          "/api/findings")
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
@@ -3320,6 +3360,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "incident not found"}, 404)
             else:
                 self._json({"incident": inc})
+            return True
+        if path == "/api/findings":
+            # Detector output — open/acted problems & opportunities,
+            # severity-ordered. Dismissed findings stay out by default.
+            scanner = getattr(sup, "scanner", None)
+            self._json({
+                "findings": scanner.list(
+                    include_closed=(q.get("all") or [""])[0] == "1")
+                if scanner else []})
             return True
         return False
 
@@ -3629,6 +3678,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(repair.rollback_incident(iid))
             else:
                 self._json({"error": "unknown repair action"}, 400)
+            return True
+        if path == "/api/findings/scan":
+            # Force an immediate detector pass (e.g. UI refresh button).
+            scanner = getattr(sup, "scanner", None)
+            if scanner is None:
+                self._json({"error": "scanner unavailable"}, 503)
+            else:
+                scanner.force()
+                self._json({"findings": scanner.list()})
+            return True
+        if path.startswith("/api/findings/"):
+            scanner = getattr(sup, "scanner", None)
+            if scanner is None:
+                self._json({"error": "scanner unavailable"}, 503)
+                return True
+            rest = path[len("/api/findings/"):].strip("/")
+            fid, _, verb = rest.rpartition("/")
+            if verb == "dismiss":
+                self._json({"ok": scanner.dismiss(fid)})
+            else:
+                self._json({"error": "expected /api/findings/{id}/dismiss"},
+                           400)
             return True
         return False
 
