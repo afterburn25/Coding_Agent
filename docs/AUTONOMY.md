@@ -77,7 +77,11 @@ the workspace as cwd), `backup` (versioned state backup), `rag_update`
 terminal state — produced files are registered as artifacts with
 knowledge-graph provenance), and `model_install` (download a model —
 an LLM catalog id via `runtime.model_catalog`, else an image-model
-profile's download job — and run it to completion). Every `job` op is
+profile's download job — and run it to completion), and `worktree`
+(provision an isolated git worktree via `WorktreeAgent`, run the
+sandboxed `command`/`argv` inside it, commit, and merge back — a
+nonzero exit or merge conflict never touches the base tree; conflicts
+keep the agent branch for manual resolution). Every `job` op is
 recorded in the unified `JobManager` ledger (`kind: mission_job`,
 carrying `mission_id`/`node_id`) so `/api/jobs` and the Jobs UI show
 mission work alongside other platform jobs. Unknown node kinds fail

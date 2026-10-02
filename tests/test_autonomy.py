@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -275,6 +276,73 @@ class JobNodeTests(unittest.TestCase):
                 self.assertEqual(ledger[0]["state"], "completed")
                 self.assertEqual(ledger[0]["metadata"]["op"], "sandbox")
                 self.assertEqual(ledger[0]["metadata"]["mission_id"], "m1")
+            finally:
+                stop_state(state)
+
+    def test_mission_job_worktree_isolated_merge(self):
+        import subprocess, sys
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.multiagent import is_repo
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t",
+                            "-c", "user.email=t@t", "commit",
+                            "--allow-empty", "-m", "init"],
+                           capture_output=True)
+            if not is_repo(repo):
+                self.skipTest("git unavailable")
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, repo, repo / ".runtime")
+            try:
+                node = {"metadata": {"job": "worktree",
+                                     "argv": [sys.executable, "-c",
+                                              "import pathlib;"
+                                              "pathlib.Path('wt_file.txt')"
+                                              ".write_text('made')"]}}
+                out = state._mission_job({"id": "m4"}, node)
+                self.assertTrue(out["ok"], out.get("output"))
+                self.assertIn("merged", out["output"])
+                # The change landed on the base branch — worktree is gone.
+                self.assertTrue((repo / "wt_file.txt").is_file())
+            finally:
+                stop_state(state)
+
+    def test_mission_job_worktree_failed_run_does_not_touch_base(self):
+        import subprocess
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.multiagent import is_repo
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t",
+                            "-c", "user.email=t@t", "commit",
+                            "--allow-empty", "-m", "init"],
+                           capture_output=True)
+            if not is_repo(repo):
+                self.skipTest("git unavailable")
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, repo, repo / ".runtime")
+            try:
+                node = {"metadata": {
+                    "job": "worktree",
+                    "argv": ["cmd.exe" if os.name == "nt" else "sh",
+                             "/c" if os.name == "nt" else "-c",
+                             "echo dirty > wt_dirty.txt & exit 3"
+                             if os.name == "nt"
+                             else "echo dirty > wt_dirty.txt; exit 3"]}}
+                out = state._mission_job({"id": "m5"}, node)
+                self.assertFalse(out["ok"])
+                # Failed run — base never sees the dirty file.
+                self.assertFalse((repo / "wt_dirty.txt").exists())
             finally:
                 stop_state(state)
 

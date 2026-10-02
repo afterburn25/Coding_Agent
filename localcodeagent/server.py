@@ -916,6 +916,8 @@ class AppState:
           model_install — download a model (LLM catalog id via
                           runtime.model_catalog, else image-model profile)
                           and wait for the install job to finish
+          worktree    — provision an isolated git worktree, run ``command``
+                        in it sandboxed, commit + merge back on clean exit
         """
         meta = dict(node.get("metadata") or {})
         op = str(meta.get("job") or "")
@@ -987,6 +989,63 @@ class AppState:
                         "output": f"index: +{r.get('added', 0)} added, "
                                   f"{r.get('updated', 0)} updated, "
                                   f"{r.get('removed', 0)} removed"}
+            if op == "worktree":
+                # Isolated execution: provision a git worktree, run the
+                # command inside it sandboxed, commit + merge back only on
+                # clean exit — a failed run never touches the main tree.
+                from .multiagent import WorktreeAgent
+                from .sandbox import Sandbox
+                agent = WorktreeAgent(
+                    self.workspace,
+                    str(meta.get("role") or "coder"))
+                prov = agent.provision(base_ref=str(meta.get("base") or "HEAD"))
+                if not prov.get("ok"):
+                    return {"ok": False,
+                            "output": f"worktree provision failed: "
+                                      f"{prov.get('error', '')}"}
+                cmd = str(meta.get("command") or "")
+                if not cmd and not meta.get("argv"):
+                    agent.teardown()
+                    return {"ok": False,
+                            "output": "worktree job: no command"}
+                sbx = Sandbox()
+                try:
+                    argv = meta.get("argv") or (
+                        ["cmd.exe", "/c", cmd] if os.name == "nt"
+                        else ["sh", "-c", cmd])
+                    r = sbx.run(list(argv), cwd=agent.path,
+                                timeout=float(meta.get("timeout", 600)),
+                                allow_network=bool(meta.get("network", False)))
+                finally:
+                    sbx.cleanup()
+                if not r.get("ok"):
+                    agent.teardown()
+                    out = (r.get("stderr") or r.get("stdout") or "")[-2000:]
+                    return {"ok": False,
+                            "output": f"worktree command failed "
+                                      f"(exit {r.get('exit')}): {out}"}
+                commit = agent.commit_work(
+                    str(meta.get("message") or "[nexus] worktree job"))
+                if not commit.get("ok"):
+                    agent.teardown()
+                    return {"ok": False,
+                            "output": f"worktree commit failed: "
+                                      f"{commit.get('error', '')}"}
+                merge = agent.merge_back()
+                if not merge.get("ok"):
+                    # Keep the branch + worktree so work isn't lost; report
+                    # the conflict instead of silently discarding changes.
+                    return {"ok": False,
+                            "output": f"worktree merge conflict — kept branch "
+                                      f"{agent.branch} at {agent.path}: "
+                                      f"{merge.get('error', '')}",
+                            "branch": agent.branch}
+                agent.teardown()
+                return {"ok": True,
+                        "output": f"worktree {agent.id} merged "
+                                  f"{merge.get('merged', agent.branch)} "
+                                  f"(exit {r.get('exit')})",
+                        "branch": agent.branch}
             if op == "model_install":
                 model_id = str(meta.get("model") or "")
                 cat = getattr(self.runtime, "model_catalog", None)
