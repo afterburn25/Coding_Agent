@@ -268,6 +268,13 @@ class JobNodeTests(unittest.TestCase):
                 self.assertTrue(out["ok"], out.get("output"))
                 self.assertTrue(marker.exists())
                 self.assertIn("sandbox", out)
+                # The op is recorded in the unified job ledger.
+                ledger = state.jobs.list_jobs()
+                self.assertEqual(len(ledger), 1)
+                self.assertEqual(ledger[0]["kind"], "mission_job")
+                self.assertEqual(ledger[0]["state"], "completed")
+                self.assertEqual(ledger[0]["metadata"]["op"], "sandbox")
+                self.assertEqual(ledger[0]["metadata"]["mission_id"], "m1")
             finally:
                 stop_state(state)
 

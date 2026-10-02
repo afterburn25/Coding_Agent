@@ -918,6 +918,38 @@ class AppState:
         """
         meta = dict(node.get("metadata") or {})
         op = str(meta.get("job") or "")
+        rec = None
+        try:
+            rec = self.jobs.submit(
+                "mission_job",
+                f"{op or 'job'}: {node.get('title') or node.get('id', '')}",
+                metadata={"mission_id": mission.get("id"),
+                          "node_id": node.get("id"), "op": op})
+            self.jobs.update(rec.id, status="running",
+                             source=str(mission.get("id") or "mission"))
+        except Exception:
+            rec = None
+        try:
+            result = self._mission_job_run(mission, node)
+        except Exception as exc:
+            result = {"ok": False, "output": f"job error: {exc}",
+                      "error": str(exc)}
+        if rec is not None:
+            try:
+                self.jobs.update(
+                    rec.id,
+                    status="finished" if result.get("ok") else "failed",
+                    progress=1.0 if result.get("ok") else 0.0,
+                    detail=str(result.get("output") or "")[:200],
+                    error="" if result.get("ok") else str(
+                        result.get("error") or result.get("output") or "")[:300])
+            except Exception:
+                pass
+        return result
+
+    def _mission_job_run(self, mission: dict, node: dict) -> dict:
+        meta = dict(node.get("metadata") or {})
+        op = str(meta.get("job") or "")
         try:
             if op == "sandbox":
                 from .sandbox import Sandbox
