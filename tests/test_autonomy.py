@@ -192,6 +192,33 @@ class JobNodeTests(unittest.TestCase):
             finally:
                 stop_state(state)
 
+    def test_mission_job_image_registers_outputs(self):
+        from types import SimpleNamespace
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                out = Path(td) / "gen.png"
+                out.write_bytes(b"png")
+                job = SimpleNamespace(id="ij1", state="finished",
+                                      stage="done", outputs=[str(out)])
+                state.images.create_job = lambda req: job
+                state.images.get_job = lambda jid: job
+                node = {"id": "n1",
+                        "metadata": {"job": "image", "prompt": "a cat"}}
+                res = state._mission_job({"id": "m2"}, node)
+                self.assertTrue(res["ok"], res.get("output"))
+                arts = state.artifacts.list(mission_id="m2")
+                self.assertEqual(len(arts), 1)
+                self.assertEqual(arts[0]["name"], "gen.png")
+                self.assertEqual(res["artifacts"], [arts[0]["id"]])
+            finally:
+                stop_state(state)
+
 
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
