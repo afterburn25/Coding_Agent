@@ -115,6 +115,40 @@ class KnowledgeGraphTests(unittest.TestCase):
             self.assertIn("decided", ctx)
             kg.close()
 
+    def test_link_resolves_names_to_entity_ids(self):
+        # link() must canonicalize endpoints — a bare name previously stored
+        # as the raw string never joined neighbors()/context_for().
+        with tempfile.TemporaryDirectory() as td:
+            kg = KnowledgeGraph(Path(td) / "kg.db")
+            self.addCleanup(kg.close)
+            kg.add_entity("service", "Gateway")
+            e = kg.link("Gateway", "Stripe", "depends_on")
+            self.assertEqual(e["src"], "service:Gateway")
+            self.assertEqual(e["dst"], "entity:Stripe")
+            ctx = kg.context_for("Gateway")
+            self.assertIn("depends_on", ctx)
+            kg.close()
+
+    def test_neighbors_matches_legacy_name_stored_edges(self):
+        # Edges written before canonicalization kept raw names — neighbors
+        # must still find them via the entity's name.
+        with tempfile.TemporaryDirectory() as td:
+            kg = KnowledgeGraph(Path(td) / "kg.db")
+            self.addCleanup(kg.close)
+            kg.add_entity("service", "Gateway")
+            import sqlite3 as _sq
+            raw = _sq.connect(str(kg.path))
+            try:
+                raw.execute(
+                    "INSERT INTO edges(id,src,dst,rel,attrs,created_at)"
+                    " VALUES('e-legacy','Gateway','Stripe','depends_on','{}',0)")
+                raw.commit()
+            finally:
+                raw.close()
+            sub = kg.neighbors("service:Gateway", depth=1)
+            self.assertEqual(len(sub["edges"]), 1)
+            kg.close()
+
     def test_persists_across_instances(self):
         with tempfile.TemporaryDirectory() as td:
             kg = KnowledgeGraph(Path(td) / "kg.db")

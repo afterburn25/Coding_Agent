@@ -329,6 +329,11 @@ class AppState:
                              lambda: "healthy" if getattr(
                                  getattr(self, "voice", None),
                                  "enabled", False) else "stopped")
+        self.health.register("llm-runtime", self._probe_llm_runtime)
+        # Monitoring only — ComfyUI already self-heals via auto-start on the
+        # next image job and the idle evictor; a competing recover loop
+        # would restart it while it is legitimately stopped.
+        self.health.register("image-backend", self._probe_image_backend)
         self.workflows_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
         if not self.workflows_dir.is_absolute():
             self.workflows_dir = self.workspace / self.workflows_dir
@@ -535,6 +540,9 @@ class AppState:
             answer_memory=self.answer_memory,
             activities=self.activities,
             digital_twin=self.twin,
+            # Callable keeps the knowledge-graph SQLite store lazily opened —
+            # it must not lock files during AppState construction.
+            knowledge_graph=lambda: self.knowledge,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -860,6 +868,39 @@ class AppState:
         if not mid:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}
+
+    # -- health probes ---------------------------------------------------
+
+    def _probe_llm_runtime(self) -> str:
+        """Aggregate managed-model state into a component health value."""
+        try:
+            statuses = [s for s in (self.runtime._status or {}).values()
+                        if getattr(s, "managed", True)]
+        except Exception:
+            return "degraded"
+        states = {getattr(s, "state", "") for s in statuses}
+        if not statuses:
+            return "stopped"
+        if "error" in states:
+            return "crashed"
+        if "loading" in states or "starting" in states:
+            return "starting"
+        if states <= {"running", "external", "external_unreachable"}:
+            return "healthy" if "running" in states or "external" in states else "degraded"
+        return "stopped"
+
+    def _probe_image_backend(self) -> str:
+        rt = getattr(getattr(self, "images", None), "backend_runtime", None)
+        if rt is None:
+            return "stopped"
+        st = getattr(rt.status, "state", "stopped")
+        if st in ("running", "healthy"):
+            return "healthy"
+        if st in ("starting", "loading"):
+            return "starting"
+        if st in ("error", "crashed"):
+            return "crashed"
+        return "stopped"
 
     def _mission_job(self, mission: dict, node: dict) -> dict:
         """Run an async platform job as a mission DAG node.

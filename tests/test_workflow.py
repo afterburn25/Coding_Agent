@@ -284,6 +284,40 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             for m in system[1:-1]:
                 self.assertNotIn("host system clock", str(m["content"]))
 
+    def test_knowledge_graph_context_injected_for_known_entity(self):
+        from localcodeagent.knowledge import KnowledgeGraph
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            kg = KnowledgeGraph(root / "kg.db")
+            kg.add_entity("service", "PaymentGateway")
+            kg.link("PaymentGateway", "Stripe", "depends_on")
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_research_unknown=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=ConversationManager(root / "conversations.json"),
+                knowledge_graph=lambda: kg,
+            )
+            agent._provider_for = lambda *_a, **_kw: provider
+            agent.run("what does PaymentGateway depend on?")
+            kg.close()
+            system_text = "\n".join(
+                str(m.get("content", "")) for m in provider.messages
+                if m.get("role") == "system")
+            self.assertIn("Knowledge graph relationships", system_text)
+            self.assertIn("service:PaymentGateway --depends_on--> entity:Stripe", system_text)
+
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -165,6 +165,7 @@ class AgentOrchestrator:
         answer_memory=None,
         activities=None,
         digital_twin=None,
+        knowledge_graph=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -184,6 +185,9 @@ class AgentOrchestrator:
         self.answer_memory = answer_memory
         self.activities = activities
         self.digital_twin = digital_twin
+        # May be a graph instance or a zero-arg callable returning one — the
+        # server passes a resolver so the SQLite store stays lazily opened.
+        self.knowledge_graph = knowledge_graph
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -961,6 +965,32 @@ class AgentOrchestrator:
             "Before reporting a self-change complete, run the repository verification selected by Nexus Core; for this source tree that verification includes the isolated second-instance selftest. "
             "If verification fails, diagnose the failure, research when needed, repair, and retest rather than claiming success."
         )
+
+    def _knowledge_graph_context(self, user_text: str) -> str:
+        """Bounded entity-relationship context for the prompt.
+
+        Resolves the graph lazily (server passes a callable so the SQLite
+        store is only opened when a query actually references it), tries the
+        full utterance first, then significant tokens.
+        """
+        if self.knowledge_graph is None:
+            return ""
+        try:
+            graph = (self.knowledge_graph() if callable(self.knowledge_graph)
+                     else self.knowledge_graph)
+            if graph is None:
+                return ""
+            ctx = graph.context_for(user_text)
+            if ctx:
+                return ctx
+            for tok in re.findall(r"[A-Za-z][\w.-]{4,}", user_text)[:6]:
+                ctx = graph.context_for(tok)
+                if ctx:
+                    return ctx
+        except Exception:
+            return ""
+        return ""
+
     def _task_context(self, task_id: str) -> None:
         self.tools.context["task_id"] = task_id
 
@@ -3025,6 +3055,11 @@ class AgentOrchestrator:
             brain_knowledge = self.nexus_brain.knowledge_context(user_text)
             if brain_knowledge:
                 knowledge_parts.append(brain_knowledge)
+        kg_ctx = self._knowledge_graph_context(user_text)
+        if kg_ctx:
+            knowledge_parts.append(
+                "Knowledge graph relationships (stored facts about entities "
+                "mentioned here):\n" + kg_ctx)
         knowledge_context = "\n\n".join(knowledge_parts)
         brain_skill_context = (
             self.nexus_brain.training_context(user_text)
