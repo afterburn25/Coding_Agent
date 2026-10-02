@@ -50,6 +50,24 @@ function renderRagStats(r){
     ||'<div class="off">No matches.</div>';
 }
 
+/* ---------- Knowledge graph ---------- */
+function renderKnowledge(k){
+  if(k&&k.available===false){
+    $('#kgStats').innerHTML='<div class="off">Knowledge graph unavailable.</div>';
+    return;
+  }
+  const s=(k&&k.stats)||{};
+  $('#kgStats').innerHTML=
+    `<div><span class="k">Entities</span>${esc(s.entities??0)}</div>`+
+    `<div><span class="k">Edges</span>${esc(s.edges??0)}</div>`;
+  if(k&&k.entities)$('#kgResults').innerHTML=k.entities.map(e=>
+    `<div class="list-row"><b>${esc(e.name)}</b> <span class="pill">${esc(e.kind)}</span>
+     <div class="meta">${esc(e.id)}</div></div>`).join('')
+    ||'<div class="off">No entities.</div>';
+  if(k&&k.context!==undefined)$('#kgContext').innerHTML=k.context
+    ?`<pre class="ctx">${esc(k.context)}</pre>`:'';
+}
+
 /* ---------- LSP ---------- */
 function renderLsp(l){
   const servers=l.servers||l||{};
@@ -111,11 +129,11 @@ function renderExperiments(list){
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,l,sk,a,b,ev,ex]=await Promise.all([
-      api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/lsp'),
+    const [h,t,r,kn,l,sk,a,b,ev,ex]=await Promise.all([
+      api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
       api('/api/skills'),api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments')]);
-    renderHealth(h);renderTwin(t);renderRagStats(r);renderLsp(l);
+    renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
     renderSkills(sk.skills||[]);renderArtifacts(a.artifacts||[]);
     renderBackups(b.backups||[]);renderEval(ev.runs||[]);renderExperiments(ex.experiments||[]);
   }catch(e){
@@ -129,6 +147,10 @@ $('#artifactKind').onchange=refresh;
 $('#ragSearch').onclick=async()=>{
   const q=$('#ragQuery').value.trim();if(!q)return;
   const r=await api('/api/rag?q='+encodeURIComponent(q));renderRagStats(r);
+};
+$('#kgSearch').onclick=async()=>{
+  const q=$('#kgQuery').value.trim();if(!q)return;
+  const k=await api('/api/knowledge?q='+encodeURIComponent(q));renderKnowledge(k);
 };
 $('#ragUpdate').onclick=async()=>{
   $('#ragResults').innerHTML='<div class="off">Updating…</div>';

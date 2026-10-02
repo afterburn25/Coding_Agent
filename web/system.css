@@ -29,5 +29,6 @@
 .list-row .actions{margin-top:4px;display:flex;gap:6px}
 .pill{display:inline-block;padding:0 6px;border-radius:8px;font-size:10px;background:#252a33;margin-right:4px}
 .off{opacity:.5}
+pre.ctx{margin:6px 0 0;padding:8px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto}
 .section-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin:14px 0 6px}
 .autonomy-card{font-size:12px;padding:8px;border:1px solid var(--border,#2a2f3a);border-radius:8px}
