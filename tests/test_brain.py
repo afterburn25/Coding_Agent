@@ -664,10 +664,18 @@ class NexusBrainIntegrationTests(unittest.TestCase):
             brain = NexusBrain(state_dir=Path(d),
                                version_lookup=lambda: "0.8.0")
             self.assertTrue(brain.answers_without_model(
-                "what version of nexus core?"))
+                "what version of Nexus Core is this?"))
+            self.assertTrue(brain.answers_without_model(
+                "what's the latest version"))
             self.assertTrue(brain.answers_without_model("system status?"))
+            self.assertTrue(brain.answers_without_model(
+                "check the system health"))
             self.assertFalse(brain.answers_without_model(
                 "refactor the parser module"))
+            self.assertFalse(brain.answers_without_model(
+                "what version of python do we need"))
+            self.assertFalse(brain.answers_without_model(
+                "check the status of my pull request"))
             brain.close()
 
     def test_ui_bus_bridge(self):

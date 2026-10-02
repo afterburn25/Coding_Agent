@@ -152,13 +152,27 @@ class Thalamus(BrainRegion):
         return reasons
 
     # -- fast paths -----------------------------------------------------------------
+    _VERSION_Q = re.compile(
+        r"(?:what|which|what's|whats|tell me|give me|do you know|do you have|say)"
+        r"(?:\s+(?:the|a|an|current|latest|installed|running|your|exact|exactly|new))*"
+        r"\s+version"
+        r"(?:\s+(?:of|is|for|are|this|it|that|nexus|core|nexus core|the app|you|"
+        r"yourself|running|installed|do you have|are you|on|using|you're))*"
+        r"[?.!]*")
+    _STATUS_Q = re.compile(
+        r"(?:(?:what's|whats|what is|check|show|give me|tell me|run|how's|"
+        r"how is|display|get)\s+)?"
+        r"(?:the\s+|a\s+)?"
+        r"(?:system|server|backend|runtime|nexus|nexus core|current)?\s*"
+        r"(?:health|status|diagnostics|vitals)"
+        r"(?:\s+(?:check|report|now|please|update))*[?.!]*")
+
     def _fast_path(self, text: str, low: str) -> str:
         """Deterministic answers that never need a model. Returns the fast-path
         kind or ''."""
-        if re.fullmatch(r"(what|which) version( is| of)?( nexus( core)?)?\??", low) \
-                or re.fullmatch(r"nexus( core)? version\??", low):
+        if self._VERSION_Q.fullmatch(low) or low in {"version", "version?"}:
             return "version"
-        if re.fullmatch(r"(system )?(health|status)( check)?\??", low) \
+        if self._STATUS_Q.fullmatch(low) \
                 or low in {"are you up", "are you alive", "diagnostics"}:
             return "status"
         return ""
