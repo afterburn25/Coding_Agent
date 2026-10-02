@@ -33,7 +33,7 @@ flowchart TD
 | **Basal Ganglia** | `brain/basal_ganglia.py` | Action scoring (usefulness, history, cost, latency, risk, resource pressure), procedural habit boosts | Decide goals |
 | **Motor Cortex** | `brain/motor.py` | Controlled execution via registered executors / ToolRouter; approval gates; structured `ExecutionResult` telemetry | Reason about goals |
 | **Cerebellum** | `brain/cerebellum.py` | Metric trends, Digital Twin measures, bounded/reversible optimization lifecycle (propose → apply → rollback) | Modify model weights |
-| **Specialists** | `brain/specialists.py` | Declarative `SpecialistSpec`s: coding, research, vision, reviewer, systems, language — share global bus/memory/stem | Duplicate global services |
+| **Specialists** | `brain/specialists.py` | `SpecialistBrain` regions (coding, research, vision, reviewer, systems, language): addressed bus citizens with domain-tagged episodic memory, `MEMORY_QUERY` domain-first recall, `LEARNING_EVENT` benchmarks, and `request_capability()` — model requests as requirements, never names | Duplicate global services |
 | **Nexus Brain** | `brain/core.py` | Owns all regions, canonical `process_input()` flow, `status()`/`trace()` observability | — |
 
 ## Canonical input flow
@@ -43,12 +43,17 @@ before any model work:
 
 1. **Observation** event published (correlation id minted).
 2. **Thalamus.route()** classifies the input:
-   - deterministic fast paths (`version`, `status`) answer in <1ms;
+   - deterministic fast paths answer in <1ms — `version`, `status`,
+     `config` (bounded non-secret keys: workspace, models directory,
+     active model), and `math` (safe `ast`-based arithmetic, never
+     `eval()`);
    - trusted memory hits (`answer_memory` trusted rows) answer without a model;
    - otherwise a `RouteDecision` names the owning region + a capability
      `ModelRequirement` resolved to a live model id.
 3. If a fast-path answer exists, the orchestrator completes the task
-   immediately — no model process is touched.
+   immediately — no model process is touched. The HTTP readiness gate
+   (`coding_model_setup_required`) consults `brain.answers_without_model()`
+   first, so deterministic answers work on installs with no model at all.
 4. Otherwise the normal pipeline runs; every hop is on the cognitive
    trace keyed by the correlation id.
 
@@ -90,6 +95,10 @@ not by prompt discipline.
 - `BrainStem.report_crash()` transitions a component to `crashed`
   immediately and publishes a high-priority `HealthEvent`; the Thalamus
   re-routes around dead models on the next `route()` call.
+- Measured model latency (`MODEL_RESULT` events from real generations,
+  recorded by the Cerebellum) feeds back into `_select_model` as a
+  bounded ±2 score adjustment — historically faster models win
+  capability-tied selections over time.
 - `server.AppState` treats brain construction as optional — a failed
   region logs and degrades; the server still starts.
 - `stop_state()` closes the brain cleanly (watchdog off).
@@ -118,8 +127,8 @@ not by prompt discipline.
 
 ## Future expansion
 
-- Specialist brains gain local planning/evaluator loops (the
-  `SpecialistBrain` interface is already in place).
+- Specialist brains gain local planning/evaluator loops (they are already
+  addressable regions with domain memory and capability requests).
 - Basal Ganglia → procedural memory writeback for repeated winning
   sequences (learned habits).
 - Cerebellum-driven tuner proposals surfaced in the UI for approval.

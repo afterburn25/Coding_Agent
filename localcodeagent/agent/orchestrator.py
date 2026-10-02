@@ -1263,6 +1263,22 @@ class AgentOrchestrator:
             except Exception:
                 cold = None
             cached = int(usage.get("cached_tokens") or 0)
+            brain = getattr(self, "brain", None)
+            if brain is not None:
+                try:
+                    from ..brain.events import CognitiveEvent, EventType
+                    brain.bus.publish(CognitiveEvent(
+                        type=EventType.MODEL_RESULT, source="orchestrator",
+                        content={
+                            "model_id": session.profile.id,
+                            "latency_ms": round(elapsed * 1000, 1),
+                            "tps": tps,
+                            "ttft_s": (float(raw["time_to_first_token_ms"]) / 1000.0
+                                       if isinstance(raw.get("time_to_first_token_ms"),
+                                                     (int, float)) else 0.0),
+                            "completion_tokens": completion_tokens}))
+                except Exception:
+                    pass
             self.telemetry.record_generation(
                 model_id=session.profile.id,
                 role=session.decision.role,
@@ -2921,7 +2937,8 @@ class AgentOrchestrator:
                         reasons=[f"brain fast path: {brain_envelope.get('fast_path')}"],
                         complexity=0),
                     model_events=[{"type": "brain_fast_path",
-                                   "fast_path": brain_envelope.get("fast_path")}],
+                                   "fast_path": brain_envelope.get("fast_path"),
+                                   "latency_ms": brain_envelope.get("latency_ms")}],
                     steps=0,
                     task=completed.as_dict() if completed else {},
                     response_source="brain_fast_path")

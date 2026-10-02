@@ -7,9 +7,12 @@ Hippocampus, Brain Stem, approval framework, and resource scheduler.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from .events import CognitiveEvent, EventType
+from .regions import BrainRegion
 from .thalamus import ModelRequirement
 
 
@@ -61,7 +64,7 @@ SPECIALISTS: tuple[SpecialistSpec, ...] = (
 )
 
 
-class SpecialistBrain:
+class SpecialistBrain(BrainRegion):
     """Runtime wrapper — a specialist owns domain state but shares the
     global bus/memory/brainstem; its model requests go through the
     Thalamus as capability requirements, never hard names."""
@@ -69,15 +72,72 @@ class SpecialistBrain:
     def __init__(self, spec: SpecialistSpec, bus, hippocampus=None,
                  motor=None) -> None:
         self.spec = spec
-        self.bus = bus
+        self.name = spec.name          # instance attr before BrainRegion init
         self.hippocampus = hippocampus
         self.motor = motor
         self.local_context: dict[str, Any] = {}
         self.benchmarks: dict[str, float] = {}
+        super().__init__(bus)
+
+    # -- addressed work ---------------------------------------------------------------
+    def handle(self, event: CognitiveEvent) -> None:
+        """Domain memory + context: specialists keep their own episodic
+        slice of the shared Hippocampus (kind = '<domain>:outcome') and
+        answer addressed memory queries with domain-first recall."""
+        if event.type == EventType.MEMORY_QUERY and self.hippocampus is not None:
+            res = self.hippocampus.recall(
+                str(event.content.get("query") or ""),
+                kinds={"episodic", "procedural"},
+                project_id=str(event.content.get("project_id") or ""),
+                limit=6)
+            domain = [e for e in res.entries
+                      if self.spec.domain in str(
+                          getattr(e, "provenance", "") or "") or
+                      str(getattr(e, "kind", "")).startswith(
+                          self.spec.domain)]
+            picked = (domain or res.entries)[:6]
+            self.respond(event, EventType.MEMORY_RESULT, {
+                "domain": self.spec.domain,
+                "entries": [e.as_dict() for e in picked]})
+        elif event.type in (EventType.EXECUTION_RESULT, EventType.MODEL_RESULT) \
+                and self.hippocampus is not None:
+            c = event.content
+            subject = c.get("action") or c.get("model_id") or event.type
+            self.hippocampus.record_episode(
+                f"{self.spec.domain}:outcome",
+                f"{subject} → {'ok' if c.get('ok', True) else 'failed'}",
+                detail=json.dumps(c, default=str)[:1000],
+                mission_id=event.mission_id, task_id=event.task_id)
+        elif event.type == EventType.ACTION_SELECTION:
+            self.local_context["last_selection"] = dict(event.content)
+        elif event.type == EventType.LEARNING_EVENT:
+            subject = str(event.content.get("subject") or "")
+            value = event.content.get("value")
+            if subject and isinstance(value, (int, float)):
+                self.benchmarks[subject] = float(value)
+
+    def request_capability(self, requirement: ModelRequirement, *,
+                           timeout: float = 10.0) -> str:
+        """Ask the Thalamus for a model by capability — never by name."""
+        resp = self.bus.request(CognitiveEvent(
+            type=EventType.MODEL_REQUEST, source=self.name,
+            destination="thalamus",
+            content={"coding": requirement.coding,
+                     "vision": requirement.vision,
+                     "reasoning": requirement.reasoning,
+                     "min_context": requirement.min_context,
+                     "quality": requirement.quality,
+                     "max_latency": requirement.max_latency}),
+            timeout=timeout)
+        return str(resp.content.get("model_id") or "") if resp else ""
 
     def status(self) -> dict[str, Any]:
-        return {"name": self.spec.name, "domain": self.spec.domain,
-                "capabilities": list(self.spec.capabilities),
-                "preferred": {"coding": self.spec.preferred_requirement.coding,
-                              "vision": self.spec.preferred_requirement.vision,
-                              "quality": self.spec.preferred_requirement.quality}}
+        base = super().status()
+        base.update({
+            "domain": self.spec.domain,
+            "capabilities": list(self.spec.capabilities),
+            "benchmarks": dict(self.benchmarks),
+            "preferred": {"coding": self.spec.preferred_requirement.coding,
+                          "vision": self.spec.preferred_requirement.vision,
+                          "quality": self.spec.preferred_requirement.quality}})
+        return base

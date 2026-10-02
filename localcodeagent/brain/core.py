@@ -48,7 +48,7 @@ class NexusBrain:
                  evaluator=None, tool_router=None, sandbox=None,
                  model_catalog=None, model_router=None,
                  classify_intent=None, research_class=None,
-                 version_lookup=None, health_lookup=None,
+                 version_lookup=None, health_lookup=None, config_lookup=None,
                  twin=None, model_telemetry=None, tool_stats=None) -> None:
         self.bus = CorpusCallosum()
         state_dir = Path(state_dir) if state_dir else None
@@ -68,7 +68,8 @@ class NexusBrain:
             self.bus, hippocampus=self.hippocampus, brainstem=self.brainstem,
             classify_intent=classify_intent, research_class=research_class,
             model_catalog=model_catalog, model_router=model_router,
-            version_lookup=version_lookup, health_lookup=health_lookup)
+            version_lookup=version_lookup, health_lookup=health_lookup,
+            config_lookup=config_lookup)
         self.pfc = PrefrontalCortex(
             self.bus, mission_planner=mission_planner,
             mission_store=mission_store, hippocampus=self.hippocampus,
@@ -97,6 +98,10 @@ class NexusBrain:
                               self.cerebellum._guarded_handle)
         self.bus.subscribe_type(EventType.MODEL_RESULT,
                               self.cerebellum._guarded_handle)
+        # Measured model latency feeds back into routing decisions —
+        # the learning loop that makes selection improve over time.
+        self.thalamus._benchmark = lambda mid: self.cerebellum.trend(
+            "inference", mid)
         # Health events reach the Thalamus so routing reacts to dead models.
         self.bus.subscribe_type(EventType.HEALTH_EVENT,
                               self.thalamus._guarded_handle)
@@ -150,6 +155,7 @@ class NexusBrain:
             "route": decision.region, "kind": decision.kind,
             "needs_model": decision.needs_model,
             "fast_path": decision.fast_path,
+            "fast_arg": decision.fast_arg,
             "model_id": decision.model_id, "model_role": decision.model_role,
             "memory_entries": decision.memory_entries,
             "reasons": decision.reasons,
@@ -157,7 +163,8 @@ class NexusBrain:
         }
         if decision.fast_path and decision.fast_path != "none":
             answer = (decision.trusted_answer
-                      or self.thalamus.answer_fast_path(decision.fast_path))
+                      or self.thalamus.answer_fast_path(
+                          decision.fast_path, decision.fast_arg))
             if answer:
                 envelope["answer"] = answer
                 self.bus.publish(CognitiveEvent(
@@ -180,7 +187,15 @@ class NexusBrain:
         except Exception:
             return False
         if decision.fast_path and decision.fast_path != "none":
-            return True
+            if decision.trusted_answer:
+                return True
+            # Only bypass the readiness gate when the fast path can actually
+            # produce an answer — otherwise let the gate's 409 stand.
+            try:
+                return bool(self.thalamus.answer_fast_path(
+                    decision.fast_path, decision.fast_arg))
+            except Exception:
+                return False
         return not decision.needs_model and bool(decision.trusted_answer)
 
     # -- observability -----------------------------------------------------------------

@@ -372,7 +372,8 @@ class Hippocampus(BrainRegion):
             conf = min(0.95, float(r["confidence"]) + 0.1 * overlap)
             out.append(MemoryEntry(
                 kind="episodic", text=text, confidence=conf,
-                provenance="episodes", freshness=_freshness(r["ts"]),
+                provenance=f"episodes/{r['kind']}",
+                freshness=_freshness(r["ts"]),
                 ts=r["ts"], source_id=r["id"]))
         if self._activity_source is not None:
             try:

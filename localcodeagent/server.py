@@ -968,6 +968,7 @@ class AppState:
             research_class=research_class,
             version_lookup=lambda: VERSION,
             health_lookup=self.health.summary,
+            config_lookup=self._brain_config_value,
             twin=self.twin,
             model_telemetry=lambda: self.model_telemetry.summary()
                 if hasattr(self.model_telemetry, "summary") else {},
@@ -980,6 +981,33 @@ class AppState:
         # The autonomy supervisor mirrors missions into the PFC.
         self.autonomy.pfc = brain.pfc
         return brain
+
+    def _brain_config_value(self, key: str) -> str:
+        """Bounded, non-secret config answers for the Thalamus config fast
+        path. Unknown keys return '' so routing falls through normally."""
+        try:
+            if key == "workspace":
+                return f"Workspace: {self.workspace}"
+            if key == "models_dir":
+                summary = self.runtime.summary() or {}
+                return (f"Models directory: "
+                        f"{summary.get('models_dir') or self.config.models_dir}")
+            if key == "active_model":
+                statuses = self.runtime.statuses() or []
+                running = [str(s.get("model_id")) for s in statuses
+                           if s.get("state") == "running" and s.get("model_id")]
+                if running:
+                    return f"Active model: {', '.join(running)}"
+                primary = next(
+                    (m.id for m in self.config.models
+                     if m.enabled and "primary_coder" in (m.roles or [])), "")
+                if primary:
+                    return (f"No model is currently loaded. "
+                            f"Configured primary: {primary}")
+                return "No model is currently loaded or configured."
+        except Exception:
+            return ""
+        return ""
 
     def _queue_enrich_mission(self, item: dict) -> dict:
         """Attribute a queue_task call made inside a mission agent run back

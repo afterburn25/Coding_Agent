@@ -186,7 +186,7 @@ class HippocampusTests(unittest.TestCase):
         res = h.recall("dbghelp installer", kinds={"episodic"},
                        project_id="proj-a")
         self.assertTrue(any("dbghelp" in e.text for e in res.entries))
-        self.assertEqual(res.entries[0].provenance, "episodes")
+        self.assertEqual(res.entries[0].provenance, "episodes/mission")
 
     def test_episodic_survives_reopen(self):
         h = self._hipp()
@@ -278,6 +278,63 @@ class ThalamusTests(unittest.TestCase):
         self.assertIn("healthy", t.answer_fast_path("status").lower()
                       .replace("operating within normal parameters", "healthy"))
 
+    def test_math_fast_path(self):
+        t = self._thalamus()
+        for msg, expected in [
+                ("what is 42 * 17?", "714"),
+                ("calculate (3 + 4) * 2", "14"),
+                ("what's 2 ^ 10", "1024"),
+                ("solve 100 / 8", "12.5"),
+                ("compute 2 ** 8", "256"),
+                ("4x4", "16"),
+                ("3 + 4", "7")]:
+            d = t.route(msg)
+            self.assertFalse(d.needs_model, msg)
+            self.assertEqual(d.fast_path, "math", msg)
+            self.assertIn(expected, t.answer_fast_path("math", d.fast_arg), msg)
+
+    def test_math_division_by_zero(self):
+        t = self._thalamus()
+        d = t.route("what is 5 / 0?")
+        self.assertEqual(d.fast_path, "math")
+        self.assertIn("division by zero",
+                      t.answer_fast_path("math", d.fast_arg))
+
+    def test_math_false_positives_not_caught(self):
+        t = self._thalamus()
+        for msg in ["555-1234", "what is the plan", "how many files are there",
+                    "what is your name", "call me at 555-0142"]:
+            d = t.route(msg)
+            self.assertNotEqual(d.fast_path, "math", msg)
+
+    def test_config_fast_path(self):
+        t = self._thalamus()
+        t._config_lookup = lambda k: {
+            "workspace": "Workspace: /tmp/proj",
+            "models_dir": "Models directory: /tmp/models",
+            "active_model": "Active model: qwen3-14b"}.get(k, "")
+        for msg, key, expected in [
+                ("what is the workspace path?", "workspace", "/tmp/proj"),
+                ("where is my workspace", "workspace", "/tmp/proj"),
+                ("what's the models directory", "models_dir", "/tmp/models"),
+                ("which model is active?", "active_model", "qwen3-14b"),
+                ("what is the current model", "active_model", "qwen3-14b")]:
+            d = t.route(msg)
+            self.assertFalse(d.needs_model, msg)
+            self.assertEqual(d.fast_path, "config", msg)
+            self.assertEqual(d.fast_arg, key, msg)
+            self.assertIn(expected,
+                          t.answer_fast_path("config", d.fast_arg), msg)
+
+    def test_config_false_positives_not_caught(self):
+        t = self._thalamus()
+        # Questions about the world, not this app's config.
+        for msg in ["what model should I use for coding",
+                    "tell me a story about a workspace",
+                    "refactor the workspace module"]:
+            d = t.route(msg)
+            self.assertNotEqual(d.fast_path, "config", msg)
+
     def test_coding_routes_to_coding_model(self):
         t = self._thalamus(catalog=[
             {"id": "util", "role": "utility", "enabled": True, "healthy": True},
@@ -295,6 +352,23 @@ class ThalamusTests(unittest.TestCase):
         d = t.route("draw a mountain landscape")
         self.assertEqual(d.region, "vision_brain")
         self.assertEqual(d.model_id, "img")
+
+    def test_benchmark_history_influences_selection(self):
+        """Cerebellum-measured latency nudges selection between otherwise
+        equal candidates without overriding capability filters."""
+        t = self._thalamus(catalog=[
+            {"id": "slow_coder", "role": "coding", "enabled": True,
+             "healthy": True},
+            {"id": "fast_coder", "role": "coding", "enabled": True,
+             "healthy": True}])
+        t._benchmark = lambda mid: {
+            "samples": 5, "last": {"slow_coder": 9000,
+                                   "fast_coder": 500}[mid]}
+        d = t.route("fix the broken test")
+        self.assertEqual(d.model_id, "fast_coder")
+        # History can't grant a missing capability.
+        d2 = t.route("draw a landscape")
+        self.assertNotEqual(d2.model_id, "fast_coder")
 
     def test_unhealthy_model_not_selected(self):
         bus = make_bus()
@@ -578,6 +652,42 @@ class SpecialistTests(unittest.TestCase):
         sb = SpecialistBrain(spec, make_bus())
         self.assertEqual(sb.status()["domain"], "coding")
 
+    def test_specialist_capability_request_round_trip(self):
+        """A specialist asks the Thalamus for a capability and gets a
+        resolved model id — never a hardcoded name."""
+        bus = make_bus()
+        Thalamus(bus, model_catalog=lambda: [
+            {"id": "coder1", "roles": ["coding"], "enabled": True,
+             "healthy": True},
+            {"id": "util1", "roles": ["utility"], "enabled": True,
+             "healthy": True}])
+        spec = next(s for s in SPECIALISTS if s.name == "coding_brain")
+        sb = SpecialistBrain(spec, bus)
+        mid = sb.request_capability(spec.preferred_requirement)
+        self.assertEqual(mid, "coder1")
+
+    def test_specialist_domain_memory(self):
+        """Addressed outcomes become domain-tagged episodes the specialist
+        can recall first."""
+        with tempfile.TemporaryDirectory() as d:
+            brain = NexusBrain(state_dir=Path(d))
+            self.addCleanup(brain.close)
+            coding = brain.specialists["coding_brain"]
+            brain.bus.publish(CognitiveEvent(
+                type=EventType.EXECUTION_RESULT, source="test",
+                destination="coding_brain",
+                content={"action": "edit_file", "ok": True,
+                         "duration_ms": 40}))
+            res = brain.hippocampus.recall(
+                "edit_file", kinds={"episodic"}, limit=5)
+            provs = {e.provenance for e in res.entries}
+            self.assertIn("episodes/coding:outcome", provs)
+            coding.bus.publish(CognitiveEvent(
+                type=EventType.LEARNING_EVENT, source="test",
+                destination="coding_brain",
+                content={"subject": "edit_file", "value": 12.5}))
+            self.assertEqual(coding.benchmarks["edit_file"], 12.5)
+
 
 # ---------------------------------------------------------------------------
 # NexusBrain integration
@@ -670,12 +780,25 @@ class NexusBrainIntegrationTests(unittest.TestCase):
             self.assertTrue(brain.answers_without_model("system status?"))
             self.assertTrue(brain.answers_without_model(
                 "check the system health"))
+            self.assertTrue(brain.answers_without_model(
+                "what is 42 * 17?"))
             self.assertFalse(brain.answers_without_model(
                 "refactor the parser module"))
             self.assertFalse(brain.answers_without_model(
                 "what version of python do we need"))
             self.assertFalse(brain.answers_without_model(
                 "check the status of my pull request"))
+            # A config question only bypasses the gate when the key actually
+            # resolves — no lookup wired means no answer to give.
+            self.assertFalse(brain.answers_without_model(
+                "what is the workspace path?"))
+            brain.close()
+        with tempfile.TemporaryDirectory() as d:
+            brain = NexusBrain(state_dir=Path(d))
+            brain.thalamus._config_lookup = (
+                lambda k: "Workspace: /tmp/proj" if k == "workspace" else "")
+            self.assertTrue(brain.answers_without_model(
+                "what is the workspace path?"))
             brain.close()
 
     def test_ui_bus_bridge(self):
