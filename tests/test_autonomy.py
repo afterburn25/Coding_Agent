@@ -294,6 +294,34 @@ class JobNodeTests(unittest.TestCase):
                 stop_state(state)
 
 
+    def test_mission_research_records_sources_in_kg(self):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                state.research = type("R", (), {
+                    "research_topic": lambda self, q: {
+                        "status": "completed",
+                        "summary": "summary",
+                        "sources": [{"title": "Docs", "url": "https://x",
+                                     "reliability": "high"}],
+                        "errors": []}})()
+                res = state._mission_research(
+                    {"id": "m7"},
+                    {"id": "r1", "instruction": "qwen3 coder context"})
+                self.assertTrue(res["ok"])
+                self.assertEqual(res["research"]["sources"], 1)
+                ctx = state.knowledge.context_for("qwen3 coder context")
+                self.assertIn("cites", ctx)
+                self.assertIn("informed_by", ctx)
+            finally:
+                stop_state(state)
+
+
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
         with tempfile.TemporaryDirectory() as td:

@@ -1078,11 +1078,38 @@ class AppState:
         except Exception as exc:
             return {"ok": False, "output": f"research failed: {exc}"}
         status = str(r.get("status") or "")
+        sources = list(r.get("sources") or [])
+        if status.startswith("completed"):
+            self._kg_record_research(mission, node, query, sources)
         return {"ok": status.startswith("completed"),
                 "output": str(r.get("summary") or "")[:4000],
                 "research": {"status": status,
-                             "sources": len(r.get("sources") or []),
+                             "sources": len(sources),
                              "errors": list(r.get("errors") or [])[:5]}}
+
+    def _kg_record_research(self, mission: dict, node: dict,
+                            query: str, sources: list) -> None:
+        """Persist research results as graph edges so later prompts can
+        recall which sources a mission actually consulted."""
+        try:
+            kg = self.knowledge
+            rid = f"research:{str(node.get('id') or query[:40])}"
+            kg.add_entity("research", query[:80], entity_id=rid,
+                          attrs={"mission_id": mission.get("id")})
+            for s in sources[:8]:
+                title = str(s.get("title") or s.get("url") or "")[:80]
+                url = str(s.get("url") or "")
+                sid = f"source:{url or title}"
+                kg.add_entity("source", title or url, entity_id=sid,
+                              attrs={"url": url,
+                                     "reliability": s.get("reliability")})
+                kg.link(rid, sid, "cites")
+            if mission.get("id"):
+                kg.add_entity("mission", str(mission["id"]),
+                              entity_id=f"mission:{mission['id']}")
+                kg.link(f"mission:{mission['id']}", rid, "informed_by")
+        except Exception:
+            pass
 
     # -- mission chat commands -----------------------------------------
     #
