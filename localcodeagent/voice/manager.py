@@ -17,7 +17,7 @@ from .cache import AudioCache
 from .engine import VoiceEngineError, get_engine
 from .presets import VoicePresetStore
 from .speech_filter import SpeechTextFilter
-from .streamer import SentenceStreamer
+from .streamer import SentenceStreamer, split_for_speech
 from .types import VoicePreset
 
 
@@ -186,7 +186,8 @@ class VoiceManager:
             spoken = self.filter.filter(final_text)
             if spoken:
                 for sent in _split_sentences(spoken):
-                    self.enqueue(task_id, sent)
+                    for part in split_for_speech(sent):
+                        self.enqueue(task_id, part)
 
     # -- queue --------------------------------------------------------------
     def enqueue(self, task_id: str, text: str, *,

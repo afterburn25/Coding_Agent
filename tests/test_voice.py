@@ -149,6 +149,34 @@ class TestSentenceStreamer(unittest.TestCase):
         s.flush()
         self.assertEqual(s.flush(), [])
 
+    def test_long_sentence_splits_into_bounded_segments(self):
+        # One monolithic sentence becomes one monolithic TTS job whose
+        # synthesis latency shows up as dead air — it must be split.
+        s = SentenceStreamer()
+        words = " ".join(f"word{i}" for i in range(160))  # ~800 chars
+        out = s.feed(words + ".")
+        out += s.flush()
+        self.assertGreater(len(out), 1)
+        self.assertTrue(all(len(p) <= s.max_clause for p in out))
+        self.assertEqual(" ".join(out).replace(" .", "."), words + ".")
+
+    def test_run_on_pending_buffer_eventually_emits(self):
+        # No clause break at all: the word-wrap fallback still bounds the
+        # pending buffer instead of waiting forever for punctuation.
+        s = SentenceStreamer()
+        words = " ".join(f"item{i}" for i in range(120))
+        out = s.feed(words)
+        self.assertGreater(len(out), 0)
+        self.assertTrue(all(len(p) <= s.max_clause for p in out))
+
+    def test_clause_breaks_stay_under_limit(self):
+        s = SentenceStreamer()
+        long_clause = ", ".join("clause" + str(i) * 8 for i in range(40))
+        out = s.feed("Intro short. " + long_clause + " trailing words")
+        out += s.flush()
+        self.assertTrue(all(len(p) <= s.max_clause for p in out))
+        self.assertGreater(len(out), 2)
+
 
 # --------------------------------------------------------------------------
 # presets
