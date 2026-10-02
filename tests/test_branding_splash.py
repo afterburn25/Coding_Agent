@@ -201,7 +201,7 @@ class UpgradeIdentityTests(unittest.TestCase):
         self.assertIn('Copy-Item $App (Join-Path $InstallDir "ChatNexus.exe")', WORKFLOW)
         self.assertIn("Update left the legacy ChatNexus.exe behind", WORKFLOW)
         self.assertIn("legacy ChatNexus.exe process", WORKFLOW)
-        self.assertIn("NexusCore-Setup-0.6.0-dev-Windows-x64.exe", WORKFLOW)
+        self.assertIn("NexusCore-Setup-${env:APP_VERSION}-Windows-x64.exe", WORKFLOW)
 
     def test_upgrade_preserves_user_data(self):
         self.assertIn(r'Excludes: "Source\*,models\*,data\*,workflows\*,config.json"', INSTALLER)

@@ -131,7 +131,11 @@ class InstallerContractTests(unittest.TestCase):
 
     def test_ci_compiles_real_installer_and_runs_update_twice(self):
         self.assertIn('installer\\ChatNexus.iss', self.workflow)
-        self.assertIn("NexusCore-Setup-0.6.0-dev-Windows-x64.exe", self.workflow)
+        self.assertIn("NexusCore-Setup-${env:APP_VERSION}-Windows-x64.exe", self.workflow)
+        # Package versions must come from the canonical VERSION file, not a
+        # hardcoded string that drifts behind releases.
+        self.assertIn("APP_VERSION=$version", self.workflow)
+        self.assertNotIn("0.6.0-dev", self.workflow)
         self.assertIn("Smoke-test fresh install and update preservation", self.workflow)
         self.assertIn("UPGRADE_PRESERVE.marker", self.workflow)
         self.assertIn("upgrade_preserve_marker", self.workflow)
@@ -144,7 +148,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Fake Nexus Core Process", self.workflow)
         self.assertIn("Installer did not close the running NexusCore.exe process", self.workflow)
         self.assertIn("Update left the legacy ChatNexus.exe behind", self.workflow)
-        self.assertNotIn("Chat-Nexus-Setup-0.6.0-dev-Windows-x64.exe", self.workflow)
+        self.assertNotIn("Chat-Nexus-Setup", self.workflow)
 
     def test_legacy_duplicate_installer_definition_is_removed(self):
         self.assertFalse((ROOT / "packaging" / "ChatNexus.iss").exists())
