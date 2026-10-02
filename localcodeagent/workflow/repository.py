@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -77,9 +77,7 @@ class RepositoryIndex:
             })
         with self._lock:
             self._data = {"version": 1, "generated_at": time.time(), "files": rows}
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
-            replace_with_retry(tmp, self.path)
+            atomic_write_text(self.path, json.dumps(self._data, ensure_ascii=False))
         return self.summary()
 
     def ensure(self) -> dict[str, Any]:

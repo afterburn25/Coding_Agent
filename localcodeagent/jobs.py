@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .fsutil import replace_with_retry
+from .fsutil import atomic_write_text
 
 # Unified job states. Subsystem-specific raw statuses are normalized into this
 # vocabulary; the raw value is preserved on the record as `status`.
@@ -289,9 +289,6 @@ class JobManager:
             return
         rows = [j.as_dict() for j in sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)[: self.limit]]
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-            replace_with_retry(tmp, self.path)
+            atomic_write_text(self.path, json.dumps(rows, indent=2))
         except OSError:
             pass

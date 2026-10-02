@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any, Callable
 
 OPEN_STATES = {"running", "waiting"}
@@ -103,12 +103,12 @@ class ActivityStore:
         keep_set = set(keep)
         self._by_task = {t: self._by_task[t] for t in keep}
         try:
-            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            with tmp.open("w", encoding="utf-8") as fh:
-                for task_id in keep:
-                    for row in self._by_task[task_id]:
-                        fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-            replace_with_retry(tmp, self.path)
+            lines = [
+                json.dumps(row, ensure_ascii=False, default=str)
+                for task_id in keep
+                for row in self._by_task[task_id]
+            ]
+            atomic_write_text(self.path, "\n".join(lines) + "\n")
         except OSError:
             pass
         del keep_set

@@ -13,7 +13,7 @@ import shutil
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 
 from .types import VoicePreset
 
@@ -104,9 +104,7 @@ class VoicePresetStore:
                 f"{preset.id} is an official preset — save under a new name")
         preset.official = False
         path = self._path(preset.id)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(preset.to_json(), encoding="utf-8")
-        replace_with_retry(tmp, path)
+        atomic_write_text(path, preset.to_json())
         return preset
 
     def save_as(self, preset: VoicePreset, new_id: str | None = None,

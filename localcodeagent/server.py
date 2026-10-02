@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any, Callable
 
-from .fsutil import replace_with_retry
+from .fsutil import atomic_write_text
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -783,9 +783,7 @@ class AppState:
             raise ValueError(f"Unsupported growth method for activation: {method}")
 
         raw["models"] = models
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".growth.tmp")
-        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
         try:
             applied = self.reload_model_configuration()
         except Exception:
@@ -815,9 +813,7 @@ class AppState:
         target["model_path"] = str(backup.get("model_path") or "")
         target["extra_args"] = list(backup.get("extra_args") or [])
         raw["models"] = models
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".rollback.tmp")
-        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
         applied = self.reload_model_configuration()
         try:
             backup_path.unlink()
@@ -846,9 +842,7 @@ class AppState:
             raw = asdict(self.config)
         raw["conversation_policy_mode"] = mode
         raw["ethical_temperature"] = temperature
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".policy.tmp")
-        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
 
         self.config.conversation_policy_mode = mode
         self.config.ethical_temperature = temperature
@@ -1046,10 +1040,7 @@ class AppState:
         for k in keys:
             if k in full:
                 raw[k] = full[k]
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False),
-                       encoding="utf-8")
-        replace_with_retry(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
 
     def _voice_publish(self, payload: dict) -> None:
         """Voice events go to the shared bus AND any live chat SSE sinks so
@@ -1278,9 +1269,7 @@ class AppState:
         else:
             raw = asdict(self.config)
         raw.update(updates)
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".cnx.tmp")
-        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.config_path)
+        atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
 
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.

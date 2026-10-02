@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
@@ -318,9 +318,7 @@ class NexusBrain:
         return events
 
     def _save_auth(self, auth: dict[str, Any]) -> None:
-        tmp = self.auth_path.with_suffix(self.auth_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(auth, indent=2), encoding="utf-8")
-        replace_with_retry(tmp, self.auth_path)
+        atomic_write_text(self.auth_path, json.dumps(auth, indent=2))
 
     _SETTINGS_HISTORY_LIMIT = 10
 
@@ -392,9 +390,7 @@ class NexusBrain:
         self._verified_for_session = True
         self._tampered = False
         self._push_settings_history()
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(self._data, indent=2, ensure_ascii=False))
         self._audit("signed_save", updated_at=self._data["updated_at"],
                     payload_sha256=hashlib.sha256(self._canonical(self._unsigned_payload())).hexdigest()[:16])
 
@@ -1278,9 +1274,7 @@ class NexusBrain:
         brain = {k: v for k, v in brain.items() if k != "settings_history"}
         # Ed25519 public verification lets a shipped Brain activate read-only
         # without exposing the creator's passcode/private signing key.
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(brain, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(brain, indent=2, ensure_ascii=False))
         self._save_auth(auth)
         self._signing_key = None
         self._unlocked = False
@@ -1329,9 +1323,7 @@ class NexusBrain:
             return {"updated": False, "reason": "current_brain_is_same_or_newer", "brain": current}
         brain_payload = {k: v for k, v in payload.get("brain").items() if k != "settings_history"}
         auth_payload = payload.get("creator_lock")
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(brain_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(brain_payload, indent=2, ensure_ascii=False))
         self._save_auth(auth_payload)
         self._signing_key = None
         self._unlocked = False

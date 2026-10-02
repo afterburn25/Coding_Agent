@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -90,9 +90,7 @@ class TaskStore:
 
     def _save(self) -> None:
         payload = {"version": 1, "tasks": [self._tasks[i].as_dict() for i in self._order[-100:]]}
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(payload, indent=2, ensure_ascii=False))
 
     def create(self, prompt: str, mode: str) -> TaskRecord:
         with self._lock:

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from time import time
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 
 
 @dataclass(slots=True)
@@ -39,9 +39,7 @@ class ConsentStore:
     def save(self, record: ConsentRecord) -> None:
         data = self._load()
         data[record.subject] = record.as_dict()
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(data, indent=2))
 
     def get(self, subject: str) -> dict | None:
         return self._load().get(subject)

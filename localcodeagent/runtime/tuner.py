@@ -22,7 +22,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
@@ -71,9 +71,7 @@ class RuntimeTuner:
         return {"version": TUNER_VERSION, "results": {}, "benchmarks": []}
 
     def _save(self) -> None:
-        tmp = self.storage_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, indent=2) + "\n", encoding="utf-8")
-        replace_with_retry(tmp, self.storage_path)
+        atomic_write_text(self.storage_path, json.dumps(self._data, indent=2) + "\n")
 
     def reset(self, model_id: str | None = None) -> None:
         if model_id:

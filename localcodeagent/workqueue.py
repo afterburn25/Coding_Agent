@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .fsutil import replace_with_retry
+from .fsutil import atomic_write_text
 from typing import Any
 
 
@@ -38,9 +38,7 @@ class WorkQueue:
             self._items = []
 
     def _save(self) -> None:
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"version": 1, "items": self._items}, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps({"version": 1, "items": self._items}, indent=2, ensure_ascii=False))
 
     def enqueue(self, prompt: str, *, mode: str = "auto") -> dict[str, Any]:
         with self._lock:

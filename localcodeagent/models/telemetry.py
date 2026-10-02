@@ -5,7 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 from ..config import ModelProfile
@@ -67,9 +67,7 @@ class ModelPerformanceTelemetry:
             "events": self._events[-self.max_events:],
             "generations": self._generations[-self.max_events:],
         }
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(payload, indent=2, ensure_ascii=False))
 
     def record(
         self,

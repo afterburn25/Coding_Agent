@@ -28,7 +28,7 @@ import re
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 from .base import ToolRegistry, ToolSpec
@@ -102,17 +102,14 @@ def _save_resume(path: Path | None, *, workflow_id: str, next_step: int,
             if isinstance(value, dict) else value
             for name, value in steps.items()
         }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({
+        atomic_write_text(path, json.dumps({
             "workflow_id": workflow_id,
             "next_step": next_step,
             "params": params,
             "steps": capped,
             "step_log": step_log,
             "saved_at": time.time(),
-        }, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, path)
+        }, ensure_ascii=False))
         return str(path)
     except OSError:
         return ""

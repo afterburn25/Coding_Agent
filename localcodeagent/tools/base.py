@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any, Callable
 
 from ..permissions import PermissionManager
@@ -537,9 +537,6 @@ class ToolRegistry:
             "sizes": {k: [s, b] for k, (s, b) in self._size_cache.items()},
         }
         try:
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            replace_with_retry(tmp, self.state_path)
+            atomic_write_text(self.state_path, json.dumps(payload, indent=2))
         except OSError:
             pass

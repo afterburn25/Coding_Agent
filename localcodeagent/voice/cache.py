@@ -11,7 +11,7 @@ import json
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_bytes
 
 
 class AudioCache:
@@ -45,9 +45,7 @@ class AudioCache:
 
     def put(self, key: str, wav: bytes) -> Path:
         p = self._path(key)
-        tmp = p.with_suffix(".wav.tmp")
-        tmp.write_bytes(wav)
-        replace_with_retry(tmp, p)
+        atomic_write_bytes(p, wav)
         self._evict()
         return p
 

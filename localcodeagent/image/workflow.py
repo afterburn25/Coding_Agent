@@ -3,11 +3,10 @@ from __future__ import annotations
 import copy
 import json
 import re
-import uuid
 from pathlib import Path
 from typing import Any
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 
 
 TOKEN = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
@@ -111,15 +110,7 @@ class WorkflowManager:
         if len(payload.encode("utf-8")) > 10 * 1024 * 1024:
             raise ValueError("workflow JSON exceeds the 10 MB import limit")
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            tmp.write_text(payload, encoding="utf-8")
-            replace_with_retry(tmp, path)
-        finally:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+        atomic_write_text(path, payload)
         result = dict(validation)
         result.update({"name": str(path.relative_to(self.root)).replace("\\", "/"), "exists": True})
         return result

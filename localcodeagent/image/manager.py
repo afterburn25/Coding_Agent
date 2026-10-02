@@ -18,13 +18,11 @@ from .router import ImageRouter
 from .runtime import ComfyUIRuntime
 from .types import ImageJob, ImageModelProfile, ImageRequest
 from .workflow import WorkflowManager
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 
 
 def _atomic_json_write(path: Path, payload: Any) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    replace_with_retry(tmp, path)
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 class ImageManager:
@@ -118,8 +116,9 @@ class ImageManager:
 
     def _save_jobs(self, job: "ImageJob | None" = None) -> None:
         self.last_activity = time.time()
-        rows=[j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:500]]
-        _atomic_json_write(self.jobs_path, rows)
+        with self._lock:
+            rows=[j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:500]]
+            _atomic_json_write(self.jobs_path, rows)
         if job is not None and self.on_change is not None:
             try:
                 self.on_change({"job": job.as_dict()})
@@ -404,13 +403,14 @@ class ImageManager:
                 self.runtime.restore_managed_models(stopped)
 
     def _append_history(self, job: ImageJob, profile: ImageModelProfile) -> None:
-        history=[]
-        if self.history_path.exists():
-            try: history=json.loads(self.history_path.read_text(encoding="utf-8"))
-            except Exception: history=[]
-        row={**job.as_dict(), "model": profile.as_dict()}
-        history.insert(0,row)
-        _atomic_json_write(self.history_path, history[:2000])
+        with self._lock:
+            history=[]
+            if self.history_path.exists():
+                try: history=json.loads(self.history_path.read_text(encoding="utf-8"))
+                except Exception: history=[]
+            row={**job.as_dict(), "model": profile.as_dict()}
+            history.insert(0,row)
+            _atomic_json_write(self.history_path, history[:2000])
         for output in job.outputs:
             meta=Path(output).with_suffix(Path(output).suffix+".json")
             meta.write_text(json.dumps(row, indent=2), encoding="utf-8")

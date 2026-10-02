@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from .fsutil import replace_with_retry
+from .fsutil import atomic_write_text
 from typing import Any
 
 from cryptography.fernet import Fernet
@@ -66,9 +66,7 @@ class SecretVault:
     def _save(self) -> None:
         payload = json.dumps({"secrets": self._store}, ensure_ascii=False).encode("utf-8")
         encrypted = self._fernet().encrypt(payload).decode("ascii")
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps({"version": 1, "data": encrypted}, indent=2))
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps({"version": 1, "data": encrypted}, indent=2))
 
     # -- API -------------------------------------------------------------------
 

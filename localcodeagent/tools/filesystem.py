@@ -4,7 +4,7 @@ import difflib
 import os
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import TYPE_CHECKING, Any
 
 from .base import ToolRegistry, ToolSpec
@@ -79,10 +79,7 @@ def register_filesystem_tools(
     def write_file(args: dict) -> str:
         path = _safe_path(workspace, args["path"])
         track_mutation(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".localcodeagent.tmp")
-        tmp.write_text(args.get("content", ""), encoding="utf-8")
-        replace_with_retry(tmp, path)
+        atomic_write_text(path, args.get("content", ""))
         return f"WROTE {path.relative_to(root)} ({path.stat().st_size} bytes)"
 
     def apply_patch(args: dict) -> str:
@@ -140,10 +137,7 @@ def register_filesystem_tools(
                 path.unlink()
                 new_lines: list[str] = []
             else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = path.with_name(path.name + ".localcodeagent.tmp")
-                tmp.write_text(new_text, encoding="utf-8")
-                replace_with_retry(tmp, path)
+                atomic_write_text(path, new_text)
                 new_lines = new_text.splitlines(keepends=True)
             diff_lines.extend(difflib.unified_diff(
                 old_text.splitlines(keepends=True),

@@ -7,7 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -86,9 +86,7 @@ class ConversationMemory:
     def _save(self) -> None:
         if not self.enabled:
             return
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(self._data, indent=2, ensure_ascii=False))
 
     @staticmethod
     def _clean(text: str, limit: int = 4000) -> str:

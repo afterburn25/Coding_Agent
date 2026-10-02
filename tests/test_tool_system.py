@@ -645,6 +645,33 @@ class ToolRouterTests(unittest.TestCase):
         self.assertIn("install", out.lower())
 
 
+class FSUtilTests(unittest.TestCase):
+    def test_atomic_write_text_concurrent_writers(self):
+        """Parallel writers to one path must not collide on a shared tmp name."""
+        import threading
+        from localcodeagent.fsutil import atomic_write_text
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "state.json"
+            errors = []
+
+            def write(i):
+                try:
+                    for n in range(20):
+                        atomic_write_text(path, json.dumps({"w": i, "n": n}))
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=write, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            self.assertTrue(json.loads(path.read_text())["w"] in range(8))
+            # No stray tmp files left behind.
+            self.assertEqual(list(Path(td).glob("*.tmp")), [])
+
+
 FAKE_MCP_SERVER = r'''
 import json, sys
 for line in sys.stdin:

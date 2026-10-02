@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .comfyui import ComfyUIBackend
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 
 
 @dataclass(slots=True)
@@ -208,9 +208,7 @@ class ComfyUIRuntime:
                 # orphan (exe path ties the pid to this install's ComfyUI).
                 marker = self._managed_marker_path()
                 marker.parent.mkdir(parents=True, exist_ok=True)
-                tmp = marker.with_suffix(".tmp")
-                tmp.write_text(json.dumps({"pid": self._process.pid, "exe": cmd[0]}), encoding="utf-8")
-                replace_with_retry(tmp, marker)
+                atomic_write_text(marker, json.dumps({"pid": self._process.pid, "exe": cmd[0]}))
             except OSError:
                 pass
             self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())

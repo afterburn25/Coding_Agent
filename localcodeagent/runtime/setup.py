@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -133,10 +133,7 @@ def write_suggested_models(config_path: Path, suggestions: list[dict[str, Any]])
         if not isinstance(raw, dict):
             raise ValueError("Config JSON root must be an object.")
     raw["models"] = suggestions
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
-    replace_with_retry(tmp, path)
+    atomic_write_text(path, json.dumps(raw, indent=2) + "\n")
     return {
         "path": str(path),
         "models": len(suggestions),

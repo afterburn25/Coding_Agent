@@ -7,7 +7,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .fsutil import replace_with_retry
+from .fsutil import atomic_write_text
 from typing import Any, Callable, Iterable
 
 from .tools.base import ToolRegistry, ToolSpec
@@ -244,9 +244,7 @@ class ToolRouter:
                 # bounded so months of runs do not grow it without limit.
                 if self.telemetry_path.stat().st_size > 512 * 1024:
                     lines = self.telemetry_path.read_text(encoding="utf-8").splitlines()[-2000:]
-                    tmp = self.telemetry_path.with_suffix(".tmp")
-                    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                    replace_with_retry(tmp, self.telemetry_path)
+                    atomic_write_text(self.telemetry_path, "\n".join(lines) + "\n")
             except OSError:
                 pass
 

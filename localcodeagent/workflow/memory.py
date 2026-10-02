@@ -5,7 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -31,9 +31,7 @@ class ProjectMemory:
             pass
 
     def _save(self) -> None:
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
-        replace_with_retry(tmp, self.path)
+        atomic_write_text(self.path, json.dumps(self._data, indent=2, ensure_ascii=False))
 
     def remember_task(self, *, task_id: str, prompt: str, summary: str, files_changed: list[str], review: str = "") -> None:
         with self._lock:

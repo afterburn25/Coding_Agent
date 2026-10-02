@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text
 from typing import Any
 
 
@@ -47,9 +47,7 @@ class CheckpointManager:
         task_dir = self._task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         path = self._manifest_path(task_id)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        replace_with_retry(tmp, path)
+        atomic_write_text(path, json.dumps(manifest, indent=2))
 
     def snapshot(self, task_id: str, path: Path) -> None:
         with self._lock:
