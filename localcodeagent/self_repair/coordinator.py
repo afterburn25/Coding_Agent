@@ -690,6 +690,32 @@ class SelfRepairCoordinator:
             return {"ok": False, "error": "no such incident"}
         result = self.rollback.restore(incident_id)
         if result.get("ok"):
-            transition(inc, "rolled_back", detail="manual rollback")
-            self._save()
+            # The candidate is dead — its worktree/branch must not linger.
+            wt = inc.get("worktree")
+            if wt:
+                try:
+                    self.patcher.cleanup(Path(wt), inc["id"])
+                except Exception:
+                    pass
+                inc["worktree"] = ""
+            self._set(inc, "rolled_back", "manual rollback")
         return result
+
+    def abandon(self, incident_id: str) -> dict:
+        """Human decision to not repair. Closes the incident, frees the
+        candidate worktree, and stops the pipeline advancing it."""
+        inc = self.get(incident_id)
+        if inc is None:
+            return {"ok": False, "error": "no such incident"}
+        state = str(inc.get("state"))
+        if state in {"resolved", "rolled_back", "abandoned"}:
+            return {"ok": False, "error": f"incident already {state}"}
+        wt = inc.get("worktree")
+        if wt:
+            try:
+                self.patcher.cleanup(Path(wt), inc["id"])
+            except Exception:
+                pass
+            inc["worktree"] = ""
+        self._set(inc, "abandoned", "closed by user — no repair applied")
+        return {"ok": True}

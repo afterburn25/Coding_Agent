@@ -3826,6 +3826,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"incident": repair.process_incident(iid)})
             elif verb == "rollback":
                 self._json(repair.rollback_incident(iid))
+            elif verb == "abandon":
+                self._json(repair.abandon(iid))
             else:
                 self._json({"error": "unknown repair action"}, 400)
             return True

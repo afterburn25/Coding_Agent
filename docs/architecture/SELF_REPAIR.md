@@ -178,9 +178,12 @@ diagnosing fresh.
   quality is measurable over time, not anecdotal.
 - **API**: `GET /api/self-repair`, `GET /api/self-repair/{id}`,
   `POST /api/self-repair/report`, `POST /api/self-repair/{id}/retry |
-  process | rollback`.
+  process | rollback | abandon`. `abandon` closes a `needs_human`
+  candidate without repair and frees its worktree; rollback frees the
+  worktree too — no candidate leaks on disk.
 - **UI**: Self Repair panel on Mission Control — state, severity,
-  confidence, recurrence count, top hypothesis, Retry for needs_human.
+  confidence, recurrence count, top hypothesis, Retry/Dismiss for
+  needs_human.
 - **Safety**: incidents never widen permissions; `is_blocked` honors
   autonomy stop/pause; secrets are redacted at intake; stable tree is
   only touched at promotion, and only after every gate passes.

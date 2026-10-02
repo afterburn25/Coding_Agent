@@ -190,7 +190,8 @@ function renderRepairs(rows){
     `<span>${esc(r.severity)}</span><span>conf ${Math.round((r.confidence||0)*100)}%</span>`+
     `${r.occurrences>1?`<span>×${r.occurrences}</span>`:''}</div>`+
     `<div class="meta"><span style="flex:1">${new Date((r.last_seen||r.created_at)*1000).toLocaleTimeString()}</span>`+
-    (r.state==='needs_human'?`<button class="mini-button" data-rep="${r.id}:retry">Retry</button>`:'')+
+    (r.state==='needs_human'?`<button class="mini-button" data-rep="${r.id}:retry">Retry</button>`+
+    `<button class="mini-button" data-rep="${r.id}:abandon">Dismiss</button>`:'')+
     `</div></div>`;
   }).join('')||'<div class="hist-row">no incidents</div>';
 }

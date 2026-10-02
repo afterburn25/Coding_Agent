@@ -606,6 +606,37 @@ class ScenarioC_Rollback(unittest.TestCase):
             self.assertEqual(coord.get(inc["id"])["state"], "rolled_back")
 
 
+class AbandonTests(unittest.TestCase):
+    """A candidate the user dismisses must free its worktree."""
+
+    def test_abandon_cleans_worktree(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo, patch_generator=good_generator,
+                               auto_promote=False)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            inc2 = coord.get(inc["id"])
+            self.assertEqual(inc2["state"], "needs_human")
+            wt = Path(inc2["worktree"])
+            self.assertTrue(wt.is_dir())
+
+            result = coord.abandon(inc["id"])
+            self.assertTrue(result["ok"], result)
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "abandoned")
+            self.assertFalse(wt.exists())
+            self.assertFalse(final.get("worktree"))
+            # stable tree untouched — nothing promoted
+            self.assertNotIn("if b == 0",
+                             (repo / "mod" / "calc.py").read_text())
+            # terminal — a second dismiss is rejected
+            self.assertFalse(coord.abandon(inc["id"])["ok"])
+            # abandoned doesn't advance on tick
+            coord.tick()
+            self.assertEqual(coord.get(inc["id"])["state"], "abandoned")
+
+
 class ScenarioD_OperationalRepair(unittest.TestCase):
     """Recurring runtime failure resolved procedurally — no worktree."""
 
