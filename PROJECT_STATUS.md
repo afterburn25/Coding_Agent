@@ -2,7 +2,20 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **698 / 698** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.8.0 — Cognitive Architecture (Nexus Brain regions)
+## Active version: 0.9.0 — Predictive splash progress + flat junction-safe installer
+
+v0.9 redesigns splash progress rendering around a three-layer model —
+`RealProgress` (reported milestones), `PredictedProgress` (learned-timing
+estimate per phase), `DisplayedProgress` (dt-based velocity-smoothed,
+monotonic, ceiling-bounded, 100 % only after genuine readiness + the 7 s
+minimum). Per-machine timing EMAs persist to `data/startup_profile.json`;
+stalled phases get honest "taking longer than usual" status. Installer now
+installs flat into `<drive>:\Nexus_Core` (largest-free-space drive),
+follows the `models/` junction for downloads, and shows Uninstall/Update
+wording only on existing installs. Docs: `docs/architecture/STARTUP.md`.
+Model tests: `desktop/StartupProgress.Tests`.
+
+### Retained from v0.8 — Cognitive Architecture (Nexus Brain regions)
 
 v0.8 adds `localcodeagent/brain/` — Corpus Callosum event bus, Brain Stem,
 Hippocampus, Thalamus, Prefrontal Cortex, Basal Ganglia, Motor Cortex,

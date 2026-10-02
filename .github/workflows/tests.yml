@@ -62,6 +62,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Run splash progress model tests
+        shell: pwsh
+        run: dotnet run -c Release --project desktop/StartupProgress.Tests
+
       - name: Resolve canonical version
         shell: pwsh
         run: |

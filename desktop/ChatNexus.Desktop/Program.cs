@@ -52,95 +52,6 @@ internal static class Program
 }
 
 /// <summary>
-/// Milestone-driven startup progress. Real phases raise the target; the
-/// displayed value eases toward it. The splash may only dismiss when the
-/// minimum display time AND genuine app readiness are both satisfied —
-/// never before 100% is earned, never backward.
-/// </summary>
-internal sealed class StartupProgress
-{
-    public static readonly TimeSpan MinimumDisplayTime = TimeSpan.FromSeconds(7);
-
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private double _target;
-    private double _displayed;
-    private string _primary = "INITIALIZING · NEXUS CORE";
-    private string _secondary = "Preparing local application environment";
-    private DateTimeOffset? _completionStarted;
-
-    /// <summary>How long the READY state + core glow plays before the swap.</summary>
-    public static readonly TimeSpan CompletionEffectTime = TimeSpan.FromMilliseconds(850);
-
-    public bool AppReady { get; private set; }
-    public double Displayed => _displayed;
-    public TimeSpan Elapsed => _clock.Elapsed;
-    public bool MinimumElapsed => Elapsed >= MinimumDisplayTime;
-    public bool ReadyToDismiss => AppReady && MinimumElapsed;
-    /// <summary>0→1 while the READY state + shield-core glow plays.</summary>
-    public double CompletionPhase =>
-        _completionStarted is null ? 0.0 :
-        Math.Clamp((DateTimeOffset.Now - _completionStarted.Value) / CompletionEffectTime, 0.0, 1.0);
-    public bool CompletionFinished => _completionStarted is not null && CompletionPhase >= 1.0;
-
-    /// <summary>PRIMARY · SUBSYSTEM line.</summary>
-    public string Primary =>
-        _completionStarted is not null || ReadyToDismiss ? "READY · NEXUS CORE" :
-        AppReady ? "FINALIZING · NEXUS CORE" : _primary;
-
-    /// <summary>Dim secondary explanation line.</summary>
-    public string Secondary =>
-        _completionStarted is not null || ReadyToDismiss ? "All startup-critical systems online" :
-        AppReady ? "Preparing interface" : _secondary;
-
-    public void Report(double fraction, string primary, string secondary)
-    {
-        var clamped = Math.Clamp(fraction, 0.0, 1.0);
-        if (clamped > _target)
-        {
-            _target = clamped;
-        }
-        _primary = primary;
-        _secondary = secondary;
-    }
-
-    public void MarkAppReady()
-    {
-        AppReady = true;
-        if (_target < 1.0)
-        {
-            _target = 1.0;
-        }
-    }
-
-    /// <summary>
-    /// Both conditions met: start the brief READY + core-glow completion
-    /// effect, after which the splash may hand off to the main window.
-    /// </summary>
-    public void BeginCompletion()
-    {
-        _completionStarted ??= DateTimeOffset.Now;
-    }
-
-    /// <summary>Ease the displayed bar toward the current target.</summary>
-    public void Tick()
-    {
-        // Before readiness the bar approaches but never parks at 100%.
-        var ceiling = AppReady ? 1.0 : Math.Min(_target, 0.985);
-        var goal = Math.Min(_target, ceiling);
-        var delta = goal - _displayed;
-        if (delta <= 0)
-        {
-            return;
-        }
-        _displayed += Math.Max(delta * 0.18, 0.001);
-        if (_displayed > goal)
-        {
-            _displayed = goal;
-        }
-    }
-}
-
-/// <summary>
 /// Borderless splash rendered from the official Nexus Core artwork with a
 /// real progress bar and status line driven by StartupProgress. Fatal
 /// startup failure swaps to an actionable failure state (Retry/Open Log/Exit)
@@ -195,6 +106,7 @@ internal sealed class SplashForm : Form
     public void ShowFailure(string message)
     {
         _timer.Stop();
+        _progress.MarkFailed();
         _failurePanel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -324,7 +236,7 @@ internal sealed class SplashForm : Form
         {
             g.DrawRectangle(edge, track);
         }
-        var fillWidth = (int)(barWidth * Math.Clamp(_progress.Displayed, 0.0, 1.0));
+        var fillWidth = (int)(barWidth * Math.Clamp(_progress.DisplayedProgress, 0.0, 1.0));
         if (fillWidth > 0)
         {
             var fill = new Rectangle(barX, barY, fillWidth, barHeight);
@@ -398,12 +310,24 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     public NexusCoreApplicationContext(string appDir)
     {
         _appDir = appDir;
-        _progress = new StartupProgress();
+        _progress = CreateProgress();
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
         _splash.Show();
         _ = RunStartupAsync();
+    }
+
+    /// <summary>
+    /// Fresh progress model wired to this install's data dirs — the timing
+    /// profile at data/startup_profile.json paces the predictive bar and is
+    /// rewritten at completion. Never gates readiness; advisory only.
+    /// </summary>
+    private StartupProgress CreateProgress()
+    {
+        var dataDir = Path.Combine(_appDir, "data");
+        var profile = StartupProfile.Load(Path.Combine(dataDir, "startup_profile.json"));
+        return new StartupProgress(profile, Path.Combine(dataDir, "logs"));
     }
 
     private void OnRetry()
@@ -412,7 +336,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _main?.DisposeBackend();
         _main?.Dispose();
         _main = null;
-        _progress = new StartupProgress();
+        _progress = CreateProgress();
         _splash = new SplashForm(_appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();

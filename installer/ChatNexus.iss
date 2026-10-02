@@ -1,9 +1,9 @@
 #ifndef AppVersion
-  #define AppVersion "0.8.1"
+  #define AppVersion "0.9.0"
 #endif
 
 #ifndef AppNumericVersion
-  #define AppNumericVersion "0.8.1.0"
+  #define AppNumericVersion "0.9.0.0"
 #endif
 
 #define AppName "Nexus Core"
@@ -44,7 +44,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={localappdata}\Programs\Nexus Core
+DefaultDirName={code:PreferredInstallDir}
 DefaultGroupName=Nexus Core
 DisableProgramGroupPage=yes
 DisableStartupPrompt=yes
@@ -53,6 +53,10 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
+; DefaultDirName already resolves to <drive>:\Nexus_Core — appending the
+; app name again would recreate the nested Nexus_Core\Nexus_Core bug.
+AppendDefaultDirName=no
+DirExistsWarning=no
 OutputDir=..\dist\installer
 OutputBaseFilename=NexusCore-Setup-{#AppVersion}-Windows-x64
 SetupIconFile=..\desktop\ChatNexus.Desktop\nexus-core.ico
@@ -98,19 +102,19 @@ Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: 
 ; Coding models are downloaded by Setup directly into the final model directory.
 ; Inno Setup shows download/install progress, verifies SHA-256 before the final
 ; filename is committed, and the Check functions skip already-trusted models.
-Source: "{#Qwen14Url}"; DestDir: "{app}\models"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
-Source: "{#Qwen30Url}"; DestDir: "{app}\models"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
+Source: "{#Qwen14Url}"; DestDir: "{code:ModelsDir}"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
+Source: "{#Qwen30Url}"; DestDir: "{code:ModelsDir}"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
 
 ; Local TTS engine assets (Kokoro-82M ONNX + voices). Small enough for Setup;
 ; skips download when already installed and hash-verified.
-Source: "{#KokoroModelUrl}"; DestDir: "{app}\models\voice"; DestName: "kokoro-v1.0.onnx"; ExternalSize: {#KokoroModelSize}; Hash: "{#KokoroModelSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroModel
-Source: "{#KokoroVoicesUrl}"; DestDir: "{app}\models\voice"; DestName: "voices-v1.0.bin"; ExternalSize: {#KokoroVoicesSize}; Hash: "{#KokoroVoicesSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroVoices
+Source: "{#KokoroModelUrl}"; DestDir: "{code:ModelsDir}\voice"; DestName: "kokoro-v1.0.onnx"; ExternalSize: {#KokoroModelSize}; Hash: "{#KokoroModelSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroModel
+Source: "{#KokoroVoicesUrl}"; DestDir: "{code:ModelsDir}\voice"; DestName: "voices-v1.0.bin"; ExternalSize: {#KokoroVoicesSize}; Hash: "{#KokoroVoicesSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroVoices
 
 ; Optional tools (ComfyUI portable, image model packs) are downloaded by the
 ; in-app Tools page instead of Setup, keeping installation fast.
 
 [Dirs]
-Name: "{app}\models"
+Name: "{code:ModelsDir}"
 Name: "{app}\data"
 
 [InstallDelete]
@@ -133,6 +137,7 @@ var
   ExistingVersion: String;
   ExistingInstallDir: String;
   UpgradeInfoPage: TOutputMsgWizardPage;
+  UninstallButton: TNewButton;
   InstallBundledSource: Boolean;
   SkipModelDownloads: Boolean;
   ModelProgressLabel: TNewStaticText;
@@ -141,6 +146,118 @@ var
   ModelProgressActive: Boolean;
   CurrentModelProgressNumber: Integer;
   LastModelBytesDone: Int64;
+
+function GetDriveType(lpRootPathName: String): UINT;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+function GetFileAttributesW(lpFileName: String): DWORD;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+// The desktop host (Program.cs EnsureStateJunctions) junctions
+// {app}\models to <drive>:\NexusCore\models after first launch. Windows
+// treats those junctions as untrusted mount points for file creation, so
+// downloads and catalog writes must target the real directory whenever
+// the junction or its target already exists. On a first install nothing
+// exists yet — files land in {app}\models and the host migrates them.
+function ModelsDir(Param: String): String;
+var
+  Link: String;
+  Target: String;
+  Attr: DWORD;
+begin
+  Link := ExpandConstant('{app}\models');
+  Target := ExtractFileDrive(ExpandConstant('{app}')) + '\NexusCore\models';
+  Attr := GetFileAttributesW(Link);
+  if DirExists(Target) or
+     ((Attr <> $FFFFFFFF) and ((Attr and $400) <> 0)) then
+    Result := Target
+  else
+    Result := Link;
+end;
+
+function PreferredInstallDir(Param: String): String;
+var
+  Letter: Integer;
+  Root: String;
+  BestRoot: String;
+  FreeBytes: Int64;
+  TotalBytes: Int64;
+  BestFree: Int64;
+begin
+  // Flat layout: install directly at <drive>:\Nexus_Core.
+  // Default to C:\; when additional fixed drives exist, prefer whichever
+  // fixed drive has the most free space.
+  BestRoot := 'C:\';
+  BestFree := -1;
+  for Letter := Ord('C') to Ord('Z') do
+  begin
+    Root := Chr(Letter) + ':\';
+    if (GetDriveType(Root) = 3) and GetSpaceOnDisk64(Root, FreeBytes, TotalBytes) then
+    begin
+      if FreeBytes > BestFree then
+      begin
+        BestFree := FreeBytes;
+        BestRoot := Root;
+      end;
+    end;
+  end;
+  Result := BestRoot + 'Nexus_Core';
+end;
+
+procedure UninstallButtonClick(Sender: TObject);
+var
+  UninstPath: String;
+  ResultCode: Integer;
+  WaitCount: Integer;
+begin
+  if ExistingInstallDir = '' then
+    Exit;
+
+  UninstPath := AddBackslash(ExistingInstallDir) + 'unins000.exe';
+  if not FileExists(UninstPath) then
+  begin
+    MsgBox(
+      'Could not find the existing Nexus Core uninstaller at:' + #13#10 + UninstPath,
+      mbError, MB_OK);
+    Exit;
+  end;
+
+  if MsgBox(
+    'Uninstall the existing Nexus Core installation at ' + ExistingInstallDir + '?' + #13#10 + #13#10 +
+    'The uninstaller will run first; this setup will then continue as a fresh installation.',
+    mbConfirmation, MB_YESNO) <> IDYES then
+    Exit;
+
+  UninstallButton.Enabled := False;
+  UninstallButton.Caption := 'Uninstalling...';
+
+  if Exec(UninstPath, '', ExistingInstallDir, SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  begin
+    // unins000.exe copies itself to a temp dir and returns before the real
+    // uninstall finishes; wait until the original unins000.exe is removed.
+    WaitCount := 0;
+    while FileExists(UninstPath) and (WaitCount < 600) do
+    begin
+      Sleep(500);
+      WaitCount := WaitCount + 1;
+    end;
+  end;
+
+  if FileExists(UninstPath) then
+  begin
+    UninstallButton.Enabled := True;
+    UninstallButton.Caption := 'Uninstall existing version';
+    Exit;
+  end;
+
+  UpgradeDetected := False;
+  UninstallButton.Visible := False;
+  WizardForm.DirEdit.Text := PreferredInstallDir('');
+  MsgBox(
+    'The previous Nexus Core installation was removed.' + #13#10 +
+    'Setup will continue with a fresh installation.',
+    mbInformation, MB_OK);
+end;
 
 procedure InitializeModelProgressControls();
 begin
@@ -259,7 +376,7 @@ end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
 begin
-  Result := ExpandConstant('{app}\models\.catalog\') + CatalogId + '.json';
+  Result := ExpandConstant('{code:ModelsDir}\.catalog\') + CatalogId + '.json';
 end;
 
 procedure WriteCatalogMetadata(
@@ -271,7 +388,7 @@ var
   MetadataFile: String;
   Data: AnsiString;
 begin
-  MetadataDir := ExpandConstant('{app}\models\.catalog');
+  MetadataDir := ExpandConstant('{code:ModelsDir}\.catalog');
   ForceDirectories(MetadataDir);
   MetadataFile := CatalogMetadataPath(CatalogId);
 
@@ -309,7 +426,7 @@ var
   ActualHash: String;
 begin
   Result := False;
-  Target := ExpandConstant('{app}\models\') + FileName;
+  Target := ExpandConstant('{code:ModelsDir}\') + FileName;
 
   if not FileExists(Target) then
     Exit;
@@ -438,9 +555,11 @@ begin
   end;
 
   // Also recognize an unpacked/older install at the normal installer
-  // locations (Nexus Core dir with NexusCore.exe, or the legacy
-  // Chat Nexus dir with ChatNexus.exe).
-  DefaultPath := ExpandConstant('{localappdata}\Programs\Nexus Core');
+  // locations (drive-root Nexus_Core dir with NexusCore.exe, the legacy
+  // Programs\Nexus Core dir, or the legacy Chat Nexus dir).
+  DefaultPath := PreferredInstallDir('');
+  if not FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
+    DefaultPath := ExpandConstant('{localappdata}\Programs\Nexus Core');
   if not FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
     DefaultPath := ExpandConstant('{localappdata}\Programs\Chat Nexus');
   if FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') or
@@ -491,11 +610,13 @@ begin
   begin
     WizardForm.Caption := 'Update Nexus Core';
     WizardForm.WelcomeLabel1.Caption := 'Update Nexus Core';
+    WizardForm.WelcomeLabel2.Caption :=
+      'This will update Nexus Core on your computer.';
 
     MessageText :=
       'Setup detected an existing Nexus Core installation.' + #13#10 + #13#10 +
       'Existing version: ' + ExistingVersion + #13#10 +
-      'Installing version: {#AppVersion}' + #13#10 + #13#10 +
+      'Update version: {#AppVersion}' + #13#10 + #13#10 +
       'The application and bundled runtime will be updated in place.' + #13#10 +
       'Models, config.json, task/data files, and your Source Git workspace are preserved.';
 
@@ -505,6 +626,17 @@ begin
       'Your existing Nexus Core installation will be updated.',
       MessageText
     );
+
+    UninstallButton := TNewButton.Create(WizardForm);
+    UninstallButton.Parent := WizardForm;
+    UninstallButton.Caption := 'Uninstall existing version';
+    UninstallButton.Width := WizardForm.CancelButton.Width + ScaleX(60);
+    UninstallButton.Height := WizardForm.CancelButton.Height;
+    UninstallButton.Top := WizardForm.CancelButton.Top;
+    UninstallButton.Left :=
+      WizardForm.ClientWidth - WizardForm.CancelButton.Left -
+      WizardForm.CancelButton.Width;
+    UninstallButton.OnClick := @UninstallButtonClick;
   end;
 end;
 
@@ -575,8 +707,42 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
-  if UpgradeDetected and (CurPageID = wpReady) then
+  if UninstallButton <> nil then
+    UninstallButton.Visible := UpgradeDetected and
+      ((CurPageID <= wpSelectDir) or (CurPageID = UpgradeInfoPage.ID));
+
+  if not UpgradeDetected then
+    Exit;
+
+  if CurPageID = wpSelectDir then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Select Update Location';
+    WizardForm.PageDescriptionLabel.Caption :=
+      'Where should the Nexus Core update be applied?';
+    WizardForm.SelectDirLabel.Caption :=
+      'Setup will update Nexus Core in the following folder.';
+    WizardForm.SelectDirBrowseLabel.Caption :=
+      'To continue, click Next. To update in a different folder, click Browse.';
+  end;
+
+  if CurPageID = wpReady then
+  begin
     WizardForm.NextButton.Caption := '&Update';
+    WizardForm.PageNameLabel.Caption := 'Ready to Update';
+    WizardForm.ReadyLabel.Caption :=
+      'Setup is now ready to begin updating Nexus Core on your computer.';
+  end;
+
+  if CurPageID = wpInstalling then
+    WizardForm.StatusLabel.Caption := 'Updating Nexus Core...';
+
+  if CurPageID = wpFinished then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Completing Nexus Core Update';
+    WizardForm.FinishedLabel.Caption :=
+      'Setup has finished updating Nexus Core on your computer.' + #13#10 + #13#10 +
+      'The application may be launched by selecting the installed shortcut.';
+  end;
 end;
 
 procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
@@ -586,9 +752,9 @@ begin
   CurrentFile := WizardForm.FilenameLabel.Caption;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{app}\models'), 1, {#Qwen14Size})
+    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), 1, {#Qwen14Size})
   else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{app}\models'), 2, {#Qwen30Size});
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), 2, {#Qwen30Size});
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -609,7 +775,7 @@ begin
     MarkModelDownloadsComplete();
 
     // Keep installer-downloaded models recognized as verified by Nexus Core.
-    if FileExists(ExpandConstant('{app}\models\{#Qwen14FileName}')) then
+    if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen14FileName}')) then
       WriteCatalogMetadata(
         '{#Qwen14CatalogId}',
         '{#Qwen14FileName}',
@@ -617,7 +783,7 @@ begin
         {#Qwen14Size},
         '{#Qwen14SourceRepo}');
 
-    if FileExists(ExpandConstant('{app}\models\{#Qwen30FileName}')) then
+    if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen30FileName}')) then
       WriteCatalogMetadata(
         '{#Qwen30CatalogId}',
         '{#Qwen30FileName}',

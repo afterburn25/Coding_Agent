@@ -20,7 +20,12 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("SolidCompression=yes", self.installer)
         self.assertIn("OutputBaseFilename=NexusCore-Setup-{#AppVersion}-Windows-x64", self.installer)
         self.assertIn("PrivilegesRequired=lowest", self.installer)
-        self.assertIn(r"DefaultDirName={localappdata}\Programs\Nexus Core", self.installer)
+        # Flat <drive>:\Nexus_Core default — the drive picked by free space.
+        self.assertIn(r"DefaultDirName={code:PreferredInstallDir}", self.installer)
+        # The code constant already yields the leaf dir; appending the app
+        # name again would recreate the nested Nexus_Core\Nexus_Core bug.
+        self.assertIn("AppendDefaultDirName=no", self.installer)
+        self.assertIn("function PreferredInstallDir", self.installer)
 
     def test_update_detection_prompts_and_uses_previous_install_directory(self):
         self.assertIn("UsePreviousAppDir=yes", self.installer)

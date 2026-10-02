@@ -8,6 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROGRAM = (ROOT / "desktop" / "ChatNexus.Desktop" / "Program.cs").read_text(encoding="utf-8")
+PROGRESS = (ROOT / "desktop" / "ChatNexus.Desktop" / "StartupProgress.cs").read_text(encoding="utf-8")
+# Progress model lives in StartupProgress.cs; splash/window plumbing in Program.cs.
+DESKTOP = PROGRAM + PROGRESS
 CSPROJ = (ROOT / "desktop" / "ChatNexus.Desktop" / "ChatNexus.Desktop.csproj").read_text(encoding="utf-8")
 INSTALLER = (ROOT / "installer" / "ChatNexus.iss").read_text(encoding="utf-8")
 BUILD = (ROOT / "packaging" / "build_windows.ps1").read_text(encoding="utf-8")
@@ -109,9 +112,11 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         self.assertIn("_main.CreateControl();", PROGRAM)  # hidden, handle only
 
     def test_splash_uses_minimum_seven_second_rule(self):
-        self.assertIn("MinimumDisplayTime = TimeSpan.FromSeconds(7)", PROGRAM)
+        self.assertIn("MinimumDisplayTime = TimeSpan.FromSeconds(7)", PROGRESS)
         # Dismissal requires BOTH readiness AND the minimum time — not a timer.
-        self.assertRegex(PROGRAM, r"ReadyToDismiss\s*=>\s*AppReady\s*&&\s*MinimumElapsed")
+        self.assertRegex(PROGRESS, r"ReadyToDismiss\s*=>\s*AppReady\s*&&\s*MinimumElapsed")
+        # And only once the bar has smoothly reached 100% — never a snap.
+        self.assertIn("_displayed >= 0.9995", PROGRESS)
 
     def test_readiness_requires_real_frontend_handshake(self):
         self.assertIn("nexus-core-ready", PROGRAM)
@@ -139,24 +144,49 @@ class StartupSplashLifecycleTests(unittest.TestCase):
             ("CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake"),
             ("READY · NEXUS CORE", "All startup-critical systems online"),
         ):
-            self.assertIn(primary, PROGRAM)
-            self.assertIn(secondary, PROGRAM)
+            self.assertIn(primary, DESKTOP)
+            self.assertIn(secondary, DESKTOP)
         # Progress never reaches 100% before genuine readiness.
-        self.assertIn("0.985", PROGRAM)
+        self.assertIn("0.985", PROGRESS)
+
+    def test_progress_model_is_three_layer_dt_based(self):
+        # Real milestones, prediction, and rendering are independent values.
+        self.assertIn("public double RealProgress", PROGRESS)
+        self.assertIn("public double PredictedProgress", PROGRESS)
+        self.assertIn("public double DisplayedProgress", PROGRESS)
+        # Velocity-smoothed, frame-rate-independent animation.
+        self.assertIn("_velocity", PROGRESS)
+        self.assertRegex(PROGRESS, r"dt\s*=\s*Math\.Clamp")
+        # Each phase has a ceiling the prediction may approach, never exceed.
+        self.assertIn("PhaseCeiling()", PROGRESS)
+        # Failure freezes the bar rather than crawling forever.
+        self.assertIn("MarkFailed()", PROGRESS)
+        self.assertIn("_progress.MarkFailed();", PROGRAM)
+
+    def test_startup_timing_profile_paced_and_persisted(self):
+        # Per-machine timing profile paces prediction; written once at completion.
+        self.assertIn("startup_profile.json", DESKTOP)
+        self.assertIn("class StartupProfile", PROGRESS)
+        self.assertIn("Record(", PROGRESS)
+        self.assertIn("ExpectedSeconds(", PROGRESS)
+        # Stall-aware secondary status for genuinely slow phases.
+        self.assertIn("taking longer than usual", PROGRESS)
+        self.assertIn("Still waiting", PROGRESS)
 
     def test_two_line_status_and_hold_state(self):
         # Primary/secondary lines are separate fields driven by the coordinator.
-        self.assertIn("public string Primary =>", PROGRAM)
-        self.assertIn("public string Secondary =>", PROGRAM)
+        self.assertIn("public string Primary", PROGRESS)
+        self.assertIn("public string Secondary", PROGRESS)
         # Ready-but-before-7s holds on FINALIZING, never READY.
-        self.assertIn('AppReady ? "FINALIZING · NEXUS CORE"', PROGRAM)
-        self.assertIn('AppReady ? "Preparing interface"', PROGRAM)
+        self.assertIn('"FINALIZING · NEXUS CORE"', PROGRESS)
+        self.assertIn('"Preparing interface"', PROGRESS)
+        self.assertIn('"READY · NEXUS CORE"', PROGRESS)
 
     def test_completion_effect_and_immediate_transition(self):
         # READY + core glow plays briefly, then splash closes and main shows.
-        self.assertIn("BeginCompletion()", PROGRAM)
-        self.assertIn("CompletionEffectTime", PROGRAM)
-        self.assertIn("CompletionPhase", PROGRAM)
+        self.assertIn("BeginCompletion()", DESKTOP)
+        self.assertIn("CompletionEffectTime", PROGRESS)
+        self.assertIn("CompletionPhase", PROGRESS)
         self.assertIn("PathGradientBrush", PROGRAM)  # core glow bloom
         body = PROGRAM[PROGRAM.index("private async Task RunStartupAsync()"):]
         body = body[:2500]
