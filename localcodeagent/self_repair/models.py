@@ -117,6 +117,8 @@ def new_incident(*, source: str, subsystem: str, error_class: str,
         # --- analysis ------------------------------------------------------
         "suspects": [],               # [{path, function, line, confidence}]
         "hypotheses": [],             # [{kind, detail, confidence, evidence}]
+        "research": [],               # external evidence gathered when
+                                      # diagnosis is weak (bounded, ≤3)
         "repair_kind": "",            # operational|code|""
         "plan": [],                   # bounded step list
         # --- execution -----------------------------------------------------

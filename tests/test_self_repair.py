@@ -434,6 +434,57 @@ class ProductionCanaryTests(unittest.TestCase):
             self.assertFalse(result.get("ok"))
 
 
+class ResearchHookTests(unittest.TestCase):
+    """Weak diagnoses consult the researcher; strong ones don't."""
+
+    def test_unknown_diagnosis_triggers_research(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            calls = []
+            coord = make_coord(
+                td, repo,
+                researcher=lambda inc: calls.append(inc) or {
+                    "summary": "docs suggest checking X",
+                    "sources": ["https://example/x"]})
+            inc, _ = coord.report_failure(
+                source="t", subsystem="mystery", exc_type="WeirdError",
+                error_message="a totally novel failure mode",
+                stack_trace="")
+            coord.process_incident(inc["id"], max_steps=10)
+            final = coord.get(inc["id"])
+            self.assertTrue(calls)                          # consulted
+            self.assertEqual(final["research"][0]["summary"],
+                             "docs suggest checking X")     # attached
+            # confidence stays honest — research is evidence, not a claim
+            self.assertLessEqual(final["confidence"], 0.45)
+
+    def test_strong_diagnosis_skips_research(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            calls = []
+            coord = make_coord(
+                td, repo,
+                researcher=lambda inc: calls.append(inc) or {})
+            inc = report_bug(coord, repo)          # ZeroDivisionError,
+            coord.process_incident(inc["id"])      # localized → confident
+            self.assertEqual(calls, [])
+
+    def test_researcher_failure_is_tolerated(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+
+            def boom(_inc):
+                raise RuntimeError("research offline")
+
+            coord = make_coord(td, repo, researcher=boom)
+            inc, _ = coord.report_failure(
+                source="t", subsystem="mystery", exc_type="WeirdError",
+                error_message="novel", stack_trace="")
+            coord.process_incident(inc["id"], max_steps=10)
+            # pipeline continued past the failed research call
+            self.assertNotEqual(coord.get(inc["id"])["state"], "diagnosing")
+
+
 class ScenarioB_BadPatchRejected(unittest.TestCase):
     """A patch that keeps failing tests must never promote."""
 

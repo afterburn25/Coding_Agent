@@ -78,7 +78,8 @@ class SelfRepairCoordinator:
                  audit: Callable[..., None] | None = None,
                  emit: Callable[[dict], None] | None = None,
                  notify: Callable[[str, str, str], None] | None = None,
-                 on_resumed: Callable[[dict], None] | None = None) -> None:
+                 on_resumed: Callable[[dict], None] | None = None,
+                 researcher: Callable[[dict], dict | None] | None = None) -> None:
         self._store = store                     # AutonomyStore
         self.repo_root = Path(repo_root)
         self.state_root = Path(state_root or
@@ -105,6 +106,10 @@ class SelfRepairCoordinator:
         self._emit = emit or (lambda payload: None)
         self._notify = notify or (lambda level, title, detail: None)
         self._on_resumed = on_resumed
+        # External evidence gatherer — consulted when diagnosis is weak
+        # (unknown hypothesis or low confidence). Attached as evidence;
+        # never fabricates a hypothesis or inflates confidence.
+        self._researcher = researcher
         self._lock = threading.RLock()
         self.detector = Detector(self._rows)
 
@@ -249,6 +254,22 @@ class SelfRepairCoordinator:
                 {"ts": time.time(), "event": "memory_recall",
                  "detail": f"known procedure ({prior['kind']}, "
                            f"confidence {prior['confidence']})"})
+        # Weak diagnosis → gather external evidence for the patch mission
+        # and human review. Research attaches; it does not decide.
+        top_kind = str((inc["hypotheses"] or [{}])[0].get("kind") or "")
+        if self._researcher and (top_kind == "unknown"
+                                 or inc["confidence"] < 0.45) \
+                and len(inc.setdefault("research", [])) < 3:
+            try:
+                res = self._researcher(dict(inc))
+            except Exception:
+                res = None
+            if res:
+                inc["research"].append(res)
+                inc.setdefault("history", []).append(
+                    {"ts": time.time(), "event": "research",
+                     "detail": str(res.get("summary")
+                                   or res.get("status") or "")[:300]})
         return "planning"
 
     def _stage_plan(self, inc: dict) -> str:

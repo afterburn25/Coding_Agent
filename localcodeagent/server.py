@@ -1106,8 +1106,30 @@ class AppState:
             notify=lambda level, title, detail: sup.notifications.notify(
                 title, level=level, detail=detail),
             on_resumed=lambda op: sup.resume_interrupted(op),
+            researcher=self._repair_researcher,
         )
         return coord
+
+    def _repair_researcher(self, inc: dict) -> dict | None:
+        """Gather external evidence for a weak diagnosis — bounded query
+        built from the error signature, real sources via the research
+        coordinator. Evidence attaches to the incident; it never decides."""
+        query = (f"{inc.get('error_class', '')} "
+                 f"{inc.get('subsystem', '')} "
+                 f"{str(inc.get('error_message', ''))[:200]}").strip()
+        if not query or self.research is None:
+            return None
+        try:
+            r = self.research.research_topic(query)
+        except Exception:
+            return None
+        if not str(r.get("status") or "").startswith("completed"):
+            return None
+        return {"query": query[:300],
+                "status": str(r.get("status") or ""),
+                "summary": str(r.get("summary") or "")[:1500],
+                "sources": [str(s.get("url") or s.get("title") or "")
+                            for s in (r.get("sources") or [])[:5]]}
 
     def _register_goal_metrics(self, registry, sup, runtime_root: Path) -> None:
         """Bind real telemetry providers to goal-metric keys. Every metric
