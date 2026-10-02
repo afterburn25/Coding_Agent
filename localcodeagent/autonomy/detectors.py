@@ -254,6 +254,34 @@ def detect_approval_backlog(sources: dict) -> dict | None:
         route="suggestion", signature="approval_backlog")
 
 
+def detect_ci_failures(sources: dict) -> dict | None:
+    """Newly-failed GitHub/CI runs — each failed run becomes a repair
+    incident once (signature keys on the run id)."""
+    fn = sources.get("ci_failures")
+    if not fn:
+        return None
+    try:
+        rows = fn() or []
+    except Exception:
+        return None
+    out = []
+    for run in rows[:5]:
+        rid = str(run.get("id") or run.get("databaseId") or "")
+        if not rid:
+            continue
+        title = str(run.get("displayTitle") or run.get("name")
+                    or "CI run failed")
+        jobs = ", ".join(str(j) for j in (run.get("jobs") or [])[:4])
+        out.append(new_finding(
+            kind="ci_failure", severity="high", confidence=0.8,
+            title=f"CI failed: {title[:100]}",
+            detail=f"run {rid}" + (f" failing jobs: {jobs}" if jobs else ""),
+            evidence={"run_id": rid, "jobs": jobs,
+                      "conclusion": str(run.get("conclusion") or "")},
+            route="repair", signature=f"ci_failure:{rid}"))
+    return out or None
+
+
 DETECTORS: list[Callable[[dict], dict | None]] = [
     detect_crash_storm,
     detect_mission_failures,
@@ -263,6 +291,7 @@ DETECTORS: list[Callable[[dict], dict | None]] = [
     detect_answer_memory_decay,
     detect_startup_regression,
     detect_approval_backlog,
+    detect_ci_failures,
 ]
 
 
@@ -315,15 +344,15 @@ class SignalScanner:
         routed = []
         for det in self.detectors:
             try:
-                finding = det(self.sources)
+                result = det(self.sources)
             except Exception:
                 continue            # a bad detector must never stall a tick
-            if finding is None:
-                continue
-            existing = self._dedupe(finding, now)
-            if existing is None:     # suppressed by cooldown
-                continue
-            routed.append(existing)
+            for finding in ([result] if isinstance(result, dict)
+                            else result or []):
+                existing = self._dedupe(finding, now)
+                if existing is None:     # suppressed by cooldown
+                    continue
+                routed.append(existing)
         return routed
 
     def _dedupe(self, finding: dict, now: float) -> dict | None:

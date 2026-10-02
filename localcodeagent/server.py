@@ -970,7 +970,31 @@ class AppState:
             except Exception:
                 return {}
 
+        def _ci_failures():
+            """Failed CI runs — only when `gh` is present+authed, cached
+            10 min so the scanner cadence can't hammer the API."""
+            import shutil as _sh, subprocess as _sp
+            if not _sh.which("gh"):
+                return []
+            cache = _ci_failures.__dict__
+            now = time.time()
+            if now - cache.get("ts", 0) < 600:
+                return cache.get("rows", [])
+            try:
+                r = _sp.run(
+                    ["gh", "run", "list", "--status", "failure",
+                     "--limit", "5", "--json",
+                     "databaseId,displayTitle,name,conclusion"],
+                    cwd=str(self.workspace), capture_output=True,
+                    text=True, timeout=20)
+                rows = json.loads(r.stdout) if r.returncode == 0 else []
+            except Exception:
+                rows = []
+            cache["ts"], cache["rows"] = now, rows
+            return rows
+
         sup.scanner.sources.update({
+            "ci_failures": _ci_failures,
             "crash_history": netdiag.crash_history,
             "missions": sup.missions.list,
             "answer_memory_stats":

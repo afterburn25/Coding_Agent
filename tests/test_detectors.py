@@ -10,9 +10,9 @@ from pathlib import Path
 from localcodeagent.autonomy import AutonomousSupervisor
 from localcodeagent.autonomy.detectors import (
     DETECTORS, SignalScanner, detect_answer_memory_decay,
-    detect_approval_backlog, detect_crash_storm, detect_disk_pressure,
-    detect_mission_failures, detect_model_failures, detect_repair_thrash,
-    detect_startup_regression, new_finding)
+    detect_approval_backlog, detect_ci_failures, detect_crash_storm,
+    detect_disk_pressure, detect_mission_failures, detect_model_failures,
+    detect_repair_thrash, detect_startup_regression, new_finding)
 from localcodeagent.autonomy.state import AutonomyStore
 
 
@@ -140,6 +140,18 @@ class DetectorUnitTests(unittest.TestCase):
         self.assertEqual(f["route"], "suggestion")
         self.assertIsNone(detect_approval_backlog(
             {"pending_approvals": lambda: [{"created_at": NOW}]}))
+
+    def test_ci_failures(self):
+        runs = [{"databaseId": 123, "displayTitle": "v0.11.0",
+                 "conclusion": "failure"},
+                {"databaseId": 124, "displayTitle": "wip",
+                 "conclusion": "failure"}]
+        out = detect_ci_failures({"ci_failures": lambda: runs})
+        self.assertEqual(len(out), 2)                 # one finding per run
+        self.assertEqual(out[0]["route"], "repair")
+        self.assertEqual(out[0]["signature"], "ci_failure:123")
+        self.assertIsNone(detect_ci_failures({"ci_failures": lambda: []}))
+        self.assertIsNone(detect_ci_failures({}))     # no gh → silent
 
     def test_finding_defaults_and_clamps(self):
         f = new_finding(kind="k", title="t", severity="bogus",

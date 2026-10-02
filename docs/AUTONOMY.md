@@ -209,8 +209,10 @@ acted-on finding requires a 1 h cooldown. `POST /api/findings/scan`
 forces a pass; `POST /api/findings/{id}/dismiss` closes a row.
 Built-in detectors: crash storms, mission failure rate, model-call
 failures, disk pressure, repair thrash (same signature ≥3 incidents),
-answer-memory decay, startup regression vs the learned profile, and
-stale approval backlog.
+answer-memory decay, startup regression vs the learned profile, stale
+approval backlog, and **CI failures** — when `gh` is installed and
+authed, failed runs (`gh run list --status failure`, cached 10 min)
+open one repair incident per failed-run signature.
 
 ## Priority scheduling & fairness
 

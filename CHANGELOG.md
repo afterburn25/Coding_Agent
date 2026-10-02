@@ -42,6 +42,10 @@ letting it preempt the user.
   incidents as `diagnostics:outcome` episodic memory; `diagnostics` and
   `repair` intents route to it. Repair/finding events cross onto the
   cognitive bus as structural events only.
+- **CI failure ingestion** — `detect_ci_failures` polls
+  `gh run list --status failure` (cached 10 min, silent when `gh` is
+  absent) and opens one repair incident per failed-run signature;
+  detectors may emit multiple findings per scan.
 - **Commit-on-promote** — promoted code repairs land as a scoped git
   commit (`Self-repair: …`, incident id + root cause + verification
   evidence, `Nexus Self-Repair` identity fallback) instead of a silent
