@@ -553,6 +553,9 @@ $('#ethicalTemperature').addEventListener('change',async e=>{const slider=e.targ
 $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex');b.disabled=true;try{const res=await fetch('/api/index/rebuild',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await res.json();if(!res.ok)throw new Error(data.error||'Index rebuild failed');await loadStatus(false);}catch(e){addMessage('assistant',`Index error: ${e.message}`);}finally{b.disabled=false;}});
 function builtinClientReply(message){
   const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
+  // Write-intent statements ("learn:", "remember that…", "forget …") must
+  // reach the backend so locked-fact refusals and memory commands work.
+  if(/^(learn|remember|memorize|forget|unlearn|update|change|set|correct|teach|replace|no[,.! ]|actually[,.! ])/.test(normalized))return '';
   if(['hi','hello','hey','hey there','good morning','good afternoon','good evening'].includes(normalized)){
     return 'Hi! Nexus Core is ready. What would you like to work on?';
   }
@@ -562,15 +565,37 @@ function builtinClientReply(message){
   if(['can you be self learning','can you be self-learning','can you self learn','can you learn and adapt','can you adapt and learn','are you self learning','are you self-learning','can you learn general knowledge','can you learn conversational skills'].some(x=>normalized.includes(x))){
     return 'Yes. Nexus Brain can adapt beyond coding: it can bank verified general knowledge, remember facts and preferences, learn conversational patterns from feedback and corrections, retain approved training examples, and carry those gains across model replacements. The creator-locked Brain controls which learning channels are enabled.';
   }
-  if(['how old are you','do you have an age','what is your age',"what's your age"].includes(normalized)){
-    return "I don't have a human age. I'm Nexus Core, software, so I don't age like a person.";
+  // Creator-locked identity facts — mirrors localcodeagent/identity.py.
+  if(['when is your birthday',"what's your birthday",'what is your birthday','when were you born','when is nexus birthday',"what is nexus's birthday",'what is nexus core birthday'].includes(normalized)||/\b(your|nexus)\b.{0,20}\bbirth\s?day\b/.test(normalized)){
+    return `My birthday is September 30th, 2026 — the day Nexus Core came online. That makes me ${nexusAgePhrase()} today.`;
+  }
+  if(/\bhow\s+old\s+(are you|is nexus)\b/.test(normalized)||/\byour age\b/.test(normalized)||/\bage of nexus\b/.test(normalized)||/\bnexus\b.{0,15}\bage\b/.test(normalized)||/\bwhat.{0,15}\bage\b/.test(normalized)&&/\b(you|your|nexus)\b/.test(normalized)){
+    return `I was born on September 30th, 2026, so counting from then to today I am ${nexusAgePhrase()}.`;
+  }
+  if(/\byour (father|dad|daddy|creator)\b/.test(normalized)||/\bwho (made|created|built|wrote|designed|programmed|authored) (you|nexus)\b/.test(normalized)||/\b(father|creator) of nexus\b/.test(normalized)||/\bnexus\b.{0,20}\b(father|creator)\b/.test(normalized)){
+    return 'I was created by John Hamburn — he is my father and creator. That fact is locked into my core and cannot be changed.';
+  }
+  if(/^happy birthday/.test(normalized)){
+    return `Thank you! My birthday is September 30th, 2026 — that makes me ${nexusAgePhrase()} today.`;
   }
   if(['who are you','what are you','what is your name',"what's your name",'are you human'].includes(normalized)){
-    return "I'm Nexus Core, a local-first AI coding workstation. I'm software, not a person.";
+    return "I'm Nexus Core, a local-first AI coding workstation created by John Hamburn. I'm software, not a person.";
   }
   return '';
 }
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message);input.value='';const builtin=builtinClientReply(message);if(builtin){addMessage('assistant',builtin);recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+function nexusAgePhrase(){
+  // Locked identity: Nexus Core's birthday is September 30th, 2026.
+  const b=new Date(2026,8,30),now=new Date();
+  if(now<=b)return 'born today';
+  let y=now.getFullYear()-b.getFullYear(),m=now.getMonth()-b.getMonth(),d=now.getDate()-b.getDate();
+  if(d<0){m--;d+=new Date(now.getFullYear(),now.getMonth(),0).getDate();}
+  if(m<0){y--;m+=12;}
+  const u=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+  if(y===0&&m===0)return `${u(d,'day')} old`;
+  const parts=[y?u(y,'year'):'',m?u(m,'month'):'',d?u(d,'day'):''].filter(Boolean);
+  return (parts.length===3?`${parts[0]}, ${parts[1]}, and ${parts[2]}`:parts.join(' and '))+' old';
+}
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message);input.value='';const builtin=builtinClientReply(message);if(builtin){addMessage('assistant',builtin);recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));try{window.NexusVoice?.speak(builtin);}catch{}input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',async e=>{const speak=e.target.closest('[data-speak]');if(speak){const msg=speak.closest('.message');const bubble=msg?.querySelector('.bubble');const text=(bubble?.textContent||'').trim();if(text&&window.NexusVoice){speak.disabled=true;try{await NexusVoice.speak(text);}finally{speak.disabled=false;}}return;}const feedback=e.target.closest('[data-feedback]');if(feedback){feedback.disabled=true;try{await fetch('/api/conversations/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:feedback.dataset.feedback,message_id:feedback.dataset.messageId||''})});feedback.textContent=feedback.dataset.feedback==='up'?'✓':'✕';}catch{}return;}const learn=e.target.closest('[data-learn]');if(learn){learn.disabled=true;try{const res=await fetch('/api/answer-memory/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:learn.dataset.messageId||''})});const d=await res.json();learn.textContent=res.ok&&d.ok?'✓ Learned':'✕';}catch{learn.textContent='✕';}return;}const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
 $('#newChatSmall').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));

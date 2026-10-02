@@ -197,6 +197,14 @@ existing 👍/👎/🔊 controls. Memory-served messages display an
   metadata, feedback, and corrections.
 - Everything stays on disk locally; export/import is explicit and
   user-driven.
+- **Creator-locked identity facts** (`localcodeagent/identity.py`):
+  Nexus Core's birthday (September 30th, 2026) and her father/creator
+  (John Hamburn) are hard-coded constants. Identity questions are answered
+  deterministically at tier-0 — before Answer Memory — and every memory
+  write path (`learn`, `forget`, `mark_incorrect`, `edit`, `import_`,
+  `record_exchange`, aliases, conversation-memory facts) refuses content
+  targeting those topics. On startup `_enforce_locked_identity()`
+  invalidates any pre-existing stored answers that contradict them.
 
 ## Failure modes
 

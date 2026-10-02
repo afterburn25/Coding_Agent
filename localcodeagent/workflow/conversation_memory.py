@@ -218,6 +218,14 @@ class ConversationMemory:
             scope_id = conversation_id
             raw = conversation_match.group(1).strip()
 
+        # Creator-locked identity facts (birthday/age/creator) cannot be
+        # taught, overridden, or forgotten — drop them before any storage.
+        from ..identity import locked_topic, locked_refusal
+        topic = locked_topic(raw)
+        if topic:
+            result.setdefault("locked", []).append(locked_refusal(topic))
+            return result
+
         forget_match = re.match(r"^forget(?:\s+that)?[,:]?\s*(.+)$", raw, flags=re.IGNORECASE)
         if forget_match:
             forgotten = self.forget(forget_match.group(1))

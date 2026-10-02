@@ -78,9 +78,27 @@ class AnswerMemory:
                 possible_threshold=possible_threshold,
             )
             self.available = True
+            self._enforce_locked_identity()
         except Exception as exc:  # never take chat down with us
             self.error = f"{type(exc).__name__}: {exc}"
             log.warning("answer memory unavailable: %s", self.error)
+
+    def _enforce_locked_identity(self) -> None:
+        """Invalidate any stored answer targeting a creator-locked identity
+        fact — they can only enter via imports/older versions, and the lock
+        means they must never be served."""
+        try:
+            from ..identity import locked_topic
+            rows = self.store.query(
+                "SELECT id, canonical_question FROM answers WHERE invalidated=0"
+            )
+            for row in rows:
+                if locked_topic(row.get("canonical_question", "")):
+                    learning.invalidate_answer(
+                        self.store, row["id"], "creator-locked identity fact"
+                    )
+        except Exception:
+            pass  # enforcement failure must never take memory offline
 
     def close(self) -> None:
         if self.store is not None:
@@ -349,6 +367,10 @@ class AnswerMemory:
         """Explicit user-approved learn → trusted answer."""
         if not self.available or self.store is None:
             return {"ok": False, "error": "answer memory unavailable"}
+        from ..identity import locked_topic, locked_refusal
+        topic = locked_topic(question)
+        if topic:
+            return {"ok": False, "error": locked_refusal(topic), "locked": topic}
         if validation.contains_secret(question) or validation.contains_secret(answer):
             return {"ok": False, "error": "refusing to persist a possible secret"}
         if freshness not in ttl.FRESHNESS_CLASSES:
@@ -373,6 +395,11 @@ class AnswerMemory:
     def forget(self, *, answer_id: str = "", question: str = "") -> dict[str, Any]:
         if not self.available or self.store is None:
             return {"ok": False}
+        if question:
+            from ..identity import locked_topic, locked_refusal
+            topic = locked_topic(question)
+            if topic:
+                return {"ok": False, "error": locked_refusal(topic), "locked": topic}
         target = self._find(answer_id=answer_id, question=question)
         if target is None:
             return {"ok": False, "error": "no matching answer"}
@@ -397,6 +424,10 @@ class AnswerMemory:
         if not question and exp_id:
             exp = self.store.query_one("SELECT * FROM experiences WHERE id=?", (exp_id,))
             question = exp["raw_question"] if exp else ""
+        from ..identity import locked_topic, locked_refusal
+        topic = locked_topic(question)
+        if topic:
+            return {"ok": False, "error": locked_refusal(topic), "locked": topic}
         result = learning.apply_correction(
             self.store,
             experience_id=exp_id,
@@ -602,6 +633,10 @@ class AnswerMemory:
             sets += ["answer_text=?", "content_hash=?"]
             params += [answer_text.strip(), learning.content_hash(answer_text)]
         if canonical_question:
+            from ..identity import locked_topic, locked_refusal
+            topic = locked_topic(canonical_question)
+            if topic:
+                return {"ok": False, "error": locked_refusal(topic), "locked": topic}
             sets += ["canonical_question=?", "normalized_question=?"]
             params += [canonical_question.strip(), normalize_question(canonical_question)]
             try:
@@ -725,7 +760,11 @@ class AnswerMemory:
         if self.store is None:
             return {"ok": False, "error": "unavailable"}
         imported = skipped = conflicts = 0
+        from ..identity import locked_topic
         for row in payload.get("answers", []):
+            if locked_topic(row.get("canonical_question") or row.get("normalized_question", "")):
+                skipped += 1  # locked identity facts cannot be imported over
+                continue
             if validation.contains_secret(row.get("canonical_question", "")) or \
                validation.contains_secret(row.get("answer_text", "")):
                 skipped += 1

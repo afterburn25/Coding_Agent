@@ -503,6 +503,14 @@ class AgentOrchestrator:
         if normalized in date_queries or normalized in day_queries:
             return f"Today is {clock['human_date']}."
 
+        # Creator-locked identity facts (birthday, age, creator) — answered
+        # deterministically so no model output or stored memory can
+        # contradict them.
+        from .. import identity
+        identity_answer = identity.response_for(normalized)
+        if identity_answer is not None:
+            return identity_answer
+
         greetings = {
             "hi", "hello", "hey", "hey there", "good morning",
             "good afternoon", "good evening",
@@ -540,14 +548,13 @@ class AgentOrchestrator:
             )
 
         if normalized in {
-            "how old are you", "do you have an age", "what is your age", "what's your age",
-        }:
-            return "I do not have a human age. I am Nexus Core, software, so I do not age like a person."
-
-        if normalized in {
             "who are you", "what are you", "what is your name", "what's your name", "are you human",
         }:
-            return "I am Nexus Core, a local-first AI coding workstation. I am software, not a person."
+            from .. import identity
+            return (
+                f"I am Nexus Core, a local-first AI coding workstation created by "
+                f"{identity.NEXUS_CREATOR}. I am software, not a person."
+            )
         return None
 
     @staticmethod
@@ -617,9 +624,12 @@ class AgentOrchestrator:
         rules = learned.get("behavior_rules") or []
         examples = learned.get("training_examples") or []
         forgotten = learned.get("forgotten") or []
-        if not (facts or rules or examples or forgotten):
+        locked = learned.get("locked") or []
+        if not (facts or rules or examples or forgotten or locked):
             return None
         parts = ["Got it."]
+        if locked:
+            parts.append(str(locked[0]))
         if facts:
             parts.append("I saved that to persistent memory.")
         if rules:

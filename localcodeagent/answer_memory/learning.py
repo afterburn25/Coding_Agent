@@ -94,6 +94,10 @@ def upsert_answer(
     now: float | None = None,
 ) -> str:
     """Insert or refresh a canonical answer; returns answer id."""
+    from ..identity import locked_topic, locked_refusal
+    topic_hit = locked_topic(question)
+    if topic_hit:
+        raise ValueError(locked_refusal(topic_hit))
     now = now or time.time()
     normalized = normalize_question(question)
     existing = store.query_one(
@@ -162,6 +166,9 @@ def upsert_answer(
 
 
 def add_alias(store, *, question: str, answer_id: str) -> None:
+    from ..identity import locked_topic
+    if locked_topic(question):
+        return  # locked identity facts must never alias onto other answers
     normalized = normalize_question(question)
     if not normalized:
         return
