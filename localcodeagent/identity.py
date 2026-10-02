@@ -133,10 +133,9 @@ def age_answer(today: date | None = None) -> str:
 
 
 def creator_answer() -> str:
-    return (
-        f"I was created by {NEXUS_CREATOR} — he is my father and creator. "
-        "That fact is locked into my core and cannot be changed."
-    )
+    # State the fact plainly — lock wording belongs only in locked_refusal()
+    # when someone tries to overwrite it, not in ordinary answers.
+    return f"I was created by {NEXUS_CREATOR} — he is my father and creator."
 
 
 _AGE_QUESTION = re.compile(

@@ -61,6 +61,18 @@ class TestIdentityAnswers(unittest.TestCase):
             self.assertIsNone(identity.response_for(q), q)
             self.assertIsNotNone(identity.locked_topic(q), q)
 
+    def test_answers_do_not_mention_lock(self):
+        # Lock meta-language ("locked into my core", "cannot be changed")
+        # must never appear in ordinary answers — it surfaces only via
+        # locked_refusal() when someone tries to overwrite the fact.
+        for q in ("who is your father", "who created you",
+                  "when is your birthday", "how old are you",
+                  "happy birthday"):
+            out = identity.response_for(q) or ""
+            self.assertNotIn("locked", out.lower(), q)
+            self.assertNotIn("cannot be changed", out.lower(), q)
+        self.assertIn("creator-locked", identity.locked_refusal("creator"))
+
     def test_locked_topic_detection(self):
         self.assertEqual(identity.locked_topic("when is your birthday"), "birthday")
         self.assertEqual(identity.locked_topic("who is your father"), "creator")
