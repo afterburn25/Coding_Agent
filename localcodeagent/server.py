@@ -1130,6 +1130,9 @@ class AppState:
                     state_parent=runtime_root / "data"))
                 if getattr(config, "self_repair_canary_enabled", True)
                 else Canary(),
+            canary_required_for=set(
+                getattr(config, "self_repair_canary_required_for", None)
+                or ()),
             commit_on_promote=bool(getattr(
                 config, "self_repair_commit_on_promote", True)),
             is_blocked=lambda: sup.policy.is_stopped()

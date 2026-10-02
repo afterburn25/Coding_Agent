@@ -193,6 +193,9 @@ class AgentConfig:
     # health (+ replay the original request when recorded) before
     # promotion. Disable to fall back to canary-skipped gating.
     self_repair_canary_enabled: bool = True
+    # Subsystems whose verified candidates must survive the candidate-
+    # instance canary before promotion (empty = canary advisory only).
+    self_repair_canary_required_for: list[str] | None = None
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -582,6 +585,10 @@ def load_config(path: Path | None) -> AgentConfig:
         "self_repair_commit_on_promote", cfg.self_repair_commit_on_promote))
     cfg.self_repair_canary_enabled = bool(raw.get(
         "self_repair_canary_enabled", cfg.self_repair_canary_enabled))
+    req = raw.get("self_repair_canary_required_for",
+                  cfg.self_repair_canary_required_for)
+    if isinstance(req, list):
+        cfg.self_repair_canary_required_for = [str(s) for s in req]
     qh = raw.get("autonomy_quiet_hours", cfg.autonomy_quiet_hours)
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
