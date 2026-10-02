@@ -48,6 +48,7 @@ class AutonomousSupervisor:
         internal_runner: Callable[[dict, dict], dict] | None = None,
         lane_free: Callable[[], bool] | None = None,
         permission_manager=None,
+        activities=None,                   # workflow.ActivityStore — timeline rows
         runtime_hooks: dict[str, Callable] | None = None,
         resources: Callable[[], dict] | None = None,
         quiet_hours: tuple[int, int] | None = None,
@@ -79,6 +80,8 @@ class AutonomousSupervisor:
         self._verify_runner = verify_runner or self._default_verify
         self._internal_runner = internal_runner or self._default_internal
         self._lane_free = lane_free or (lambda: True)
+        self.activities = activities
+        self._node_rows: dict[str, str] = {}  # node_id -> activity row id
         self._hooks = dict(runtime_hooks or {})
 
         self._wake = threading.Event()
@@ -763,6 +766,7 @@ class AutonomousSupervisor:
             except Exception:
                 pass
 
+        self._node_activity_open(m, node)
         try:
             if kind == "agent":
                 if self._executor is None:
@@ -790,7 +794,49 @@ class AutonomousSupervisor:
                 self.locks.release(lock, owner)
         self._finish_node(mission_id, node_id, result or {"ok": False})
 
+    def _node_activity_open(self, mission: dict, node: dict) -> None:
+        """Mirror a mission node onto the shared task timeline (Devin-style)."""
+        store = self.activities
+        if store is None:
+            return
+        try:
+            mtitle = str(mission.get("title") or mission.get("objective") or "mission")
+            row = store.open(
+                f"mission:{mission.get('id')}", "task_graph",
+                str(node.get("title") or "task"),
+                f"{mtitle[:80]} · {node.get('kind', 'agent')}",
+                details={"mission_id": mission.get("id"),
+                         "node_id": node.get("id"),
+                         "kind": node.get("kind")},
+                mission_id=mission.get("id"),
+            )
+            self._node_rows[str(node.get("id"))] = row["id"]
+        except Exception:
+            pass
+
+    def _node_activity_close(self, mission_id: str, node_id: str, result: dict) -> None:
+        store = self.activities
+        row_id = self._node_rows.pop(str(node_id), None)
+        if store is None or row_id is None:
+            return
+        try:
+            task_id = f"mission:{mission_id}"
+            if result.get("pending_approval"):
+                store.update(
+                    task_id, row_id, state="waiting",
+                    summary="Waiting for approval",
+                    details={"pending_approval": result.get("pending_approval")})
+            elif result.get("ok"):
+                store.update(task_id, row_id, state="completed",
+                             summary=str(result.get("output") or "")[:200])
+            else:
+                store.update(task_id, row_id, state="failed",
+                             summary=str(result.get("output") or result.get("error") or "failed")[:200])
+        except Exception:
+            pass
+
     def _finish_node(self, mission_id: str, node_id: str, result: dict) -> None:
+        self._node_activity_close(mission_id, node_id, result)
         m = self.missions.get(mission_id)
         if m is None:
             return

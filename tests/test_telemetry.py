@@ -120,6 +120,30 @@ class ModelTelemetryTests(unittest.TestCase):
             reloaded = ModelPerformanceTelemetry(Path(td))
             self.assertEqual(reloaded.generation_summary()["generation_count"], 3)
 
+    def test_cold_warm_and_runtime_surface(self):
+        with tempfile.TemporaryDirectory() as td:
+            telemetry = ModelPerformanceTelemetry(Path(td))
+            telemetry.record_generation(
+                model_id="m", completion_tokens=64, predicted_per_second=10.0,
+                cold=True, context=24576,
+                runtime={"batch": "512", "flash_attn": "auto", "gpu_layers": "99"})
+            telemetry.record_generation(
+                model_id="m", completion_tokens=64, predicted_per_second=40.0,
+                cold=False, cached_tokens=1024)
+            row = telemetry.generation_summary()["models"][0]
+            self.assertEqual(row["cold_samples"], 1)
+            self.assertEqual(row["warm_samples"], 1)
+            self.assertEqual(row["avg_cold_tps"], 10.0)
+            self.assertEqual(row["avg_warm_tps"], 40.0)
+            self.assertEqual(row["cached_tokens"], 1024)
+            self.assertEqual(row["prompt_cache_hits"], 1)
+            self.assertEqual(row["last_runtime"].get("flash_attn"), None)  # last event had none
+            # Reload: cold/warm split persists
+            reloaded = ModelPerformanceTelemetry(Path(td))
+            row2 = reloaded.generation_summary()["models"][0]
+            self.assertEqual(row2["cold_samples"], 1)
+            self.assertEqual(row2["warm_samples"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

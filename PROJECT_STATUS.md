@@ -198,7 +198,27 @@
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **765 tests passing** (2 environment skips).
+- Current automated checkpoint: **783 tests passing** (2 environment skips).
+
+#### v0.7.1 — performance + timeline
+
+- **Tuner sweep**: bounded benchmark candidates now vary batch/ubatch, threads,
+  flash-attention, KV-cache q8_0, and speculative decoding (when a draft model
+  exists); probe failures classified oom/crash/timeout; `mark_bad` blacklist
+  ensures configs that crash a real launch are never re-picked while the
+  fingerprint holds.
+- **Launch fallback**: tuned → heuristic-safe → bare flag ladder in
+  `_launch_with_fallback`; bad tuning cannot brick startup.
+- **Context classes**: `context_class()` small/medium/large/xlarge; orchestrator
+  passes `min_context` to `ensure_ready`, which relaunches the resident server
+  at a bigger window when a task needs it (never silently truncates).
+- **Cold/warm telemetry**: per-generation records carry `cold`, `context`,
+  `cached_tokens`, and launch surface; `generation_summary` reports cold vs
+  warm TPS + prompt-cache hits; measurements feed the Digital Twin.
+- **Timeline**: rows carry `mission_id`/`progress`; `/api/activity` supports
+  `mission_id` filter and returns a per-task rollup (tools/models/errors/
+  retries/elapsed); mission nodes appear as `task_graph` rows; auto-resume
+  opens a `RECOVERING TASK` row; UI shows mission chip + progress bar.
 
 
 

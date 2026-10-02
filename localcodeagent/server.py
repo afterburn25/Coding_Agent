@@ -511,6 +511,7 @@ class AppState:
             nexus_brain=self.nexus_brain,
             answer_memory=self.answer_memory,
             activities=self.activities,
+            digital_twin=self.twin,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -643,6 +644,11 @@ class AppState:
                     task_id, "vram", "Freeing VRAM",
                     f"Unloading {model_id}" + (f" — {reason}" if reason else ""),
                 )
+            elif action == "relaunch":
+                row = self.activities.open(
+                    task_id, "model", "Restarting Model",
+                    f"Relaunching {model_id}" + (f" — {reason}" if reason else ""),
+                )
             else:
                 row = self.activities.open(
                     task_id, "model", "Starting Model",
@@ -675,18 +681,45 @@ class AppState:
                 ]
                 for task in candidates:
                     try:
+                        tid = str(task.get("id") or "")
                         self.events.publish("task", {
                             "event": "auto_resume",
-                            "task_id": task.get("id"),
+                            "task_id": tid,
                         })
+                        # Honest recovery marker on the task timeline: the
+                        # previously-open rows were already marked
+                        # 'interrupted' at store load; this row shows the
+                        # resume attempt as its own step.
+                        rec_row_id = None
+                        try:
+                            row = self.activities.open(
+                                tid, "recovery", "Recovering Task",
+                                "Resuming interrupted work",
+                                details={"recovery_count": int(task.get("recovery_count") or 0) + 1})
+                            rec_row_id = row["id"]
+                        except Exception:
+                            pass
                         voice_rid = self._voice_begin()
                         try:
                             res = self.agent.recover(
                                 str(task["id"]),
                                 event_callback=self._voice_tee(voice_rid, self._bus_emit))
                             self._voice_finish(voice_rid, res.content)
+                            if rec_row_id:
+                                status = str((res.task or {}).get("status") or "")
+                                self.activities.update(
+                                    tid, rec_row_id,
+                                    state="completed" if status == "done" else "failed",
+                                    summary=f"Resumed · task {status or 'finished'}")
                         except Exception:
                             self._voice_finish(voice_rid)
+                            if rec_row_id:
+                                try:
+                                    self.activities.update(
+                                        tid, rec_row_id, state="failed",
+                                        summary="Resume attempt failed")
+                                except Exception:
+                                    pass
                             raise
                     except Exception as exc:
                         self.events.publish("task", {
@@ -717,6 +750,7 @@ class AppState:
 
         def executor(mission: dict, node: dict, emit_cb) -> dict:
             voice_rid = self._voice_begin()
+            self.agent.current_mission_id = str(mission.get("id") or "") or None
             try:
                 result = self.agent.run(
                     str(node.get("instruction") or node.get("title") or ""),
@@ -735,8 +769,20 @@ class AppState:
                     out["pending_approval"] = (
                         result.pending_approval
                         or task.get("pending_approval") or {"kind": "task"})
+                # Tag any pre-stamp rows so /api/activity?mission_id finds the
+                # whole node run even if a row was opened before stamping.
+                if out["task_id"] and mission.get("id"):
+                    try:
+                        for row in self.activities.for_task(out["task_id"]):
+                            if not row.get("mission_id"):
+                                self.activities.update(
+                                    out["task_id"], row["id"],
+                                    mission_id=str(mission["id"]))
+                    except Exception:
+                        pass
                 return out
             finally:
+                self.agent.current_mission_id = None
                 self._voice_finish(voice_rid)
 
         def lane_free() -> bool:
@@ -775,6 +821,7 @@ class AppState:
             executor=executor,
             lane_free=lane_free,
             permission_manager=self.permission_manager,
+            activities=self.activities,
             runtime_hooks=hooks,
             resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
             quiet_hours=quiet_hours,
@@ -3017,13 +3064,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/activity":
             query = parse_qs(urlparse(self.path).query)
             task_id = query.get("task_id", [""])[0]
-            if task_id:
+            mission_id = query.get("mission_id", [""])[0]
+            payload: dict = {"task_id": task_id}
+            if mission_id:
+                payload["mission_id"] = mission_id
+                payload["activities"] = self.state.activities.for_mission(mission_id)
+            elif task_id:
                 rows = self.state.activities.for_task(task_id)
+                payload["activities"] = rows
+                payload["summary"] = self.state.activities.summary(task_id)
             else:
                 latest = self.state.tasks.recent(1)
                 rows = self.state.activities.for_task(str(latest[0]["id"])) if latest else []
                 task_id = str(latest[0]["id"]) if latest else ""
-            self._json({"task_id": task_id, "activities": rows})
+                payload["task_id"] = task_id
+                payload["activities"] = rows
+                if task_id:
+                    payload["summary"] = self.state.activities.summary(task_id)
+            self._json(payload)
             return
         if path == "/api/queue":
             self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})

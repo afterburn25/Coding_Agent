@@ -319,7 +319,7 @@ function upsertActivityRow(row){
   if(!rec){
     const el=document.createElement('div');
     el.className='tl-row';
-    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><button class="tl-stop" type="button" title="Stop this command — the task continues">Stop</button><span class="tl-time"></span></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
+    el.innerHTML='<div class="tl-head"><span class="tl-caret">▸</span><span class="tl-icon"></span><span class="tl-title"></span><span class="tl-mission"></span><button class="tl-stop" type="button" title="Stop this command — the task continues">Stop</button><span class="tl-time"></span></div><div class="tl-prog"><i></i></div><div class="tl-body"><div class="tl-summary"></div><div class="tl-details"></div><pre class="tl-out"></pre><div class="tl-children"></div></div>';
     el.querySelector('.tl-head').addEventListener('click',()=>{
       const r=tlRows.get(row.id);
       if(r){r.manual=!el.classList.contains('open');el.classList.toggle('open',r.manual);}
@@ -337,6 +337,12 @@ function upsertActivityRow(row){
   el.style.display=(tlFilter==='all'||el.dataset.group===tlFilter)?'':'none';
   el.querySelector('.tl-icon').textContent=TL_ICONS[row.category]||'⚙';
   el.querySelector('.tl-title').textContent=row.title||row.category||'activity';
+  const mchip=el.querySelector('.tl-mission');
+  if(row.mission_id){mchip.textContent='mission · '+String(row.mission_id).slice(0,8);mchip.style.display='';}
+  else{mchip.textContent='';mchip.style.display='none';}
+  const prog=el.querySelector('.tl-prog');
+  if(typeof row.progress==='number'){prog.style.display='';prog.firstElementChild.style.width=Math.round(row.progress*100)+'%';}
+  else{prog.style.display='none';}
   const tt=el.querySelector('.tl-time');
   tt.textContent=tlElapsed(row).toFixed(row.elapsed!=null?1:0)+'s';
   const stop=el.querySelector('.tl-stop');

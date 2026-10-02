@@ -129,6 +129,9 @@
 .tl-row.complete>.tl-head .tl-icon{color:#2be59a}
 .tl-children{margin-top:5px;padding-left:10px;border-left:1px solid #16304d}
 .tl-children .tl-row{margin:2px 0}
+.tl-mission{font-size:9px;color:#7aa8d0;background:#0d2a44;border:1px solid #1a4a6d;border-radius:8px;padding:0 6px;line-height:14px;white-space:nowrap}
+.tl-prog{height:2px;background:#0a1c2e;display:none}
+.tl-prog i{display:block;height:100%;background:#11cfff;transition:width .3s}
 .tl-stop{display:none;font-size:9px;padding:1px 7px;border:1px solid #5a2433;border-radius:8px;background:#2a0f16;color:#ff9aab;cursor:pointer}
 .tl-stop:hover{border-color:#ff7b8f;color:#ffd0d8}
 .tl-filters{display:flex;flex-wrap:wrap;gap:4px;padding:2px 0 6px}

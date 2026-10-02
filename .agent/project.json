@@ -1,10 +1,10 @@
 {
  "name": "Nexus Core",
- "version": "0.7.0",
+ "version": "0.7.1",
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 765,
+ "test_checkpoint": 783,
  "next_milestone": "v0.7.x workstation expansion continues: computer use, sandbox, LSP, RAG, skills, multi-agent worktrees, eval lab, artifacts, backups, DPAPI vault, connectors, knowledge graph, simulation, digital twin, health service, voice STT scaffold all landed on the 0.7.0 line. Next: autonomy executor routes through sandbox+RAG, UI surfaces for new services, async-job DAG node kinds, Windows CI/package on 0.7.0.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",

@@ -1041,3 +1041,16 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   backups/skills/eval; mission-node kinds for async jobs; voice STT
   needs audio deps installed + mic device selection UI; Windows desktop
   CI/package run on the 0.7.0 line.
+
+## v0.7.1 perf + timeline checkpoint — pending commit
+
+- Tuner: bounded sweep (batch/ubatch, threads, FA, KV q8_0, draft),
+  mark_bad blacklist for OOM/crash configs, classify_launch_error,
+  launch fallback ladder tuned→heuristic→bare, context classes +
+  ensure_ready(min_context) relaunch for bigger windows.
+- Telemetry: cold/warm split, context, cached_tokens, launch surface;
+  generation_summary reports cold vs warm TPS + cache hits; twin fed.
+- Timeline: mission_id+progress on rows, /api/activity?mission_id=,
+  rollup summary per task, mission node rows (task_graph category),
+  RECOVERING TASK rows on auto-resume, UI mission chip + progress bar.
+- Version 0.7.1 synced across artifacts. Suite: 783 passing.

@@ -417,6 +417,81 @@ class RuntimeManagerTests(unittest.TestCase):
 
         self.assertEqual(calls, {"fit": 3, "ready": 1})
 
+    def test_launch_fallback_marks_tuned_bad(self):
+        # Tuned launch crashes → heuristic retry succeeds; tuned args are
+        # blacklisted so the next launch never re-picks them.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            tuned = ["--batch-size", "2048", "--ubatch-size", "1024"]
+            manager.tuner.record_result(profile, tuned, {"predicted_per_second": 99.0})
+            calls: list[dict] = []
+
+            def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
+                calls.append({"tuned": apply_tuning, "extra": extra_args})
+                if apply_tuning:
+                    raise RuntimeError("llama-server exited: out of memory")
+                return endpoint
+
+            manager._spawn_and_wait = spawn
+            out = manager._launch_with_fallback(profile, 18080, "http://127.0.0.1:18080/v1")
+            self.assertTrue(out.endswith("/v1"))
+            self.assertEqual([c["tuned"] for c in calls], [True, False])
+            # tuned args now blacklisted — tuned_flags falls back to heuristics
+            self.assertNotEqual(manager.tuner.tuned_flags(profile), tuned)
+
+    def test_launch_fallback_bare_when_heuristic_also_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            manager.tuner._find_llama = lambda: "llama-server"
+            calls = []
+
+            def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
+                calls.append((apply_tuning, list(extra_args or [])))
+                if len(calls) < 3:
+                    raise RuntimeError("crash")
+                return endpoint
+
+            manager._spawn_and_wait = spawn
+            manager._launch_with_fallback(profile, 18080, "http://x/v1")
+            self.assertEqual(calls[-1], (False, []))  # bare last resort
+
+    def test_context_growth_relaunches_resident(self):
+        # Resident server at 8k; a task needing 32k must relaunch, not truncate.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            proc = _attach_fake_managed(manager, profile)
+            manager._launch_ctx[profile.id] = 8192
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            spawns: list[int | None] = []
+            manager._enforce_residency = lambda p: None
+            manager._reclaim_orphaned_port = lambda port: None
+
+            def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
+                spawns.append(ctx_override)
+                manager._launch_ctx[p.id] = ctx_override or 8192
+                return endpoint
+
+            manager._spawn_and_wait = spawn
+            manager._start_llama_cpp(profile, ctx_override=32768)
+            self.assertTrue(proc.terminated)
+            self.assertEqual(spawns, [32768])
+
+    def test_resident_kept_when_ctx_sufficient(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            proc = _attach_fake_managed(manager, profile)
+            manager._launch_ctx[profile.id] = 24576
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._spawn_and_wait = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no relaunch"))
+            ep = manager._start_llama_cpp(profile, ctx_override=8192)
+            self.assertFalse(proc.terminated)
+            self.assertEqual(ep, "http://x/v1")
+
     def test_prewarm_gives_up_after_bounded_attempts(self):
         from types import SimpleNamespace
         from localcodeagent.server import AppState

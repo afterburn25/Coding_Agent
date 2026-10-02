@@ -58,6 +58,49 @@ def _agent(root: Path, store: ActivityStore, events: list):
     return agent
 
 
+class MissionTimelineTests(unittest.TestCase):
+    def test_mission_id_stamp_and_filter(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = ActivityStore(Path(td) / "a.jsonl")
+            store.open("t1", "tool", "Row", mission_id="m-123")
+            store.open("t2", "command", "Other")
+            self.assertEqual(len(store.for_mission("m-123")), 1)
+            self.assertEqual(store.for_mission("m-123")[0]["mission_id"], "m-123")
+            self.assertEqual(store.for_mission("nope"), [])
+
+    def test_progress_clamped(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = ActivityStore(Path(td) / "a.jsonl")
+            row = store.open("t1", "testing", "Tests", progress=0.5)
+            self.assertEqual(row["progress"], 0.5)
+            store.update("t1", row["id"], progress=1.7)
+            self.assertEqual(store.for_task("t1")[0]["progress"], 1.0)
+
+    def test_mission_id_survives_reload(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "a.jsonl"
+            store = ActivityStore(path)
+            r = store.open("t1", "task_graph", "Node", mission_id="m-9")
+            store.update("t1", r["id"], state="completed")
+            store2 = ActivityStore(path)
+            self.assertEqual(store2.for_mission("m-9")[0]["title"], "Node")
+
+    def test_summary_rollup(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = ActivityStore(Path(td) / "a.jsonl")
+            a = store.open("t1", "tool", "run_shell", details={"model_id": "m1"})
+            store.update("t1", a["id"], state="completed")
+            b = store.open("t1", "retry", "Retrying", details={})
+            store.update("t1", b["id"], state="failed")
+            s = store.summary("t1")
+            self.assertEqual(s["activities"], 2)
+            self.assertEqual(s["errors"], 1)
+            self.assertEqual(s["retries"], 1)
+            self.assertIn("run_shell", s["tools"])
+            self.assertIn("m1", s["models"])
+            self.assertIsNotNone(s["elapsed_seconds"])
+
+
 class ActivityStoreTests(unittest.TestCase):
     def test_open_update_complete(self):
         with tempfile.TemporaryDirectory() as td:

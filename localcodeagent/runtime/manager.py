@@ -79,8 +79,7 @@ class RuntimeManager:
         self._status: dict[str, RuntimeStatus] = {}
         self._lock = threading.RLock()
         self._last_used: dict[str, float] = {}
-        # keep_loaded models evicted under real memory pressure — rewarm when
-        # resources free up again.
+        self._launch_ctx: dict[str, int] = {}
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
         # Optional residency observer: called with {"action", "model_id",
@@ -379,7 +378,7 @@ class RuntimeManager:
             f"fits effective available RAM{switch_note}{ram_note}"
         )
 
-    def _build_command(self, profile: ModelProfile, port: int, *, apply_tuning: bool = True, extra_args: list[str] | None = None) -> list[str]:
+    def _build_command(self, profile: ModelProfile, port: int, *, apply_tuning: bool = True, extra_args: list[str] | None = None, ctx_override: int | None = None) -> list[str]:
         exe = self.discover_llama_server(profile)
         if not exe:
             raise RuntimeError(
@@ -402,6 +401,10 @@ class RuntimeManager:
                 ctx = recommended_context(profile)
             except Exception:
                 ctx = profile.context_window
+        if ctx_override:
+            # A task can demand a larger window than the role default — never
+            # shrink below the role recommendation though.
+            ctx = max(ctx or 0, int(ctx_override)) or ctx_override
         cmd.extend([
             "--model", str(model_path),
             "--host", profile.host,
@@ -772,20 +775,78 @@ class RuntimeManager:
             self.refresh_hardware()
             free_vram = float(self.hardware.free_vram_gb)
 
-    def _start_llama_cpp(self, profile: ModelProfile) -> str:
+    def _start_llama_cpp(self, profile: ModelProfile, ctx_override: int | None = None) -> str:
         existing = self._managed.get(profile.id)
         if existing and existing.process.poll() is None:
             healthy, _ = self._health(existing.endpoint)
-            if healthy:
+            launched_ctx = self._launch_ctx.get(profile.id, 0)
+            ctx_ok = not ctx_override or launched_ctx >= ctx_override or not launched_ctx
+            if healthy and ctx_ok:
                 existing.status.healthy = True
                 existing.status.state = "running"
                 return existing.endpoint
+            if healthy and not ctx_ok:
+                # Task needs a bigger window than the resident server was
+                # launched with — restart at the larger context rather than
+                # silently truncating the prompt.
+                self._emit_residency(
+                    "relaunch", profile.id,
+                    f"expanding context {launched_ctx}→{ctx_override}")
             self._stop_managed(profile.id)
 
         self._enforce_residency(profile)
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
         self._reclaim_orphaned_port(port)
         endpoint = self._profile_endpoint(profile, port)
+        return self._launch_with_fallback(profile, port, endpoint, ctx_override)
+
+    def _launch_with_fallback(
+        self, profile: ModelProfile, port: int, endpoint: str,
+        ctx_override: int | None = None,
+    ) -> str:
+        """Launch with tuned flags; on provable tuned-config failure, drop to
+        heuristic-safe flags, then to a bare launch. A bad benchmark result
+        must never leave the model unable to start."""
+        tuned: list[str] = []
+        try:
+            tuned = self.tuner.tuned_flags(
+                profile, mode=str(getattr(self.config, "performance_mode", "auto")))
+        except Exception:
+            pass
+        attempts = [
+            ("tuned", True, []),
+            ("heuristic", False, self.tuner.tuned_flags_heuristic_safe()),
+            ("bare", False, []),
+        ]
+        # Skip redundant middle attempt when tuned==heuristic or when no
+        # tuning was going to be applied anyway.
+        if not tuned:
+            attempts = [("heuristic", False, attempts[1][2]), ("bare", False, [])]
+        elif tuned == attempts[1][2]:
+            attempts = [("tuned", True, []), ("bare", False, [])]
+
+        last_exc: Exception | None = None
+        for label, apply_tuning, extra in attempts:
+            try:
+                return self._spawn_and_wait(
+                    profile, port, endpoint,
+                    apply_tuning=apply_tuning, extra_args=extra,
+                    ctx_override=ctx_override)
+            except Exception as exc:
+                last_exc = exc
+                if label == "tuned" and tuned:
+                    try:
+                        self.tuner.mark_bad(profile, tuned, str(exc))
+                    except Exception:
+                        pass
+                continue
+        raise last_exc or RuntimeError("llama-server launch failed")
+
+    def _spawn_and_wait(
+        self, profile: ModelProfile, port: int, endpoint: str, *,
+        apply_tuning: bool = True, extra_args: list[str] | None = None,
+        ctx_override: int | None = None,
+    ) -> str:
         log_path = self.logs_dir / f"{profile.id}.log"
         try:
             # The per-model log appends on every start — bound it so months of
@@ -795,7 +856,9 @@ class RuntimeManager:
         except OSError:
             pass
         log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
-        command = self._build_command(profile, port)
+        command = self._build_command(
+            profile, port, apply_tuning=apply_tuning,
+            extra_args=extra_args, ctx_override=ctx_override)
         creationflags = 0
         if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
             creationflags = subprocess.CREATE_NO_WINDOW
@@ -837,6 +900,7 @@ class RuntimeManager:
                 status.state = "running"
                 status.healthy = True
                 self._last_used[profile.id] = time.time()
+                self._launch_ctx[profile.id] = self._ctx_from_command(command)
                 self._warmup(profile, endpoint)
                 return endpoint
             time.sleep(0.25)
@@ -846,6 +910,14 @@ class RuntimeManager:
         self._stop_managed(profile.id)
         status.state = "error"
         raise TimeoutError(status.error)
+
+    @staticmethod
+    def _ctx_from_command(command: list[str]) -> int:
+        try:
+            idx = command.index("--ctx-size")
+            return int(command[idx + 1])
+        except (ValueError, IndexError):
+            return 0
 
     def _warmup(self, profile: ModelProfile, endpoint: str) -> None:
         """Fire a 1-token completion so the first real request isn't cold.
@@ -935,7 +1007,7 @@ class RuntimeManager:
             f"probe llama-server did not become healthy within "
             f"{max(5, profile.startup_timeout)}s (log: {log_path})")
 
-    def ensure_ready(self, profile: ModelProfile) -> str:
+    def ensure_ready(self, profile: ModelProfile, min_context: int | None = None) -> str:
         with self._lock:
             self._last_used[profile.id] = time.time()
             if profile.runtime == "external":
@@ -952,7 +1024,7 @@ class RuntimeManager:
                 raise RuntimeError(f"Unsupported runtime '{profile.runtime}' for model '{profile.id}'")
             if not self.config.runtime_auto_start:
                 return self._profile_endpoint(profile)
-            return self._start_llama_cpp(profile)
+            return self._start_llama_cpp(profile, ctx_override=min_context)
 
     def recover(self, profile: ModelProfile) -> str:
         with self._lock:

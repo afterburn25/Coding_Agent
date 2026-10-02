@@ -164,6 +164,7 @@ class AgentOrchestrator:
         nexus_brain: NexusBrain | None = None,
         answer_memory=None,
         activities=None,
+        digital_twin=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -182,6 +183,10 @@ class AgentOrchestrator:
         self.nexus_brain = nexus_brain
         self.answer_memory = answer_memory
         self.activities = activities
+        self.digital_twin = digital_twin
+        # Set by the mission executor while an autonomous node owns the agent
+        # lane — stamps mission_id onto every activity row it opens.
+        self.current_mission_id: str | None = None
         self._sessions: dict[str, _AgentSession] = {}
 
     def _act(
@@ -198,7 +203,9 @@ class AgentOrchestrator:
         """Open a timeline activity row and emit it to the live stream."""
         if self.activities is None:
             return None
-        row = self.activities.open(task_id, category, title, summary, details=details, parent=parent)
+        row = self.activities.open(
+            task_id, category, title, summary, details=details, parent=parent,
+            mission_id=self.current_mission_id)
         self._safe_emit(callback, {"type": "activity", "task_id": task_id, "activity": dict(row)})
         return row
 
@@ -696,9 +703,38 @@ class AgentOrchestrator:
         self._remember_research(query, session)
         return session
 
-    def _provider_for(self, profile: ModelProfile) -> OpenAICompatibleProvider:
-        endpoint = self.runtime.ensure_ready(profile)
+    def _provider_for(
+        self, profile: ModelProfile, *, min_context: int | None = None,
+    ) -> OpenAICompatibleProvider:
+        if min_context:
+            try:
+                endpoint = self.runtime.ensure_ready(profile, min_context=min_context)
+            except TypeError:
+                # Runtime substitute (tests, embedders) without the kwarg.
+                endpoint = self.runtime.ensure_ready(profile)
+        else:
+            endpoint = self.runtime.ensure_ready(profile)
         return OpenAICompatibleProvider(profile, endpoint=endpoint)
+
+    def _needed_context(self, user_text: str, decision: RoutingDecision | None = None) -> int | None:
+        """Smallest context class covering this request, or None (role default).
+
+        Rough token estimate (~4 chars/token) of the known prompt plus the
+        system/memory/repo scaffolding that is always injected (~6k tokens).
+        Role still sets the *launch* ctx when nothing larger is needed.
+        """
+        try:
+            from ..runtime.tuner import CONTEXT_CLASSES
+        except Exception:
+            return None
+        need = len(user_text or "") // 4 + 6000
+        role = getattr(decision, "role", "") or ""
+        if role in {"primary_coder", "fast_coder", "deep_reasoner", "reviewer"}:
+            need += 4000  # repository index + tool schemas ride along
+        for name in ("small", "medium", "large", "xlarge"):
+            if need <= CONTEXT_CLASSES[name] * 0.9:
+                return CONTEXT_CLASSES[name]
+        return None  # leave launch ctx alone when beyond all classes
 
     def _activate_with_fallback(
         self,
@@ -714,8 +750,13 @@ class AgentOrchestrator:
     ) -> tuple[RoutingDecision, ModelProfile, OpenAICompatibleProvider]:
         """Start the routed model, falling back in Auto mode if activation fails."""
         profile = self.router.get_profile(decision.model_id)
+        min_ctx = self._needed_context(user_text, decision)
         try:
-            return decision, profile, self._provider_for(profile)
+            try:
+                provider = self._provider_for(profile, min_context=min_ctx)
+            except TypeError:
+                provider = self._provider_for(profile)
+            return decision, profile, provider
         except Exception as exc:
             if mode != "auto":
                 raise
@@ -727,7 +768,10 @@ class AgentOrchestrator:
                 exclude_model_ids={decision.model_id},
             )
             fallback_profile = self.router.get_profile(fallback.model_id)
-            fallback_provider = self._provider_for(fallback_profile)
+            try:
+                fallback_provider = self._provider_for(fallback_profile, min_context=min_ctx)
+            except TypeError:
+                fallback_provider = self._provider_for(fallback_profile)
             fallback.reasons.insert(
                 0,
                 f"{decision.model_id} activation failed; fell back automatically: {type(exc).__name__}: {exc}",
@@ -1085,6 +1129,21 @@ class AgentOrchestrator:
                 tps = completion_tokens / elapsed
             if not (completion_tokens or tps or elapsed):
                 return
+            launch = self._launch_diagnostics(session.profile)
+            # Cold vs warm: a managed server that started after this session
+            # began was loaded for this request — its TTFT/throughput numbers
+            # carry load cost and shouldn't average into steady-state stats.
+            cold: bool | None = None
+            try:
+                status = next(
+                    (s for s in self.runtime.statuses()
+                     if s.get("model_id") == session.profile.id), None)
+                started = (status or {}).get("started_at")
+                if isinstance(started, (int, float)):
+                    cold = started >= session.started_at
+            except Exception:
+                cold = None
+            cached = int(usage.get("cached_tokens") or 0)
             self.telemetry.record_generation(
                 model_id=session.profile.id,
                 role=session.decision.role,
@@ -1094,8 +1153,24 @@ class AgentOrchestrator:
                 predicted_per_second=tps,
                 prompt_per_second=float(timings.get("prompt_per_second") or 0.0),
                 time_to_first_token_ms=raw.get("time_to_first_token_ms"),
+                cold=cold,
+                context=int(launch.get("context_window") or 0),
+                cached_tokens=cached,
+                runtime=launch,
             )
-            launch = self._launch_diagnostics(session.profile)
+            if self.digital_twin is not None:
+                try:
+                    self.digital_twin.record_model_measure(
+                        model_id=session.profile.id,
+                        size_gb=float(getattr(session.profile, "estimated_vram_gb", 0.0)
+                                      or getattr(session.profile, "estimated_ram_gb", 0.0) or 0.0),
+                        context=int(launch.get("context_window") or 0),
+                        ttft_s=(float(raw["time_to_first_token_ms"]) / 1000.0
+                                if isinstance(raw.get("time_to_first_token_ms"), (int, float)) else None),
+                        tps=tps or None,
+                        source="observed")
+                except Exception:
+                    pass
             self._emit(session, "perf", model_id=session.profile.id,
                        role=session.decision.role,
                        predicted_per_second=round(tps, 2),
@@ -1121,6 +1196,14 @@ class AgentOrchestrator:
             "threads": int(getattr(profile, "threads", 0) or 0),
             "context_window": int(getattr(profile, "context_window", 0) or 0),
         }
+        # Prefer the ctx the resident server was actually launched with —
+        # dynamic-context relaunches mean it can differ from the profile.
+        try:
+            launched = getattr(self.runtime, "_launch_ctx", {}).get(profile.id)
+            if launched:
+                out["context_window"] = int(launched)
+        except Exception:
+            pass
         tuner = getattr(self.runtime, "tuner", None)
         if tuner is not None:
             try:
@@ -1861,18 +1944,33 @@ class AgentOrchestrator:
         )
         task = self.tasks.get(session.task_id)
         self._emit(session, "task", task=task.as_dict())
+        rollup = (
+            self.activities.summary(session.task_id)
+            if self.activities is not None else {}
+        )
         summary_bits = [
             f"{len(task.files_changed)} file(s) modified",
             f"{len(current_round)} verification(s)",
             f"{session.profile.id}",
             f"{session.steps} step(s)",
         ]
+        if rollup.get("tools"):
+            summary_bits.append(f"{len(rollup['tools'])} tool(s)")
+        if rollup.get("errors"):
+            summary_bits.append(f"{rollup['errors']} error(s)")
+        if rollup.get("retries") or session.repair_cycles:
+            summary_bits.append(f"{rollup.get('retries', 0) + session.repair_cycles} retry/repair(s)")
         act = self._act(
             session.task_id, "complete",
             "Complete" if status == "completed" else "Completed with Warnings",
             " · ".join(summary_bits),
             details={"status": status, "files_changed": list(task.files_changed)[:40],
-                     "model_id": session.profile.id},
+                     "model_id": session.profile.id,
+                     "tools": rollup.get("tools") or [],
+                     "models_used": rollup.get("models") or [session.profile.id],
+                     "errors": rollup.get("errors", 0),
+                     "retries": rollup.get("retries", 0),
+                     "repair_cycles": session.repair_cycles},
             callback=session.event_callback,
         )
         self._act_update(session.task_id, act, state="completed", callback=session.event_callback)

@@ -149,6 +149,8 @@ class ActivityStore:
         details: dict[str, Any] | None = None,
         parent: str | None = None,
         activity_id: str | None = None,
+        mission_id: str | None = None,
+        progress: float | None = None,
     ) -> dict[str, Any]:
         row = {
             "id": activity_id or uuid.uuid4().hex[:12],
@@ -159,6 +161,8 @@ class ActivityStore:
             "summary": str(summary)[:500],
             "details": dict(details or {}),
             "parent": parent,
+            "mission_id": str(mission_id) if mission_id else None,
+            "progress": progress,
             "started_at": time.time(),
             "ended_at": None,
             "elapsed": None,
@@ -177,6 +181,8 @@ class ActivityStore:
         summary: str | None = None,
         details: dict[str, Any] | None = None,
         title: str | None = None,
+        progress: float | None = None,
+        mission_id: str | None = None,
     ) -> dict[str, Any] | None:
         row = self._find(task_id, activity_id)
         if row is None:
@@ -185,6 +191,10 @@ class ActivityStore:
             row["title"] = str(title)[:200]
         if summary is not None:
             row["summary"] = str(summary)[:500]
+        if progress is not None:
+            row["progress"] = max(0.0, min(1.0, float(progress)))
+        if mission_id is not None:
+            row["mission_id"] = str(mission_id)
         if details:
             row["details"].update(details)
         if state is not None:
@@ -229,6 +239,49 @@ class ActivityStore:
 
     def for_task(self, task_id: str) -> list[dict[str, Any]]:
         return [dict(r) for r in self._by_task.get(str(task_id), [])]
+
+    def for_mission(self, mission_id: str) -> list[dict[str, Any]]:
+        return [
+            dict(r) for rows in self._by_task.values() for r in rows
+            if r.get("mission_id") == str(mission_id)
+        ]
+
+    def summary(self, task_id: str) -> dict[str, Any]:
+        """Completion rollup for a finished task: models/tools/files/elapsed."""
+        rows = self._by_task.get(str(task_id), [])
+        cats: dict[str, int] = {}
+        tools: set[str] = set()
+        models: set[str] = set()
+        errors = 0
+        retries = 0
+        started = None
+        ended = None
+        for row in rows:
+            cats[row["category"]] = cats.get(row["category"], 0) + 1
+            det = row.get("details") or {}
+            if row["category"] in {"tool", "command"} and row.get("title"):
+                tools.add(str(row["title"]))
+            for key in ("model_id", "model"):
+                if det.get(key):
+                    models.add(str(det[key]))
+            if row.get("state") == "failed":
+                errors += 1
+            if row["category"] == "retry":
+                retries += 1
+            if row.get("started_at"):
+                started = row["started_at"] if started is None else min(started, row["started_at"])
+            if row.get("ended_at"):
+                ended = row["ended_at"] if ended is None else max(ended, row["ended_at"])
+        return {
+            "task_id": str(task_id),
+            "activities": len(rows),
+            "errors": errors,
+            "retries": retries,
+            "tools": sorted(tools)[:30],
+            "models": sorted(models)[:10],
+            "categories": cats,
+            "elapsed_seconds": round(ended - started, 2) if started and ended else None,
+        }
 
     def _find(self, task_id: str, activity_id: str) -> dict[str, Any] | None:
         for row in self._by_task.get(str(task_id), []):

@@ -31,6 +31,48 @@ from ..config import AgentConfig, ModelProfile
 TUNER_VERSION = 1
 PROBE_TIMEOUT = 20.0
 
+# Failure signatures seen in llama-server probe crashes. Benchmarking classifies
+# each candidate failure so OOM/instability is recorded distinctly from a plain
+# launch error — that feeds mark_bad() and the operator-facing status.
+_ERROR_CLASSES = (
+    ("out of memory", "oom"), ("cudaMalloc", "oom"), ("failed to allocate", "oom"),
+    ("insufficient memory", "oom"), ("cannot allocate", "oom"),
+    ("access violation", "crash"), ("assertion failed", "crash"),
+    ("cuda error", "crash"), ("ggml_backend_cuda", "crash"),
+    ("timed out", "timeout"), ("timeout", "timeout"),
+)
+
+
+def classify_launch_error(message: str) -> str:
+    low = str(message or "").lower()
+    for pattern, kind in _ERROR_CLASSES:
+        if pattern.lower() in low:
+            return kind
+    return "error"
+
+
+# Task-class → context sizing. The resident llama-server keeps the ctx it was
+# launched with; when a task genuinely needs a larger window, ensure_ready
+# restarts the model at the larger class rather than silently truncating.
+CONTEXT_CLASSES = {
+    "small": 8192,        # ordinary conversation / quick answers
+    "medium": 16384,      # everyday technical/coding work
+    "large": 24576,       # multi-file coding, moderate repo context
+    "xlarge": 32768,      # repo-scale/research — only when needed
+}
+
+
+def context_class(need_tokens: int) -> str:
+    """Smallest context class that covers the estimated need."""
+    for name in ("small", "medium", "large", "xlarge"):
+        if need_tokens <= CONTEXT_CLASSES[name] * 0.9:
+            return name
+    return "xlarge"
+
+
+def context_class_size(name: str) -> int:
+    return CONTEXT_CLASSES.get(name, CONTEXT_CLASSES["medium"])
+
 
 @dataclass(slots=True)
 class TuningResult:
@@ -57,6 +99,7 @@ class RuntimeTuner:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._capabilities: dict[str, Any] | None = None
         self._data = self._load()
+        self._data.setdefault("bad_results", {})
 
     # ------------------------------------------------------------------
     # persistence
@@ -167,7 +210,11 @@ class RuntimeTuner:
         else safe heuristics derived from detected flag support."""
         fp = self.fingerprint(profile)
         stored = self._data["results"].get(profile.id)
-        if stored and stored.get("fingerprint") == fp:
+        if (
+            stored
+            and stored.get("fingerprint") == fp
+            and tuple(stored.get("args") or ()) not in self._bad_for(profile)
+        ):
             return list(stored.get("args") or [])
         args: list[str] = []
         if mode in {"auto", "balanced", "max"}:
@@ -186,6 +233,40 @@ class RuntimeTuner:
             if threads:
                 args += ["--threads", str(threads)]
         return args
+
+    def _bad_for(self, profile: ModelProfile) -> set[tuple]:
+        """Arg-tuples that provably crashed/OOM'd this model+runtime."""
+        fp = self.fingerprint(profile)
+        return {
+            tuple(row.get("args") or ())
+            for row in self._data.get("bad_results", {}).get(profile.id, [])
+            if row.get("fingerprint") == fp
+        }
+
+    def mark_bad(
+        self, profile: ModelProfile, args: list[str], error: str,
+    ) -> None:
+        """Record a tuned configuration that failed a real launch.
+
+        Benchmarks only prove a candidate can serve a probe — a crash on the
+        production launch path is stronger evidence. The config is dropped
+        from results so tuned_flags() never re-picks it.
+        """
+        entry = {
+            "args": list(args),
+            "error": str(error)[:400],
+            "error_kind": classify_launch_error(error),
+            "fingerprint": self.fingerprint(profile),
+            "at": time.time(),
+        }
+        bad = self._data.setdefault("bad_results", {}).setdefault(profile.id, [])
+        if not any(row.get("args") == entry["args"] for row in bad):
+            bad.append(entry)
+            del bad[:-20]
+        stored = self._data["results"].get(profile.id)
+        if stored and list(stored.get("args") or []) == list(args):
+            self._data["results"].pop(profile.id, None)
+        self._save()
 
     def _default_threads(self, mode: str) -> int:
         import os
@@ -218,6 +299,14 @@ class RuntimeTuner:
             "results": {
                 mid: {"source": r.get("source"), "metrics": r.get("metrics"), "tuned_at": r.get("tuned_at")}
                 for mid, r in self._data["results"].items()
+            },
+            "bad_results": {
+                mid: [
+                    {"args": r.get("args"), "error_kind": r.get("error_kind"),
+                     "error": str(r.get("error") or "")[:160], "at": r.get("at")}
+                    for r in rows
+                ]
+                for mid, rows in self._data.get("bad_results", {}).items()
             },
         }
 
@@ -254,7 +343,13 @@ class RuntimeTuner:
         if launch is None:
             return {"status": "unavailable", "reason": "no llama.cpp launch path"}
         fp = self.fingerprint(profile)
-        candidates = candidates or self._default_candidates()
+        bad = self._bad_for(profile)
+        candidates = [
+            c for c in (candidates or self._default_candidates(profile))
+            if tuple(c) not in bad
+        ]
+        if not candidates:
+            candidates = [self.tuned_flags_heuristic_safe()]
         results: list[dict[str, Any]] = []
         for args in candidates:
             row = {"args": args, "ok": False}
@@ -272,6 +367,12 @@ class RuntimeTuner:
                 row.update({"ok": True, "metrics": metrics})
             except Exception as exc:
                 row["error"] = f"{type(exc).__name__}: {exc}"
+                row["error_kind"] = classify_launch_error(str(exc))
+                # A candidate that OOM'd or crashed must never be re-picked
+                # while this fingerprint is valid — record it now, not only
+                # when the production launcher hits it.
+                if row["error_kind"] in {"oom", "crash"}:
+                    self.mark_bad(profile, args, str(exc))
             finally:
                 try:
                     if proc is not None:
@@ -299,12 +400,61 @@ class RuntimeTuner:
             pass
         return out
 
-    def _default_candidates(self) -> list[list[str]]:
-        base = self.tuned_flags_heuristic_safe()
-        out = [base]
-        if self.supports("--flash-attn"):
-            out.append([a for a in base if a != "--flash-attn" and a != "auto"])
-        return out
+    def _default_candidates(self, profile: ModelProfile | None = None) -> list[list[str]]:
+        """Bounded sweep across the launch dimensions that matter.
+
+        Ordered cheapest-first. Each candidate is a complete extra-args set
+        (batch/ubatch/threads/FA/KV-type) launched by launch_probe with tuning
+        bypassed, so the measurement reflects the candidate alone.
+        """
+        import os
+        logical = os.cpu_count() or 4
+        physical = max(1, logical // 2)
+        fa = ["--flash-attn", "auto"] if self.supports("--flash-attn") else []
+        reuse = ["--cache-reuse", "256"] if self.supports("--cache-reuse") else []
+        kv = (
+            ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
+            if self.supports("--cache-type-k") and self.supports("--cache-type-v")
+            else []
+        )
+
+        def flags(batch: int, ubatch: int, threads: int,
+                  extra: list[str] | None = None) -> list[str]:
+            out = [*fa, *reuse, "--batch-size", str(batch),
+                   "--ubatch-size", str(ubatch)]
+            if self.supports("--threads"):
+                out += ["--threads", str(threads)]
+            return out + list(extra or [])
+
+        candidates = [
+            flags(512, 256, physical),                 # balanced baseline
+            flags(1024, 512, physical),                # prompt-throughput heavy
+            flags(256, 128, physical),                 # conservative
+            flags(512, 256, max(physical + 1, logical - 1)),  # more threads
+        ]
+        if kv:
+            candidates.append(flags(512, 256, physical, kv))  # KV-quantized
+        if fa:
+            candidates.append([a for a in flags(512, 256, physical)
+                               if a not in {"--flash-attn", "auto"}])
+        # Speculative decoding candidate only when the runtime supports it and
+        # a draft model is actually configured.
+        if (
+            profile is not None
+            and self.supports("--model-draft")
+            and self.speculative_status() == "available"
+        ):
+            draft = next(
+                (m for m in self.config.models
+                 if m.model_path and "draft" in m.id.lower()), None)
+            if draft is not None and self.runtime is not None:
+                draft_path = getattr(self.runtime, "_resolve", lambda p: p)(
+                    draft.model_path)
+                candidates.append(flags(
+                    512, 256, physical,
+                    ["--model-draft", str(draft_path),
+                     "--draft-max", "16", "--draft-min", "4"]))
+        return candidates
 
     def tuned_flags_heuristic_safe(self) -> list[str]:
         args: list[str] = []

@@ -118,8 +118,19 @@ class ModelPerformanceTelemetry:
         predicted_per_second: float = 0.0,
         prompt_per_second: float = 0.0,
         time_to_first_token_ms: float | None = None,
+        cold: bool | None = None,
+        context: int = 0,
+        cached_tokens: int = 0,
+        runtime: dict[str, Any] | None = None,
     ) -> None:
-        """Record measured per-generation speed stats (tokens/sec, TTFT)."""
+        """Record measured per-generation speed stats (tokens/sec, TTFT).
+
+        ``cold`` distinguishes first-request-after-load from warm residency so
+        load time isn't averaged into steady-state TPS. ``runtime`` carries the
+        launch surface (gpu_layers/threads/batch/ubatch/flash_attn/kv/ctx) the
+        server was actually running with — stored compactly for regression
+        analysis without duplicating it per field.
+        """
         if not self.enabled or not model_id:
             return
         event = {
@@ -133,7 +144,18 @@ class ModelPerformanceTelemetry:
             "prompt_per_second": round(max(0.0, float(prompt_per_second)), 2),
             "time_to_first_token_ms": round(float(time_to_first_token_ms), 1)
             if isinstance(time_to_first_token_ms, (int, float)) else None,
+            "cold": cold if isinstance(cold, bool) else None,
+            "context": max(0, int(context)),
+            "cached_tokens": max(0, int(cached_tokens)),
         }
+        if isinstance(runtime, dict):
+            event["runtime"] = {
+                k: runtime[k] for k in (
+                    "gpu_layers", "threads", "batch", "ubatch", "flash_attn",
+                    "kv_cache_type", "prompt_cache_reuse", "speculative_decoding",
+                    "context_window")
+                if k in runtime
+            }
         with self._lock:
             self._generations.append(event)
             self._generations = self._generations[-self.max_events:]
@@ -145,6 +167,8 @@ class ModelPerformanceTelemetry:
     def generation_summary(self) -> dict[str, Any]:
         """Aggregate measured generation speed per model (avg/last TPS, TTFT)."""
         with self._lock:
+            def events_for(key: str) -> list[dict[str, Any]]:
+                return [e for e in self._generations if str(e.get("model_id", "")) == key]
             grouped: dict[str, dict[str, Any]] = {}
             for event in self._generations:
                 key = str(event.get("model_id", ""))
@@ -158,6 +182,11 @@ class ModelPerformanceTelemetry:
                     "ttft_sum": 0.0,
                     "ttft_samples": 0,
                     "elapsed_sum": 0.0,
+                    "cold_tps_sum": 0.0,
+                    "cold_samples": 0,
+                    "warm_tps_sum": 0.0,
+                    "warm_samples": 0,
+                    "cached_tokens": 0,
                     "last": event,
                 })
                 row["samples"] += 1
@@ -170,6 +199,13 @@ class ModelPerformanceTelemetry:
                 if isinstance(ttft, (int, float)):
                     row["ttft_sum"] += float(ttft)
                     row["ttft_samples"] += 1
+                if event.get("cold") is True:
+                    row["cold_tps_sum"] += float(event.get("predicted_per_second", 0.0) or 0.0)
+                    row["cold_samples"] += 1
+                elif event.get("cold") is False:
+                    row["warm_tps_sum"] += float(event.get("predicted_per_second", 0.0) or 0.0)
+                    row["warm_samples"] += 1
+                row["cached_tokens"] += int(event.get("cached_tokens", 0) or 0)
                 row["last"] = event
             rows = []
             for row in grouped.values():
@@ -184,6 +220,16 @@ class ModelPerformanceTelemetry:
                     if row["ttft_samples"] else None,
                     "avg_completion_tokens": round(row["completion_tokens"] / samples, 1),
                     "avg_elapsed_seconds": round(row["elapsed_sum"] / samples, 3),
+                    "cold_samples": row["cold_samples"],
+                    "warm_samples": row["warm_samples"],
+                    "avg_cold_tps": round(row["cold_tps_sum"] / row["cold_samples"], 2)
+                    if row["cold_samples"] else None,
+                    "avg_warm_tps": round(row["warm_tps_sum"] / row["warm_samples"], 2)
+                    if row["warm_samples"] else None,
+                    "cached_tokens": row["cached_tokens"],
+                    "prompt_cache_hits": sum(
+                        1 for e in events_for(key) if e.get("cached_tokens")),
+                    "last_runtime": last.get("runtime") or {},
                     "last_predicted_per_second": last.get("predicted_per_second", 0.0),
                     "last_completion_tokens": last.get("completion_tokens", 0),
                     "last_elapsed_seconds": last.get("elapsed_seconds", 0.0),

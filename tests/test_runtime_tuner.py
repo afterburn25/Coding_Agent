@@ -7,7 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from localcodeagent.config import AgentConfig, ModelProfile
-from localcodeagent.runtime.tuner import RuntimeTuner, recommended_context
+from localcodeagent.runtime.tuner import (
+    CONTEXT_CLASSES, RuntimeTuner, classify_launch_error, context_class,
+    context_class_size, recommended_context,
+)
 
 
 def _profile(**kw):
@@ -30,6 +33,7 @@ HELP_TEXT = """
   --gpu-layers N               layers on gpu
   --ctx-size N                 context window
   --cache-type-k TYPE          kv cache type
+  --cache-type-v TYPE          kv cache type
   --mlock                      lock memory
 """
 
@@ -190,6 +194,91 @@ class BenchmarkTests(unittest.TestCase):
             tuner = _tuner(td)
             result = tuner.benchmark(_profile(), launch=None)
             self.assertEqual(result["status"], "unavailable")
+
+
+class MarkBadTests(unittest.TestCase):
+    def test_mark_bad_drops_stored_result(self):
+        with tempfile.TemporaryDirectory() as td:
+            tuner = _tuner(td)
+            profile = _profile()
+            tuner.record_result(profile, ["--batch-size", "777"], {"predicted_per_second": 60.0})
+            self.assertEqual(tuner.tuned_flags(profile), ["--batch-size", "777"])
+            tuner.mark_bad(profile, ["--batch-size", "777"], "cudaMalloc failed")
+            args = tuner.tuned_flags(profile)
+            self.assertNotIn("777", args)
+            self.assertIn("--batch-size", args)  # heuristic fallback
+
+    def test_bad_result_persists_across_reload(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = _profile()
+            tuner = _tuner(td)
+            tuner.record_result(profile, ["--gpu-layers", "200"], {})
+            tuner.mark_bad(profile, ["--gpu-layers", "200"], "out of memory")
+            tuner2 = _tuner(td)
+            self.assertNotEqual(tuner2.tuned_flags(profile), ["--gpu-layers", "200"])
+            bad = tuner2.status()["bad_results"]
+            self.assertEqual(bad["qwen3-14b"][0]["error_kind"], "oom")
+
+    def test_error_classification(self):
+        self.assertEqual(classify_launch_error("cudaMalloc failed: out of memory"), "oom")
+        self.assertEqual(classify_launch_error("Access violation at 0x0"), "crash")
+        self.assertEqual(classify_launch_error("probe timed out"), "timeout")
+        self.assertEqual(classify_launch_error("something else"), "error")
+
+
+class CandidateSweepTests(unittest.TestCase):
+    def test_sweep_covers_batch_threads_fa_kv(self):
+        with tempfile.TemporaryDirectory() as td:
+            tuner = _tuner(td)
+            candidates = tuner._default_candidates(_profile())
+            self.assertGreaterEqual(len(candidates), 4)
+            flat = [" ".join(c) for c in candidates]
+            self.assertTrue(any("--batch-size 1024" in c for c in flat))
+            self.assertTrue(any("--threads" in c for c in flat))
+            # KV-quantized variant present when both cache-type flags supported
+            self.assertTrue(any("--cache-type-k q8_0" in c for c in flat))
+            # FA-off variant present (HELP_TEXT advertises --flash-attn)
+            self.assertTrue(any("--flash-attn" not in c for c in flat))
+
+    def test_sweep_skips_known_bad(self):
+        with tempfile.TemporaryDirectory() as td:
+            tuner = _tuner(td)
+            profile = _profile()
+            bad = ["--batch-size", "1024", "--ubatch-size", "512"]
+            tuner.mark_bad(profile, bad, "out of memory")
+            candidates = tuner._default_candidates(profile)
+            self.assertNotIn(bad, candidates)
+
+    def test_benchmark_records_error_kind(self):
+        with tempfile.TemporaryDirectory() as td:
+            tuner = _tuner(td)
+            profile = _profile()
+
+            def launch(p, port, args):
+                raise RuntimeError("probe exited: out of memory")
+
+            result = tuner.benchmark(profile, launch=launch, candidates=[["--gpu-layers", "200"]])
+            self.assertEqual(result["results"][0]["error_kind"], "oom")
+            self.assertNotIn(["--gpu-layers", "200"],
+                             [list(c) for c in tuner._default_candidates(profile)] or [])
+            # mark_bad was recorded so the production launch won't retry it
+            self.assertIn("qwen3-14b", tuner.status()["bad_results"])
+
+
+class ContextClassTests(unittest.TestCase):
+    def test_small_requests_pick_small(self):
+        self.assertEqual(context_class(100), "small")
+        self.assertEqual(context_class(6000), "small")
+
+    def test_large_requests_escalate(self):
+        self.assertEqual(context_class(20000), "large")
+        self.assertEqual(context_class(12000), "medium")
+        self.assertEqual(context_class(26000), "xlarge")
+
+    def test_class_sizes_monotonic(self):
+        names = ["small", "medium", "large", "xlarge"]
+        sizes = [context_class_size(n) for n in names]
+        self.assertEqual(sizes, sorted(sizes))
 
 
 class SpeculativeStatusTests(unittest.TestCase):
