@@ -123,8 +123,14 @@
         </div>
       </section>
 
+      <div id="attachChips" class="attach-chips" hidden></div>
       <form id="composer" class="composer">
-        <button class="composer-icon" type="button" aria-label="Attach context">＋</button>
+        <button id="attachBtn" class="composer-icon" type="button" aria-label="Attach context" title="Attach files or images">＋</button>
+        <input id="attachInput" type="file" multiple hidden />
+        <div id="attachMenu" class="attach-menu" hidden>
+          <button type="button" data-attach="file">📄 Attach files…</button>
+          <button type="button" data-attach="image">🖼 Attach images…</button>
+        </div>
         <textarea id="input" rows="1" placeholder="Message Nexus Core…"></textarea>
         <div class="composer-meta">
           <span>Code</span>

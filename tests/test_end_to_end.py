@@ -537,5 +537,113 @@ class EndToEndAgentTests(unittest.TestCase):
                 "bus never delivered the completed task event")
 
 
+class ChatAttachmentTests(unittest.TestCase):
+    """Chat '+' attachments: text files inline into the model's user
+    message; images persist locally and reach the image lane as source
+    paths. Task titles/routing/memory see only the bare prompt."""
+
+    def _state(self, td: str, endpoint: str):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState
+        cfg = AgentConfig(
+            models=[ModelProfile(
+                id="fake", endpoint=endpoint, model="fake-model",
+                roles=["primary_coder", "utility", "fast_coder"],
+                runtime="external")],
+            process_watchdog=False, research_enabled=False,
+        )
+        return AppState(cfg, Path(td), Path(td) / ".runtime")
+
+    def test_text_attachment_reaches_model_but_not_task_title(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        fake.tool_calls = []  # answer directly, no tool calls
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            result = state.agent.run(
+                "summarize this file",
+                attachments=[{"name": "notes.txt", "kind": "file",
+                              "content": "the secret code is ALBACORE-7"}],
+            )
+            self.assertEqual(result.task.get("status"), "completed")
+            sent = json.dumps(fake.requests[-1]["messages"])
+            self.assertIn("ALBACORE-7", sent)
+            self.assertIn("notes.txt", sent)
+            # Routing/title/memory see the bare prompt, not the file body.
+            self.assertEqual(result.task.get("prompt"), "summarize this file")
+            self.assertNotIn("ALBACORE-7", json.dumps(result.task))
+
+    def test_image_attachment_saved_and_routed_to_image_lane(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        png = ("data:image/png;base64," + __import__("base64").b64encode(
+            b"\x89PNG\r\n\x1a\nfakeimagebytes").decode())
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            # Stub the actual generation; we only verify the source path
+            # reaches the image tool arguments.
+            captured = {}
+
+            def fake_exec(name, args, **kw):
+                captured["name"] = name
+                captured["args"] = args
+                return "IMAGE GENERATED"
+
+            state.agent.tools.execute = fake_exec
+            state.agent.tools.permission_for = (
+                lambda name: ("image.generate", "allow"))
+            result = state.agent.run(
+                "generate an image of a cat",
+                attachments=[{"name": "photo.png", "kind": "image",
+                              "data_url": png}],
+            )
+            args = captured.get("args") or {}
+            src = args.get("source_image", "")
+            self.assertTrue(src, "image lane never received a source_image")
+            self.assertTrue(Path(src).is_file())
+            self.assertIn("data\\attachments", src.replace("/", "\\"))
+            refs = args.get("reference_images")
+            self.assertFalse(refs)
+
+    def test_oversized_and_binary_attachments_bounded(self):
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td, fake.endpoint)
+            out = state.agent._prepare_attachments([
+                {"name": "big.txt", "kind": "file",
+                 "content": "x" * 500_000},
+                {"name": "a.bin", "kind": "file"},  # no content
+                {"name": "evil/../x.txt", "kind": "file", "content": "ok"},
+            ])
+            self.assertEqual(len(out["blocks"]), 2)
+            self.assertLessEqual(len(out["blocks"][0]),
+                                 state.agent._ATTACH_MAX_TEXT_PER_FILE + 64)
+            self.assertTrue(any("a.bin" in n for n in out["notes"]))
+            self.assertNotIn("..", out["blocks"][1].split("\n")[0])
+
+    def test_server_clean_attachments_drops_malformed(self):
+        from localcodeagent.server import _clean_attachments
+        body = {"attachments": [
+            {"name": "ok.txt", "kind": "file", "content": "hi"},
+            {"name": "no-content"},                       # dropped
+            "not-a-dict",                                  # dropped
+            {"name": "img.png", "kind": "image",
+             "data_url": "data:image/png;base64,AAA="},
+            {"name": "bad.png", "kind": "image",
+             "data_url": "not-a-data-url"},                # dropped
+        ]}
+        out = _clean_attachments(body)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["name"], "ok.txt")
+        self.assertEqual(out[1]["kind"], "image")
+
+    def test_empty_message_with_attachment_accepted(self):
+        from localcodeagent.server import _clean_attachments
+        body = {"message": "", "attachments": [
+            {"name": "f.txt", "kind": "file", "content": "data"}]}
+        self.assertTrue(_clean_attachments(body))
+
+
 if __name__ == "__main__":
     unittest.main()

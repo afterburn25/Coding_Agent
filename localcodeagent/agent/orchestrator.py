@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import base64
 import http.client
 import inspect
 import json
 import re
+import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
@@ -2373,6 +2376,7 @@ class AgentOrchestrator:
         user_text: str,
         event_callback: Callable[[dict[str, Any]], None] | None,
         approved: bool | None = None,
+        source_images: list[str] | None = None,
     ) -> AgentResult:
         decision = RoutingDecision(
             role="image",
@@ -2388,6 +2392,10 @@ class AgentOrchestrator:
         }
         permission, permission_mode = self.tools.permission_for("generate_image")
         arguments = {"prompt": user_text}
+        if source_images:
+            arguments["source_image"] = source_images[0]
+            if len(source_images) > 1:
+                arguments["reference_images"] = source_images[1:]
 
         if not permission:
             content = "Image generation is not available because the image tool is not configured."
@@ -2550,6 +2558,70 @@ class AgentOrchestrator:
             task=completed.as_dict(),
         )
 
+    _ATTACH_MAX_FILES = 8
+    _ATTACH_MAX_TEXT_PER_FILE = 40_000
+    _ATTACH_MAX_TEXT_TOTAL = 120_000
+    _ATTACH_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+    def _save_attachment(self, name: str, data_url: str, dest_dir: Path) -> Path | None:
+        """Decode a data: URL attachment and persist it under the workspace
+        so image backends and file tools can use it by path."""
+        try:
+            header, _, encoded = data_url.partition(",")
+            if not encoded or ";base64" not in header:
+                return None
+            raw = base64.b64decode(encoded, validate=False)
+            if not raw or len(raw) > self._ATTACH_MAX_IMAGE_BYTES:
+                return None
+            mime = header[5:].split(";")[0] if header.startswith("data:") else ""
+            ext = {
+                "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+                "image/webp": ".webp", "image/gif": ".gif", "image/bmp": ".bmp",
+            }.get(mime, Path(name).suffix if Path(name).suffix else ".png")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            target = dest_dir / (secrets.token_hex(6) + ext.lower())
+            target.write_bytes(raw)
+            return target
+        except Exception:
+            return None
+
+    def _prepare_attachments(self, attachments: list[dict[str, Any]] | None) -> dict[str, Any]:
+        """Normalize user-attached files into prompt text + saved image paths.
+
+        Text-like content is inlined (capped); images are written under
+        data/attachments and returned as local paths for the image lane or
+        file tools. Everything is bounded so an attachment can't blow up the
+        prompt or disk."""
+        out: dict[str, Any] = {"blocks": [], "image_paths": [], "notes": []}
+        if not attachments:
+            return out
+        dest_dir = self.checkpoints.workspace / "data" / "attachments"
+        budget = self._ATTACH_MAX_TEXT_TOTAL
+        for item in attachments[: self._ATTACH_MAX_FILES]:
+            if not isinstance(item, dict):
+                continue
+            name = re.sub(r"[^\w.\- ()]", "_", str(item.get("name") or "file")).replace("..", "_")[:120].strip() or "file"
+            kind = str(item.get("kind") or "")
+            if kind == "image" and item.get("data_url"):
+                saved = self._save_attachment(name, str(item["data_url"]), dest_dir)
+                if saved is not None:
+                    out["image_paths"].append(str(saved))
+                else:
+                    out["notes"].append(f"attached image '{name}' could not be decoded")
+                continue
+            content = item.get("content")
+            if isinstance(content, str) and content.strip():
+                take = min(budget, self._ATTACH_MAX_TEXT_PER_FILE, len(content))
+                text = content[:take]
+                budget -= len(text)
+                suffix = "\n… [truncated]" if len(content) > take else ""
+                out["blocks"].append(f"--- {name} ---\n{text}{suffix}")
+            else:
+                out["notes"].append(
+                    f"user attached '{name}' (binary or empty — contents not inlined)"
+                )
+        return out
+
     def run(
         self,
         user_text: str,
@@ -2557,6 +2629,7 @@ class AgentOrchestrator:
         history: list[dict[str, Any]] | None = None,
         mode: str = "auto",
         event_callback: Callable[[dict[str, Any]], None] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> AgentResult:
         task = self.tasks.create(user_text, mode)
         event_callback = self._logging_callback(task.id, event_callback)
@@ -2579,6 +2652,7 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else "conversation"
         )
+        attach = self._prepare_attachments(attachments)
         learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": [], "forgotten": []}
         if (
             self.conversation_memory is not None
@@ -2624,6 +2698,7 @@ class AgentOrchestrator:
                 task_id=task.id,
                 user_text=user_text,
                 event_callback=event_callback,
+                source_images=attach["image_paths"],
             )
 
         # Tier 0: deterministic/local handlers — before any hardware probe or
@@ -2924,6 +2999,20 @@ class AgentOrchestrator:
                     )
             except Exception as exc:
                 research_context = {"error": f"{type(exc).__name__}: {exc}"}
+        # Attachment context rides inside the user message so it enters
+        # history naturally, but never inside `user_text` itself — routing,
+        # Answer Memory lookup, and task titles must see the bare prompt.
+        user_content = user_text
+        if attach["blocks"] or attach["notes"] or attach["image_paths"]:
+            parts = list(attach["blocks"])
+            parts.extend(attach["notes"])
+            if attach["image_paths"]:
+                parts.append(
+                    "Attached image file(s) saved locally — usable as "
+                    "source/reference paths by image tools:\n"
+                    + "\n".join(attach["image_paths"])
+                )
+            user_content = user_text + "\n\nAttached context:\n" + "\n\n".join(parts)
         if lightweight:
             # Fast General lane: bounded prompt-evaluation budget. Optional
             # context blocks share ONE total character budget (injected in
@@ -2981,7 +3070,7 @@ class AgentOrchestrator:
                     entry["content"] = content
                     kept.append(entry)
                 messages.extend(reversed(kept))
-            messages.append({"role": "user", "content": user_text})
+            messages.append({"role": "user", "content": user_content})
         else:
             project_memory = self.memory.context()
             index_act = self._act(
@@ -3086,7 +3175,7 @@ class AgentOrchestrator:
                     entry["content"] = content
                     kept.append(entry)
                 messages.extend(reversed(kept))
-            messages.append({"role": "user", "content": user_text})
+            messages.append({"role": "user", "content": user_content})
         session = _AgentSession(
             task_id=task.id,
             user_text=user_text,

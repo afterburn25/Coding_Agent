@@ -1696,6 +1696,47 @@ class AppState:
         }
 
 
+def _clean_attachments(body: dict) -> list[dict]:
+    """Validate/normalize chat attachments from the request body.
+
+    Text content is capped at 400 KB per file server-side (the agent lane
+    trims further to fit the context budget); image data URLs at ~12 MB
+    decoded. Anything unparseable is dropped rather than failing the chat.
+    """
+    raw = body.get("attachments")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "file")[:200]
+        kind = "image" if str(item.get("kind")) == "image" else "file"
+        entry: dict = {"name": name, "kind": kind}
+        if kind == "image":
+            data_url = str(item.get("data_url") or "")
+            if data_url.startswith("data:") and len(data_url) <= 17_000_000:
+                entry["data_url"] = data_url
+        else:
+            content = item.get("content")
+            if isinstance(content, str) and content and len(content) <= 400_000:
+                entry["content"] = content
+        if "data_url" in entry or "content" in entry:
+            out.append(entry)
+    return out
+
+
+def _queueable_message(message: str, attachments: list[dict]) -> str:
+    """Fold text attachments into a queued prompt — queue items only carry
+    plain text, so attachments survive a busy-queue hop."""
+    texts = [a for a in attachments if a.get("content")]
+    if not texts:
+        return message
+    blocks = [f"--- {a.get('name', 'file')} ---\n{str(a['content'])[:40000]}"
+              for a in texts[:8]]
+    return message + "\n\nAttached context:\n" + "\n\n".join(blocks)
+
+
 class Handler(BaseHTTPRequestHandler):
     state: AppState
     web_root: Path
@@ -3061,9 +3102,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat/stream":
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
-                if not message:
+                chat_attachments = _clean_attachments(body)
+                if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
                     return
+                if not message:
+                    message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()
                 if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
                     if not getattr(self.state.config, "chat_queue_when_busy", True):
@@ -3074,7 +3118,8 @@ class Handler(BaseHTTPRequestHandler):
                         }, 409)
                         return
                     try:
-                        item = self.state.queue.enqueue(message, mode=mode)
+                        item = self.state.queue.enqueue(
+                            _queueable_message(message, chat_attachments), mode=mode)
                     except ValueError as exc:
                         self._json({"error": str(exc)}, 429)
                         return
@@ -3155,6 +3200,7 @@ class Handler(BaseHTTPRequestHandler):
                             history=self.state.history,
                             mode=mode,
                             event_callback=self.state._voice_tee(voice_rid, emit),
+                            attachments=chat_attachments,
                         )
                         self.state._voice_finish(voice_rid, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
@@ -3233,9 +3279,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat":
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
-                if not message:
+                chat_attachments = _clean_attachments(body)
+                if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
                     return
+                if not message:
+                    message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()
                 if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
                     if not getattr(self.state.config, "chat_queue_when_busy", True):
@@ -3246,7 +3295,8 @@ class Handler(BaseHTTPRequestHandler):
                         }, 409)
                         return
                     try:
-                        item = self.state.queue.enqueue(message, mode=mode)
+                        item = self.state.queue.enqueue(
+                            _queueable_message(message, chat_attachments), mode=mode)
                     except ValueError as exc:
                         self._json({"error": str(exc)}, 429)
                         return
@@ -3286,7 +3336,8 @@ class Handler(BaseHTTPRequestHandler):
                 voice_rid = self.state._voice_begin()
                 try:
                     result = self.state.agent.run(message, history=self.state.history, mode=mode,
-                                                  event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
+                                                  event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit),
+                                                  attachments=chat_attachments)
                     self.state._voice_finish(voice_rid, result.content)
                 except Exception:
                     self.state._voice_finish(voice_rid)

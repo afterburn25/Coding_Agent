@@ -160,7 +160,7 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **362 tests passing**.
+- Current automated checkpoint: **649 tests passing**.
 
 
 
@@ -183,6 +183,7 @@
 - Completed tasks now persist `final_content`, and the UI can recover the finished response from durable task state if the final SSE event is lost.
 - Short non-coding conversation uses the lightweight utility route; the primary 14B model pre-warms in the background.
 - Local system now exposes Memory & training counts.
+- Chat composer `+` attachments: menu-driven file/image picker, removable chips with thumbnails, text/code files inlined into the model's user turn (bounded), images persisted under `data/attachments` and routed into image workflows, attachment-only messages allowed, and queued requests retain attached context.
 
 - Conversation Manager now supports durable/searchable/restorable chats, personality controls, scoped memory, feedback, and the Trainer / Model Growth UI.
 - Sourced knowledge memory stores researched answers with provenance/freshness and can refresh current-sensitive knowledge.
