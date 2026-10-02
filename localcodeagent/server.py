@@ -1913,7 +1913,7 @@ class AppState:
                 stop=lambda s=sid: self.mcp.disconnect(s),
                 restart=lambda s=sid: self.mcp.restart(s),
                 metadata={"transport": row.get("transport"),
-                          "auto_start": True},
+                          "auto_restart": True},
             ))
 
     def _register_health_checks(self) -> None:

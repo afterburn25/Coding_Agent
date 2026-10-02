@@ -570,6 +570,8 @@ class EndToEndAgentTests(unittest.TestCase):
                 self.assertEqual(ids, ["mcp:testsrv"])
                 self.assertEqual(state._probe_mcp(), "degraded")
                 self.assertEqual(state.health.check("mcp"), "degraded")
+                # Watchdog opt-in — crashed MCP servers must auto-restart.
+                self.assertTrue(svc.metadata.get("auto_restart"))
             finally:
                 state.mcp.shutdown()
 
