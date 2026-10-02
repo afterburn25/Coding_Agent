@@ -11,6 +11,32 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## v0.7.2 UI unification + transport hardening checkpoint
+
+- **One design system**: `web/styles.css` defines the token palette
+  (`--bg`/`--surface`/`--panel`/`--panel2`/`--card`, `--line`/`--line2`,
+  text tiers, accent/status colors, tints, radius) + shared primitives
+  (`.workspace-link`, `.side-links a`, `.side-toggle`, `.btn`,
+  `.btn-primary`, `.btn-danger`, `.page-head`, `.empty-state`,
+  element-level `input`/`select`/`textarea` theming, scrollbars,
+  `[hidden]` always wins). Page CSS files consume tokens — the old gray
+  `#101217` palette and bordered-pill navs are gone.
+- **Canonical nav**: all 11 pages share the same workspace link set
+  (Chat, Models, Research, Missions, Image Studio, Tools, Trainer,
+  Voice Studio, Learned Answers, System, Settings) with `.active` on
+  the current page. Missions raw-link regression fixed.
+- **Chat layout**: `.main` grid rows are content-sized (`auto`) so the
+  composer can never be crushed into a fixed track; textarea
+  auto-resizes via `scrollHeight`; utility rail collapses through
+  `#railToggle` (persisted); mobile topbar nav under 760px.
+- **Guards**: `tests/test_ui_layout.py` — 19 structural tests covering
+  tokens, nav, grid safety, `[hidden]`, autoresize, components.
+- **WinError 10054 wave** (commits `35e74d5`, `8e37c34`): persisted
+  bounded crash history in `netdiag`, `annotate_recovery`, push-style
+  `HealthService.report()`, mid-run crash → runtime-tuner `mark_bad`,
+  MCP/ComfyUI transport diagnostics.
+- Version bumped via `VERSION` + `scripts/sync_version.py` → **0.7.2**.
+
 ## v0.6 Nexus Core UI checkpoint
 
 - The approved primary UI is implemented in `web/index.html` / `web/styles.css` / `web/app.js`.

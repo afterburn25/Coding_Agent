@@ -239,6 +239,36 @@
   tool), `b6e2572` + `a44905c` (workflow version resolution +
   contract-test fix), `8e477c8` (System page), `17fdaea` (job nodes).
 
+#### v0.7.2 — UI unification + transport-failure hardening
+
+- **Shared design system**: `styles.css` owns the token palette
+  (`--bg`/`--surface`/`--panel`/`--panel2`, `--line`, `--text`,
+  `--accent`, status colors + tints) plus shared primitives
+  (`.workspace-link`, `.side-toggle`, `.btn` variants, `.page-head`,
+  `.empty-state`, element-level themed form controls, scrollbars).
+  All page stylesheets migrated off divergent gray/navy hexes.
+- **Canonical nav**: every secondary page renders the same 11-link
+  workspace nav with an `.active` marker; voice toggle and jump links
+  styled consistently.
+- **Chat fixes**: `.main` grid no longer crushes the composer onto a
+  fixed track; `[hidden]` beats class `display`; textarea auto-resizes;
+  collapsible utility rail; mobile topbar nav below 760px; fixed
+  `grid-template-colums` typo and the undefined `--purple` reference.
+- **UI regression tests**: `tests/test_ui_layout.py` (19 tests) guards
+  tokens, canonical nav, grid safety, composer autoresize, and shared
+  components across all 11 pages.
+- **Transport hardening (WinError 10054)**: `netdiag` failure history
+  persists to bounded JSONL with recovery-outcome annotation;
+  `HealthService.report()` push API for immediate state transitions;
+  mid-run llama.cpp crashes feed `mark_bad()` so crashing configs are
+  never re-picked; MCP stdio/HTTP failures carry structured diagnostics;
+  ComfyUI transport errors enter the shared failure history.
+- Found + documented a real port-collision case: a stale dev backend
+  (`python -m localcodeagent` from an earlier session) was squatting on
+  :8765 serving `0.6.0-dev` while the packaged app ran on a dynamically
+  chosen port — the exact class of stale-process issue this hardening
+  targets.
+
 #### Verified benchmark — user hardware (2026-10-02)
 
 RTX 3080 Ti 12 GB (10.36 GB free), 64 GB RAM, 24 logical cores,
