@@ -75,6 +75,12 @@ letting it preempt the user.
 ### Changed
 
 - `MissionStore.list()` now sorts by `effective_rank` (aging-aware).
+- Deterministic teardown: `AppState.close()` joins tracked daemon
+  threads (auto-resume, prewarm) and `AutonomousSupervisor.stop()` joins
+  its tick/bus/worker threads, so nothing writes into a workspace while
+  it is being torn down. Test scratch dirs keep `ignore_cleanup_errors`
+  as defense for untracked workers, but leaks are now closed at the
+  source.
 
 ## [0.10.0] — Unreleased
 

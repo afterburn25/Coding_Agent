@@ -570,6 +570,7 @@ class AppState:
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
+        self._resume_thread: threading.Thread | None = None
         # Autonomous supervisor — persistent missions, triggers, schedules,
         # standing goals. Never widens permissions; interactive lane wins.
         self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
@@ -795,7 +796,18 @@ class AppState:
             except Exception:
                 pass
 
-        threading.Thread(target=resume, name="auto-resume-interrupted", daemon=True).start()
+        self._resume_thread = threading.Thread(
+            target=resume, name="auto-resume-interrupted", daemon=True)
+        self._resume_thread.start()
+
+    def close(self) -> None:
+        """Stop background work and release held resources.
+
+        Deterministic teardown: stops the autonomy supervisor (joining its
+        tick/bus/worker threads), closes brain/memory stores, and joins
+        tracked daemon threads. Safe to call more than once; failures in
+        one subsystem never prevent the rest from closing."""
+        stop_state(self)
 
     def _build_autonomy(self, config: AgentConfig, runtime_root: Path):
         """Construct the AutonomousSupervisor with live service hooks.
@@ -5973,6 +5985,17 @@ def stop_state(state: AppState) -> None:
             state.brain.close()
     except Exception:
         pass
+    # Join tracked daemon threads so nothing writes after the workspace
+    # is torn down (test tempdirs especially — daemon writers racing
+    # shutil.rmtree produced WinError 32 / Errno 39 flakes).
+    for name in ("_resume_thread", "_prewarm_thread"):
+        t = getattr(state, name, None)
+        try:
+            if t is not None and t.is_alive() \
+                    and t is not threading.current_thread():
+                t.join(timeout=5.0)
+        except Exception:
+            pass
 
 
 def _describe_port_owner(host: str, port: int) -> str:

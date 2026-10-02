@@ -168,6 +168,12 @@ class AutonomousSupervisor:
                 self._bus.unsubscribe(self._bus_queue)
             except Exception:
                 pass
+        # Join owned threads so teardown is deterministic — a tick or
+        # worker writing after the workspace is deleted is a real bug.
+        for t in (self._thread, self._bus_thread,
+                  *self._workers.values()):
+            if t is not None and t.is_alive() and t is not threading.current_thread():
+                t.join(timeout=5.0)
 
     def wake(self) -> None:
         self._wake.set()

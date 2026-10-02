@@ -1600,10 +1600,13 @@ class AppStateWiringTests(unittest.TestCase):
             calls = []
             with patch.object(AgentOrchestrator, "recover",
                               lambda self, task_id, **kw: calls.append(task_id)):
-                AppState(cfg, ws, ws / ".runtime")
-                deadline = time.time() + 5
-                while not calls and time.time() < deadline:
-                    time.sleep(0.05)
+                state = AppState(cfg, ws, ws / ".runtime")
+                try:
+                    deadline = time.time() + 5
+                    while not calls and time.time() < deadline:
+                        time.sleep(0.05)
+                finally:
+                    state.close()
             self.assertEqual(calls, [task.id])
 
     def test_autonomous_approval_timeout_fails_stale_task(self):
@@ -1620,16 +1623,19 @@ class AppStateWiringTests(unittest.TestCase):
                 process_watchdog=False,
             )
             state = AppState(cfg, ws, ws / ".runtime")
-            task = state.tasks.create("risky work", "auto")
-            state.tasks.update(task.id, status="waiting_approval",
-                               pending_approval={"name": "spend.money"})
-            time.sleep(0.05)
+            try:
+                task = state.tasks.create("risky work", "auto")
+                state.tasks.update(task.id, status="waiting_approval",
+                                   pending_approval={"name": "spend.money"})
+                time.sleep(0.05)
 
-            state._expire_stale_approvals()
+                state._expire_stale_approvals()
 
-            updated = state.tasks.get(task.id)
-            self.assertEqual(updated.status, "error")
-            self.assertIn("Approval timed out", updated.error)
+                updated = state.tasks.get(task.id)
+                self.assertEqual(updated.status, "error")
+                self.assertIn("Approval timed out", updated.error)
+            finally:
+                state.close()
 
     def test_approval_waits_forever_without_autonomous_mode(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
