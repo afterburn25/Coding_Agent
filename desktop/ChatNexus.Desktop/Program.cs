@@ -525,6 +525,7 @@ internal sealed class BackendProcess : IDisposable
             WriteLog("HOST", $"backend exited with code {code}");
             if (!_disposing)
             {
+                RecordCrashExit(code);
                 UnexpectedExit?.Invoke(code);
             }
         };
@@ -577,6 +578,41 @@ internal sealed class BackendProcess : IDisposable
         }
         return int.TryParse(line[prefix.Length..].Trim(), out port)
             && port > 0 && port <= 65535;
+    }
+
+    /// <summary>
+    /// Persist backend process exits into the same JSONL crash history the
+    /// backend writes (data/crash_history.jsonl) — a whole-backend crash can
+    /// never record itself, so the host does. /api/diagnostics reads this
+    /// file; data/ is junctioned to the per-user state root.
+    /// </summary>
+    private void RecordCrashExit(int code)
+    {
+        try
+        {
+            // LogPath is <appDir>/data/logs/backend-host.log.
+            var dataDir = Directory.GetParent(Path.GetDirectoryName(LogPath)!)?.FullName;
+            if (string.IsNullOrEmpty(dataDir))
+            {
+                return;
+            }
+            var entry = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["subsystem"] = "backend",
+                ["kind"] = "process_exit",
+                ["detail"] = $"backend exited with code {code}",
+                ["exit_code"] = code,
+                ["time"] = DateTimeOffset.Now.ToUnixTimeSeconds(),
+                ["recovery"] = "host_restart",
+            });
+            lock (_logLock)
+            {
+                File.AppendAllText(
+                    Path.Combine(dataDir, "crash_history.jsonl"),
+                    entry + Environment.NewLine);
+            }
+        }
+        catch { /* crash history is best-effort — never block restart */ }
     }
 
     private int SafeExitCode()
@@ -783,7 +819,12 @@ internal sealed class BackendProcess : IDisposable
     }
 
     /// <summary>Mutable dirs that belong to the user, not the install.</summary>
-    private static readonly string[] StateDirs = { "data", ".agent", "output", "models" };
+    private static readonly string[] StateDirs =
+        { "data", ".agent", "output", "models", "ComfyUI_windows_portable" };
+
+    /// <summary>Dirs too large for the profile drive — shared per install drive.</summary>
+    private static readonly HashSet<string> DriveStateDirs =
+        new(StringComparer.OrdinalIgnoreCase) { "models", "ComfyUI_windows_portable" };
 
     private static string UserStateRoot() =>
         Path.Combine(
@@ -792,13 +833,14 @@ internal sealed class BackendProcess : IDisposable
 
     /// <summary>
     /// Root a state dir's junction target under. Small state (chats, memory,
-    /// output) lives in the per-user profile; models can be tens of GB so
-    /// they share a root on the install's own drive — relocation stays a
-    /// rename, never a cross-volume copy onto a nearly-full C:.
+    /// output) lives in the per-user profile; large installs (models, the
+    /// ComfyUI portable checkout — tens of GB) share a root on the install's
+    /// own drive so relocation stays a rename, never a cross-volume copy
+    /// onto a nearly-full C:.
     /// </summary>
     private static string StateTargetRoot(string appDir, string name)
     {
-        if (name == "models")
+        if (DriveStateDirs.Contains(name))
         {
             var driveRoot = Path.GetPathRoot(Path.GetFullPath(appDir));
             return Path.Combine(driveRoot ?? appDir, "NexusCore");
