@@ -556,10 +556,14 @@ class RuntimeManagerTests(unittest.TestCase):
             state.config = AgentConfig(
                 models=[self._profile()], runtime_auto_tune=False)
             state.runtime = SimpleNamespace(tuner=None)
+            # The worker loops for the app's lifetime — earlier tests may
+            # still have one alive, so assert no NEW thread spawns.
+            before = sum(t.name == "runtime-auto-tune" and t.is_alive()
+                         for t in threading.enumerate())
             AppState._start_auto_tune(state)
-            self.assertFalse(
-                any(t.name == "runtime-auto-tune" and t.is_alive()
-                    for t in threading.enumerate()))
+            after = sum(t.name == "runtime-auto-tune" and t.is_alive()
+                        for t in threading.enumerate())
+            self.assertEqual(after, before)
 
     def test_auto_tune_benchmarks_untuned_profile(self):
         from types import SimpleNamespace

@@ -238,6 +238,7 @@ class AppState:
             jobs_path = runtime_root / jobs_path
         self.jobs = JobManager(jobs_path)
         self.events = EventBus()
+        self._shutdown = threading.Event()  # set by stop_state — long-lived workers check this
         self._stream_sinks: list = []  # live chat SSE queues that also want voice events
         self.jobs.on_change = make_emitter(self.events, "job")
         self.images.on_change = make_emitter(self.events, "image_job")
@@ -1354,11 +1355,10 @@ class AppState:
         """
         if not getattr(self.config, "runtime_auto_tune", True):
             return
-        targets = [
-            p for p in self.config.models
-            if p.enabled and p.runtime == "llama_cpp" and p.model_path
-        ]
-        if not targets:
+        if not any(
+            p.enabled and p.runtime == "llama_cpp" and p.model_path
+            for p in self.config.models
+        ):
             return
 
         def _lane_busy() -> bool:
@@ -1380,34 +1380,61 @@ class AppState:
             except Exception:
                 return True  # can't verify → leave it alone
 
+        stop = getattr(self, "_shutdown", None)  # threading.Event | None
+
+        def _stopped() -> bool:
+            return bool(stop is not None and stop.is_set())
+
         def _worker() -> None:
-            time.sleep(max(5.0, float(getattr(
-                self.config, "runtime_auto_tune_idle_seconds", 45.0))))
-            for profile in targets:
-                if _has_result(profile):
-                    continue
-                # Wait for an idle window — missions/queues can start at
-                # any time; check cheaply every few seconds, bounded.
-                for _ in range(240):  # ~20 min max wait
-                    if not _lane_busy():
-                        break
-                    time.sleep(5.0)
-                if _lane_busy():
-                    return  # still busy after the window — skip this boot
-                try:
-                    self.events.publish("model", {"event": {
-                        "type": "auto_tune_start", "model_id": profile.id}})
-                    result = self.runtime.tuner.benchmark(profile)
-                    self.events.publish("model", {"event": {
-                        "type": "tuning_complete", "model_id": profile.id,
-                        "status": result.get("status"), "source": "auto",
-                        "tps": (result.get("best") or {}).get("metrics", {}).get(
-                            "predicted_per_second"),
-                    }})
-                except Exception as exc:
-                    self.events.publish("model", {"event": {
-                        "type": "auto_tune_failed", "model_id": profile.id,
-                        "error": f"{type(exc).__name__}: {exc}"[:200]}})
+            if stop is not None and stop.wait(max(5.0, float(getattr(
+                    self.config, "runtime_auto_tune_idle_seconds", 45.0)))):
+                return
+            if stop is None:
+                time.sleep(max(5.0, float(getattr(
+                    self.config, "runtime_auto_tune_idle_seconds", 45.0))))
+            attempted: set[str] = set()  # "id:fingerprint" — retry once per boot
+            while not _stopped():
+                # Re-scan each pass so models installed mid-session (e.g. via
+                # a model_install mission job) get tuned without a restart.
+                targets = [
+                    p for p in self.config.models
+                    if p.enabled and p.runtime == "llama_cpp" and p.model_path
+                ]
+                for profile in targets:
+                    try:
+                        fp = self.runtime.tuner.fingerprint(profile)
+                    except Exception:
+                        continue
+                    key = f"{profile.id}:{fp}"
+                    if key in attempted or _has_result(profile):
+                        continue
+                    # Wait for an idle window — missions/queues can start at
+                    # any time; check cheaply every few seconds, bounded.
+                    for _ in range(240):  # ~20 min max wait
+                        if not _lane_busy() or _stopped():
+                            break
+                        time.sleep(5.0)
+                    if _lane_busy() or _stopped():
+                        break  # still busy — resume scanning next pass
+                    attempted.add(key)
+                    try:
+                        self.events.publish("model", {"event": {
+                            "type": "auto_tune_start", "model_id": profile.id}})
+                        result = self.runtime.tuner.benchmark(profile)
+                        self.events.publish("model", {"event": {
+                            "type": "tuning_complete", "model_id": profile.id,
+                            "status": result.get("status"), "source": "auto",
+                            "tps": (result.get("best") or {}).get(
+                                "metrics", {}).get("predicted_per_second"),
+                        }})
+                    except Exception as exc:
+                        self.events.publish("model", {"event": {
+                            "type": "auto_tune_failed", "model_id": profile.id,
+                            "error": f"{type(exc).__name__}: {exc}"[:200]}})
+                if stop is not None:
+                    stop.wait(600.0)   # re-scan every 10 min while idle
+                else:
+                    time.sleep(600.0)
 
         threading.Thread(target=_worker, name="runtime-auto-tune", daemon=True).start()
 
@@ -4991,6 +5018,12 @@ def create_server(
 
 
 def stop_state(state: AppState) -> None:
+    try:
+        stop = getattr(state, "_shutdown", None)
+        if stop is not None:
+            stop.set()
+    except Exception:
+        pass
     try:
         state.mcp.shutdown()
     except Exception:
