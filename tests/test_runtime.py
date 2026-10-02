@@ -290,12 +290,18 @@ class RuntimeManagerTests(unittest.TestCase):
             manager = RuntimeManager(AgentConfig(models=[]), base_dir=root)
             self.assertEqual(manager.measure_resident("none"), {})
             proc = sp.Popen([sys.executable, "-c",
+                             "x=bytearray(64*1024*1024);"
                              "import time;time.sleep(60)"])
             try:
                 manager._managed["m"] = _ManagedProcess(
                     profile=SimpleNamespace(model_path="models/m.gguf"),
                     process=proc, endpoint="", log_handle=None, status=None)
-                meas = manager.measure_resident("m")
+                meas = {}
+                for _ in range(20):
+                    meas = manager.measure_resident("m")
+                    if meas.get("ram_used_gb", 0) > 0:
+                        break
+                    time.sleep(0.1)
                 self.assertIn("ram_used_gb", meas)
                 self.assertGreater(meas["ram_used_gb"], 0)
                 self.assertAlmostEqual(meas["model_size_gb"], 12345 / 1e9,
