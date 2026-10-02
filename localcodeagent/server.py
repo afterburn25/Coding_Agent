@@ -348,6 +348,7 @@ class AppState:
         # next image job and the idle evictor; a competing recover loop
         # would restart it while it is legitimately stopped.
         self.health.register("image-backend", self._probe_image_backend)
+        self.health.register("mcp", self._probe_mcp)
         self.workflows_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
         if not self.workflows_dir.is_absolute():
             self.workflows_dir = self.workspace / self.workflows_dir
@@ -905,6 +906,22 @@ class AppState:
         if states <= {"running", "external", "external_unreachable"}:
             return "healthy" if "running" in states or "external" in states else "degraded"
         return "stopped"
+
+    def _probe_mcp(self) -> str:
+        """Aggregate MCP server states into a component health value."""
+        try:
+            rows = (self.mcp.status() or {}).get("servers") or []
+        except Exception:
+            return "degraded"
+        live = [r for r in rows if r.get("enabled")]
+        if not live:
+            return "stopped"
+        states = {r.get("state") for r in live}
+        if "error" in states:
+            return "crashed"
+        if "connected" in states:
+            return "healthy"
+        return "degraded"
 
     def _probe_image_backend(self) -> str:
         rt = getattr(getattr(self, "images", None), "backend_runtime", None)

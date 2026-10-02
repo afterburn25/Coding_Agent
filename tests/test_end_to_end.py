@@ -568,6 +568,8 @@ class EndToEndAgentTests(unittest.TestCase):
                 self.assertEqual(row["state"], "disconnected")
                 ids = state.processes.service_ids(prefix="mcp:")
                 self.assertEqual(ids, ["mcp:testsrv"])
+                self.assertEqual(state._probe_mcp(), "degraded")
+                self.assertEqual(state.health.check("mcp"), "degraded")
             finally:
                 state.mcp.shutdown()
 
