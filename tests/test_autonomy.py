@@ -137,6 +137,25 @@ class JobNodeTests(unittest.TestCase):
             self.assertEqual(node["state"], "completed")
             sup.stop()
 
+    def test_wait_node_sleeps_and_aborts_on_mission_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            # Bound: a 5s wait completes; an aborting mission fails early.
+            m = sup.create_mission(objective="wait test", title="wait")
+            sup.start_mission(m["id"])
+            sup.missions.mutate(
+                m["id"], lambda r: r.update({"status": "executing"}))
+            sup._running = True  # unit-test the wait body without tick loop
+            t0 = time.time()
+            out = sup._default_wait(m, {"metadata": {"seconds": 0.2}})
+            self.assertTrue(out["ok"])
+            self.assertGreaterEqual(time.time() - t0, 0.19)
+            sup.missions.transition(m["id"], "paused")
+            out = sup._default_wait(m, {"metadata": {"seconds": 30}})
+            self.assertFalse(out["ok"])
+            self.assertIn("paused", out["output"])
+            sup.stop()
+
     def test_default_job_runner_reports_unwired(self):
         sup = make_sup(tempfile.mkdtemp())
         out = sup._default_job({}, {"metadata": {"job": "sandbox"}})

@@ -792,6 +792,8 @@ class AutonomousSupervisor:
                 result = self._research_runner(m, node)
             elif kind == "job":
                 result = self._job_runner(m, node)
+            elif kind == "wait":
+                result = self._default_wait(m, node)
             else:
                 result = {"ok": True, "output": "no-op"}
         finally:
@@ -1189,6 +1191,30 @@ class AutonomousSupervisor:
                 return {"ok": False, "output": f"rag_update failed: {exc}"}
         return {"ok": False,
                 "output": f"job node has no runner wired (metadata.job={op!r})"}
+
+    _ACTIVE_MISSION_STATES = frozenset(
+        {"active", "planning", "executing", "verifying", "evaluating",
+         "replanning", "waiting_dependency"})
+
+    def _default_wait(self, mission: dict, node: dict) -> dict:
+        """Bounded delay node — sleeps metadata.seconds (or until an
+        epoch in metadata.until), capped at 1h, and aborts early when the
+        mission leaves an executing-family state (pause/cancel/stop)."""
+        meta = dict(node.get("metadata") or {})
+        secs = float(meta.get("seconds") or 0)
+        until = float(meta.get("until") or 0)
+        if until > 0:
+            secs = max(0.0, until - time.time())
+        secs = max(0.0, min(secs, 3600.0))
+        end = time.time() + secs
+        while time.time() < end and self._running:
+            cur = self.missions.get(str(mission.get("id") or ""))
+            if cur and cur.get("status") not in self._ACTIVE_MISSION_STATES:
+                return {"ok": False,
+                        "output": f"wait aborted — mission {cur['status']}"}
+            time.sleep(min(1.0, end - time.time()))
+        waited = round(secs - max(0.0, end - time.time()))
+        return {"ok": True, "output": f"waited {waited}s"}
 
     # ------------------------------------------------------------------
     # standing-goal ticking
