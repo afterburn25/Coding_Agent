@@ -4,8 +4,8 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 810,
-  "next_milestone": "v0.7.x continues: perf tuner sweep + launch fallback + idle auto-tuner + cold/warm telemetry + idle context shrink landed; mission-linked expandable activity timeline landed; generated verify commands sandboxed; repo_search exposes RAG to agents; knowledge graph feeds prompts and holds research/artifact provenance; job DAG nodes cover sandbox/backup/rag_update/image/model_install and are recorded in the unified JobManager ledger; research nodes run the real ResearchCoordinator; conservative resource mode yields GPU jobs to the interactive lane; unknown node kinds fail loudly; System page covers health/twin/rag/knowledge/lsp/skills/connectors/artifacts/backups/eval/simulation; Windows package CI green on 0.7.x. Next: voice STT optional deps, real ComfyUI workflow import testing, accumulated on-hardware tuner data.",
+  "test_checkpoint": 812,
+  "next_milestone": "v0.7.x continues: perf tuner sweep + launch fallback + idle auto-tuner + cold/warm telemetry + idle context shrink (wired config knobs) landed; mission-linked expandable activity timeline on chat + Missions page; generated verify commands sandboxed; repo_search exposes RAG; knowledge graph feeds prompts and holds research/artifact provenance; job DAG nodes cover sandbox/backup/rag_update/image/model_install recorded in the JobManager ledger (Jobs card on System page); research nodes run the real ResearchCoordinator; conservative resource mode yields GPU jobs to the interactive lane; unknown node kinds fail loudly; plan simulation dry-runs real mission DAGs; all parsed config keys documented; draft role marker enables speculative-decoding candidates; System page covers health/twin/rag/knowledge/lsp/skills/connectors/jobs/artifacts/backups/eval/simulation; Windows package CI green on 0.7.x. Next: voice STT optional deps, real ComfyUI workflow import testing, accumulated on-hardware tuner data.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -543,7 +543,7 @@
     }
   },
   "verified_tests": 555,
-  "head": "907a3cc",
+  "head": "079d954",
   "test_count": 555,
   "branding": {
     "canonical_name": "Nexus Core",
