@@ -112,9 +112,34 @@ Performance tuning + live activity timeline.
   Jobs card on the System page; Missions + System linked from every
   sidebar; config.example.json documents every parsed key.
 
+### Autonomy + platform wiring (0.7.1 fourth pass)
+
+- **Notifications reach the chat lane**: `NotificationCenter` publishes
+  onto the SSE bus (status line in chat) and mirrors every notification
+  into the ActivityStore as a persisted `notification` timeline row —
+  mission-scoped rows appear under `?mission_id=` and survive reloads.
+- **Autonomy CRUD on the Missions page**: create standing goals,
+  schedules (interval/once/daily/weekly), and triggers from the sidebar;
+  enable/disable/delete controls on every schedule + trigger row; the
+  trigger event picker is populated from `/api/triggers`' new `signals`
+  vocabulary so it cannot drift from `SIGNALS`.
+- **`worktree` job op**: missions can run commands inside an isolated
+  git worktree (`WorktreeAgent`) — sandboxed execution, commit, merge
+  back on clean exit; nonzero exits leave the base untouched and merge
+  conflicts keep the agent branch for manual resolution.
+- **`GitHubConnector`** (`connectors/github.py`): the previously empty
+  ConnectorRegistry now hosts a real first-class service — `repo`,
+  `list_issues`, `ci_status`, `create_issue` capabilities over
+  `GitHubCodingClient`, rate-limited, permission-gated under
+  `external_api.call`, audited, with a `/rate_limit` health probe.
+- **Skills actually reach the agent**: `AgentOrchestrator` accepts a
+  `skills` resolver and injects `SkillRegistry.instructions_for()` into
+  both the utility and heavy prompt block lists — installed/enabled
+  skill packages were previously inert.
+
 ### Tests
 
-- 812 passing (2 env skips). GitHub Actions green through `70cd34e`
+- 819 passing (2 env skips). GitHub Actions green through `a9fb9da`
   including the windows-desktop installer/package smoke job.
 - New coverage: mark_bad persistence, error classification, sweep
   composition/skip-bad, context classes, launch fallback ladder,
