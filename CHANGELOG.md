@@ -46,6 +46,13 @@ letting it preempt the user.
   `gh run list --status failure` (cached 10 min, silent when `gh` is
   absent) and opens one repair incident per failed-run signature;
   detectors may emit multiple findings per scan.
+- **Production candidate canary** — `canary.production_launcher` boots
+  the repaired Nexus from the incident worktree (PYTHONPATH-scoped code,
+  free port, scratch config → isolated `data/canary/<incident>/` state),
+  checks `/api/health`, replays the original failing request path when
+  recorded, then terminates the candidate. Wired in production behind
+  `self_repair_canary_enabled` (default on); a real instance launch is
+  covered by `tests/test_self_repair.py::ProductionCanaryTests`.
 - **Commit-on-promote** — promoted code repairs land as a scoped git
   commit (`Self-repair: …`, incident id + root cause + verification
   evidence, `Nexus Self-Repair` identity fallback) instead of a silent

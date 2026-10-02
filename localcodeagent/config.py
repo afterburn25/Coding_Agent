@@ -188,6 +188,11 @@ class AgentConfig:
     # metadata (never pushes — remote work stays under git permissions).
     # Disable to leave promoted repairs as uncommitted working changes.
     self_repair_commit_on_promote: bool = True
+    # Candidate-instance validation: launch the repaired Nexus from the
+    # incident worktree on a free port with isolated state and check
+    # health (+ replay the original request when recorded) before
+    # promotion. Disable to fall back to canary-skipped gating.
+    self_repair_canary_enabled: bool = True
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -575,6 +580,8 @@ def load_config(path: Path | None) -> AgentConfig:
         "self_repair_auto_promote", cfg.self_repair_auto_promote))
     cfg.self_repair_commit_on_promote = bool(raw.get(
         "self_repair_commit_on_promote", cfg.self_repair_commit_on_promote))
+    cfg.self_repair_canary_enabled = bool(raw.get(
+        "self_repair_canary_enabled", cfg.self_repair_canary_enabled))
     qh = raw.get("autonomy_quiet_hours", cfg.autonomy_quiet_hours)
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]

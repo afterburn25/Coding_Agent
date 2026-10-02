@@ -108,9 +108,15 @@ patchers for tests.
 - `_default_review` is a deterministic baseline review (rejects
   `except: pass` error-hiding, path escapes, empty patches); a separate
   reviewer callable can be injected for model-based review.
-- `Canary` runs an injected candidate launcher (isolated port/state);
-  `skipped` is reported honestly, and `canary_required_for` subsystems
-  refuse promotion without one.
+- `Canary` runs a candidate launcher (isolated port/state). Production
+  wiring uses `production_launcher`: boots `python -m localcodeagent`
+  from the incident worktree (PYTHONPATH-scoped code, free port, scratch
+  config under `data/canary/<incident>/` — all candidate state isolated
+  from the live instance), waits for `/api/health`, replays the original
+  failing request path when the incident recorded one, then terminates
+  the process. `self_repair_canary_enabled=false` falls back to the
+  honest `skipped` report, and `canary_required_for` subsystems refuse
+  promotion without a real canary either way.
 - Promotion requires: confidence ≥ `min_promote_confidence`, targeted
   tests green, regression suite green when configured, review pass,
   canary pass/not-required — **and** `auto_promote` enabled

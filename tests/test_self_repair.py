@@ -23,7 +23,7 @@ from localcodeagent.autonomy.state import AutonomyStore
 from localcodeagent.self_repair import (
     SelfRepairCoordinator, Detector, Localizer, Diagnostician,
     RepairMemory)
-from localcodeagent.self_repair.canary import Canary
+from localcodeagent.self_repair.canary import Canary, production_launcher
 from localcodeagent.self_repair.coordinator import redact
 from localcodeagent.self_repair.models import (
     new_incident, transition, budget_exceeded)
@@ -406,6 +406,32 @@ class ScenarioA_CodeRepairPromoted(unittest.TestCase):
             # fix present but uncommitted
             self.assertIn("calc.py",
                           git("status", "--porcelain", cwd=repo).stdout)
+
+
+class ProductionCanaryTests(unittest.TestCase):
+    """The real candidate launcher — boots the repo's Nexus from the
+    worktree on a free port with fully isolated state."""
+
+    def test_candidate_boots_health_and_dies(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as td:
+            launcher = production_launcher(state_parent=Path(td))
+            result = launcher({"id": "canary-test"}, repo,
+                              timeout_s=120)
+            self.assertTrue(result.get("ok"), result)
+            self.assertTrue(result["checks"]["health"]["ok"])
+            # state stayed isolated under the scratch dir
+            self.assertTrue((Path(td) / "canary" / "canary-test"
+                             ).is_dir())
+
+    def test_candidate_exit_reported(self):
+        """A worktree that can't boot reports failure, never hangs."""
+        with tempfile.TemporaryDirectory() as td:
+            empty = Path(td) / "empty_wt"
+            empty.mkdir()
+            launcher = production_launcher(state_parent=Path(td))
+            result = launcher({"id": "dead"}, empty, timeout_s=10)
+            self.assertFalse(result.get("ok"))
 
 
 class ScenarioB_BadPatchRejected(unittest.TestCase):

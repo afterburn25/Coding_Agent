@@ -1020,6 +1020,7 @@ class AppState:
         and code repairs delegate patch generation to a bounded repair
         mission inside an isolated git worktree — never the live tree."""
         from .self_repair import SelfRepairCoordinator
+        from .self_repair.canary import Canary, production_launcher
 
         def _fix_restart(ctx):
             hooks.get("restart_service", lambda: None)()
@@ -1091,6 +1092,11 @@ class AppState:
                                        .get("status"),
             auto_promote=bool(getattr(config, "self_repair_auto_promote",
                                       False)),
+            canary=Canary(
+                launcher=production_launcher(
+                    state_parent=runtime_root / "data"))
+                if getattr(config, "self_repair_canary_enabled", True)
+                else Canary(),
             commit_on_promote=bool(getattr(
                 config, "self_repair_commit_on_promote", True)),
             is_blocked=lambda: sup.policy.is_stopped()
