@@ -783,12 +783,28 @@ internal sealed class BackendProcess : IDisposable
     }
 
     /// <summary>Mutable dirs that belong to the user, not the install.</summary>
-    private static readonly string[] StateDirs = { "data", ".agent", "output" };
+    private static readonly string[] StateDirs = { "data", ".agent", "output", "models" };
 
     private static string UserStateRoot() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "NexusCore");
+
+    /// <summary>
+    /// Root a state dir's junction target under. Small state (chats, memory,
+    /// output) lives in the per-user profile; models can be tens of GB so
+    /// they share a root on the install's own drive — relocation stays a
+    /// rename, never a cross-volume copy onto a nearly-full C:.
+    /// </summary>
+    private static string StateTargetRoot(string appDir, string name)
+    {
+        if (name == "models")
+        {
+            var driveRoot = Path.GetPathRoot(Path.GetFullPath(appDir));
+            return Path.Combine(driveRoot ?? appDir, "NexusCore");
+        }
+        return UserStateRoot();
+    }
 
     /// <summary>
     /// Redirect each mutable state dir under appDir to the per-user state
@@ -799,11 +815,10 @@ internal sealed class BackendProcess : IDisposable
     /// </summary>
     private static void EnsureStateJunctions(string appDir, List<string> notes)
     {
-        var stateRoot = UserStateRoot();
         foreach (var name in StateDirs)
         {
             var link = Path.Combine(appDir, name);
-            var target = Path.Combine(stateRoot, name);
+            var target = Path.Combine(StateTargetRoot(appDir, name), name);
             try
             {
                 if (Directory.Exists(link))
@@ -830,7 +845,11 @@ internal sealed class BackendProcess : IDisposable
         }
     }
 
-    /// <summary>Copy source contents into target; existing target entries win.</summary>
+    /// <summary>
+    /// Move source contents into target; existing target entries win.
+    /// Moves keep model-size migrations instant on the same volume; the
+    /// recursive fallback covers the rare cross-volume case.
+    /// </summary>
     private static void MigrateDirectoryContents(string source, string target)
     {
         Directory.CreateDirectory(target);
@@ -839,12 +858,26 @@ internal sealed class BackendProcess : IDisposable
             var dest = Path.Combine(target, Path.GetFileName(file));
             if (!File.Exists(dest))
             {
-                File.Copy(file, dest);
+                File.Move(file, dest);
             }
         }
         foreach (var dir in Directory.EnumerateDirectories(source))
         {
-            MigrateDirectoryContents(dir, Path.Combine(target, Path.GetFileName(dir)));
+            var dest = Path.Combine(target, Path.GetFileName(dir));
+            if (!Directory.Exists(dest))
+            {
+                try
+                {
+                    Directory.Move(dir, dest);
+                    continue;
+                }
+                catch (IOException)
+                {
+                    // Cross-volume: fall through to the copy path.
+                }
+            }
+            MigrateDirectoryContents(dir, dest);
+            try { Directory.Delete(dir, recursive: true); } catch { }
         }
     }
 

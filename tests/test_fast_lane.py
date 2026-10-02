@@ -353,6 +353,11 @@ class BootMarkerTests(unittest.TestCase):
         self.assertIn("EnsureStateJunctions", src)
         self.assertIn("LocalApplicationData", src)
         self.assertIn("NEXUS_NO_STATE_REDIRECT", src)
+        # Models are far too large for the profile drive — they redirect to
+        # a shared root on the install's own drive instead.
+        self.assertIn('"models"', src)
+        self.assertIn("StateTargetRoot", src)
+        self.assertIn("GetPathRoot", src)
 
 
 class FrontendBufferTests(unittest.TestCase):

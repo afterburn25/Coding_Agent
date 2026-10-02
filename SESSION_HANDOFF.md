@@ -50,9 +50,13 @@
 - **Durable user state**: mutable dirs (`data/`, `.agent/`, `output/`)
   are relocated to `%LOCALAPPDATA%\NexusCore` via directory junctions
   created by the desktop host (`EnsureStateJunctions`, opt-out
-  `NEXUS_NO_STATE_REDIRECT=1` for the build smoke test). Existing
-  content merges into the state root on first redirect — rebuilds,
-  updates and reinstalls can no longer wipe chat history.
+  `NEXUS_NO_STATE_REDIRECT=1` for the build smoke test). `models/` is
+  junctioned too, but to a drive-root share (`<install-drive>:\NexusCore`)
+  instead — model files are too large for the profile volume, and same-
+  volume relocation is a rename rather than a copy (`StateTargetRoot`).
+  Existing content moves/merges into the state root on first redirect —
+  rebuilds, updates and reinstalls can no longer wipe chat history or
+  model files.
 - **Build safety**: `build_windows.ps1` merges dist state into the
   per-user root *before* wiping `dist/`, removes junctions without
   traversing them (`rmdir` only), and preserves `config.json`.

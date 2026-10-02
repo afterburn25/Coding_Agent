@@ -28,7 +28,11 @@ $DesktopSplash = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core-splash.pn
 # real user data — merge it into the per-user state root before wiping, or
 # every rebuild would silently delete chat history, memory, and output.
 $StateRoot = Join-Path $env:LOCALAPPDATA "NexusCore"
-foreach ($stateDir in @("data", ".agent", "output")) {
+# Small state lives in the per-user profile; models can be tens of GB so the
+# host redirects them to a shared root on the install drive instead — the
+# merge below mirrors that split (see StateTargetRoot in Program.cs).
+$DriveStateRoot = Join-Path ([IO.Path]::GetPathRoot((Resolve-Path $PackageRoot).Path)) "NexusCore"
+foreach ($stateDir in @("data", ".agent", "output", "models")) {
     $existing = Join-Path $PackageRoot $stateDir
     if (-not (Test-Path $existing)) { continue }
     $item = Get-Item $existing -Force
@@ -38,7 +42,7 @@ foreach ($stateDir in @("data", ".agent", "output")) {
         cmd /c rmdir "$existing" | Out-Null
         continue
     }
-    $dest = Join-Path $StateRoot $stateDir
+    $dest = Join-Path $(if ($stateDir -eq "models") { $DriveStateRoot } else { $StateRoot }) $stateDir
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     Get-ChildItem $existing -Force | ForEach-Object {
         $d = Join-Path $dest $_.Name
