@@ -174,7 +174,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
     def test_main_form_reports_real_phases_to_progress(self):
         for fraction in ("0.30", "0.55", "0.72", "0.85"):
             self.assertIn(f"progress.Report({fraction}", PROGRAM)
-        self.assertIn("WaitUntilHealthyAsync(TimeSpan.FromSeconds(60))", PROGRAM)
+        self.assertIn("WaitUntilHealthyAsync(TimeSpan.FromSeconds(180))", PROGRAM)
 
     def test_backend_watchdog_recovery_is_preserved(self):
         self.assertIn("UnexpectedExit", PROGRAM)

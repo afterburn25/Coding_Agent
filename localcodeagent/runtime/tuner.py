@@ -377,8 +377,8 @@ class RuntimeTuner:
 # fast lane, headroom for deep work. Applied at profile launch, not per call.
 ROLE_CONTEXT_HINTS = {
     "utility": 8192,
-    "fast_coder": 16384,
-    "primary_coder": 16384,
+    "fast_coder": 24576,
+    "primary_coder": 24576,
     "deep_reasoner": 32768,
     "reviewer": 32768,
     "vision": 16384,

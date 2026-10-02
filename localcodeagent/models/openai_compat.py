@@ -125,6 +125,7 @@ class OpenAICompatibleProvider:
         )
         started_at = time.monotonic()
         repaired = 0
+        tools_dropped = False
         while True:
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -148,13 +149,32 @@ class OpenAICompatibleProvider:
                         headers={"Content-Type": "application/json",
                                  "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
                     continue
+                if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
+                        and not tools_dropped and payload.get("tools")):
+                    # Last resort: system prompt + tool schemas alone can
+                    # exceed the window, leaving message shrinking unable to
+                    # converge. Drop the tools so the turn degrades to a plain
+                    # answer instead of a hard failure.
+                    tools_dropped = True
+                    payload.pop("tools", None)
+                    payload.pop("tool_choice", None)
+                    payload["messages"] = _shrink_messages_for_context(messages, 2048)
+                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                    messages = payload["messages"]
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                    continue
                 raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
             except urllib.error.URLError as exc:
                 raise RuntimeError(
                     f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
                 ) from exc
         if repaired:
-            raw.setdefault("auto_repaired", {"context_shrink": repaired})
+            raw.setdefault("auto_repaired", {"context_shrink": repaired,
+                                             "tools_dropped": tools_dropped})
         choices = raw.get("choices") or []
         if not choices:
             raise RuntimeError(f"Model endpoint returned no choices: {raw}")
@@ -206,6 +226,7 @@ class OpenAICompatibleProvider:
         started_at = time.monotonic()
         first_token_at = 0.0
         repaired = 0
+        tools_dropped = False
         while True:
             try:
                 resp = urllib.request.urlopen(req, timeout=self.timeout)
@@ -217,6 +238,24 @@ class OpenAICompatibleProvider:
                     nums = _OVERFLOW_NUMBERS_RE.search(server_message)
                     overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
                     payload["messages"] = _shrink_messages_for_context(messages, overage)
+                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                    messages = payload["messages"]
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                 "Accept": "text/event-stream"})
+                    continue
+                if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
+                        and not tools_dropped and payload.get("tools")):
+                    # Last resort: system prompt + tool schemas alone can
+                    # exceed the window; drop tool schemas and retry so the
+                    # turn still answers instead of hard-failing.
+                    tools_dropped = True
+                    payload.pop("tools", None)
+                    payload.pop("tool_choice", None)
+                    payload["messages"] = _shrink_messages_for_context(messages, 2048)
                     payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
                     messages = payload["messages"]
                     data = json.dumps(payload).encode("utf-8")
@@ -306,7 +345,8 @@ class OpenAICompatibleProvider:
         raw: dict[str, Any] = {
             "stream": True,
             "finish_reason": finish_reason,
-            **({"auto_repaired": {"context_shrink": repaired}} if repaired else {}),
+            **({"auto_repaired": {"context_shrink": repaired,
+                                  "tools_dropped": tools_dropped}} if repaired else {}),
             "chunks": chunk_count,
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "time_to_first_token_ms": round((first_token_at - started_at) * 1000, 1) if first_token_at else None,

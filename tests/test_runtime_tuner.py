@@ -132,7 +132,7 @@ class TuningResolutionTests(unittest.TestCase):
 class ContextHintTests(unittest.TestCase):
     def test_role_windows(self):
         self.assertEqual(recommended_context(_profile(roles=["utility"], context_window=32768)), 8192)
-        self.assertEqual(recommended_context(_profile(roles=["primary_coder"], context_window=32768)), 16384)
+        self.assertEqual(recommended_context(_profile(roles=["primary_coder"], context_window=32768)), 24576)
         self.assertEqual(recommended_context(_profile(roles=["deep_reasoner"], context_window=65536)), 32768)
 
     def test_never_exceeds_profile_window(self):

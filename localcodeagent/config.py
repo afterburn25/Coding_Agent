@@ -170,6 +170,10 @@ class AgentConfig:
     # larger output budget instead of truncating.
     fast_general_history_turns: int = 8
     fast_general_context_chars: int = 9000
+    # Total budget for optional injected context in the coding lane (system
+    # memory/knowledge/research blocks + carried history share it). Prevents
+    # oversized prompts that overflow the context window outright.
+    coding_context_chars: int = 60000
     fast_general_output_tokens: int = 1024
     fast_general_long_output_tokens: int = 2048
     # Performance profile for managed llama.cpp runtimes:
@@ -277,7 +281,7 @@ def default_config() -> AgentConfig:
                 model="Qwen3-14B-Q4_K_M",
                 model_path="models/Qwen3-14B-Q4_K_M.gguf",
                 roles=["fast_coder", "primary_coder"],
-                context_window=16384,
+                context_window=24576,
                 max_output_tokens=2048,
                 priority=90,
                 runtime="llama_cpp",
@@ -470,6 +474,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
     cfg.fast_general_history_turns = max(0, int(raw.get("fast_general_history_turns", cfg.fast_general_history_turns)))
     cfg.fast_general_context_chars = max(500, int(raw.get("fast_general_context_chars", cfg.fast_general_context_chars)))
+    cfg.coding_context_chars = max(2000, int(raw.get("coding_context_chars", cfg.coding_context_chars)))
     cfg.fast_general_output_tokens = max(128, int(raw.get("fast_general_output_tokens", cfg.fast_general_output_tokens)))
     cfg.fast_general_long_output_tokens = max(256, int(raw.get("fast_general_long_output_tokens", cfg.fast_general_long_output_tokens)))
     perf_mode = str(raw.get("performance_mode", cfg.performance_mode)).strip().lower()
