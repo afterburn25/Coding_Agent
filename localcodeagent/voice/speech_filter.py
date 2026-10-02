@@ -40,8 +40,24 @@ class SpeechTextFilter:
     IMG_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
     BOLD_RE = re.compile(r"(\*\*|__)(.+?)\1")
     ITALIC_RE = re.compile(r"(\*|_)([^*_]+)\1")
-    LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+    LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.M)
     QUOTE_RE = re.compile(r"^\s*>\s?")
+    # Status glyphs are verdicts — never read the glyph name ("check mark").
+    # Locked wording: pass → "operating within normal parameters", fail →
+    # "failed to initialize". Applies to every spoken path (stream, replay,
+    # speak tool) since all of them pass through _sanitize_prose.
+    OK_GLYPH = "✅✔☑✓🟢\ufe0f"
+    FAIL_GLYPH = "❌✗✖✘🔴\ufe0f"
+    OK_LEAD_RE = re.compile(
+        rf"(?m)^\s*(?:[{OK_GLYPH}]+|\[(?:x|✓|✔)\])\s*([^\n]*)$")
+    FAIL_LEAD_RE = re.compile(rf"(?m)^\s*[{FAIL_GLYPH}]+\s*([^\n]*)$")
+    PENDING_LEAD_RE = re.compile(r"(?m)^\s*\[ \]\s*([^\n]*)$")
+    OK_INLINE_RE = re.compile(rf"[{OK_GLYPH}]+")
+    FAIL_INLINE_RE = re.compile(rf"[{FAIL_GLYPH}]+")
+    WARN_GLYPH_RE = re.compile(r"⚠️?")
+    EMOJI_RUN_RE = re.compile(
+        "[\U0001F000-\U0001FAFF☀-➿⬀-⯿️\ufe0f]+")
+    ARROW_RE = re.compile(r"(?:→|⟶|->)")
     CMD_LINE_RE = re.compile(r"^\s*(\$ |>|PS C:|python3?\s+-\w|pip\s+install|npm\s+|git\s+\w|docker\s+|curl\s+|nvidia-smi|cd\s+\S)")
     PUNCT_RUN_RE = re.compile(r"[^\w\s]{4,}")
 
@@ -130,6 +146,19 @@ class SpeechTextFilter:
         t = self.HEADING_RE.sub("", t)
         t = self.QUOTE_RE.sub("", t)
         t = self.LIST_MARKER_RE.sub("", t)
+        # A leading status glyph is a verdict on the item — name the item,
+        # then speak the verdict instead of the glyph name.
+        t = self.OK_LEAD_RE.sub(self._lead_verdict(
+            "operating within normal parameters"), t)
+        t = self.FAIL_LEAD_RE.sub(self._lead_verdict("failed to initialize"), t)
+        t = self.PENDING_LEAD_RE.sub(self._lead_verdict("pending"), t)
+        # Inline glyphs mid-sentence become the same spoken verdicts.
+        t = self.OK_INLINE_RE.sub(" — operating within normal parameters", t)
+        t = self.FAIL_INLINE_RE.sub(" — failed to initialize", t)
+        t = self.WARN_GLYPH_RE.sub(" — needs attention", t)
+        t = self.ARROW_RE.sub(" to ", t)
+        # Any emoji left unmapped is pictographic noise — drop it.
+        t = self.EMOJI_RUN_RE.sub(" ", t)
         t = self.PATH_RE.sub(lambda m: self._speakable_path(m.group(0)), t)
         # Collapse markdown table pipes left inside SUMMARIZE leftovers.
         t = re.sub(r"\|+", ", ", t)
@@ -137,6 +166,14 @@ class SpeechTextFilter:
         t = re.sub(r"[ \t]{2,}", " ", t)
         t = re.sub(r"\n{3,}", "\n\n", t)
         return t
+
+    @staticmethod
+    def _lead_verdict(phrase: str):
+        """re.sub callback factory: '✅ GPU ready' → 'GPU ready — <phrase>'."""
+        def repl(m):
+            rest = m.group(1).strip()
+            return f"{rest} — {phrase}" if rest else phrase.capitalize() + "."
+        return repl
 
     def _speakable_code(self, snippet: str) -> str:
         s = snippet.strip()

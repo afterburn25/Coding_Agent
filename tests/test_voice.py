@@ -82,6 +82,32 @@ class TestSpeechFilter(unittest.TestCase):
         self.assertIn("recovers cleanly", out)
         self.assertNotIn("rm -rf", out)
 
+    def test_status_glyphs_speak_verdicts(self):
+        # Diagnostic readouts say the verdict, never the glyph name.
+        out = self.f.filter(
+            "Self-diagnostic complete.\n"
+            "✅ GPU detected\n"
+            "✔️ Models verified\n"
+            "❌ ComfyUI backend\n"
+            "✗ Audio pipeline\n"
+            "- [x] config loaded\n"
+            "- [ ] queued task\n")
+        self.assertIn("GPU detected — operating within normal parameters", out)
+        self.assertIn("Models verified — operating within normal parameters", out)
+        self.assertIn("ComfyUI backend — failed to initialize", out)
+        self.assertIn("Audio pipeline — failed to initialize", out)
+        self.assertIn("config loaded — operating within normal parameters", out)
+        self.assertIn("queued task — pending", out)
+        for glyph in ("✅", "✔", "❌", "✗"):
+            self.assertNotIn(glyph, out)
+
+    def test_inline_glyph_verdict(self):
+        out = self.f.filter("Backend status: ✅ and tools: ❌ done.")
+        self.assertIn("operating within normal parameters", out)
+        self.assertIn("failed to initialize", out)
+        self.assertNotIn("✅", out)
+        self.assertNotIn("❌", out)
+
     def test_stack_trace_skipped(self):
         out = self.f.filter(
             "It crashed:\nTraceback (most recent call last):\n"
