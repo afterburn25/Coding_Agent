@@ -803,7 +803,11 @@ class AutonomousSupervisor:
             elif kind == "wait":
                 result = self._default_wait(m, node)
             else:
-                result = {"ok": True, "output": "no-op"}
+                # Unknown kind — fail loudly so recovery/replanning engages
+                # rather than reporting a phantom success.
+                result = {"ok": False,
+                          "output": f"unknown node kind: {kind}",
+                          "error": f"unknown node kind: {kind}"}
         finally:
             lock = node.get("lock") or ("agent_lane" if kind == "agent" else "")
             if lock:

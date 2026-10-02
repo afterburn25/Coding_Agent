@@ -116,6 +116,26 @@ class JobNodeTests(unittest.TestCase):
             self.assertTrue(node["result"]["ok"])
             sup.stop()
 
+    def test_unknown_node_kind_fails_loudly(self):
+        # A hand-corrupted graph must not report a phantom success.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="corrupted graph",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            def _inject(row):
+                g = TaskGraph(row)
+                g.add(new_task("Weird", "x", kind="internal"))
+                g.nodes[-1]["kind"] = "bogus_kind"  # bypass new_task normalizer
+            sup.missions.mutate(m["id"], _inject)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"])
+            node = (m.get("graph") or {}).get("nodes", [])[0]
+            self.assertNotEqual(node["state"], "completed")
+            self.assertIn("unknown node kind",
+                          str((node.get("result") or {}).get("output") or ""))
+            sup.stop()
+
     def test_research_node_dispatches_research_runner(self):
         with tempfile.TemporaryDirectory() as td:
             seen = []
