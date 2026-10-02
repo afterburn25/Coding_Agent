@@ -2071,6 +2071,10 @@ class AppState:
             for model_id in stopped:
                 self.events.publish("model", {"event": {"type": "idle_evicted",
                                                         "model_id": model_id}})
+            shrunk = self.runtime.shrink_oversized_context(busy_models=busy)
+            for model_id in shrunk:
+                self.events.publish("model", {"event": {"type": "context_shrunk",
+                                                        "model_id": model_id}})
             self._evict_idle_comfyui()
         except Exception:
             pass

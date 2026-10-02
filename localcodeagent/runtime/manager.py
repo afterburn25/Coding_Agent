@@ -683,6 +683,58 @@ class RuntimeManager:
                 self.refresh_hardware()
         return stopped
 
+    def shrink_oversized_context(self, *, busy_models: set[str] | None = None) -> list[str]:
+        """Relaunch idle residents whose launched context far exceeds the
+        role recommendation — a big task can grow the window, and once the
+        work is done the oversized KV cache should not pin VRAM forever.
+
+        A model is only shrunk when it is not busy, has been idle for
+        ``context_shrink_idle_seconds`` (default 600), and its launched
+        window exceeds ``context_shrink_factor`` × ``recommended_context``
+        (default 1.5). This is a relaunch, not an eviction — the model
+        stays warm, just at its normal window. If the relaunch fails the
+        model is simply left stopped (launch fallback already ran).
+        """
+        busy = set(busy_models or ())
+        grace = float(getattr(self.config, "context_shrink_idle_seconds", 600.0) or 0.0)
+        factor = float(getattr(self.config, "context_shrink_factor", 1.5) or 1.5)
+        if grace <= 0:
+            return []
+        shrunk: list[str] = []
+        with self._lock:
+            now = time.time()
+            profiles = {m.id: m for m in self.config.models}
+            for mid, item in list(self._managed.items()):
+                if mid in busy or item.process.poll() is not None:
+                    continue
+                profile = profiles.get(mid)
+                if profile is None or profile.runtime != "llama_cpp":
+                    continue
+                launched = int(self._launch_ctx.get(mid, 0))
+                if not launched:
+                    continue
+                try:
+                    from .tuner import recommended_context
+                    want = int(recommended_context(profile))
+                except Exception:
+                    want = int(profile.context_window or 0)
+                if not want or launched <= want * factor:
+                    continue
+                if now - self._last_used.get(mid, 0.0) < grace:
+                    continue
+                self._emit_residency(
+                    "relaunch", mid,
+                    f"shrinking idle context {launched}→{want}")
+                self._stop_managed(mid)
+                try:
+                    self._start_llama_cpp(profile)
+                except Exception as exc:
+                    self._emit_residency(
+                        "evict", mid, f"context shrink failed: {exc}")
+                    continue
+                shrunk.append(mid)
+        return shrunk
+
     def rewarm_keep_loaded(self) -> list[str]:
         """Restart keep_loaded models that were reclaimed under memory pressure.
 

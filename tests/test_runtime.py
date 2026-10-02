@@ -493,6 +493,61 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertFalse(proc.terminated)
             self.assertEqual(ep, "http://x/v1")
 
+    def test_shrink_oversized_context_relaunches_idle_resident(self):
+        # Resident grown to 32k by a big task, now idle past the grace
+        # period — relaunch at the 16k role recommendation, not evict.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            proc = _attach_fake_managed(
+                manager, profile, last_used=time.time() - 1200)
+            manager._launch_ctx[profile.id] = 49152
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._enforce_residency = lambda p: None
+            manager._reclaim_orphaned_port = lambda port: None
+            spawns: list[int | None] = []
+
+            def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
+                spawns.append(ctx_override)
+                manager._launch_ctx[p.id] = 16384
+                return endpoint
+
+            manager._spawn_and_wait = spawn
+            shrunk = manager.shrink_oversized_context()
+            self.assertEqual(shrunk, [profile.id])
+            self.assertTrue(proc.terminated)
+            self.assertEqual(spawns, [None])  # role default, no override
+
+    def test_shrink_skips_busy_fresh_and_normal_size(self):
+        with tempfile.TemporaryDirectory() as td:
+            big = self._profile(id="big")
+            busy = self._profile(id="busy")
+            small = self._profile(id="small")
+            manager = RuntimeManager(
+                AgentConfig(models=[big, busy, small]), base_dir=Path(td))
+            old = time.time() - 1200
+            p_big = _attach_fake_managed(manager, big, last_used=old)
+            p_busy = _attach_fake_managed(manager, busy, last_used=old)
+            p_small = _attach_fake_managed(manager, small, last_used=old)
+            manager._launch_ctx["big"] = 49152
+            manager._launch_ctx["busy"] = 49152
+            manager._launch_ctx["small"] = 16384  # at recommended size
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._enforce_residency = lambda p: None
+            manager._reclaim_orphaned_port = lambda port: None
+            manager._spawn_and_wait = lambda p, port, endpoint, **k: endpoint
+            shrunk = manager.shrink_oversized_context(busy_models={"busy"})
+            self.assertEqual(shrunk, ["big"])
+            self.assertTrue(p_big.terminated)
+            self.assertFalse(p_busy.terminated)
+            self.assertFalse(p_small.terminated)
+            # A recently-used oversized model is inside the grace window.
+            p_fresh = _attach_fake_managed(manager, big)
+            manager._launch_ctx["big"] = 49152
+            self.assertEqual(
+                manager.shrink_oversized_context(busy_models={"busy"}), [])
+            self.assertFalse(p_fresh.terminated)
+
     def test_auto_tune_disabled_when_config_off(self):
         from types import SimpleNamespace
         from localcodeagent.server import AppState
