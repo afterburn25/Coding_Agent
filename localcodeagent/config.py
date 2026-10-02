@@ -324,7 +324,7 @@ def default_config() -> AgentConfig:
                 capabilities=["text_to_image"],
                 priority=110, quality_tier="high", speed_tier="balanced",
                 quantization="full SDXL checkpoint (fp16)",
-                estimated_vram_gb=10.0, estimated_ram_gb=24.0, max_loras=4,
+                estimated_vram_gb=10.0, estimated_ram_gb=16.0, max_loras=4,
                 homepage="https://huggingface.co/RunDiffusion/Juggernaut-X-v10",
                 license_name="CreativeML OpenRAIL-M",
                 display_name="Juggernaut X v10",
@@ -431,6 +431,16 @@ def load_config(path: Path | None) -> AgentConfig:
     if image_models:
         known = {m.id for m in image_models}
         image_models.extend(m for m in defaults.image_models if m.id not in known)
+        # Backfill presentation fields added after the user's entry was saved
+        # (display_name/tagline/license_name) — never overwrite set values.
+        default_by_id = {m.id: m for m in defaults.image_models}
+        for m in image_models:
+            d = default_by_id.get(m.id)
+            if d is None:
+                continue
+            for field_name in ("display_name", "tagline", "license_name", "homepage"):
+                if not getattr(m, field_name):
+                    setattr(m, field_name, getattr(d, field_name))
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
     # Fast-lane migration: configs saved before the dedicated utility model
     # still route "utility" to the 14B. Graft the small resident profile in;

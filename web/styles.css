@@ -71,8 +71,8 @@
 .image-generation-copy{position:relative;z-index:1;display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;color:#dbe8fb}
 .image-generation-copy strong{font-size:13px}.image-generation-copy span{font-size:10px;color:#8197b5}
 .image-job-progress-indeterminate span{width:28%!important;animation:image-progress-indeterminate 1.25s ease-in-out infinite}
-@keyframes image-shimmer{0%{transform:translateX(-25%)}100%{transform:translateX(25%)}}
-@keyframes image-progress-indeterminate{0%{transform:translateX(-120%)}50%{transform:translateX(130%)}100%{transform:translateX(330%)}}
+@keyframes image-shimmer{0%{transform:translateX(-45%)}100%{transform:translateX(45%)}}
+@keyframes image-progress-indeterminate{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}
 
 
 /* Starship-console activity HUD: high-level execution state only, never hidden chain-of-thought. */

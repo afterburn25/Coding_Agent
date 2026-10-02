@@ -178,7 +178,7 @@
       "enabled": true,
       "quantization": "full SDXL checkpoint (fp16)",
       "estimated_vram_gb": 10,
-      "estimated_ram_gb": 24,
+      "estimated_ram_gb": 16,
       "max_reference_images": 0,
       "max_loras": 4,
       "supports_transparency": false,
