@@ -67,14 +67,18 @@ node (bounded by `max_task_retries`). Cycles are rejected.
 
 Node kinds: `agent` (executor on the agent lane), `verify`
 (project-detected or generated checks — generated commands run inside a
-Sandbox), `research`/`internal` (server-side helpers), `wait`, and
+Sandbox), `research` (the real ResearchCoordinator — repo/local-docs
+first, web per policy), `internal` (server-side helpers), `wait`, and
 `job` — asynchronous platform work dispatched via the wired job runner.
 `job` metadata selects the operation: `sandbox` (bounded command with
 the workspace as cwd), `backup` (versioned state backup), `rag_update`
 (incremental index refresh; works standalone via a transient
-`RepoIndex`), and `image` (submit an `ImageRequest` and await the job's
-terminal state). Repository/workspace missions automatically prepend a
-`rag_update` job node so inspection sees a fresh index.
+`RepoIndex`), `image` (submit an `ImageRequest` and await the job's
+terminal state — produced files are registered as artifacts with
+knowledge-graph provenance), and `model_install` (run an image-model
+profile's download job to completion). Repository/workspace missions
+automatically prepend a `rag_update` job node so inspection sees a
+fresh index.
 
 ## Recovery
 

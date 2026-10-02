@@ -90,6 +90,20 @@ function renderSkills(list){
     </div>`).join('')||'<div class="off">No skills installed.</div>';
 }
 
+/* ---------- Connectors ---------- */
+function renderConnectors(list){
+  $('#connectorsList').innerHTML=list.map(c=>{
+    const h=c.last_health||{};
+    const ok=h.ok===true?'healthy':(h.ok===false?'unhealthy':'unchecked');
+    return `<div class="list-row"><b>${esc(c.name)}</b> <span class="pill">${esc(ok)}</span>
+     ${c.enabled?'<span class="pill">enabled</span>':'<span class="pill">disabled</span>'}
+     ${c.authed?'<span class="pill">authed</span>':''}
+     ${c.errors?`<span class="pill">${esc(c.errors)} errors</span>`:''}
+     <div class="meta">${(c.capabilities||[]).map(x=>`<span class="pill">${esc(x)}</span>`).join('')}
+     ${c.permission?' · perm '+esc(c.permission):''}</div>
+    </div>`}).join('')||'<div class="off">No connectors registered.</div>';
+}
+
 /* ---------- Artifacts ---------- */
 function renderArtifacts(list){
   $('#artifactsList').innerHTML=list.map(a=>
@@ -129,12 +143,14 @@ function renderExperiments(list){
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,a,b,ev,ex]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,a,b,ev,ex]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
-      api('/api/skills'),api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
+      api('/api/skills'),api('/api/connectors'),
+      api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments')]);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
-    renderSkills(sk.skills||[]);renderArtifacts(a.artifacts||[]);
+    renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
+    renderArtifacts(a.artifacts||[]);
     renderBackups(b.backups||[]);renderEval(ev.runs||[]);renderExperiments(ex.experiments||[]);
   }catch(e){
     $('#overallCard').innerHTML='<span class="off">API unavailable — '+esc(e.message)+'</span>';
