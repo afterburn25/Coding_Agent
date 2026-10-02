@@ -876,3 +876,44 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   served real WAV from `dist\ChatNexus` (2.87 s audio in ~4.3 s).
 - Measured: model load ~0.8 s, warm synthesis RTF ~0.43 on CPU.
 - Test suite: 537 / 537 (2 environment skips).
+
+## 2026-10-01 — Reliability/live-ops hardening round (main, deployed)
+
+- **Missing-tool reporting** (`d7f61d7`): `TOOL_NOT_INSTALLED:` is now an
+  error prefix; the router returns a `tools_not_installed` outcome naming
+  the missing tools + install guidance (manifest install hints), instead
+  of letting a missing tool look like a success. Registry direct-call
+  message names the tool and points to Tool Manager. Orchestrator prompt
+  instructs the agent to tell the user what to install.
+- **Atomic-write race** (`77c7d28`): `localcodeagent/fsutil.py` —
+  `atomic_write_text/bytes` (unique tmp name per call) +
+  `replace_with_retry`; all persistence call sites converted. Fixes the
+  Windows `jobs.json` WinError 32 that killed image jobs; image job
+  persistence serialized.
+- **WebView2 stale-page flash** (`7316925`): disk cache invalidated once
+  per backend payload change — old tools.html no longer flashes.
+- **ComfyUI lifecycle** (`b4f2066`): a timed-out request no longer kills
+  a half-booted ComfyUI; the process stays in `loading` and the next
+  request attaches to the same boot (restart only after a 2x-timeout
+  total budget). Windows `stop()` tree-kills so re-exec'd children can't
+  hold port 8188. `comfyui_startup_timeout` default 180 → 300 s.
+- **Voice composer mute** (`fcd540c` + `789c407`): icon-only speaker
+  button next to Send (🔊/🔇), synced with nav toggle via shared
+  `.voice-mute-btn` class. `789c407` fixes a `getAttribute()=x`
+  SyntaxError that disabled the entire voice client (no auto-play).
+- **Voice latency** (`4d87cd4`): engine pre-warm thread at task start so
+  the ~1 s Kokoro load overlaps text generation.
+- **Cold-boot health budget** (`df3277d`): desktop host waits 180 s
+  (was 60) for backend health — fresh unsigned ~200 MB exe under AV
+  scan could exceed 60 s → spurious "could not load backend".
+- **Context budget + overflow recovery** (`0abd2e4`): optional injected
+  context blocks + history share ONE budget per lane
+  (`fast_general_context_chars`=9000, `coding_context_chars`=60000 —
+  newest history wins). Previously per-block caps could total 20k+
+  tokens on a simple question → 16k overflow + double prompt eval
+  (~200 s responses). Last-resort repair: retry once without tool
+  schemas when shrinking can't converge. fast/primary coder lanes raised
+  to 24576 ctx (Qwen3-14B native 32k).
+- Deployed: backend + host rebuilt and copied to installed app; exe
+  hash-verified. App healthy post-deploy (voice enabled, unmuted).
+- Suite: 540 tests, OK (skipped=2).
