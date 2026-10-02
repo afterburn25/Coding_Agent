@@ -521,6 +521,47 @@ class DiagnosticsEndpointTests(unittest.TestCase):
                 server.server_close()
                 stop_state(state)
 
+    def test_watchdog_restart_events_reach_health_and_failures(self):
+        """Watchdog auto-restarts must land in health state + the failure
+        ring — an unattended overnight recovery must not be invisible."""
+        import threading
+        from localcodeagent.server import create_server, stop_state
+
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "web").mkdir()
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:9/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+            )
+            server, state = create_server(
+                cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            try:
+                seen = []
+                netdiag._FAILURES.clear()
+                state._on_process_event(
+                    {"service": "llama:fake", "event": "auto_restart",
+                     "attempt": 1, "state": "error"},
+                    seen.append)
+                self.assertEqual(len(seen), 1)  # still forwarded to the bus
+                comp = state.health.components["llm-runtime"]
+                self.assertEqual(comp.state, "restarting")
+                kinds = [e.get("kind") for e in netdiag._FAILURES]
+                self.assertIn("watchdog_restart", kinds)
+                state._on_process_event(
+                    {"service": "llama:fake", "event": "auto_restart_failed",
+                     "error": "spawn failed"},
+                    lambda p: None)
+                self.assertEqual(comp.state, "crashed")
+                kinds = [e.get("kind") for e in netdiag._FAILURES]
+                self.assertIn("watchdog_restart_failed", kinds)
+            finally:
+                server.server_close()
+                stop_state(state)
+
 
 class RealSocketResetTests(unittest.TestCase):
     """Reproduce an actual OS-level TCP reset on loopback — SO_LINGER(0)

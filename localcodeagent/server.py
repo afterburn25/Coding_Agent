@@ -244,7 +244,9 @@ class AppState:
         self.images.on_change = make_emitter(self.events, "image_job")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
-        self.processes.on_event = make_emitter(self.events, "process")
+        _process_bus_emit = make_emitter(self.events, "process")
+        self.processes.on_event = lambda payload: self._on_process_event(
+            payload, _process_bus_emit)
         self._register_processes()
         if getattr(config, "process_watchdog", True):
             self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
@@ -1853,6 +1855,56 @@ class AppState:
                 else "Conversation policy updated."
             ),
         }
+
+    _PROCESS_HEALTH_COMPONENTS = {
+        "llama:": "llm-runtime",
+        "comfyui": "image-backend",
+        "mcp:": "mcp",
+    }
+
+    def _on_process_event(self, payload: dict, bus_emit) -> None:
+        """Forward process-manager events to the bus, and record watchdog
+        auto-restarts in health + crash history so an overnight recovery is
+        visible in diagnostics instead of silently healing."""
+        bus_emit(payload)
+        event = str(payload.get("event") or "")
+        if event not in ("auto_restart", "auto_restart_failed"):
+            return
+        service_id = str(payload.get("service") or "")
+        component = next(
+            (comp for prefix, comp in self._PROCESS_HEALTH_COMPONENTS.items()
+             if service_id.startswith(prefix)), "")
+        detail = (
+            f"watchdog auto-restart of {service_id} "
+            f"(attempt {payload.get('attempt', '?')}, state {payload.get('state', '?')})"
+            if event == "auto_restart" else
+            f"watchdog auto-restart of {service_id} failed: {payload.get('error', '?')}"
+        )
+        try:
+            health = getattr(self, "health", None)
+            if health is not None and component:
+                health.report(
+                    component,
+                    "restarting" if event == "auto_restart" else "crashed",
+                    detail[:300])
+        except Exception:
+            pass
+        try:
+            entry = {
+                "subsystem": component or service_id,
+                "kind": "watchdog_restart" if event == "auto_restart" else "watchdog_restart_failed",
+                "detail": detail,
+                "service": service_id,
+                "attempt": payload.get("attempt"),
+                "state": payload.get("state"),
+                "error": payload.get("error", ""),
+                "time": time.time(),
+                "recovery": "restarted" if event == "auto_restart" else "failed",
+            }
+            netdiag._FAILURES.append(entry)
+            netdiag._persist_failure(entry)
+        except Exception:
+            pass
 
     def _register_processes(self) -> None:
         """Register controllable services with the central ProcessManager."""
