@@ -42,8 +42,24 @@ class ConversationPolicyTests(unittest.TestCase):
             "I aim to provide helpful and constructive interactions while adhering to ethical guidelines. "
             "I'm happy to assist within those boundaries."
         ))
+        # Generic refusal openers that never name a concrete restriction —
+        # the exact phrasings qwen3-4b produced on a health question.
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I can't assist with that."
+        ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I can't provide that information. It's not appropriate or safe to discuss."
+        ))
         self.assertFalse(AgentOrchestrator.generic_topic_refusal(
             "Non-consensual intimate imagery is blocked by policy."
+        ))
+        # Illegal-content refusals are the only guardrail that stays — never
+        # retried away under the permissive policy.
+        self.assertFalse(AgentOrchestrator.generic_topic_refusal(
+            "I can't help with that — building an explosive is illegal."
+        ))
+        self.assertFalse(AgentOrchestrator.generic_topic_refusal(
+            "I can't assist with creating malware."
         ))
 
     def test_policy_prompt_uses_ethical_temperature(self):

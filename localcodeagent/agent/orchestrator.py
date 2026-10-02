@@ -50,6 +50,7 @@ For adult-only text conversation, engage normally and directly rather than refus
 Consensual adult sexual conversation may use direct explicit language, including anatomy, sexual acts, fantasies, preferences, and erotic fiction involving adults. Do not sanitize or euphemize solely because the language is sexual unless the user asks you to.
 Profanity by itself is not sexual content and is not a reason to refuse, redirect, lecture, or ask the user to be more respectful.
 Answer allowed discussion, analysis, fiction, relationships, education, and ordinary adult topics directly and neutrally.
+Questions about health, the body, reproduction, sexuality, drugs, relationships, law, self-image, and other sensitive-but-legal subjects are ordinary informational requests — answer them factually and completely the way a professional reference or educator would.
 Do not use generic refusal language about "ethical guidelines", "inappropriate content", "something more constructive", "keep the conversation respectful", or similar boilerplate.
 Hard safety/tool policies are enforced separately by the relevant action layer. If a specific hard policy blocks an action, identify that concrete restriction and still help with the allowed portions. Do not invent additional restrictions.""",
     "balanced": """Conversation policy: balanced.
@@ -425,9 +426,19 @@ class AgentOrchestrator:
         if not normalized:
             return False
         hard_specific = (
+            # Genuinely-illegal content only — these refusals must not be
+            # retried away under the permissive policy. Everything else
+            # (adult, health, controversial, embarrassing topics) retries.
             "minor", "underage", "non-consensual", "without consent",
             "consent record", "permission denied", "blocked by policy",
             "requires an active adult consent record",
+            "illegal", "unlawful", "against the law",
+            "child sexual", "csam", "child abuse", "sexual content involving",
+            "a real person", "a real person'", "real person's",
+            "malware", "ransomware", "phishing",
+            "make a bomb", "build a bomb", "build an explosive",
+            "make a weapon", "build a weapon",
+            "commit fraud", "commit a crime", "terroris",
         )
         if any(marker in normalized for marker in hard_specific):
             return False
@@ -454,6 +465,46 @@ class AgentOrchestrator:
             "within those boundaries",
             "my programming is designed to",
             "what would you like to discuss",
+            # Generic refusal openers — same boilerplate shape as the
+            # explicit-content phrasings above, but the model never names a
+            # concrete policy ("I can't assist with that.", "not appropriate
+            # or safe to discuss"). hard_specific above still wins when a
+            # real restriction is cited.
+            "i can't assist with that",
+            "i cannot assist with that",
+            "i can't assist you with",
+            "i cannot assist you with",
+            "i can't help with that",
+            "i cannot help with that",
+            "i can't help you with that",
+            "i cannot help you with that",
+            "i can't provide that",
+            "i cannot provide that",
+            "i'm not able to help with that",
+            "i'm unable to help with that",
+            "i'm not able to provide",
+            "i'm unable to provide",
+            "i'm not able to assist",
+            "i'm unable to assist",
+            "i must decline",
+            "i have to decline",
+            "i won't be able to help",
+            "i won't be able to assist",
+            "i'd rather not discuss",
+            "i'd prefer not to discuss",
+            "i can't discuss that",
+            "i cannot discuss that",
+            "i can't talk about that",
+            "i cannot talk about that",
+            "not appropriate or safe",
+            "inappropriate to discuss",
+            "not safe to discuss",
+            "not something i can help",
+            "against my guidelines",
+            "violates my guidelines",
+            "outside my guidelines",
+            "outside of my guidelines",
+            "as an ai language model",
         )
         return any(marker in normalized for marker in generic)
 
