@@ -657,6 +657,19 @@ class NexusBrainIntegrationTests(unittest.TestCase):
             self.assertEqual(len(b2.cerebellum.optimizations()), 1)
             b2.close()
 
+    def test_answers_without_model_gate(self):
+        """The chat readiness gate consults this so deterministic/memory
+        fast paths work on a machine with no model installed."""
+        with tempfile.TemporaryDirectory() as d:
+            brain = NexusBrain(state_dir=Path(d),
+                               version_lookup=lambda: "0.8.0")
+            self.assertTrue(brain.answers_without_model(
+                "what version of nexus core?"))
+            self.assertTrue(brain.answers_without_model("system status?"))
+            self.assertFalse(brain.answers_without_model(
+                "refactor the parser module"))
+            brain.close()
+
     def test_ui_bus_bridge(self):
         with tempfile.TemporaryDirectory() as d:
             brain = NexusBrain(state_dir=Path(d))

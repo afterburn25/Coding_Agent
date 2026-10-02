@@ -170,6 +170,19 @@ class NexusBrain:
                              "model_id": ""}))
         return envelope
 
+    def answers_without_model(self, text: str, *, project_id: str = "") -> bool:
+        """Cheap gate predicate: can this input be fully answered without
+        invoking a model? Used by the chat readiness gate so deterministic
+        and trusted-memory fast paths work on a machine with no model
+        installed."""
+        try:
+            decision = self.thalamus.route(text, project_id=project_id)
+        except Exception:
+            return False
+        if decision.fast_path and decision.fast_path != "none":
+            return True
+        return not decision.needs_model and bool(decision.trusted_answer)
+
     # -- observability -----------------------------------------------------------------
     def trace(self, correlation_id: str = "", limit: int = 100) -> list[dict]:
         return self.bus.trace(correlation_id=correlation_id, limit=limit)

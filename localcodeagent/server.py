@@ -4735,6 +4735,11 @@ class Handler(BaseHTTPRequestHandler):
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
+                        or (
+                            getattr(self.state, "brain", None) is not None
+                            and self.state.brain.answers_without_model(
+                                message, project_id=str(self.state.workspace))
+                        )
                     )
                 )
                 if not coding_model_optional:
@@ -4924,6 +4929,11 @@ class Handler(BaseHTTPRequestHandler):
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
+                        or (
+                            getattr(self.state, "brain", None) is not None
+                            and self.state.brain.answers_without_model(
+                                message, project_id=str(self.state.workspace))
+                        )
                     )
                 )
                 if not coding_model_optional:
