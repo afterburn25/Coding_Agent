@@ -5,9 +5,21 @@ import re
 from typing import Callable
 
 from ..config import ModelProfile
+from .tiers import canonical_role
 
 
-ROLES = ("utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer", "vision")
+ROLES = ("utility", "lightweight_reasoner", "fast_coder", "primary_coder",
+         "deep_reasoner", "reviewer", "vision")
+
+
+def _role_matches(model: ModelProfile, role: str) -> bool:
+    """Canonical-role matching: a 'lightweight_reasoner' request is served by
+    models configured with any tier-2 role (light_coder, general_assistant…),
+    and 'fast_coder' resolves to the primary-coder ladder rung."""
+    if role in model.roles:
+        return True
+    target = canonical_role(role)
+    return any(canonical_role(r) == target for r in model.roles)
 ResourceAdvisor = Callable[[ModelProfile], tuple[bool, int, str]]
 PerformanceAdvisor = Callable[[ModelProfile, str, int], tuple[int, str]]
 
@@ -145,9 +157,9 @@ class ModelRouter:
         else:
             role, complexity, reasons = self.classify_role(text, phase=phase, changed_files=changed_files, failures=failures)
 
-        candidates = [m for m in available_models if role in m.roles]
+        candidates = [m for m in available_models if _role_matches(m, role)]
         if not candidates:
-            candidates = [m for m in available_models if "primary_coder" in m.roles] or available_models
+            candidates = [m for m in available_models if _role_matches(m, "primary_coder")] or available_models
             reasons.append(f"no dedicated {role} model configured; using fallback")
 
         ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
@@ -166,7 +178,7 @@ class ModelRouter:
         if fitting:
             pool = fitting
         else:
-            fallback_candidates = [m for m in available_models if "primary_coder" in m.roles and m not in candidates]
+            fallback_candidates = [m for m in available_models if _role_matches(m, "primary_coder") and m not in candidates]
             fallback_ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
             for model in fallback_candidates:
                 if self.resource_advisor:

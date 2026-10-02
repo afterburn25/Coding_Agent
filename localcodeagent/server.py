@@ -4161,6 +4161,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/models":
             self._json({"models": [asdict(m) for m in self.state.config.models]})
             return
+        if path == "/api/model-plan":
+            try:
+                from .runtime.hardware import hardware_profile
+                from .models.tiers import plan_model_stack
+                plan = plan_model_stack(
+                    hardware_profile(disk_path=self.state.workspace))
+                self._json(plan.as_dict())
+            except Exception as exc:
+                self._json({"error": f"{type(exc).__name__}: {exc}"},
+                           status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if path == "/api/model-telemetry":
             payload = self.state.model_telemetry.summary()
             payload["generations"] = self.state.model_telemetry.generation_summary()

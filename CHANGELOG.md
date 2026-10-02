@@ -72,6 +72,19 @@ letting it preempt the user.
   is never swept; never pushes. `self_repair_commit_on_promote` config
   (default on).
 
+- **Hardware-tier model stack** — `models/tiers.py` + `model_tiers.json`:
+  a four-tier catalog (4B utility / 8B lightweight_reasoner / 14B
+  primary_coder / 30B deep_reasoner) with a `plan_model_stack` planner.
+  Dedicated VRAM only (shared memory and pagefile never qualify), usable
+  RAM = total − reserve, and hybrid offload may climb at most one tier
+  above the highest native tier — a 12 GB + 64 GB machine runs the 30B
+  as hybrid. Windows GPU detection now reads the display-adapter
+  registry for true 64-bit VRAM + vendor when nvidia-smi is absent.
+  `GET /api/model-plan` exposes the live plan; `canonical_role` maps
+  legacy roles onto the ladder so tier-configured models serve
+  canonical-role requests. `scripts/sync_model_catalog.py` keeps the
+  installer's compile-time model defines in sync with the catalog.
+
 ### Changed
 
 - `MissionStore.list()` now sorts by `effective_rank` (aging-aware).

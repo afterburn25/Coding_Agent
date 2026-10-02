@@ -49,6 +49,32 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(d.role, "reviewer")
         self.assertEqual(d.model_id, "deep")
 
+    def test_canonical_role_matching_tier2(self):
+        """A model configured with catalog tier-2 roles (light_coder)
+        serves fast_coder/lightweight requests via alias resolution."""
+        router = ModelRouter([
+            ModelProfile(id="lite", endpoint="http://x", model="lite",
+                         roles=["light_coder"], priority=10),
+            ModelProfile(id="big", endpoint="http://x", model="big",
+                         roles=["primary_coder"], priority=10),
+        ])
+        d = router.choose("Rename the Save button to Apply")
+        # light_coder canonicalizes to lightweight_reasoner; fast_coder →
+        # primary_coder, so the light model should not match a fast_coder
+        # request — the primary model serves it.
+        self.assertEqual(d.model_id, "big")
+        d2 = router.choose("x", override="lightweight_reasoner")
+        self.assertEqual(d2.model_id, "lite")
+
+    def test_alias_roles_match_canonical_role(self):
+        """primary_reasoner on a model satisfies a primary_coder request."""
+        router = ModelRouter([
+            ModelProfile(id="aliased", endpoint="http://x", model="m",
+                         roles=["primary_reasoner"], priority=10),
+        ])
+        d = router.choose("fix this file")
+        self.assertEqual(d.model_id, "aliased")
+
 
 if __name__ == "__main__":
     unittest.main()
