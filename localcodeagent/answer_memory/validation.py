@@ -13,6 +13,33 @@ _NOISE = {
     "bye", "goodbye", "good night", "good morning", "good afternoon",
 }
 
+# Utterances that only mean something relative to the previous assistant
+# turn — "do it", "yes go ahead", "the second one". They must never be
+# learned or resolved as standalone questions: the referent lives in live
+# conversation state, and a stored Q/A pair injects a stale answer as a
+# "possibly relevant" hint or replays an earlier exchange verbatim.
+_CONTEXT_DEPENDENT_RE = re.compile(
+    r"^\s*(?:"
+    r"yes|yeah|yep|yup|ya|yea|sure|ok(?:ay)?|kk|alright|fine|cool|"
+    r"affirmative|absolutely|definitely|of course|please do|"
+    r"do it|do that|do this|go ahead|go for it|sounds good|"
+    r"let'?s do it|proceed|continue|carry on|keep going|resume|"
+    r"why not|no|nope|nah|negative|don'?t|do not|"
+    r"never ?mind|cancel(?: that)?|skip it|forget (?:it|that)|"
+    r"that one|this one|the (?:first|second|third|last) one|"
+    r"(?:first|second|third|last) one|both|all of them|neither|either one|"
+    r"same(?: thing)?|again|retry|try again|once more"
+    r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|them))*"
+    r"[\s.!?,]*$",
+    re.I,
+)
+
+
+def is_context_dependent(text: str) -> bool:
+    """True when the message only resolves against live conversation
+    context — affirmatives, deictic picks, bare continue/cancel."""
+    return bool(_CONTEXT_DEPENDENT_RE.match(str(text or "")))
+
 # Secret / credential indicators — suppress persistent learning entirely.
 _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
@@ -56,6 +83,8 @@ def is_noise(text: str) -> bool:
         return True
     if norm in _NOISE:
         return True
+    if is_context_dependent(text):
+        return True
     if not re.search(r"[a-z0-9]", norm):
         return True
     return False
@@ -72,6 +101,8 @@ def classify_cacheability(text: str) -> str:
     transformation | task_specific."""
     t = normalize_question(text)
     if not t:
+        return "task_specific"
+    if is_context_dependent(text):
         return "task_specific"
     if any(m in t for m in _LIVE_MARKERS):
         return "live"

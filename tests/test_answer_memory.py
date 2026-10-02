@@ -611,3 +611,37 @@ class BenchmarkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestContextDependentUtterances(unittest.TestCase):
+    """'do it' / 'yes' refer to the previous turn — they must never be
+    learned or resolved as standalone questions."""
+
+    def test_context_dependent_detection(self):
+        from localcodeagent.answer_memory import validation
+        for text in ("do it", "yes", "yes do it", "go ahead", "sure",
+                     "the second one", "proceed", "try again", "forget it"):
+            self.assertTrue(validation.is_context_dependent(text), text)
+        for text in ("do it again with the release build",
+                     "continue the refactor of parser.py",
+                     "what does this function do"):
+            self.assertFalse(validation.is_context_dependent(text), text)
+
+    def test_context_dependent_not_cacheable(self):
+        from localcodeagent.answer_memory import validation
+        for text in ("do it", "yes", "yes do it", "go ahead"):
+            self.assertEqual(validation.classify_cacheability(text),
+                             "task_specific", text)
+            self.assertTrue(validation.is_noise(text), text)
+
+    def test_context_dependent_exchange_not_learned(self):
+        from localcodeagent.answer_memory import AnswerMemory
+        with tempfile.TemporaryDirectory() as tmp:
+            am = AnswerMemory(str(Path(tmp) / "am.db"))
+            try:
+                out = am.record_exchange("yes do it", "Done.")
+                self.assertIsNone(out["answer_id"])
+                rows = am.store.query("SELECT * FROM answers")
+                self.assertEqual(rows, [])
+            finally:
+                am.close()

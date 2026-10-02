@@ -677,6 +677,11 @@ class AgentOrchestrator:
         Uses a non-recording peek so gating never double-counts stats ahead of
         the real lookup in ``run()``.
         """
+        from ..answer_memory import validation as _am_validation
+        if _am_validation.is_context_dependent(user_text):
+            # "do it" / "yes" resolve against live conversation, never a
+            # stored answer.
+            return False
         am = self.answer_memory
         if am is None or not getattr(am, "available", False):
             return False
@@ -2996,10 +3001,19 @@ class AgentOrchestrator:
         # model inference entirely; a possible match only contributes context
         # to the fast lane later on.
         memory_context = ""
+        # Context-dependent utterances ("do it", "yes", "the second one")
+        # refer to the previous turn — a stored Q/A can only inject a stale
+        # exchange, so skip Answer Memory outright.
+        try:
+            from ..answer_memory import validation as _am_validation
+            context_dependent = _am_validation.is_context_dependent(user_text)
+        except Exception:
+            context_dependent = False
         if (
             mode == "auto"
             and self.answer_memory is not None
             and self._brain_subroutine_enabled("answer_memory", True)
+            and not context_dependent
         ):
             try:
                 memory_match = self.answer_memory.lookup(
