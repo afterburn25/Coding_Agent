@@ -11,6 +11,7 @@ import http.client
 import json
 import socket
 import tempfile
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -517,6 +518,159 @@ class DiagnosticsEndpointTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 stop_state(state)
+
+
+class RealSocketResetTests(unittest.TestCase):
+    """Reproduce an actual OS-level TCP reset on loopback — SO_LINGER(0)
+    close produces a genuine WinError 10054 on Windows / ECONNRESET on
+    POSIX, not a synthetic exception."""
+
+    def _rst_server(self):
+        import struct
+        import threading
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(4)
+        port = srv.getsockname()[1]
+        stop = threading.Event()
+
+        def loop():
+            srv.settimeout(0.5)
+            while not stop.is_set():
+                try:
+                    conn, _ = srv.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                # Abortive close: unread request bytes + RST.
+                conn.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                conn.close()
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+        return srv, port, stop, t
+
+    def test_real_tcp_reset_surfaces_as_connection_reset(self):
+        import http.client as hc
+        srv, port, stop, t = self._rst_server()
+        try:
+            with self.assertRaises((ConnectionResetError, ConnectionAbortedError,
+                                    BrokenPipeError, hc.RemoteDisconnected,
+                                    OSError)) as ctx:
+                conn = hc.HTTPConnection("127.0.0.1", port, timeout=5)
+                try:
+                    conn.request("POST", "/v1/chat/completions", body="{}", headers={"Content-Type": "application/json"})
+                    conn.getresponse().read()
+                finally:
+                    conn.close()
+            # Whatever the OS reported must classify as a transport failure.
+            self.assertTrue(
+                is_transport_failure(ctx.exception) or
+                classify_transport_error(ctx.exception) is not None or
+                isinstance(ctx.exception, hc.RemoteDisconnected),
+                f"unexpected classification for {ctx.exception!r}")
+        finally:
+            stop.set()
+            srv.close()
+            t.join(timeout=2)
+
+    def test_real_reset_through_provider_is_classified_backend_error(self):
+        srv, port, stop, t = self._rst_server()
+        try:
+            provider = OpenAICompatibleProvider(
+                _profile(endpoint=f"http://127.0.0.1:{port}/v1"))
+            with self.assertRaises(BackendConnectionError) as ctx:
+                provider.complete(messages=[{"role": "user", "content": "hi"}])
+            exc = ctx.exception
+            self.assertIn(exc.kind, ("connection_reset", "connection_aborted",
+                                     "incomplete_read", "eof", "http_error",
+                                     "timeout", "connection_refused"))
+            self.assertEqual(exc.host, "127.0.0.1")
+            self.assertEqual(exc.port, port)
+            self.assertFalse(exc.delivered_output)
+        finally:
+            stop.set()
+            srv.close()
+            t.join(timeout=2)
+
+
+class PortCollisionTests(unittest.TestCase):
+    """A stale dev backend squatting on the API port must not kill the
+    server with a raw bind traceback — serve() identifies the owner and
+    picks a free port."""
+
+    def _cfg(self) -> AgentConfig:
+        return AgentConfig(
+            models=[ModelProfile(
+                id="fake", endpoint="http://127.0.0.1:9/v1",
+                model="fake-model", roles=["primary_coder"],
+                runtime="external")],
+            process_watchdog=False, research_enabled=False)
+
+    def test_create_server_cleans_up_state_on_bind_failure(self):
+        import threading
+        from localcodeagent.server import create_server
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        held_port = sock.getsockname()[1]
+        threads_before = threading.active_count()
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / "web").mkdir()
+            with self.assertRaises(OSError):
+                create_server(self._cfg(), ws, "127.0.0.1", held_port,
+                              ws / "web", ws / ".runtime")
+            # The orphaned AppState must have been shut down — no leaked
+            # worker threads from the failed attempt.
+            time.sleep(0.5)
+            self.assertLessEqual(threading.active_count(), threads_before + 1)
+        sock.close()
+
+    def test_serve_recovers_on_held_port(self):
+        import threading
+        from localcodeagent.server import serve
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        held_port = sock.getsockname()[1]
+
+        # serve() emits the real bound port via boot.port_report so the
+        # desktop host can health-check it; capture the call directly —
+        # stdout redirection races with other tests' serve() threads.
+        reported: list[int] = []
+        import localcodeagent.boot as boot_mod
+        original = boot_mod.port_report
+        boot_mod.port_report = lambda p: (reported.append(p), original(p))
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                ws = Path(td)
+                (ws / "web").mkdir()
+                t = threading.Thread(
+                    target=serve,
+                    args=(self._cfg(), ws, "127.0.0.1", held_port,
+                          Path(__file__).resolve().parents[1] / "web",
+                          ws / ".runtime"),
+                    kwargs={"config_path": None},
+                    daemon=True)
+                t.start()
+                # AppState init can take several seconds under parallel
+                # test load; poll until the marker lands or the thread dies.
+                deadline = time.time() + 25
+                while not reported and t.is_alive() and time.time() < deadline:
+                    time.sleep(0.1)
+                self.assertTrue(t.is_alive(), "serve() must not die on bind collision")
+                self.assertTrue(reported, "serve() must report its bound port")
+                self.assertNotEqual(reported[-1], held_port,
+                                    "reported port must be the fallback, not the held port")
+        finally:
+            boot_mod.port_report = original
+        sock.close()
 
 
 if __name__ == "__main__":

@@ -476,9 +476,17 @@ internal sealed class BackendProcess : IDisposable
     private readonly Process _process;
     private readonly TextWriter _logWriter;
     private readonly object _logLock = new();
+    private readonly int _requestedPort;
+    private volatile int _announcedPort;
     private volatile bool _disposing;
 
-    public int Port { get; }
+    /// <summary>
+    /// The port the backend actually bound. Normally the requested port;
+    /// if the backend reported a fallback via its "[nexus-port]" stdout
+    /// marker, that port wins so health checks never hit a foreign process
+    /// squatting on the requested port.
+    /// </summary>
+    public int Port => _announcedPort > 0 ? _announcedPort : _requestedPort;
     public string BaseUrl => $"http://127.0.0.1:{Port}/";
     public string LogPath { get; }
     public event Action<int>? UnexpectedExit;
@@ -488,7 +496,7 @@ internal sealed class BackendProcess : IDisposable
     private BackendProcess(Process process, int port, string logPath)
     {
         _process = process;
-        Port = port;
+        _requestedPort = port;
         LogPath = logPath;
         _logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true) { AutoFlush = true });
 
@@ -500,6 +508,14 @@ internal sealed class BackendProcess : IDisposable
             {
                 try { BootPhase?.Invoke(pct, primary, secondary); }
                 catch { /* splash updates must never break the backend host */ }
+            }
+            if (TryParsePortMarker(e.Data, out var announced))
+            {
+                _announcedPort = announced;
+                if (announced != _requestedPort)
+                {
+                    WriteLog("HOST", $"backend bound fallback port {announced} (requested {_requestedPort})");
+                }
             }
         };
         _process.ErrorDataReceived += (_, e) => WriteLog("ERR", e.Data);
@@ -544,6 +560,25 @@ internal sealed class BackendProcess : IDisposable
         }
     }
 
+    /// <summary>
+    /// Parse a "[nexus-port] N" stdout line emitted right after the backend
+    /// binds its socket. The backend may legitimately bind a different port
+    /// than requested (the candidate can be taken between the host's free-
+    /// port probe and the backend's bind); the announced port is the only
+    /// trustworthy target for health checks.
+    /// </summary>
+    internal static bool TryParsePortMarker(string? line, out int port)
+    {
+        port = 0;
+        const string prefix = "[nexus-port] ";
+        if (line is null || !line.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        return int.TryParse(line[prefix.Length..].Trim(), out port)
+            && port > 0 && port <= 65535;
+    }
+
     private int SafeExitCode()
     {
         try { return _process.ExitCode; }
@@ -586,6 +621,18 @@ internal sealed class BackendProcess : IDisposable
 
         var config = Path.Combine(appDir, "config.json");
         var port = FindFreePort();
+
+        // Mutable user state (chat history, memory, diagnostics, generated
+        // output) must not live inside the app directory — rebuilds,
+        // updates, and reinstalls replace it wholesale, which has wiped
+        // conversations before. Relocate those dirs under a per-user root
+        // and leave junctions behind so backend paths keep resolving.
+        // NEXUS_NO_STATE_REDIRECT=1 opts out (used by the build smoke test).
+        var stateNotes = new List<string>();
+        if (Environment.GetEnvironmentVariable("NEXUS_NO_STATE_REDIRECT") != "1")
+        {
+            EnsureStateJunctions(appDir, stateNotes);
+        }
 
         var logDir = Path.Combine(appDir, "data", "logs");
         Directory.CreateDirectory(logDir);
@@ -653,6 +700,10 @@ internal sealed class BackendProcess : IDisposable
             // Best-effort bookkeeping — never block startup on it.
         }
         var backend = new BackendProcess(process, port, logPath);
+        foreach (var note in stateNotes)
+        {
+            backend.WriteLog("HOST", note);
+        }
         backend.WriteLog("HOST", $"started backend pid {process.Id} on port {port}");
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -728,6 +779,90 @@ internal sealed class BackendProcess : IDisposable
         {
             try { _logWriter.Dispose(); } catch { }
             _process.Dispose();
+        }
+    }
+
+    /// <summary>Mutable dirs that belong to the user, not the install.</summary>
+    private static readonly string[] StateDirs = { "data", ".agent", "output" };
+
+    private static string UserStateRoot() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "NexusCore");
+
+    /// <summary>
+    /// Redirect each mutable state dir under appDir to the per-user state
+    /// root via a directory junction. Junctions are transparent to the
+    /// backend — every runtime_root/"data" path resolves through them —
+    /// and creating one needs no elevation. Existing content is merged
+    /// into the state root first so an upgrade never drops history.
+    /// </summary>
+    private static void EnsureStateJunctions(string appDir, List<string> notes)
+    {
+        var stateRoot = UserStateRoot();
+        foreach (var name in StateDirs)
+        {
+            var link = Path.Combine(appDir, name);
+            var target = Path.Combine(stateRoot, name);
+            try
+            {
+                if (Directory.Exists(link))
+                {
+                    if ((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        continue; // already redirected
+                    }
+                    MigrateDirectoryContents(link, target);
+                    Directory.Delete(link, recursive: true);
+                    notes.Add($"migrated {name}/ into per-user state at {target}");
+                }
+                Directory.CreateDirectory(target);
+                CreateJunction(link, target);
+                notes.Add($"redirected {name}/ to {target}");
+            }
+            catch (Exception ex)
+            {
+                // Redirection is a durability upgrade, never a startup
+                // blocker — fall back to a plain in-place directory.
+                notes.Add($"could not redirect {name}/ ({ex.Message}) — state stays in the install directory");
+                try { Directory.CreateDirectory(link); } catch { }
+            }
+        }
+    }
+
+    /// <summary>Copy source contents into target; existing target entries win.</summary>
+    private static void MigrateDirectoryContents(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            var dest = Path.Combine(target, Path.GetFileName(file));
+            if (!File.Exists(dest))
+            {
+                File.Copy(file, dest);
+            }
+        }
+        foreach (var dir in Directory.EnumerateDirectories(source))
+        {
+            MigrateDirectoryContents(dir, Path.Combine(target, Path.GetFileName(dir)));
+        }
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        using var p = Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+        p?.WaitForExit(10000);
+        if (p is null || p.ExitCode != 0 || !Directory.Exists(link))
+        {
+            throw new InvalidOperationException($"mklink /J failed for {link}");
         }
     }
 

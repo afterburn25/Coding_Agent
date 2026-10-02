@@ -10,28 +10,30 @@
 </head>
 <body>
   <div class="trainer-shell">
-    <aside class="trainer-side">
+        <aside class="sidebar">
       <div class="brand-lockup">
         <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
-        <div class="brand-wordmark">Nexus <strong>Core</strong><small>Trainer / Model Growth</small></div>
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>TRAINER</small></div>
       </div>
-      <a class="workspace-link" href="/">← Chat</a>
-      <a class="workspace-link" href="/models.html">Models</a>
-      <a class="workspace-link" href="/research.html">Research</a>
-      <a class="workspace-link" href="/missions.html">Missions</a>
-      <a class="workspace-link" href="/image.html">Image Studio</a>
-      <a class="workspace-link" href="/tools.html">Tools</a>
-      <a class="workspace-link active" href="/trainer.html">Trainer</a>
-      <a class="workspace-link" href="/voice.html">Voice Studio</a>
-      <a class="workspace-link" href="/answers.html">Learned Answers</a>
-      <a class="workspace-link" href="/system.html">System</a>
-      <a class="workspace-link" href="/settings.html">Settings</a>
-      <button id="voiceToggle" class="workspace-link voice-toggle" type="button">🔊 Voice On</button>
-<div class="section-title">Growth pipeline</div>
-      <div class="pipeline">
-        <span>Learn</span><b>→</b><span>Review</span><b>→</b><span>Dataset</span><b>→</b><span>Train</span><b>→</b><span>Evaluate</span><b>→</b><span>Promote</span>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item active" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
       </div>
-      <p class="muted small">Live conversations update memory immediately. Model weights only change through an explicit offline/versioned training workflow.</p>
     </aside>
 
     <main class="trainer-main">
@@ -40,6 +42,14 @@
         <div><h1>Trainer & Model Growth</h1><p>Teach Nexus Core through normal conversation, inspect what it learned, and curate what becomes model training data.</p></div>
         <button id="syncGrowth" class="trainer-primary" type="button">Sync learned items</button>
       </header>
+
+      <section class="trainer-card">
+        <div class="section-title">Growth pipeline</div>
+<div class="pipeline">
+        <span>Learn</span><b>→</b><span>Review</span><b>→</b><span>Dataset</span><b>→</b><span>Train</span><b>→</b><span>Evaluate</span><b>→</b><span>Promote</span>
+      </div>
+<p class="muted small">Live conversations update memory immediately. Model weights only change through an explicit offline/versioned training workflow.</p>
+      </section>
 
       <section class="trainer-card brain-card">
         <div class="card-head">

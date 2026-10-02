@@ -1,6 +1,6 @@
 /* Settings — secondary nav, profiles, permission matrix, detail panel */
 
-.settings-nav{display:flex;flex-direction:column;gap:4px}
+.settings-nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
 .settings-nav button{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text-dim);font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
 .settings-nav button:hover{background:var(--panel2);border-color:var(--line)}
 .settings-nav button.active{background:linear-gradient(90deg,rgba(3,190,255,.16),rgba(109,51,255,.22));border-color:var(--info);color:var(--text)}

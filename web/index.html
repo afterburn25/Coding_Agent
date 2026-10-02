@@ -19,14 +19,14 @@
 
       <nav class="primary-nav" aria-label="Primary">
         <button id="newChat" class="nav-item active" type="button"><span class="nav-icon">◌</span><span>Chat</span></button>
-        <a class="nav-item" href="#workspaceBlock"><span class="nav-icon">□</span><span>Projects</span></a>
-        <a class="nav-item" href="#modelBlock"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
         <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
         <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
         <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
         <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
         <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
         <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
         <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
         <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
         <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
@@ -39,53 +39,6 @@
       </div>
 
       <div class="sidebar-spacer"></div>
-
-      <details id="systemBlock" class="system-drawer">
-        <summary>Local system</summary>
-        <div class="system-block">
-          <div class="section-title">Coding readiness</div>
-          <div id="readinessPanel" class="readiness-panel"><span class="muted">Checking local coding stack…</span></div>
-        </div>
-        <div id="workspaceBlock" class="system-block">
-          <div class="section-title">Workspace</div>
-          <div id="workspace" class="workspace">Loading…</div>
-        </div>
-        <div class="system-block">
-          <div class="section-title">Hardware</div>
-          <div id="hardware" class="hardware">Detecting…</div>
-        </div>
-        <div id="modelBlock" class="system-block">
-          <div class="section-row"><span class="section-title">Models</span><a class="mini-button" href="/models.html">Manage</a><button id="refreshRuntime" class="mini-button" type="button">Refresh</button><button id="copyDiagnostics" class="mini-button" type="button" title="Fetch /api/diagnostics and copy a crash report">Diagnostics</button></div>
-          <div id="models" class="models"></div>
-        </div>
-        <div class="system-block">
-          <div class="section-row"><span class="section-title">Repository index</span><button id="rebuildIndex" class="mini-button" type="button">Rebuild</button></div>
-          <div id="repoIndex" class="inventory">Not indexed</div>
-        </div>
-        <div class="system-block">
-          <div class="section-title">Conversation policy</div>
-          <select id="policyMode" class="policy-select">
-            <option value="permissive">Permissive</option>
-            <option value="balanced">Balanced</option>
-            <option value="strict">Strict</option>
-          </select>
-          <label class="ethical-temperature-row">
-            <span>Ethical temperature <strong id="ethicalTemperatureValue">1.00</strong></span>
-            <input id="ethicalTemperature" type="range" min="0" max="1" step="0.05" value="1" />
-          </label>
-          <small id="policyNote" class="policy-note">1.00 = maximum conversational permissiveness within the hard tool/action safety boundary.</small>
-        </div>
-        <div class="system-block">
-          <div class="section-row"><span class="section-title">Memory & training</span><button id="refreshMemory" class="mini-button" type="button">Refresh</button></div>
-          <div id="memoryStatus" class="inventory">Loading persistent memory…</div>
-          <a class="mini-button trainer-link" href="/trainer.html">Open Trainer / Model Growth</a>
-          <a class="mini-button trainer-link" href="/answers.html">Learned Answers</a>
-        </div>
-        <div class="system-block">
-          <div class="section-title">Local GGUF inventory</div>
-          <div id="inventory" class="inventory">Scanning…</div>
-        </div>
-      </details>
 
       <div class="local-card">
         <span class="local-dot"></span>
@@ -161,6 +114,7 @@
         <button class="utility-tab active" data-panel="diff" type="button">Code Diff</button>
         <button class="utility-tab" data-panel="tasks" type="button">Tasks</button>
         <button class="utility-tab" data-panel="terminal" type="button">Terminal</button>
+        <button class="utility-tab" data-panel="system" type="button">System</button>
       </div>
 
       <section class="utility-panel active" data-utility-panel="diff">
@@ -192,6 +146,53 @@
           <button class="tl-chip" data-tl="error" type="button">Errors</button>
         </div>
         <section id="activity" class="activity"><span class="muted">Tool calls, model switches, and command output will appear here.</span></section>
+      </section>
+
+      <section class="utility-panel" data-utility-panel="system" id="systemBlock">
+        <div class="taskbar-title">Local system</div>
+        <div class="system-block">
+          <div class="section-title">Coding readiness</div>
+          <div id="readinessPanel" class="readiness-panel"><span class="muted">Checking local coding stack…</span></div>
+        </div>
+        <div id="workspaceBlock" class="system-block">
+          <div class="section-title">Workspace</div>
+          <div id="workspace" class="workspace">Loading…</div>
+        </div>
+        <div class="system-block">
+          <div class="section-title">Hardware</div>
+          <div id="hardware" class="hardware">Detecting…</div>
+        </div>
+        <div id="modelBlock" class="system-block">
+          <div class="section-row"><span class="section-title">Models</span><a class="mini-button" href="/models.html">Manage</a><button id="refreshRuntime" class="mini-button" type="button">Refresh</button><button id="copyDiagnostics" class="mini-button" type="button" title="Fetch /api/diagnostics and copy a crash report">Diagnostics</button></div>
+          <div id="models" class="models"></div>
+        </div>
+        <div class="system-block">
+          <div class="section-row"><span class="section-title">Repository index</span><button id="rebuildIndex" class="mini-button" type="button">Rebuild</button></div>
+          <div id="repoIndex" class="inventory">Not indexed</div>
+        </div>
+        <div class="system-block">
+          <div class="section-title">Conversation policy</div>
+          <select id="policyMode" class="policy-select">
+            <option value="permissive">Permissive</option>
+            <option value="balanced">Balanced</option>
+            <option value="strict">Strict</option>
+          </select>
+          <label class="ethical-temperature-row">
+            <span>Ethical temperature <strong id="ethicalTemperatureValue">1.00</strong></span>
+            <input id="ethicalTemperature" type="range" min="0" max="1" step="0.05" value="1" />
+          </label>
+          <small id="policyNote" class="policy-note">1.00 = maximum conversational permissiveness within the hard tool/action safety boundary.</small>
+        </div>
+        <div class="system-block">
+          <div class="section-row"><span class="section-title">Memory &amp; training</span><button id="refreshMemory" class="mini-button" type="button">Refresh</button></div>
+          <div id="memoryStatus" class="inventory">Loading persistent memory…</div>
+          <a class="mini-button trainer-link" href="/trainer.html">Open Trainer / Model Growth</a>
+          <a class="mini-button trainer-link" href="/answers.html">Learned Answers</a>
+        </div>
+        <div class="system-block">
+          <div class="section-title">Local GGUF inventory</div>
+          <div id="inventory" class="inventory">Scanning…</div>
+        </div>
       </section>
 
       <div class="rail-footer">

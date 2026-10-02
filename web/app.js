@@ -499,7 +499,7 @@ async function streamAgent(message,attachments){
   let res;
   try{res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message,mode:mode.value,...(attachments?.length?{attachments}:{})})});}
   catch(e){agentStreamActive=false;throw e;}
-  if(!res.ok){agentStreamActive=false;let detail='Request failed',code='';try{const d=await res.json();detail=d.error||detail;code=d.code||'';}catch{}state.bubble.textContent=detail;state.wrap.classList.remove('streaming');if(code==='coding_model_setup_required'){document.querySelector('#systemBlock')?.setAttribute('open','');loadReadiness();}const err=new Error(detail);err.displayed=true;throw err;}
+  if(!res.ok){agentStreamActive=false;let detail='Request failed',code='';try{const d=await res.json();detail=d.error||detail;code=d.code||'';}catch{}state.bubble.textContent=detail;state.wrap.classList.remove('streaming');if(code==='coding_model_setup_required'){setUtilityPanel('system');loadReadiness();}const err=new Error(detail);err.displayed=true;throw err;}
   if(!res.body)throw new Error('Streaming response body is unavailable in this browser.');
   const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
   while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});let split;while((split=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,split);buffer=buffer.slice(split+2);if(block.trim())parseSseBlock(block,state);}if(done)break;}

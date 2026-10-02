@@ -124,13 +124,59 @@ class NavigationTests(unittest.TestCase):
             html = read(f"{page}.html")
             self.assertIn('href="/styles.css"', html, f"{page} missing styles.css")
 
+    def _sidebar_block(self, html: str) -> str:
+        m = re.search(r'<aside class="sidebar">.*?</aside>', html, re.S)
+        self.assertIsNotNone(m, "page has no canonical .sidebar")
+        return m.group(0)
+
     def test_workspace_pages_have_canonical_nav(self):
         for page in [p for p in PAGES if p != "index"]:
             html = read(f"{page}.html")
             for href in CANONICAL_LINKS:
                 self.assertIn(f'href="{href}"', html, f"{page} missing nav link {href}")
-            count = len(re.findall(r'class="(?:workspace-link|side-links)', html))
-            self.assertGreaterEqual(count, 1, f"{page} has no workspace nav")
+            self.assertIn('class="primary-nav"', html,
+                          f"{page} is not using the shared primary-nav")
+
+    def test_sidebar_is_nav_only(self):
+        # The left rail is navigation, not a junk drawer — page controls
+        # (selects, forms, status blocks) belong in the page's own areas.
+        for page in [p for p in PAGES if p != "index"]:
+            sidebar = self._sidebar_block(read(f"{page}.html"))
+            self.assertNotIn("<form", sidebar, f"{page} sidebar contains a form")
+            self.assertNotIn("<select", sidebar, f"{page} sidebar contains a select")
+            self.assertNotIn("<textarea", sidebar, f"{page} sidebar contains a textarea")
+            self.assertNotIn('class="side-block', sidebar,
+                             f"{page} sidebar still holds control blocks")
+            self.assertNotIn('class="section-title"', sidebar,
+                             f"{page} sidebar still holds sectioned extras")
+            ids = re.findall(r'id="([^"]+)"', sidebar)
+            self.assertEqual(ids, ["voiceToggle"],
+                             f"{page} sidebar has non-nav widgets: {ids}")
+
+    def test_displaced_controls_still_exist(self):
+        # Controls removed from sidebars must land inside the page, not vanish.
+        expectations = {
+            "tools": ["categoryList", "mcpList"],
+            "models": ["hwBox", "fileList"],
+            "settings": ["settingsNav"],
+            "voice": ["engineStatus", "presetList", "autoRead"],
+            "research": ["researchMode", "researchStats", "recentResearch"],
+            "trainer": ['class="pipeline"'],
+            "system": ["overallCard", "refreshAll"],
+            "missions": ["autonomyStatus", "createMission", "standingGoals",
+                         "schedules", "triggers"],
+            "image": ["imageBackend", "imageModels", "loraLibrary",
+                      "imageInventory", "subjectProfiles"],
+        }
+        for page, ids in expectations.items():
+            html = read(f"{page}.html")
+            sidebar = self._sidebar_block(html)
+            for marker in ids:
+                needle = marker if marker.startswith(("id=", "class=")) else f'id="{marker}"'
+                self.assertIn(needle, html, f"{page} lost {marker}")
+                self.assertNotIn(
+                    needle, sidebar,
+                    f"{page} {marker} still inside the nav sidebar")
 
     def test_current_page_marked_active(self):
         for page in [p for p in PAGES if p != "index"]:
@@ -163,7 +209,7 @@ class SharedComponentTests(unittest.TestCase):
         self.assertRegex(self.css, r"input::placeholder")
 
     def test_workspace_link_component(self):
-        for sel in (".workspace-link", ".side-links a", ".side-toggle"):
+        for sel in (".nav-item", ".primary-nav", ".nav-icon", ".local-card"):
             self.assertIn(sel, self.css)
 
 

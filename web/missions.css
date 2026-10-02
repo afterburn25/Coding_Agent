@@ -1,6 +1,6 @@
 /* Nexus Core — Mission Control */
 .missions-shell{display:flex;min-height:100vh}
-.missions-side{width:280px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:8px;position:sticky;top:0;height:100vh;overflow-y:auto}
+
 .missions-right{width:300px;flex-shrink:0;background:var(--panel2);border-left:1px solid var(--line);padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .missions-main{flex:1;display:flex;flex-direction:column;min-width:0}
 .missions-body{display:flex;flex:1;min-height:0}
@@ -28,7 +28,7 @@
 .mini-button.danger{border-color:var(--line2);color:var(--danger)}
 .mini-button.danger:hover{background:var(--danger-tint)}
 
-.missions-side textarea,.missions-side select{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--text-dim);font:inherit;font-size:12px;padding:7px 9px;resize:vertical}
+.missions-right textarea,.missions-right select{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--text-dim);font:inherit;font-size:12px;padding:7px 9px;resize:vertical}
 
 .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
 .detail-head h2{margin:0;font-size:17px;color:var(--text)}
@@ -64,5 +64,5 @@
 #missionCount{color:var(--muted);font-size:12px;margin-left:10px}
 #missionFilter{width:230px}
 @media(max-width:700px){.missions-main .topbar{flex-wrap:wrap;padding:10px 14px;height:auto}#missionFilter{width:100%}}
-@media(max-width:1100px){.missions-side{width:230px}.mission-list{width:200px;min-width:160px}}
-@media(max-width:700px){.missions-side{width:190px}.mission-list{display:none}}
+@media(max-width:1100px){.mission-list{width:200px;min-width:160px}}
+@media(max-width:700px){.mission-list{display:none}}

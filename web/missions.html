@@ -10,21 +10,50 @@
 </head>
 <body>
 <div class="missions-shell">
-  <aside class="missions-side">
-    <div class="brand">Nexus Core <span>Missions</span></div>
-    <a class="workspace-link" href="/">← Chat</a>
-    <a class="workspace-link" href="/models.html">Models</a>
-    <a class="workspace-link" href="/research.html">Research</a>
-    <a class="workspace-link active" href="/missions.html">Missions</a>
-    <a class="workspace-link" href="/image.html">Image Studio</a>
-    <a class="workspace-link" href="/tools.html">Tools</a>
-    <a class="workspace-link" href="/trainer.html">Trainer</a>
-    <a class="workspace-link" href="/voice.html">Voice Studio</a>
-    <a class="workspace-link" href="/answers.html">Learned Answers</a>
-    <a class="workspace-link" href="/system.html">System</a>
-    <a class="workspace-link" href="/settings.html">Settings</a>
-    <button id="voiceToggle" class="workspace-link voice-toggle" type="button">🔊 Voice On</button>
-<div class="section-title">Autonomy</div>
+      <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>MISSION CONTROL</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item active" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
+      </div>
+    </aside>
+
+  <main class="missions-main">
+
+    <a class="mobile-back" href="/">← Chat</a>
+    <header class="topbar">
+      <div><strong>Mission Control</strong><span id="missionCount">0 missions</span></div>
+      <input id="missionFilter" placeholder="Filter missions…" />
+    </header>
+    <div class="missions-body">
+      <section id="missionList" class="mission-list"></section>
+      <section id="missionDetail" class="mission-detail">
+        <div class="empty">Select a mission</div>
+      </section>
+    </div>
+  </main>
+
+  <aside class="missions-right">
+
+    <div class="section-title">Autonomy</div>
     <div id="autonomyStatus" class="autonomy-card">Loading…</div>
     <div class="side-actions">
       <button id="stopAutonomy" class="mini-button danger" type="button">Stop Autonomy</button>
@@ -44,6 +73,13 @@
       <option value="extended_autonomous">Extended Autonomous</option>
     </select>
     <div class="side-actions"><button id="createMission" class="mini-button" type="button">Create + Start</button></div>
+
+    <div class="section-title">Pending approvals</div>
+    <div id="approvals" class="inventory"></div>
+    <div class="section-title">Notifications</div>
+    <div id="notifications" class="inventory"></div>
+    <div class="section-title">Daily summary</div>
+    <div id="dailySummary" class="inventory"></div>
     <div class="section-title">Standing goals</div>
     <div id="standingGoals" class="inventory"></div>
     <div class="mini-form">
@@ -73,28 +109,6 @@
       <input id="newTrigObjective" placeholder="Mission objective…" />
       <button id="createTrigger" class="mini-button" type="button">Add</button>
     </div>
-  </aside>
-
-  <main class="missions-main">
-    <header class="topbar">
-      <div><strong>Mission Control</strong><span id="missionCount">0 missions</span></div>
-      <input id="missionFilter" placeholder="Filter missions…" />
-    </header>
-    <div class="missions-body">
-      <section id="missionList" class="mission-list"></section>
-      <section id="missionDetail" class="mission-detail">
-        <div class="empty">Select a mission</div>
-      </section>
-    </div>
-  </main>
-
-  <aside class="missions-right">
-    <div class="section-title">Pending approvals</div>
-    <div id="approvals" class="inventory"></div>
-    <div class="section-title">Notifications</div>
-    <div id="notifications" class="inventory"></div>
-    <div class="section-title">Daily summary</div>
-    <div id="dailySummary" class="inventory"></div>
   </aside>
 </div>
 <script src="/voice_global.js"></script>

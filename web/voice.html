@@ -11,45 +11,29 @@
 </head>
 <body>
   <div class="tools-shell">
-    <aside class="tools-side">
-      <div class="brand">
-        <img class="brand-logo" src="/assets/nexus-core-icon.png" alt="Nexus Core">
-        <div>
-          <div class="brand-title">NEXUS <span>CORE</span></div>
-          <div class="brand-sub">VOICE STUDIO</div>
-        </div>
+        <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>VOICE STUDIO</small></div>
       </div>
-      <nav class="side-links">
-        <a href="/">Chat</a>
-        <a href="/models.html">Models</a>
-        <a href="/research.html">Research</a>
-        <a href="/missions.html">Missions</a>
-        <a href="/image.html">Images</a>
-        <a href="/tools.html">Tools</a>
-        <a href="/trainer.html">Trainer</a>
-        <a class="active" href="/voice.html">Voice</a>
-        <a href="/answers.html">Answers</a>
-        <a href="/system.html">System</a>
-        <a href="/settings.html">Settings</a>
-        <button id="voiceToggle" class="voice-toggle side-toggle" type="button">🔊 Voice On</button>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item active" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
       </nav>
-<div class="side-block">
-        <div class="side-block-title">Engine</div>
-        <div id="engineStatus" class="muted">Checking local voice engine…</div>
-      </div>
-      <div class="side-block">
-        <div class="side-block-title">Voice presets</div>
-        <div id="presetList" class="voice-preset-list muted">Loading…</div>
-        <div class="side-actions">
-          <button id="importPreset" class="mini-button" type="button">Import</button>
-          <button id="installAssets" class="mini-button" type="button">Setup engine</button>
-        </div>
-        <input id="presetFile" type="file" accept=".json" hidden>
-      </div>
-      <div class="side-block">
-        <div class="side-block-title">Behavior</div>
-        <label class="voice-check"><input type="checkbox" id="autoRead"> Read responses aloud</label>
-        <label class="voice-check"><input type="checkbox" id="voiceEnabled" checked> Voice enabled</label>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
       </div>
     </aside>
 
@@ -62,6 +46,27 @@
         </div>
         <div id="presetBadge" class="voice-badge">—</div>
       </header>
+
+      <div class="context-grid">
+        <section class="card">
+          <div class="section-title">Engine</div>
+          <div id="engineStatus" class="muted">Checking local voice engine…</div>
+        </section>
+        <section class="card">
+          <div class="section-title">Voice presets</div>
+          <div id="presetList" class="voice-preset-list muted">Loading…</div>
+          <div class="side-actions">
+            <button id="importPreset" class="mini-button" type="button">Import</button>
+            <button id="installAssets" class="mini-button" type="button">Setup engine</button>
+          </div>
+          <input id="presetFile" type="file" accept=".json" hidden>
+        </section>
+        <section class="card">
+          <div class="section-title">Behavior</div>
+          <label class="voice-check"><input type="checkbox" id="autoRead"> Read responses aloud</label>
+          <label class="voice-check"><input type="checkbox" id="voiceEnabled" checked> Voice enabled</label>
+        </section>
+      </div>
 
       <section class="voice-preview card">
         <div class="card-title">Preview</div>

@@ -1,11 +1,11 @@
 /* Nexus Core · System page */
 .system-shell{display:flex;min-height:100vh}
-.system-side{width:220px;flex:0 0 220px;padding:16px;border-right:1px solid var(--border,var(--line));position:sticky;top:0;height:100vh;overflow-y:auto}
+
 .system-main{flex:1;padding:20px 24px;max-width:1100px}
 .brand{font-weight:700;margin-bottom:12px}
 .brand span{opacity:.6;font-weight:400}
-.jump-links{display:flex;flex-direction:column;gap:4px}
-.jump-links a{font-size:12px;opacity:.8;text-decoration:none}
+.jump-links{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 16px}
+.jump-links a{font-size:12px;opacity:.85;text-decoration:none;padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
 .jump-links a:hover{opacity:1}
 .panel{margin-bottom:28px;padding:16px;border:1px solid var(--border,var(--line));border-radius:10px;background:var(--panel,var(--panel2))}
 .panel h2{margin:0 0 12px;font-size:15px}
@@ -32,5 +32,5 @@
 pre.ctx{margin:6px 0 0;padding:8px;background:var(--bg,var(--panel2));border:1px solid var(--border,var(--line));border-radius:6px;font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto}
 .section-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin:14px 0 6px}
 .autonomy-card{font-size:12px;padding:8px;border:1px solid var(--border,var(--line));border-radius:8px}
-@media(max-width:1100px){.system-side{width:180px;flex-basis:180px}.system-main{padding:16px}}
-@media(max-width:640px){.system-side{display:none}}
+@media(max-width:1100px){.system-main{padding:16px}}
+

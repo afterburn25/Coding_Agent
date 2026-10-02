@@ -5186,7 +5186,11 @@ def create_server(
 ) -> tuple[ThreadingHTTPServer, AppState]:
     state = AppState(config, workspace, runtime_root, config_path=config_path, boot=boot)
     handler = type("ChatNexusHandler", (Handler,), {"state": state, "web_root": web_root})
-    server = _NexusHTTPServer((host, port), handler)
+    try:
+        server = _NexusHTTPServer((host, port), handler)
+    except BaseException:
+        stop_state(state)
+        raise
     return server, state
 
 
@@ -5234,13 +5238,51 @@ def stop_state(state: AppState) -> None:
         pass
 
 
+def _describe_port_owner(host: str, port: int) -> str:
+    """Probe the process holding `port` — if it's another Nexus backend,
+    report its version/workspace so a stale dev server is identifiable
+    instead of silently stealing API traffic."""
+    try:
+        import urllib.request as _ul
+        with _ul.urlopen(f"http://{host}:{port}/api/status", timeout=2) as resp:
+            info = json.loads(resp.read().decode("utf-8", "replace"))
+        if isinstance(info, dict) and "version" in info:
+            detail = f" by a Nexus Core backend (v{info.get('version')}"
+            ws = info.get("workspace")
+            if ws:
+                detail += f", workspace {ws}"
+            return detail + ")"
+    except Exception:
+        pass
+    return " by another process"
+
+
 def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
-    from .boot import boot_report, reporter_from_env
+    from .boot import boot_report, port_report, reporter_from_env
     boot = reporter_from_env()
     if boot is not None:
         boot(2, "STARTING · CORE SERVICES", "Launching Nexus Core backend services")
-    server, state = create_server(config, workspace, host, port, web_root, runtime_root, config_path=config_path, boot=boot)
+    try:
+        server, state = create_server(config, workspace, host, port, web_root, runtime_root, config_path=config_path, boot=boot)
+    except OSError as bind_exc:
+        winerror = getattr(bind_exc, "winerror", None)
+        errno = getattr(bind_exc, "errno", None)
+        if winerror not in (10048, 10013) and errno not in (48, 98, 10048, 10013):
+            raise
+        # Port collision or OS-reserved port — identify what owns it before
+        # picking a new port so a stale backend can't silently masquerade as
+        # this instance.
+        if winerror == 10013:
+            reason = f"Port {port} is unavailable (Windows socket permission/reservation)"
+        else:
+            reason = f"Port {port} is already in use{_describe_port_owner(host, port)}"
+        print(f"{reason} — selecting a free port instead.", file=sys.stderr)
+        server, state = create_server(config, workspace, host, 0, web_root, runtime_root, config_path=config_path, boot=boot)
     actual_port = int(server.server_address[1])
+    # Report the real bound port before the server starts accepting — the
+    # desktop host must health-check this port, not the requested one,
+    # when a collision forced a fallback.
+    port_report(actual_port)
     if boot is not None:
         boot_report(98, "STARTING · CORE SERVICES", "Backend interface online — synchronizing runtime state")
     print(f"Nexus Core v{VERSION}")

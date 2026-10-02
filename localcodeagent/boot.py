@@ -16,6 +16,7 @@ from typing import Callable
 BootReporter = Callable[[float, str, str], None]
 
 MARKER_PREFIX = "[nexus-boot] "
+PORT_MARKER_PREFIX = "[nexus-port] "
 ENV_FLAG = "NEXUS_BOOT_MARKERS"
 
 
@@ -29,6 +30,20 @@ def boot_report(pct: float, primary: str, secondary: str) -> None:
     # ASCII-safe JSON: backend stdout may be decoded under the console OEM
     # codepage by the host, so non-ASCII characters must stay escaped.
     print(f"{MARKER_PREFIX}{json.dumps(payload, ensure_ascii=True)}", flush=True)
+
+
+def port_report(port: int) -> None:
+    """Emit the actual bound port on stdout.
+
+    The host picks a candidate port before launching the backend, but the
+    backend may fall back to a different port if the candidate became
+    unavailable in the meantime. Without this marker the host would
+    health-check a port the backend never bound — or worse, a foreign
+    service squatting on it. Emitted unconditionally: unlike boot markers,
+    any launcher (not just the desktop host) benefits from knowing where
+    the server actually landed.
+    """
+    print(f"{PORT_MARKER_PREFIX}{int(port)}", flush=True)
 
 
 def reporter_from_env() -> BootReporter | None:

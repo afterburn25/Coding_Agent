@@ -24,6 +24,35 @@ $DesktopProject = Join-Path $Root "desktop\ChatNexus.Desktop\ChatNexus.Desktop.c
 $DesktopIcon = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core.ico"
 $DesktopSplash = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core-splash.png"
 
+# Running out of dist/ is supported for dev loops, so its mutable state is
+# real user data — merge it into the per-user state root before wiping, or
+# every rebuild would silently delete chat history, memory, and output.
+$StateRoot = Join-Path $env:LOCALAPPDATA "NexusCore"
+foreach ($stateDir in @("data", ".agent", "output")) {
+    $existing = Join-Path $PackageRoot $stateDir
+    if (-not (Test-Path $existing)) { continue }
+    $item = Get-Item $existing -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # Junction into the state root — remove only the link; a recursive
+        # Remove-Item on a reparse point can traverse into the target.
+        cmd /c rmdir "$existing" | Out-Null
+        continue
+    }
+    $dest = Join-Path $StateRoot $stateDir
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    Get-ChildItem $existing -Force | ForEach-Object {
+        $d = Join-Path $dest $_.Name
+        if (-not (Test-Path $d)) { Copy-Item $_.FullName $d -Recurse -Force }
+    }
+}
+# A user-edited config.json in the build output survives rebuilds too.
+$StashDir = Join-Path $env:TEMP ("nexus-build-stash-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $StashDir | Out-Null
+$PreservedConfig = Join-Path $StashDir "config.json"
+if (Test-Path (Join-Path $PackageRoot "config.json")) {
+    Copy-Item (Join-Path $PackageRoot "config.json") $PreservedConfig -Force
+}
+
 Remove-Item -Recurse -Force "build","dist",$RuntimeExtract -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "build","dist" | Out-Null
 
@@ -135,7 +164,12 @@ foreach ($VoiceAsset in $VoiceAssets) {
 }
 
 Copy-Item "config.example.json" (Join-Path $PackageRoot "config.example.json") -Force
-Copy-Item "config.example.json" (Join-Path $PackageRoot "config.json") -Force
+if (Test-Path $PreservedConfig) {
+    Copy-Item $PreservedConfig (Join-Path $PackageRoot "config.json") -Force
+    Write-Host "Restored existing config.json — user settings survive rebuilds."
+} else {
+    Copy-Item "config.example.json" (Join-Path $PackageRoot "config.json") -Force
+}
 Copy-Item "README.md" (Join-Path $PackageRoot "README.md") -Force
 
 $BrainSeed = $env:CHAT_NEXUS_BRAIN_SEED
@@ -178,15 +212,30 @@ Pop-Location
 if (-not (Test-Path (Join-Path $PackageRoot "Source\.git\HEAD"))) { throw "Bundled Source workspace is missing Git metadata" }
 
 Write-Host "Smoke testing native NexusCore.exe -> hidden backend integration..."
-$Smoke = Start-Process -FilePath (Join-Path $PackageRoot "NexusCore.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
+# The smoke test must write scratch state inside the package, not through
+# the per-user junctions it would otherwise create and pollute.
+$env:NEXUS_NO_STATE_REDIRECT = "1"
+try {
+    $Smoke = Start-Process -FilePath (Join-Path $PackageRoot "NexusCore.exe") -ArgumentList "--self-test" -WorkingDirectory $PackageRoot -PassThru -Wait
+} finally {
+    Remove-Item Env:NEXUS_NO_STATE_REDIRECT -ErrorAction SilentlyContinue
+}
 if ($Smoke.ExitCode -ne 0) { throw "Native NexusCore.exe self-test failed with exit code $($Smoke.ExitCode)" }
 
 # The smoke test creates fresh runtime state under the package root. Strip it
 # so deploying/updating never clobbers the installed app's user data
-# (conversations, generated images, voice cache, etc.).
+# (conversations, generated images, voice cache, etc.). Junctions (if any
+# survived) are unlinked only — never traversed into the state root.
 foreach ($runtimeDir in @("data", ".agent", "output", "logs")) {
     $p = Join-Path $PackageRoot $runtimeDir
-    if (Test-Path $p) { Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue }
+    if (Test-Path $p) {
+        $i = Get-Item $p -Force
+        if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            cmd /c rmdir "$p" | Out-Null
+        } else {
+            Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+        }
+    }
 }
 if (Test-Path (Join-Path $PackageRoot "data")) { throw "Package still contains runtime data/ after cleanup" }
 

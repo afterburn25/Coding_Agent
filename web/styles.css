@@ -8,6 +8,7 @@
      these tokens are the single source of truth. Legacy names stay as
      aliases so older page CSS keeps working while it converges. */
   --bg:#050b16;                 /* app background */
+  --side-w:232px;               /* canonical left nav width — same on every page */
   --surface:#071120;            /* primary surface */
   --panel:#081121;              /* rail / secondary surface */
   --panel2:#0b1629;             /* cards / raised panels */
@@ -65,7 +66,7 @@ body {
 
 .app-shell {
   display:grid;
-  grid-template-columns:220px minmax(0,1fr) 390px;
+  grid-template-columns:var(--side-w) minmax(0,1fr) 390px;
   height:100vh;
   min-height:680px;
   border:1px solid #172b4d;
@@ -83,6 +84,7 @@ body {
   padding:18px 14px;
   border-right:1px solid var(--line);
   overflow:auto;
+  flex-shrink:0;
 }
 
 .brand-lockup {
@@ -104,6 +106,7 @@ body {
   font-size:18px;
   color:#24d7ff;
   line-height:1.05;
+  white-space:nowrap;
 }
 
 .brand-wordmark strong {
@@ -165,23 +168,6 @@ body {
 .sidebar-spacer {
   flex:1;
   min-height:20px;
-}
-
-.system-drawer {
-  border-top:1px solid #152640;
-  margin-top:16px;
-  padding-top:14px;
-}
-
-.system-drawer summary {
-  cursor:pointer;
-  color:#9db0cc;
-  font-size:12px;
-  list-style:none;
-}
-
-.system-drawer summary::-webkit-details-marker {
-  display:none;
 }
 
 .system-block {
@@ -743,7 +729,7 @@ body {
 }
 
 .app-shell.rail-collapsed {
-  grid-template-columns:220px minmax(0,1fr) 38px;
+  grid-template-columns:var(--side-w) minmax(0,1fr) 38px;
 }
 
 .app-shell.rail-collapsed .taskbar > *:not(.rail-toggle) {
@@ -2712,12 +2698,67 @@ select {
   color:var(--text);
 }
 
+/* ── Canonical sidebar layout ──────────────────────────────────────────
+   The left rail is navigation only, identical on every page. Page tools
+   and status blocks live in the page's own panels/right rail instead. */
+.missions-shell > .sidebar,
+.system-shell > .sidebar {
+  width:var(--side-w);
+  flex:0 0 var(--side-w);
+  position:sticky;
+  top:0;
+  height:100vh;
+}
+
+/* Relocated page controls rendered as main-area cards. */
+.context-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:12px;
+  margin-bottom:16px;
+}
+
+/* Compact action rows inside relocated control blocks. */
+.side-actions {
+  display:flex;
+  gap:6px;
+  margin:7px 0 12px;
+}
+
+.side-actions .mini-button {
+  flex:1;
+}
+
+/* Research page mode picker (moved from sidebar into the query card). */
+.research-mode-row {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:10px 0 4px;
+}
+
+.research-mode-row select {
+  max-width:260px;
+}
+
+/* Sidebar collapses on narrow windows; pages offer a ← Chat link. */
+@media(max-width:900px) {
+  .tools-shell > .sidebar,
+  .missions-shell > .sidebar,
+  .research-shell > .sidebar,
+  .image-shell > .sidebar,
+  .trainer-shell > .sidebar,
+  .system-shell > .sidebar {
+    display:none;
+  }
+}
+
 /* Narrow-window escape hatch on pages whose sidebar collapses away. */
 .mobile-back {
   display:none;
 }
 
-@media(max-width:700px) {
+@media(max-width:900px) {
   .mobile-back {
     display:inline-block;
     margin:0 0 12px;

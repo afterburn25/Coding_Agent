@@ -1,8 +1,8 @@
 
 :root{color-scheme:dark}
 body{margin:0;background:var(--panel2);color:var(--text);font-family:Inter,Segoe UI,system-ui,sans-serif}
-.trainer-shell{display:grid;grid-template-columns:260px 1fr;height:100vh;min-height:0}
-.trainer-side{padding:24px 18px;border-right:1px solid var(--line);background:var(--panel);overflow-y:auto;min-height:0}
+.trainer-shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100vh;min-height:0}
+
 .brand-lockup{display:flex;gap:12px;align-items:center;margin-bottom:20px}.brand-emblem{width:38px;height:38px}.brand-wordmark{display:flex;flex-direction:column}.brand-wordmark small{color:var(--muted)}
 
 .section-title{margin-top:20px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
@@ -22,7 +22,7 @@ body{margin:0;background:var(--panel2);color:var(--text);font-family:Inter,Segoe
 .knowledge-row p{white-space:pre-wrap}.knowledge-row small{color:var(--muted)}.source-links{margin-top:7px;font-size:12px}.source-links a{color:var(--cyan);text-decoration:none}
 .trainer-card label{display:grid;gap:6px;margin:10px 0;color:var(--muted)}.trainer-card input,.trainer-card select{background:var(--panel2);border:1px solid var(--line2);color:var(--text);border-radius:8px;padding:9px}.check-row{display:flex!important;gap:8px!important;align-items:center}.check-row input{width:auto}
 .trainer-result{margin-top:10px;display:flex;flex-direction:column;gap:4px;word-break:break-word}.trainer-result small{color:var(--muted)}
-@media(max-width:1050px){.trainer-shell{grid-template-columns:1fr}.trainer-side{display:none}.stat-grid{grid-template-columns:repeat(3,1fr)}.trainer-grid{grid-template-columns:1fr}}
+@media(max-width:1050px){.trainer-shell{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(3,1fr)}.trainer-grid{grid-template-columns:1fr}}
 
 .job-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;border:1px solid var(--line2);background:var(--panel2);border-radius:9px;padding:9px;margin:7px 0}.job-row>div{display:flex;flex-direction:column;min-width:0}.job-row small{color:var(--muted);word-break:break-word}.job-row button{border:1px solid var(--info);background:var(--line);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer}
 

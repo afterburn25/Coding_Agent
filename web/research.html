@@ -10,33 +10,30 @@
 </head>
 <body>
   <div class="research-shell">
-    <aside class="research-side">
-      <div class="brand">Nexus Core <span>Research Hub</span></div>
-      <a class="workspace-link" href="/">← Chat</a>
-      <a class="workspace-link" href="/models.html">Models</a>
-      <a class="workspace-link active" href="/research.html">Research</a>
-      <a class="workspace-link" href="/missions.html">Missions</a>
-      <a class="workspace-link" href="/image.html">Image Studio</a>
-      <a class="workspace-link" href="/tools.html">Tools</a>
-      <a class="workspace-link" href="/trainer.html">Trainer</a>
-      <a class="workspace-link" href="/voice.html">Voice Studio</a>
-      <a class="workspace-link" href="/answers.html">Learned Answers</a>
-      <a class="workspace-link" href="/system.html">System</a>
-      <a class="workspace-link" href="/settings.html">Settings</a>
-      <button id="voiceToggle" class="workspace-link voice-toggle" type="button">🔊 Voice On</button>
-<div class="section-title">Mode</div>
-      <select id="researchMode" class="full-select">
-        <option value="auto">Auto Research</option>
-        <option value="official">Official Sources</option>
-        <option value="balanced">Balanced</option>
-        <option value="deep">Deep Research</option>
-        <option value="local_only">Local Only</option>
-        <option value="offline">Offline</option>
-      </select>
-      <div class="section-title">Research cache</div>
-      <div id="researchStats" class="inventory">Loading…</div>
-      <div class="section-title">Recent sessions</div>
-      <div id="recentResearch" class="research-recent muted">No research sessions yet.</div>
+        <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>RESEARCH HUB</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item active" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
+      </div>
     </aside>
 
     <main class="research-main">
@@ -52,7 +49,19 @@
         <label>What should the agent investigate?
           <textarea id="researchQuery" rows="4" placeholder="Example: Why does this CUDA error happen with the PyTorch version installed in this project?"></textarea>
         </label>
-        <div class="research-row">
+                <div class="research-mode-row">
+          <label class="muted small" for="researchMode">Mode</label>
+<select id="researchMode" class="full-select">
+        <option value="auto">Auto Research</option>
+        <option value="official">Official Sources</option>
+        <option value="balanced">Balanced</option>
+        <option value="deep">Deep Research</option>
+        <option value="local_only">Local Only</option>
+        <option value="offline">Offline</option>
+      </select>
+        </div>
+
+<div class="research-row">
           <label>Version / constraint <input id="researchVersion" placeholder="Optional, e.g. PyTorch 2.8" /></label>
           <div class="research-buttons">
             <button id="planResearch" class="mini-button">Plan only</button>
@@ -73,7 +82,16 @@
         </div>
       </section>
 
-      <section class="research-card sources-card">
+            <section class="research-card">
+        <h2>Research cache</h2>
+        <div id="researchStats" class="inventory">Loading…</div>
+      </section>
+      <section class="research-card">
+        <h2>Recent sessions</h2>
+        <div id="recentResearch" class="research-recent muted">No research sessions yet.</div>
+      </section>
+
+<section class="research-card sources-card">
         <h2>Sources</h2>
         <div id="researchSources" class="source-list muted">No sources yet.</div>
       </section>

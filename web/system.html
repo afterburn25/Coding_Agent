@@ -10,24 +10,38 @@
 </head>
 <body>
 <div class="system-shell">
-  <aside class="system-side">
-    <div class="brand">Nexus Core <span>System</span></div>
-    <a class="workspace-link" href="/">← Chat</a>
-    <a class="workspace-link" href="/models.html">Models</a>
-    <a class="workspace-link" href="/research.html">Research</a>
-    <a class="workspace-link" href="/missions.html">Missions</a>
-    <a class="workspace-link" href="/image.html">Image Studio</a>
-    <a class="workspace-link" href="/tools.html">Tools</a>
-    <a class="workspace-link" href="/trainer.html">Trainer</a>
-    <a class="workspace-link" href="/voice.html">Voice Studio</a>
-    <a class="workspace-link" href="/answers.html">Learned Answers</a>
-    <a class="workspace-link active" href="/system.html">System</a>
-    <a class="workspace-link" href="/settings.html">Settings</a>
-    <button id="voiceToggle" class="workspace-link voice-toggle" type="button">🔊 Voice On</button>
-<div class="section-title">Overall</div>
-    <div id="overallCard" class="autonomy-card">Loading…</div>
-    <div class="side-actions"><button id="refreshAll" class="mini-button" type="button">Refresh</button></div>
-    <div class="section-title">Jump to</div>
+      <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>SYSTEM</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item active" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
+      </div>
+    </aside>
+  <main class="system-main">
+
+    <a class="mobile-back" href="/">← Chat</a>
+    <section class="panel">
+      <div class="section-row"><span class="section-title">Overall</span><button id="refreshAll" class="mini-button" type="button">Refresh</button></div>
+      <div id="overallCard" class="autonomy-card">Loading…</div>
+    </section>
     <div class="jump-links">
       <a href="#secHealth">Health</a>
       <a href="#secTwin">Digital Twin</a>
@@ -43,8 +57,6 @@
       <a href="#secExperiments">Experiments</a>
       <a href="#secSimulate">Plan Simulation</a>
     </div>
-  </aside>
-  <main class="system-main">
     <section class="panel" id="secHealth">
       <h2>Health</h2>
       <div id="healthStates" class="grid-cards"></div>

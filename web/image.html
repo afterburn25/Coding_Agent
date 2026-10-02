@@ -10,39 +10,35 @@
 </head>
 <body>
 <div class="image-shell">
-  <aside class="image-side">
-    <div class="brand">Nexus Core <span>Image Studio</span></div>
-    <a class="workspace-link" href="/">← Chat</a>
-    <a class="workspace-link" href="/models.html">Models</a>
-    <a class="workspace-link" href="/research.html">Research</a>
-    <a class="workspace-link" href="/missions.html">Missions</a>
-    <a class="workspace-link active" href="/image.html">Image Studio</a>
-    <a class="workspace-link" href="/tools.html">Tools</a>
-    <a class="workspace-link" href="/trainer.html">Trainer</a>
-    <a class="workspace-link" href="/voice.html">Voice Studio</a>
-    <a class="workspace-link" href="/answers.html">Learned Answers</a>
-    <a class="workspace-link" href="/system.html">System</a>
-    <a class="workspace-link" href="/settings.html">Settings</a>
-    <button id="voiceToggle" class="workspace-link voice-toggle" type="button">🔊 Voice On</button>
-<div class="section-title">Backend</div>
-    <div id="imageBackend" class="inventory">Checking ComfyUI…</div>
-    <div class="side-actions"><button id="startImageBackend" class="mini-button">Start</button><button id="stopImageBackend" class="mini-button">Stop</button></div>
-    <div class="section-title">Image models & workflows</div>
-    <div class="side-actions"><button id="verifyImageModels" class="mini-button">Verify all</button></div>
-    <input id="workflowFile" type="file" accept="application/json,.json" hidden />
-    <div id="imageModels" class="models"></div>
-    <div class="section-title">Installs</div>
-    <div id="imageInstalls" class="inventory"></div>
-    <div class="section-title">LoRA library</div>
-    <input id="loraFilter" class="side-filter" placeholder="Filter LoRAs…" />
-    <div id="loraLibrary" class="inventory"></div>
-    <div class="section-title">Model inventory</div>
-    <div id="imageInventory" class="inventory"></div>
-    <div class="section-title">Subject profiles</div>
-    <div id="subjectProfiles" class="inventory"></div>
-  </aside>
+      <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>IMAGE STUDIO</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item active" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
+      </div>
+    </aside>
 
   <main class="image-main">
+
+    <a class="mobile-back" href="/">← Chat</a>
     <header class="topbar">
       <div><strong>Image workspace</strong><span id="imageStatus">Local generation + editing</span></div>
       <label>Model
@@ -138,6 +134,25 @@
       <div id="imageGallery" class="image-gallery"></div>
     </section>
   </main>
+  <aside class="image-right">
+<div class="section-title">Backend</div>
+    <div id="imageBackend" class="inventory">Checking ComfyUI…</div>
+    <div class="side-actions"><button id="startImageBackend" class="mini-button">Start</button><button id="stopImageBackend" class="mini-button">Stop</button></div>
+    <div class="section-title">Image models & workflows</div>
+    <div class="side-actions"><button id="verifyImageModels" class="mini-button">Verify all</button></div>
+    <input id="workflowFile" type="file" accept="application/json,.json" hidden />
+    <div id="imageModels" class="models"></div>
+    <div class="section-title">Installs</div>
+    <div id="imageInstalls" class="inventory"></div>
+    <div class="section-title">LoRA library</div>
+    <input id="loraFilter" class="side-filter" placeholder="Filter LoRAs…" />
+    <div id="loraLibrary" class="inventory"></div>
+    <div class="section-title">Model inventory</div>
+    <div id="imageInventory" class="inventory"></div>
+    <div class="section-title">Subject profiles</div>
+    <div id="subjectProfiles" class="inventory"></div>
+  </aside>
+
 </div>
 <script src="/image.js"></script>
   <script src="/voice_global.js"></script>

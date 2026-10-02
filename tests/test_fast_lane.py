@@ -333,6 +333,27 @@ class BootMarkerTests(unittest.TestCase):
         self.assertIn("TryParseBootMarker", src)
         self.assertIn("BootPhase", src)
 
+    def test_host_tracks_announced_port(self):
+        # The backend may bind a fallback port when the host's candidate was
+        # taken in between; the host must health-check the announced port,
+        # not blindly trust its own pick.
+        src = (ROOT / "desktop" / "ChatNexus.Desktop" / "Program.cs").read_text(encoding="utf-8")
+        self.assertIn("TryParsePortMarker", src)
+        self.assertIn("[nexus-port]", src)
+        self.assertIn("_announcedPort", src)
+
+    def test_backend_reports_bound_port(self):
+        src = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        self.assertIn("port_report(actual_port)", src)
+
+    def test_host_redirects_state_dirs(self):
+        # User state must live outside the install dir — rebuilds and
+        # reinstalls replace it wholesale, which wiped chat history before.
+        src = (ROOT / "desktop" / "ChatNexus.Desktop" / "Program.cs").read_text(encoding="utf-8")
+        self.assertIn("EnsureStateJunctions", src)
+        self.assertIn("LocalApplicationData", src)
+        self.assertIn("NEXUS_NO_STATE_REDIRECT", src)
+
 
 class FrontendBufferTests(unittest.TestCase):
     def setUp(self):
