@@ -96,9 +96,32 @@ function renderDetail(){
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
+    `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
     (m.blocked_reason?`<div class="detail-section"><h3>Blocked</h3><div class="objective">${esc(m.blocked_reason)}</div></div>`:'')+
     (m.completion?`<div class="detail-section"><h3>Completion</h3><div class="objective">Elapsed: ${m.completion.elapsed_s}s · ${m.completion.state}</div></div>`:'')+
     `<div class="detail-section"><h3>History</h3>${hist||'<div class="hist-row">empty</div>'}</div>`;
+  loadMissionActivity(m.id);
+}
+
+async function loadMissionActivity(mid){
+  // Devin-style live timeline rows recorded against this mission —
+  // lets the user inspect what each node actually did, not just state.
+  try{
+    const r=await api('/api/activity?mission_id='+encodeURIComponent(mid));
+    const el=$('#missionActivity');
+    if(!el||selected!==mid)return;  // selection changed mid-fetch
+    const rows=(r.activities||[]);
+    el.innerHTML=rows.slice(-40).reverse().map(a=>{
+      const timing=a.elapsed!=null?` · ${Number(a.elapsed).toFixed(1)}s`:'';
+      const prog=a.progress!=null&&a.state==='running'?` ${Math.round(a.progress*100)}%`:'';
+      return `<div class="hist-row"><b>${esc(a.category)}</b> ${esc(a.title)}`+
+        ` <span class="mstatus ${a.state==='failed'?'failed':a.state==='running'?'executing':'done'}">${esc(a.state)}${prog}</span>`+
+        `<span style="float:right">${esc((a.summary||'').slice(0,80))}${timing}</span></div>`;
+    }).join('')||'<div class="hist-row">no activity recorded</div>';
+  }catch(e){
+    const el=$('#missionActivity');
+    if(el&&selected===mid)el.innerHTML='<div class="hist-row">activity unavailable</div>';
+  }
 }
 
 function renderApprovals(rows){
