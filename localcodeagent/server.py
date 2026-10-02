@@ -2093,6 +2093,31 @@ class AppState:
                     self.history = self.conversation_manager.history(limit=32)
                 except Exception as exc:
                     self._voice_finish(voice_rid)
+                    # A run that dies before its first logged event leaves a
+                    # terminal task with an empty transcript — record the
+                    # failure so the ledger always explains the outcome.
+                    try:
+                        task = next(
+                            (t for t in self.tasks.recent(5)
+                             if t.get("prompt") == entry.get("prompt")),
+                            None)
+                        if task is not None:
+                            self.tasks.append_log(
+                                task["id"],
+                                f"## error: {type(exc).__name__}: {exc}\n")
+                            self.tasks.flush_log(task["id"])
+                            # If the run died before marking the task terminal
+                            # it would sit 'running' forever and wedge the
+                            # single-flight queue — close it out.
+                            if str(task.get("status")) in {
+                                    "queued", "running", "planning",
+                                    "working", "verifying", "reviewing",
+                                    "waiting_approval"}:
+                                self.tasks.update(
+                                    task["id"], status="error", phase="done",
+                                    error=str(exc)[:300])
+                    except Exception:
+                        pass
                     self.events.publish("task", {
                         "event": "queue_item_failed", "queue_item": entry,
                         "error": f"{type(exc).__name__}: {exc}",
