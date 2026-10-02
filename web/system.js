@@ -104,6 +104,17 @@ function renderConnectors(list){
     </div>`}).join('')||'<div class="off">No connectors registered.</div>';
 }
 
+/* ---------- Jobs ---------- */
+function renderJobs(list){
+  $('#jobsList').innerHTML=list.map(j=>
+    `<div class="list-row"><b>${esc(j.title||j.id)}</b> <span class="pill">${esc(j.kind||'')}</span>
+     <span class="state st-${esc(j.state)}">${esc(j.state||'')}</span>
+     ${j.progress?` <span class="pill">${Math.round(j.progress*100)}%</span>`:''}
+     <div class="meta">${esc(j.detail||'')}${j.source?' · '+esc(j.source):''}${j.error?' · <span class="state st-failed">'+esc(j.error)+'</span>':''}</div>
+     <div class="meta">${fmtTs(j.created_at)}${j.finished_at?' → '+fmtTs(j.finished_at):''}</div>
+    </div>`).join('')||'<div class="off">No jobs recorded.</div>';
+}
+
 /* ---------- Artifacts ---------- */
 function renderArtifacts(list){
   $('#artifactsList').innerHTML=list.map(a=>
@@ -143,13 +154,14 @@ function renderExperiments(list){
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,co,a,b,ev,ex]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
-      api('/api/skills'),api('/api/connectors'),
+      api('/api/skills'),api('/api/connectors'),api('/api/jobs'),
       api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments')]);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
     renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
+    renderJobs(jb.jobs||[]);
     renderArtifacts(a.artifacts||[]);
     renderBackups(b.backups||[]);renderEval(ev.runs||[]);renderExperiments(ex.experiments||[]);
   }catch(e){
