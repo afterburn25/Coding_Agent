@@ -363,7 +363,7 @@ class EndToEndAgentTests(unittest.TestCase):
         drain, which is the 'run all night' invariant."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.config.runtime_recovery_attempts = 1
             state.agent.config.runtime_recovery_attempts = 1

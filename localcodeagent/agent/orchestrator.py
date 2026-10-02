@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import inspect
 import json
 import re
@@ -19,6 +20,7 @@ from ..models.telemetry import ModelPerformanceTelemetry
 from ..runtime.manager import RuntimeManager
 from ..research import ResearchCoordinator
 from ..tools.base import ToolRegistry
+from .. import netdiag
 from ..workflow.checkpoint import CheckpointManager
 from ..workflow.memory import ProjectMemory
 from ..workflow.conversation_memory import ConversationMemory
@@ -752,6 +754,7 @@ class AgentOrchestrator:
         max_tokens: int | None = None,
     ):
         attempts = 0
+        failure_rec: dict | None = None
         while True:
             streaming = on_delta is not None and hasattr(provider, "complete_stream")
             method = provider.complete_stream if streaming else provider.complete
@@ -764,14 +767,45 @@ class AgentOrchestrator:
                     cap["max_tokens"] = max_tokens
             try:
                 if streaming:
-                    return method(messages=messages, tools=tools, on_delta=on_delta, **cap)
-                return method(messages=messages, tools=tools, **cap)
-            except RuntimeError as exc:
+                    result = method(messages=messages, tools=tools, on_delta=on_delta, **cap)
+                else:
+                    result = method(messages=messages, tools=tools, **cap)
+                if failure_rec is not None:
+                    failure_rec["recovery"] = f"succeeded on retry {attempts}"
+                return result
+            except (RuntimeError, OSError, http.client.HTTPException) as exc:
+                # Attach live backend diagnostics so a bare WinError 10054
+                # never reaches the user unexplained.
+                try:
+                    if hasattr(exc, "backend"):
+                        exc.backend = self.runtime.backend_health(profile.id)
+                except Exception:
+                    pass
+                failure_rec = netdiag.record_failure(exc)
+                if model_events is not None:
+                    diag = getattr(exc, "diagnostic", None)
+                    failure_event = {
+                        "type": "backend_failure",
+                        "model_id": profile.id,
+                        "attempt": attempts,
+                        "reason": (exc.diagnostic_text() if callable(diag) else str(exc)),
+                        "diagnostic": diag() if callable(diag) else {},
+                    }
+                    model_events.append(failure_event)
+                    self._safe_emit(event_callback, {"type": "model", "event": failure_event})
                 if attempts >= self.config.runtime_recovery_attempts:
+                    failure_rec["recovery"] = f"gave up after {attempts} retries"
                     raise
                 # A 4xx rejection means the server is healthy and answered —
                 # restarting it cannot fix a malformed/oversized request.
                 if getattr(exc, "status", 0) and 400 <= int(exc.status) < 500:
+                    failure_rec["recovery"] = "not retried — server rejected the request (4xx)"
+                    raise
+                # A mid-stream failure after tokens were already delivered
+                # must NOT auto-retry — the user already saw partial output
+                # and a retry would duplicate it.
+                if getattr(exc, "delivered_output", False):
+                    failure_rec["recovery"] = "not retried — partial output already delivered"
                     raise
                 attempts += 1
                 if profile.runtime == "llama_cpp":
@@ -2001,12 +2035,22 @@ class AgentOrchestrator:
         try:
             return self._drive(session)
         except Exception as exc:
+            # Transport failures to local backends carry a friendly message
+            # and a structured diagnostic — the raw WinError never becomes
+            # the primary user-facing text.
+            technical = f"{type(exc).__name__}: {exc}"
+            friendly = getattr(exc, "friendly", "") or technical
+            diag = getattr(exc, "diagnostic", None)
+            diagnostic = diag() if callable(diag) else {}
+            if getattr(exc, "backend", None):
+                diagnostic["backend"] = exc.backend
             error_task = self.tasks.update(
                 session.task_id, status="error", phase="done",
-                error=f"{type(exc).__name__}: {exc}",
+                error=friendly,
             )
             self._emit(session, "task", task=error_task.as_dict())
-            self._emit(session, "error", error=error_task.error)
+            self._emit(session, "error", error=error_task.error,
+                       technical=technical, diagnostic=diagnostic)
             if self.activities is not None:
                 self.activities.close_open(session.task_id, "failed")
             act = self._act(

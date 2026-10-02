@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import http.client
 import json
 import mimetypes
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -10,6 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from .backend import ImageBackend
+from ..netdiag import BackendConnectionError
+
+
+def _conn_error(exc: BaseException, url: str, *, method: str = "GET") -> BackendConnectionError:
+    return BackendConnectionError(
+        exc, subsystem="comfyui", url=url, method=method,
+        request_id=secrets.token_hex(6),
+    )
 
 
 class ComfyUIBackend(ImageBackend):
@@ -28,9 +38,14 @@ class ComfyUIBackend(ImageBackend):
             method=method,
             headers={"Content-Type": "application/json"} if data is not None else {},
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            raw = resp.read()
-            return json.loads(raw.decode("utf-8")) if raw else {}
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw.decode("utf-8")) if raw else {}
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
+            raise _conn_error(exc, self.endpoint + path, method=method) from exc
 
     def health(self) -> tuple[bool, str]:
         try:
@@ -82,6 +97,8 @@ class ComfyUIBackend(ImageBackend):
                 last=exc
                 if exc.code not in {404,405}:
                     raise
+            except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
+                raise _conn_error(exc, self.endpoint + endpoint_path, method="POST") from exc
         raise RuntimeError(f"ComfyUI image upload failed: {last}")
 
     def submit(self, workflow: dict[str, Any]) -> str:
@@ -111,8 +128,13 @@ class ComfyUIBackend(ImageBackend):
             "type": item.get("type", "output"),
         })
         req = urllib.request.Request(self.endpoint + "/view?" + params, method="GET")
-        with urllib.request.urlopen(req, timeout=max(self.timeout, 30.0)) as resp:
-            data = resp.read()
+        try:
+            with urllib.request.urlopen(req, timeout=max(self.timeout, 30.0)) as resp:
+                data = resp.read()
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
+            raise _conn_error(exc, self.endpoint + "/view") from exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
         return destination

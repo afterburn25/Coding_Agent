@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any, Callable
 
 from .fsutil import atomic_write_text
+from . import netdiag
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -68,7 +69,7 @@ from .workflow.tasks import TaskStore
 from .workflow.activity import ActivityStore
 
 
-VERSION = "0.6.0-dev"
+VERSION = "0.6.1-dev"
 
 
 class AppState:
@@ -1670,6 +1671,30 @@ class AppState:
         )
         return payload
 
+    def diagnostics_payload(self) -> dict:
+        """Aggregated local-backend diagnostics: per-model process health,
+        crash signatures, log tails, resource picture and recent transport
+        failures. Contains no prompts or secrets."""
+        hw = self.runtime.hardware
+        models: list[dict] = []
+        for m in self.config.models:
+            entry: dict = {"id": m.id, "runtime": m.runtime,
+                           "role": getattr(m, "role", "")}
+            if m.runtime == "llama_cpp":
+                try:
+                    entry["backend"] = self.runtime.backend_health(m.id)
+                except Exception:
+                    entry["backend"] = {}
+            models.append(entry)
+        return {
+            "version": VERSION,
+            "time": time.time(),
+            "hardware": hw.as_dict() if hasattr(hw, "as_dict") else {},
+            "models": models,
+            "processes": self.processes.list(),
+            "recent_failures": netdiag.recent_failures(),
+        }
+
 
 class Handler(BaseHTTPRequestHandler):
     state: AppState
@@ -2124,6 +2149,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
                 return
             self._json({"id": service_id, "path": log_path, "log": text})
+            return
+        if path == "/api/diagnostics":
+            self._json(self.state.diagnostics_payload())
             return
         if path == "/api/events":
             # Long-lived SSE stream of job/tool events for live UI updates.
@@ -3636,7 +3664,18 @@ class Handler(BaseHTTPRequestHandler):
         except KeyError as exc:
             self._json({"error": f"Not found: {exc}"}, 404)
         except Exception as exc:
-            self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            # Transport-classified failures carry a friendly message and a
+            # structured diagnostic — keep the raw exception off the chat
+            # surface while preserving it for diagnostics.
+            diag_fn = getattr(exc, "diagnostic", None)
+            friendly = getattr(exc, "friendly", "")
+            payload: dict[str, Any] = {
+                "error": friendly or f"{type(exc).__name__}: {exc}"
+            }
+            if callable(diag_fn):
+                payload["technical"] = f"{type(exc).__name__}: {exc}"
+                payload["diagnostic"] = diag_fn()
+            self._json(payload, 500)
 
     def log_message(self, format: str, *args) -> None:
         pass

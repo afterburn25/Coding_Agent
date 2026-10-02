@@ -1,10 +1,10 @@
 {
  "name": "Nexus Core",
- "version": "0.6.0-dev",
+ "version": "0.6.1-dev",
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 606,
+ "test_checkpoint": 643,
  "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling — MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing; Nexus Answer Memory landed (persistent learned Q&A, semantic recall with conflict gates, trusted hits skip model inference — see docs/ANSWER_MEMORY.md).",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import http.client
 import json
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -8,6 +10,7 @@ from typing import Any, Callable
 
 from .provider import ProviderResponse
 from ..config import ModelProfile
+from ..netdiag import BackendConnectionError
 
 import re
 
@@ -126,6 +129,7 @@ class OpenAICompatibleProvider:
         started_at = time.monotonic()
         repaired = 0
         tools_dropped = False
+        request_id = secrets.token_hex(6)
         while True:
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -169,8 +173,16 @@ class OpenAICompatibleProvider:
                     continue
                 raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
             except urllib.error.URLError as exc:
-                raise RuntimeError(
-                    f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
+                raise BackendConnectionError(
+                    exc, subsystem="llm", url=url, model_id=self.profile.id,
+                    request_id=request_id, phase="connect",
+                    elapsed_s=time.monotonic() - started_at, attempt=repaired,
+                ) from exc
+            except (OSError, http.client.HTTPException, TimeoutError) as exc:
+                raise BackendConnectionError(
+                    exc, subsystem="llm", url=url, model_id=self.profile.id,
+                    request_id=request_id, phase="read",
+                    elapsed_s=time.monotonic() - started_at, attempt=repaired,
                 ) from exc
         if repaired:
             raw.setdefault("auto_repaired", {"context_shrink": repaired,
@@ -227,6 +239,7 @@ class OpenAICompatibleProvider:
         first_token_at = 0.0
         repaired = 0
         tools_dropped = False
+        request_id = secrets.token_hex(6)
         while True:
             try:
                 resp = urllib.request.urlopen(req, timeout=self.timeout)
@@ -267,8 +280,16 @@ class OpenAICompatibleProvider:
                     continue
                 raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
             except urllib.error.URLError as exc:
-                raise RuntimeError(
-                    f"Could not reach model endpoint {url}. Start your local inference server or update config.json. Details: {exc}"
+                raise BackendConnectionError(
+                    exc, subsystem="llm", url=url, model_id=self.profile.id,
+                    request_id=request_id, streaming=True, phase="connect",
+                    elapsed_s=time.monotonic() - started_at, attempt=repaired,
+                ) from exc
+            except (OSError, http.client.HTTPException, TimeoutError) as exc:
+                raise BackendConnectionError(
+                    exc, subsystem="llm", url=url, model_id=self.profile.id,
+                    request_id=request_id, streaming=True, phase="connect",
+                    elapsed_s=time.monotonic() - started_at, attempt=repaired,
                 ) from exc
         try:
             with resp:
@@ -333,8 +354,23 @@ class OpenAICompatibleProvider:
                             current["function"]["arguments"] += str(fn["arguments"])
         except urllib.error.URLError as exc:
             # Mid-stream connection drops still surface as reachability errors.
-            raise RuntimeError(
-                f"Lost connection to model endpoint {url} mid-stream. Details: {exc}"
+            raise BackendConnectionError(
+                exc, subsystem="llm", url=url, model_id=self.profile.id,
+                request_id=request_id, streaming=True, phase="stream",
+                chunks_received=chunk_count,
+                partial_chars=sum(len(p) for p in content_parts),
+                elapsed_s=time.monotonic() - started_at, attempt=repaired,
+            ) from exc
+        except (OSError, http.client.HTTPException, TimeoutError) as exc:
+            # A backend crash mid-generation surfaces as a bare socket error
+            # (WinError 10054, IncompleteRead, ...) — classify it so the
+            # recovery layer sees a RuntimeError and diagnostics get context.
+            raise BackendConnectionError(
+                exc, subsystem="llm", url=url, model_id=self.profile.id,
+                request_id=request_id, streaming=True, phase="stream",
+                chunks_received=chunk_count,
+                partial_chars=sum(len(p) for p in content_parts),
+                elapsed_s=time.monotonic() - started_at, attempt=repaired,
             ) from exc
 
         if chunk_count == 0:

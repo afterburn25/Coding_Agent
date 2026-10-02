@@ -2,7 +2,7 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **537 / 537** (2 environment skips); see SESSION_HANDOFF.md for the v0.8 local voice subsystem checkpoint.
 
-## Active version: 0.6.0-dev — Native Nexus Core Desktop Dogfood
+## Active version: 0.6.1-dev — Native Nexus Core Desktop Dogfood
 
 ### Stable capabilities retained from v0.1–v0.3
 
@@ -329,9 +329,44 @@ Unit checkpoint: **362 tests passing**.
 - Reference: `docs/ANSWER_MEMORY.md`. Tests: `tests/test_answer_memory.py`
   (48 cases); full suite **606 passing** (2 environment skips).
 
+## Backend connection reliability — WinError 10054 recovery (v0.6.1)
+
+- **Root cause:** a local backend (llama.cpp/llama-server, ComfyUI) closing
+  a socket surfaced as a bare `ConnectionResetError`/`IncompleteRead`. The
+  SSE reader iterated the raw response and only caught `URLError`, and the
+  orchestrator's recovery loop only caught `RuntimeError` — so `OSError`
+  transport failures escaped recovery entirely and reached the user raw.
+- `localcodeagent/netdiag.py` classifies every transport failure
+  (reset/aborted/refused/broken-pipe/incomplete-read/timeout) into a
+  `BackendConnectionError` carrying subsystem, redacted endpoint, host,
+  port, request id, model, phase (connect/read/stream), elapsed time,
+  chunk/partial-output counts, and a `friendly` user message.
+- `RuntimeManager.backend_health(model_id)` snapshots process state, PID,
+  exit code, restart count, log tail and RAM/VRAM, and recognises crash
+  signatures (VRAM/RAM exhaustion, CUDA failure, access violation, model
+  load failure, port bind failure) so a backend crash reports the real
+  cause instead of a socket error.
+- Recovery loop now catches `OSError`/`http.client` transport failures,
+  attaches backend health, emits a `backend_failure` model event, and
+  retries through a fresh connection after `runtime.recover()`. Retries
+  are bounded by `runtime_recovery_attempts` and are **never** attempted
+  once tokens were already delivered (no duplicated partial responses);
+  4xx rejections are still never retried.
+- `/api/diagnostics` aggregates per-model backend health, managed-service
+  state, hardware picture and a bounded ring of the last 25 transport
+  failures with their recovery outcome; the Models sidebar gains a
+  **Diagnostics** button that copies a full crash report.
+- ComfyUI calls (`submit`/`status`/`cancel`/upload/download) classify the
+  same way; non-streaming `/api/chat` 500s map to the friendly message
+  with the diagnostic attached.
+- Tests: `tests/test_netdiag.py` (19 cases — socket reset mid-stream,
+  connect-phase refusal, truncated bodies, bounded retries, no-retry
+  after delivered output, crash-signature health reports); full suite
+  **643 passing**.
+
 ## Next milestone
 
-**Modular workstation core + Answer Memory are in place** (606 tests). Priorities:
+**Modular workstation core + Answer Memory are in place** (643 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Nexus Core repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)

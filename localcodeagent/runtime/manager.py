@@ -32,6 +32,9 @@ class RuntimeStatus:
     restarts: int = 0
     error: str = ""
     log_path: str = ""
+    exit_code: int | None = None
+    crash_reason: str = ""
+    last_crash_at: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -45,6 +48,9 @@ class RuntimeStatus:
             "restarts": self.restarts,
             "error": self.error,
             "log_path": self.log_path,
+            "exit_code": self.exit_code,
+            "crash_reason": self.crash_reason,
+            "last_crash_at": self.last_crash_at,
         }
 
 
@@ -967,7 +973,12 @@ class RuntimeManager:
                         status.state = "error"
                         status.healthy = False
                         status.pid = None
-                        status.error = f"runtime exited with code {item.process.returncode}"
+                        status.exit_code = item.process.returncode
+                        status.crash_reason = (
+                            f"llama-server exited with code {item.process.returncode}"
+                        )
+                        status.last_crash_at = time.time()
+                        status.error = status.crash_reason
                     else:
                         healthy, detail = self._health(item.endpoint, timeout=0.3)
                         status.healthy = healthy
@@ -980,6 +991,81 @@ class RuntimeManager:
                     status.state = "running" if healthy else "external_unreachable"
                     status.error = "" if healthy else detail[:300]
             return [self._status[m.id].as_dict() for m in self.config.models]
+
+    _CRASH_SIGNATURES = (
+        # (pattern, human-readable cause) — first match wins. These turn a
+        # bare socket reset into the real reason the backend died.
+        ("out of memory", "VRAM/RAM exhausted while loading or generating"),
+        ("cuda error", "CUDA failure"),
+        ("cudaMalloc failed", "VRAM allocation failed"),
+        ("failed to allocate", "memory allocation failed"),
+        ("ggml_backend_cuda", "CUDA backend failure"),
+        ("access violation", "backend crashed (access violation)"),
+        ("assertion failed", "backend crashed (assertion failure)"),
+        ("error loading model", "model file failed to load"),
+        ("failed to load model", "model file failed to load"),
+        ("bind", "port bind failure — the port was already in use"),
+        ("address already in use", "port bind failure — the port was already in use"),
+    )
+
+    def _log_tail(self, log_path: str, limit: int = 6000) -> str:
+        """Last `limit` bytes of a backend log — the crash's stderr lives
+        here because llama-server runs with stderr→stdout→file."""
+        try:
+            path = Path(log_path)
+            if not path.is_file():
+                return ""
+            size = path.stat().st_size
+            with path.open("rb") as fh:
+                if size > limit:
+                    fh.seek(-limit, 2)
+                return fh.read().decode("utf-8", errors="replace")[-limit:]
+        except Exception:
+            return ""
+
+    def backend_health(self, model_id: str) -> dict:
+        """On-demand diagnostic snapshot for a failed model request —
+        process state, exit code, crash signature, log tail and the memory
+        picture, so a bare WinError 10054 is never all the user gets."""
+        status = self._status.get(model_id)
+        profile = next((m for m in self.config.models if m.id == model_id), None)
+        item = self._managed.get(model_id)
+        proc_alive = bool(item and item.process.poll() is None)
+        exit_code = (
+            item.process.returncode
+            if item is not None and item.process.poll() is not None
+            else (status.exit_code if status else None)
+        )
+        tail = self._log_tail(status.log_path) if status and status.log_path else ""
+        crash_hint = ""
+        if exit_code is not None or not proc_alive:
+            low = tail.lower()
+            for pattern, cause in self._CRASH_SIGNATURES:
+                if pattern.lower() in low:
+                    crash_hint = cause
+                    break
+        hw = self.hardware
+        return {
+            "model_id": model_id,
+            "runtime": profile.runtime if profile else "",
+            "managed": bool(status.managed) if status else False,
+            "state": status.state if status else "unknown",
+            "healthy": bool(status.healthy) if status else False,
+            "endpoint": status.endpoint if status else "",
+            "port": self._port_from_endpoint(status.endpoint) if status else None,
+            "pid": (item.process.pid if proc_alive else None),
+            "exit_code": exit_code,
+            "restarts": status.restarts if status else 0,
+            "started_at": status.started_at if status else None,
+            "error": status.error if status else "",
+            "crash_reason": crash_hint or (status.crash_reason if status else ""),
+            "log_path": status.log_path if status else "",
+            "log_tail": tail[-2000:] if tail else "",
+            "free_vram_gb": getattr(hw, "free_vram_gb", None),
+            "total_vram_gb": getattr(hw, "total_vram_gb", None),
+            "available_ram_gb": getattr(hw, "available_ram_gb", None),
+            "estimated_model_vram_gb": float(getattr(profile, "estimated_vram_gb", 0.0) or 0.0) if profile else None,
+        }
 
     def readiness(self, *, probe_external: bool = True) -> dict:
         """Describe whether configured coding models can actually serve agent work."""
