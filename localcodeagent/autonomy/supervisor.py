@@ -581,6 +581,14 @@ class AutonomousSupervisor:
                     break
                 if not self.locks.acquire("agent_lane", node["id"]):
                     break
+            elif kind == "job" and str(
+                    (node.get("metadata") or {}).get("job") or "") == "image" \
+                    and not self.budgets.may_use_gpu(
+                        m, foreground_busy=not self._lane_free(),
+                        resource_mode=self.policy.resource_mode()):
+                # GPU-bound background work yields to the interactive lane
+                # in conservative mode — stays ready for the next tick.
+                continue
             else:
                 lock = node.get("lock") or ""
                 if lock and not self.locks.acquire(lock, node["id"]):

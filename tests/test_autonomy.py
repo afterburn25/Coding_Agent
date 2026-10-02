@@ -156,6 +156,47 @@ class JobNodeTests(unittest.TestCase):
             self.assertIn("paused", out["output"])
             sup.stop()
 
+    def test_conservative_mode_defers_gpu_job_when_lane_busy(self):
+        with tempfile.TemporaryDirectory() as td:
+            seen = []
+            sup = make_sup(
+                td,
+                lane_free=lambda: False,  # interactive lane is busy
+                job_runner=lambda m, n: (seen.append(n["id"]) or
+                                         {"ok": True, "output": "x"}))
+            sup.policy.set_resource_mode("conservative")
+            m = sup.create_mission(
+                objective="render", success_criteria=[
+                    {"kind": "all_tasks_completed"}])
+            sup.missions.mutate(m["id"], lambda r: TaskGraph(r).add(
+                new_task("Render", "make image", kind="job",
+                         metadata={"job": "image"})))
+            sup.start_mission(m["id"])
+            sup.tick()
+            node = (sup.missions.get(m["id"]).get("graph") or {})["nodes"][0]
+            self.assertEqual(seen, [])
+            self.assertEqual(node["state"], "ready")  # deferred, not claimed
+            sup.policy.set_resource_mode("performance")
+            seen.clear()
+            # Balanced/performance no longer yield to the busy lane.
+            tb = Path(td) / "b"
+            tb.mkdir()
+            sup2 = make_sup(str(tb), lane_free=lambda: True,
+                            job_runner=lambda m, n: (seen.append(n["id"]) or
+                                                     {"ok": True, "output": "x"}))
+            m2 = sup2.create_mission(
+                objective="render", success_criteria=[
+                    {"kind": "all_tasks_completed"}])
+            sup2.missions.mutate(m2["id"], lambda r: TaskGraph(r).add(
+                new_task("Render", "make image", kind="job",
+                         metadata={"job": "image"})))
+            sup2.start_mission(m2["id"])
+            sup2.tick()
+            time.sleep(0.2)
+            self.assertEqual(len(seen), 1)
+            sup.stop()
+            sup2.stop()
+
     def test_default_job_runner_reports_unwired(self):
         sup = make_sup(tempfile.mkdtemp())
         out = sup._default_job({}, {"metadata": {"job": "sandbox"}})

@@ -67,8 +67,13 @@ class BudgetManager:
         return {"ok": not violations, "violations": violations,
                 "snapshot": snap}
 
-    def may_use_gpu(self, mission: dict) -> bool:
-        """GPU-heavy mission work yields when the foreground lane is busy —
-        checked cheaply via resource mode + locks, refined later."""
-        mode = str((mission.get("resource_mode") or "balanced"))
-        return mode != "conservative" or True
+    def may_use_gpu(self, mission: dict, *, foreground_busy: bool = False,
+                    resource_mode: str = "") -> bool:
+        """GPU-heavy mission work yields to interactive use in conservative
+        mode. balanced/performance always allow. The effective mode comes
+        from the global policy unless the mission overrides it."""
+        mode = str(resource_mode or mission.get("resource_mode")
+                   or "balanced")
+        if mode == "conservative" and foreground_busy:
+            return False
+        return True
