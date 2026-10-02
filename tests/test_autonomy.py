@@ -346,6 +346,68 @@ class JobNodeTests(unittest.TestCase):
             finally:
                 stop_state(state)
 
+    def test_mission_job_worktree_exception_still_tears_down(self):
+        # A Sandbox.run exception must not strand the provisioned worktree.
+        import subprocess
+        from unittest.mock import patch
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.multiagent import is_repo
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t",
+                            "-c", "user.email=t@t", "commit",
+                            "--allow-empty", "-m", "init"],
+                           capture_output=True)
+            if not is_repo(repo):
+                self.skipTest("git unavailable")
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, repo, repo / ".runtime")
+            try:
+                node = {"metadata": {"job": "worktree",
+                                     "command": "echo hi"}}
+                with patch("localcodeagent.sandbox.Sandbox.run",
+                           side_effect=RuntimeError("sandbox boom")):
+                    out = state._mission_job({"id": "m7"}, node)
+                self.assertFalse(out["ok"])
+                wt_root = repo / ".agent" / "worktrees"
+                leftovers = [d for d in wt_root.iterdir() if d.is_dir()]                     if wt_root.is_dir() else []
+                self.assertEqual(leftovers, [])
+            finally:
+                stop_state(state)
+
+    def test_sweep_worktree_orphans_removes_dirs_keeps_branches(self):
+        import subprocess
+        from localcodeagent.multiagent import (
+            WorktreeAgent, is_repo, sweep_worktree_orphans)
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t",
+                            "-c", "user.email=t@t", "commit",
+                            "--allow-empty", "-m", "init"],
+                           capture_output=True)
+            if not is_repo(repo):
+                self.skipTest("git unavailable")
+            # Simulate a crash: provisioned worktree, process died.
+            agent = WorktreeAgent(repo, "coder")
+            prov = agent.provision()
+            self.assertTrue(prov.get("ok"), prov)
+            self.assertTrue(agent.path.is_dir())
+            out = sweep_worktree_orphans(repo)
+            self.assertFalse(agent.path.exists())
+            self.assertGreaterEqual(out["removed"], 1)
+            self.assertIn(agent.branch, out["kept_branches"])
+            bl = subprocess.run(
+                ["git", "-C", str(repo), "branch", "--list", agent.branch],
+                capture_output=True, text=True)
+            self.assertIn(agent.branch.split("/")[-1], bl.stdout)
+
     def test_register_output_artifact_records_kg_provenance(self):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import AppState, stop_state

@@ -568,6 +568,7 @@ class AppState:
         # standing goals. Never widens permissions; interactive lane wins.
         self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
         self.autonomy = self._build_autonomy(config, runtime_root)
+        self._sweep_worktree_orphans()
         self.queue.enrich = self._queue_enrich_mission
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
@@ -907,6 +908,27 @@ class AppState:
             return "healthy" if "running" in states or "external" in states else "degraded"
         return "stopped"
 
+    def _sweep_worktree_orphans(self) -> None:
+        """Reclaim worktree dirs stranded by a crashed/killed process.
+
+        Runs once at boot after the autonomy store is up. nexus-agent/*
+        branches are kept — a merge-conflict path preserves work for
+        recovery — and surfaced as a notification instead of vanishing.
+        """
+        try:
+            from .multiagent import sweep_worktree_orphans
+            out = sweep_worktree_orphans(self.workspace)
+            kept = out.get("kept_branches") or []
+            if kept:
+                self.autonomy.notifications.notify(
+                    f"Recovered {len(kept)} agent worktree branch(es) from a "
+                    f"previous session: {', '.join(kept[:5])}",
+                    level="info", title="Worktree recovery",
+                    detail=f"Removed {out.get('removed', 0)} orphaned "
+                           f"worktree dir(s); branches kept for recovery.")
+        except Exception:
+            pass
+
     def _probe_mcp(self) -> str:
         """Aggregate MCP server states into a component health value."""
         try:
@@ -1035,49 +1057,51 @@ class AppState:
                     return {"ok": False,
                             "output": f"worktree provision failed: "
                                       f"{prov.get('error', '')}"}
-                cmd = str(meta.get("command") or "")
-                if not cmd and not meta.get("argv"):
-                    agent.teardown()
-                    return {"ok": False,
-                            "output": "worktree job: no command"}
-                sbx = Sandbox()
+                keep = False
                 try:
-                    argv = meta.get("argv") or (
-                        ["cmd.exe", "/c", cmd] if os.name == "nt"
-                        else ["sh", "-c", cmd])
-                    r = sbx.run(list(argv), cwd=agent.path,
-                                timeout=float(meta.get("timeout", 600)),
-                                allow_network=bool(meta.get("network", False)))
-                finally:
-                    sbx.cleanup()
-                if not r.get("ok"):
-                    agent.teardown()
-                    out = (r.get("stderr") or r.get("stdout") or "")[-2000:]
-                    return {"ok": False,
-                            "output": f"worktree command failed "
-                                      f"(exit {r.get('exit')}): {out}"}
-                commit = agent.commit_work(
-                    str(meta.get("message") or "[nexus] worktree job"))
-                if not commit.get("ok"):
-                    agent.teardown()
-                    return {"ok": False,
-                            "output": f"worktree commit failed: "
-                                      f"{commit.get('error', '')}"}
-                merge = agent.merge_back()
-                if not merge.get("ok"):
-                    # Keep the branch + worktree so work isn't lost; report
-                    # the conflict instead of silently discarding changes.
-                    return {"ok": False,
-                            "output": f"worktree merge conflict — kept branch "
-                                      f"{agent.branch} at {agent.path}: "
-                                      f"{merge.get('error', '')}",
+                    cmd = str(meta.get("command") or "")
+                    if not cmd and not meta.get("argv"):
+                        return {"ok": False,
+                                "output": "worktree job: no command"}
+                    sbx = Sandbox()
+                    try:
+                        argv = meta.get("argv") or (
+                            ["cmd.exe", "/c", cmd] if os.name == "nt"
+                            else ["sh", "-c", cmd])
+                        r = sbx.run(list(argv), cwd=agent.path,
+                                    timeout=float(meta.get("timeout", 600)),
+                                    allow_network=bool(meta.get("network", False)))
+                    finally:
+                        sbx.cleanup()
+                    if not r.get("ok"):
+                        out = (r.get("stderr") or r.get("stdout") or "")[-2000:]
+                        return {"ok": False,
+                                "output": f"worktree command failed "
+                                          f"(exit {r.get('exit')}): {out}"}
+                    commit = agent.commit_work(
+                        str(meta.get("message") or "[nexus] worktree job"))
+                    if not commit.get("ok"):
+                        return {"ok": False,
+                                "output": f"worktree commit failed: "
+                                          f"{commit.get('error', '')}"}
+                    merge = agent.merge_back()
+                    if not merge.get("ok"):
+                        # Keep the branch + worktree so work isn't lost;
+                        # report the conflict instead of silently discarding.
+                        keep = True
+                        return {"ok": False,
+                                "output": f"worktree merge conflict — kept branch "
+                                          f"{agent.branch} at {agent.path}: "
+                                          f"{merge.get('error', '')}",
+                                "branch": agent.branch}
+                    return {"ok": True,
+                            "output": f"worktree {agent.id} merged "
+                                      f"{merge.get('merged', agent.branch)} "
+                                      f"(exit {r.get('exit')})",
                             "branch": agent.branch}
-                agent.teardown()
-                return {"ok": True,
-                        "output": f"worktree {agent.id} merged "
-                                  f"{merge.get('merged', agent.branch)} "
-                                  f"(exit {r.get('exit')})",
-                        "branch": agent.branch}
+                finally:
+                    if not keep:
+                        agent.teardown()
             if op == "model_install":
                 model_id = str(meta.get("model") or "")
                 cat = getattr(self.runtime, "model_catalog", None)

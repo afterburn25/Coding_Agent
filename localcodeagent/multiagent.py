@@ -152,3 +152,40 @@ class AgentPool:
         for a in self.agents.values():
             a.teardown(delete_branch=a.state != "merged")
         self.agents.clear()
+
+
+def sweep_worktree_orphans(repo: Path) -> dict[str, Any]:
+    """Reclaim worktree dirs stranded by a crashed/killed process.
+
+    Worktree directories under ``.agent/worktrees`` are removed (``git
+    worktree remove --force`` with an rmtree fallback). ``nexus-agent/*``
+    branches are deliberately kept — a merge-conflict path preserves them
+    for recovery — and their names are returned so callers can surface
+    them rather than silently discarding work.
+    """
+    repo = Path(repo).resolve()
+    if not is_repo(repo):
+        return {"removed": 0, "kept_branches": []}
+    root = repo / ".agent" / "worktrees"
+    removed = 0
+    if root.is_dir():
+        rc, out = _git(repo, "worktree", "list", "--porcelain")
+        live = set()
+        if rc == 0:
+            for line in out.splitlines():
+                if line.startswith("worktree "):
+                    live.add(str(Path(line[9:].strip()).resolve()))
+        for d in root.iterdir():
+            if not d.is_dir():
+                continue
+            if str(d.resolve()) in live:
+                _git(repo, "worktree", "remove", "--force", str(d))
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+    rc, out = _git(repo, "branch", "--list", "nexus-agent/*")
+    kept = []
+    if rc == 0:
+        kept = [line.strip().lstrip("* ").strip()
+                for line in out.splitlines() if line.strip()]
+    return {"removed": removed, "kept_branches": kept}
