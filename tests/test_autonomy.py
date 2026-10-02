@@ -42,6 +42,49 @@ def drive(sup: AutonomousSupervisor, mission_id: str, ticks: int = 30,
     return m
 
 
+class SandboxedVerifyTests(unittest.TestCase):
+    def test_generated_verify_command_runs_in_sandbox(self):
+        # A node-supplied command is generated code — must run sandboxed
+        # (job limits, clean env) with the repo as cwd, not raw shell=True.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            marker = Path(td) / "verify_ran.txt"
+            script = Path(td) / "mk.py"
+            script.write_text(
+                f"import pathlib;pathlib.Path(r'{marker}').write_text('ok')")
+            import sys
+            node = {"instruction": "run checks",
+                    "metadata": {"command": f"{sys.executable} {script}"}}
+            out = sup._default_verify({"autonomy_profile": "local_autonomous",
+                                       "workspace": td}, node)
+            self.assertTrue(out["ok"], out["output"])
+            self.assertIn("[sandboxed]", out["output"])
+            self.assertTrue(marker.exists())
+            sup.stop()
+
+    def test_detected_verify_command_not_sandboxed(self):
+        # Repo-detected checks (e.g. pytest found in the project) are trusted —
+        # they run on the host so fixtures/venv resolve normally.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "pytest.ini").write_text("[pytest]\n")
+            sup = make_sup(td)
+            import localcodeagent.workflow.verify as vermod
+            orig = vermod.detect_verification_commands
+            vermod.detect_verification_commands = lambda w: [
+                {"command": f'{__import__("sys").executable} -c "print(1)"',
+                 "name": "pytest"}]
+            try:
+                out = sup._default_verify({"autonomy_profile": "local_autonomous",
+                                           "workspace": td},
+                                          {"instruction": "x", "metadata": {}})
+            finally:
+                vermod.detect_verification_commands = orig
+            self.assertIn("pytest", out["output"])
+            self.assertNotIn("[sandboxed]", out["output"])
+            sup.stop()
+
+
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
         with tempfile.TemporaryDirectory() as td:

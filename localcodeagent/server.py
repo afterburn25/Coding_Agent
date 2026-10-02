@@ -297,6 +297,29 @@ class AppState:
         self._rag_obj: RepoIndex | None = None
         self.eval_lab = EvalLab(runtime_root / "data" / "eval")
         self.experiments = ExperimentStore(runtime_root / "data" / "eval")
+
+        # Repository RAG as a first-class tool: incremental symbol+chunk
+        # search so coding flows query the index instead of re-reading files.
+        from .tools.base import ToolSpec
+
+        def _repo_search(args: dict) -> str:
+            try:
+                idx = self.rag_index
+                idx.update()  # incremental — changed files only
+                out = idx.search(str(args.get("query") or ""))
+                return json.dumps(out[:30], ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+
+        self.tools.register(ToolSpec(
+            "repo_search",
+            "Search the persistent repository index (symbols, chunks, docs) for a query. Faster and more targeted than scanning files — the index is updated incrementally.",
+            {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+            "filesystem.read",
+            _repo_search,
+            category="coding",
+            capabilities=["repository_search", "local_rag"],
+        ))
         # Register core component probes with the health service.
         self.health.register("autonomy",
                              lambda: "healthy" if getattr(

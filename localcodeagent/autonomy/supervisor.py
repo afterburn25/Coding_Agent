@@ -1101,12 +1101,31 @@ class AutonomousSupervisor:
                                          "detail": node.get("instruction", "")[:300]}}
         command = str(node.get("metadata", {}).get("command") or "")
         name = "verify"
+        generated_cmd = bool(command)
         if not command:
             cmds = detect_verification_commands(self.workspace)
             if not cmds:
                 return {"ok": True, "output": "no verification commands detected"}
             command = cmds[0]["command"]
             name = cmds[0]["name"]
+        if generated_cmd or node.get("metadata", {}).get("sandbox"):
+            # Node-supplied commands are generated code — run them inside the
+            # sandbox (Job memory cap + kill-on-close + timeout + clean env)
+            # with the repo as cwd, not a raw host shell.
+            try:
+                from ..sandbox import Sandbox
+                with Sandbox() as sb:
+                    res = sb.run_shell(
+                        command, timeout=900,
+                        allow_network=bool(node.get("metadata", {}).get("network")),
+                        cwd=self.workspace)
+                tail = (res.get("stdout") or "")[-3000:] + (res.get("stderr") or "")[-1500:]
+                if res.get("timed_out"):
+                    return {"ok": False, "output": f"{name}: timed out (sandboxed)"}
+                return {"ok": bool(res.get("ok")),
+                        "output": f"{name} [sandboxed]: rc={res.get('exit')}\n{tail}"}
+            except Exception as exc:
+                return {"ok": False, "output": f"{name}: sandbox failed — {exc}"}
         try:
             proc = subprocess.run(
                 command, shell=True, cwd=str(self.workspace),

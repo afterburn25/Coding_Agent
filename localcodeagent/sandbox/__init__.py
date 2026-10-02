@@ -116,15 +116,21 @@ class Sandbox:
 
     def run(self, argv: list[str], *, timeout: float = DEFAULT_TIMEOUT,
             mem_mb: int = DEFAULT_MEM_MB, allow_network: bool = False,
-            stdin: str = "") -> dict[str, Any]:
+            stdin: str = "", cwd: Path | str | None = None) -> dict[str, Any]:
         """Run argv inside the sandbox workspace. Never raises on child
-        failure — the result dict carries ok/timeout/exit/stdout/stderr."""
+        failure — the result dict carries ok/timeout/exit/stdout/stderr.
+
+        ``cwd`` may point at an external directory (e.g. the project repo)
+        when the command needs a real working tree; the sandbox workspace
+        itself remains the scratch root for artifacts and is always the
+        thing cleaned up — never pass the workspace as ``root``.
+        """
         timeout = max(1.0, min(float(timeout), MAX_TIMEOUT))
         started = time.time()
         job = None
         try:
             proc = subprocess.Popen(
-                [str(a) for a in argv], cwd=self.root,
+                [str(a) for a in argv], cwd=str(cwd or self.root),
                 env=_clean_env(allow_network),
                 stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,

@@ -1521,8 +1521,25 @@ class AppStateWiringTests(unittest.TestCase):
                 "docker_run", "blender_render", "list_workflows", "run_workflow",
                 "find_tools", "use_capability", "install_tool", "system_resources",
                 "queue_task", "queue_list", "queue_cancel",
+                "repo_search",
             ):
                 self.assertIn(expected, names, f"missing registered tool: {expected}")
+
+    def test_repo_search_queries_incremental_index(self):
+        import json
+        from localcodeagent.server import stop_state
+        with tempfile.TemporaryDirectory() as td:
+            state = self._state(td)
+            try:
+                (Path(td) / "mod.py").write_text(
+                    "def helper():\n    return 42\n\nclass Widget:\n    pass\n")
+                spec = state.tools.get("repo_search")
+                hits = json.loads(spec.handler({"query": "Widget"}))
+                self.assertTrue(any(h.get("name") == "Widget" for h in hits))
+            finally:
+                # The lazy RAG index holds a SQLite handle — release it so the
+                # temp dir can be deleted on Windows.
+                stop_state(state)
 
     def test_idle_comfyui_evicted_only_when_managed_and_idle(self):
         with tempfile.TemporaryDirectory() as td:
