@@ -282,6 +282,8 @@ class AppState:
         from .lsp import LspPool
         from .eval import EvalLab, ExperimentStore
         self.twin = DigitalTwin(runtime_root / "data" / "twin.json")
+        # Measured footprints calibrate resource_fit over static estimates.
+        self.runtime.twin = self.twin
         self.artifacts = ArtifactManager(runtime_root / "data" / "artifacts")
         self.backups = BackupService(runtime_root)
         self.health = HealthService(runtime_root / "data" / "health.json")

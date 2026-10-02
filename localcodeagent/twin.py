@@ -125,7 +125,7 @@ class DigitalTwin:
     # -- prediction -------------------------------------------------------
 
     def predict_model(self, *, size_gb: float, quant: str = "",
-                      context: int = 0,
+                      context: int = 0, model_id: str = "",
                       prefer_gpu: bool = True) -> dict[str, Any]:
         """Predict whether a model of size_gb will fit, expected RAM/VRAM,
         ttft, tps — from measured history when available."""
@@ -135,10 +135,14 @@ class DigitalTwin:
                            for g in hw.get("gpus", []))
         free_vram_gb = free_vram_mb / 1024.0
 
-        # Nearest measured model by size for calibration.
+        # Calibration source: an exact model match beats size proximity.
         measures = self.data.get("model_measures") or []
         near = None
-        if measures:
+        if model_id:
+            same = [m for m in measures if m.get("model_id") == model_id]
+            if same:
+                near = same[-1]
+        if near is None and measures:
             near = min(measures,
                        key=lambda m: abs(m["size_gb"] - size_gb)
                        + (0 if (not quant or m.get("quant") == quant) else 0.2))

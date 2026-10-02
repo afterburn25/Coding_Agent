@@ -79,6 +79,7 @@ class RuntimeManager:
         self._status: dict[str, RuntimeStatus] = {}
         self._lock = threading.RLock()
         self._last_used: dict[str, float] = {}
+        self.twin: Any = None  # optional DigitalTwin, attached by AppState
         self._launch_ctx: dict[str, int] = {}
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
@@ -300,6 +301,23 @@ class RuntimeManager:
         avail_ram = h.available_ram_gb
         required_vram = max(0.0, float(profile.estimated_vram_gb))
         required_ram = max(0.0, float(profile.estimated_ram_gb))
+
+        # Digital Twin calibration: when this hardware has measured the model's
+        # real footprint, prefer those numbers over static profile estimates.
+        twin = getattr(self, "twin", None)
+        if twin is not None and profile.model_path:
+            try:
+                mp = self._resolve(profile.model_path)
+                if mp.is_file():
+                    pred = twin.predict_model(
+                        model_id=profile.id,
+                        size_gb=mp.stat().st_size / 1e9,
+                        prefer_gpu=required_vram > 0)
+                    if pred.get("basis") == "measured":
+                        required_ram = float(pred["estimated_ram_gb"])
+                        required_vram = float(pred["estimated_vram_gb"])
+            except Exception:
+                pass
 
         reclaim_ram, reclaim_vram, victims = self._reclaimable_resources(profile)
         if reclaim_ram > 0 and h.total_ram_gb > 0:
@@ -590,6 +608,55 @@ class RuntimeManager:
     def resident_model_ids(self) -> list[str]:
         with self._lock:
             return [mid for mid, item in self._managed.items() if item.process.poll() is None]
+
+    def measure_resident(self, model_id: str) -> dict[str, Any]:
+        """Best-effort RSS/VRAM/model-size footprint of a resident model.
+
+        Feeds DigitalTwin.model_measures so predict_model can calibrate on
+        observed numbers instead of static profile estimates. Returns {} when
+        the model is not resident; every field is independently optional.
+        """
+        with self._lock:
+            item = self._managed.get(model_id)
+        if item is None or item.process.poll() is not None:
+            return {}
+        out: dict[str, Any] = {}
+        try:
+            mp = self._resolve(item.profile.model_path) if item.profile.model_path else None
+            if mp is not None and mp.is_file():
+                out["model_size_gb"] = round(mp.stat().st_size / 1e9, 3)
+        except OSError:
+            pass
+        pid = item.process.pid
+        try:
+            if os.name == "nt":
+                r = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-Process -Id {pid}).WorkingSet64"],
+                    capture_output=True, text=True, timeout=5)
+                if r.returncode == 0 and r.stdout.strip().isdigit():
+                    out["ram_used_gb"] = round(int(r.stdout.strip()) / 1e9, 2)
+            else:
+                for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+                    if line.startswith("VmRSS:"):
+                        out["ram_used_gb"] = round(int(line.split()[1]) / 1048576, 2)
+                        break
+        except Exception:
+            pass
+        try:
+            r = subprocess.run(
+                ["nvidia-smi", "--query-compute-apps=pid,used_memory",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                for line in r.stdout.splitlines():
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) == 2 and parts[0] == str(pid):
+                        out["vram_used_mb"] = float(parts[1])
+                        break
+        except Exception:
+            pass
+        return out
 
     def _emit_residency(self, action: str, model_id: str, reason: str = "") -> None:
         hook = self.on_residency_event

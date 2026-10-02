@@ -1207,14 +1207,20 @@ class AgentOrchestrator:
             )
             if self.digital_twin is not None:
                 try:
+                    meas = {}
+                    if self.runtime is not None:
+                        meas = self.runtime.measure_resident(session.profile.id) or {}
                     self.digital_twin.record_model_measure(
                         model_id=session.profile.id,
-                        size_gb=float(getattr(session.profile, "estimated_vram_gb", 0.0)
+                        size_gb=float(meas.get("model_size_gb")
+                                      or getattr(session.profile, "estimated_vram_gb", 0.0)
                                       or getattr(session.profile, "estimated_ram_gb", 0.0) or 0.0),
                         context=int(launch.get("context_window") or 0),
                         ttft_s=(float(raw["time_to_first_token_ms"]) / 1000.0
                                 if isinstance(raw.get("time_to_first_token_ms"), (int, float)) else None),
                         tps=tps or None,
+                        ram_used_gb=meas.get("ram_used_gb"),
+                        vram_used_mb=meas.get("vram_used_mb"),
                         source="observed")
                 except Exception:
                     pass

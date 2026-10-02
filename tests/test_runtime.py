@@ -234,6 +234,76 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertEqual(score, -100)
             self.assertIn("auto-fit margin", reason)
 
+    def test_resource_fit_prefers_measured_twin_footprint(self):
+        # Static profile estimate says "oversized" but measured history for
+        # this exact model says it fits — measured basis must win.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            gguf = root / "models" / "big.gguf"
+            gguf.write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_text("placeholder", encoding="utf-8")
+            big = self._profile(
+                id="big", endpoint="", executable=str(fake_server),
+                model_path="models/big.gguf",
+                estimated_vram_gb=24.0, estimated_ram_gb=42.0,
+                allow_cpu_offload=True)
+            manager = RuntimeManager(AgentConfig(models=[big]), base_dir=root)
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=29.8,
+                gpus=[GPUInfo(0, "RTX", 12288, 9216, 3072)],
+                nvidia_smi_available=True)
+            without_twin = manager.resource_fit(big)
+            self.assertFalse(without_twin[0])
+            from localcodeagent.twin import DigitalTwin
+            twin = DigitalTwin(root / "twin.json", detect=lambda: {
+                "ram_free_gb": 29.8,
+                "gpus": [{"free_vram_mb": 9216}]})
+            size_gb = gguf.stat().st_size / 1e9
+            twin.record_model_measure(model_id="big", size_gb=size_gb,
+                                      ram_used_gb=8.0, vram_used_mb=4000)
+            manager.twin = twin
+            fits, score, reason = manager.resource_fit(big)
+            self.assertTrue(fits, reason)
+            # Exact model_id wins over a closer-by-size measure: a tiny
+            # "other" measure would predict ~1 GB, but the big model's own
+            # record (8 GB) must be used.
+            twin2 = DigitalTwin(root / "twin2.json", detect=lambda: {
+                "ram_free_gb": 29.8, "gpus": [{"free_vram_mb": 9216}]})
+            twin2.record_model_measure(model_id="big", size_gb=size_gb,
+                                       ram_used_gb=8.0, vram_used_mb=4000)
+            twin2.record_model_measure(model_id="other", size_gb=0.000005,
+                                       ram_used_gb=1.0)
+            manager.twin = twin2
+            fits2, _, _ = manager.resource_fit(big)
+            self.assertTrue(fits2)
+
+    def test_measure_resident_reports_rss_and_file_size(self):
+        import subprocess as sp, sys
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            gguf = root / "models" / "m.gguf"
+            gguf.write_bytes(b"x" * 12345)
+            manager = RuntimeManager(AgentConfig(models=[]), base_dir=root)
+            self.assertEqual(manager.measure_resident("none"), {})
+            proc = sp.Popen([sys.executable, "-c",
+                             "import time;time.sleep(60)"])
+            try:
+                manager._managed["m"] = _ManagedProcess(
+                    profile=SimpleNamespace(model_path="models/m.gguf"),
+                    process=proc, endpoint="", log_handle=None, status=None)
+                meas = manager.measure_resident("m")
+                self.assertIn("ram_used_gb", meas)
+                self.assertGreater(meas["ram_used_gb"], 0)
+                self.assertAlmostEqual(meas["model_size_gb"], 12345 / 1e9,
+                                       places=3)
+            finally:
+                proc.terminate()
+                proc.wait(timeout=10)
+
     def test_resource_fit_counts_memory_released_by_resident_model_switch(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
