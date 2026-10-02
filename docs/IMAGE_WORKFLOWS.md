@@ -38,12 +38,17 @@ Local Code Agent can substitute `${...}` values before execution. Common variabl
 
 Unresolved variables cause the job to fail before it is submitted to ComfyUI.
 
-## Current Qwen / FLUX workflow targets
+## Current Qwen / FLUX / SDXL workflow targets
 
 The default profiles reserve operation-specific paths under:
 
 - `workflows/image/qwen/`
 - `workflows/image/flux/`
+- `workflows/image/sdxl/` — `juggernaut-x-v10-t2i-api.json` is a standard
+  SDXL checkpoint graph (`CheckpointLoaderSimple` → `CLIPTextEncode` ×2 →
+  `EmptyLatentImage` → `KSampler` → `VAEDecode` → `SaveImage`); the
+  checkpoint resolves via `${component_checkpoint}` from the model
+  profile's `checkpoint` component.
 
 Weights are managed independently under `models/image/`; importing a workflow does not download or overwrite model weights.
 

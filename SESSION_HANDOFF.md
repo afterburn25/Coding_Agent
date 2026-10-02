@@ -917,3 +917,27 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Deployed: backend + host rebuilt and copied to installed app; exe
   hash-verified. App healthy post-deploy (voice enabled, unmuted).
 - Suite: 540 tests, OK (skipped=2).
+
+## 2026-10-02 — Juggernaut X v10 becomes default text-to-image (main)
+
+- New default image profile `juggernaut-x-v10` (RunDiffusion SDXL
+  checkpoint, pinned rev `e53841ec`, sha256 `d91d3573…0c45`,
+  CreativeML OpenRAIL-M, 7,105,348,672 bytes). Normal/photorealistic
+  t2i routes to it at priority 110; Qwen (80) keeps edit/inpaint/
+  outpaint/background_removal; FLUX (70, speed_tier=fast) deterministically
+  wins preview/fast/draft via a fast-tier pool restriction in
+  `ImageRouter.choose`.
+- New SDXL API workflow `workflows/image/sdxl/juggernaut-x-v10-t2i-api.json`
+  (CheckpointLoaderSimple + CLIPTextEncode ×2 + EmptyLatentImage +
+  KSampler + VAEDecode + SaveImage); checkpoint resolves via
+  `${component_checkpoint}`; quality-focused default negative prompt has
+  no censorship terms.
+- `load_config` merges new default image models into existing installs by
+  id (user entries win). `ImageModelProfile` gained `display_name` /
+  `tagline`; Image Studio dropdown sorted by priority and shows friendly
+  labels.
+- SDXL CFG default is family-aware: `stable-diffusion*` → 6.5, others →
+  1.0 (distilled). Approved adult prompts reach the checkpoint verbatim —
+  no hidden sanitizer anywhere in the path (verified by test).
+- Checkpoint verified on disk in installed app. Suite: 555 tests,
+  OK (skipped=2).

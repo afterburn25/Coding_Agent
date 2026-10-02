@@ -277,7 +277,9 @@ class ImageManager:
             "width": request.width, "height": request.height, "count": request.count,
             "seed": request.seed if request.seed is not None else random.randint(0, 2**31-1),
             "steps": request.steps if request.steps is not None else (4 if profile.speed_tier == "fast" else 25),
-            "guidance": request.guidance if request.guidance is not None else 1.0,
+            # CFG 1.0 is correct for distilled models (FLUX Klein); full
+            # checkpoints like SDXL need real guidance.
+            "guidance": request.guidance if request.guidance is not None else (6.5 if "stable-diffusion" in profile.family else 1.0),
             "model_path": Path(profile.model_path).name if profile.model_path else "",
             "source_image": source, "mask_path": mask, "references": refs,
             "image_strength": request.image_strength if request.image_strength is not None else 1.0,

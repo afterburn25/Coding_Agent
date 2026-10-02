@@ -155,7 +155,8 @@ $ExpectedImageWorkflows = @(
     "image\qwen\qwen-image-2.1-inpaint-api.json",
     "image\qwen\qwen-image-2.1-background-removal-api.json",
     "image\flux\flux2-klein-4b-t2i-api.json",
-    "image\flux\flux2-klein-4b-edit-api.json"
+    "image\flux\flux2-klein-4b-edit-api.json",
+    "image\sdxl\juggernaut-x-v10-t2i-api.json"
 )
 foreach ($RelativeWorkflow in $ExpectedImageWorkflows) {
     if (-not (Test-Path (Join-Path $WorkflowTarget $RelativeWorkflow))) {

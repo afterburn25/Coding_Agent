@@ -80,6 +80,13 @@ class ImageRouter:
                 raise RuntimeError(f"No enabled image model supports: {', '.join(required)}")
             fitting = [c for c in candidates if c[0]]
             pool = fitting or candidates
+            # Fast/draft requests go to a fast-tier model when one can serve
+            # the operation — a higher-priority quality model must never steal
+            # a preview the user asked to be quick.
+            if request.quality in {"preview", "fast", "draft"}:
+                fast = [c for c in pool if c[2].speed_tier == "fast"]
+                if fast:
+                    pool = fast
             pool.sort(key=lambda item: (-item[1], item[2].id))
             fits, _, chosen, resource_reason = pool[0]
             if resource_reason:

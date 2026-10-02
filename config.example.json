@@ -120,6 +120,9 @@
   "model_telemetry_min_samples": 3,
   "model_telemetry_weight": 20,
   "model_telemetry_max_events": 500,
+  "fast_general_history_turns": 8,
+  "fast_general_context_chars": 9000,
+  "coding_context_chars": 60000,
   "image_enabled": true,
   "image_models_dir": "models/image",
   "image_data_dir": "data/image",
@@ -137,6 +140,52 @@
   "image_auto_run_jobs": true,
   "image_job_timeout": 900,
   "image_models": [
+    {
+      "id": "juggernaut-x-v10",
+      "family": "stable-diffusion-xl",
+      "backend": "comfyui",
+      "model_path": "models/image/stable-diffusion/checkpoints/Juggernaut-X-RunDiffusion-NSFW.safetensors",
+      "workflow": "",
+      "workflows": {
+        "text_to_image": "sdxl/juggernaut-x-v10-t2i-api.json"
+      },
+      "components": [
+        {
+          "key": "checkpoint",
+          "path": "models/image/stable-diffusion/checkpoints/Juggernaut-X-RunDiffusion-NSFW.safetensors",
+          "url": "https://huggingface.co/RunDiffusion/Juggernaut-X-v10/resolve/e53841ec9fc47ad9b803d6bfcfb3c00bdd815023/Juggernaut-X-RunDiffusion-NSFW.safetensors",
+          "required": true,
+          "size_bytes": 7105348672,
+          "sha256": "d91d35736d8f2be038f760a9b0009a771ecf0a417e9b38c244a84ea4cb9c0c45"
+        }
+      ],
+      "required_nodes": [
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "EmptyLatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "homepage": "https://huggingface.co/RunDiffusion/Juggernaut-X-v10",
+      "license_name": "CreativeML OpenRAIL-M",
+      "display_name": "Juggernaut X v10",
+      "tagline": "Photorealistic · SDXL · default generation",
+      "capabilities": [
+        "text_to_image"
+      ],
+      "priority": 110,
+      "enabled": true,
+      "quantization": "full SDXL checkpoint (fp16)",
+      "estimated_vram_gb": 10,
+      "estimated_ram_gb": 24,
+      "max_reference_images": 0,
+      "max_loras": 4,
+      "supports_transparency": false,
+      "speed_tier": "balanced",
+      "quality_tier": "high",
+      "notes": "Default general text-to-image model (pinned RunDiffusion revision e53841ec)."
+    },
     {
       "id": "qwen-image-2.1",
       "family": "qwen-image-2.1",
@@ -188,7 +237,9 @@
         "QwenImage21Cache"
       ],
       "homepage": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1",
-      "license_name": "",
+      "license_name": "Apache-2.0",
+      "display_name": "Qwen Image 2.1",
+      "tagline": "Editing / inpainting / high-quality image operations",
       "capabilities": [
         "text_to_image",
         "image_edit",
@@ -248,7 +299,9 @@
       ],
       "required_nodes": [],
       "homepage": "https://huggingface.co/Comfy-Org/flux2-klein",
-      "license_name": "",
+      "license_name": "Apache-2.0",
+      "display_name": "FLUX.2 Klein 4B",
+      "tagline": "Fast preview",
       "capabilities": [
         "text_to_image",
         "image_edit",

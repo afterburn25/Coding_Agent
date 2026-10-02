@@ -54,6 +54,7 @@
 - Optional managed ComfyUI process runtime with health/start/stop/recovery.
 - Image model profiles and local weight discovery.
 - Automatic image operation/model router.
+- Juggernaut X v10 (RunDiffusion SDXL, pinned rev e53841ec) default text-to-image profile.
 - Qwen-Image-2.1 quality/editing default profile.
 - FLUX.2 Klein 4B fast-preview default profile.
 - JSON workflow manager with typed variable substitution.

@@ -308,9 +308,10 @@ ImageBackend
   └─ future native/other backends
 ```
 
-The initial model profiles are:
+The model profiles are:
 
-- **Qwen-Image-2.1** — preferred quality/editing route.
+- **Juggernaut X v10** (RunDiffusion SDXL checkpoint, pinned revision `e53841ec`) — default normal/photorealistic text-to-image route, including adult-only synthetic generation when permitted by policy.
+- **Qwen-Image-2.1** — preferred editing route (edit/inpaint/outpaint/background removal/multi-reference).
 - **FLUX.2 Klein 4B** — preferred fast preview/draft route.
 
 Weights are not bundled or silently downloaded. The Image Model Manager can explicitly verify/install/repair/remove configured components; already-valid large files are reused. Configure or import API-format ComfyUI workflows separately.

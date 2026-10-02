@@ -589,5 +589,162 @@ class ComfyUIProgressListenerTests(unittest.TestCase):
             listener.stop()
 
 
+class JuggernautDefaultTests(unittest.TestCase):
+    """Juggernaut X v10 (RunDiffusion SDXL) is the default text-to-image model."""
+
+    PINNED_REVISION = "e53841ec9fc47ad9b803d6bfcfb3c00bdd815023"
+    PINNED_SHA256 = "d91d35736d8f2be038f760a9b0009a771ecf0a417e9b38c244a84ea4cb9c0c45"
+    CHECKPOINT_REL = "models/image/stable-diffusion/checkpoints/Juggernaut-X-RunDiffusion-NSFW.safetensors"
+    WORKFLOW_REL = "sdxl/juggernaut-x-v10-t2i-api.json"
+
+    def setUp(self):
+        from localcodeagent.config import default_config
+        self.models = {m.id: m for m in default_config().image_models}
+        self.jug = self.models["juggernaut-x-v10"]
+        self.router = ImageRouter(list(self.models.values()))
+
+    def test_profile_exists(self):
+        self.assertEqual(self.jug.family, "stable-diffusion-xl")
+        self.assertEqual(self.jug.capabilities, ["text_to_image"])
+        self.assertGreater(self.jug.priority, self.models["qwen-image-2.1"].priority)
+        self.assertGreater(self.models["qwen-image-2.1"].priority, self.models["flux2-klein-4b"].priority)
+
+    def test_checkpoint_path(self):
+        self.assertEqual(self.jug.model_path, self.CHECKPOINT_REL)
+        self.assertEqual(self.jug.components[0]["key"], "checkpoint")
+        self.assertEqual(self.jug.components[0]["path"], self.CHECKPOINT_REL)
+
+    def test_pinned_source_and_sha256(self):
+        component = self.jug.components[0]
+        self.assertIn(f"/resolve/{self.PINNED_REVISION}/", component["url"])
+        self.assertEqual(component["sha256"], self.PINNED_SHA256)
+        self.assertEqual(int(component["size_bytes"]), 7105348672)
+        self.assertIn("OpenRAIL", self.jug.license_name)
+
+    def test_sdxl_workflow_uses_checkpoint_loader(self):
+        manager = WorkflowManager(ROOT / "workflows" / "image")
+        self.assertEqual(self.jug.workflow_for("text_to_image"), self.WORKFLOW_REL)
+        status = manager.inspect(self.WORKFLOW_REL)
+        self.assertTrue(status["exists"])
+        self.assertTrue(status["valid"], status["errors"])
+        self.assertEqual(status["format"], "api")
+        for required in ("CheckpointLoaderSimple", "CLIPTextEncode", "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage"):
+            self.assertIn(required, status["class_types"])
+        # The checkpoint resolves through the component system, not a hardcoded path.
+        self.assertIn("component_checkpoint", status["unresolved_tokens"])
+
+    def test_workflow_negative_prompt_is_quality_not_censorship(self):
+        manager = WorkflowManager(ROOT / "workflows" / "image")
+        workflow = manager.load(self.WORKFLOW_REL)
+        texts = [n["inputs"].get("text", "") for n in workflow.values()
+                 if n.get("class_type") == "CLIPTextEncode" and isinstance(n.get("inputs"), dict)]
+        negative = next(t for t in texts if "low quality" in str(t).lower())
+        for banned in ("nsfw", "nude", "nudity", "genitals", "explicit"):
+            self.assertNotIn(banned, negative.lower())
+
+    def test_text_to_image_auto_routes_juggernaut(self):
+        decision = self.router.choose(ImageRequest(prompt="a castle on a hill"))
+        self.assertEqual(decision.operation, "text_to_image")
+        self.assertEqual(decision.model_id, "juggernaut-x-v10")
+
+    def test_high_quality_text_to_image_routes_juggernaut(self):
+        decision = self.router.choose(ImageRequest(prompt="photorealistic portrait", quality="high"))
+        self.assertEqual(decision.model_id, "juggernaut-x-v10")
+
+    def test_edit_operations_stay_on_qwen(self):
+        for op, req in (
+            ("edit_image", ImageRequest(prompt="make it darker", source_image="a.png")),
+            ("inpaint", ImageRequest(prompt="fill the mask", mask_path="m.png")),
+            ("outpaint", ImageRequest(prompt="extend this image")),
+            ("remove_background", ImageRequest(prompt="remove background", source_image="a.png")),
+        ):
+            with self.subTest(op=op):
+                decision = self.router.choose(req)
+                self.assertEqual(decision.operation, op)
+                self.assertEqual(decision.model_id, "qwen-image-2.1")
+
+    def test_fast_draft_routes_flux(self):
+        for quality in ("preview", "fast", "draft"):
+            with self.subTest(quality=quality):
+                decision = self.router.choose(ImageRequest(prompt="quick concept", quality=quality))
+                self.assertEqual(decision.model_id, "flux2-klein-4b")
+
+    def test_manual_model_overrides(self):
+        for model_id in ("qwen-image-2.1", "flux2-klein-4b", "juggernaut-x-v10"):
+            with self.subTest(model_id=model_id):
+                decision = self.router.choose(ImageRequest(prompt="test", model_override=model_id))
+                self.assertEqual(decision.model_id, model_id)
+
+    def _manager(self, root: Path) -> ImageManager:
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188",
+            comfyui_auto_start=False, image_resource_mode="balanced",
+        )
+        return ImageManager(base_dir=root, models=list(self.models.values()), config=config, workspace=root / "workspace")
+
+    def test_missing_checkpoint_reports_friendly_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            status = manager.library.verify_model(self.jug)
+            self.assertFalse(status["installed"])
+            checkpoint = next(c for c in status["components"] if c["key"] == "checkpoint")
+            self.assertFalse(checkpoint["ok"])
+
+    def test_corrupt_checkpoint_detected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = root / self.CHECKPOINT_REL
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"corrupt")
+            manager = self._manager(root)
+            status = manager.library.verify_model(self.jug, deep_hash=True)
+            checkpoint = next(c for c in status["components"] if c["key"] == "checkpoint")
+            self.assertFalse(checkpoint["size_ok"])
+            self.assertFalse(checkpoint["hash_ok"])
+            self.assertEqual(checkpoint["sha256"], __import__("hashlib").sha256(b"corrupt").hexdigest())
+
+    def test_policy_approved_adult_prompt_reaches_workflow_verbatim(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manager = self._manager(root)
+            manager.adult_content_allowed = lambda: True
+            prompt = "tasteful nude portrait of a confident 30-year-old adult woman, studio lighting"
+            allowed, _ = manager.policy.check(prompt)
+            self.assertTrue(allowed)
+            request = ImageRequest(prompt=prompt)
+            variables = manager._workflow_variables(request, self.jug)
+            self.assertEqual(variables["prompt"], prompt)
+            rendered = WorkflowManager.render(
+                WorkflowManager(ROOT / "workflows" / "image").load(self.WORKFLOW_REL), variables)
+            positive = next(n for n in rendered.values() if n["class_type"] == "CLIPTextEncode"
+                            and n["inputs"]["text"] == prompt)
+            self.assertIn("nude", positive["inputs"]["text"])
+
+    def test_existing_config_gains_juggernaut_without_losing_models(self):
+        from localcodeagent.config import load_config
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "image_models": [
+                    {"id": "qwen-image-2.1", "family": "qwen-image-2.1", "priority": 80},
+                    {"id": "flux2-klein-4b", "family": "flux.2-klein", "priority": 70},
+                ],
+            }), encoding="utf-8")
+            config = load_config(cfg_path)
+            ids = [m.id for m in config.image_models]
+            self.assertIn("juggernaut-x-v10", ids)
+            self.assertIn("qwen-image-2.1", ids)
+            self.assertIn("flux2-klein-4b", ids)
+            # User's own entry wins over the merged default.
+            qwen = next(m for m in config.image_models if m.id == "qwen-image-2.1")
+            self.assertEqual(qwen.components, [])
+
+    def test_image_studio_renders_friendly_labels(self):
+        js = (ROOT / "web" / "image.js").read_text(encoding="utf-8")
+        self.assertIn("display_name", js)
+        self.assertIn("tagline", js)
+
+
 if __name__ == "__main__":
     unittest.main()

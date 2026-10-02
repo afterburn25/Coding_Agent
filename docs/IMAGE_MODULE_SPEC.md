@@ -21,11 +21,27 @@ Use GPU/CPU offloading, quantization, tiled processing, and memory-efficient att
 
 Add support for:
 
+### Juggernaut X v10 (default text-to-image)
+
+RunDiffusion Juggernaut-X-v10 (full SDXL checkpoint, pinned revision
+`e53841ec`) is the default general/photorealistic text-to-image model:
+
+- normal and photorealistic text-to-image
+- adult-only synthetic generation when the creator-locked Nexus Brain
+  adult-content setting and `ImageSafetyPolicy` permit it
+
+Weights land under `models/image/stable-diffusion/checkpoints/` and are
+exposed to ComfyUI through the generated `extra_model_paths` file. The
+bundled workflow is `workflows/image/sdxl/juggernaut-x-v10-t2i-api.json`
+(standard `CheckpointLoaderSimple` + `CLIPTextEncode` + `EmptyLatentImage`
++ `KSampler` + `VAEDecode` + `SaveImage`). The default negative prompt
+targets quality defects only — it does not inject censorship terms into
+requests that already passed the image safety policy.
+
 ### Qwen-Image-2.1
 
 Use Qwen-Image-2.1 as the preferred quality model for:
 
-- text-to-image
 - image-to-image
 - conversational image editing
 - subject-preserving edits
@@ -36,7 +52,9 @@ Use Qwen-Image-2.1 as the preferred quality model for:
 - multiple reference images
 - consistent-character generation
 - transparent-background images where supported
-- photorealistic generation
+
+(Qwen can also produce photorealistic output, but default/photorealistic
+text-to-image routes to Juggernaut X v10.)
 
 Support GGUF/quantized versions suitable for 12 GB VRAM.
 
@@ -45,7 +63,8 @@ Support GGUF/quantized versions suitable for 12 GB VRAM.
 Use FLUX.2 Klein 4B as a fast secondary model for:
 
 - rapid previews
-- text-to-image
+- fast/draft text-to-image (it always wins `preview`/`fast`/`draft`
+  quality requests regardless of global model priority)
 - lightweight edits
 - draft generations
 - workflows where speed matters more than maximum quality

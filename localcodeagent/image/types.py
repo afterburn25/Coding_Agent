@@ -16,6 +16,8 @@ class ImageModelProfile:
     required_nodes: list[str] = field(default_factory=list)
     homepage: str = ""
     license_name: str = ""
+    display_name: str = ""
+    tagline: str = ""
     capabilities: list[str] = field(default_factory=lambda: ["text_to_image"])
     priority: int = 50
     enabled: bool = True

@@ -311,6 +311,27 @@ def default_config() -> AgentConfig:
         ],
         image_models=[
             ImageModelProfile(
+                id="juggernaut-x-v10",
+                family="stable-diffusion-xl",
+                model_path="models/image/stable-diffusion/checkpoints/Juggernaut-X-RunDiffusion-NSFW.safetensors",
+                workflows={
+                    "text_to_image": "sdxl/juggernaut-x-v10-t2i-api.json",
+                },
+                components=[
+                    {"key":"checkpoint","path":"models/image/stable-diffusion/checkpoints/Juggernaut-X-RunDiffusion-NSFW.safetensors","url":"https://huggingface.co/RunDiffusion/Juggernaut-X-v10/resolve/e53841ec9fc47ad9b803d6bfcfb3c00bdd815023/Juggernaut-X-RunDiffusion-NSFW.safetensors","sha256":"d91d35736d8f2be038f760a9b0009a771ecf0a417e9b38c244a84ea4cb9c0c45","size_bytes":7105348672,"required":True},
+                ],
+                required_nodes=["CheckpointLoaderSimple","CLIPTextEncode","EmptyLatentImage","KSampler","VAEDecode","SaveImage"],
+                capabilities=["text_to_image"],
+                priority=110, quality_tier="high", speed_tier="balanced",
+                quantization="full SDXL checkpoint (fp16)",
+                estimated_vram_gb=10.0, estimated_ram_gb=24.0, max_loras=4,
+                homepage="https://huggingface.co/RunDiffusion/Juggernaut-X-v10",
+                license_name="CreativeML OpenRAIL-M",
+                display_name="Juggernaut X v10",
+                tagline="Photorealistic · SDXL · default generation",
+                notes="Default general text-to-image model (pinned RunDiffusion revision e53841ec). SDXL checkpoint loaded via CheckpointLoaderSimple.",
+            ),
+            ImageModelProfile(
                 id="qwen-image-2.1",
                 family="qwen-image-2.1",
                 model_path="models/image/qwen/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
@@ -334,6 +355,9 @@ def default_config() -> AgentConfig:
                 quantization="official int8 convrot; GGUF profiles/workflows can be added without changing the router",
                 estimated_vram_gb=11.0, estimated_ram_gb=28.0, max_loras=4,
                 homepage="https://huggingface.co/Comfy-Org/Qwen-Image-2.1",
+                license_name="Apache-2.0",
+                display_name="Qwen Image 2.1",
+                tagline="Editing / inpainting / high-quality image operations",
                 notes="Preferred quality/editing path. API-format workflows are verified separately from model files.",
             ),
             ImageModelProfile(
@@ -354,6 +378,9 @@ def default_config() -> AgentConfig:
                 priority=70, quality_tier="balanced", speed_tier="fast", max_reference_images=4,
                 quantization="4B distilled", estimated_vram_gb=9.0, estimated_ram_gb=16.0, max_loras=4,
                 homepage="https://huggingface.co/Comfy-Org/flux2-klein",
+                license_name="Apache-2.0",
+                display_name="FLUX.2 Klein 4B",
+                tagline="Fast preview",
                 notes="Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing.",
             ),
         ],
@@ -398,6 +425,12 @@ def load_config(path: Path | None) -> AgentConfig:
         except (TypeError, AttributeError):
             continue
     defaults = default_config()
+    # Merge new default image models into existing installs so an update can
+    # offer newly added defaults (e.g. Juggernaut) without touching the user's
+    # existing model list. User-configured entries always win by id.
+    if image_models:
+        known = {m.id for m in image_models}
+        image_models.extend(m for m in defaults.image_models if m.id not in known)
     cfg = AgentConfig(models=models or defaults.models, image_models=image_models or defaults.image_models)
     # Fast-lane migration: configs saved before the dedicated utility model
     # still route "utility" to the 14B. Graft the small resident profile in;
