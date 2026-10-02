@@ -368,7 +368,8 @@ class ImageManager:
             job.state="generating"; job.stage="generating"; job.progress=0.20
             job.backend_job_id=self.backend.submit(workflow); self._save_jobs(job)
             listener=self._ws_progress_listener()
-            deadline=time.monotonic()+max(30, int(getattr(self.config,"image_job_timeout",900)))
+            gen_started=time.monotonic()
+            deadline=gen_started+max(30, int(getattr(self.config,"image_job_timeout",900)))
             while time.monotonic()<deadline:
                 state=self.backend.status(job.backend_job_id)
                 if state.get("state")=="finished":
@@ -376,12 +377,19 @@ class ImageManager:
                 if state.get("state")=="failed":
                     raise RuntimeError(str(state.get("error") or "ComfyUI generation failed"))
                 job.progress=max(job.progress, float(state.get("progress",0.25)))
+                ws_node=None
                 if listener is not None:
                     ws_progress, ws_node = listener.progress_for(job.backend_job_id)
                     if ws_progress:
                         # Map ComfyUI's 0..1 step fraction into the generating band.
                         job.progress=max(job.progress, 0.20 + 0.70 * ws_progress)
-                        job.stage="generating" + (f" · node {ws_node}" if ws_node else "")
+                if ws_node:
+                    job.stage="generating" + (f" · node {ws_node}" if ws_node else "")
+                # ComfyUI only emits step fractions inside the sampler; model
+                # loads/encodes report nothing, which left the bar frozen at
+                # 20%. Ramp toward 0.85 over ~4 min so the UI stays honest.
+                elapsed=time.monotonic()-gen_started
+                job.progress=max(job.progress, min(0.85, 0.20 + 0.65 * (elapsed / 240.0)))
                 self._save_jobs(job); time.sleep(0.75)
             else:
                 raise TimeoutError("Timed out waiting for ComfyUI image generation")

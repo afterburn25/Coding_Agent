@@ -601,20 +601,23 @@ class RuntimeManager:
             if required_vram_gb <= 0 or self.hardware.free_vram_gb >= required_vram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
-            active = [mid for mid in self.resident_model_ids() if not profiles.get(mid, self.config.models[0]).keep_loaded]
-            active.sort(key=lambda mid: self._last_used.get(mid, 0.0))
-            if str(mode).lower() in {"prefer image model", "prefer_image_model", "aggressive vram cleanup", "aggressive_vram_cleanup"}:
-                victims = list(active)
-            else:
-                victims = active[:1]
+            resident = self.resident_model_ids()
+            active = [mid for mid in resident if not profiles.get(mid, self.config.models[0]).keep_loaded]
+            # keep_loaded models are a last resort: still evictable when an
+            # image job genuinely cannot fit — otherwise the generation crawls
+            # on CPU offload for far longer than a reload would cost.
+            baseline = [mid for mid in resident if mid not in active]
+            key = lambda mid: self._last_used.get(mid, 0.0)
+            active.sort(key=key); baseline.sort(key=key)
+            aggressive = str(mode).lower() in {"prefer image model", "prefer_image_model", "aggressive vram cleanup", "aggressive_vram_cleanup"}
             stopped: list[str] = []
-            for mid in victims:
+            for mid in active + baseline:
+                if not aggressive and self.hardware.free_vram_gb >= required_vram_gb:
+                    break
                 self._stop_managed(mid)
                 stopped.append(mid)
                 self._emit_residency("evict", mid, f"freeing VRAM ({mode})")
                 self.refresh_hardware()
-                if self.hardware.free_vram_gb >= required_vram_gb and str(mode).lower() not in {"aggressive vram cleanup", "aggressive_vram_cleanup"}:
-                    break
             return stopped
 
     def evict_idle(self, *, busy_models: set[str] | None = None) -> list[str]:
