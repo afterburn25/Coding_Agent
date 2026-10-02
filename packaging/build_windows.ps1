@@ -31,7 +31,10 @@ $StateRoot = Join-Path $env:LOCALAPPDATA "NexusCore"
 # Small state lives in the per-user profile; models can be tens of GB so the
 # host redirects them to a shared root on the install drive instead — the
 # merge below mirrors that split (see StateTargetRoot in Program.cs).
-$DriveStateRoot = Join-Path ([IO.Path]::GetPathRoot((Resolve-Path $PackageRoot).Path)) "NexusCore"
+# On a clean checkout dist\ChatNexus doesn't exist yet — Resolve-Path would
+# throw. PackageRoot is always under $Root, so fall back to $Root's drive.
+$PackageDrive = if (Test-Path $PackageRoot) { (Resolve-Path $PackageRoot).Path } else { $Root }
+$DriveStateRoot = Join-Path ([IO.Path]::GetPathRoot($PackageDrive)) "NexusCore"
 $DriveDirs = @("models", "ComfyUI_windows_portable")
 foreach ($stateDir in @("data", ".agent", "output", "models", "ComfyUI_windows_portable")) {
     $existing = Join-Path $PackageRoot $stateDir
