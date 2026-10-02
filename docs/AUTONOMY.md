@@ -75,8 +75,13 @@ the workspace as cwd), `backup` (versioned state backup), `rag_update`
 (incremental index refresh; works standalone via a transient
 `RepoIndex`), `image` (submit an `ImageRequest` and await the job's
 terminal state — produced files are registered as artifacts with
-knowledge-graph provenance), and `model_install` (run an image-model
-profile's download job to completion). Repository/workspace missions
+knowledge-graph provenance), and `model_install` (download a model —
+an LLM catalog id via `runtime.model_catalog`, else an image-model
+profile's download job — and run it to completion). Every `job` op is
+recorded in the unified `JobManager` ledger (`kind: mission_job`,
+carrying `mission_id`/`node_id`) so `/api/jobs` and the Jobs UI show
+mission work alongside other platform jobs. Unknown node kinds fail
+loudly rather than completing silently. Repository/workspace missions
 automatically prepend a `rag_update` job node so inspection sees a
 fresh index.
 
@@ -106,6 +111,15 @@ it can only narrow, never widen.
   all new autonomous work until resumed
 - File watches are confined to the workspace; artifact criteria are
   confined to the workspace
+
+### Resource modes
+
+`resource_mode` (`conservative` / `balanced` / `performance`) caps
+mission parallelism (1/2/3 in-flight nodes) and gates GPU-heavy mission
+work: in `conservative` mode, `job` nodes whose op uses the GPU
+(`image`) stay `ready` while the interactive agent lane is busy —
+background missions never compete with the user's foreground request
+for VRAM. `balanced`/`performance` always allow them.
 
 ## Notifications
 
