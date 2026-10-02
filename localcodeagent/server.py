@@ -4682,7 +4682,18 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception as exc:
                         self.state._voice_finish(voice_rid)
                         err = f"{type(exc).__name__}: {exc}"
-                        events.put({"type": "error", "error": err})
+                        # Transport-classified failures carry a friendly
+                        # message + structured diagnostic so the chat UI can
+                        # render an explanation instead of a bare socket error.
+                        err_event: dict[str, Any] = {"type": "error", "error": err}
+                        friendly = getattr(exc, "friendly", "")
+                        diag_fn = getattr(exc, "diagnostic", None)
+                        if friendly:
+                            err_event["error"] = str(friendly)
+                            err_event["technical"] = err
+                        if callable(diag_fn):
+                            err_event["diagnostic"] = diag_fn()
+                        events.put(err_event)
                         try:
                             current = self.state.tasks.current()
                             payload = {"error": err}
