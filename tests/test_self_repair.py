@@ -284,6 +284,22 @@ class DiagnosisTests(unittest.TestCase):
         self.assertEqual(out["category"], "unknown")
         self.assertLess(out["confidence"], 0.5)
 
+    def test_ram_pressure_finding_maps_to_evict(self):
+        # Detector incidents carry the measured cause in error_class —
+        # the message has no OOM keywords, so it needs a direct mapping.
+        out = self.diag.diagnose(self._inc(
+            error_class="ram_pressure",
+            error_message="RAM free space low: 1.2 GB"))
+        self.assertEqual(out["category"], "hardware_pressure")
+        self.assertEqual(out["repair_kind"], "operational")
+
+    def test_model_failure_rate_maps_to_config_reset(self):
+        out = self.diag.diagnose(self._inc(
+            error_class="model_failure_rate",
+            error_message="Model failures elevated"))
+        self.assertEqual(out["category"], "bad_model_config")
+        self.assertEqual(out["repair_kind"], "operational")
+
 
 class RepairMemoryTests(unittest.TestCase):
     def test_recall_prefers_success(self):

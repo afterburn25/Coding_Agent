@@ -74,6 +74,19 @@ class Diagnostician:
                      "Memory/VRAM exhaustion — reduce footprint or "
                      "downgrade model/context", 0.85,
                      ["OOM signature in message"]))
+        # Detector-routed kinds already carry measured evidence — map them
+        # straight onto their operational hypothesis instead of relying on
+        # message keywords that finding-generated messages don't contain.
+        if cls == "ram_pressure":
+            add(_hyp("hardware_pressure",
+                     "System RAM nearly exhausted — evict idle models and "
+                     "shrink resident context", 0.9,
+                     ["RAM pressure measured by telemetry detector"]))
+        if cls == "model_failure_rate":
+            add(_hyp("bad_model_config",
+                     "Elevated model-call failure rate — reset to safe "
+                     "runtime defaults", 0.55,
+                     ["model failure rate measured by detector"]))
         if cls == "CorruptionError" or _has(msg, "corrupt", "json decode",
                                             "expecting value"):
             add(_hyp("corrupt_store",
