@@ -4,7 +4,9 @@ Wraps ``GitHubCodingClient`` (dependency-free REST) behind the Connector
 contract so GitHub calls share the registry's rate limiting, permission
 gate, health probe, and audit history instead of going through tools
 directly. Read capabilities need no token; writes require one and are
-rejected at the client layer when it is missing.
+rejected at the client layer when it is missing. Credentials resolve from
+the configured token env var first, then a ``github_token`` entry in the
+encrypted SecretVault.
 """
 from __future__ import annotations
 
@@ -26,9 +28,13 @@ class GitHubConnector(Connector):
         # boots, so the client must be rebuilt per call rather than captured.
         self._client_factory = client_factory
         self._slug = slug
+        self._vault: Any = None
 
     def _client(self) -> Any:
-        return self._client_factory()
+        client = self._client_factory()
+        if not getattr(client, "token", "") and self._vault is not None:
+            client.token = self._vault.get("github_token") or ""
+        return client
 
     def _repo_slug(self, override: Any = None) -> str:
         slug = str(override or (self._slug() if callable(self._slug)
@@ -41,8 +47,10 @@ class GitHubConnector(Connector):
     # -- Connector contract -------------------------------------------------
 
     def authenticate(self, vault: Any) -> bool:
-        # Reads work without a token; authentication reflects whether the
-        # env var is present, not whether a vault secret exists.
+        # Capture the vault for token fallback. Reads work without a token;
+        # authentication reflects whether a credential resolves, not whether
+        # one is required.
+        self._vault = vault
         return True
 
     def health(self) -> dict[str, Any]:

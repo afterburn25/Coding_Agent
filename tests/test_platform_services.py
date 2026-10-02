@@ -129,6 +129,39 @@ class ConnectorTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertIn("slug", out["error"])
 
+    def test_github_connector_vault_token_fallback(self):
+        from localcodeagent.connectors.github import GitHubConnector
+
+        clients = []
+
+        class EnvlessClient:
+            def __init__(self):
+                self.token = ""
+                self.authed_headers = None
+
+            @property
+            def authenticated(self):
+                return bool(self.token)
+
+            def request(self, method, path, *, params=None, body=None,
+                        require_auth=False):
+                return {"resources": {"core": {"remaining": 100}}}
+
+        class FakeVault:
+            def get(self, name):
+                return "vault-token" if name == "github_token" else None
+
+        def factory():
+            c = EnvlessClient()
+            clients.append(c)
+            return c
+
+        conn = GitHubConnector(client_factory=factory, slug="o/r")
+        conn.authenticate(FakeVault())
+        client = conn._client()
+        self.assertEqual(client.token, "vault-token")
+        self.assertTrue(client.authenticated)
+
 
 class KnowledgeGraphTests(unittest.TestCase):
     def test_entities_edges_neighbors(self):
