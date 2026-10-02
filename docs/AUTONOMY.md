@@ -102,6 +102,12 @@ repair, replan, escalate — with hard caps:
 A repeated identical failure signature stops the mission instead of
 looping forever.
 
+The supervisor also pauses all mission execution under RAM pressure —
+when free host RAM drops below ``min(2 GB, 5% of total)`` the tick skips
+dispatching nodes entirely (existing work finishes or re-parks on
+restart) and resumes when memory frees, so unattended missions cannot
+OOM the host.
+
 ## Policy
 
 `AutonomyPolicy` is a gate **on top of** the existing PermissionManager —
@@ -124,6 +130,13 @@ work: in `conservative` mode, `job` nodes whose op uses the GPU
 (`image`) stay `ready` while the interactive agent lane is busy —
 background missions never compete with the user's foreground request
 for VRAM. `balanced`/`performance` always allow them.
+
+## Restart hygiene
+
+Boot recovery re-parks missions mid-flight (``MissionStore._recover_orphans``)
+and sweeps orphaned ``.agent/worktrees`` dirs left by a killed process.
+``nexus-agent/*`` branches are never deleted — a merge conflict preserves
+work on them — and kept branches surface as a notification.
 
 ## Notifications
 
