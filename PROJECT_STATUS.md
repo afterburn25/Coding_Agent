@@ -176,7 +176,29 @@
 - Missions UI at `web/missions.html` (list/detail, status, task graph, approvals, controls); chat commands `make this a mission`, `stop autonomy`, `resume autonomy` answer locally in both streaming and non-streaming chat.
 - Autonomy status/mission/approval/goal/schedule/trigger/notification APIs under `/api/autonomy/*`; supervisor emits `mission`/`notification`/`autonomy` bus events; ActivityStore gained `autonomy`/`mission` categories.
 - `tests/test_autonomy.py` adds 49 tests: persistence, restart recovery, corrupt-store quarantine, DAG/leases/locks, failure playbooks, policy/grants/stop, notifications, schedules, triggers, evaluator, approvals, denial→replan, stop-autonomy, lane arbitration, budgets, standing goals.
-- Reference: `docs/AUTONOMY.md`. Current automated checkpoint: **698 tests passing** (2 environment skips).
+- Reference: `docs/AUTONOMY.md`.
+
+### Platform workstation expansion (v0.7.0 line)
+
+- Canonical `VERSION` file + `localcodeagent/version.py` + `scripts/sync_version.py`: pyproject, Inno defaults, .NET project, PyInstaller backend resource, and `.agent/project.json` all derive from one source; `--check` runs in tests.
+- **Computer Use**: `localcodeagent/computer_use/` (screenshots via PIL/PowerShell fallback, window enum/focus, mouse/keyboard/clipboard via SendInput) exposed as `computer_*` tools behind new `computer.observe`/`computer.control` permissions; audited to the activity timeline.
+- **Sandbox**: `localcodeagent/sandbox/` — temp-workspace python/JS/shell exec with timeout, Windows Job Object memory+kill limits, network-deny, artifact extraction; `sandbox_run` tool.
+- **LSP**: `localcodeagent/lsp/` stdio JSON-RPC client (definitions/references/document+workspace symbols/hover/diagnostics), pooled per server, graceful without installed servers.
+- **Repo RAG**: `localcodeagent/rag/` incremental SQLite index (files/symbols/chunks, mtime+sha incremental) — `search()` for coding workflows.
+- **Skills**: `localcodeagent/skills/` — skill.json/SKILL.md packages with capabilities/tools/permissions/instructions; install/enable/disable persisted under `data/skills/`.
+- **Multi-agent worktrees**: `localcodeagent/multiagent.py` — role-scoped agents (planner/coder/reviewer/tester/debugger/security) in isolated git worktrees; controlled merge-back aborts cleanly on conflict.
+- **Eval Lab + Experiments**: `localcodeagent/eval/` — suite runs with history/compare; experiment records (hypothesis→arms→metrics→conclusion).
+- **Artifacts**: `localcodeagent/artifacts.py` — provenance registry (creator/mission/task, sha256, versioning, managed store).
+- **Backups**: `localcodeagent/backups.py` — versioned manifest-verified backups of Brain/Answer Memory/autonomy/config/skills; verified restore with pre-restore stash; last valid never pruned.
+- **Vault hardening**: secret store key DPAPI-wrapped per Windows user; pattern redaction for API keys/tokens/private-key blocks.
+- **Connectors**: `localcodeagent/connectors/` — capability/permission/rate-limit/health/reconnect/audit framework.
+- **Knowledge graph**: `localcodeagent/knowledge/` — SQLite entity+edge store with bounded BFS context (`context_for`) for prompt injection.
+- **Simulation**: `localcodeagent/simulate.py` + `/api/simulate` — dry-run steps/files/permissions/verdicts/failure points; never executes.
+- **Digital Twin**: `localcodeagent/twin.py` — measured hardware samples + model measures; predicts RAM/VRAM fit, load/TTFT/TPS; hardware-fingerprint invalidation.
+- **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
+- **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
+- Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
+- Current automated checkpoint: **765 tests passing** (2 environment skips).
 
 
 

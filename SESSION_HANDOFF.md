@@ -1015,3 +1015,29 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   shallow; async job dependencies (image/model-install) not yet DAG node
   kinds; unattended multi-hour dogfood + Windows CI/installer run pending;
   canonical VERSION/release machinery is the next milestone.
+
+## v0.7.0 platform expansion checkpoint — commits d17ab56 + 05456c2
+
+- Canonical versioning restored: `VERSION` (0.7.0) → `version.py` →
+  `scripts/sync_version.py` derives pyproject/.iss defaults/.csproj/
+  backend_version.txt/.agent/project.json; `--check` enforced by tests;
+  build_windows.ps1 syncs before compiling and bundles VERSION.
+- Platform wave implemented (see CHANGELOG.md): computer_use tools
+  (permission-gated, audited), stdio LSP client+pool, incremental RAG
+  index, multi-agent git worktrees with conflict-abort merges, EvalLab +
+  experiments, artifact registry, versioned backups w/ verified restore,
+  DPAPI-wrapped vault key + pattern redaction, connector framework,
+  knowledge graph (SQLite), plan simulation, DigitalTwin predictions,
+  health service, two-way voice scaffold (Vosk/faster-whisper optional).
+- New endpoints: /api/health /api/twin /api/artifacts /api/skills
+  /api/connectors /api/knowledge /api/rag /api/lsp /api/eval/history
+  /api/experiments /api/backups /api/simulate.
+- AppState holds all services; SQLite/subprocess services (RAG,
+  knowledge graph, LSP pool) are lazy and closed by stop_state.
+- New permissions: computer.observe / computer.control (ask-default).
+- Suite: **765 passing** (2 env skips).
+- Still open for follow-on 0.7.x releases: autonomy executor should route
+  through sandbox_run + RAG context; UI surfaces for health/artifacts/
+  backups/skills/eval; mission-node kinds for async jobs; voice STT
+  needs audio deps installed + mic device selection UI; Windows desktop
+  CI/package run on the 0.7.0 line.
