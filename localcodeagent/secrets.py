@@ -40,15 +40,98 @@ class SecretVault:
 
     # -- key + storage ---------------------------------------------------------
 
-    def _fernet(self) -> Fernet:
-        if self.key_path.is_file():
-            return Fernet(self.key_path.read_text().strip().encode("ascii"))
-        key = Fernet.generate_key()
-        self.key_path.write_text(key.decode("ascii"))
+    @staticmethod
+    def _dpapi_protect(raw: bytes) -> bytes | None:
+        """Windows DPAPI: encrypt so only this Windows user can read it.
+        Returns None when unavailable (non-Windows or crypt32 missing)."""
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class DATA_BLOB(ctypes.Structure):
+                _fields_ = [("cbData", wintypes.DWORD),
+                            ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+            def _blob(data: bytes) -> DATA_BLOB:
+                buf = (ctypes.c_byte * len(data)).from_buffer_copy(data)
+                return DATA_BLOB(len(data), ctypes.cast(
+                    buf, ctypes.POINTER(ctypes.c_byte)))
+
+            in_blob = _blob(raw)
+            out_blob = DATA_BLOB()
+            crypt32 = ctypes.windll.crypt32
+            kernel32 = ctypes.windll.kernel32
+            if not crypt32.CryptProtectData(
+                    ctypes.byref(in_blob), "NexusCoreVault", None,
+                    None, None, 0, ctypes.byref(out_blob)):
+                return None
+            try:
+                return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+            finally:
+                kernel32.LocalFree(out_blob.pbData)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _dpapi_unprotect(raw: bytes) -> bytes | None:
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class DATA_BLOB(ctypes.Structure):
+                _fields_ = [("cbData", wintypes.DWORD),
+                            ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+            buf = (ctypes.c_byte * len(raw)).from_buffer_copy(raw)
+            in_blob = DATA_BLOB(len(raw), ctypes.cast(
+                buf, ctypes.POINTER(ctypes.c_byte)))
+            out_blob = DATA_BLOB()
+            crypt32 = ctypes.windll.crypt32
+            kernel32 = ctypes.windll.kernel32
+            if not crypt32.CryptUnprotectData(
+                    ctypes.byref(in_blob), None, None, None, None, 0,
+                    ctypes.byref(out_blob)):
+                return None
+            try:
+                return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+            finally:
+                kernel32.LocalFree(out_blob.pbData)
+        except Exception:
+            return None
+
+    def _read_key(self) -> bytes | None:
+        try:
+            text = self.key_path.read_text().strip()
+        except OSError:
+            return None
+        if text.startswith("dpapi:"):
+            raw = base64.b64decode(text[6:])
+            key = self._dpapi_unprotect(raw)
+            return key
+        return text.encode("ascii")
+
+    def _write_key(self, key: bytes) -> None:
+        protected = self._dpapi_protect(key)
+        if protected is not None:
+            self.key_path.write_text(
+                "dpapi:" + base64.b64encode(protected).decode("ascii"))
+        else:
+            self.key_path.write_text(key.decode("ascii"))
         try:
             os.chmod(self.key_path, 0o600)
         except OSError:
             pass
+
+    def _fernet(self) -> Fernet:
+        key = self._read_key()
+        if key is not None:
+            return Fernet(key)
+        key = Fernet.generate_key()
+        self._write_key(key)
         return Fernet(key)
 
     def _load(self) -> None:
@@ -114,6 +197,28 @@ class SecretVault:
         for value in values:
             if len(value) >= 6:
                 text = text.replace(value, "••••••")
+        return text
+
+    @staticmethod
+    def redact_patterns(text: str) -> str:
+        """Pattern-based redaction for secrets not stored in the vault —
+        API keys, bearer tokens, private-key blocks appearing in logs,
+        diagnostics, or crash reports."""
+        if not text:
+            return text
+        import re
+        patterns = [
+            r"\bsk-[A-Za-z0-9_\-]{16,}\b",
+            r"\bghp_[A-Za-z0-9]{20,}\b",
+            r"\bgho_[A-Za-z0-9]{20,}\b",
+            r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
+            r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b",
+            r"\bAKIA[0-9A-Z]{16}\b",
+            r"\bBearer\s+[A-Za-z0-9._\-]{20,}",
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        ]
+        for pat in patterns:
+            text = re.sub(pat, "••••••", text)
         return text
 
     def delete(self, name: str) -> bool:
