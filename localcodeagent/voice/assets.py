@@ -13,6 +13,8 @@ import hashlib
 import urllib.request
 from pathlib import Path
 
+from ..fsutil import replace_with_retry
+
 ASSETS = {
     "kokoro-v1.0.onnx": {
         "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
@@ -81,5 +83,5 @@ def ensure_assets(asset_dir: Path, progress=None) -> dict[str, dict]:
         if sha256_file(tmp) != meta["sha256"]:
             tmp.unlink(missing_ok=True)
             raise RuntimeError(f"voice asset {name} failed sha256 verification")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
     return asset_status(asset_dir)

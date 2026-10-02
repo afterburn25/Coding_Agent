@@ -8,6 +8,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 
@@ -49,7 +51,7 @@ class ModelGrowthLab:
     def _save_json(path: Path, payload: dict[str, Any]) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
 
     @staticmethod
     def _signature(kind: str, instruction: str, response: str) -> str:

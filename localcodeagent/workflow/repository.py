@@ -6,6 +6,8 @@ import re
 import threading
 import time
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 
@@ -77,7 +79,7 @@ class RepositoryIndex:
             self._data = {"version": 1, "generated_at": time.time(), "files": rows}
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.path)
+            replace_with_retry(tmp, self.path)
         return self.summary()
 
     def ensure(self) -> dict[str, Any]:

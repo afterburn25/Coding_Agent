@@ -13,6 +13,8 @@ import shutil
 import time
 from pathlib import Path
 
+from ..fsutil import replace_with_retry
+
 from .types import VoicePreset
 
 OFFICIAL_PRESET_ID = "nexus-synthetic-isabella"
@@ -104,7 +106,7 @@ class VoicePresetStore:
         path = self._path(preset.id)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(preset.to_json(), encoding="utf-8")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
         return preset
 
     def save_as(self, preset: VoicePreset, new_id: str | None = None,

@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from .types import ImageModelProfile
 from .workflow import WorkflowManager
+from ..fsutil import replace_with_retry
 
 
 LORA_EXTENSIONS = {".safetensors", ".gguf", ".ckpt", ".pt", ".pth"}
@@ -276,7 +277,7 @@ class ImageAssetLibrary:
                 raise RuntimeError(f"Downloaded size mismatch for {target.name}")
             if expected_hash and _sha256(tmp).lower() != expected_hash:
                 raise RuntimeError(f"SHA256 mismatch for {target.name}")
-            os.replace(tmp,target)
+            replace_with_retry(tmp,target)
             return {"path":str(target),"status":"downloaded","size_bytes":target.stat().st_size}
         except Exception:
             try: tmp.unlink(missing_ok=True)

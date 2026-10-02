@@ -11,6 +11,8 @@ import json
 import time
 from pathlib import Path
 
+from ..fsutil import replace_with_retry
+
 
 class AudioCache:
     def __init__(self, cache_dir: Path, max_bytes: int = 512 * 1024 * 1024) -> None:
@@ -45,7 +47,7 @@ class AudioCache:
         p = self._path(key)
         tmp = p.with_suffix(".wav.tmp")
         tmp.write_bytes(wav)
-        tmp.replace(p)
+        replace_with_retry(tmp, p)
         self._evict()
         return p
 

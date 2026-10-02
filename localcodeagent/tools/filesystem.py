@@ -3,6 +3,8 @@ from __future__ import annotations
 import difflib
 import os
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import TYPE_CHECKING, Any
 
 from .base import ToolRegistry, ToolSpec
@@ -80,7 +82,7 @@ def register_filesystem_tools(
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".localcodeagent.tmp")
         tmp.write_text(args.get("content", ""), encoding="utf-8")
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
         return f"WROTE {path.relative_to(root)} ({path.stat().st_size} bytes)"
 
     def apply_patch(args: dict) -> str:
@@ -141,7 +143,7 @@ def register_filesystem_tools(
                 path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_name(path.name + ".localcodeagent.tmp")
                 tmp.write_text(new_text, encoding="utf-8")
-                os.replace(tmp, path)
+                replace_with_retry(tmp, path)
                 new_lines = new_text.splitlines(keepends=True)
             diff_lines.extend(difflib.unified_diff(
                 old_text.splitlines(keepends=True),

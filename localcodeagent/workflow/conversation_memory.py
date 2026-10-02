@@ -6,6 +6,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 
@@ -86,7 +88,7 @@ class ConversationMemory:
             return
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     @staticmethod
     def _clean(text: str, limit: int = 4000) -> str:

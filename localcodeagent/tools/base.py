@@ -8,6 +8,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any, Callable
 
 from ..permissions import PermissionManager
@@ -433,7 +435,18 @@ class ToolRegistry:
         if name in self._disabled:
             return f"TOOL_DISABLED: tool '{name}' is disabled in the Tool Manager"
         if tool.install_status == "missing":
-            return f"TOOL_NOT_INSTALLED: '{name}' is not installed — see the Tool Manager for install options"
+            try:
+                m = self.manifest(name)
+                installable = bool(m.get("installable"))
+                deps = [str(d) for d in m.get("dependencies") or []]
+            except Exception:
+                installable, deps = False, []
+            how = (f"install it with install_tool(tool='{name}') or from the Tools page"
+                   if installable else
+                   "manual installation is required — see the Tools page for details")
+            dep_text = f" Requires: {', '.join(deps)}." if deps else ""
+            return (f"TOOL_NOT_INSTALLED: {tool.display_name} ('{name}') is not installed — "
+                    f"tell the user it must be installed before this request can run: {how}.{dep_text}")
         manager = self.permission_manager
         mode = manager.effective(tool.permission)
         if mode == "deny":
@@ -527,6 +540,6 @@ class ToolRegistry:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
             tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            tmp.replace(self.state_path)
+            replace_with_retry(tmp, self.state_path)
         except OSError:
             pass

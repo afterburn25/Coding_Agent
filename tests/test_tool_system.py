@@ -622,6 +622,28 @@ class ToolRouterTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertEqual(out["error"], "no_capable_tool")
 
+    def test_missing_tool_reports_install_guidance(self):
+        reg = self._reg()
+        reg.register(ToolSpec("offline_tool", "missing tool", {"type": "object"}, "filesystem.read",
+                              lambda a: "never", capabilities=["do_missing"], display_name="Offline Tool"))
+        reg.get("offline_tool").install_status = "missing"
+        router = ToolRouter(reg)
+        out = router.execute("do_missing", {})
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["error"], "tools_not_installed")
+        self.assertEqual(out["missing"][0]["tool"], "offline_tool")
+        self.assertEqual(out["missing"][0]["display_name"], "Offline Tool")
+        self.assertIn("not installed", out["message"])
+        self.assertIn("Offline Tool", out["message"])
+
+    def test_registry_missing_tool_message(self):
+        reg = self._reg()
+        reg.get("tool_a").install_status = "missing"
+        out = reg.execute("tool_a", {})
+        self.assertTrue(out.startswith("TOOL_NOT_INSTALLED:"))
+        self.assertIn("tool_a", out)
+        self.assertIn("install", out.lower())
+
 
 FAKE_MCP_SERVER = r'''
 import json, sys

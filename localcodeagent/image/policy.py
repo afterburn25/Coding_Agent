@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from time import time
 
+from ..fsutil import replace_with_retry
+
 
 @dataclass(slots=True)
 class ConsentRecord:
@@ -39,7 +41,7 @@ class ConsentStore:
         data[record.subject] = record.as_dict()
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     def get(self, subject: str) -> dict | None:
         return self._load().get(subject)

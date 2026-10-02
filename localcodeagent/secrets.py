@@ -13,6 +13,8 @@ import os
 import threading
 import time
 from pathlib import Path
+
+from .fsutil import replace_with_retry
 from typing import Any
 
 from cryptography.fernet import Fernet
@@ -66,7 +68,7 @@ class SecretVault:
         encrypted = self._fernet().encrypt(payload).decode("ascii")
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps({"version": 1, "data": encrypted}, indent=2))
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     # -- API -------------------------------------------------------------------
 

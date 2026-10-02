@@ -14,6 +14,8 @@ import re
 import time
 from collections import Counter
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 from .base import ToolRegistry, ToolSpec
@@ -71,7 +73,7 @@ class KnowledgeIndex:
         payload = {"version": 1, "updated_at": time.time(), "files": self.entries}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     def index_workspace(self, workspace: Path, *, subpath: str = "") -> dict[str, Any]:
         root = (workspace / subpath).resolve()

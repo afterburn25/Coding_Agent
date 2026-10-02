@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 
@@ -134,7 +136,7 @@ def write_suggested_models(config_path: Path, suggestions: list[dict[str, Any]])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    replace_with_retry(tmp, path)
     return {
         "path": str(path),
         "models": len(suggestions),

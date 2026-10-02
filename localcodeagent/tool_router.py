@@ -6,12 +6,14 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+
+from .fsutil import replace_with_retry
 from typing import Any, Callable, Iterable
 
 from .tools.base import ToolRegistry, ToolSpec
 
 HEALTH_TTL_SECONDS = 60.0
-ERROR_PREFIXES = ("ERROR:", "PERMISSION_DENIED:", "APPROVAL_REQUIRED:", "TOOL_DISABLED:")
+ERROR_PREFIXES = ("ERROR:", "PERMISSION_DENIED:", "APPROVAL_REQUIRED:", "TOOL_DISABLED:", "TOOL_NOT_INSTALLED:")
 
 
 class ToolRouter:
@@ -183,8 +185,44 @@ class ToolRouter:
                     "attempts": attempts, "elapsed_ms": elapsed}
         elapsed = round((time.time() - started) * 1000, 1)
         self._record(capability, None, attempts, ok=False, elapsed_ms=elapsed)
-        return {"ok": False, "error": "no_capable_tool", "capability": capability,
-                "excluded": info["excluded"], "attempts": attempts, "elapsed_ms": elapsed}
+        result = {"ok": False, "error": "no_capable_tool", "capability": capability,
+                  "excluded": info["excluded"], "attempts": attempts, "elapsed_ms": elapsed}
+        missing = self._missing_details(info["excluded"])
+        if missing:
+            result["error"] = "tools_not_installed"
+            result["missing"] = missing
+            names = ", ".join(f"{m['display_name']} ({m['tool']})" for m in missing)
+            installable = [m["tool"] for m in missing if m["installable"]]
+            how = (
+                "install them via install_tool or from the Tools page"
+                if installable else
+                "manual installation required — see the Tools page for details"
+            )
+            result["message"] = (
+                f"This request needs tools that are not installed: {names}. "
+                f"Tell the user these must be installed before the request can run — {how}."
+            )
+        return result
+
+    def _missing_details(self, excluded: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Install detail for capability candidates excluded as not installed."""
+        missing = []
+        for row in excluded:
+            if row.get("reason") != "not_installed":
+                continue
+            name = row["tool"]
+            spec = self.registry.get(name)
+            entry = {"tool": name,
+                     "display_name": spec.display_name if spec else name,
+                     "installable": False, "dependencies": []}
+            try:
+                m = self.registry.manifest(name)
+                entry["installable"] = bool(m.get("installable"))
+                entry["dependencies"] = list(m.get("dependencies") or [])
+            except Exception:
+                pass
+            missing.append(entry)
+        return missing
 
     def _record(self, capability: str, chosen: str | None, attempts: list[dict[str, Any]], *, ok: bool, elapsed_ms: float) -> None:
         entry = {
@@ -208,7 +246,7 @@ class ToolRouter:
                     lines = self.telemetry_path.read_text(encoding="utf-8").splitlines()[-2000:]
                     tmp = self.telemetry_path.with_suffix(".tmp")
                     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                    tmp.replace(self.telemetry_path)
+                    replace_with_retry(tmp, self.telemetry_path)
             except OSError:
                 pass
 

@@ -16,6 +16,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any, Callable
 
 OPEN_STATES = {"running", "waiting"}
@@ -106,7 +108,7 @@ class ActivityStore:
                 for task_id in keep:
                     for row in self._by_task[task_id]:
                         fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-            tmp.replace(self.path)
+            replace_with_retry(tmp, self.path)
         except OSError:
             pass
         del keep_set

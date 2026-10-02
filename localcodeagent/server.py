@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any, Callable
 
+from .fsutil import replace_with_retry
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -349,7 +350,7 @@ class AppState:
                     "name": m["name"], "description": m["description"][:160],
                     "category": m["category"], "capabilities": m.get("capabilities", [])[:8],
                     "permission": m.get("permission_mode"), "enabled": m.get("enabled"),
-                    "install": m.get("install_status"),
+                    "install": m.get("install_status"), "installable": m.get("installable"),
                 })
             if not rows:
                 return json.dumps({"tools": [], "hint": "no matching callable tools — try a broader term or check the Tool Manager"})
@@ -412,7 +413,7 @@ class AppState:
 
         self.tools.register(ToolSpec(
             "use_capability",
-            "Request a capability (e.g. 'ocr_image', 'convert_video', 'execute_code') and let the Tool Router pick the best installed/permitted tool for it. Prefer this when the exact tool name is unknown — the router ranks candidates, applies resource/permission checks, and falls back automatically. Pass 'arguments' matching the resolved tool's schema.",
+            "Request a capability (e.g. 'ocr_image', 'convert_video', 'execute_code') and let the Tool Router pick the best installed/permitted tool for it. Prefer this when the exact tool name is unknown — the router ranks candidates, applies resource/permission checks, and falls back automatically. Pass 'arguments' matching the resolved tool's schema. If the result is 'tools_not_installed', reply to the user with the tool names in 'missing' and explain they must be installed first (Tools page or install_tool) — do not attempt the request without them.",
             {
                 "type": "object",
                 "properties": {
@@ -784,7 +785,7 @@ class AppState:
         raw["models"] = models
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".growth.tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.config_path)
+        replace_with_retry(tmp, self.config_path)
         try:
             applied = self.reload_model_configuration()
         except Exception:
@@ -816,7 +817,7 @@ class AppState:
         raw["models"] = models
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".rollback.tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.config_path)
+        replace_with_retry(tmp, self.config_path)
         applied = self.reload_model_configuration()
         try:
             backup_path.unlink()
@@ -847,7 +848,7 @@ class AppState:
         raw["ethical_temperature"] = temperature
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".policy.tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.config_path)
+        replace_with_retry(tmp, self.config_path)
 
         self.config.conversation_policy_mode = mode
         self.config.ethical_temperature = temperature
@@ -1048,7 +1049,7 @@ class AppState:
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False),
                        encoding="utf-8")
-        tmp.replace(self.config_path)
+        replace_with_retry(tmp, self.config_path)
 
     def _voice_publish(self, payload: dict) -> None:
         """Voice events go to the shared bus AND any live chat SSE sinks so
@@ -1279,7 +1280,7 @@ class AppState:
         raw.update(updates)
         tmp = self.config_path.with_suffix(self.config_path.suffix + ".cnx.tmp")
         tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.config_path)
+        replace_with_retry(tmp, self.config_path)
 
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.

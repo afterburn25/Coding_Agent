@@ -27,6 +27,8 @@ import json
 import re
 import time
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 from .base import ToolRegistry, ToolSpec
@@ -110,7 +112,7 @@ def _save_resume(path: Path | None, *, workflow_id: str, next_step: int,
             "step_log": step_log,
             "saved_at": time.time(),
         }, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
         return str(path)
     except OSError:
         return ""

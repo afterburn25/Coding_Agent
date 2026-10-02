@@ -4,6 +4,8 @@ import json
 import threading
 import time
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 from ..config import ModelProfile
@@ -67,7 +69,7 @@ class ModelPerformanceTelemetry:
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     def record(
         self,

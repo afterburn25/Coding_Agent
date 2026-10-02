@@ -15,6 +15,8 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 log = logging.getLogger("chatnexus.updates")
@@ -46,7 +48,7 @@ class ToolUpdateChecker:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.cache_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self._cache, indent=1), encoding="utf-8")
-            tmp.replace(self.cache_path)
+            replace_with_retry(tmp, self.cache_path)
         except OSError as exc:
             log.warning("update cache write failed: %s", exc)
 

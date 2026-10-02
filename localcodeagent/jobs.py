@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .fsutil import replace_with_retry
+
 # Unified job states. Subsystem-specific raw statuses are normalized into this
 # vocabulary; the raw value is preserved on the record as `status`.
 JOB_STATES = (
@@ -290,6 +292,6 @@ class JobManager:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
             tmp.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-            tmp.replace(self.path)
+            replace_with_retry(tmp, self.path)
         except OSError:
             pass

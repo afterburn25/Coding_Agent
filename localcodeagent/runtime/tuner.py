@@ -21,6 +21,8 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
@@ -71,7 +73,7 @@ class RuntimeTuner:
     def _save(self) -> None:
         tmp = self.storage_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._data, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(self.storage_path)
+        replace_with_retry(tmp, self.storage_path)
 
     def reset(self, model_id: str | None = None) -> None:
         if model_id:

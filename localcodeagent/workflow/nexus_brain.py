@@ -10,6 +10,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
@@ -318,7 +320,7 @@ class NexusBrain:
     def _save_auth(self, auth: dict[str, Any]) -> None:
         tmp = self.auth_path.with_suffix(self.auth_path.suffix + ".tmp")
         tmp.write_text(json.dumps(auth, indent=2), encoding="utf-8")
-        tmp.replace(self.auth_path)
+        replace_with_retry(tmp, self.auth_path)
 
     _SETTINGS_HISTORY_LIMIT = 10
 
@@ -392,7 +394,7 @@ class NexusBrain:
         self._push_settings_history()
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
         self._audit("signed_save", updated_at=self._data["updated_at"],
                     payload_sha256=hashlib.sha256(self._canonical(self._unsigned_payload())).hexdigest()[:16])
 
@@ -1278,7 +1280,7 @@ class NexusBrain:
         # without exposing the creator's passcode/private signing key.
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(brain, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
         self._save_auth(auth)
         self._signing_key = None
         self._unlocked = False
@@ -1329,7 +1331,7 @@ class NexusBrain:
         auth_payload = payload.get("creator_lock")
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(brain_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
         self._save_auth(auth_payload)
         self._signing_key = None
         self._unlocked = False

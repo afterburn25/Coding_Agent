@@ -18,12 +18,13 @@ from .router import ImageRouter
 from .runtime import ComfyUIRuntime
 from .types import ImageJob, ImageModelProfile, ImageRequest
 from .workflow import WorkflowManager
+from ..fsutil import replace_with_retry
 
 
 def _atomic_json_write(path: Path, payload: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    replace_with_retry(tmp, path)
 
 
 class ImageManager:

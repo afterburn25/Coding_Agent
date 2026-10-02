@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..fsutil import replace_with_retry
+
 
 TOKEN = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
 
@@ -112,7 +114,7 @@ class WorkflowManager:
         tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             tmp.write_text(payload, encoding="utf-8")
-            tmp.replace(path)
+            replace_with_retry(tmp, path)
         finally:
             try:
                 tmp.unlink(missing_ok=True)

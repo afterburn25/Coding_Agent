@@ -4,6 +4,8 @@ import hashlib
 import json
 import time
 from pathlib import Path
+
+from ..fsutil import replace_with_retry
 from typing import Any
 
 
@@ -43,7 +45,7 @@ class ResearchCache:
         payload = {"cached_at": time.time(), "provider": provider, "query": query, "version": version, "value": value}
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
         self._prune(self.cache_dir, self._CACHE_FILE_LIMIT, expire=True)
 
     def _prune(self, directory: Path, limit: int, *, expire: bool) -> None:
@@ -65,7 +67,7 @@ class ResearchCache:
         path = self.sessions_dir / f"{sid}.json"
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        replace_with_retry(tmp, path)
         self._prune(self.sessions_dir, self._SESSION_FILE_LIMIT, expire=False)
 
     def recent_sessions(self, limit: int = 20) -> list[dict[str, Any]]:

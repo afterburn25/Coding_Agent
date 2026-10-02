@@ -5,6 +5,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from .fsutil import replace_with_retry
 from typing import Any
 
 
@@ -38,7 +40,7 @@ class WorkQueue:
     def _save(self) -> None:
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps({"version": 1, "items": self._items}, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        replace_with_retry(tmp, self.path)
 
     def enqueue(self, prompt: str, *, mode: str = "auto") -> dict[str, Any]:
         with self._lock:
