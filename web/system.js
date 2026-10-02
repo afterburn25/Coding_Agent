@@ -199,6 +199,27 @@ document.addEventListener('click',async e=>{
     await api('/api/experiments/conclude','POST',{id:t.dataset.conclude,conclusion:c});refresh();
   }
 });
+/* ---------- Simulate ---------- */
+$('#simRun').onclick=async()=>{
+  let plan;
+  try{plan=JSON.parse($('#simPlan').value||'{}');}
+  catch(e){$('#simResults').innerHTML='<div class="off">Invalid JSON: '+esc(e.message)+'</div>';return;}
+  const r=await api('/api/simulate','POST',{plan});
+  $('#simResults').innerHTML=
+    `<div class="list-row"><b>${esc(r.step_count??0)} steps</b>
+     <span class="pill">~${esc(Math.round(r.estimated_duration_s||0))}s est</span>
+     <span class="pill">${esc(r.approvals_expected??0)} approvals</span>
+     ${(r.denied||[]).length?`<span class="pill">${esc(r.denied.length)} denied</span>`:''}
+     ${r.resource_note?`<div class="meta">${esc(r.resource_note)}</div>`:''}</div>`+
+    (r.steps||[]).map(s=>
+      `<div class="list-row"><b>${esc(s.title)}</b> <span class="pill">${esc(s.tool||'—')}</span>
+       <span class="pill">${esc(s.verdict)}</span> <span class="pill">${esc(s.risk)}</span>
+       ${(s.files_affected||[]).length?`<div class="meta">${s.files_affected.map(f=>esc(f)).join(', ')}</div>`:''}
+      </div>`).join('')+
+    (r.failure_points||[]).map(f=>`<div class="list-row"><b>risk</b><div class="meta">${esc(f)}</div></div>`).join('')
+    ||'';
+};
+
 $('#expCreate').onclick=async()=>{
   const h=$('#expHypothesis').value.trim();if(!h)return;
   await api('/api/experiments/create','POST',{hypothesis:h,arms:[{name:'control'},{name:'candidate'}]});

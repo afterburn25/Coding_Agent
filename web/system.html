@@ -32,6 +32,7 @@
       <a href="#secBackups">Backups</a>
       <a href="#secEval">Evaluation Lab</a>
       <a href="#secExperiments">Experiments</a>
+      <a href="#secSimulate">Plan Simulation</a>
     </div>
   </aside>
   <main class="system-main">
@@ -113,6 +114,17 @@
         <button id="expCreate" class="mini-button" type="button">New experiment</button>
       </div>
       <div id="experimentsList" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secSimulate">
+      <h2>Plan Simulation</h2>
+      <p class="off" style="font-size:12px">Dry-run a plan — reports tools, permissions, verdicts, and failure points without executing anything.</p>
+      <div class="row-actions">
+        <textarea id="simPlan" rows="6" style="flex:1;min-width:280px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px;font-family:inherit" placeholder='{"steps":[{"title":"Edit router","tool":"filesystem.write","files":["src/router.py"]},{"title":"Run tests","tool":"shell.execute"}]}'></textarea>
+      </div>
+      <div class="row-actions">
+        <button id="simRun" class="mini-button" type="button">Simulate</button>
+      </div>
+      <div id="simResults" class="scroll-list"></div>
     </section>
   </main>
 </div>
