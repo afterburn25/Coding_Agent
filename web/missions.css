@@ -53,3 +53,7 @@
 
 .hist-row{font-size:11px;color:#7f91ad;padding:3px 0;border-bottom:1px solid #152238}
 .hist-row b{color:#c9d5e7}
+
+.mini-form{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
+.mini-form input,.mini-form select{background:#0c1728;border:1px solid #274a78;border-radius:8px;color:#c9d5e7;font:inherit;font-size:12px;padding:7px 9px;width:100%;box-sizing:border-box}
+.hist-row .mini-button{font-size:10px;padding:1px 8px;vertical-align:1px}

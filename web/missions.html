@@ -38,10 +38,33 @@
     <div class="side-actions"><button id="createMission" class="mini-button" type="button">Create + Start</button></div>
     <div class="section-title">Standing goals</div>
     <div id="standingGoals" class="inventory"></div>
+    <div class="mini-form">
+      <input id="newGoalObjective" placeholder="Recurring objective…" />
+      <button id="createGoal" class="mini-button" type="button">Add goal</button>
+    </div>
     <div class="section-title">Schedules</div>
     <div id="schedules" class="inventory"></div>
+    <div class="mini-form">
+      <input id="newSchedName" placeholder="Schedule name" />
+      <input id="newSchedObjective" placeholder="Mission objective…" />
+      <select id="newSchedKind">
+        <option value="interval">Every N minutes</option>
+        <option value="once">Once, in N minutes</option>
+        <option value="daily">Daily at HH:MM</option>
+        <option value="weekly">Weekly at HH:MM</option>
+      </select>
+      <input id="newSchedValue" placeholder="N minutes or HH:MM" />
+      <button id="createSchedule" class="mini-button" type="button">Add</button>
+    </div>
     <div class="section-title">Triggers</div>
     <div id="triggers" class="inventory"></div>
+    <div class="mini-form">
+      <input id="newTrigName" placeholder="Trigger name" />
+      <select id="newTrigEvent"></select>
+      <input id="newTrigWatch" placeholder="Watch path (file_changed)" />
+      <input id="newTrigObjective" placeholder="Mission objective…" />
+      <button id="createTrigger" class="mini-button" type="button">Add</button>
+    </div>
   </aside>
 
   <main class="missions-main">

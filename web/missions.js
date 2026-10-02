@@ -32,6 +32,10 @@ async function refresh(){
     renderGoals(goals.goals||[]);
     renderSchedules(scheds.schedules||[]);
     renderTriggers(trigs.triggers||[]);
+    if(Array.isArray(trigs.signals)&&trigs.signals.length&&
+       $('#newTrigEvent')&&!$('#newTrigEvent').options.length)
+      $('#newTrigEvent').innerHTML=trigs.signals.map(s=>
+        `<option value="${esc(s)}">${esc(s)}</option>`).join('');
   }catch(e){
     $('#autonomyStatus').innerHTML='<span class="off">API unavailable</span>';
   }
@@ -141,17 +145,22 @@ function renderGoals(rows){
   $('#standingGoals').innerHTML=rows.map(g=>
     `<div class="mission-card"><div class="title">${esc(g.objective).slice(0,80)}</div>`+
     `<div class="meta"><span class="mstatus ${g.enabled?'executing':'paused'}">${g.enabled?'enabled':'disabled'}</span>`+
-    `<button class="mini-button" data-goalrun="${g.id}">Run now</button></div></div>`
+    `<button class="mini-button" data-goalrun="${g.id}">Run now</button>`+
+    `<button class="mini-button" data-goaltoggle="${g.id}:${g.enabled?'disable':'enable'}">${g.enabled?'Disable':'Enable'}</button></div></div>`
   ).join('')||'<div class="hist-row">none</div>';
 }
 function renderSchedules(rows){
   $('#schedules').innerHTML=rows.map(s=>
-    `<div class="hist-row"><b>${esc(s.name)}</b> ${esc(s.kind)}${s.next_run?' · next '+new Date(s.next_run*1000).toLocaleString():''}</div>`
+    `<div class="hist-row"><b>${esc(s.name)}</b> ${esc(s.kind)}${s.next_run?' · next '+new Date(s.next_run*1000).toLocaleString():''}`+
+    ` <button class="mini-button" data-sched="${s.id}:${s.enabled===false?'enable':'disable'}">${s.enabled===false?'Enable':'Disable'}</button>`+
+    ` <button class="mini-button danger" data-scheddel="${s.id}">×</button></div>`
   ).join('')||'<div class="hist-row">none</div>';
 }
 function renderTriggers(rows){
   $('#triggers').innerHTML=rows.map(t=>
-    `<div class="hist-row"><b>${esc(t.name)}</b> ${esc(t.event)} · fired ${t.fire_count||0}×</div>`
+    `<div class="hist-row"><b>${esc(t.name)}</b> ${esc(t.event)} · fired ${t.fire_count||0}×${t.enabled===false?' · off':''}`+
+    ` <button class="mini-button" data-trig="${t.id}:${t.enabled===false?'enable':'disable'}">${t.enabled===false?'Enable':'Disable'}</button>`+
+    ` <button class="mini-button danger" data-trigdel="${t.id}">×</button></div>`
   ).join('')||'<div class="hist-row">none</div>';
 }
 
@@ -170,7 +179,25 @@ document.addEventListener('click',async e=>{
     return;
   }
   const gr=e.target.closest('[data-goalrun]');
-  if(gr){try{await api(`/api/standing-goals/${gr.dataset.goalrun}/run`,'POST',{});refresh();}catch(err){alert(err.message);}}
+  if(gr){try{await api(`/api/standing-goals/${gr.dataset.goalrun}/run`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const gt=e.target.closest('[data-goaltoggle]');
+  if(gt){const[id,verb]=gt.dataset.goaltoggle.split(':');
+    try{await api(`/api/standing-goals/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const sc=e.target.closest('[data-sched]');
+  if(sc){const[id,verb]=sc.dataset.sched.split(':');
+    try{await api(`/api/schedules/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const sd=e.target.closest('[data-scheddel]');
+  if(sd){try{await api(`/api/schedules/${sd.dataset.scheddel}/delete`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const tg=e.target.closest('[data-trig]');
+  if(tg){const[id,verb]=tg.dataset.trig.split(':');
+    try{await api(`/api/triggers/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const td=e.target.closest('[data-trigdel]');
+  if(td){try{await api(`/api/triggers/${td.dataset.trigdel}/delete`,'POST',{});refresh();}catch(err){alert(err.message);}}
 });
 $('#createMission').addEventListener('click',async()=>{
   const objective=$('#newObjective').value.trim();
@@ -182,6 +209,53 @@ $('#createMission').addEventListener('click',async()=>{
     $('#newObjective').value='';
     selected=d.mission.id;
     refresh();
+  }catch(err){alert(err.message);}
+});
+$('#createGoal').addEventListener('click',async()=>{
+  const objective=$('#newGoalObjective').value.trim();
+  if(!objective)return;
+  try{
+    await api('/api/standing-goals','POST',{objective});
+    $('#newGoalObjective').value='';refresh();
+  }catch(err){alert(err.message);}
+});
+$('#createSchedule').addEventListener('click',async()=>{
+  const name=$('#newSchedName').value.trim()||'schedule';
+  const objective=$('#newSchedObjective').value.trim();
+  if(!objective){alert('Objective required');return;}
+  const kind=$('#newSchedKind').value;
+  const raw=$('#newSchedValue').value.trim();
+  const body={name,kind,action:{kind:'mission',objective}};
+  if(kind==='interval'||kind==='once'){
+    const mins=parseFloat(raw)||60;
+    if(kind==='interval')body.interval_s=mins*60;
+    else body.at=Math.floor(Date.now()/1000)+mins*60;
+  }else{
+    const m=/^(\d{1,2}):(\d{2})/.exec(raw||'03:00');
+    body.hour=Math.min(23,parseInt(m?m[1]:'3',10));
+    body.minute=Math.min(59,parseInt(m?m[2]:'0',10));
+    // Scheduler uses Python tm_wday (Mon=0); JS getDay() is Sun=0.
+    if(kind==='weekly')body.weekday=(new Date().getDay()+6)%7;
+  }
+  try{
+    await api('/api/schedules','POST',body);
+    $('#newSchedName').value='';$('#newSchedObjective').value='';
+    $('#newSchedValue').value='';refresh();
+  }catch(err){alert(err.message);}
+});
+$('#createTrigger').addEventListener('click',async()=>{
+  const name=$('#newTrigName').value.trim();
+  const objective=$('#newTrigObjective').value.trim();
+  if(!objective){alert('Objective required');return;}
+  const body={name:name||$('#newTrigEvent').value,
+              event:$('#newTrigEvent').value,
+              action:{kind:'mission',objective}};
+  const watch=$('#newTrigWatch').value.trim();
+  if(watch)body.watch=watch;
+  try{
+    await api('/api/triggers','POST',body);
+    $('#newTrigName').value='';$('#newTrigObjective').value='';
+    $('#newTrigWatch').value='';refresh();
   }catch(err){alert(err.message);}
 });
 $('#stopAutonomy').addEventListener('click',async()=>{

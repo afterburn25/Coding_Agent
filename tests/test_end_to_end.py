@@ -541,6 +541,99 @@ class EndToEndAgentTests(unittest.TestCase):
                 "bus never delivered the completed task event")
 
 
+class AutonomyApiTests(unittest.TestCase):
+    """Autonomy CRUD endpoints — triggers expose the signal vocabulary for
+    the UI form, and enable/disable/delete actually mutate the store."""
+
+    def test_trigger_crud_and_signals(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import create_server, stop_state
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+                autonomy_enabled=False,
+            )
+            server, state = create_server(
+                cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(lambda: (server.shutdown(),
+                                     server.server_close(),
+                                     stop_state(state)))
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            def post(path, body):
+                req = urllib.request.Request(
+                    base + path, data=json.dumps(body).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST")
+                return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+            # Signals vocabulary is exposed so the UI can build the event
+            # picker without hardcoding.
+            data = json.loads(urllib.request.urlopen(
+                f"{base}/api/triggers", timeout=10).read())
+            self.assertIn("file_changed", data["signals"])
+            self.assertIn("ci_failed", data["signals"])
+
+            out = post("/api/triggers", {
+                "name": "watch build", "event": "file_changed",
+                "watch": str(ws), "debounce_s": 5,
+                "action": {"kind": "mission", "objective": "rebuild"}})
+            self.assertTrue(out["ok"], out)
+            tid = out["trigger"]["id"]
+
+            out = post(f"/api/triggers/{tid}/disable", {})
+            self.assertTrue(out["ok"])
+            trig = next(t for t in json.loads(urllib.request.urlopen(
+                f"{base}/api/triggers", timeout=10).read())["triggers"]
+                        if t["id"] == tid)
+            self.assertFalse(trig["enabled"])
+
+            out = post(f"/api/triggers/{tid}/delete", {})
+            self.assertTrue(out["ok"])
+            remaining = json.loads(urllib.request.urlopen(
+                f"{base}/api/triggers", timeout=10).read())["triggers"]
+            self.assertFalse(any(t["id"] == tid for t in remaining))
+
+    def test_schedule_create_validates_kind(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import create_server, stop_state
+            ws = Path(td)
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+                autonomy_enabled=False,
+            )
+            server, state = create_server(
+                cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(lambda: (server.shutdown(),
+                                     server.server_close(),
+                                     stop_state(state)))
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            req = urllib.request.Request(
+                f"{base}/api/schedules",
+                data=json.dumps({"name": "bad", "kind": "fortnightly",
+                                 "action": {"kind": "mission",
+                                            "objective": "x"}}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=10)
+                self.fail("unknown kind accepted")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 400)
+
+
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user
     message; images persist locally and reach the image lane as source

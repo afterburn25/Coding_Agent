@@ -2799,7 +2799,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"mission": m})
             return True
         if path == "/api/triggers":
-            self._json({"triggers": sup.triggers.list()})
+            from .autonomy.triggers import SIGNALS
+            self._json({"triggers": sup.triggers.list(),
+                        "signals": sorted(SIGNALS)})
             return True
         if path == "/api/schedules":
             self._json({"schedules": sup.scheduler.list()})
