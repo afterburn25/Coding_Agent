@@ -199,7 +199,7 @@ class AgentConfig:
     comfyui_python: str = ""
     comfyui_extra_args: list[str] = field(default_factory=list)
     comfyui_logs_dir: str = ".agent/runtime"
-    comfyui_startup_timeout: int = 180
+    comfyui_startup_timeout: int = 300
     comfyui_idle_unload_seconds: float = 900.0
     image_resource_mode: str = "balanced"
     image_restore_chat_model: bool = True

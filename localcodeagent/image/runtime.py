@@ -186,57 +186,81 @@ class ComfyUIRuntime:
             if self._process and self._process.poll() is None:
                 healthy, _ = self.backend.health()
                 if healthy:
-                    return
-                self.stop()
-            cmd, cwd = self._command()
-            logs = self._resolve(str(getattr(self.config, "comfyui_logs_dir", ".agent/runtime")))
-            logs.mkdir(parents=True, exist_ok=True)
-            log_path = logs / "comfyui.log"
-            try:
-                # Bound the append-only process log for unattended runs.
-                if log_path.exists() and log_path.stat().st_size > 8 * 1024 * 1024:
-                    log_path.write_bytes(log_path.read_bytes()[-4 * 1024 * 1024:])
-            except OSError:
-                pass
-            self._log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
-            flags = 0
-            if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
-                flags = subprocess.CREATE_NO_WINDOW
-            self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
-            try:
-                # Marker lets a restarted backend recognize this process as our
-                # orphan (exe path ties the pid to this install's ComfyUI).
-                marker = self._managed_marker_path()
-                marker.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_text(marker, json.dumps({"pid": self._process.pid, "exe": cmd[0]}))
-            except OSError:
-                pass
-            self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
-            deadline = time.monotonic() + max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
-            last = ""
-            while time.monotonic() < deadline:
-                if self._process.poll() is not None:
-                    self.status.state = "error"
-                    self.status.error = f"ComfyUI exited with code {self._process.returncode}; see {log_path}"
-                    self.status.pid = None
-                    raise RuntimeError(self.status.error)
-                healthy, last = self.backend.health()
-                if healthy:
                     self.status.state = "running"
                     self.status.healthy = True
                     return
-                time.sleep(0.5)
-            self.status.state = "error"
-            self.status.error = f"Timed out waiting for ComfyUI: {last[:300]}"
-            self.stop()
-            raise TimeoutError(self.status.error)
+                # A half-booted ComfyUI keeps making progress — killing it on
+                # every timed-out request just restarts the cold boot. Keep
+                # waiting on the same process; only restart once it has
+                # exceeded its total boot budget (2x the startup timeout).
+                budget = 2 * max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
+                if time.time() - (self.status.started_at or time.time()) > budget:
+                    self.stop()
+            if not (self._process and self._process.poll() is None):
+                self._spawn()
+            self._wait_ready()
+
+    def _spawn(self) -> None:
+        cmd, cwd = self._command()
+        logs = self._resolve(str(getattr(self.config, "comfyui_logs_dir", ".agent/runtime")))
+        logs.mkdir(parents=True, exist_ok=True)
+        log_path = logs / "comfyui.log"
+        try:
+            # Bound the append-only process log for unattended runs.
+            if log_path.exists() and log_path.stat().st_size > 8 * 1024 * 1024:
+                log_path.write_bytes(log_path.read_bytes()[-4 * 1024 * 1024:])
+        except OSError:
+            pass
+        self._log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
+        flags = 0
+        if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+            flags = subprocess.CREATE_NO_WINDOW
+        self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
+        try:
+            # Marker lets a restarted backend recognize this process as our
+            # orphan (exe path ties the pid to this install's ComfyUI).
+            marker = self._managed_marker_path()
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(marker, json.dumps({"pid": self._process.pid, "exe": cmd[0]}))
+        except OSError:
+            pass
+        self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
+
+    def _wait_ready(self) -> None:
+        deadline = time.monotonic() + max(10, int(getattr(self.config, "comfyui_startup_timeout", 180)))
+        last = ""
+        while time.monotonic() < deadline:
+            if self._process is None or self._process.poll() is not None:
+                code = self._process.returncode if self._process is not None else "?"
+                self.status.state = "error"
+                self.status.error = f"ComfyUI exited with code {code}; see {self.status.log_path}"
+                self.status.pid = None
+                raise RuntimeError(self.status.error)
+            healthy, last = self.backend.health()
+            if healthy:
+                self.status.state = "running"
+                self.status.healthy = True
+                return
+            time.sleep(0.5)
+        # The process is alive but not yet serving — leave it booting (state
+        # stays "loading") so the next request attaches to the same cold boot
+        # instead of restarting it. The boot budget in start() bounds how long
+        # a genuinely stuck process can hold on.
+        self.status.error = f"ComfyUI is still starting: {last[:300]}"
+        raise TimeoutError(self.status.error)
 
     def stop(self) -> None:
         with self._lock:
             p = self._process
             self._process = None
             if p and p.poll() is None:
-                p.terminate()
+                if os.name == "nt":
+                    # Kill the whole tree — the embedded python may re-exec a
+                    # child that would otherwise survive and hold port 8188.
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                                   capture_output=True, timeout=15)
+                else:
+                    p.terminate()
                 try:
                     p.wait(timeout=10)
                 except subprocess.TimeoutExpired:
