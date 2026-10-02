@@ -142,6 +142,19 @@ class VoiceManager:
                     self._spoken_tasks.pop(k, None)
         if stale:
             self.stop_all(reason="new_response")
+        # Pre-warm the TTS engine while the text response streams in, so the
+        # first emitted sentence doesn't pay the ~1s model-load cost after an
+        # idle unload. load() is idempotent and lock-guarded.
+        if (self.enabled() and not self.muted()
+                and self.mode() in {"responses", "responses_activity"}):
+            threading.Thread(target=self._warm_engine,
+                             name="nexus-voice-warm", daemon=True).start()
+
+    def _warm_engine(self) -> None:
+        try:
+            self.engine().load()
+        except Exception:
+            pass
 
     def feed_token(self, task_id: str, delta: str) -> int:
         """Feed a token delta; returns number of sentences enqueued."""
