@@ -85,6 +85,92 @@ class SandboxedVerifyTests(unittest.TestCase):
             sup.stop()
 
 
+class JobNodeTests(unittest.TestCase):
+    def test_job_kind_is_accepted_and_carries_no_default_lock(self):
+        n = new_task("Do job", "do it", kind="job",
+                     metadata={"job": "backup"})
+        self.assertEqual(n["kind"], "job")
+        self.assertEqual(n["lock"], "")
+        # Unknown kinds still degrade to agent.
+        self.assertEqual(new_task("x", "x", kind="bogus")["kind"], "agent")
+
+    def test_job_node_runs_job_runner_and_completes(self):
+        with tempfile.TemporaryDirectory() as td:
+            seen = []
+            sup = make_sup(
+                td,
+                job_runner=lambda m, n: (seen.append(
+                    (n.get("metadata") or {}).get("job")) or
+                    {"ok": True, "output": "job done"}))
+            m = sup.create_mission(
+                objective="run a job",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.missions.mutate(m["id"], lambda r: TaskGraph(r).add(
+                new_task("Index repo", "refresh the index", kind="job",
+                         metadata={"job": "rag_update"})))
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"])
+            node = (m.get("graph") or {}).get("nodes", [])[0]
+            self.assertEqual(seen, ["rag_update"])
+            self.assertEqual(node["state"], "completed")
+            self.assertTrue(node["result"]["ok"])
+            sup.stop()
+
+    def test_default_job_runner_reports_unwired(self):
+        sup = make_sup(tempfile.mkdtemp())
+        out = sup._default_job({}, {"metadata": {"job": "sandbox"}})
+        self.assertFalse(out["ok"])
+        self.assertIn("sandbox", out["output"])
+
+    def test_default_job_runner_indexes_repo_standalone(self):
+        # rag_update works without a wired runner — the supervisor builds a
+        # transient RepoIndex over the workspace.
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "m.py").write_text("class C:\n    pass\n")
+            sup = make_sup(td)
+            out = sup._default_job({}, {"metadata": {"job": "rag_update"}})
+            self.assertTrue(out["ok"], out["output"])
+            self.assertIn("+1 added", out["output"])
+            sup.stop()
+
+    def test_repository_plan_includes_index_job_node(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        plan = MissionPlanner().initial_plan(
+            {"objective": "refactor", "scope": "repository"})
+        jobs = [t for t in plan if t["kind"] == "job"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["metadata"]["job"], "rag_update")
+        inspect = next(t for t in plan if t["title"] == "Inspect current state")
+        self.assertEqual(inspect["deps"], [jobs[0]["id"]])
+        # Non-repo scopes stay index-free.
+        plan2 = MissionPlanner().initial_plan(
+            {"objective": "x", "scope": "one_shot"})
+        self.assertFalse([t for t in plan2 if t["kind"] == "job"])
+
+    def test_mission_job_sandbox_runs_in_workspace(self):
+        import sys
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                marker = Path(td) / "job_marker.txt"
+                node = {"metadata": {"job": "sandbox",
+                                     "argv": [sys.executable, "-c",
+                                              "import pathlib;"
+                                              f"pathlib.Path(r'{marker}')"
+                                              ".write_text('ok')"]}}
+                out = state._mission_job({"id": "m1"}, node)
+                self.assertTrue(out["ok"], out.get("output"))
+                self.assertTrue(marker.exists())
+                self.assertIn("sandbox", out)
+            finally:
+                stop_state(state)
+
+
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
         with tempfile.TemporaryDirectory() as td:

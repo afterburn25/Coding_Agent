@@ -46,6 +46,7 @@ class AutonomousSupervisor:
         executor: Callable[[dict, dict, Callable | None], dict] | None = None,
         verify_runner: Callable[[dict, dict], dict] | None = None,
         internal_runner: Callable[[dict, dict], dict] | None = None,
+        job_runner: Callable[[dict, dict], dict] | None = None,
         lane_free: Callable[[], bool] | None = None,
         permission_manager=None,
         activities=None,                   # workflow.ActivityStore — timeline rows
@@ -79,6 +80,7 @@ class AutonomousSupervisor:
         self._executor = executor
         self._verify_runner = verify_runner or self._default_verify
         self._internal_runner = internal_runner or self._default_internal
+        self._job_runner = job_runner or self._default_job
         self._lane_free = lane_free or (lambda: True)
         self.activities = activities
         self._node_rows: dict[str, str] = {}  # node_id -> activity row id
@@ -786,6 +788,8 @@ class AutonomousSupervisor:
                 result = self._internal_runner(m, node)
             elif kind == "research":
                 result = self._internal_runner(m, node)
+            elif kind == "job":
+                result = self._job_runner(m, node)
             else:
                 result = {"ok": True, "output": "no-op"}
         finally:
@@ -1160,6 +1164,29 @@ class AutonomousSupervisor:
             except Exception as exc:
                 return {"ok": False, "output": f"maintenance: {exc}"}
         return {"ok": True, "output": "internal task acknowledged"}
+
+    def _default_job(self, mission: dict, node: dict) -> dict:
+        op = str((node.get("metadata") or {}).get("job") or "")
+        if op == "rag_update":
+            # Standalone-capable op — the server's runner reuses the shared
+            # index instance; without one, build a transient index handle.
+            try:
+                from ..rag import RepoIndex
+                idx = RepoIndex(self.workspace,
+                                db_path=self.workspace / ".agent"
+                                / "rag_index.db")
+                try:
+                    r = idx.update()
+                    return {"ok": True,
+                            "output": f"index: +{r.get('added', 0)} added, "
+                                      f"{r.get('updated', 0)} updated, "
+                                      f"{r.get('removed', 0)} removed"}
+                finally:
+                    idx.close()
+            except Exception as exc:
+                return {"ok": False, "output": f"rag_update failed: {exc}"}
+        return {"ok": False,
+                "output": f"job node has no runner wired (metadata.job={op!r})"}
 
     # ------------------------------------------------------------------
     # standing-goal ticking

@@ -65,7 +65,7 @@ Performance tuning + live activity timeline.
 
 ### Tests
 
-- 789 passing (2 env skips). GitHub Actions green on `55c7d66` including
+- 796 passing (2 env skips). GitHub Actions green on `a44905c`/`2bdb8c0` including
   the windows-desktop installer/package smoke job.
 - New coverage: mark_bad persistence, error classification, sweep
   composition/skip-bad, context classes, launch fallback ladder,

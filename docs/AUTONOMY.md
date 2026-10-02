@@ -65,6 +65,17 @@ node (bounded by `max_task_retries`). Cycles are rejected.
 `ResourceLocks` provides exclusive named lanes (`workspace_write`,
 `agent_lane`, ...) so parallel nodes never collide on shared resources.
 
+Node kinds: `agent` (executor on the agent lane), `verify`
+(project-detected or generated checks — generated commands run inside a
+Sandbox), `research`/`internal` (server-side helpers), `wait`, and
+`job` — asynchronous platform work dispatched via the wired job runner.
+`job` metadata selects the operation: `sandbox` (bounded command with
+the workspace as cwd), `backup` (versioned state backup), `rag_update`
+(incremental index refresh; works standalone via a transient
+`RepoIndex`), and `image` (submit an `ImageRequest` and await the job's
+terminal state). Repository/workspace missions automatically prepend a
+`rag_update` job node so inspection sees a fresh index.
+
 ## Recovery
 
 `classify_failure(text)` maps failures to classes (CUDA OOM, network

@@ -843,6 +843,7 @@ class AppState:
             emit=emit,
             bus=self.events,
             executor=executor,
+            job_runner=self._mission_job,
             lane_free=lane_free,
             permission_manager=self.permission_manager,
             activities=self.activities,
@@ -859,6 +860,77 @@ class AppState:
         if not mid:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}
+
+    def _mission_job(self, mission: dict, node: dict) -> dict:
+        """Run an async platform job as a mission DAG node.
+
+        ``node.metadata.job`` selects the operation:
+          sandbox    — run ``command`` (shell string) or ``argv`` inside a
+                       Sandbox with the workspace as cwd (bounded, cleaned)
+          backup     — create a versioned state backup
+          rag_update — incremental repository index refresh
+          image      — submit an ImageRequest and wait for completion
+        """
+        meta = dict(node.get("metadata") or {})
+        op = str(meta.get("job") or "")
+        try:
+            if op == "sandbox":
+                from .sandbox import Sandbox
+                sbx = Sandbox()
+                try:
+                    argv = meta.get("argv")
+                    if not argv:
+                        cmd = str(meta.get("command") or "")
+                        if not cmd:
+                            return {"ok": False, "output": "sandbox job: no command"}
+                        argv = (["cmd.exe", "/c", cmd] if os.name == "nt"
+                                else ["sh", "-c", cmd])
+                    r = sbx.run(list(argv), cwd=self.workspace,
+                                timeout=float(meta.get("timeout", 120)),
+                                allow_network=bool(meta.get("network", False)))
+                    out = (r.get("stdout") or "")[-4000:]
+                    err = (r.get("stderr") or "")[-2000:]
+                    return {"ok": bool(r.get("ok")),
+                            "output": out + (("\n[stderr]\n" + err) if err else ""),
+                            "sandbox": {k: r.get(k) for k in
+                                        ("exit", "timed_out", "elapsed_s",
+                                         "mem_limit_mb", "job_limited")}}
+                finally:
+                    sbx.cleanup()
+            if op == "backup":
+                r = self.backups.create(label=str(meta.get("label") or "mission"))
+                return {"ok": bool(r.get("ok")),
+                        "output": f"backup {r.get('backup', '')} "
+                                  f"({r.get('files', 0)} files)" if r.get("ok")
+                        else f"backup failed: {r.get('error', 'unknown')}"}
+            if op == "rag_update":
+                r = self.rag_index.update(force=bool(meta.get("force", False)))
+                return {"ok": True,
+                        "output": f"index: +{r.get('added', 0)} added, "
+                                  f"{r.get('updated', 0)} updated, "
+                                  f"{r.get('removed', 0)} removed"}
+            if op == "image":
+                from .image.types import ImageRequest
+                req = ImageRequest(
+                    prompt=str(meta.get("prompt") or node.get("instruction") or ""),
+                    operation=str(meta.get("operation") or "auto"),
+                    width=int(meta.get("width", 1024)),
+                    height=int(meta.get("height", 1024)),
+                    count=max(1, min(int(meta.get("count", 1)), 4)))
+                job = self.images.create_job(req)
+                deadline = time.time() + float(meta.get("timeout", 600))
+                while time.time() < deadline:
+                    cur = self.images.get_job(job.id)
+                    if cur.state in ("finished", "failed", "cancelled"):
+                        return {"ok": cur.state == "finished",
+                                "output": f"image job {cur.state}: {cur.stage}",
+                                "artifacts": [job.id]}
+                    time.sleep(1.0)
+                return {"ok": False, "output": "image job timed out",
+                        "artifacts": [job.id]}
+            return {"ok": False, "output": f"unknown job op: {op!r}"}
+        except Exception as exc:
+            return {"ok": False, "output": f"{op or 'job'} failed: {exc}"}
 
     # -- mission chat commands -----------------------------------------
     #

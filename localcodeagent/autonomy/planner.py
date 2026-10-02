@@ -29,12 +29,23 @@ class MissionPlanner:
         if scope == "maintenance":
             return self._maintenance_plan(mission)
 
+        # Repository/workspace work should see a fresh code index before the
+        # agent inspects anything — refresh it as an async job node first.
+        index_node = None
+        if scope in {"repository", "workspace"}:
+            index_node = new_task(
+                "Refresh repository index",
+                "Incrementally update the code index before inspection.",
+                kind="job", priority=5, verify="none", max_retries=0,
+                metadata={"job": "rag_update"})
+
         inspect = new_task(
             "Inspect current state",
             ("Inspect the workspace relevant to this objective and report "
              "what exists and what must change. Objective: " + objective),
             kind="agent", priority=10, model_role="utility",
             verify="none", max_retries=1,
+            deps=[index_node["id"]] if index_node else None,
         )
         work = new_task(
             f"Execute: {str(mission.get('title') or objective)[:100]}",
@@ -46,6 +57,8 @@ class MissionPlanner:
             max_retries=int((mission.get("budgets") or {}).get(
                 "max_task_retries", 2)),
         )
+        if index_node is not None:
+            tasks.append(index_node)
         tasks += [inspect, work]
 
         verif_deps = [work["id"]]

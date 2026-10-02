@@ -31,6 +31,9 @@ KIND_DEFAULT_LOCK = {
     "research": "network_heavy",
     "internal": "",
     "wait": "",
+    # Async host jobs (sandbox commands, image renders, backups, …) carry
+    # their own lock via metadata — e.g. comfy_gpu, installer, model_gpu.
+    "job": "",
 }
 
 
@@ -44,7 +47,7 @@ def new_task(title: str, instruction: str, *, kind: str = "agent",
         "id": f"t-{uuid.uuid4().hex[:10]}",
         "title": str(title or instruction)[:140],
         "instruction": str(instruction)[:8000],
-        "kind": kind if kind in {"agent", "verify", "research", "internal", "wait"} else "agent",
+        "kind": kind if kind in {"agent", "verify", "research", "internal", "wait", "job"} else "agent",
         "state": "planned",
         "deps": list(deps or []),
         "priority": int(priority),
