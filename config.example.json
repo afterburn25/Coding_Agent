@@ -14,6 +14,8 @@
   "autonomous_approval_timeout_seconds": 3600,
   "agent_tool_timeout_seconds": 1800,
   "model_idle_unload_seconds": 900,
+  "context_shrink_idle_seconds": 600,
+  "context_shrink_factor": 1.5,
   "model_warmup": true,
   "memory_pressure_vram_gb": 0,
   "memory_pressure_ram_gb": 0,

@@ -5,7 +5,7 @@
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
  "test_checkpoint": 805,
- "next_milestone": "v0.7.x continues: perf tuner sweep + launch fallback + idle auto-tuner + cold/warm telemetry landed; mission-linked expandable activity timeline landed; generated verify commands now sandboxed; repo_search exposes RAG to agents; Windows package CI green on 0.7.x. Next: UI surfaces for health/artifacts/backups/skills/eval, async-job DAG node kinds, voice STT optional deps, auto-shrink of oversized resident context.",
+ "next_milestone": "v0.7.x continues: perf tuner sweep + launch fallback + idle auto-tuner + cold/warm telemetry + idle context shrink landed; mission-linked expandable activity timeline landed; generated verify commands now sandboxed; repo_search exposes RAG to agents; knowledge graph feeds prompts and is populated by artifact provenance; job DAG nodes cover sandbox/backup/rag_update/image/model_install; research nodes run the real ResearchCoordinator; System page covers health/twin/rag/knowledge/lsp/skills/connectors/artifacts/backups/eval; Windows package CI green on 0.7.x. Next: voice STT optional deps, real ComfyUI workflow import testing, accumulated on-hardware tuner data.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
