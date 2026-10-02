@@ -990,6 +990,21 @@ class AppState:
                 rows = json.loads(r.stdout) if r.returncode == 0 else []
             except Exception:
                 rows = []
+            # Attach a bounded failed-job log tail per run — the repair
+            # incident's localizer needs real frames to map onto repo files.
+            for row in rows[:3]:
+                rid = str(row.get("databaseId") or "")
+                if not rid:
+                    continue
+                try:
+                    lg = _sp.run(
+                        ["gh", "run", "view", rid, "--log-failed"],
+                        cwd=str(self.workspace), capture_output=True,
+                        text=True, timeout=25)
+                    if lg.returncode == 0 and lg.stdout:
+                        row["log_tail"] = lg.stdout[-4000:]
+                except Exception:
+                    continue
             cache["ts"], cache["rows"] = now, rows
             return rows
 

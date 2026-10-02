@@ -220,6 +220,21 @@ class LocalizerTests(unittest.TestCase):
             self.assertEqual(suspects[0]["function"], "divide")
             self.assertGreater(suspects[0]["confidence"], 0.5)
 
+    def test_ci_runner_path_suffix_matches(self):
+        # CI tracebacks carry /home/runner/work/<repo>/<repo>/... paths —
+        # suffix matching must still map them onto repo files.
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            loc = Localizer(repo)
+            inc = new_incident(
+                source="t", subsystem="code", error_class="Error",
+                error_message="x", signature="s",
+                stack_trace='File "/home/runner/work/Coding_Agent/'
+                            'Coding_Agent/mod/calc.py", line 8, in divide')
+            suspects = loc.localize(inc)
+            self.assertEqual([s["path"] for s in suspects],
+                             ["mod/calc.py"])
+
     def test_no_repo_frames_empty_suspects(self):
         with tempfile.TemporaryDirectory() as td:
             repo = make_repo(td)

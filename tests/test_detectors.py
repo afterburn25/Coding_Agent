@@ -165,6 +165,14 @@ class DetectorUnitTests(unittest.TestCase):
         self.assertIsNone(detect_ci_failures({"ci_failures": lambda: []}))
         self.assertIsNone(detect_ci_failures({}))     # no gh → silent
 
+    def test_ci_failure_carries_log_tail(self):
+        runs = [{"databaseId": 99, "displayTitle": "x",
+                 "log_tail": "z" * 5000}]
+        out = detect_ci_failures({"ci_failures": lambda: runs})
+        tail = out[0]["evidence"]["log_tail"]
+        self.assertLessEqual(len(tail), 3000)         # bounded
+        self.assertTrue(tail.endswith("z"))
+
     def test_finding_defaults_and_clamps(self):
         f = new_finding(kind="k", title="t", severity="bogus",
                         confidence=9.9)

@@ -1247,7 +1247,10 @@ class AutonomousSupervisor:
         created object's id (or '' when nothing was created)."""
         route = str(finding.get("route") or "suggestion")
         if route == "repair" and self.repair is not None:
-            ev = finding.get("evidence") or {}
+            ev = dict(finding.get("evidence") or {})
+            # Long blob evidence (CI log tails) feeds the localizer via
+            # stack_trace instead of being dumped into the message.
+            stack = str(ev.pop("log_tail", "") or "")
             inc, _ = self.repair.report_failure(
                 source=f"detector:{finding.get('kind')}",
                 subsystem=str(finding.get("kind") or "system"),
@@ -1255,7 +1258,7 @@ class AutonomousSupervisor:
                 error_message=f"{finding.get('title')}. "
                               f"{finding.get('detail') or ''} "
                               f"evidence={ev}",
-                stack_trace="")
+                stack_trace=stack)
             if inc:
                 self._emit("finding", {"type": "finding_routed",
                                        "finding": finding.get("id"),

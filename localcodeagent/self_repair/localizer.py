@@ -43,7 +43,12 @@ class Localizer:
             capture_output=True, text=True, timeout=15)
 
     def _in_repo(self, path: str) -> str:
-        """Map an absolute traceback path to a repo-relative path, or ''."""
+        """Map a traceback path to a repo-relative path, or ''.
+
+        Foreign-root paths (CI runners, site-packages) can't resolve
+        relative to repo_root — fall back to a suffix match so
+        '/home/runner/work/.../localcodeagent/x.py' still maps to
+        'localcodeagent/x.py'."""
         try:
             p = Path(path)
             if not p.is_absolute():
@@ -51,6 +56,16 @@ class Localizer:
             rel = p.resolve().relative_to(self.repo_root.resolve())
             if (self.repo_root / rel).is_file():
                 return str(rel).replace("\\", "/")
+        except (OSError, ValueError):
+            pass
+        # Suffix match: try repo_root/<tail> for each leading cut depth.
+        try:
+            parts = Path(path).parts
+            for i in range(1, len(parts)):
+                cand = self.repo_root.joinpath(*parts[i:])
+                if cand.is_file():
+                    return str(cand.relative_to(self.repo_root)
+                               ).replace("\\", "/")
         except (OSError, ValueError):
             pass
         return ""

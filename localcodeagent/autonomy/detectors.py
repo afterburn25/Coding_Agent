@@ -293,12 +293,16 @@ def detect_ci_failures(sources: dict) -> dict | None:
         title = str(run.get("displayTitle") or run.get("name")
                     or "CI run failed")
         jobs = ", ".join(str(j) for j in (run.get("jobs") or [])[:4])
+        ev = {"run_id": rid, "jobs": jobs,
+              "conclusion": str(run.get("conclusion") or "")}
+        log_tail = str(run.get("log_tail") or "")
+        if log_tail:
+            ev["log_tail"] = log_tail[-3000:]
         out.append(new_finding(
             kind="ci_failure", severity="high", confidence=0.8,
             title=f"CI failed: {title[:100]}",
             detail=f"run {rid}" + (f" failing jobs: {jobs}" if jobs else ""),
-            evidence={"run_id": rid, "jobs": jobs,
-                      "conclusion": str(run.get("conclusion") or "")},
+            evidence=ev,
             route="repair", signature=f"ci_failure:{rid}"))
     return out or None
 
