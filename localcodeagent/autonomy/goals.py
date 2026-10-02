@@ -543,11 +543,16 @@ class GoalManager:
     # defaults
 
     def seed_defaults(self) -> None:
-        """First-run builtin goals — the system's own health floor."""
+        """First-run builtin goals — the system's own health floor.
+        Seeding is initialization, not a runtime event: it must not emit
+        bus traffic during AppState construction."""
         with self._lock:
             if self._rows():
                 return
-        self.add(
+        emit, audit = self._emit, self._audit
+        self._emit, self._audit = lambda p: None, lambda k, **f: None
+        try:
+            self.add(
             "Keep Nexus Core healthy during unattended operation",
             description=("Self-managing health floor: crash-free backend, "
                          "bounded mission failures, disk headroom, intact "
@@ -567,3 +572,5 @@ class GoalManager:
             review_interval_s=300.0,
             mission_cooldown_s=1800.0,
         )
+        finally:
+            self._emit, self._audit = emit, audit

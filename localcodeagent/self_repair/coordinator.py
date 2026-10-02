@@ -1,0 +1,639 @@
+"""SelfRepairCoordinator — the bounded state machine that carries an
+incident from detection to resolution, needs_human, or rollback.
+
+Pipeline per the self-repair contract:
+
+    detected → collecting → localizing → diagnosing → planning
+             → patching → testing → reviewing → canary → promoting
+             → resolved | rolled_back | needs_human | abandoned
+
+Two repair paths:
+
+- **operational** — deterministic fixers (restart, quarantine+rebuild,
+  port reclaim, config blacklist…) registered by server wiring. These
+  run directly, are fully testable, and are preferred whenever the
+  diagnosis says the fault is environmental/config/runtime-state.
+
+- **code** — a candidate patch is generated inside an isolated git
+  worktree by an injected `patch_generator` (production: the coding
+  model via AgentOrchestrator; tests: a fault-injection fake), verified
+  by targeted + regression test runs in the worktree, independently
+  reviewed, optionally canaried, then promoted only when every gate
+  passes and `auto_promote`/permissions allow. Otherwise the fully
+  diagnosed candidate waits at `needs_human` with all evidence attached.
+
+Everything is injected: no LLM, no subprocess, and no live service is
+required to drive the state machine in tests.
+"""
+from __future__ import annotations
+
+import re
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from .models import (REPAIR_STATES, OPEN_REPAIR_STATES,
+                     TERMINAL_REPAIR_STATES, new_incident, transition,
+                     budget_exceeded)
+from .detector import Detector
+from .localizer import Localizer
+from .diagnosis import Diagnostician
+from .repair_memory import RepairMemory
+from .patcher import Patcher
+from .verifier import run_unittest, targeted_tests_for
+from .rollback import Rollback
+from .canary import Canary
+
+# Secret-looking fragments are stripped before any incident field or
+# log excerpt is persisted or shown to a model.
+_SECRET_RX = re.compile(
+    r"(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|"
+    r"(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*\S+)",
+    re.I)
+
+
+def redact(text: str) -> str:
+    return _SECRET_RX.sub("[redacted]", str(text))
+
+
+class SelfRepairCoordinator:
+    def __init__(self, store, repo_root: Path, *,
+                 state_root: Path | None = None,
+                 localizer: Localizer | None = None,
+                 diagnostician: Diagnostician | None = None,
+                 fixers: dict[str, Callable[[dict], dict]] | None = None,
+                 patch_generator: Callable[[dict, Path], dict] | None = None,
+                 mission_status: Callable[[str], str] | None = None,
+                 reviewer: Callable[[dict, Path, str], dict] | None = None,
+                 canary: Canary | None = None,
+                 collectors: dict[str, Callable[[], Any]] | None = None,
+                 verify_timeout_s: float = 300.0,
+                 regression_suite: str | None = None,
+                 auto_promote: bool = False,
+                 canary_required_for: set[str] | None = None,
+                 min_promote_confidence: float = 0.6,
+                 is_blocked: Callable[[], bool] | None = None,
+                 audit: Callable[..., None] | None = None,
+                 emit: Callable[[dict], None] | None = None,
+                 notify: Callable[[str, str, str], None] | None = None,
+                 on_resumed: Callable[[dict], None] | None = None) -> None:
+        self._store = store                     # AutonomyStore
+        self.repo_root = Path(repo_root)
+        self.state_root = Path(state_root or
+                               getattr(store, "root", repo_root))
+        self.localizer = localizer or Localizer(self.repo_root)
+        self.diagnostician = diagnostician or Diagnostician()
+        self.memory = RepairMemory(self.state_root / "repair_memory.json")
+        self.patcher = Patcher(self.repo_root)
+        self.rollback = Rollback(self.repo_root, self.state_root)
+        self.canary = canary or Canary()
+        self.fixers = dict(fixers or {})
+        self.patch_generator = patch_generator
+        self._mission_status = mission_status
+        self.reviewer = reviewer or self._default_review
+        self.collectors = dict(collectors or {})
+        self.verify_timeout_s = verify_timeout_s
+        self.regression_suite = regression_suite   # e.g. "tests"
+        self.auto_promote = bool(auto_promote)
+        self.canary_required_for = canary_required_for or set()
+        self.min_promote_confidence = float(min_promote_confidence)
+        self._is_blocked = is_blocked or (lambda: False)
+        self._audit = audit or (lambda kind, **kw: None)
+        self._emit = emit or (lambda payload: None)
+        self._notify = notify or (lambda level, title, detail: None)
+        self._on_resumed = on_resumed
+        self._lock = threading.RLock()
+        self.detector = Detector(self._rows)
+
+    # ------------------------------------------------------------------
+    # storage
+
+    def _rows(self) -> list[dict]:
+        return self._store.repairs.data.setdefault("repairs", [])
+
+    def _save(self) -> None:
+        self._store.repairs.save()
+
+    def get(self, incident_id: str) -> dict | None:
+        for r in self._rows():
+            if r.get("id") == incident_id:
+                return r
+        return None
+
+    def list(self, *, include_terminal: bool = True) -> list[dict]:
+        with self._lock:
+            rows = [dict(r) for r in self._rows()
+                    if include_terminal
+                    or r.get("state") not in TERMINAL_REPAIR_STATES]
+        rows.sort(key=lambda r: -(r.get("updated_at") or 0))
+        return rows
+
+    def summary(self) -> dict[str, Any]:
+        rows = self.list()
+        by_state: dict[str, int] = {}
+        for r in rows:
+            s = str(r.get("state"))
+            by_state[s] = by_state.get(s, 0) + 1
+        return {"incidents": len(rows), "by_state": by_state,
+                "open": sum(1 for r in rows
+                            if r.get("state") in OPEN_REPAIR_STATES),
+                "auto_resolved": sum(
+                    1 for r in rows if r.get("state") == "resolved")}
+
+    # ------------------------------------------------------------------
+    # intake
+
+    def report_failure(self, *, source: str, error_message: str,
+                       exc_type: str = "", subsystem: str = "",
+                       stack_trace: str = "", **kw) -> tuple[dict | None, str]:
+        """Main entry point — every subsystem funnels failures here."""
+        incident, disp = self.detector.ingest(
+            source=source, error_message=redact(error_message),
+            exc_type=exc_type, subsystem=subsystem,
+            stack_trace=redact(stack_trace), **kw)
+        if incident is None:
+            return None, disp
+        with self._lock:
+            if disp == "new":
+                self._rows().append(incident)
+            self._save()
+        self._audit("repair_" + disp, incident=incident["id"],
+                    signature=incident["signature"],
+                    severity=incident["severity"])
+        self._emit({"type": "repair_incident", "incident_id": incident["id"],
+                    "disposition": disp, "severity": incident["severity"]})
+        if incident["severity"] == "critical":
+            self._notify("failure",
+                         f"Critical failure: {incident['error_class']}",
+                         incident["error_message"][:300])
+        return incident, disp
+
+    # ------------------------------------------------------------------
+    # stage drivers
+
+    def _set(self, inc: dict, state: str, detail: str = "") -> dict:
+        transition(inc, state, detail=detail)
+        inc["updated_at"] = time.time()
+        with self._lock:
+            self._save()
+        self._emit({"type": "repair_state", "incident_id": inc["id"],
+                    "state": state})
+        return inc
+
+    def _fail_open(self, inc: dict, reason: str) -> None:
+        """Not enough evidence/permission to continue autonomously."""
+        inc["needs_human_reason"] = reason[:300]
+        self._set(inc, "needs_human", reason)
+        self._notify("important",
+                     f"Repair needs review: {inc['error_class']}",
+                     reason[:200])
+
+    def _budget_check(self, inc: dict) -> bool:
+        name = budget_exceeded(inc)
+        if name:
+            inc["needs_human_reason"] = f"budget exceeded: {name}"
+            self._set(inc, "needs_human", f"budget exceeded: {name}")
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # stage 1 — evidence
+
+    def _stage_collect(self, inc: dict) -> str:
+        self._set(inc, "collecting")
+        snap = {}
+        for name, fn in self.collectors.items():
+            try:
+                snap[name] = fn()
+            except Exception as exc:
+                snap[name] = {"error": str(exc)[:120]}
+        for k in ("logs", "crash_history"):
+            if k in snap:
+                inc["logs"] = redact(str(snap[k]))[:4000]
+        if "hardware" in snap:
+            inc["hardware_snapshot"] = snap["hardware"]
+        if "runtime" in snap:
+            inc["runtime_snapshot"] = snap["runtime"]
+        try:
+            out = self.patcher._git("log", "-8", "--oneline",
+                                    "--pretty=format:%h %s").stdout
+            inc["recent_commits"] = [
+                l.strip() for l in out.splitlines() if l.strip()][:8]
+        except Exception:
+            pass
+        return "localizing"
+
+    def _stage_localize(self, inc: dict) -> str:
+        self._set(inc, "localizing")
+        inc["suspects"] = self.localizer.localize(inc)
+        inc["affected_files"] = [s["path"] for s in inc["suspects"]]
+        return "diagnosing"
+
+    def _stage_diagnose(self, inc: dict) -> str:
+        self._set(inc, "diagnosing")
+        inc["attempts"]["diagnosis"] = \
+            int(inc["attempts"].get("diagnosis") or 0) + 1
+        diag = self.diagnostician.diagnose(inc)
+        inc["hypotheses"] = diag["hypotheses"]
+        inc["repair_kind"] = diag["repair_kind"]
+        inc["confidence"] = diag["confidence"]
+        # Prior procedures adjust confidence — a proven fix lifts it,
+        # a known-bad history warns.
+        prior = self.memory.best_fix(inc["signature"])
+        if prior:
+            inc["confidence"] = min(0.98, inc["confidence"] + 0.15)
+            inc.setdefault("history", []).append(
+                {"ts": time.time(), "event": "memory_recall",
+                 "detail": f"known procedure ({prior['kind']}, "
+                           f"confidence {prior['confidence']})"})
+        return "planning"
+
+    def _stage_plan(self, inc: dict) -> str:
+        self._set(inc, "planning")
+        top = (inc["hypotheses"] or [{}])[0]
+        steps = []
+        if inc["repair_kind"] == "operational":
+            steps = [f"verify hypothesis '{top.get('kind')}'",
+                     f"apply operational fix for {top.get('kind')}",
+                     "re-run health check",
+                     "resume interrupted operation"]
+        else:
+            steps = ["reproduce failure in isolation where possible",
+                     "open isolated repair worktree",
+                     "write regression test that fails pre-patch",
+                     "apply minimal patch",
+                     "run targeted tests", "run regression suite",
+                     "independent review", "canary check", "promote or reject"]
+        inc["plan"] = steps[:12]
+        return "patching" if inc["repair_kind"] == "code" else "testing"
+
+    # ------------------------------------------------------------------
+    # operational path
+
+    def _apply_operational(self, inc: dict) -> str:
+        top = (inc["hypotheses"] or [{}])[0]
+        kind = str(top.get("kind") or "")
+        fixer = self.fixers.get(kind)
+        if fixer is None:
+            # no deterministic fixer — fall back to the code pipeline if
+            # there is something to patch, else escalate.
+            if inc.get("suspects") and self.patch_generator:
+                inc["repair_kind"] = "code"
+                return "patching"
+            self._fail_open(inc, f"no operational fixer for '{kind}' "
+                                 "and no code suspects")
+            return ""
+        inc["repair_procedure"].append(f"operational:{kind}")
+        try:
+            result = fixer({"incident": dict(inc),
+                            "repo_root": self.repo_root}) or {}
+        except Exception as exc:
+            result = {"ok": False, "detail": str(exc)[:300]}
+        inc["verification"]["operational_fix"] = result
+        if result.get("ok"):
+            return "promoting"
+        # deterministic fix failed — count it and reconsider
+        inc["attempts"]["patch"] = int(
+            inc["attempts"].get("patch") or 0) + 1
+        self.memory.record(inc["signature"], kind=f"operational:{kind}",
+                           steps=inc["repair_procedure"], success=False,
+                           confidence=inc["confidence"],
+                           detail=result.get("detail", ""))
+        if self.memory.known_bad(inc["signature"], f"operational:{kind}"):
+            self._fail_open(inc, f"operational fix '{kind}' repeatedly "
+                                 "failed — refusing to loop")
+            return ""
+        return "planning"  # replan with the new evidence
+
+    # ------------------------------------------------------------------
+    # code path
+
+    def _stage_patch(self, inc: dict) -> str:
+        if self.patch_generator is None:
+            self._fail_open(inc, "no code-repair generator wired — "
+                                 "diagnosis and suspects attached")
+            return ""
+        if self._is_blocked():
+            self._fail_open(inc, "autonomy is stopped/paused")
+            return ""
+        self._set(inc, "patching")
+        try:
+            wt = self.patcher.create(inc["id"])
+        except Exception as exc:
+            self._fail_open(inc, f"worktree failed: {exc}")
+            return ""
+        inc["worktree"] = str(wt)
+
+        # Async path — a repair mission already spawned is generating the
+        # patch inside the worktree; stay in `patching` until it settles.
+        pending = inc.get("patch_mission")
+        if pending and self._mission_status is not None:
+            status = str(self._mission_status(pending) or "")
+            if status in {"ready", "active", "planning", "executing",
+                          "verifying", "evaluating", "replanning",
+                          "waiting_dependency", "waiting_approval",
+                          "paused"}:
+                return ""           # still generating
+            if status in {"completed", "completed_with_warnings"}:
+                inc["patch_files"] = self.patcher.changed_files(wt) or \
+                    inc.get("patch_files", [])
+                if not inc["patch_files"]:
+                    self._fail_open(
+                        inc, "repair mission finished but the worktree "
+                             "has no changes")
+                    return ""
+                inc["repair_procedure"].append(
+                    f"patch:{','.join(inc['patch_files'])[:200]}")
+                return "testing"
+            # terminal failure → count attempt and replan/escalate
+            inc["attempts"]["patch"] = int(
+                inc["attempts"].get("patch") or 0) + 1
+            inc["patch_mission"] = ""
+            if self._budget_check(inc):
+                return ""
+            return "planning"
+
+        inc["attempts"]["patch"] = int(
+            inc["attempts"].get("patch") or 0) + 1
+        try:
+            patch = self.patch_generator(dict(inc), wt) or {}
+        except Exception as exc:
+            self._fail_open(inc, f"patch generation failed: {exc}")
+            return ""
+        # Generator may delegate to a mission — wait for it next tick.
+        if patch.get("mission_id"):
+            inc["patch_mission"] = str(patch["mission_id"])
+            self._save()
+            return ""
+        inc["patch_files"] = list(patch.get("files") or [])
+        inc["regression_test"] = str(patch.get("test") or "")
+        if not inc["patch_files"]:
+            self._fail_open(inc, "generator produced no changes")
+            return ""
+        inc["repair_procedure"].append(
+            f"patch:{','.join(inc['patch_files'])[:200]}")
+        return "testing"
+
+    def _stage_test(self, inc: dict) -> str:
+        self._set(inc, "testing")
+        wt = Path(inc["worktree"]) if inc.get("worktree") else None
+        if not wt or not wt.exists():
+            self._fail_open(inc, "worktree missing — cannot verify")
+            return ""
+        ver = inc.setdefault("verification", {})
+        targets = targeted_tests_for(inc, wt)
+        results = []
+        for t in targets:
+            results.append(run_unittest(wt, t,
+                                        timeout_s=self.verify_timeout_s))
+            if not results[-1]["ok"]:
+                break
+        ver["targeted"] = results
+        if results and not all(r["ok"] for r in results):
+            inc["attempts"]["same_patch_failures"] = int(
+                inc["attempts"].get("same_patch_failures") or 0) + 1
+            self.memory.record(inc["signature"], kind="code",
+                               steps=inc["repair_procedure"], success=False,
+                               confidence=inc["confidence"],
+                               detail="targeted tests failed")
+            return "planning" if not self._budget_check(inc) else ""
+        # Regression gate — bounded, only when configured.
+        if self.regression_suite:
+            ver["regression"] = run_unittest(
+                wt, self.regression_suite,
+                timeout_s=max(self.verify_timeout_s, 600))
+            if not ver["regression"].get("ok"):
+                inc["attempts"]["same_patch_failures"] = int(
+                    inc["attempts"].get("same_patch_failures") or 0) + 1
+                self.memory.record(inc["signature"], kind="code",
+                                   steps=inc["repair_procedure"],
+                                   success=False,
+                                   confidence=inc["confidence"],
+                                   detail="regression suite failed")
+                return "planning" if not self._budget_check(inc) else ""
+        return "reviewing"
+
+    def _default_review(self, inc: dict, wt: Path, diff: str) -> dict:
+        """Deterministic baseline review — static checks that always run
+        even without a separate reviewer model wired in."""
+        notes = []
+        ok = True
+        joined = diff or ""
+        for pat, why in ((r"except\s*:\s*pass",
+                          "blanket except-pass hides the error"),
+                         (r"except\s+Exception\s*:\s*pass",
+                          "except-Exception-pass hides the error"),
+                         (r"os\.system\(",
+                          "raw os.system introduced")):
+            if re.search(pat, joined):
+                notes.append(f"suspicious: {why}")
+                ok = False
+        for f in inc.get("patch_files") or []:
+            if f.startswith(("..", "/", "\\")) or ".." in Path(f).parts:
+                notes.append(f"patch escapes repo: {f}")
+                ok = False
+        if not (inc.get("patch_files")):
+            ok = False
+            notes.append("empty patch")
+        return {"ok": ok, "reviewer": "static",
+                "confidence": 0.7 if ok else 0.3, "notes": notes}
+
+    def _stage_review(self, inc: dict) -> str:
+        self._set(inc, "reviewing")
+        wt = Path(inc["worktree"])
+        diff = ""
+        try:
+            diff = __import__("subprocess").run(
+                ["git", "-C", str(wt), "diff", "HEAD"],
+                capture_output=True, text=True, timeout=20).stdout
+        except Exception:
+            pass
+        if self.reviewer is not self._default_review or not diff:
+            try:
+                review = self.reviewer(dict(inc), wt, diff) or {}
+            except Exception as exc:
+                review = {"ok": False, "error": str(exc)[:200],
+                          "reviewer": "external"}
+        else:
+            review = self.reviewer(dict(inc), wt, diff)
+        inc["review"] = review
+        if not review.get("ok"):
+            self.memory.record(inc["signature"], kind="code",
+                               steps=inc["repair_procedure"], success=False,
+                               confidence=inc["confidence"],
+                               detail="review rejected candidate")
+            return "planning" if not self._budget_check(inc) else ""
+        return "canary"
+
+    def _stage_canary(self, inc: dict) -> str:
+        self._set(inc, "canary")
+        wt = Path(inc["worktree"])
+        result = self.canary.check(dict(inc), wt)
+        inc["verification"]["canary"] = result
+        if result.get("ok") is False:
+            inc["attempts"]["same_patch_failures"] = int(
+                inc["attempts"].get("same_patch_failures") or 0) + 1
+            return "planning" if not self._budget_check(inc) else ""
+        if result.get("skipped") and \
+                inc.get("subsystem") in self.canary_required_for:
+            self._fail_open(
+                inc, "canary required for this subsystem but no candidate "
+                     "launcher is configured")
+            return ""
+        return "promoting"
+
+    def _stage_promote(self, inc: dict) -> str:
+        # Final gate: confidence, autonomy permission, review, tests.
+        ver = inc.get("verification") or {}
+        targeted_ok = all(r.get("ok") for r in ver.get("targeted") or [])
+        if inc["repair_kind"] == "code":
+            if inc["confidence"] < self.min_promote_confidence:
+                self._fail_open(
+                    inc, f"root-cause confidence {inc['confidence']:.2f} "
+                         f"< {self.min_promote_confidence}")
+                return ""
+            if not targeted_ok and (ver.get("targeted")):
+                self._fail_open(inc, "targeted verification did not pass")
+                return ""
+            if not self.auto_promote:
+                self._fail_open(
+                    inc, "candidate verified but auto-promote is disabled "
+                         "— review and promote manually")
+                return ""
+        self._set(inc, "promoting")
+        if inc["repair_kind"] == "code" and inc.get("worktree"):
+            wt = Path(inc["worktree"])
+            files = self.patcher.changed_files(wt) or inc["patch_files"]
+            manifest = self.rollback.snapshot(inc["id"], files)
+            inc["rollback"] = {"snapshot": str(self.rollback.lkg_root
+                                                 / inc["id"]),
+                               "files": [f["path"] for f in
+                                         manifest["files"]]}
+            try:
+                how = self.patcher.promote(wt)
+                inc["promotion"] = {"method": how, "ts": time.time(),
+                                    "files": files}
+            except Exception as exc:
+                self._fail_open(inc, f"promotion failed: {exc}")
+                return ""
+        self._set(inc, "resolved",
+                  f"{inc['repair_kind']} repair applied")
+        dur = time.time() - float(inc.get("created_at") or time.time())
+        self.memory.record(inc["signature"], kind=inc["repair_kind"] or "code",
+                           steps=inc["repair_procedure"], success=True,
+                           confidence=inc["confidence"],
+                           detail=inc["hypotheses"][0]["detail"]
+                           if inc.get("hypotheses") else "",
+                           duration_s=dur)
+        # Resume the operation the failure interrupted.
+        if self._on_resumed and inc.get("interrupted_operation"):
+            try:
+                self._on_resumed(inc["interrupted_operation"])
+            except Exception:
+                pass
+        sev = inc.get("severity")
+        self._notify(
+            "failure" if sev == "critical" else "info",
+            f"Self-repair resolved: {inc['error_class']}",
+            f"{inc['subsystem']} · {inc['repair_kind']} · "
+            f"confidence {inc['confidence']:.0%}")
+        if inc.get("worktree"):
+            self.patcher.cleanup(Path(inc["worktree"]), inc["id"])
+        self._save()
+        return ""
+
+    # ------------------------------------------------------------------
+    # drivers
+
+    _STAGE_FN = {}
+
+    def _advance(self, inc: dict) -> None:
+        """Advance one incident one stage. Bounded; safe to call per tick."""
+        if self._budget_check(inc):
+            return
+        state = str(inc.get("state"))
+        nxt: str | None
+        if state == "detected":
+            nxt = self._stage_collect(inc)
+        elif state == "collecting":
+            nxt = "localizing"
+        elif state == "localizing":
+            nxt = self._stage_localize(inc)
+        elif state == "diagnosing":
+            nxt = self._stage_diagnose(inc)
+        elif state == "planning":
+            nxt = self._stage_plan(inc)
+        elif state == "patching":
+            nxt = self._stage_patch(inc)
+        elif state == "testing":
+            nxt = (self._apply_operational(inc)
+                   if inc.get("repair_kind") == "operational"
+                   else self._stage_test(inc))
+        elif state == "reviewing":
+            nxt = self._stage_review(inc)
+        elif state == "canary":
+            nxt = self._stage_canary(inc)
+        elif state == "promoting":
+            nxt = self._stage_promote(inc)
+        else:
+            return
+        if nxt:
+            transition(inc, nxt)
+            inc["updated_at"] = time.time()
+            with self._lock:
+                self._save()
+
+    def tick(self, now: float | None = None) -> None:
+        """Bounded supervisor-tick step: each open incident advances at
+        most one stage so a heavy repair cannot stall the supervisor."""
+        with self._lock:
+            due = [dict(r) for r in self._rows()
+                   if r.get("state") in OPEN_REPAIR_STATES
+                   and r.get("state") != "needs_human"]
+        for snapshot in due:
+            inc = self.get(snapshot["id"])  # live row, not the copy
+            if inc is None:
+                continue
+            try:
+                self._advance(inc)
+            except Exception as exc:
+                inc.setdefault("history", []).append(
+                    {"ts": time.time(), "event": "stage_error",
+                     "detail": str(exc)[:200]})
+                inc["attempts"]["replans"] = int(
+                    inc["attempts"].get("replans") or 0) + 1
+                self._budget_check(inc)
+                self._save()
+
+    def process_incident(self, incident_id: str,
+                         max_steps: int = 40) -> dict | None:
+        """Synchronous end-to-end drive — used by tests and by the
+        manual 'repair now' action."""
+        for _ in range(max_steps):
+            inc = self.get(incident_id)
+            if inc is None or str(inc.get("state")) in \
+                    TERMINAL_REPAIR_STATES:
+                return inc
+            self._advance(inc)
+        return self.get(incident_id)
+
+    def retry(self, incident_id: str) -> bool:
+        inc = self.get(incident_id)
+        if inc is None:
+            return False
+        if str(inc.get("state")) in TERMINAL_REPAIR_STATES:
+            transition(inc, "detected", detail="manual retry")
+            self._save()
+            return True
+        return False
+
+    def rollback_incident(self, incident_id: str) -> dict:
+        inc = self.get(incident_id)
+        if inc is None:
+            return {"ok": False, "error": "no such incident"}
+        result = self.rollback.restore(incident_id)
+        if result.get("ok"):
+            transition(inc, "rolled_back", detail="manual rollback")
+            self._save()
+        return result

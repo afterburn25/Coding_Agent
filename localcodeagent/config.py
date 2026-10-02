@@ -180,6 +180,10 @@ class AgentConfig:
     # Optional quiet-hours window [start_hour, end_hour] local time during
     # which noncritical notifications are muted.
     autonomy_quiet_hours: list[int] | None = None
+    # When False (default) a verified self-repair candidate stops at
+    # needs_human for review; when True a code repair that passes every
+    # gate (confidence, tests, review, canary) promotes itself.
+    self_repair_auto_promote: bool = False
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -563,6 +567,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.autonomy_enabled = bool(raw.get("autonomy_enabled", cfg.autonomy_enabled))
+    cfg.self_repair_auto_promote = bool(raw.get(
+        "self_repair_auto_promote", cfg.self_repair_auto_promote))
     qh = raw.get("autonomy_quiet_hours", cfg.autonomy_quiet_hours)
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]

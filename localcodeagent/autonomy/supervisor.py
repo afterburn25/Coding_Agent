@@ -58,6 +58,7 @@ class AutonomousSupervisor:
         quiet_hours: tuple[int, int] | None = None,
         enabled: bool = True,
         metrics: MetricRegistry | None = None,
+        repair: Any = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -97,6 +98,10 @@ class AutonomousSupervisor:
             emit=lambda p: self._emit("goal", p),
             is_blocked=lambda: self.policy.is_stopped() or
             self.policy.is_paused())
+        # Self-repair coordinator — wired by AppState. When a mission's
+        # recovery playbook is exhausted the failure becomes a repair
+        # incident; on resolution the interrupted mission resumes.
+        self.repair = repair
 
         self._executor = executor
         self._verify_runner = verify_runner or self._default_verify
@@ -457,6 +462,50 @@ class AutonomousSupervisor:
             detail=f"goal:{goal.get('id')} {evidence.get('health')}")
         return mission
 
+    def _spawn_repair_patch_mission(self, incident: dict,
+                                    worktree) -> dict:
+        """Code-repair generation: run the normal mission executor with
+        the incident's worktree as workspace so the agent patches the
+        candidate copy, never the stable tree. The coordinator's own
+        verify/review/promote gates then apply to the worktree diff."""
+        top = (incident.get("hypotheses") or [{}])[0]
+        suspects = "; ".join(
+            f"{s['path']}:{s.get('line')}" for s in
+            (incident.get("suspects") or [])[:4])
+        objective = (
+            f"Self-repair incident {incident['id']} — produce a minimal, "
+            f"verified fix in THIS workspace (an isolated repair worktree; "
+            f"do not touch anything outside it).\n"
+            f"Failure: {incident.get('error_class')} in "
+            f"{incident.get('subsystem')}\n"
+            f"Message: {str(incident.get('error_message'))[:800]}\n"
+            f"Hypothesis: {top.get('kind')} — {top.get('detail')}\n"
+            f"Suspects: {suspects or 'unlocalized'}\n"
+            f"Stack (tail): {str(incident.get('stack_trace'))[-1500:]}\n"
+            "Requirements: add or update a regression test that fails "
+            "without the fix, apply the minimal patch, run the targeted "
+            "test(s). Record what you changed.")
+        mission = self.missions.create(
+            objective=objective[:3900],
+            title=f"Repair {incident['id']}: "
+                  f"{str(incident.get('error_class'))[:60]}",
+            scope="repository",
+            priority="urgent" if incident.get("severity") == "critical"
+            else "normal",
+            success_criteria=[
+                {"kind": "all_tasks_completed",
+                 "description": "patch applied in worktree"},
+                {"kind": "verify_passed",
+                 "description": "targeted tests pass"}],
+            autonomy_profile="local_autonomous",
+            notification_policy="silent",
+            source="self_repair", source_id=str(incident.get("id")),
+            created_by="self_repair",
+            workspace=str(worktree))
+        self.missions.transition(mission["id"], "ready",
+                                 detail=f"self-repair:{incident.get('id')}")
+        return mission
+
     # ------------------------------------------------------------------
     # triggers + schedules
 
@@ -528,6 +577,14 @@ class AutonomousSupervisor:
         # 2b. evaluated goals — outcome feedback + due reviews; a degraded
         # goal generates a repair mission (deduped, cooldown-bounded)
         self.goal_manager.tick(now)
+
+        # 2c. self-repair — each open incident advances at most one stage
+        # per tick so a heavy repair cannot stall the supervisor.
+        if self.repair is not None:
+            try:
+                self.repair.tick(now)
+            except Exception:
+                pass
 
         # 3. reclaim expired leases (worker died mid-task)
         for m in self.missions.list():
@@ -1071,6 +1128,24 @@ class AutonomousSupervisor:
                 actions=["replan", "cancel"])
             self._audit("recovery_exhausted", mission=mission_id,
                         failure_class=failure.get("class"))
+            # Hand the failure to self-repair: deterministic playbooks are
+            # exhausted, so the incident pipeline localizes, repairs, and
+            # — on success — resumes this mission instead of leaving it
+            # permanently blocked.
+            if self.repair is not None:
+                try:
+                    inc, _disp = self.repair.report_failure(
+                        source="mission", subsystem="mission",
+                        exc_type=str(failure.get("class") or ""),
+                        error_message=str(failure.get("error") or
+                                          f"{failure.get('class')} in mission"),
+                        mission_id=mission_id)
+                    if inc is not None:
+                        inc["interrupted_operation"] = {
+                            "kind": "mission", "mission_id": mission_id}
+                        self.repair._save()
+                except Exception:
+                    pass  # repair intake must never break recovery
             return
         action = step.get("action")
         self._audit("recovery_step", mission=mission_id, node=node_id,
@@ -1147,6 +1222,18 @@ class AutonomousSupervisor:
             # treat as escalate to stay bounded.
             self.missions.transition(mission_id, "blocked",
                                      detail=f"no handler for recovery step '{action}'")
+
+    def resume_interrupted(self, op: dict) -> None:
+        """Self-repair resolved → restart the work it interrupted."""
+        if str(op.get("kind")) != "mission":
+            return
+        mid = str(op.get("mission_id") or "")
+        m = self.missions.get(mid)
+        if m and str(m.get("status")) in {"blocked", "failed"}:
+            self.missions.transition(
+                mid, "replanning",
+                detail="self-repair resolved — resuming mission")
+            self.wake()
 
     # ------------------------------------------------------------------
     # approvals (autonomy-level)

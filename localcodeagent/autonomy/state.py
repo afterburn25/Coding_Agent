@@ -117,7 +117,7 @@ class AutonomyStore:
 
     FILES = (
         "missions", "standing_goals", "goals", "triggers", "schedules",
-        "grants", "notifications", "approvals",
+        "grants", "notifications", "approvals", "repairs",
     )
 
     def __init__(self, root: Path) -> None:
@@ -141,6 +141,10 @@ class AutonomyStore:
                                        default=None, key="notifications", limit=300)
         self.approvals = JsonStore(self.root / "approvals.json",
                                    default=None, key="approvals", limit=300)
+        # Durable self-repair incidents (SelfRepairCoordinator) —
+        # persisted so a crash mid-repair resumes instead of repeating.
+        self.repairs = JsonStore(self.root / "repairs.json",
+                                 default=None, key="repairs", limit=200)
         self.control = JsonStore(self.root / "control.json",
                                  default={"version": SCHEMA_VERSION,
                                           "paused": False,

@@ -918,7 +918,99 @@ class AppState:
             metrics=registry,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
+        sup.repair = self._build_self_repair(config, sup, runtime_root,
+                                             hooks, emit)
         return sup
+
+    def _build_self_repair(self, config: AgentConfig, sup,
+                           runtime_root: Path, hooks: dict,
+                           emit) -> "object":
+        """Autonomous self-repair coordinator. Everything external is
+        injected: deterministic fixers reuse the same runtime hooks the
+        recovery playbooks use, evidence collectors read real telemetry,
+        and code repairs delegate patch generation to a bounded repair
+        mission inside an isolated git worktree — never the live tree."""
+        from .self_repair import SelfRepairCoordinator
+
+        def _fix_restart(ctx):
+            hooks.get("restart_service", lambda: None)()
+            ok = bool(hooks.get("health_probe", lambda: False)())
+            return {"ok": ok, "detail": "restart requested + health probe"}
+
+        def _fix_evict(ctx):
+            freed = hooks.get("evict_idle_models", lambda: [])() or []
+            return {"ok": True,
+                    "detail": f"evicted {len(freed)} idle model(s)"}
+
+        def _fix_corrupt_store(ctx):
+            quarantined = len(list(sup.store.root.glob("*.corrupt-*")))
+            sup.store.health()   # raises if a store wedges on load
+            return {"ok": True,
+                    "detail": f"stores load cleanly; {quarantined} "
+                              "corrupt file(s) quarantined"}
+
+        def _fix_bad_model_config(ctx):
+            hooks.get("stop_models", lambda: None)()
+            return {"ok": True,
+                    "detail": "models stopped — next launch uses safe "
+                              "runtime defaults"}
+
+        def _fix_probe(ctx):
+            ok = bool(hooks.get("health_probe", lambda: False)())
+            return {"ok": ok, "detail": "health probe"}
+
+        def _tail_log() -> str:
+            for cand in (runtime_root / "data" / "logs" / "backend-host.log",
+                         Path(config.runtime_logs_dir) / "backend.log"):
+                try:
+                    if cand.is_file():
+                        return "\n".join(
+                            cand.read_text(encoding="utf-8",
+                                           errors="replace")
+                            .splitlines()[-40:])
+                except OSError:
+                    continue
+            return ""
+
+        coord = SelfRepairCoordinator(
+            sup.store, self.workspace,
+            state_root=runtime_root / "data" / "autonomy",
+            fixers={
+                "stale_process": _fix_restart,
+                "port_collision": _fix_restart,
+                "network_failure": _fix_restart,
+                "external_service": _fix_probe,
+                "environment": _fix_probe,
+                "hardware_pressure": _fix_evict,
+                "corrupt_store": _fix_corrupt_store,
+                "bad_model_config": _fix_bad_model_config,
+            },
+            collectors={
+                "hardware": lambda: (self.runtime.summary() or {})
+                                    .get("hardware") or {},
+                "runtime": lambda: {"models": (self.runtime.summary() or {})
+                                    .get("models") or []},
+                "crash_history": lambda: netdiag.crash_history(20),
+                "logs": _tail_log,
+            },
+            # Code repairs run as repair missions whose workspace is the
+            # incident's isolated worktree — the existing executor writes
+            # the patch there, then the coordinator's gates apply.
+            patch_generator=lambda inc, wt: {
+                "mission_id": sup._spawn_repair_patch_mission(inc, wt)["id"]},
+            mission_status=lambda mid: (sup.missions.get(mid) or {})
+                                       .get("status"),
+            auto_promote=bool(getattr(config, "self_repair_auto_promote",
+                                      False)),
+            is_blocked=lambda: sup.policy.is_stopped()
+                               or sup.policy.is_paused(),
+            audit=sup._audit,
+            emit=lambda p: emit("repair", p),
+            notify=lambda level, title, detail: sup.notifications.notify(
+                title, level=level, detail=detail),
+            on_resumed=lambda op: sup.resume_interrupted(op),
+        )
+        return coord
 
     def _register_goal_metrics(self, registry, sup, runtime_root: Path) -> None:
         """Bind real telemetry providers to goal-metric keys. Every metric
@@ -3012,7 +3104,7 @@ class Handler(BaseHTTPRequestHandler):
 
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
                           "/api/schedules", "/api/standing-goals",
-                          "/api/goals")
+                          "/api/goals", "/api/self-repair")
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
@@ -3212,6 +3304,22 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"goals": sup.goal_manager.list(),
                         "metrics": sup.goal_manager.available_metrics(),
                         "summary": sup.goal_manager.summary()})
+            return True
+        if path == "/api/self-repair":
+            repair = getattr(sup, "repair", None)
+            if repair is None:
+                self._json({"incidents": [], "summary": {}})
+            else:
+                self._json({"incidents": repair.list(),
+                            "summary": repair.summary()})
+            return True
+        if path.startswith("/api/self-repair/"):
+            repair = getattr(sup, "repair", None)
+            inc = repair.get(path.rsplit("/", 1)[-1]) if repair else None
+            if inc is None:
+                self._json({"error": "incident not found"}, 404)
+            else:
+                self._json({"incident": inc})
             return True
         return False
 
@@ -3484,6 +3592,43 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": sup.goal_manager.archive(gid)})
                 return True
             self._json({"error": "unknown goal action"}, 400)
+            return True
+
+        if path == "/api/self-repair/report":
+            repair = getattr(sup, "repair", None)
+            if repair is None:
+                self._json({"error": "self-repair unavailable"}, 503)
+                return True
+            inc, disp = repair.report_failure(
+                source=str(body.get("source") or "api"),
+                error_message=str(body.get("error_message")
+                                  or body.get("message") or ""),
+                exc_type=str(body.get("exc_type") or ""),
+                subsystem=str(body.get("subsystem") or ""),
+                stack_trace=str(body.get("stack_trace") or ""),
+                mission_id=str(body.get("mission_id") or ""))
+            self._json({"disposition": disp,
+                        "incident": inc})
+            return True
+        if path.startswith("/api/self-repair/"):
+            repair = getattr(sup, "repair", None)
+            if repair is None:
+                self._json({"error": "self-repair unavailable"}, 503)
+                return True
+            rest = path[len("/api/self-repair/"):].strip("/")
+            iid, _, verb = rest.rpartition("/")
+            if not verb or not iid:
+                self._json({"error": "expected /api/self-repair/{id}/{action}"},
+                           400)
+                return True
+            if verb == "retry":
+                self._json({"ok": repair.retry(iid)})
+            elif verb == "process":
+                self._json({"incident": repair.process_incident(iid)})
+            elif verb == "rollback":
+                self._json(repair.rollback_incident(iid))
+            else:
+                self._json({"error": "unknown repair action"}, 400)
             return True
         return False
 

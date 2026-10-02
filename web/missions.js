@@ -13,7 +13,7 @@ let missions=[],selected=null;
 
 async function refresh(){
   try{
-    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals]=await Promise.all([
+    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs]=await Promise.all([
       api('/api/autonomy/status'),
       api('/api/missions'),
       api('/api/autonomy/approvals?pending=1'),
@@ -23,6 +23,7 @@ async function refresh(){
       api('/api/triggers'),
       api('/api/autonomy/summary'),
       api('/api/goals'),
+      api('/api/self-repair'),
     ]);
     renderStatus(st);
     missions=ms.missions||[];
@@ -33,6 +34,7 @@ async function refresh(){
     renderDailySummary(summary||{});
     renderGoals(sgoals.goals||[]);
     renderEvalGoals(goals.goals||[],goals.metrics||[]);
+    renderRepairs(repairs.incidents||[]);
     renderSchedules(scheds.schedules||[]);
     renderTriggers(trigs.triggers||[]);
     if(Array.isArray(trigs.signals)&&trigs.signals.length&&
@@ -176,6 +178,20 @@ function renderEvalGoals(rows,metricSpecs){
     sel.innerHTML='<option value="">metric…</option>'+metricSpecs.map(m=>
       `<option value="${esc(m.key)}">${esc(m.key)}${m.unit?` (${esc(m.unit)})`:''}</option>`).join('');
 }
+const REPAIR_STATE_CLASS={resolved:'ok',detected:'unknown',collecting:'unknown',localizing:'warn',diagnosing:'warn',planning:'warn',patching:'warn',testing:'warn',reviewing:'warn',canary:'warn',promoting:'warn',rolled_back:'warn',needs_human:'bad',abandoned:'unknown'};
+function renderRepairs(rows){
+  $('#repairPanel').innerHTML=rows.slice(0,12).map(r=>{
+    const top=(r.hypotheses||[])[0];
+    return `<div class="mission-card"><div class="title">${esc(r.error_class)} · ${esc(r.subsystem)}</div>`+
+    `<div class="goal-evidence">${esc(top?top.detail:'')}${r.needs_human_reason?' — '+esc(r.needs_human_reason):''}</div>`+
+    `<div class="meta"><span class="gstatus ${REPAIR_STATE_CLASS[r.state]||'unknown'}">${esc(r.state)}</span>`+
+    `<span>${esc(r.severity)}</span><span>conf ${Math.round((r.confidence||0)*100)}%</span>`+
+    `${r.occurrences>1?`<span>×${r.occurrences}</span>`:''}</div>`+
+    `<div class="meta"><span style="flex:1">${new Date((r.last_seen||r.created_at)*1000).toLocaleTimeString()}</span>`+
+    (r.state==='needs_human'?`<button class="mini-button" data-rep="${r.id}:retry">Retry</button>`:'')+
+    `</div></div>`;
+  }).join('')||'<div class="hist-row">no incidents</div>';
+}
 function renderGoals(rows){
   $('#standingGoals').innerHTML=rows.map(g=>
     `<div class="mission-card"><div class="title">${esc(g.objective).slice(0,80)}</div>`+
@@ -223,6 +239,10 @@ document.addEventListener('click',async e=>{
   const ga=e.target.closest('[data-goalact]');
   if(ga){const[id,verb]=ga.dataset.goalact.split(':');
     try{await api(`/api/goals/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
+  const rp=e.target.closest('[data-rep]');
+  if(rp){const[id,verb]=rp.dataset.rep.split(':');
+    try{await api(`/api/self-repair/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
     return;}
   const sc=e.target.closest('[data-sched]');
   if(sc){const[id,verb]=sc.dataset.sched.split(':');

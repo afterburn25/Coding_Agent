@@ -2,7 +2,31 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **698 / 698** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.9.0 — Predictive splash progress + flat junction-safe installer
+## Active version: 0.10.0 — Autonomous self-repair + evaluated goals
+
+v0.10 adds `localcodeagent/self_repair/` — a guarded incident pipeline:
+failure detection with signature dedupe and severity gating → evidence
+collection (redacted logs/crash history/hardware/runtime/recent commits)
+→ traceback/git localizer → deterministic diagnosis across the
+fault taxonomy → operational fixers (restart/quarantine/evict/probe) or
+code repairs in isolated `.repair-worktrees/` via bounded repair missions
+→ targeted + regression tests → static review → optional canary →
+promotion gated on confidence/tests/`self_repair_auto_promote` →
+byte-for-byte last-known-good rollback → procedural memory that recalls
+proven fixes and suppresses known-bad ones → interrupted missions resume.
+Incidents persist in `data/autonomy/repairs.json`; exhausted mission
+recovery playbooks open incidents automatically. API `/api/self-repair*`;
+Self Repair panel on Mission Control. Docs: `docs/architecture/SELF_REPAIR.md`.
+Fault-injection suite `tests/test_self_repair.py` (27 tests) proves all
+five scenarios: promote, reject, rollback, procedural repair, and
+mid-repair restart resume.
+
+Shipped alongside on the 0.9.0 line: the evaluated Goal Manager
+(`autonomy/goals.py` + `metrics.py`) — durable metric-driven goals that
+self-generate evidence-carrying repair missions with dedupe + cooldown,
+confidence feedback, `/api/goals` routes, and a Mission Control panel.
+
+### Retained from v0.9 — Predictive splash progress
 
 v0.9 redesigns splash progress rendering around a three-layer model —
 `RealProgress` (reported milestones), `PredictedProgress` (learned-timing
