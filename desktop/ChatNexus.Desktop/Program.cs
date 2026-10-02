@@ -856,8 +856,9 @@ internal sealed class MainForm : Form
             progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
         progress.Report(0.30, "STARTING · CORE SERVICES", "Waiting for backend health");
         // Cold starts on machines scanning a fresh unsigned exe (AV) can
-        // exceed 30s even when the backend is healthy.
-        await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
+        // exceed 60s even when the backend is healthy — the PyInstaller
+        // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
+        await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
         progress.Report(0.55, "CONNECTING · LOCAL AI RUNTIME", "Backend healthy — synchronizing runtime state");
 
         var userDataFolder = Path.Combine(
@@ -1022,7 +1023,7 @@ internal sealed class MainForm : Form
             await Task.Delay(350);
             var replacement = BackendProcess.Start(_appDir);
             AttachBackend(replacement);
-            await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(60));
+            await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
 
             if (!_closing && _webView.CoreWebView2 is not null)
             {
