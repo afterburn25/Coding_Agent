@@ -116,6 +116,27 @@ class JobNodeTests(unittest.TestCase):
             self.assertTrue(node["result"]["ok"])
             sup.stop()
 
+    def test_research_node_dispatches_research_runner(self):
+        with tempfile.TemporaryDirectory() as td:
+            seen = []
+            sup = make_sup(
+                td,
+                research_runner=lambda m, n: (seen.append(
+                    n.get("instruction")) or {"ok": True,
+                                              "output": "findings"}))
+            m = sup.create_mission(
+                objective="survey libs",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.missions.mutate(m["id"], lambda r: TaskGraph(r).add(
+                new_task("Survey", "python logging frameworks",
+                         kind="research")))
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"])
+            node = (m.get("graph") or {}).get("nodes", [])[0]
+            self.assertEqual(seen, ["python logging frameworks"])
+            self.assertEqual(node["state"], "completed")
+            sup.stop()
+
     def test_default_job_runner_reports_unwired(self):
         sup = make_sup(tempfile.mkdtemp())
         out = sup._default_job({}, {"metadata": {"job": "sandbox"}})

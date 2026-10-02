@@ -852,6 +852,7 @@ class AppState:
             bus=self.events,
             executor=executor,
             job_runner=self._mission_job,
+            research_runner=self._mission_research,
             lane_free=lane_free,
             permission_manager=self.permission_manager,
             activities=self.activities,
@@ -1007,6 +1008,23 @@ class AppState:
         except Exception:
             pass
         return rec
+
+    def _mission_research(self, mission: dict, node: dict) -> dict:
+        """Run a mission 'research' node through the real coordinator —
+        repository/local-docs first, web sources when policy allows."""
+        query = str(node.get("instruction") or node.get("title") or "")
+        if not query.strip():
+            return {"ok": False, "output": "research node: no query"}
+        try:
+            r = self.research.research_topic(query)
+        except Exception as exc:
+            return {"ok": False, "output": f"research failed: {exc}"}
+        status = str(r.get("status") or "")
+        return {"ok": status.startswith("completed"),
+                "output": str(r.get("summary") or "")[:4000],
+                "research": {"status": status,
+                             "sources": len(r.get("sources") or []),
+                             "errors": list(r.get("errors") or [])[:5]}}
 
     # -- mission chat commands -----------------------------------------
     #

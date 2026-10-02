@@ -47,6 +47,7 @@ class AutonomousSupervisor:
         verify_runner: Callable[[dict, dict], dict] | None = None,
         internal_runner: Callable[[dict, dict], dict] | None = None,
         job_runner: Callable[[dict, dict], dict] | None = None,
+        research_runner: Callable[[dict, dict], dict] | None = None,
         lane_free: Callable[[], bool] | None = None,
         permission_manager=None,
         activities=None,                   # workflow.ActivityStore — timeline rows
@@ -81,6 +82,7 @@ class AutonomousSupervisor:
         self._verify_runner = verify_runner or self._default_verify
         self._internal_runner = internal_runner or self._default_internal
         self._job_runner = job_runner or self._default_job
+        self._research_runner = research_runner or self._default_internal
         self._lane_free = lane_free or (lambda: True)
         self.activities = activities
         self._node_rows: dict[str, str] = {}  # node_id -> activity row id
@@ -787,7 +789,7 @@ class AutonomousSupervisor:
             elif kind == "internal":
                 result = self._internal_runner(m, node)
             elif kind == "research":
-                result = self._internal_runner(m, node)
+                result = self._research_runner(m, node)
             elif kind == "job":
                 result = self._job_runner(m, node)
             else:
