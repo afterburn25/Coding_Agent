@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **537 / 537** (2 environment skips); see SESSION_HANDOFF.md for the v0.8 local voice subsystem checkpoint.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **698 / 698** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.6.1-dev — Native Nexus Core Desktop Dogfood
 
@@ -160,7 +160,23 @@
 - Chat preflight returns one clean Setup required response when no coding model is usable instead of opening a doomed SSE stream.
 - Dogfood package includes the project `Source` working copy and preserves its `.git` metadata.
 - The Windows ZIP builder rejects legacy pythonnet / `Python.Runtime.dll` / pywebview paths so the CLR-loading crash cannot silently return.
-- Current automated checkpoint: **649 tests passing**.
+
+### Autonomous missions checkpoint
+
+- `localcodeagent/autonomy/` adds a persistent mission layer: `data/autonomy/` JSON stores (schema v1) for missions, standing goals, triggers, schedules, grants, approvals, notifications, plus append-only `receipts.jsonl`/`audit.jsonl`.
+- `AutonomousSupervisor` runs bounded event-driven ticks (no uncontrolled loop): reclaim leases → fire schedules/triggers → plan → execute DAG nodes in worker threads → verify → evaluate → complete/replan/escalate.
+- `TaskGraph` gives dependency-aware DAG execution with node leases, parallel independent branches, blocked/failed propagation, and cycle rejection; `ResourceLocks` provides exclusive named lanes; interactive chat always wins the agent lane.
+- `MissionPlanner` decomposes objectives into plan/research/implement/verify steps; `MissionEvaluator` checks success criteria (`all_tasks_completed`, `verify_passed`, `artifact_exists`, metrics) before completion — tool success is never assumed equal to mission success.
+- `RecoveryManager` classifies failures (CUDA OOM, WinError 10054, tool crash, approval-required, test failure…) into bounded playbooks — wait/retry/repair/replan/escalate — with per-mission budgets (`max_task_retries`, `max_repair_loops`, `max_same_failure_retries`, `max_runtime_s`); repeated identical failure signatures halt instead of looping.
+- `AutonomyPolicy` profiles (`supervised`/`local_autonomous`/`extended_autonomous`/`custom`) sit on top of the existing PermissionManager and can only narrow it; sensitive actions (`git_push`, `create_pr`, `packages`, `delete_data`, `credentials`, `outbound_message`) require a standing grant (scoped/expirable/revocable) or a mission approval.
+- Approvals pause a mission into `waiting_approval` and resume the exact suspended step; denial triggers replanning; pending approvals persist across restart.
+- Durable scheduler (once/interval/daily/weekly — missed runs catch up after downtime) plus a trigger engine (file_changed, startup, ci_*, model_runtime_failed, custom, …) with conditions, debounce, and workspace-confined file watches; standing goals spawn recurring missions.
+- `stop autonomy` / `resume autonomy` (chat command, API, or UI) immediately pauses all live missions and denies new autonomous work.
+- Restart safety: `MissionStore._recover_orphans()` re-parks missions that were mid-execution when the process died — running nodes return to `ready`, completed work is never repeated.
+- Missions UI at `web/missions.html` (list/detail, status, task graph, approvals, controls); chat commands `make this a mission`, `stop autonomy`, `resume autonomy` answer locally in both streaming and non-streaming chat.
+- Autonomy status/mission/approval/goal/schedule/trigger/notification APIs under `/api/autonomy/*`; supervisor emits `mission`/`notification`/`autonomy` bus events; ActivityStore gained `autonomy`/`mission` categories.
+- `tests/test_autonomy.py` adds 49 tests: persistence, restart recovery, corrupt-store quarantine, DAG/leases/locks, failure playbooks, policy/grants/stop, notifications, schedules, triggers, evaluator, approvals, denial→replan, stop-autonomy, lane arbitration, budgets, standing goals.
+- Reference: `docs/AUTONOMY.md`. Current automated checkpoint: **698 tests passing** (2 environment skips).
 
 
 

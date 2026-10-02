@@ -1,0 +1,1205 @@
+"""Autonomous Supervisor — bounded, event-driven mission engine.
+
+One daemon thread. Each tick is bounded and terminal: fire due triggers and
+schedules, reclaim dead leases, step each live mission a bounded amount,
+persist after transitions, then sleep on a condition event. There is no
+uncontrolled while-loop over work — mission progress is explicit state.
+
+Interactive priority: the supervisor only claims the agent lane when the
+foreground chat lane is idle (checked via the injected lane probe), so user
+requests always outrank background work.
+"""
+from __future__ import annotations
+
+import subprocess
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Callable
+
+from .budgets import BudgetManager
+from .evaluator import EvalVerdict, MissionEvaluator
+from .missions import MissionStore, TERMINAL_MISSION_STATUSES, DEFAULT_BUDGETS
+from .notifications import NotificationCenter
+from .planner import MissionPlanner
+from .policy import AutonomyPolicy
+from .recovery import RecoveryManager, FailureClass
+from .scheduler import Scheduler
+from .state import AutonomyStore
+from .task_graph import ResourceLocks, TaskGraph, new_task
+from .triggers import TriggerEngine
+
+
+class AutonomousSupervisor:
+    """Owns all autonomy subsystems; drives missions through bounded ticks."""
+
+    TICK_SECONDS = 5.0
+
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        store_root: Path,
+        emit: Callable[[str, dict], None] | None = None,
+        bus: Any = None,                     # EventBus for event triggers
+        executor: Callable[[dict, dict, Callable | None], dict] | None = None,
+        verify_runner: Callable[[dict, dict], dict] | None = None,
+        internal_runner: Callable[[dict, dict], dict] | None = None,
+        lane_free: Callable[[], bool] | None = None,
+        permission_manager=None,
+        runtime_hooks: dict[str, Callable] | None = None,
+        resources: Callable[[], dict] | None = None,
+        quiet_hours: tuple[int, int] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        self.workspace = Path(workspace)
+        self.store = AutonomyStore(store_root)
+        self._emit_bus = emit or (lambda t, p: None)
+        self.enabled = enabled
+
+        self.missions = MissionStore(
+            self.store,
+            on_change=lambda p: self._emit("mission", p))
+        self.locks = ResourceLocks()
+        self.recovery = RecoveryManager()
+        self.evaluator = MissionEvaluator(self.workspace)
+        self.planner = MissionPlanner()
+        self.budgets = BudgetManager(self.workspace, resources=resources)
+        self.policy = AutonomyPolicy(self.store, permission_manager)
+        self.notifications = NotificationCenter(
+            self.store,
+            publish=lambda p: self._emit("notification", p),
+            quiet_hours=quiet_hours)
+        self.scheduler = Scheduler(self.store, on_fire=self._on_schedule_fired)
+        self.triggers = TriggerEngine(
+            self.store, on_fire=self._on_trigger_fired, workspace=self.workspace)
+
+        self._executor = executor
+        self._verify_runner = verify_runner or self._default_verify
+        self._internal_runner = internal_runner or self._default_internal
+        self._lane_free = lane_free or (lambda: True)
+        self._hooks = dict(runtime_hooks or {})
+
+        self._wake = threading.Event()
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._bus_thread: threading.Thread | None = None
+        self._bus_queue = None
+        self._bus = bus
+        self._workers: dict[str, threading.Thread] = {}  # node_id -> thread
+        self._heartbeat = {"ts": 0.0, "tick_ms": 0.0}
+        self._started_once = False
+        self._gate_lock = threading.RLock()
+        # WorkQueue attribution hook set by the server wiring.
+        self._lane_mission: str | None = None
+
+    # ------------------------------------------------------------------
+    # lifecycle
+
+    def start(self) -> None:
+        if not self.enabled or self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._loop, name="nexus-supervisor", daemon=True)
+        self._thread.start()
+        if self._bus is not None:
+            try:
+                self._bus_queue = self._bus.subscribe(replay=0)
+                self._bus_thread = threading.Thread(
+                    target=self._bus_pump, name="nexus-trigger-pump", daemon=True)
+                self._bus_thread.start()
+            except Exception:
+                self._bus_queue = None
+        # Startup triggers fire once per process boot.
+        self._started_once = True
+        try:
+            self.triggers.fire("startup", {"ts": time.time()})
+        except Exception:
+            pass
+
+    def stop(self) -> None:
+        self._running = False
+        self._wake.set()
+        if self._bus is not None and self._bus_queue is not None:
+            try:
+                self._bus.unsubscribe(self._bus_queue)
+            except Exception:
+                pass
+
+    def wake(self) -> None:
+        self._wake.set()
+
+    def _bus_pump(self) -> None:
+        q = self._bus_queue
+        while self._running and q is not None:
+            try:
+                event = q.get(timeout=2.0)
+            except Exception:
+                continue
+            try:
+                before = {t["id"] for t in self.triggers.list()}
+                fired = []
+                self.triggers.handle_bus_event(event)
+                fired = [t for t in self.triggers.list()
+                         if t.get("last_fired") and t["id"] in before]
+                if fired:
+                    self.wake()
+            except Exception:
+                pass
+
+    def _loop(self) -> None:
+        while self._running:
+            started = time.monotonic()
+            try:
+                self.tick()
+            except Exception:
+                pass
+            self._heartbeat = {
+                "ts": time.time(),
+                "tick_ms": round((time.monotonic() - started) * 1000, 1),
+            }
+            # Wait for the next scheduled deadline or an external wake —
+            # never a hot polling loop.
+            delay = self.TICK_SECONDS
+            try:
+                nxt = self.scheduler.next_due()
+                if nxt and nxt.get("next_run"):
+                    delay = max(1.0, min(self.TICK_SECONDS,
+                                         float(nxt["next_run"]) - time.time() + 0.5))
+            except Exception:
+                pass
+            self._wake.wait(timeout=delay)
+            self._wake.clear()
+
+    # ------------------------------------------------------------------
+    # emission / audit
+
+    def _emit(self, event_type: str, payload: dict) -> None:
+        try:
+            self._emit_bus(event_type, payload)
+        except Exception:
+            pass
+
+    def _audit(self, kind: str, **fields: Any) -> None:
+        try:
+            self.store.audit.append({"ts": time.time(), "kind": kind, **fields})
+        except Exception:
+            pass
+
+    def _receipt(self, mission_id: str, node_id: str, action: str,
+                 result: dict | None = None) -> None:
+        """Action receipt — persisted so recovery/retries can tell whether a
+        side effect already landed (idempotency)."""
+        try:
+            self.store.receipts.append({
+                "ts": time.time(), "mission": mission_id, "task": node_id,
+                "action": action, "ok": bool((result or {}).get("ok")),
+                "detail": str((result or {}).get("output") or "")[:500],
+            })
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # public control
+
+    def create_mission(self, **fields: Any) -> dict:
+        mission = self.missions.create(**fields)
+        self.wake()
+        return mission
+
+    def start_mission(self, mission_id: str) -> dict | None:
+        m = self.missions.transition(mission_id, "ready", detail="started")
+        self.wake()
+        return m
+
+    def pause_mission(self, mission_id: str, *, reason: str = "user pause") -> dict | None:
+        m = self.missions.transition(mission_id, "paused", detail=reason)
+        if m is not None:
+            self._audit("mission_paused", mission=mission_id, reason=reason)
+        self.wake()
+        return m
+
+    def resume_mission(self, mission_id: str) -> dict | None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return None
+        target = "active" if (m.get("graph") or {}).get("nodes") else "ready"
+        if str(m.get("status")) == "blocked":
+            target = "replanning"
+        m = self.missions.transition(mission_id, target, detail="resumed")
+        self.wake()
+        return m
+
+    def cancel_mission(self, mission_id: str) -> dict | None:
+        def _fn(m: dict) -> None:
+            for n in (m.get("graph") or {}).get("nodes", []):
+                if n.get("state") in {"planned", "ready", "waiting_dependency",
+                                      "waiting_approval", "blocked"}:
+                    n["state"] = "cancelled"
+        self.missions.mutate(mission_id, _fn)
+        m = self.missions.transition(mission_id, "cancelled", detail="cancelled")
+        self._audit("mission_cancelled", mission=mission_id)
+        self.wake()
+        return m
+
+    def replan_mission(self, mission_id: str, reason: str = "user requested replan") -> dict | None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return None
+        def _fn(row: dict) -> None:
+            self._do_replan(row, reason)
+        self.missions.mutate(mission_id, _fn)
+        m = self.missions.transition(mission_id, "executing", detail="replan")
+        self.wake()
+        return m
+
+    def stop_autonomy(self) -> dict:
+        """Global emergency stop: no new autonomous work; live missions are
+        cooperatively paused (in-flight tasks finish their bounded step)."""
+        self.policy.set_stopped(True)
+        paused = []
+        for m in self.missions.list():
+            if m.get("status") in {"ready", "active", "planning", "executing",
+                                   "verifying", "evaluating", "replanning",
+                                   "waiting_dependency"}:
+                self.missions.transition(m["id"], "paused",
+                                         detail="STOP AUTONOMY")
+                paused.append(m["id"])
+        self._emit("autonomy", {"event": "stopped", "paused_missions": paused})
+        self._audit("autonomy_stop", paused=paused)
+        self.wake()
+        return {"stopped": True, "paused_missions": paused}
+
+    def resume_autonomy(self) -> dict:
+        self.policy.set_stopped(False)
+        self.policy.set_paused(False)
+        self._emit("autonomy", {"event": "resumed"})
+        self.wake()
+        return {"stopped": False}
+
+    # ------------------------------------------------------------------
+    # standing goals
+
+    def add_standing_goal(self, objective: str, *, trigger: dict | None = None,
+                          schedule: dict | None = None,
+                          scope: str = "standing",
+                          allowed_actions: list[str] | None = None,
+                          notification_policy: str = "important",
+                          enabled: bool = True,
+                          success_criteria: list[dict] | None = None,
+                          constraints: list[str] | None = None) -> dict:
+        row = {
+            "id": f"sg-{uuid.uuid4().hex[:10]}",
+            "objective": str(objective)[:2000],
+            "enabled": bool(enabled),
+            "scope": scope,
+            "trigger": dict(trigger or {}),
+            "schedule": dict(schedule or {}),      # {kind, interval_s, hour, ...}
+            "allowed_actions": list(allowed_actions or []),
+            "notification_policy": notification_policy,
+            "success_criteria": list(success_criteria or []),
+            "constraints": list(constraints or []),
+            "last_run": None, "next_run": None, "last_result": None,
+            "created_at": time.time(),
+        }
+        if schedule:
+            row["next_run"] = self._goal_next_run(row, after=time.time() - 1)
+        self.store.standing_goals.data.setdefault("goals", []).append(row)
+        self.store.standing_goals.save()
+        # Bind a live trigger record for event-driven goals.
+        trig_spec = row["trigger"]
+        if enabled and trig_spec.get("event"):
+            self.triggers.add(
+                f"goal:{row['id']}", trig_spec["event"],
+                conditions=trig_spec.get("conditions"),
+                action={"kind": "standing_goal", "goal_id": row["id"]},
+                debounce_s=float(trig_spec.get("debounce_s", 300)),
+                created_by="standing_goal")
+        self.wake()
+        return dict(row)
+
+    def _goal_next_run(self, goal: dict, *, after: float) -> float | None:
+        spec = goal.get("schedule") or {}
+        kind = spec.get("kind")
+        if kind == "interval":
+            return after + float(spec.get("interval_s") or 86400)
+        if kind == "daily":
+            from .scheduler import _next_daily
+            return _next_daily(int(spec.get("hour", 3)), int(spec.get("minute", 0)),
+                               after=after)
+        if kind == "weekly":
+            from .scheduler import _next_daily
+            return _next_daily(int(spec.get("hour", 3)), int(spec.get("minute", 0)),
+                               weekday=int(spec.get("weekday") or 6), after=after)
+        return None
+
+    def set_goal_enabled(self, goal_id: str, enabled: bool) -> bool:
+        for g in self.store.standing_goals.data.setdefault("goals", []):
+            if g.get("id") == goal_id:
+                g["enabled"] = bool(enabled)
+                g["next_run"] = self._goal_next_run(g, after=time.time()) if enabled else None
+                self.store.standing_goals.save()
+                return True
+        return False
+
+    def standing_goals(self) -> list[dict]:
+        return self.store.standing_goals.rows()
+
+    def _spawn_goal_mission(self, goal: dict, *, origin: str) -> dict:
+        mission = self.missions.create(
+            objective=goal["objective"],
+            title=f"[{goal.get('id')}] {goal['objective'][:90]}",
+            scope="standing" if goal.get("scope") == "standing" else goal.get("scope", "one_shot"),
+            priority="maintenance",
+            success_criteria=goal.get("success_criteria") or
+                [{"kind": "all_tasks_completed", "description": "checks complete"}],
+            constraints=goal.get("constraints"),
+            autonomy_profile="local_autonomous",
+            notification_policy=goal.get("notification_policy", "important"),
+            source=origin, source_id=goal["id"],
+            workspace=str(self.workspace))
+        self.missions.transition(mission["id"], "ready",
+                                 detail=f"spawned by {origin}")
+        return mission
+
+    # ------------------------------------------------------------------
+    # triggers + schedules
+
+    def _on_schedule_fired(self, schedule: dict) -> None:
+        self._emit("schedule", {"type": "schedule_fired", "schedule": schedule})
+        self._audit("schedule_fired", schedule=schedule.get("id"),
+                    name=schedule.get("name"))
+        action = schedule.get("action") or {}
+        self._materialize_action(action, origin=f"schedule:{schedule.get('id')}")
+        self.triggers.fire("schedule_due",
+                           {"schedule_id": schedule.get("id"),
+                            "name": schedule.get("name", "")})
+        self.wake()
+
+    def _on_trigger_fired(self, trigger: dict, payload: dict) -> None:
+        self._emit("trigger", {"type": "trigger_fired", "trigger": trigger,
+                               "payload": {k: v for k, v in payload.items()
+                                           if isinstance(v, (str, int, float, bool))}})
+        self._audit("trigger_fired", trigger=trigger.get("id"),
+                    signal=payload.get("signal"))
+        self._materialize_action(trigger.get("action") or {},
+                                 origin=f"trigger:{trigger.get('id')}")
+        self.wake()
+
+    def _materialize_action(self, action: dict, *, origin: str) -> None:
+        kind = action.get("kind", "mission")
+        if self.policy.is_stopped():
+            self._audit("materialize_blocked", origin=origin, reason="autonomy stopped")
+            return
+        if kind == "standing_goal":
+            goal = next((g for g in self.standing_goals()
+                         if g.get("id") == action.get("goal_id")), None)
+            if goal is not None and goal.get("enabled"):
+                self._spawn_goal_mission(goal, origin=origin)
+            return
+        if kind == "mission":
+            objective = str(action.get("objective") or "").strip()
+            if not objective:
+                return
+            mission = self.missions.create(
+                objective=objective,
+                title=action.get("title") or objective[:90],
+                scope=str(action.get("scope") or "one_shot"),
+                priority=str(action.get("priority") or "normal"),
+                success_criteria=action.get("success_criteria"),
+                constraints=action.get("constraints"),
+                autonomy_profile=str(action.get("autonomy_profile") or "local_autonomous"),
+                budgets=action.get("budgets"),
+                notification_policy=str(action.get("notification_policy") or "important"),
+                source=origin.split(":")[0], source_id=origin,
+                workspace=str(self.workspace))
+            self.missions.transition(mission["id"], "ready", detail=origin)
+
+    # ------------------------------------------------------------------
+    # main tick — bounded, terminal, persists after each transition
+
+    def tick(self) -> None:
+        if not self.enabled:
+            return
+        now = time.time()
+
+        # 1. schedules + file watches
+        self.scheduler.tick()
+        self.triggers.check_watches()
+
+        # 2. standing goals whose schedule came due
+        self._tick_goals(now)
+
+        # 3. reclaim expired leases (worker died mid-task)
+        for m in self.missions.list():
+            graph = TaskGraph(m)
+            for node in graph.reclaim_expired():
+                self.missions.append_history(
+                    m["id"], "lease_expired",
+                    f"task '{node.get('title')}' worker lost — requeued")
+
+        # 4. drive live missions
+        if self.policy.is_stopped() or self.policy.is_paused():
+            return
+        for m in self.missions.list():
+            status = str(m.get("status"))
+            if status in TERMINAL_MISSION_STATUSES or status in {
+                    "draft", "paused", "blocked", "waiting_trigger",
+                    "waiting_approval", "archived"}:
+                continue
+            try:
+                self._step_mission(m["id"])
+            except Exception:
+                pass  # one mission's fault must not kill the supervisor
+
+    # ------------------------------------------------------------------
+    # per-mission step
+
+    def _step_mission(self, mission_id: str) -> None:
+        m = self.missions.get(mission_id)
+        if m is None or m.get("stop_requested"):
+            return
+        status = str(m.get("status"))
+
+        # Budget gate first — overspend pauses with a notification.
+        budget = self.budgets.check(m)
+        if not budget["ok"]:
+            self.missions.transition(mission_id, "paused",
+                                     detail="; ".join(budget["violations"]))
+            self.notifications.notify(
+                f"Mission '{m.get('title')}' paused — "
+                + "; ".join(budget["violations"]),
+                level="important", policy=m.get("notification_policy", "important"),
+                mission_id=mission_id, title="Budget exceeded",
+                actions=["resume", "edit budget"])
+            return
+
+        if status in {"ready", "active"}:
+            graph = TaskGraph(m)
+            if not graph.nodes:
+                self.missions.transition(mission_id, "planning")
+                self._build_plan(mission_id)
+                return
+            self.missions.transition(mission_id, "executing")
+            status = "executing"
+
+        if status in {"planning"}:
+            self._build_plan(mission_id)
+            return
+
+        if status == "executing":
+            self._step_executing(mission_id)
+            return
+
+        if status == "evaluating":
+            self._step_evaluating(mission_id)
+            return
+
+        if status == "replanning":
+            m = self.missions.get(mission_id)
+            if m is not None:
+                def _fn(row: dict) -> None:
+                    last_fail = next(
+                        (n for n in (row.get("graph") or {}).get("nodes", [])
+                         if n.get("state") == "failed"), None)
+                    self._do_replan(row, "replanning phase", failed_node=last_fail)
+                self.missions.mutate(mission_id, _fn)
+                self.missions.transition(mission_id, "executing")
+            return
+
+        if status == "waiting_dependency":
+            # Dependencies resolve into ready on refresh — nothing else waits
+            # on an external signal right now.
+            self.missions.transition(mission_id, "executing")
+            return
+
+    def _build_plan(self, mission_id: str) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        def _fn(row: dict) -> None:
+            if (row.get("graph") or {}).get("nodes"):
+                return
+            tasks = self.planner.initial_plan(row)
+            graph = TaskGraph(row)
+            for t in tasks:
+                graph.add(t)
+            row.setdefault("history", []).append({
+                "ts": time.time(), "event": "plan",
+                "detail": f"{len(tasks)} tasks planned",
+            })
+            row["attempts"] = int(row.get("attempts") or 0) + 1
+        self.missions.mutate(mission_id, _fn)
+        self._emit("task_graph", {"type": "task_graph_updated",
+                                  "mission_id": mission_id,
+                                  "graph": (self.missions.get(mission_id) or {}).get("graph")})
+        self.missions.transition(mission_id, "executing", detail="plan built")
+
+    def _step_executing(self, mission_id: str) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        graph = TaskGraph(m)
+
+        # Honor retry cooldowns.
+        now = time.time()
+        for n in graph.nodes:
+            if n.get("state") == "ready" and n.get("retry_after", 0) > now:
+                n["state"] = "waiting_dependency"   # parked until cooldown
+            elif n.get("state") == "waiting_dependency" \
+                    and n.get("retry_after", 0) <= now:
+                n["state"] = "ready"
+
+        # Detect newly-failed dependencies → mark failed node's dependents.
+        for n in graph.running():
+            continue  # running workers update their own state
+
+        runnable = graph.runnable(limit=8)
+        started = 0
+        max_parallel = {"conservative": 1, "balanced": 2,
+                        "performance": 3}.get(self.policy.resource_mode(), 2)
+        in_flight = len(graph.running())
+        budget_parallel = max(0, max_parallel - in_flight)
+
+        for node in runnable:
+            if started >= budget_parallel:
+                break
+            kind = node.get("kind", "agent")
+            if kind == "agent":
+                # The agent lane is exclusive and interactive work outranks
+                # background missions.
+                if not self._lane_free():
+                    break
+                if not self.locks.acquire("agent_lane", node["id"]):
+                    break
+            else:
+                lock = node.get("lock") or ""
+                if lock and not self.locks.acquire(lock, node["id"]):
+                    continue
+            if not graph.claim(node["id"], owner=f"supervisor"):
+                if kind == "agent":
+                    self.locks.release("agent_lane", node["id"])
+                elif node.get("lock"):
+                    self.locks.release(node["lock"], node["id"])
+                continue
+            started += 1
+            self._spawn_worker(mission_id, node["id"])
+
+        if started:
+            self.missions.update(mission_id, graph=graph.graph)
+            self._emit("task_graph", {"type": "task_graph_updated",
+                                      "mission_id": mission_id,
+                                      "graph": graph.graph})
+        elif not runnable and not graph.running():
+            # Nothing left to run — evaluate goal progress, or recover
+            # nodes stranded behind a failed dependency.
+            if graph.is_done():
+                self.missions.transition(mission_id, "evaluating")
+            else:
+                failed = [n for n in graph.nodes if n.get("state") == "failed"]
+                stuck = [n for n in graph.nodes
+                         if n.get("state") in {"planned", "blocked"}]
+                if failed and stuck:
+                    # Replan around the failed dep — repoints the stranded
+                    # nodes onto a fresh recovery path.
+                    self.missions.transition(mission_id, "replanning",
+                                             detail="dependency failed")
+                elif stuck:
+                    self.missions.transition(mission_id, "blocked",
+                                             detail="tasks stuck on failed dependencies")
+                    self.notifications.notify(
+                        f"Mission '{m.get('title')}' blocked — dependencies failed.",
+                        level="failure",
+                        policy=m.get("notification_policy", "important"),
+                        mission_id=mission_id, title="Mission blocked",
+                        actions=["replan", "resume"])
+                else:
+                    self.missions.transition(mission_id, "evaluating")
+
+    def _step_evaluating(self, mission_id: str) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        result = self.evaluator.evaluate(m)
+        verdict = result["verdict"]
+        if verdict == EvalVerdict.COMPLETE.value:
+            self._complete_mission(mission_id, warnings=False)
+        elif verdict == EvalVerdict.NEEDS_USER.value:
+            self.missions.transition(mission_id, "waiting_approval")
+        elif verdict == EvalVerdict.NEEDS_REPLAN.value:
+            reason = self.recovery.budgets_exceeded(m)
+            if reason:
+                self.missions.transition(mission_id, "blocked", detail=reason)
+                self.notifications.notify(
+                    f"Mission '{m.get('title')}' blocked: {reason}",
+                    level="failure",
+                    policy=m.get("notification_policy", "important"),
+                    mission_id=mission_id, title="Mission blocked",
+                    actions=["replan"])
+            else:
+                def _fn(row: dict) -> None:
+                    last_fail = next(
+                        (n for n in (row.get("graph") or {}).get("nodes", [])
+                         if n.get("state") == "failed"), None)
+                    self._do_replan(row, "; ".join(result["reasons"]),
+                                    failed_node=last_fail)
+                self.missions.mutate(mission_id, _fn)
+                self.missions.transition(mission_id, "executing",
+                                         detail="auto-replan")
+        else:
+            self.missions.transition(mission_id, "executing")
+
+    def _do_replan(self, mission: dict, reason: str,
+                   failed_node: dict | None = None) -> None:
+        graph = TaskGraph(mission)
+        if failed_node is None:
+            failed_node = next(
+                (n for n in graph.nodes if n.get("state") == "failed"), None)
+        tasks = self.planner.replan(mission, failed_node, reason)
+        new_ids = []
+        for t in tasks:
+            graph.add(t)
+            new_ids.append(t["id"])
+        if failed_node is not None:
+            # Repoint the failed node's dependents onto the new verify tail
+            # and skip the dead node so the graph can progress.
+            tail = new_ids[-1] if new_ids else failed_node["id"]
+            for n in graph.dependents(failed_node["id"]):
+                n["deps"] = [tail]
+                if n.get("state") == "blocked":
+                    n["state"] = "planned"
+            failed_node["state"] = "skipped"
+        graph.refresh()
+
+    def _complete_mission(self, mission_id: str, *, warnings: bool) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        nodes = (m.get("graph") or {}).get("nodes", [])
+        completion = {
+            "mission": mission_id,
+            "state": "completed_with_warnings" if warnings else "completed",
+            "criteria": (self.evaluator.evaluate(m) or {}).get("criteria", []),
+            "tasks": [{"id": n["id"], "title": n.get("title"),
+                       "state": n.get("state")} for n in nodes],
+            "changes": [a for a in m.get("artifacts", [])][:50],
+            "elapsed_s": round(time.time() - (m.get("started_at") or
+                                              m.get("created_at") or 0), 1),
+            "finished_at": time.time(),
+        }
+        def _fn(row: dict) -> None:
+            row["completion"] = completion
+        self.missions.mutate(mission_id, _fn)
+        self.missions.transition(
+            mission_id,
+            "completed_with_warnings" if warnings else "completed",
+            detail="success criteria satisfied")
+        self._receipt(mission_id, "mission", "mission_completed",
+                      {"ok": True, "output": "criteria satisfied"})
+        self._audit("mission_completed", mission=mission_id,
+                    warnings=warnings)
+        self.notifications.notify(
+            f"Mission complete: {m.get('title')}",
+            level="completion",
+            policy=m.get("notification_policy", "important"),
+            mission_id=mission_id, title="Mission completed")
+        self._learn_from_mission(mission_id)
+        self._emit("mission", {"type": "mission_completed",
+                               "mission": self.missions.get(mission_id)})
+
+    def _learn_from_mission(self, mission_id: str) -> None:
+        """Feed durable lessons: structured mission outcomes only, never
+        hidden reasoning."""
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        lesson = {
+            "ts": time.time(), "mission": mission_id,
+            "objective": str(m.get("objective"))[:300],
+            "outcome": m.get("status"),
+            "failures": len(m.get("failure_history") or []),
+            "repair_loops": m.get("repair_loops", 0),
+            "tasks": len((m.get("graph") or {}).get("nodes", [])),
+        }
+        try:
+            self.store.lessons.append(lesson)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # worker execution
+
+    def _spawn_worker(self, mission_id: str, node_id: str) -> None:
+        def work() -> None:
+            try:
+                self._run_node(mission_id, node_id)
+            except Exception as exc:
+                self._finish_node(mission_id, node_id,
+                                  {"ok": False,
+                                   "output": f"{type(exc).__name__}: {exc}"})
+            finally:
+                self._workers.pop(node_id, None)
+                self.wake()
+        t = threading.Thread(target=work, name=f"mission-{node_id}", daemon=True)
+        self._workers[node_id] = t
+        t.start()
+
+    def _run_node(self, mission_id: str, node_id: str) -> None:
+        m = self.missions.get(mission_id)
+        node = TaskGraph(m).get(node_id) if m else None
+        if m is None or node is None:
+            return
+        kind = node.get("kind", "agent")
+        owner = node_id  # same identity used by acquire() in _step_executing
+
+        def emit(event: dict) -> None:
+            try:
+                e = dict(event)
+                e.setdefault("mission_id", mission_id)
+                e.setdefault("mission_node", node_id)
+                self._emit_bus(str(e.pop("type", "task") or "task"), e)
+            except Exception:
+                pass
+
+        try:
+            if kind == "agent":
+                if self._executor is None:
+                    self._finish_node(mission_id, node_id,
+                                      {"ok": False, "output": "no executor configured"})
+                    return
+                # Mark the mission as owning the agent lane while the run is
+                # in-flight (queue_task enrichment hooks read this).
+                self._lane_mission = mission_id
+                try:
+                    result = self._executor(m, node, emit)
+                finally:
+                    self._lane_mission = None
+            elif kind == "verify":
+                result = self._verify_runner(m, node)
+            elif kind == "internal":
+                result = self._internal_runner(m, node)
+            elif kind == "research":
+                result = self._internal_runner(m, node)
+            else:
+                result = {"ok": True, "output": "no-op"}
+        finally:
+            lock = node.get("lock") or ("agent_lane" if kind == "agent" else "")
+            if lock:
+                self.locks.release(lock, owner)
+        self._finish_node(mission_id, node_id, result or {"ok": False})
+
+    def _finish_node(self, mission_id: str, node_id: str, result: dict) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        ok = bool(result.get("ok"))
+        pending_approval = result.get("pending_approval")
+
+        def _fn(row: dict) -> None:
+            graph = TaskGraph(row)
+            node = graph.get(node_id)
+            if node is None:
+                return
+            if pending_approval:
+                node["state"] = "waiting_approval"
+                node["result"] = result
+                row["pending_approval"] = pending_approval
+                row["waiting_for"] = "approval"
+                return
+            node["result"] = {
+                "ok": ok,
+                "output": str(result.get("output") or "")[:4000],
+                "task_id": str(result.get("task_id") or ""),
+                "artifacts": list(result.get("artifacts") or [])[:20],
+                "finished_at": time.time(),
+            }
+            if ok:
+                node["state"] = "completed"
+                if node.get("kind") == "verify":
+                    row.setdefault("verification_history", []).append({
+                        "ts": time.time(), "ok": True,
+                        "task": node.get("title"),
+                        "output": str(result.get("output") or "")[:800]})
+            else:
+                node["retries"] = int(node.get("retries") or 0) + 1
+                if node["retries"] >= int(node.get("max_retries") or 0):
+                    node["state"] = "failed"
+                else:
+                    node["state"] = "ready"
+                    # Bounded backoff — no instant hot retry.
+                    node["retry_after"] = time.time() + min(
+                        120.0, 10.0 * node["retries"])
+                if node["state"] == "failed":
+                    self.recovery.record_failure(
+                        row, node.get("title", ""),
+                        str(result.get("output") or "task failed"))
+                if node.get("kind") == "verify":
+                    row.setdefault("verification_history", []).append({
+                        "ts": time.time(), "ok": False,
+                        "task": node.get("title"),
+                        "output": str(result.get("output") or "")[:800]})
+            graph.refresh()
+
+        self.missions.mutate(mission_id, _fn)
+        self._receipt(mission_id, node_id, "task_finished", result)
+
+        if pending_approval:
+            self.missions.transition(mission_id, "waiting_approval")
+            self._create_approval(mission_id, node_id, pending_approval)
+            return
+
+        m2 = self.missions.get(mission_id)
+        node2 = TaskGraph(m2).get(node_id) if m2 else None
+        if not ok and node2 is not None and node2.get("state") == "failed":
+            # Node exhausted its retries — run the recovery playbook.
+            self._recover_node(mission_id, node_id)
+        self.wake()
+
+    def _recover_node(self, mission_id: str, node_id: str) -> None:
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        failures = m.get("failure_history") or []
+        failure = failures[-1] if failures else None
+        if failure is None:
+            return
+        reason = self.recovery.budgets_exceeded(m)
+        if reason:
+            self.missions.transition(mission_id, "blocked", detail=reason)
+            self.notifications.notify(
+                f"Mission '{m.get('title')}' blocked: {reason}",
+                level="failure",
+                policy=m.get("notification_policy", "important"),
+                mission_id=mission_id, title="Mission blocked",
+                actions=["replan", "resume"])
+            return
+        step = self.recovery.next_step(m, failure)
+        if step is None or step.get("action") == "escalate":
+            self.missions.transition(mission_id, "blocked",
+                                     detail=f"recovery playbook exhausted ({failure.get('class')})")
+            self.notifications.notify(
+                f"Mission '{m.get('title')}' needs help — recovery exhausted for "
+                f"{failure.get('class')}. Last error: {str(failure.get('error'))[:200]}",
+                level="failure",
+                policy=m.get("notification_policy", "important"),
+                mission_id=mission_id, title="Mission blocked — needs user",
+                actions=["replan", "cancel"])
+            self._audit("recovery_exhausted", mission=mission_id,
+                        failure_class=failure.get("class"))
+            return
+        action = step.get("action")
+        self._audit("recovery_step", mission=mission_id, node=node_id,
+                    action=action, failure_class=failure.get("class"))
+        self._emit("recovery", {"type": "recovery_started",
+                                "mission_id": mission_id, "node": node_id,
+                                "action": action})
+        self._apply_recovery_step(m, node_id, step, failure)
+        self.missions.update(mission_id)  # persist playbook cursor
+
+    def _apply_recovery_step(self, m: dict, node_id: str,
+                             step: dict, failure: dict) -> None:
+        action = str(step.get("action"))
+        mission_id = m["id"]
+
+        def requeue(delay: float = 0.0) -> None:
+            def _fn(row: dict) -> None:
+                graph = TaskGraph(row)
+                node = graph.get(node_id)
+                if node is not None and node.get("state") == "failed":
+                    node["state"] = "ready"
+                    node["retry_after"] = time.time() + max(0.0, delay)
+                    node["retries"] = 0  # playbook retry resets the per-node counter
+            self.missions.mutate(mission_id, _fn)
+
+        if action == "retry":
+            requeue(float(step.get("delay") or 0))
+        elif action == "subtask_fix":
+            self.missions.mutate(
+                mission_id,
+                lambda row: self._do_replan(
+                    row, f"playbook fix for {failure.get('class')}",
+                    failed_node=TaskGraph(row).get(node_id)))
+        elif action == "request_approval":
+            pend = {"kind": "autonomy", "mission_id": mission_id,
+                    "node_id": node_id,
+                    "detail": failure.get("error", "")[:500]}
+            self._create_approval(mission_id, node_id, pend)
+            self.missions.transition(mission_id, "waiting_approval")
+        elif action in {"pause"}:
+            self.missions.transition(mission_id, "paused",
+                                     detail=f"recovery: {failure.get('class')}")
+        elif action in {"stop"}:
+            self.missions.transition(mission_id, "cancelled",
+                                     detail=f"recovery stop ({failure.get('class')})")
+        elif action == "notify":
+            self.notifications.notify(
+                f"Mission '{m.get('title')}': {failure.get('error', '')[:300]}",
+                level="important",
+                policy=m.get("notification_policy", "important"),
+                mission_id=mission_id)
+        elif action == "wait_connectivity":
+            requeue(120.0)
+        elif action in self._hooks:
+            try:
+                outcome = self._hooks[action]()
+                self._audit("recovery_hook", mission=mission_id,
+                            action=action, result=str(outcome)[:200])
+            except Exception as exc:
+                self._audit("recovery_hook_failed", mission=mission_id,
+                            action=action, error=f"{type(exc).__name__}: {exc}")
+            # Hooks don't requeue on their own — advance to next step on next tick
+        elif action in {"inspect_failure", "inspect_logs", "fetch_logs",
+                        "research"}:
+            # Diagnostic steps funnel into a fix subtask — the agent does
+            # the actual diagnosis inside the replan path.
+            self.missions.mutate(
+                mission_id,
+                lambda row: self._do_replan(
+                    row, f"{action} for {failure.get('class')}",
+                    failed_node=TaskGraph(row).get(node_id)))
+        else:
+            # Unknown/hook-less step (fallback_model, redownload, …) —
+            # treat as escalate to stay bounded.
+            self.missions.transition(mission_id, "blocked",
+                                     detail=f"no handler for recovery step '{action}'")
+
+    # ------------------------------------------------------------------
+    # approvals (autonomy-level)
+
+    def _create_approval(self, mission_id: str, node_id: str,
+                       pending: dict) -> dict:
+        row = {
+            "id": f"ap-{uuid.uuid4().hex[:10]}",
+            "mission_id": mission_id,
+            "node_id": node_id,
+            "action": str(pending.get("name") or pending.get("kind") or "action"),
+            "detail": str(pending.get("detail") or "")[:800],
+            "state": "pending",
+            "created_at": time.time(),
+            "resolved_at": None,
+        }
+        self.store.approvals.data.setdefault("approvals", []).append(row)
+        self.store.approvals.save()
+        self.notifications.notify(
+            f"Approval needed — {row['action']}: {row['detail'][:200]}",
+            level="approval", policy="all",
+            mission_id=mission_id, title="Approval required",
+            actions=["approve", "deny"])
+        self._emit("mission", {"type": "mission_blocked",
+                               "mission_id": mission_id,
+                               "reason": "approval_required"})
+        return row
+
+    def approvals(self, *, pending_only: bool = False) -> list[dict]:
+        rows = self.store.approvals.rows()
+        if pending_only:
+            rows = [r for r in rows if r.get("state") == "pending"]
+        return rows[::-1]
+
+    def resolve_approval(self, approval_id: str, approve: bool) -> dict | None:
+        with self.store.approvals._lock:
+            target = None
+            for r in self.store.approvals.data.setdefault("approvals", []):
+                if r.get("id") == approval_id:
+                    target = r
+                    break
+            if target is None or target.get("state") != "pending":
+                return None
+            target["state"] = "approved" if approve else "denied"
+            target["resolved_at"] = time.time()
+            self.store.approvals.save()
+        mission_id = target.get("mission_id")
+        node_id = target.get("node_id")
+        if approve:
+            def _fn(row: dict) -> None:
+                graph = TaskGraph(row)
+                node = graph.get(node_id)
+                if node is not None and node.get("state") == "waiting_approval":
+                    node["state"] = "ready"   # resume exact action
+                row["pending_approval"] = None
+                row["waiting_for"] = ""
+            self.missions.mutate(mission_id, _fn)
+            self.missions.transition(mission_id, "executing",
+                                     detail="approval granted")
+        else:
+            self.missions.mutate(
+                mission_id,
+                lambda row: self._do_replan(
+                    row, "approval denied",
+                    failed_node=TaskGraph(row).get(node_id)))
+            self.missions.transition(mission_id, "executing",
+                                     detail="approval denied — replanning")
+        self._audit("approval_resolved", approval=approval_id,
+                    approved=approve, mission=mission_id)
+        self.wake()
+        return dict(target)
+
+    # ------------------------------------------------------------------
+    # verify/internal runners
+
+    def _default_verify(self, mission: dict, node: dict) -> dict:
+        """Run verification — detected project checks, or the node's
+        explicit command. Permission-gated via the policy engine."""
+        from ..workflow.verify import detect_verification_commands
+        decision = self.policy.check(
+            "run_tests", profile=str(mission.get("autonomy_profile") or "local_autonomous"),
+            scope=str(mission.get("workspace") or ""))
+        if decision == "deny":
+            return {"ok": False, "output": "shell verification denied by policy"}
+        if decision == "ask":
+            return {"ok": False,
+                    "pending_approval": {"name": "run_tests",
+                                         "kind": "autonomy",
+                                         "detail": node.get("instruction", "")[:300]}}
+        command = str(node.get("metadata", {}).get("command") or "")
+        name = "verify"
+        if not command:
+            cmds = detect_verification_commands(self.workspace)
+            if not cmds:
+                return {"ok": True, "output": "no verification commands detected"}
+            command = cmds[0]["command"]
+            name = cmds[0]["name"]
+        try:
+            proc = subprocess.run(
+                command, shell=True, cwd=str(self.workspace),
+                capture_output=True, text=True, timeout=900,
+                errors="replace")
+            ok = proc.returncode == 0
+            tail = (proc.stdout or "")[-3000:] + (proc.stderr or "")[-1500:]
+            return {"ok": ok, "output": f"{name}: rc={proc.returncode}\n{tail}"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "output": f"{name}: timed out after 900s"}
+        except OSError as exc:
+            return {"ok": False, "output": f"{name}: {exc}"}
+
+    def _default_internal(self, mission: dict, node: dict) -> dict:
+        instr = str(node.get("instruction") or "")
+        if instr.startswith("internal:artifact_exists:"):
+            raw = instr.split("internal:artifact_exists:", 1)[1].strip()
+            p = Path(raw)
+            if not p.is_absolute():
+                p = self.workspace / raw
+            try:
+                p = p.resolve()
+                p.relative_to(self.workspace.resolve())
+                ok = p.exists()
+            except (OSError, ValueError):
+                ok = False
+            return {"ok": ok, "output": f"{raw}: {'exists' if ok else 'missing'}"}
+        if instr.startswith("internal:maintenance"):
+            try:
+                from .maintenance import run_light_maintenance
+                return run_light_maintenance(self.workspace, self.store)
+            except Exception as exc:
+                return {"ok": False, "output": f"maintenance: {exc}"}
+        return {"ok": True, "output": "internal task acknowledged"}
+
+    # ------------------------------------------------------------------
+    # standing-goal ticking
+
+    def _tick_goals(self, now: float) -> None:
+        changed = False
+        for g in self.store.standing_goals.data.setdefault("goals", []):
+            if not g.get("enabled"):
+                continue
+            nxt = g.get("next_run")
+            if nxt is None:
+                continue
+            if now >= float(nxt):
+                g["last_run"] = now
+                g["next_run"] = self._goal_next_run(g, after=now)
+                changed = True
+                try:
+                    self._spawn_goal_mission(g, origin=f"goal-schedule:{g['id']}")
+                except Exception:
+                    pass
+        if changed:
+            self.store.standing_goals.save()
+
+    # ------------------------------------------------------------------
+    # status / reporting
+
+    def status(self) -> dict:
+        missions = self.missions.list()
+        live = [m for m in missions if m.get("status") not in
+                TERMINAL_MISSION_STATUSES | {"archived", "draft"}]
+        heartbeat_age = time.time() - self._heartbeat.get("ts", 0.0) \
+            if self._heartbeat.get("ts") else None
+        return {
+            "enabled": self.enabled,
+            "running": self._running and self._thread is not None
+            and self._thread.is_alive(),
+            "stopped": self.policy.is_stopped(),
+            "paused": self.policy.is_paused(),
+            "resource_mode": self.policy.resource_mode(),
+            "heartbeat_age_s": round(heartbeat_age, 1) if heartbeat_age else None,
+            "tick_ms": self._heartbeat.get("tick_ms"),
+            "active_missions": len(live),
+            "missions": [ {"id": m["id"], "title": m.get("title"),
+                           "status": m.get("status"), "phase": m.get("phase")}
+                          for m in live[:20] ],
+            "pending_approvals": len(self.approvals(pending_only=True)),
+            "unread_notifications": self.notifications.pending_count(),
+            "locks": self.locks.snapshot(),
+            "workers": len(self._workers),
+            "next_schedule": self.scheduler.next_due(),
+            "store": self.store.health(),
+        }
+
+    def daily_summary(self, *, hours: float = 24.0) -> dict:
+        cutoff = time.time() - hours * 3600
+        missions = self.missions.list(include_archived=False)
+        recent = [m for m in missions if (m.get("updated_at") or 0) >= cutoff]
+        return {
+            "window_hours": hours,
+            "missions_completed": sum(1 for m in recent
+                                      if m.get("status") in
+                                      {"completed", "completed_with_warnings"}),
+            "missions_failed": sum(1 for m in recent if m.get("status") == "failed"),
+            "missions_blocked": [m["title"] for m in missions
+                                 if m.get("status") == "blocked"][:10],
+            "tasks_completed": sum(
+                1 for m in recent
+                for n in (m.get("graph") or {}).get("nodes", [])
+                if n.get("state") == "completed"),
+            "pending_approvals": [a["action"] for a in
+                                  self.approvals(pending_only=True)][:10],
+            "next_scheduled": self.scheduler.next_due(),
+            "notifications": self.notifications.pending_count(),
+        }
+
+    def answer_about_mission(self, mission_id: str, question: str) -> str:
+        """Mission conversation: answers come from persisted state, never
+        guesses."""
+        m = self.missions.get(mission_id)
+        if m is None:
+            return "Mission not found."
+        q = str(question or "").lower()
+        nodes = (m.get("graph") or {}).get("nodes", [])
+        if any(w in q for w in ("why", "blocked", "stuck")):
+            if m.get("status") == "blocked":
+                return (f"Mission is blocked: {m.get('blocked_reason') or ''} "
+                        + "; ".join(str(f.get('error'))[:150] for f in
+                                    (m.get('failure_history') or [])[-2:]))
+            fails = (m.get("failure_history") or [])[-3:]
+            return ("Not currently blocked. " +
+                    (f"Recent failures: " + "; ".join(
+                        str(f.get('error'))[:120] for f in fails) if fails
+                     else "No recorded failures."))
+        if any(w in q for w in ("tried", "attempted", "what have")):
+            hist = [h for h in (m.get("history") or [])[-12:]]
+            lines = [f"{h.get('event')}: {h.get('detail')}" for h in hist]
+            return "Mission activity:\n" + "\n".join(lines)
+        if any(w in q for w in ("left", "remaining", "next")):
+            open_nodes = [n for n in nodes if n.get("state") in
+                          {"planned", "ready", "running", "waiting_dependency"}]
+            if not open_nodes:
+                return "No open tasks — awaiting evaluation."
+            return "Remaining work:\n" + "\n".join(
+                f"- [{n.get('state')}] {n.get('title')}" for n in open_nodes[:10])
+        return (f"Mission '{m.get('title')}' is {m.get('status')} "
+                f"(phase {m.get('phase')}). "
+                f"{sum(1 for n in nodes if n.get('state') == 'completed')}"
+                f"/{len(nodes)} tasks completed.")

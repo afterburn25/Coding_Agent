@@ -4,8 +4,8 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 643,
- "next_milestone": "v0.7 modular AI workstation: all 20 capability areas have working tooling — MCP stdio+HTTP, declarative workflows with cancellation, learned tool/model routing, measured TPS/TTFT telemetry, worktrees, watchdog restarts. Next: real dogfood tasks on local models, real MCP/ComfyUI interop on hardware, tree-sitter/LSP indexing; Nexus Answer Memory landed (persistent learned Q&A, semantic recall with conflict gates, trusted hits skip model inference — see docs/ANSWER_MEMORY.md).",
+ "test_checkpoint": 698,
+ "next_milestone": "Nexus Autonomy landed: persistent missions, task DAG with leases/locks, bounded event-driven supervisor, recovery playbooks, policy engine + standing grants, scheduler/triggers/standing goals, notifications, missions UI, chat commands (docs/AUTONOMY.md). Next: canonical VERSION + release machinery, then Computer Use backend, sandbox providers, LSP indexing, semantic RAG, skills, multi-agent worktrees, evaluation lab.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -139,7 +139,7 @@
   "preferences_and_rules": true,
   "correction_examples": true,
   "prompt_injection_of_saved_rules": true,
-  "ui": "Local system → Memory & training",
+  "ui": "Local system \u2192 Memory & training",
   "api": "GET /api/conversation-memory"
  },
  "stream_recovery": {
@@ -214,7 +214,7 @@
    "GET /api/policy",
    "POST /api/policy/mode"
   ],
-  "ui": "Local system → Conversation policy",
+  "ui": "Local system \u2192 Conversation policy",
   "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
   "ethical_temperature_default": 1,
   "ethical_temperature_range": [
@@ -266,7 +266,7 @@
   "default_text_to_image_model": "juggernaut-x-v10",
   "editing_model": "qwen-image-2.1",
   "fast_preview_model": "flux2-klein-4b",
-  "default_t2i_source": "RunDiffusion/Juggernaut-X-v10 @ e53841ec (sha256 d91d3573…0c45, OpenRAIL-M)"
+  "default_t2i_source": "RunDiffusion/Juggernaut-X-v10 @ e53841ec (sha256 d91d3573\u20260c45, OpenRAIL-M)"
  },
  "live_clock": {
   "source": "host OS local clock via datetime.now().astimezone()",
@@ -412,7 +412,7 @@
   "installer_seed_public_only": true,
   "installer_seed_build_validation": true,
   "adult_content_image_gate": true,
-  "audit_log": "data/nexus_brain.audit.jsonl — signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit",
+  "audit_log": "data/nexus_brain.audit.jsonl \u2014 signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -492,21 +492,21 @@
   ],
   "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
   "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
-  "browser": "localcodeagent/webtools/browser.py — Playwright runner w/ sessions, console+network capture, extended actions, health probe",
-  "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep — live install status in Tool Manager",
-  "install_manager": "POST /api/tools/install — packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
-  "secrets": "localcodeagent/secrets.py — Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
-  "codeintel": "localcodeagent/tools/codeintel.py — code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
-  "data": "localcodeagent/tools/data.py — data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
+  "browser": "localcodeagent/webtools/browser.py \u2014 Playwright runner w/ sessions, console+network capture, extended actions, health probe",
+  "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u2014 live install status in Tool Manager",
+  "install_manager": "POST /api/tools/install \u2014 packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
+  "secrets": "localcodeagent/secrets.py \u2014 Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
+  "codeintel": "localcodeagent/tools/codeintel.py \u2014 code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
+  "data": "localcodeagent/tools/data.py \u2014 data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
   "models_ui": "/models.html",
-  "media": "localcodeagent/tools/media.py — media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
-  "documents": "localcodeagent/tools/documents.py — extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
-  "knowledge": "localcodeagent/tools/knowledge.py — local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
-  "sandbox": "localcodeagent/tools/sandbox.py — python_exec isolated -I interpreter in .agent/sandbox",
-  "workflows": "localcodeagent/tools/workflows.py — declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
-  "blender3d": "localcodeagent/tools/blender3d.py — blender_render scene-script generator delegating to blender manifest",
-  "events": "localcodeagent/events.py + GET /api/events — SSE bus for job/tool events; tools.js live refresh",
-  "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)",
+  "media": "localcodeagent/tools/media.py \u2014 media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
+  "documents": "localcodeagent/tools/documents.py \u2014 extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
+  "knowledge": "localcodeagent/tools/knowledge.py \u2014 local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
+  "sandbox": "localcodeagent/tools/sandbox.py \u2014 python_exec isolated -I interpreter in .agent/sandbox",
+  "workflows": "localcodeagent/tools/workflows.py \u2014 declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
+  "blender3d": "localcodeagent/tools/blender3d.py \u2014 blender_render scene-script generator delegating to blender manifest",
+  "events": "localcodeagent/events.py + GET /api/events \u2014 SSE bus for job/tool events; tools.js live refresh",
+  "capability_dispatch": "use_capability tool \u2014 model-callable ToolRouter dispatch (outcome-based tool selection)",
   "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
   "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
   "workflows_api": "GET /api/workflows + Tools-page Workflows panel",
@@ -525,7 +525,7 @@
    "busy_chat": "chat_queue_when_busy auto-enqueues while a task is active"
   },
   "event_bus_reconnect": {
-   "bus": "localcodeagent/events.py EventBus — /api/events SSE, 100-event replay",
+   "bus": "localcodeagent/events.py EventBus \u2014 /api/events SSE, 100-event replay",
    "mirroring": "non-token agent events publish with task_id via AppState._bus_emit",
    "ui": "web/app.js connectAgentEvents + agentStreamActive dedup",
    "transcript": ".agent/terminal/<task>.log, GET /api/task-log, pruned on load"
@@ -558,8 +558,8 @@
   "minimum_seconds": 7,
   "dismiss_rule": "AppReady AND MinimumElapsed; never timer-only",
   "ready_handshake": "web/app.js posts {type:\"nexus-core-ready\"} via chrome.webview.postMessage after shell init",
-  "two_line_status": "ACTION · SUBSYSTEM + secondary description under the progress bar",
-  "completion_effect": "READY · NEXUS CORE + ~850ms shield-core glow bloom",
+  "two_line_status": "ACTION \u00b7 SUBSYSTEM + secondary description under the progress bar",
+  "completion_effect": "READY \u00b7 NEXUS CORE + ~850ms shield-core glow bloom",
   "failure_state": "NEXUS CORE COULD NOT START with Retry / Open Log (backend-host.log) / Exit",
   "navigation_fallback": "NavigationCompleted + 15s bounded fallback prevents hangs on broken pages"
  },

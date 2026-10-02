@@ -988,3 +988,30 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Tests: `tests/test_answer_memory.py` (48). Full suite 606 passing
   (2 env skips) on Windows. Bench: exact ≈0.08 ms, semantic ≈0.13 ms @200.
 - Docs: `docs/ANSWER_MEMORY.md`; README/PROJECT_STATUS/this file updated.
+
+## Nexus Autonomy checkpoint — persistent mission manager
+
+- `localcodeagent/autonomy/` landed: durable mission store (`data/autonomy/`,
+  schema v1), task DAG with leases + resource locks, bounded event-driven
+  supervisor (tick-based, bus-woken — no busy loop), planner, evaluator,
+  recovery playbooks, policy engine + standing grants, scheduler
+  (once/interval/daily/weekly with missed-run catch-up), triggers
+  (file_changed/startup/ci_*/custom, workspace-confined watches, debounce),
+  notification center (policies + quiet hours + dedupe), standing goals.
+- Supervisor yields the agent lane to interactive work (`lane_free` gate);
+  sensitive actions need standing grants or mission approvals; `stop
+  autonomy` pauses everything immediately.
+- `MissionStore._recover_orphans()` re-parks mid-execution missions on
+  restart — running nodes return to `ready`, completed work never repeats.
+- Server: `/api/autonomy/*` endpoints; chat commands "make this a mission",
+  "stop autonomy", "resume autonomy" in both streaming and non-streaming
+  chat (no coding model needed); Missions UI at `web/missions.html`.
+- Bug fixed during dogfood: resource lock released under a different owner
+  than the claimer stalled missions forever — release now uses the claiming
+  node id.
+- `tests/test_autonomy.py`: 49 tests. Full suite: **698 passing** (2 env
+  skips). Docs: `docs/AUTONOMY.md`.
+- Still open: Brain/Answer-Memory hooks into plan/eval/learn are
+  shallow; async job dependencies (image/model-install) not yet DAG node
+  kinds; unattended multi-hour dogfood + Windows CI/installer run pending;
+  canonical VERSION/release machinery is the next milestone.

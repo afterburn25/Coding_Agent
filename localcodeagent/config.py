@@ -173,6 +173,13 @@ class AgentConfig:
     # after this many seconds so an unattended run cannot stall all night
     # (0 waits forever, the pre-autonomy behavior).
     autonomous_approval_timeout_seconds: float = 3600.0
+    # Nexus Autonomy: mission supervisor, triggers, schedules, standing
+    # goals. Runs inside the backend so missions continue while the UI is
+    # closed; missions never widen tool permissions.
+    autonomy_enabled: bool = True
+    # Optional quiet-hours window [start_hour, end_hour] local time during
+    # which noncritical notifications are muted.
+    autonomy_quiet_hours: list[int] | None = None
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
@@ -538,6 +545,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.chat_queue_when_busy = bool(raw.get("chat_queue_when_busy", cfg.chat_queue_when_busy))
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
+    cfg.autonomy_enabled = bool(raw.get("autonomy_enabled", cfg.autonomy_enabled))
+    qh = raw.get("autonomy_quiet_hours", cfg.autonomy_quiet_hours)
+    if isinstance(qh, (list, tuple)) and len(qh) == 2:
+        cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
     cfg.fast_general_history_turns = max(0, int(raw.get("fast_general_history_turns", cfg.fast_general_history_turns)))

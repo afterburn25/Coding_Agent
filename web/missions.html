@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core · Missions</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/missions.css" />
+</head>
+<body>
+<div class="missions-shell">
+  <aside class="missions-side">
+    <div class="brand">Nexus Core <span>Missions</span></div>
+    <a class="workspace-link" href="/">← Chat</a>
+    <a class="workspace-link" href="/image.html">Image Studio</a>
+    <a class="workspace-link" href="/voice.html">Voice Studio</a>
+    <div class="section-title">Autonomy</div>
+    <div id="autonomyStatus" class="autonomy-card">Loading…</div>
+    <div class="side-actions">
+      <button id="stopAutonomy" class="mini-button danger" type="button">Stop Autonomy</button>
+      <button id="resumeAutonomy" class="mini-button" type="button">Resume</button>
+    </div>
+    <div class="section-title">New mission</div>
+    <textarea id="newObjective" rows="3" placeholder="Objective — what Nexus should accomplish…"></textarea>
+    <select id="newScope">
+      <option value="one_shot">One-shot</option>
+      <option value="workspace">Workspace</option>
+      <option value="repository">Repository</option>
+      <option value="self_development">Self-development</option>
+    </select>
+    <select id="newProfile">
+      <option value="local_autonomous">Local Autonomous</option>
+      <option value="supervised">Supervised</option>
+      <option value="extended_autonomous">Extended Autonomous</option>
+    </select>
+    <div class="side-actions"><button id="createMission" class="mini-button" type="button">Create + Start</button></div>
+    <div class="section-title">Standing goals</div>
+    <div id="standingGoals" class="inventory"></div>
+    <div class="section-title">Schedules</div>
+    <div id="schedules" class="inventory"></div>
+    <div class="section-title">Triggers</div>
+    <div id="triggers" class="inventory"></div>
+  </aside>
+
+  <main class="missions-main">
+    <header class="topbar">
+      <div><strong>Mission Control</strong><span id="missionCount">0 missions</span></div>
+      <input id="missionFilter" placeholder="Filter missions…" />
+    </header>
+    <div class="missions-body">
+      <section id="missionList" class="mission-list"></section>
+      <section id="missionDetail" class="mission-detail">
+        <div class="empty">Select a mission</div>
+      </section>
+    </div>
+  </main>
+
+  <aside class="missions-right">
+    <div class="section-title">Pending approvals</div>
+    <div id="approvals" class="inventory"></div>
+    <div class="section-title">Notifications</div>
+    <div id="notifications" class="inventory"></div>
+    <div class="section-title">Daily summary</div>
+    <div id="dailySummary" class="inventory"></div>
+  </aside>
+</div>
+<script src="/voice_global.js"></script>
+<script src="/missions.js"></script>
+</body>
+</html>

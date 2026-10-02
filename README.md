@@ -158,6 +158,20 @@ The Model Growth Lab keeps the live base model intact. Learned behavior, correct
 - The **Learned Answers** page (`/answers.html`, linked from every screen) lists/search/filters answers with trust, confidence, freshness, scope and usage, and supports learn/forget/mark-incorrect/update/merge/refresh plus export/import, index rebuild, vacuum, and clear.
 - Full reference: [docs/ANSWER_MEMORY.md](docs/ANSWER_MEMORY.md)
 
+## Nexus Autonomy — Persistent Missions
+
+**Nexus Autonomy** (`localcodeagent/autonomy/`, state under `data/autonomy/`) is the persistent mission layer: durable objectives that survive restarts, decomposed into a dependency-aware task DAG and driven by a bounded event-driven supervisor.
+
+- **Missions** (`/missions.html`) carry objective, status, success criteria, budgets, task graph, approvals, artifacts, checkpoints and a full transition history — persisted atomically, quarantined on corruption, recovered on restart (interrupted work resumes instead of restarting).
+- **DAG execution** runs independent branches concurrently with leases and named resource locks; interactive chat always wins the agent lane.
+- **Recovery** classifies failures (CUDA OOM, socket resets, tool crashes, permission-required…) and walks finite playbooks — bounded retries, replan, escalate — never infinite loops; repeated identical failures stop the mission.
+- **Policy** profiles (`supervised` / `local_autonomous` / `extended_autonomous` / `custom`) gate action classes on top of the existing PermissionManager; sensitive actions (`git_push`, `create_pr`, `packages`, credentials…) always require approval or a scoped, expirable standing grant.
+- **Schedules** (once/interval/daily/weekly) and **triggers** (file_changed, startup, CI events, custom…) persist across restarts and materialize missions; standing goals spawn recurring missions.
+- **Approvals** pause a mission into `waiting_approval` and resume the exact step after a decision; denials trigger replanning. `stop autonomy` (chat command or API) halts everything immediately.
+- **Evaluation** checks success criteria (`all_tasks_completed`, `verify_passed`, `artifact_exists`, metrics…) before a mission is called complete — tool success alone is never enough.
+- Chat commands `make this a mission` / `stop autonomy` / `resume autonomy` work in both streaming and non-streaming chat without needing a coding model.
+- Full reference: [docs/AUTONOMY.md](docs/AUTONOMY.md)
+
 ## Nexus Brain
 
 **Nexus Brain** is the model-independent long-term identity/learning layer under `data/nexus_brain.json`. Model GGUF files are replaceable reasoning engines; the Brain is separate durable state, so replacing Qwen, downloading fresh weights, or rolling back a LoRA does not erase the protected knowledge/personality layer.

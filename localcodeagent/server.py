@@ -67,6 +67,7 @@ from .training import ModelGrowthLab
 from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 from .workflow.activity import ActivityStore
+from .autonomy.missions import DEFAULT_BUDGETS as _DEFAULT_BUDGETS
 
 
 VERSION = "0.6.1-dev"
@@ -458,9 +459,16 @@ class AppState:
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
+        # Autonomous supervisor — persistent missions, triggers, schedules,
+        # standing goals. Never widens permissions; interactive lane wins.
+        self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
+        self.autonomy = self._build_autonomy(config, runtime_root)
+        self.queue.enrich = self._queue_enrich_mission
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_resume()
+        if getattr(config, "autonomy_enabled", True):
+            self.autonomy.start()
 
     def exchange_for_message(self, message_id: str) -> tuple[str, str]:
         """Resolve a message id to (user_question, assistant_answer)."""
@@ -604,6 +612,240 @@ class AppState:
                 pass
 
         threading.Thread(target=resume, name="auto-resume-interrupted", daemon=True).start()
+
+    def _build_autonomy(self, config: AgentConfig, runtime_root: Path):
+        """Construct the AutonomousSupervisor with live service hooks.
+
+        The executor drives mission 'agent' nodes through the same
+        AgentOrchestrator the chat lane uses — identical permissions,
+        verification, checkpoints and event streaming — so autonomous work
+        is fully observable on the normal timeline.
+        """
+        from .autonomy import AutonomousSupervisor
+
+        def emit(etype: str, payload: dict) -> None:
+            try:
+                self.events.publish(str(etype or "mission"), payload)
+            except Exception:
+                pass
+
+        def executor(mission: dict, node: dict, emit_cb) -> dict:
+            voice_rid = self._voice_begin()
+            try:
+                result = self.agent.run(
+                    str(node.get("instruction") or node.get("title") or ""),
+                    history=[], mode="auto",
+                    event_callback=emit_cb,
+                )
+                task = result.task or {}
+                status = str(task.get("status") or "")
+                out = {
+                    "ok": status in {"done", "reverted"},
+                    "output": result.content or str(task.get("error") or ""),
+                    "task_id": str(task.get("id") or ""),
+                    "artifacts": list(task.get("files_changed") or [])[:20],
+                }
+                if result.pending_approval or status == "waiting_approval":
+                    out["pending_approval"] = (
+                        result.pending_approval
+                        or task.get("pending_approval") or {"kind": "task"})
+                return out
+            finally:
+                self._voice_finish(voice_rid)
+
+        def lane_free() -> bool:
+            """Interactive chat/queued work outranks background missions."""
+            try:
+                recent = self.tasks.recent(10)
+                if any(t.get("status") in {"running", "verifying", "reviewing",
+                                           "waiting_approval"} for t in recent):
+                    return False
+                if getattr(self, "_queue_running", None):
+                    return False
+                if getattr(self, "_retrying_tasks", None):
+                    return False
+                return True
+            except Exception:
+                return False
+
+        hooks = {
+            "evict_idle_models": lambda: self.runtime.evict_idle(),
+            "stop_models": lambda: self.runtime.stop_all(),
+            "restart_service": lambda: True,   # process watchdog owns restarts
+            "health_probe": lambda: bool(self.runtime.summary()),
+            "reduce_context": lambda: True,     # marker: retry runs leaner
+            "refresh_workspace": lambda: self.repository_index.rebuild()
+                if hasattr(self.repository_index, "rebuild") else True,
+        }
+
+        quiet = getattr(config, "autonomy_quiet_hours", None)
+        quiet_hours = tuple(quiet) if isinstance(quiet, (list, tuple)) and len(quiet) == 2 else None
+
+        return AutonomousSupervisor(
+            workspace=self.workspace,
+            store_root=runtime_root / "data" / "autonomy",
+            emit=emit,
+            bus=self.events,
+            executor=executor,
+            lane_free=lane_free,
+            permission_manager=self.permission_manager,
+            runtime_hooks=hooks,
+            resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
+            quiet_hours=quiet_hours,
+            enabled=bool(getattr(config, "autonomy_enabled", True)),
+        )
+
+    def _queue_enrich_mission(self, item: dict) -> dict:
+        """Attribute a queue_task call made inside a mission agent run back
+        to its owning mission (single agent lane ⇒ one owner at a time)."""
+        mid = getattr(self.autonomy, "_lane_mission", None)
+        if not mid:
+            return {}
+        return {"mission_id": mid, "source": "mission_subtask"}
+
+    # -- mission chat commands -----------------------------------------
+    #
+    # Natural imperatives like "make this a mission" convert chat context
+    # into a structured mission. Creation is never silent: every command
+    # replies with exactly what was created and under which profile.
+
+    _MISSION_CREATE_PHRASES = (
+        "make this a mission", "turn this into a mission", "make it a mission",
+        "keep working on this", "keep working until", "work on this until",
+        "continue this overnight", "keep going until", "don't stop until",
+    )
+    _MISSION_STANDING_PHRASES = (
+        "standing goal", "every day", "each day", "every morning",
+        "check this daily", "check every day", "weekly", "every week",
+    )
+
+    def _mission_context_request(self, exclude: str) -> str:
+        """The most recent real user request before the command itself."""
+        try:
+            for m in reversed(self.conversation_manager.history(limit=32)):
+                if str(m.get("role")) != "user":
+                    continue
+                text = str(m.get("content") or "").strip()
+                if text and text.lower() != exclude.lower():
+                    return text
+        except Exception:
+            pass
+        return ""
+
+    def _mission_command(self, message: str) -> dict | None:
+        """Detect autonomy imperatives; returns {"content", ...} or None."""
+        if not getattr(self.config, "autonomy_enabled", True):
+            return None
+        low = message.strip().lower()
+        sup = self.autonomy
+
+        if any(p in low for p in ("stop autonomy", "stop all missions",
+                                  "stop autonomous work", "halt autonomy")):
+            out = sup.stop_autonomy()
+            return {"content": (
+                f"Autonomy stopped. {len(out['paused_missions'])} mission(s) "
+                "paused cooperatively — no new autonomous work will start "
+                "until you resume it from the Missions page.")}
+
+        if any(p in low for p in ("resume autonomy", "start autonomy",
+                                  "resume missions", "continue autonomy")):
+            sup.resume_autonomy()
+            return {"content": "Autonomy resumed — paused missions can continue."}
+
+        if any(p in low for p in ("cancel the mission", "stop the mission",
+                                  "stop working on that mission",
+                                  "cancel that mission", "stop that mission")):
+            live = [m for m in sup.missions.list()
+                    if m.get("status") in
+                    {"ready", "active", "planning", "executing", "verifying",
+                     "evaluating", "replanning", "waiting_dependency",
+                     "waiting_approval"}]
+            if not live:
+                return {"content": "There is no active mission to stop."}
+            sup.cancel_mission(live[0]["id"])
+            return {"content": f"Stopped mission '{live[0]['title']}'. Its state is preserved on the Missions page."}
+
+        wants_standing = any(p in low for p in self._MISSION_STANDING_PHRASES)
+        wants_mission = any(p in low for p in self._MISSION_CREATE_PHRASES)
+        if not (wants_mission or wants_standing):
+            return None
+
+        context = self._mission_context_request(message)
+        objective = context or message
+        if not objective.strip():
+            return {"content": "What should the mission objective be?"}
+        if wants_standing:
+            sched = {"kind": "daily", "hour": 9, "minute": 0} \
+                if any(w in low for w in ("day", "daily", "morning")) \
+                else {"kind": "weekly", "hour": 9, "minute": 0, "weekday": 0}
+            goal = sup.add_standing_goal(
+                objective, schedule=sched,
+                success_criteria=[{"kind": "all_tasks_completed",
+                                   "description": "goal run completes"}],
+                notification_policy="important")
+            return {"content": (
+                f"Standing goal created: “{objective[:140]}”\n\n"
+                f"It runs on a {sched['kind']} schedule under the Local "
+                "Autonomous profile and notifies on important events. "
+                "Manage it on the Missions page — disable any time.")}
+        mission = sup.create_mission(
+            objective=objective,
+            user_request=objective,
+            scope="workspace" if "this" in low or "overnight" in low else "one_shot",
+            autonomy_profile="local_autonomous",
+            source="chat",
+            workspace=str(self.workspace),
+            success_criteria=[{"kind": "all_tasks_completed",
+                               "description": "all mission tasks completed"},
+                              {"kind": "verify_passed",
+                               "description": "verification passes"}])
+        sup.start_mission(mission["id"])
+        return {"content": (
+            f"Mission created: “{mission['title'][:120]}”\n\n"
+            "The supervisor is planning it now — watch live progress on the "
+            "Missions page. It runs under the Local Autonomous profile; "
+            "sensitive actions still ask for approval.")}
+
+    def _mission_reply_result(self, text: str) -> dict:
+        """Synthesize an agent-result-shaped payload for command replies."""
+        task = self.tasks.create("autonomy command", "auto")
+        task = self.tasks.update(
+            task.id, status="done", phase="done",
+            model_id="autonomy", model_role="mission",
+            summary=text[:200], final_content=text)
+        return {
+            "content": text,
+            "routing": {"role": "mission", "model_id": "autonomy",
+                        "complexity": "trivial",
+                        "reasons": ["autonomy_command"]},
+            "tool_events": [], "model_events": [], "steps": 0,
+            "task": task.as_dict(), "pending_approval": None,
+            "verification": [], "review": "", "research": {},
+            "response_source": "autonomy", "memory": {},
+            "image_jobs": [],
+            "runtime": self.runtime.summary(probe_external=False),
+        }
+
+    def _autonomy_watchdog(self) -> None:
+        """Watchdog tick: bounded restart of a dead supervisor thread —
+        detected via heartbeat, never on a single slow tick."""
+        try:
+            autonomy = getattr(self, "autonomy", None)
+            if autonomy is None or not autonomy.enabled:
+                return
+            if autonomy._running and (
+                    autonomy._thread is None or not autonomy._thread.is_alive()):
+                restarts = getattr(self, "_autonomy_restarts", 0)
+                if restarts >= 3:
+                    return
+                self._autonomy_restarts = restarts + 1
+                self.events.publish("autonomy", {
+                    "event": "supervisor_restart",
+                    "attempt": restarts + 1})
+                autonomy._running = False
+                autonomy.start()
+        except Exception:
+            pass
 
     def _start_primary_prewarm(self) -> None:
         if not self.config.runtime_auto_start:
@@ -1060,6 +1302,7 @@ class AppState:
         self._dequeue_next()
         self._check_disk_space()
         self._unload_idle_voice_engine()
+        self._autonomy_watchdog()
 
     def _unload_idle_voice_engine(self) -> None:
         """Release the TTS model after voice_idle_unload_seconds of silence —
@@ -1770,6 +2013,310 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             return False
 
+    # ------------------------------------------------------------------
+    # Autonomy API — missions, triggers, schedules, standing goals,
+    # approvals, notifications, global control.
+
+    _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
+                          "/api/schedules", "/api/standing-goals")
+
+    def _autonomy_get(self, path: str) -> bool:
+        """GET handler; returns True when the route was handled."""
+        sup = self.state.autonomy
+        query = parse_qs(urlparse(self.path).query)
+        if path == "/api/autonomy/status":
+            self._json(sup.status())
+            return True
+        if path == "/api/autonomy/summary":
+            self._json(sup.daily_summary(
+                hours=float(query.get("hours", ["24"])[0] or 24)))
+            return True
+        if path == "/api/autonomy/notifications":
+            self._json({"notifications": sup.notifications.list(
+                unread_only=query.get("unread", [""])[0] == "1")})
+            return True
+        if path == "/api/autonomy/approvals":
+            self._json({"approvals": sup.approvals(
+                pending_only=query.get("pending", [""])[0] == "1")})
+            return True
+        if path == "/api/autonomy/policy":
+            self._json({
+                "resource_mode": sup.policy.resource_mode(),
+                "stopped": sup.policy.is_stopped(),
+                "paused": sup.policy.is_paused(),
+                "grants": sup.policy.grants(),
+            })
+            return True
+        if path == "/api/missions":
+            self._json({"missions": sup.missions.list(
+                include_archived=query.get("archived", [""])[0] == "1")})
+            return True
+        if path.startswith("/api/missions/"):
+            mid = path[len("/api/missions/"):].strip("/")
+            if mid.endswith("/graph"):
+                mid = mid[:-len("/graph")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                self._json({"graph": m.get("graph") or {"nodes": []}})
+                return True
+            if mid.endswith("/history"):
+                mid = mid[:-len("/history")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                self._json({
+                    "history": m.get("history") or [],
+                    "failures": m.get("failure_history") or [],
+                    "evaluations": m.get("evaluator_history") or [],
+                    "verifications": m.get("verification_history") or [],
+                })
+                return True
+            m = sup.missions.get(mid)
+            if m is None:
+                self._json({"error": "mission not found"}, 404)
+                return True
+            self._json({"mission": m})
+            return True
+        if path == "/api/triggers":
+            self._json({"triggers": sup.triggers.list()})
+            return True
+        if path == "/api/schedules":
+            self._json({"schedules": sup.scheduler.list()})
+            return True
+        if path == "/api/standing-goals":
+            self._json({"goals": sup.standing_goals()})
+            return True
+        return False
+
+    def _autonomy_post(self, path: str, body: dict) -> bool:
+        """POST handler; returns True when the route was handled."""
+        sup = self.state.autonomy
+
+        if path == "/api/autonomy/stop":
+            self._json(sup.stop_autonomy())
+            return True
+        if path in {"/api/autonomy/resume", "/api/autonomy/start"}:
+            self._json(sup.resume_autonomy())
+            return True
+        if path == "/api/autonomy/pause":
+            sup.policy.set_paused(True)
+            self._json({"paused": True})
+            return True
+        if path == "/api/autonomy/notifications/read":
+            self._json({"marked": sup.notifications.mark_read(
+                str(body.get("id") or "") or None)})
+            return True
+        if path.startswith("/api/autonomy/approvals/"):
+            rest = path[len("/api/autonomy/approvals/"):].strip("/")
+            for verb in ("approve", "deny"):
+                if rest.endswith("/" + verb):
+                    aid = rest[:-len(verb) - 1]
+                    out = sup.resolve_approval(aid, approve=(verb == "approve"))
+                    if out is None:
+                        self._json({"error": "approval not found or already resolved"}, 404)
+                        return True
+                    self._json({"ok": True, "approval": out})
+                    return True
+            self._json({"error": "unknown approval action"}, 400)
+            return True
+        if path == "/api/autonomy/policy":
+            mode = body.get("resource_mode")
+            if mode:
+                sup.policy.set_resource_mode(str(mode))
+            self._json({"ok": True, "resource_mode": sup.policy.resource_mode()})
+            return True
+        if path == "/api/autonomy/grants":
+            row = sup.policy.grant(
+                str(body.get("action") or ""),
+                scope=str(body.get("scope") or ""),
+                expires_in_s=float(body.get("expires_in_s") or 0),
+                note=str(body.get("note") or ""))
+            self._json({"ok": True, "grant": row})
+            return True
+        if path.startswith("/api/autonomy/grants/") and path.endswith("/revoke"):
+            gid = path[len("/api/autonomy/grants/"):-len("/revoke")].strip("/")
+            self._json({"ok": sup.policy.revoke(gid)})
+            return True
+
+        if path == "/api/missions":
+            objective = str(body.get("objective") or body.get("title") or "").strip()
+            if not objective:
+                self._json({"error": "objective is required"}, 400)
+                return True
+            m = sup.create_mission(
+                objective=objective,
+                title=str(body.get("title") or ""),
+                user_request=str(body.get("user_request") or objective),
+                scope=str(body.get("scope") or "one_shot"),
+                priority=str(body.get("priority") or "normal"),
+                success_criteria=body.get("success_criteria")
+                    if isinstance(body.get("success_criteria"), list) else None,
+                constraints=body.get("constraints")
+                    if isinstance(body.get("constraints"), list) else None,
+                autonomy_profile=str(body.get("autonomy_profile") or "local_autonomous"),
+                budgets=body.get("budgets")
+                    if isinstance(body.get("budgets"), dict) else None,
+                notification_policy=str(body.get("notification_policy") or "important"),
+                source=str(body.get("source") or "api"),
+                source_id=str(body.get("source_id") or ""),
+                workspace=str(self.state.workspace))
+            if body.get("start", True):
+                m = sup.start_mission(m["id"]) or m
+            self._json({"ok": True, "mission": m})
+            return True
+        if path.startswith("/api/missions/"):
+            rest = path[len("/api/missions/"):].strip("/")
+            for verb in ("pause", "resume", "cancel", "replan", "ask", "update"):
+                suffix = "/" + verb
+                if not rest.endswith(suffix):
+                    continue
+                mid = rest[:-len(suffix)]
+                if verb == "pause":
+                    out = sup.pause_mission(mid, reason=str(body.get("reason") or "user pause"))
+                elif verb == "resume":
+                    out = sup.resume_mission(mid)
+                elif verb == "cancel":
+                    out = sup.cancel_mission(mid)
+                elif verb == "replan":
+                    out = sup.replan_mission(mid, reason=str(body.get("reason") or "manual replan"))
+                elif verb == "ask":
+                    self._json({"ok": True,
+                                "answer": sup.answer_about_mission(
+                                    mid, str(body.get("question") or ""))})
+                    return True
+                else:  # update — objective/criteria/constraints/priority edits
+                    updates = {}
+                    for key in ("objective", "title", "priority",
+                                "notification_policy"):
+                        if key in body:
+                            updates[key] = body[key]
+                    for key in ("success_criteria", "constraints"):
+                        if isinstance(body.get(key), list):
+                            updates[key] = body[key]
+                    if isinstance(body.get("budgets"), dict):
+                        updates["budgets"] = {**_DEFAULT_BUDGETS,
+                                              **body["budgets"]}
+                    def _bump(row: dict, _u=updates) -> None:
+                        row.update(_u)
+                        row["revision"] = int(row.get("revision") or 1) + 1
+                        row.setdefault("history", []).append({
+                            "ts": time.time(), "event": "edited",
+                            "detail": f"user edited: {', '.join(_u)}",
+                        })
+                    out = sup.missions.mutate(mid, _bump)
+                if out is None:
+                    self._json({"error": "mission not found or illegal transition"}, 404)
+                    return True
+                self._json({"ok": True, "mission": out})
+                return True
+            self._json({"error": "unknown mission action"}, 400)
+            return True
+
+        if path == "/api/triggers":
+            try:
+                row = sup.triggers.add(
+                    str(body.get("name") or body.get("event") or "trigger"),
+                    str(body.get("event") or ""),
+                    conditions=body.get("conditions")
+                        if isinstance(body.get("conditions"), dict) else None,
+                    action=body.get("action")
+                        if isinstance(body.get("action"), dict) else None,
+                    debounce_s=float(body.get("debounce_s") or 60.0),
+                    watch=str(body.get("watch") or ""),
+                    enabled=bool(body.get("enabled", True)))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+                return True
+            self._json({"ok": True, "trigger": row})
+            return True
+        if path.startswith("/api/triggers/"):
+            rest = path[len("/api/triggers/"):].strip("/")
+            if rest.endswith("/enable") or rest.endswith("/disable"):
+                tid = rest.rsplit("/", 1)[0]
+                self._json({"ok": sup.triggers.set_enabled(
+                    tid, rest.endswith("/enable"))})
+                return True
+            if rest.endswith("/delete"):
+                tid = rest[:-len("/delete")]
+                self._json({"ok": sup.triggers.remove(tid)})
+                return True
+            self._json({"error": "unknown trigger action"}, 400)
+            return True
+
+        if path == "/api/schedules":
+            try:
+                row = sup.scheduler.add(
+                    str(body.get("name") or "schedule"),
+                    str(body.get("kind") or "once"),
+                    at=body.get("at"),
+                    interval_s=float(body.get("interval_s") or 0),
+                    hour=int(body.get("hour") or 3),
+                    minute=int(body.get("minute") or 0),
+                    weekday=body.get("weekday"),
+                    action=body.get("action")
+                        if isinstance(body.get("action"), dict) else None,
+                    enabled=bool(body.get("enabled", True)))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+                return True
+            self._json({"ok": True, "schedule": row})
+            return True
+        if path.startswith("/api/schedules/"):
+            rest = path[len("/api/schedules/"):].strip("/")
+            if rest.endswith("/delete"):
+                self._json({"ok": sup.scheduler.remove(rest[:-len("/delete")])})
+                return True
+            if rest.endswith("/enable") or rest.endswith("/disable"):
+                sid = rest.rsplit("/", 1)[0]
+                self._json({"ok": sup.scheduler.set_enabled(
+                    sid, rest.endswith("/enable"))})
+                return True
+            self._json({"error": "unknown schedule action"}, 400)
+            return True
+
+        if path == "/api/standing-goals":
+            try:
+                row = sup.add_standing_goal(
+                    str(body.get("objective") or ""),
+                    trigger=body.get("trigger")
+                        if isinstance(body.get("trigger"), dict) else None,
+                    schedule=body.get("schedule")
+                        if isinstance(body.get("schedule"), dict) else None,
+                    allowed_actions=body.get("allowed_actions")
+                        if isinstance(body.get("allowed_actions"), list) else None,
+                    notification_policy=str(body.get("notification_policy") or "important"),
+                    enabled=bool(body.get("enabled", True)),
+                    success_criteria=body.get("success_criteria")
+                        if isinstance(body.get("success_criteria"), list) else None,
+                    constraints=body.get("constraints")
+                        if isinstance(body.get("constraints"), list) else None)
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+                return True
+            self._json({"ok": True, "goal": row})
+            return True
+        if path.startswith("/api/standing-goals/"):
+            rest = path[len("/api/standing-goals/"):].strip("/")
+            if rest.endswith("/enable") or rest.endswith("/disable"):
+                gid = rest.rsplit("/", 1)[0]
+                self._json({"ok": sup.set_goal_enabled(gid, rest.endswith("/enable"))})
+                return True
+            if rest.endswith("/run"):
+                gid = rest[:-len("/run")]
+                goal = next((g for g in sup.standing_goals() if g.get("id") == gid), None)
+                if goal is None:
+                    self._json({"error": "goal not found"}, 404)
+                    return True
+                m = sup._spawn_goal_mission(goal, origin=f"manual:{gid}")
+                self._json({"ok": True, "mission": m})
+                return True
+            self._json({"error": "unknown goal action"}, 400)
+            return True
+        return False
+
     def _handle_voice_post(self, path: str, body: dict) -> None:
         """Voice subsystem POST endpoints. TTS failures never reach chat —
         every error returns a concise JSON payload."""
@@ -2274,6 +2821,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/queue":
             self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})
             return
+        if path.startswith(self._AUTONOMY_PREFIXES):
+            if self._autonomy_get(path):
+                return
+            self._json({"error": "unknown autonomy route"}, 404)
+            return
         if path == "/api/index":
             self._json(self.state.repository_index.summary())
             return
@@ -2484,6 +3036,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._handle_voice_post(path, body)
                 return
+            if path.startswith(self._AUTONOMY_PREFIXES):
+                if self._autonomy_post(path, body):
+                    return
+                self._json({"error": "unknown autonomy route"}, 404)
+                return
+
             if path == "/api/nexus-brain/initialize":
                 state = self.state.nexus_brain.initialize_creator(
                     str(body.get("creator_name", "")).strip(),
@@ -3143,6 +3701,16 @@ class Handler(BaseHTTPRequestHandler):
                         "runtime": self.state.runtime.summary(probe_external=False),
                     })
                     return
+                # Autonomy chat commands ("make this a mission", "stop
+                # autonomy") never need a model — answer directly.
+                mission_cmd = self.state._mission_command(message)
+                if mission_cmd is not None:
+                    payload = self.state._mission_reply_result(mission_cmd["content"])
+                    self._sse_begin()
+                    self._sse_event("ready", {"mode": mode})
+                    self._sse_event("task", {"task": payload["task"]})
+                    self._sse_event("result", payload)
+                    return
                 coding_model_optional = (
                     mode == "auto"
                     and (
@@ -3316,6 +3884,10 @@ class Handler(BaseHTTPRequestHandler):
                         "steps": 0,
                         "runtime": self.state.runtime.summary(probe_external=False),
                     })
+                    return
+                mission_cmd = self.state._mission_command(message)
+                if mission_cmd is not None:
+                    self._json(self.state._mission_reply_result(mission_cmd["content"]))
                     return
                 coding_model_optional = (
                     mode == "auto"

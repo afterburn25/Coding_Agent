@@ -26,6 +26,10 @@ class WorkQueue:
         self.path = self.root / "queue.json"
         self._lock = threading.RLock()
         self._items: list[dict[str, Any]] = []
+        # Optional hook: enrich(item) -> dict | None, merged into a new queue
+        # item. The autonomy supervisor uses it to attribute queue_task calls
+        # made inside a mission run back to the owning mission.
+        self.enrich = None
         self._load()
 
     def _load(self) -> None:
@@ -51,6 +55,13 @@ class WorkQueue:
                 "status": "queued",
                 "enqueued_at": time.time(),
             }
+            if self.enrich is not None:
+                try:
+                    extra = self.enrich(item)
+                    if isinstance(extra, dict):
+                        item.update(extra)
+                except Exception:
+                    pass
             self._items.append(item)
             self._save()
             return dict(item)

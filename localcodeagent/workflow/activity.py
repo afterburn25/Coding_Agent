@@ -33,6 +33,9 @@ CATEGORIES = {
     "editing", "diff", "building", "testing", "review", "download", "install",
     "service", "approval", "model_wait", "recovery", "retry", "image",
     "artifact", "git", "github", "complete", "error",
+    # autonomy mission timeline categories
+    "mission", "trigger", "schedule", "task_graph", "dependency",
+    "autonomous_action", "evaluation", "budget", "notification",
 }
 
 OUTPUT_TAIL_LIMIT = 20000
