@@ -25,6 +25,20 @@ repair incidents via `gh`; weak diagnoses gather external evidence
 through the research coordinator; twin RAM snapshots feed both incident
 evidence and a `ram_pressure` detector; and terminal incidents record
 their verification checks into the Eval Lab's `self_repair` suite.
+CI-failure incidents now carry the failed job's log tail (bounded) into
+the localizer, which suffix-matches CI-runner paths onto repo files.
+
+Also on this line: **deterministic teardown** — `AppState.close()` joins
+tracked daemon threads (auto-resume, prewarm) and the supervisor joins
+its tick/bus/worker threads, closing the WinError-32/Errno-39 teardown
+races at the source. **Hardware-tier model stack** — `models/tiers.py`
++ `model_tiers.json`: a four-tier catalog (4B→8B→14B→30B) with a
+`plan_model_stack` planner (dedicated VRAM only, usable RAM minus
+reserve, hybrid capped one tier above native — 12 GB + 64 GB qualifies
+the 30B as hybrid), registry-based GPU detection, `/api/model-plan`,
+canonical-role router matching, and `scripts/sync_model_catalog.py`
+keeping the installer's model defines in sync. Docs:
+`docs/HARDWARE_MODEL_TIERS.md`.
 
 ### Retained from v0.10 — Autonomous self-repair + evaluated goals
 
