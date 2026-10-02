@@ -6,6 +6,11 @@ compile time — it cannot read JSON. The canonical values live in
 localcodeagent/models/model_tiers.json; this script rewrites the define
 blocks (or, with --check, exits non-zero on drift).
 
+--check also verifies every runtime-catalog asset whose id matches a
+tier id carries the same file/url/sha256/size/source_repo — the two
+catalogs intentionally differ in role vocabulary but must never disagree
+on what bytes a catalog id downloads.
+
     python scripts/sync_model_catalog.py [--check]
 """
 from __future__ import annotations
@@ -16,6 +21,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 CATALOG = ROOT / "localcodeagent" / "models" / "model_tiers.json"
 ISS = ROOT / "installer" / "ChatNexus.iss"
 
@@ -24,6 +30,26 @@ ISS_PREFIX = {
     "qwen3-14b-q4-k-m": "Qwen14",
     "qwen3-coder-30b-a3b-q4-k-m": "Qwen30",
 }
+
+_RUNTIME_FIELDS = (("filename", "filename"), ("url", "url"),
+                   ("sha256", "sha256"), ("file_size", "size_bytes"),
+                   ("source_repo", "source_repo"))
+
+
+def _runtime_catalog_drift(tiers: dict[str, dict]) -> list[str]:
+    from localcodeagent.runtime.catalog import CODING_MODEL_CATALOG
+    drift = []
+    for asset in CODING_MODEL_CATALOG:
+        tier = tiers.get(asset.id)
+        if tier is None:
+            drift.append(f"{asset.id}: in runtime catalog but not tier catalog")
+            continue
+        for tkey, akey in _RUNTIME_FIELDS:
+            if getattr(asset, akey) != tier[tkey]:
+                drift.append(
+                    f"{asset.id}.{akey}: runtime={getattr(asset, akey)!r} "
+                    f"!= tier={tier[tkey]!r}")
+    return drift
 
 
 def _block(prefix: str, tier: dict) -> str:
@@ -59,12 +85,17 @@ def main() -> int:
             return 2
         new = pattern.sub(lambda m: _block(prefix, tier), new, count=1)
     if check:
+        ok = True
         if new != text:
             print(f"error: {ISS.name} is out of sync with {CATALOG.name} "
                   f"— run scripts/sync_model_catalog.py")
-            return 1
-        print("model catalog in sync")
-        return 0
+            ok = False
+        for line in _runtime_catalog_drift(tiers):
+            print(f"error: runtime catalog drift — {line}")
+            ok = False
+        if ok:
+            print("model catalog in sync")
+        return 0 if ok else 1
     if new != text:
         ISS.write_text(new, encoding="utf-8")
         print(f"updated {ISS.name}")

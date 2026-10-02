@@ -75,6 +75,19 @@ class RouterTests(unittest.TestCase):
         d = router.choose("fix this file")
         self.assertEqual(d.model_id, "aliased")
 
+    def test_fallback_prefers_nearest_tier(self):
+        """No primary-tier model: a fast_coder request degrades to the
+        tier-2 light reasoner, never to the tier-1 utility model."""
+        router = ModelRouter([
+            ModelProfile(id="tiny", endpoint="http://x", model="tiny",
+                         roles=["utility"], priority=10),
+            ModelProfile(id="lite", endpoint="http://x", model="lite",
+                         roles=["light_coder"], priority=10),
+        ])
+        d = router.choose("Rename the Save button to Apply")
+        self.assertEqual(d.role, "fast_coder")
+        self.assertEqual(d.model_id, "lite")
+
 
 if __name__ == "__main__":
     unittest.main()

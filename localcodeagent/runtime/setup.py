@@ -7,25 +7,48 @@ from ..fsutil import atomic_write_text
 from typing import Any
 
 
+# Known tier-catalog files → (profile id, ladder tier, base roles).
+# Ordered smallest → largest; roles follow docs/HARDWARE_MODEL_TIERS.md.
+_TIER_FILES: tuple[tuple[str, str, int, list[str]], ...] = (
+    ("qwen_qwen3-4b-instruct-2507-q4_k_m.gguf", "qwen3-4b-instruct", 1,
+     ["utility"]),
+    ("qwen3-8b-q4_k_m.gguf", "qwen3-8b", 2,
+     ["lightweight_reasoner", "light_coder", "general_assistant"]),
+    ("qwen3-14b-q4_k_m.gguf", "qwen3-14b", 3,
+     ["fast_coder", "primary_coder"]),
+    ("qwen3-coder-30b-a3b-instruct-q4_k_m.gguf", "qwen3-coder-30b", 4,
+     ["deep_reasoner", "reviewer"]),
+)
+
+# Roles every usable coding config must cover somewhere.
+_CORE_ROLES = ("fast_coder", "primary_coder", "deep_reasoner", "reviewer")
+
+
 def _catalog_pair_assignments(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any], list[str], str]]:
-    """Prefer the known Nexus Core 4B/14B/30B trio when those files are present."""
+    """Prefer the known Nexus Core 4B/8B/14B/30B tier files when present.
+
+    Coverage rules: the utility lane lands on the smallest present tier;
+    every other uncovered core role is absorbed by the largest present
+    tier — a lone model ends up serving everything, and partial stacks
+    degrade toward their biggest model."""
     by_name = {str(row["name"]).lower(): row for row in rows}
-    q4 = by_name.get("qwen_qwen3-4b-instruct-2507-q4_k_m.gguf")
-    q14 = by_name.get("qwen3-14b-q4_k_m.gguf")
-    q30 = by_name.get("qwen3-coder-30b-a3b-instruct-q4_k_m.gguf")
-    fast_lane = [(q4, ["utility"], "qwen3-4b-instruct")] if q4 else []
-    if q14 and q30:
-        return fast_lane + [
-            (q14, ["fast_coder", "primary_coder"] + (["utility"] if not q4 else []), "qwen3-14b"),
-            (q30, ["deep_reasoner", "reviewer"], "qwen3-coder-30b"),
-        ]
-    if q14:
-        return fast_lane + [(q14, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"] if not q4 else ["fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-14b")]
-    if q30:
-        return fast_lane + [(q30, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"] if not q4 else ["fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-coder-30b")]
-    if q4:
-        return [(q4, ["utility", "fast_coder", "primary_coder", "deep_reasoner", "reviewer"], "qwen3-4b-instruct")]
-    return []
+    present = [
+        (by_name[fname], list(roles), pid)
+        for fname, pid, _tier, roles in _TIER_FILES
+        if fname in by_name
+    ]
+    if not present:
+        return []
+    if len(present) == 1:
+        row, roles, pid = present[0]
+        return [(row, ["utility", *_CORE_ROLES], pid)]
+    if "utility" not in {r for _row, roles, _pid in present for r in roles}:
+        present[0][1].append("utility")           # smallest present tier
+    covered = {r for _row, roles, _pid in present for r in roles}
+    missing = [r for r in _CORE_ROLES if r not in covered]
+    if missing:
+        present[-1][1].extend(missing)            # largest present tier
+    return present
 
 
 def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -62,8 +85,9 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
 
     seen_paths: set[str] = set()
     suggestions: list[dict[str, Any]] = []
-    fixed_ports = {"qwen3-4b-instruct": 8080, "qwen3-14b": 8081, "qwen3-coder-30b": 8082}
-    port = 8083
+    fixed_ports = {"qwen3-4b-instruct": 8080, "qwen3-14b": 8081,
+                   "qwen3-coder-30b": 8082, "qwen3-8b": 8084}
+    port = 8085
     for item, roles, profile_id in assignments:
         if item["path"] in seen_paths:
             # Three-way role assignment can converge on the same file with a tiny
@@ -87,15 +111,24 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "model": Path(item["path"]).stem,
             "model_path": item["path"],
             "roles": roles,
-            "context_window": 8192 if profile_id == "qwen3-4b-instruct" else 32768,
+            "context_window": (
+                8192 if profile_id == "qwen3-4b-instruct"
+                else 12288 if profile_id == "qwen3-8b"
+                else 32768
+            ),
             "max_output_tokens": (
                 1024 if profile_id == "qwen3-4b-instruct"
+                else 2048 if profile_id == "qwen3-8b"
                 else 2048 if profile_id == "qwen3-14b"
                 else 8192 if profile_id == "qwen3-coder-30b"
                 else 4096
             ),
             "tool_calling": True,
-            "temperature": 0.6 if profile_id == "qwen3-4b-instruct" else 0.2,
+            "temperature": (
+                0.6 if profile_id == "qwen3-4b-instruct"
+                else 0.4 if profile_id == "qwen3-8b"
+                else 0.2
+            ),
             "vision": "vision" in roles,
             "priority": {
                 "fast-coder": 80,
@@ -103,6 +136,7 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
                 "primary-coder": 90,
                 "deep-reasoner": 100,
                 "qwen3-4b-instruct": 95,
+                "qwen3-8b": 93,
                 "qwen3-14b": 90,
                 "qwen3-coder-30b": 100,
             }.get(profile_id, 80),
@@ -116,7 +150,8 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             # requirements. Runtime auto-fit may choose a different split.
             "estimated_vram_gb": round(max(2.0, size * 1.08), 1),
             "estimated_ram_gb": round(max(4.0, size * 1.35 + 2.0), 1),
-            "extra_args": ["--reasoning", "off"] if profile_id == "qwen3-14b" else [],
+            "extra_args": (["--reasoning", "off"]
+                          if profile_id in {"qwen3-8b", "qwen3-14b"} else []),
             "notes": f"Auto-suggested from local GGUF: {item['name']}. Review before use.",
         })
     return suggestions

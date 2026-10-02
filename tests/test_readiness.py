@@ -187,6 +187,52 @@ class ModelSetupPlannerTests(unittest.TestCase):
         self.assertEqual(set(suggestions[0]["roles"]), {"utility", "fast_coder", "primary_coder"})
         self.assertEqual(set(suggestions[1]["roles"]), {"deep_reasoner", "reviewer"})
 
+    def test_full_tier_stack_quad_assignment(self):
+        """All four tier files present: each gets its ladder rung."""
+        suggestions = suggest_model_profiles([
+            {"name": "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "path": "/models/q4.gguf", "size_gb": 2.5},
+            {"name": "Qwen3-8B-Q4_K_M.gguf", "path": "/models/q8.gguf", "size_gb": 5.0},
+            {"name": "Qwen3-14B-Q4_K_M.gguf", "path": "/models/q14.gguf", "size_gb": 9.0},
+            {"name": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "path": "/models/q30.gguf", "size_gb": 18.6},
+        ])
+        self.assertEqual(
+            [row["id"] for row in suggestions],
+            ["qwen3-4b-instruct", "qwen3-8b", "qwen3-14b", "qwen3-coder-30b"])
+        self.assertEqual(set(suggestions[0]["roles"]), {"utility"})
+        self.assertTrue({"lightweight_reasoner", "light_coder",
+                         "general_assistant"}
+                        .issubset(set(suggestions[1]["roles"])))
+        self.assertEqual(set(suggestions[2]["roles"]),
+                         {"fast_coder", "primary_coder"})
+        self.assertEqual(set(suggestions[3]["roles"]),
+                         {"deep_reasoner", "reviewer"})
+        self.assertEqual(suggestions[1]["context_window"], 12288)
+        self.assertEqual(suggestions[1]["extra_args"], ["--reasoning", "off"])
+
+    def test_8b_and_30b_without_4b_14b_coverage(self):
+        """8B+30B stack: the 8B takes the utility lane (smallest present),
+        the 30B absorbs fast/primary (largest present)."""
+        suggestions = suggest_model_profiles([
+            {"name": "Qwen3-8B-Q4_K_M.gguf", "path": "/models/q8.gguf", "size_gb": 5.0},
+            {"name": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "path": "/models/q30.gguf", "size_gb": 18.6},
+        ])
+        roles8 = set(suggestions[0]["roles"])
+        roles30 = set(suggestions[1]["roles"])
+        self.assertIn("utility", roles8)
+        self.assertIn("lightweight_reasoner", roles8)
+        self.assertTrue({"fast_coder", "primary_coder", "deep_reasoner",
+                         "reviewer"}.issubset(roles30))
+
+    def test_lone_8b_serves_everything(self):
+        suggestions = suggest_model_profiles([
+            {"name": "Qwen3-8B-Q4_K_M.gguf", "path": "/models/q8.gguf", "size_gb": 5.0},
+        ])
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["id"], "qwen3-8b")
+        self.assertTrue({"utility", "fast_coder", "primary_coder",
+                         "deep_reasoner", "reviewer"}
+                        .issubset(set(suggestions[0]["roles"])))
+
     def test_three_ggufs_are_split_across_fast_primary_and_deep_roles(self):
         suggestions = suggest_model_profiles([
             {"name": "small.gguf", "path": "/models/small.gguf", "size_gb": 4.0},

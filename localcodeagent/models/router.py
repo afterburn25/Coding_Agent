@@ -5,7 +5,7 @@ import re
 from typing import Callable
 
 from ..config import ModelProfile
-from .tiers import canonical_role
+from .tiers import canonical_role, tier_for_role
 
 
 ROLES = ("utility", "lightweight_reasoner", "fast_coder", "primary_coder",
@@ -20,6 +20,13 @@ def _role_matches(model: ModelProfile, role: str) -> bool:
         return True
     target = canonical_role(role)
     return any(canonical_role(r) == target for r in model.roles)
+
+
+def _tier_distance(model: ModelProfile, want: int) -> int:
+    """Closest ladder-tier distance between the model's roles and `want`."""
+    if not model.roles:
+        return 99
+    return min(abs(tier_for_role(r) - want) for r in model.roles)
 ResourceAdvisor = Callable[[ModelProfile], tuple[bool, int, str]]
 PerformanceAdvisor = Callable[[ModelProfile, str, int], tuple[int, str]]
 
@@ -159,7 +166,20 @@ class ModelRouter:
 
         candidates = [m for m in available_models if _role_matches(m, role)]
         if not candidates:
-            candidates = [m for m in available_models if _role_matches(m, "primary_coder")] or available_models
+            primary = [m for m in available_models
+                       if _role_matches(m, "primary_coder")]
+            if primary:
+                candidates = primary
+            else:
+                # Degrade toward the nearest ladder tier rather than an
+                # arbitrary model — a light-coder task on an 8B+4B
+                # machine should land on the 8B, not the 4B utility.
+                want = tier_for_role(role)
+                best = min((_tier_distance(m, want) for m in available_models),
+                           default=99)
+                candidates = [m for m in available_models
+                              if _tier_distance(m, want) == best] \
+                    or available_models
             reasons.append(f"no dedicated {role} model configured; using fallback")
 
         ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
