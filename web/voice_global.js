@@ -107,12 +107,22 @@
       if (icon) icon.textContent = NV.muted ? '🔇' : '🔊';
       btn.title = NV.muted ? 'Voice muted — click to unmute' : 'Voice on — click to mute';
     }
+    // Icon-only mute buttons (e.g. next to the composer send button).
+    for (const mb of document.querySelectorAll('.voice-mute-btn')) {
+      mb.classList.toggle('muted', NV.muted);
+      mb.textContent = NV.muted ? '🔇' : '🔊';
+      mb.title = mb.getAttribute('aria-label') = NV.muted
+        ? 'Voice muted — click to unmute' : 'Voice on — click to mute';
+    }
   };
 
   // Wire the global speaker button + shared event bus.
   document.addEventListener('DOMContentLoaded', async () => {
     const btn = document.getElementById('voiceToggle');
     if (btn) btn.addEventListener('click', () => NV.setMuted(!NV.muted));
+    for (const mb of document.querySelectorAll('.voice-mute-btn')) {
+      mb.addEventListener('click', () => NV.setMuted(!NV.muted));
+    }
     await NV.refresh();
     // Shared bus mirrors voice stop/segment events so other pages react.
     try {
