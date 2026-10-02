@@ -6031,7 +6031,7 @@ def _describe_port_owner(host: str, port: int) -> str:
     return " by another process"
 
 
-def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
+def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None, shutdown_event: threading.Event | None = None) -> None:
     from .boot import boot_report, port_report, reporter_from_env
     boot = reporter_from_env()
     if boot is not None:
@@ -6070,7 +6070,12 @@ def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: 
         print("GPU: no NVIDIA GPU detected through nvidia-smi")
     print("Press Ctrl+C to stop.")
     try:
-        server.serve_forever()
+        if shutdown_event is None:
+            server.serve_forever()
+        else:
+            server.timeout = 0.25
+            while not shutdown_event.is_set():
+                server.handle_request()
     except KeyboardInterrupt:
         pass
     finally:

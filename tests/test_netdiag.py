@@ -690,8 +690,10 @@ class PortCollisionTests(unittest.TestCase):
         import localcodeagent.boot as boot_mod
         original = boot_mod.port_report
         boot_mod.port_report = lambda p: (reported.append(p), original(p))
+        stop = threading.Event()
+        t: threading.Thread | None = None
         try:
-            with tempfile.TemporaryDirectory() as td:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
                 ws = Path(td)
                 (ws / "web").mkdir()
                 t = threading.Thread(
@@ -699,7 +701,8 @@ class PortCollisionTests(unittest.TestCase):
                     args=(self._cfg(), ws, "127.0.0.1", held_port,
                           Path(__file__).resolve().parents[1] / "web",
                           ws / ".runtime"),
-                    kwargs={"config_path": None},
+                    kwargs={"config_path": None,
+                            "shutdown_event": stop},
                     daemon=True)
                 t.start()
                 # AppState init can take several seconds under parallel
@@ -712,6 +715,9 @@ class PortCollisionTests(unittest.TestCase):
                 self.assertNotEqual(reported[-1], held_port,
                                     "reported port must be the fallback, not the held port")
         finally:
+            stop.set()
+            if t is not None:
+                t.join(timeout=45)
             boot_mod.port_report = original
         sock.close()
 
