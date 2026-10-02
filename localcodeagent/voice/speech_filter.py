@@ -43,9 +43,9 @@ class SpeechTextFilter:
     LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.M)
     QUOTE_RE = re.compile(r"^\s*>\s?")
     # Status glyphs are verdicts — never read the glyph name ("check mark").
-    # Locked wording: pass → "operating within normal parameters", fail →
-    # "failed to initialize". Applies to every spoken path (stream, replay,
-    # speak tool) since all of them pass through _sanitize_prose.
+    # Items whose text already states the result are spoken as-is; opaque
+    # items get the verdict appended. Applies to every spoken path (stream,
+    # replay, speak tool) since all of them pass through _sanitize_prose.
     OK_GLYPH = "✅✔☑✓🟢\ufe0f"
     FAIL_GLYPH = "❌✗✖✘🔴\ufe0f"
     OK_LEAD_RE = re.compile(
@@ -54,6 +54,22 @@ class SpeechTextFilter:
     PENDING_LEAD_RE = re.compile(r"(?m)^\s*\[ \]\s*([^\n]*)$")
     OK_INLINE_RE = re.compile(rf"[{OK_GLYPH}]+")
     FAIL_INLINE_RE = re.compile(rf"[{FAIL_GLYPH}]+")
+    # Result words that make an appended verdict redundant — a checked item
+    # whose text already states the pass is read as-is.
+    PASS_SAID_RE = re.compile(
+        r"\b(?:pass(?:ed|es|ing)?|ok(?:ay)?|healthy|read(?:y|ied)|running|"
+        r"online|active|connected|available|working|green|succeed(?:ed|s|ing)?|"
+        r"success(?:ful)?|normal(?:ly)?|verified|present|complet(?:e|ed|ion)|"
+        r"done|enabled|good|fine|up|responding|reachable|loaded|detected|"
+        r"found|operational|nominal)\b", re.I)
+    FAIL_SAID_RE = re.compile(
+        r"\b(?:fail(?:ed|s|ing|ure)?|errors?|down|offline|missing|broken|"
+        r"unavailable|crash(?:ed|es|ing)?|dead|timed?\s*out|timeout|"
+        r"refus(?:ed|al)|denied|unable|cannot|can't|bad|red|unhealthy|"
+        r"disabled|absent|unreachable|not\s+\w+)\b", re.I)
+    PENDING_SAID_RE = re.compile(
+        r"\b(?:pending|queued|waiting|skipped|untested|unchecked|todo|"
+        r"not\s+(?:yet\s+)?(?:run|done|complete[ds]?))\b", re.I)
     WARN_GLYPH_RE = re.compile(r"⚠️?")
     EMOJI_RUN_RE = re.compile(
         "[\U0001F000-\U0001FAFF☀-➿⬀-⯿️\ufe0f]+")
@@ -147,14 +163,20 @@ class SpeechTextFilter:
         t = self.QUOTE_RE.sub("", t)
         t = self.LIST_MARKER_RE.sub("", t)
         # A leading status glyph is a verdict on the item — name the item,
-        # then speak the verdict instead of the glyph name.
+        # then speak the verdict instead of the glyph name. When the item
+        # text already states the result, no verdict is appended.
         t = self.OK_LEAD_RE.sub(self._lead_verdict(
-            "operating within normal parameters"), t)
-        t = self.FAIL_LEAD_RE.sub(self._lead_verdict("failed to initialize"), t)
-        t = self.PENDING_LEAD_RE.sub(self._lead_verdict("pending"), t)
-        # Inline glyphs mid-sentence become the same spoken verdicts.
-        t = self.OK_INLINE_RE.sub(" — operating within normal parameters", t)
-        t = self.FAIL_INLINE_RE.sub(" — failed to initialize", t)
+            "operating within normal parameters", self.PASS_SAID_RE), t)
+        t = self.FAIL_LEAD_RE.sub(self._lead_verdict(
+            "failed to initialize", self.FAIL_SAID_RE), t)
+        t = self.PENDING_LEAD_RE.sub(self._lead_verdict(
+            "pending", self.PENDING_SAID_RE), t)
+        # Inline glyphs mid-sentence become a short verdict — dropped when
+        # the label before the glyph already states the result.
+        t = self.OK_INLINE_RE.sub(
+            self._inline_verdict("passed", self.PASS_SAID_RE), t)
+        t = self.FAIL_INLINE_RE.sub(
+            self._inline_verdict("failed", self.FAIL_SAID_RE), t)
         t = self.WARN_GLYPH_RE.sub(" — needs attention", t)
         t = self.ARROW_RE.sub(" to ", t)
         # Any emoji left unmapped is pictographic noise — drop it.
@@ -168,11 +190,30 @@ class SpeechTextFilter:
         return t
 
     @staticmethod
-    def _lead_verdict(phrase: str):
-        """re.sub callback factory: '✅ GPU ready' → 'GPU ready — <phrase>'."""
+    def _lead_verdict(phrase: str, already: re.Pattern | None = None):
+        """re.sub callback factory: '✅ GPU check' → 'GPU check — <phrase>'.
+        When `already` matches the item text the result is self-stated and
+        the glyph is simply dropped ('✅ Models verified' → 'Models verified')."""
         def repl(m):
             rest = m.group(1).strip()
-            return f"{rest} — {phrase}" if rest else phrase.capitalize() + "."
+            if not rest:
+                return phrase.capitalize() + "."
+            if already is not None and already.search(rest):
+                return rest
+            return f"{rest} — {phrase}"
+        return repl
+
+    @staticmethod
+    def _inline_verdict(phrase: str, already: re.Pattern):
+        """re.sub callback for mid-line glyphs. Appends ' — <phrase>' unless
+        the label before the glyph already states the result."""
+        def repl(m):
+            head = m.string[: m.start()]
+            seg = head[head.rfind("\n") + 1:]
+            bpos = max(seg.rfind(c) for c in ".!?;,—:")
+            if already.search(seg[bpos + 1:]):
+                return ""
+            return f" — {phrase}"
         return repl
 
     def _speakable_code(self, snippet: str) -> str:

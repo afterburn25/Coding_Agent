@@ -91,22 +91,39 @@ class TestSpeechFilter(unittest.TestCase):
             "❌ ComfyUI backend\n"
             "✗ Audio pipeline\n"
             "- [x] config loaded\n"
-            "- [ ] queued task\n")
-        self.assertIn("GPU detected — operating within normal parameters", out)
-        self.assertIn("Models verified — operating within normal parameters", out)
+            "- [ ] queued task\n"
+            "✅ memory bus\n"
+            "- [ ] thermal probe\n")
+        # Items that already state the result are read as-is — no
+        # redundant verdict bolted on.
+        self.assertIn("GPU detected", out)
+        self.assertIn("Models verified", out)
+        self.assertIn("config loaded", out)
+        self.assertIn("queued task", out)
+        self.assertNotIn("GPU detected —", out)
+        self.assertNotIn("Models verified —", out)
+        self.assertNotIn("config loaded —", out)
+        self.assertNotIn("queued task —", out)
+        # Opaque items get the verdict appended.
         self.assertIn("ComfyUI backend — failed to initialize", out)
         self.assertIn("Audio pipeline — failed to initialize", out)
-        self.assertIn("config loaded — operating within normal parameters", out)
-        self.assertIn("queued task — pending", out)
+        self.assertIn("memory bus — operating within normal parameters", out)
+        self.assertIn("thermal probe — pending", out)
         for glyph in ("✅", "✔", "❌", "✗"):
             self.assertNotIn(glyph, out)
 
     def test_inline_glyph_verdict(self):
         out = self.f.filter("Backend status: ✅ and tools: ❌ done.")
-        self.assertIn("operating within normal parameters", out)
-        self.assertIn("failed to initialize", out)
+        self.assertIn("passed", out)
+        self.assertIn("failed", out)
         self.assertNotIn("✅", out)
         self.assertNotIn("❌", out)
+
+    def test_inline_glyph_dropped_when_result_already_said(self):
+        out = self.f.filter("The backend is healthy ✅, all good.")
+        self.assertIn("healthy", out)
+        self.assertNotIn("passed", out)
+        self.assertNotIn("✅", out)
 
     def test_stack_trace_skipped(self):
         out = self.f.filter(
