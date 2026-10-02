@@ -912,8 +912,9 @@ class AppState:
           backup     — create a versioned state backup
           rag_update — incremental repository index refresh
           image      — submit an ImageRequest and wait for completion
-          model_install — download an image model profile's components and
-                          wait for the install job to finish
+          model_install — download a model (LLM catalog id via
+                          runtime.model_catalog, else image-model profile)
+                          and wait for the install job to finish
         """
         meta = dict(node.get("metadata") or {})
         op = str(meta.get("job") or "")
@@ -955,13 +956,45 @@ class AppState:
                                   f"{r.get('removed', 0)} removed"}
             if op == "model_install":
                 model_id = str(meta.get("model") or "")
+                cat = getattr(self.runtime, "model_catalog", None)
+                llm_job = None
+                if cat is not None:
+                    try:
+                        cat.asset(model_id)  # raises for unknown ids
+                        llm_job = cat.start_install(
+                            model_id, repair=bool(meta.get("repair")))
+                    except KeyError:
+                        llm_job = None
+                    except Exception as exc:
+                        return {"ok": False,
+                                "output": f"LLM install failed to start: {exc}"}
+                if llm_job is not None:
+                    deadline = time.time() + float(meta.get("timeout", 7200))
+                    while time.time() < deadline:
+                        try:
+                            cur = cat.get_job(llm_job["id"])
+                        except KeyError:
+                            # 'reuse-*' fast-path jobs are not persisted —
+                            # they are already terminal in the returned dict.
+                            cur = llm_job
+                        if cur.get("state") in ("finished", "failed",
+                                                "cancelled"):
+                            return {"ok": cur["state"] == "finished",
+                                    "output": f"LLM install {cur['state']}"
+                                              f"{': ' + cur['error'] if cur.get('error') else ''}",
+                                    "job": cur}
+                        time.sleep(2.0)
+                    return {"ok": False,
+                            "output": "LLM model install timed out",
+                            "job": llm_job}
                 try:
                     profile = self.images.router.get_profile(model_id)
                 except Exception:
                     profile = None
                 if profile is None:
                     return {"ok": False,
-                            "output": f"unknown image model: {model_id!r}"}
+                            "output": f"unknown model: {model_id!r} (not in "
+                                      "LLM catalog or image profiles)"}
                 job = self.images.library.start_install(
                     profile, repair=bool(meta.get("repair")))
                 deadline = time.time() + float(meta.get("timeout", 3600))

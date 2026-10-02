@@ -655,9 +655,11 @@ No image weights are downloaded automatically yet.
 
 1. Use the Image workspace workflow manager to import and test real ComfyUI API-format workflows for the selected Qwen-Image-2.1 and FLUX.2 Klein local node stacks.
 2. Add dedicated background-removal and upscaler adapters/workflows.
-3. Add WebSocket/SSE streaming for chat tokens, tool events, research events, and image-generation progress.
-4. Add persistent browser sessions and richer browser selectors/snapshots.
-6. Add model-performance and research-outcome telemetry to improve automatic routing.
+3. ~~WebSocket/SSE streaming~~ — done: `/api/chat/stream` tokens + `/api/events` bus mirror all non-token events with task attribution.
+4. ~~Persistent browser sessions~~ — done: `browser_run` accepts `session` + `save_session` (`storage_state` JSON under `.agent/browser/`).
+5. Voice STT session scaffold exists (`voice/stt.py`) but needs `sounddevice` + a model (Vosk/faster-whisper) installed on the host.
+6. Runtime tuner produces real numbers only when probes run on hardware — idle auto-tuner covers this; `data/runtime_tuning.json` accumulates results.
+7. LLM model downloads are not yet a mission `job` op (image-model installs are, via `model_install`).
 
 ## Testing command
 
@@ -665,7 +667,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `328 tests` passing.
+Expected at this checkpoint: `804 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

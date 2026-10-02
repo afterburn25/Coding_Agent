@@ -270,7 +270,7 @@ class JobNodeTests(unittest.TestCase):
                     {"id": "n10",
                      "metadata": {"job": "model_install", "model": "nope"}})
                 self.assertFalse(bad["ok"])
-                self.assertIn("unknown image model", bad["output"])
+                self.assertIn("unknown model", bad["output"])
             finally:
                 stop_state(state)
 
