@@ -49,3 +49,36 @@ class VersionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckpointConsistencyTests(unittest.TestCase):
+    """The docs broadcast a single "current" test count in four places —
+    this pins them so a partial sync fails the suite instead of drifting.
+    Update the actual count after any test-count change (same commit).
+    """
+
+    EXPECTED = 821
+
+    def _counts(self):
+        checks = {
+            "PROJECT_STATUS.md": r"Current automated checkpoint:\s*\*\*(\d+) tests passing",
+            "README.md": r"Current expected result:\s*\*\*(\d+) tests passing",
+            "SESSION_HANDOFF.md": r"Expected at this checkpoint:\s*`(\d+) tests`",
+        }
+        out = {}
+        for name, pat in checks.items():
+            text = (ROOT / name).read_text(encoding="utf-8")
+            m = re.search(pat, text)
+            self.assertIsNotNone(m, f"{name}: checkpoint line missing/changed")
+            out[name] = int(m.group(1))
+        import json
+        pj = json.loads((ROOT / ".agent" / "project.json").read_text(
+            encoding="utf-8"))
+        out[".agent/project.json"] = int(pj["test_checkpoint"])
+        return out
+
+    def test_checkpoint_counts_agree(self):
+        counts = self._counts()
+        for name, n in counts.items():
+            self.assertEqual(n, self.EXPECTED,
+                             f"{name} reports {n}, expected {self.EXPECTED}")
