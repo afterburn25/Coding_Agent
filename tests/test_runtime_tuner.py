@@ -68,6 +68,24 @@ class CapabilityTests(unittest.TestCase):
             self.assertTrue(tuner.supports("--cache-reuse"))
             self.assertFalse(tuner.supports("--model-draft"))
 
+    def test_draft_role_marker_enables_speculative(self):
+        # A model carrying the 'draft' role (not just a *-draft id) is a
+        # valid speculative-decoding partner.
+        help_text = HELP_TEXT + "  --model-draft PATH       speculative\n" \
+            "  --draft-max N\ndraft\n  --draft-min N\n"
+        cfg = AgentConfig(models=[
+            _profile(),
+            _profile(id="small-helper", roles=["draft"],
+                     model_path="models/draft.gguf"),
+        ], permissions={})
+        with tempfile.TemporaryDirectory() as td:
+            tuner = _tuner(td, help_text=help_text, config=cfg)
+            self.assertEqual(tuner.speculative_status(), "available")
+            cfg2 = AgentConfig(models=[_profile()], permissions={})
+            tuner2 = _tuner(td + "x" if False else td, help_text=help_text,
+                            config=cfg2)
+            self.assertEqual(tuner2.speculative_status(), "no_draft_model")
+
     def test_missing_binary_marks_unavailable(self):
         with tempfile.TemporaryDirectory() as td:
             tuner = RuntimeTuner(Path(td), AgentConfig(models=[_profile()], permissions={}))

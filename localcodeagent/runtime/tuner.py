@@ -310,11 +310,20 @@ class RuntimeTuner:
             },
         }
 
+    def _draft_model(self):
+        """A speculative-decoding draft is any configured model whose id
+        names it (…-draft) or which carries the 'draft' role marker."""
+        return next(
+            (m for m in self.config.models
+             if getattr(m, "model_path", "")
+             and ("draft" in str(m.id).lower()
+                  or "draft" in (getattr(m, "roles", None) or []))),
+            None)
+
     def speculative_status(self) -> str:
         if not self.supports("--model-draft"):
             return "not_supported"
-        draft = next((m for m in self.config.models if m.model_path and "draft" in m.id.lower()), None)
-        if draft is None:
+        if self._draft_model() is None:
             return "no_draft_model"
         return "available"
 
@@ -444,9 +453,7 @@ class RuntimeTuner:
             and self.supports("--model-draft")
             and self.speculative_status() == "available"
         ):
-            draft = next(
-                (m for m in self.config.models
-                 if m.model_path and "draft" in m.id.lower()), None)
+            draft = self._draft_model()
             if draft is not None and self.runtime is not None:
                 draft_path = getattr(self.runtime, "_resolve", lambda p: p)(
                     draft.model_path)
