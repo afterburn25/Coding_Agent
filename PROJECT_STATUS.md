@@ -231,12 +231,12 @@
 - **CI**: worktree merges carry explicit git identity (fixes Linux-runner
   `empty ident` failures); the Windows package workflow resolves
   `VERSION` into `APP_VERSION`/`APP_NUMERIC_VERSION` for Inno defines and
-  artifact names instead of hardcoded `0.6.0-dev`. GitHub Actions green
-  on `55c7d66` including the windows-desktop package + installer smoke
+  artifact names instead of hardcoded `0.6.0-dev`. GitHub Actions run `36982678215` green
+  on `a44905c` including the windows-desktop package + installer smoke
   job.
 - Final commits this wave: `6986514` (0.7.1 perf+timeline), `55c7d66`
   (auto-tuner + CI identity fix), `2df6870` (sandboxed verify + RAG
-  tool), `b6e2572` (workflow version resolution).
+  tool), `b6e2572` + `a44905c` (workflow version resolution + contract-test fix).
 
 
 

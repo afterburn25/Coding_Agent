@@ -12,9 +12,9 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Latest code checkpoint after Phase 1 tool-system foundation: `d55bf52716b01ea266ff6d1fb503ac1f2837078e` (verify with `git rev-parse HEAD`)
 - Current development version: `0.7.1` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
 - Verified unit checkpoint: **789 / 789 passing** (2 environment skips) after the 0.7.1 perf-tuner + activity-timeline wave
-- Last verified GitHub Actions run: `36981638438` — green including the windows-desktop installer/package smoke job (commit `55c7d66`)
-- Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36981638438
-- Latest commits: `b6e2572` (workflow version resolution), `2df6870` (sandboxed verify + repo_search), `55c7d66` (idle auto-tuner + CI git-identity fix), `6986514` (0.7.1 perf + timeline)
+- Last verified GitHub Actions run: `36982678215` — green including the windows-desktop installer/package smoke job (commit `a44905c`)
+- Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36982678215
+- Latest commits: `a44905c` (CI contract-test fix), `b6e2572` (workflow version resolution), `2df6870` (sandboxed verify + repo_search), `55c7d66` (idle auto-tuner + CI git-identity fix), `6986514` (0.7.1 perf + timeline)
 
 The `main` branch includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint or takeover anchor.**
 

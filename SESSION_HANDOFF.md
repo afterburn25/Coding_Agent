@@ -1064,4 +1064,4 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   hardcoded `0.6.0-dev` in Inno defines or artifact names (`b6e2572`).
 - Version 0.7.1 synced across artifacts. Suite: **789 passing**
   (2 env skips). GitHub Actions green on `55c7d66` including the
-  windows-desktop installer smoke job; `b6e2572` run pending.
+  windows-desktop installer smoke job; final run `36982678215` green on `a44905c` (8m21s, includes installer build + update-preservation smoke).
