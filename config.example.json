@@ -13,10 +13,16 @@
   "chat_queue_when_busy": true,
   "autonomous_approval_timeout_seconds": 3600,
   "agent_tool_timeout_seconds": 1800,
+  "autonomy_enabled": true,
+  "autonomy_quiet_hours": null,
   "model_idle_unload_seconds": 900,
   "context_shrink_idle_seconds": 600,
   "context_shrink_factor": 1.5,
   "model_warmup": true,
+  "performance_mode": "auto",
+  "runtime_auto_tune": true,
+  "runtime_auto_tune_idle_seconds": 45,
+  "runtime_dynamic_context": true,
   "memory_pressure_vram_gb": 0,
   "memory_pressure_ram_gb": 0,
   "models": [
@@ -92,6 +98,7 @@
     "github.write": "ask"
   },
   "permission_profile": "custom",
+  "permission_scopes": {},
   "tools_state_path": "data/tools_state.json",
   "jobs_path": "data/jobs.json",
   "tool_manifests_dir": "tools/manifests",
@@ -124,6 +131,8 @@
   "model_telemetry_max_events": 500,
   "fast_general_history_turns": 8,
   "fast_general_context_chars": 9000,
+  "fast_general_output_tokens": 1024,
+  "fast_general_long_output_tokens": 2048,
   "coding_context_chars": 60000,
   "image_enabled": true,
   "image_models_dir": "models/image",
@@ -389,5 +398,9 @@
   "voice_assets_dir": "models/voice",
   "voice_presets_dir": "data/voice/presets",
   "voice_cache_dir": "data/voice/cache",
-  "voice_device": "cpu"
+  "voice_device": "cpu",
+  "voice_output_device": "",
+  "voice_cache_max_mb": 512,
+  "voice_max_concurrency": 1,
+  "voice_idle_unload_seconds": 600
 }
