@@ -1,59 +1,66 @@
 /* Nexus Core — Mission Control */
 .missions-shell{display:flex;min-height:100vh}
-.missions-side{width:280px;flex-shrink:0;background:#0a1424;border-right:1px solid #1a2c47;padding:18px 14px;display:flex;flex-direction:column;gap:8px;position:sticky;top:0;height:100vh;overflow-y:auto}
-.missions-right{width:300px;flex-shrink:0;background:#0a1424;border-left:1px solid #1a2c47;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.missions-side{width:280px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:8px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.missions-right{width:300px;flex-shrink:0;background:var(--panel2);border-left:1px solid var(--line);padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .missions-main{flex:1;display:flex;flex-direction:column;min-width:0}
 .missions-body{display:flex;flex:1;min-height:0}
-.mission-list{width:380px;flex-shrink:0;border-right:1px solid #1a2c47;overflow-y:auto;padding:10px}
+.mission-list{width:380px;flex-shrink:0;border-right:1px solid var(--line);overflow-y:auto;padding:10px}
 .mission-detail{flex:1;overflow-y:auto;padding:18px}
-.mission-detail .empty{color:#4d5f7c;text-align:center;margin-top:80px}
+.mission-detail .empty{color:var(--info);text-align:center;margin-top:80px}
 
-.mission-card{background:#0c1728;border:1px solid #274a78;border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
-.mission-card:hover{border-color:#3a6299}
-.mission-card.selected{border-color:#11cfff}
-.mission-card .title{color:#dbe6f5;font-size:13px;font-weight:600}
-.mission-card .meta{color:#7f91ad;font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center}
+.mission-card{background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.mission-card:hover{border-color:var(--info)}
+.mission-card.selected{border-color:var(--cyan)}
+.mission-card .title{color:var(--text);font-size:13px;font-weight:600}
+.mission-card .meta{color:var(--muted);font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center}
 .mstatus{display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
-.mstatus.executing,.mstatus.active,.mstatus.planning,.mstatus.replanning,.mstatus.evaluating,.mstatus.verifying{background:#0d3327;color:#4ade80}
-.mstatus.blocked,.mstatus.failed{background:#3d1522;color:#ff7b8f}
-.mstatus.waiting_approval,.mstatus.waiting_dependency,.mstatus.waiting_trigger{background:#3a2c10;color:#fbbf24}
-.mstatus.paused{background:#1a2c47;color:#93a5c0}
-.mstatus.completed{background:#12352e;color:#34d399}
-.mstatus.completed_with_warnings{background:#3a2c10;color:#fbbf24}
-.mstatus.draft,.mstatus.ready,.mstatus.cancelled,.mstatus.archived{background:#1a2438;color:#7f91ad}
+.mstatus.executing,.mstatus.active,.mstatus.planning,.mstatus.replanning,.mstatus.evaluating,.mstatus.verifying{background:var(--line);color:var(--good)}
+.mstatus.blocked,.mstatus.failed{background:var(--danger-tint);color:var(--danger)}
+.mstatus.waiting_approval,.mstatus.waiting_dependency,.mstatus.waiting_trigger{background:var(--line);color:var(--warn)}
+.mstatus.paused{background:var(--line);color:var(--muted)}
+.mstatus.completed{background:var(--line);color:var(--good)}
+.mstatus.completed_with_warnings{background:var(--line);color:var(--warn)}
+.mstatus.draft,.mstatus.ready,.mstatus.cancelled,.mstatus.archived{background:var(--panel2);color:var(--muted)}
 
-.autonomy-card{background:#0c1728;border:1px solid #274a78;border-radius:10px;padding:10px;font-size:11px;color:#c9d5e7;line-height:1.6}
-.autonomy-card .on{color:#4ade80}
-.autonomy-card .off{color:#ff7b8f}
-.mini-button.danger{border-color:#5c2b3d;color:#ff9db0}
-.mini-button.danger:hover{background:#3d1522}
+.autonomy-card{background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:10px;font-size:11px;color:var(--text-dim);line-height:1.6}
+.autonomy-card .on{color:var(--good)}
+.autonomy-card .off{color:var(--danger)}
+.mini-button.danger{border-color:var(--line2);color:var(--danger)}
+.mini-button.danger:hover{background:var(--danger-tint)}
 
-.missions-side textarea,.missions-side select{background:#0c1728;border:1px solid #274a78;border-radius:8px;color:#c9d5e7;font:inherit;font-size:12px;padding:7px 9px;resize:vertical}
+.missions-side textarea,.missions-side select{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--text-dim);font:inherit;font-size:12px;padding:7px 9px;resize:vertical}
 
 .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
-.detail-head h2{margin:0;font-size:17px;color:#e6eef8}
+.detail-head h2{margin:0;font-size:17px;color:var(--text)}
 .detail-actions{display:flex;gap:6px;flex-wrap:wrap}
 .detail-section{margin-bottom:16px}
-.detail-section h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#7f91ad;margin:0 0 6px}
-.detail-section .objective{color:#c9d5e7;font-size:13px;line-height:1.55;white-space:pre-wrap}
+.detail-section h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 6px}
+.detail-section .objective{color:var(--text-dim);font-size:13px;line-height:1.55;white-space:pre-wrap}
 
-.criterion{display:flex;gap:8px;font-size:12px;color:#c9d5e7;padding:4px 0}
+.criterion{display:flex;gap:8px;font-size:12px;color:var(--text-dim);padding:4px 0}
 .criterion .dot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex-shrink:0}
-.criterion .dot.met{background:#4ade80}
-.criterion .dot.unmet{background:#fbbf24}
-.criterion .dot.unknown{background:#4d5f7c}
+.criterion .dot.met{background:var(--good)}
+.criterion .dot.unmet{background:var(--warn)}
+.criterion .dot.unknown{background:var(--info)}
 
-.dag-node{background:#0c1728;border:1px solid #274a78;border-left:3px solid #4d5f7c;border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12px;color:#c9d5e7}
-.dag-node .nstate{float:right;font-size:10px;text-transform:uppercase;color:#7f91ad}
-.dag-node[data-state="running"]{border-left-color:#11cfff}
-.dag-node[data-state="completed"]{border-left-color:#4ade80}
-.dag-node[data-state="failed"]{border-left-color:#ff7b8f}
-.dag-node[data-state="blocked"]{border-left-color:#fbbf24}
-.dag-node .nresult{color:#7f91ad;font-size:11px;margin-top:4px;white-space:pre-wrap}
+.dag-node{background:var(--panel2);border:1px solid var(--line2);border-left:3px solid var(--info);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12px;color:var(--text-dim)}
+.dag-node .nstate{float:right;font-size:10px;text-transform:uppercase;color:var(--muted)}
+.dag-node[data-state="running"]{border-left-color:var(--cyan)}
+.dag-node[data-state="completed"]{border-left-color:var(--good)}
+.dag-node[data-state="failed"]{border-left-color:var(--danger)}
+.dag-node[data-state="blocked"]{border-left-color:var(--warn)}
+.dag-node .nresult{color:var(--muted);font-size:11px;margin-top:4px;white-space:pre-wrap}
 
-.hist-row{font-size:11px;color:#7f91ad;padding:3px 0;border-bottom:1px solid #152238}
-.hist-row b{color:#c9d5e7}
+.hist-row{font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--panel2)}
+.hist-row b{color:var(--text-dim)}
 
 .mini-form{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
-.mini-form input,.mini-form select{background:#0c1728;border:1px solid #274a78;border-radius:8px;color:#c9d5e7;font:inherit;font-size:12px;padding:7px 9px;width:100%;box-sizing:border-box}
+.mini-form input,.mini-form select{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--text-dim);font:inherit;font-size:12px;padding:7px 9px;width:100%;box-sizing:border-box}
 .hist-row .mini-button{font-size:10px;padding:1px 8px;vertical-align:1px}
+
+/* Header — don't inherit chat's 3-col topbar grid. */
+.missions-main .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px;min-height:58px}
+.missions-main .topbar strong{font-size:16px}
+#missionCount{color:var(--muted);font-size:12px;margin-left:10px}
+#missionFilter{width:230px}
+@media(max-width:700px){.missions-main .topbar{flex-wrap:wrap;padding:10px 14px;height:auto}#missionFilter{width:100%}}

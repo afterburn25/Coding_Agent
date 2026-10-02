@@ -626,6 +626,19 @@ $('#conversationList').addEventListener('click',e=>{const row=e.target.closest('
 let conversationSearchTimer=null;
 $('#conversationSearch').addEventListener('input',e=>{clearTimeout(conversationSearchTimer);const q=e.target.value.trim();conversationSearchTimer=setTimeout(()=>loadConversations(q),180);});
 document.querySelectorAll('.utility-tab').forEach(btn=>btn.addEventListener('click',()=>setUtilityPanel(btn.dataset.panel)));
+// Utility rail collapse — persists across sessions so the layout stays as the
+// user left it; the slim edge strip keeps the rail discoverable when closed.
+(function initRailToggle(){
+  const shell=document.querySelector('.app-shell'),btn=$('#railToggle');
+  if(!shell||!btn)return;
+  const apply=()=>{const collapsed=localStorage.getItem('nexus.railCollapsed')==='1';
+    shell.classList.toggle('rail-collapsed',collapsed);
+    btn.textContent=collapsed?'❮':'❯';
+    btn.setAttribute('aria-label',collapsed?'Expand panel':'Collapse panel');
+    btn.title=collapsed?'Expand panel':'Collapse panel';};
+  btn.addEventListener('click',()=>{localStorage.setItem('nexus.railCollapsed',shell.classList.contains('rail-collapsed')?'0':'1');apply();});
+  apply();
+})();
 const activityFilters=document.getElementById('activityFilters');
 if(activityFilters)activityFilters.addEventListener('click',e=>{
   const chip=e.target.closest('[data-tl]');if(!chip)return;
@@ -634,6 +647,12 @@ if(activityFilters)activityFilters.addEventListener('click',e=>{
   for(const rec of tlRows.values())rec.el.style.display=(tlFilter==='all'||rec.el.dataset.group===tlFilter)?'':'none';
 });
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
+// Auto-grow the composer with content (bounded by CSS max-height), and
+// collapse back to one line when emptied.
+function autosizeComposer(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
+input.addEventListener('input',autosizeComposer);
+input.addEventListener('keydown',e=>{requestAnimationFrame(autosizeComposer);});
+form.addEventListener('submit',()=>{setTimeout(()=>{input.style.height='';},0);});
 connectAgentEvents();
 loadStatus().then(async()=>{const [_,__,convos]=await Promise.all([loadReadiness(),loadConversationMemory(),loadConversations()]);const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);}).finally(()=>{
   // Readiness handshake: the desktop host holds the splash screen until the

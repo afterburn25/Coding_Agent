@@ -1,34 +1,34 @@
 /* Nexus Core · System page */
 .system-shell{display:flex;min-height:100vh}
-.system-side{width:220px;flex:0 0 220px;padding:16px;border-right:1px solid var(--border,#2a2f3a);position:sticky;top:0;height:100vh;overflow-y:auto}
+.system-side{width:220px;flex:0 0 220px;padding:16px;border-right:1px solid var(--border,var(--line));position:sticky;top:0;height:100vh;overflow-y:auto}
 .system-main{flex:1;padding:20px 24px;max-width:1100px}
 .brand{font-weight:700;margin-bottom:12px}
 .brand span{opacity:.6;font-weight:400}
 .jump-links{display:flex;flex-direction:column;gap:4px}
 .jump-links a{font-size:12px;opacity:.8;text-decoration:none}
 .jump-links a:hover{opacity:1}
-.panel{margin-bottom:28px;padding:16px;border:1px solid var(--border,#2a2f3a);border-radius:10px;background:var(--panel,#14171d)}
+.panel{margin-bottom:28px;padding:16px;border:1px solid var(--border,var(--line));border-radius:10px;background:var(--panel,var(--panel2))}
 .panel h2{margin:0 0 12px;font-size:15px}
 .grid-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
-.health-card{padding:10px;border:1px solid var(--border,#2a2f3a);border-radius:8px;font-size:12px}
+.health-card{padding:10px;border:1px solid var(--border,var(--line));border-radius:8px;font-size:12px}
 .health-card .name{font-weight:600;margin-bottom:4px}
 .health-card .state{display:inline-block;padding:1px 8px;border-radius:8px;font-size:11px}
-.st-healthy{background:#1d3a24;color:#8fe3a0}
-.st-degraded{background:#3a3117;color:#e8cf7a}
-.st-crashed,.st-hung{background:#3a1d1d;color:#f19a9a}
-.st-starting,.st-restarting{background:#1d2c3a;color:#8fc3e8}
-.st-stopped,.st-overloaded{background:#252a33;color:#9aa4b5}
+.st-healthy{background:var(--line);color:var(--good)}
+.st-degraded{background:var(--line);color:var(--warn)}
+.st-crashed,.st-hung{background:var(--panel2);color:var(--danger)}
+.st-starting,.st-restarting{background:var(--line);color:var(--cyan)}
+.st-stopped,.st-overloaded{background:var(--line);color:var(--muted)}
 .kv{font-size:12px;line-height:1.7}
 .kv .k{opacity:.6;display:inline-block;min-width:150px}
 .scroll-list{max-height:280px;overflow-y:auto;font-size:12px;display:flex;flex-direction:column;gap:6px}
 .row-actions{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
-.row-actions input[type=text]{flex:1;min-width:180px;padding:5px 8px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px}
-.row-actions select{padding:5px 8px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px}
-.list-row{padding:8px;border:1px solid var(--border,#2a2f3a);border-radius:6px}
+.row-actions input[type=text]{flex:1;min-width:180px;padding:5px 8px;background:var(--bg,var(--panel2));border:1px solid var(--border,var(--line));border-radius:6px;color:inherit;font-size:12px}
+.row-actions select{padding:5px 8px;background:var(--bg,var(--panel2));border:1px solid var(--border,var(--line));border-radius:6px;color:inherit;font-size:12px}
+.list-row{padding:8px;border:1px solid var(--border,var(--line));border-radius:6px}
 .list-row .meta{opacity:.6;font-size:11px;margin-top:3px}
 .list-row .actions{margin-top:4px;display:flex;gap:6px}
-.pill{display:inline-block;padding:0 6px;border-radius:8px;font-size:10px;background:#252a33;margin-right:4px}
+.pill{display:inline-block;padding:0 6px;border-radius:8px;font-size:10px;background:var(--line);margin-right:4px}
 .off{opacity:.5}
-pre.ctx{margin:6px 0 0;padding:8px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto}
+pre.ctx{margin:6px 0 0;padding:8px;background:var(--bg,var(--panel2));border:1px solid var(--border,var(--line));border-radius:6px;font-size:11px;white-space:pre-wrap;max-height:220px;overflow:auto}
 .section-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin:14px 0 6px}
-.autonomy-card{font-size:12px;padding:8px;border:1px solid var(--border,#2a2f3a);border-radius:8px}
+.autonomy-card{font-size:12px;padding:8px;border:1px solid var(--border,var(--line));border-radius:8px}

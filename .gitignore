@@ -59,3 +59,8 @@ tools_*.png
 
 # Local PyInstaller output
 /bin/
+
+# Local UI screenshot QA
+.shots/
+.shots-baseline/
+.agent/rag_index.db
