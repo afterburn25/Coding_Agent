@@ -449,6 +449,35 @@ class BackendHealthTests(unittest.TestCase):
             self.assertEqual(health["port"], 9999)
 
 
+class CrashHistoryTests(unittest.TestCase):
+    def test_record_failure_persists_to_jsonl_and_reads_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            netdiag.configure_history(Path(td) / "crash.jsonl")
+            try:
+                entry = netdiag.record_failure(BackendConnectionError(
+                    _win_reset(), subsystem="llm",
+                    url="http://127.0.0.1:8081/v1/chat/completions",
+                    model_id="coder", request_id="req1"))
+                netdiag.annotate_recovery(entry, "succeeded on retry 1")
+                rows = netdiag.crash_history()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0]["request_id"], "req1")
+                self.assertEqual(rows[0]["kind"], "connection_reset")
+                self.assertEqual(rows[1]["recovery_for"], "req1")
+                self.assertEqual(rows[1]["recovery"], "succeeded on retry 1")
+            finally:
+                netdiag.configure_history(None)
+                netdiag._HISTORY = None
+
+    def test_crash_history_empty_without_config(self):
+        old = netdiag._HISTORY
+        netdiag._HISTORY = None
+        try:
+            self.assertEqual(netdiag.crash_history(), [])
+        finally:
+            netdiag._HISTORY = old
+
+
 class DiagnosticsEndpointTests(unittest.TestCase):
     def test_diagnostics_endpoint_reports_failures_and_health(self):
         import threading

@@ -81,6 +81,7 @@ class RuntimeManager:
         self._last_used: dict[str, float] = {}
         self.twin: Any = None  # optional DigitalTwin, attached by AppState
         self._launch_ctx: dict[str, int] = {}
+        self._launch_tuning: dict[str, list[str]] = {}
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
         # Optional residency observer: called with {"action", "model_id",
@@ -999,6 +1000,16 @@ class RuntimeManager:
         status.error = ""
         status.log_path = str(log_path)
         self._managed[profile.id] = _ManagedProcess(profile, process, endpoint, log_handle, status)
+        # Remember the tuned arg-set this process launched with — if it dies
+        # mid-run the recovery path can mark exactly this config bad instead
+        # of relaunching it identically forever.
+        try:
+            self._launch_tuning[profile.id] = list(
+                self.tuner.tuned_flags(
+                    profile, mode=str(getattr(self.config, "performance_mode", "auto")))
+            ) if apply_tuning else []
+        except Exception:
+            self._launch_tuning[profile.id] = []
 
         deadline = time.monotonic() + max(5, profile.startup_timeout)
         last_detail = ""
@@ -1151,6 +1162,30 @@ class RuntimeManager:
             if profile.runtime == "external":
                 return self.ensure_ready(profile)
             status.restarts += 1
+            # If this exact tuned configuration keeps dying mid-run, mark it
+            # bad so the next launch falls back instead of looping on the same
+            # crashing config. Only blacklist on a real process exit with a
+            # crash signature — a refused connection to a still-alive server
+            # is a stale socket, not a bad config.
+            item = self._managed.get(profile.id)
+            died = item is not None and item.process.poll() is not None
+            if died and status.restarts >= 2:
+                tail = self._log_tail(status.log_path) if status.log_path else ""
+                cause = ""
+                for pattern, label in self._CRASH_SIGNATURES:
+                    if pattern.lower() in tail.lower():
+                        cause = label
+                        break
+                tuned = self._launch_tuning.get(profile.id) or []
+                if tuned:
+                    code = item.process.poll()
+                    try:
+                        self.tuner.mark_bad(
+                            profile, tuned,
+                            cause or f"llama-server exited with code {code}")
+                    except Exception:
+                        pass
+                status.crash_reason = cause or status.crash_reason
             self._stop_managed(profile.id)
             return self._start_llama_cpp(profile)
 

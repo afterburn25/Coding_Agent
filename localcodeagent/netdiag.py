@@ -12,9 +12,11 @@ from __future__ import annotations
 import collections
 import http.client
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 # Ordered categories — first match wins.
@@ -233,6 +235,33 @@ class BackendConnectionError(RuntimeError):
 # Entries carry no prompts and no secrets.
 _FAILURES: collections.deque = collections.deque(maxlen=25)
 
+# Optional durable crash history — a bounded JSONL next to the other runtime
+# state so crash patterns (e.g. "qwen3 30B resets at large context") survive
+# restarts and can feed the Digital Twin / tuner. Configured by the server at
+# boot; when unset the ring above is still recorded.
+_HISTORY = None
+_HISTORY_LOCK = threading.Lock()
+
+
+def configure_history(path: Path | str | None) -> None:
+    """Point crash-history persistence at a JSONL file (called once at boot)."""
+    global _HISTORY
+    if not path:
+        return
+    from .autonomy.state import JsonlLog  # late import — state.py is heavier
+    _HISTORY = JsonlLog(Path(path), max_bytes=1024 * 1024, keep_tail=512 * 1024)
+
+
+def _persist_failure(entry: dict) -> None:
+    log = _HISTORY
+    if log is None:
+        return
+    try:
+        with _HISTORY_LOCK:
+            log.append(dict(entry))
+    except Exception:
+        pass  # history is best-effort; never break the caller's error path
+
 
 def record_failure(exc: BaseException) -> dict:
     """Snapshot a transport failure for the diagnostics report; returns the
@@ -245,8 +274,42 @@ def record_failure(exc: BaseException) -> dict:
     entry["time"] = time.time()
     entry["recovery"] = "pending"
     _FAILURES.append(entry)
+    _persist_failure(entry)
     return entry
+
+
+def annotate_recovery(entry: dict | None, outcome: str) -> None:
+    """Record the recovery outcome on a failure entry — updates the in-memory
+    row and appends the resolution to the durable history."""
+    if not isinstance(entry, dict):
+        return
+    entry["recovery"] = outcome
+    log = _HISTORY
+    if log is None:
+        return
+    try:
+        with _HISTORY_LOCK:
+            log.append({
+                "recovery_for": entry.get("request_id") or "",
+                "subsystem": entry.get("subsystem", ""),
+                "kind": entry.get("kind", ""),
+                "recovery": outcome,
+                "time": time.time(),
+            })
+    except Exception:
+        pass
 
 
 def recent_failures() -> list[dict]:
     return list(_FAILURES)
+
+
+def crash_history(limit: int = 50) -> list[dict]:
+    """Read back the persisted crash/recovery history (newest last)."""
+    log = _HISTORY
+    if log is None:
+        return []
+    try:
+        return log.tail(limit)
+    except Exception:
+        return []

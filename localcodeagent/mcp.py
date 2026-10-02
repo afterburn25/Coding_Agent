@@ -68,6 +68,25 @@ class MCPError(Exception):
     pass
 
 
+def _conn_diag(exc: BaseException, config: "MCPServerConfig", *,
+               process: subprocess.Popen | None = None,
+               method: str = "") -> "object":
+    """Wrap an MCP transport failure in BackendConnectionError so it lands in
+    the diagnostics ring with server/pid context instead of a bare socket
+    error. Returns the wrapped exception; callers decide whether to raise it
+    or keep the MCPError surface."""
+    from .netdiag import BackendConnectionError
+    peer = config.url or (config.command[0] if config.command else config.id)
+    proc = None
+    if process is not None:
+        proc = {"pid": process.pid,
+                "exit_code": process.poll(),
+                "command": " ".join(config.command)[:200]}
+    return BackendConnectionError(
+        exc, subsystem="mcp", url=peer, model_id=config.id,
+        method=method or "POST", process=proc)
+
+
 class MCPClient:
     """Synchronous stdio JSON-RPC client for one MCP server process."""
 
@@ -182,7 +201,15 @@ class MCPClient:
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         if not self.is_alive():
-            raise MCPError(f"MCP server '{self.config.id}' is not running")
+            from .netdiag import record_failure
+            proc = self._proc
+            exited = proc is not None and proc.poll() is not None
+            diag = _conn_diag(
+                BrokenPipeError(f"MCP server '{self.config.id}' exited mid-request"
+                                if exited else f"MCP server '{self.config.id}' is not running"),
+                self.config, process=proc, method=method)
+            record_failure(diag)
+            raise MCPError(diag.friendly) from diag
         with self._send_lock:
             self._next_id += 1
             request_id = self._next_id
@@ -197,6 +224,15 @@ class MCPClient:
             message = q.get(timeout=self.timeout)
         except queue.Empty as exc:
             self._pending.pop(request_id, None)
+            proc = self._proc
+            if proc is not None and proc.poll() is not None:
+                # The server died while we waited — surface that, not a bare
+                # timeout. Recorded so diagnostics/watchdog see the crash.
+                from .netdiag import record_failure
+                diag = _conn_diag(BrokenPipeError("process exited"), self.config,
+                                  process=proc, method=method)
+                record_failure(diag)
+                raise MCPError(diag.friendly) from diag
             raise MCPError(f"MCP request '{method}' timed out after {self.timeout}s") from exc
         if "error" in message:
             err = message["error"]
@@ -332,7 +368,10 @@ class MCPHTTPClient:
         except urllib.error.HTTPError as exc:
             raise MCPError(f"MCP HTTP {exc.code}: {exc.read()[:300]!r}") from exc
         except OSError as exc:
-            raise MCPError(f"MCP HTTP request failed: {exc}") from exc
+            from .netdiag import record_failure
+            diag = _conn_diag(exc, self.config)
+            record_failure(diag)
+            raise MCPError(diag.friendly) from diag
         # Streamable HTTP may answer with SSE frames — take the last data: line.
         payload = ""
         for line in body.splitlines():

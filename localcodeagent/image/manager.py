@@ -425,6 +425,12 @@ class ImageManager:
             job.state="failed"; job.stage="failed"
             job.error_code=error["code"]; job.error_message=error["message"]; job.error=job.error_message
             job.technical_details=error["technical_details"]; job.finished_at=time.time()
+            try:
+                from ..netdiag import is_transport_failure, record_failure
+                if is_transport_failure(exc):
+                    record_failure(exc)
+            except Exception:
+                pass
         finally:
             self._save_jobs(job)
             if stopped and bool(getattr(self.config,"image_restore_chat_model",True)) and self.runtime is not None:

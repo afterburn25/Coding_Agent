@@ -518,6 +518,49 @@ class RuntimeManagerTests(unittest.TestCase):
             # tuned args now blacklisted — tuned_flags falls back to heuristics
             self.assertNotEqual(manager.tuner.tuned_flags(profile), tuned)
 
+    def test_recover_marks_repeatedly_crashing_tuned_config_bad(self):
+        # A tuned config that launches fine but dies mid-generation is real
+        # evidence the config is broken — recover() must blacklist it rather
+        # than relaunch the same args forever.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            tuned = ["--batch-size", "2048", "--ubatch-size", "1024"]
+            manager.tuner.record_result(profile, tuned, {"predicted_per_second": 99.0})
+            proc = _attach_fake_managed(manager, profile)
+            manager._launch_tuning[profile.id] = list(tuned)
+            log = Path(td) / "coder.log"
+            log.write_text("llama-server: cudaMalloc failed" + chr(10), encoding="utf-8")
+            manager._status[profile.id].log_path = str(log)
+            manager._status[profile.id].restarts = 1
+            proc.alive = False  # died mid-run
+
+            manager._start_llama_cpp = lambda p, ctx_override=None: "http://127.0.0.1:9/v1"
+            manager.recover(profile)
+
+            bad = manager.tuner._data.get("bad_results", {}).get(profile.id, [])
+            self.assertTrue(any(tuple(r.get("args") or ()) == tuple(tuned) for r in bad))
+            self.assertNotEqual(manager.tuner.tuned_flags(profile), tuned)
+
+    def test_recover_does_not_blacklist_on_first_crash(self):
+        # One mid-run crash is not proof the config is bad — only repeated
+        # failures blacklists, so a transient OOM does not permanently
+        # discard a good tuned config.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            tuned = ["--batch-size", "2048"]
+            proc = _attach_fake_managed(manager, profile)
+            manager._launch_tuning[profile.id] = list(tuned)
+            manager._status[profile.id].restarts = 0
+            proc.alive = False
+
+            manager._start_llama_cpp = lambda p, ctx_override=None: "http://127.0.0.1:9/v1"
+            manager.recover(profile)
+
+            bad = manager.tuner._data.get("bad_results", {}).get(profile.id, [])
+            self.assertFalse(any(tuple(r.get("args") or ()) == tuple(tuned) for r in bad))
+
     def test_launch_fallback_bare_when_heuristic_also_fails(self):
         with tempfile.TemporaryDirectory() as td:
             profile = self._profile()

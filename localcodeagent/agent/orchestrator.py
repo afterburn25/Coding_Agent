@@ -167,6 +167,7 @@ class AgentOrchestrator:
         digital_twin=None,
         knowledge_graph=None,
         skills=None,
+        health=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -192,6 +193,9 @@ class AgentOrchestrator:
         # SkillRegistry or zero-arg resolver — enabled skills inject bounded
         # instruction context into prompts.
         self.skills = skills
+        # HealthService (or resolver) — a backend transport failure pushes
+        # "crashed" immediately rather than waiting for the next probe tick.
+        self.health = health
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -826,7 +830,7 @@ class AgentOrchestrator:
                 else:
                     result = method(messages=messages, tools=tools, **cap)
                 if failure_rec is not None:
-                    failure_rec["recovery"] = f"succeeded on retry {attempts}"
+                    netdiag.annotate_recovery(failure_rec, f"succeeded on retry {attempts}")
                 return result
             except (RuntimeError, OSError, http.client.HTTPException) as exc:
                 # Attach live backend diagnostics so a bare WinError 10054
@@ -837,6 +841,18 @@ class AgentOrchestrator:
                 except Exception:
                     pass
                 failure_rec = netdiag.record_failure(exc)
+                try:
+                    health = self.health() if callable(self.health) else self.health
+                    if health is not None:
+                        backend = getattr(exc, "backend", None) or {}
+                        alive = backend.get("pid") and backend.get("exit_code") is None
+                        health.report(
+                            "llm-runtime",
+                            "degraded" if alive else "crashed",
+                            (getattr(exc, "diagnostic_text", lambda: str(exc))())[:300],
+                        )
+                except Exception:
+                    pass
                 if model_events is not None:
                     diag = getattr(exc, "diagnostic", None)
                     failure_event = {
@@ -849,18 +865,18 @@ class AgentOrchestrator:
                     model_events.append(failure_event)
                     self._safe_emit(event_callback, {"type": "model", "event": failure_event})
                 if attempts >= self.config.runtime_recovery_attempts:
-                    failure_rec["recovery"] = f"gave up after {attempts} retries"
+                    netdiag.annotate_recovery(failure_rec, f"gave up after {attempts} retries")
                     raise
                 # A 4xx rejection means the server is healthy and answered —
                 # restarting it cannot fix a malformed/oversized request.
                 if getattr(exc, "status", 0) and 400 <= int(exc.status) < 500:
-                    failure_rec["recovery"] = "not retried — server rejected the request (4xx)"
+                    netdiag.annotate_recovery(failure_rec, "not retried — server rejected the request (4xx)")
                     raise
                 # A mid-stream failure after tokens were already delivered
                 # must NOT auto-retry — the user already saw partial output
                 # and a retry would duplicate it.
                 if getattr(exc, "delivered_output", False):
-                    failure_rec["recovery"] = "not retried — partial output already delivered"
+                    netdiag.annotate_recovery(failure_rec, "not retried — partial output already delivered")
                     raise
                 attempts += 1
                 if profile.runtime == "llama_cpp":

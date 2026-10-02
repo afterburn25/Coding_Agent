@@ -211,6 +211,16 @@ class HealthTests(unittest.TestCase):
             h.check("svc")
         self.assertEqual(recovered["n"], 2)  # bounded, never infinite
 
+    def test_report_pushes_state_and_recovers(self):
+        h = HealthService()
+        recovered = {"n": 0}
+        h.register("svc", lambda: "healthy",
+                   recover=lambda: recovered.__setitem__("n", recovered["n"] + 1) or True,
+                   cooldown_s=0)
+        self.assertEqual(h.report("svc", "crashed", "socket reset"), "healthy")
+        self.assertEqual(recovered["n"], 1)
+        self.assertEqual(h.report("nope", "crashed"), "unknown")
+
     def test_overall_and_persist(self):
         with tempfile.TemporaryDirectory() as td:
             h = HealthService(Path(td) / "health.json")

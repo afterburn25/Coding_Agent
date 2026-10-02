@@ -287,6 +287,9 @@ class AppState:
         self.artifacts = ArtifactManager(runtime_root / "data" / "artifacts")
         self.backups = BackupService(runtime_root)
         self.health = HealthService(runtime_root / "data" / "health.json")
+        # Durable crash/recovery history — patterns feed diagnostics, the
+        # tuner and Digital Twin calibration across restarts.
+        netdiag.configure_history(runtime_root / "data" / "crash_history.jsonl")
         self.connectors = ConnectorRegistry(
             state_path=runtime_root / "data" / "connectors_audit.json",
             vault=self.secrets,
@@ -560,6 +563,7 @@ class AppState:
             # it must not lock files during AppState construction.
             knowledge_graph=lambda: self.knowledge,
             skills=lambda: self.skills,
+            health=lambda: self.health,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""

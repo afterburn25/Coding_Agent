@@ -61,6 +61,22 @@ class HealthService:
         comp.detail = detail
         comp.last_check = time.time()
 
+    def report(self, name: str, state: str, detail: str = "") -> str:
+        """Push a component state transition immediately — e.g. a transport
+        failure observed mid-request — rather than waiting for the next probe
+        tick. Bad states still route through the registered recover callback
+        with the same bounded-attempts/cooldown rules as probe-driven checks."""
+        comp = self.components.get(name)
+        if comp is None:
+            return "unknown"
+        if state not in STATES:
+            state = "degraded"
+        with self._lock:
+            self._transition(comp, state, detail)
+            if state in BAD_STATES and comp.recover is not None:
+                self._try_recover(comp)
+            return comp.state
+
     def check(self, name: str) -> str:
         comp = self.components.get(name)
         if comp is None:
