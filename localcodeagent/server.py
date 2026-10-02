@@ -289,6 +289,17 @@ class AppState:
             state_path=runtime_root / "data" / "connectors_audit.json",
             vault=self.secrets,
             permission_check=lambda perm: self.permission_manager.effective(perm))
+        # First-class connector for the repo host — lazy client factory so a
+        # token exported after boot still authenticates; slug resolves from
+        # the workspace git remote.
+        try:
+            from .connectors.github import GitHubConnector
+            from .tools.github import GitHubCodingClient, _repo_slug
+            self.connectors.register(GitHubConnector(
+                client_factory=lambda: GitHubCodingClient(config),
+                slug=lambda: _repo_slug(self.workspace)))
+        except Exception:
+            pass
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         self._rag_db = self.workspace / ".agent" / "rag_index.db"

@@ -77,6 +77,58 @@ class ConnectorTests(unittest.TestCase):
         reg.set_enabled("fake-svc", False)
         self.assertFalse(reg.call("fake-svc", "fetch")["ok"])
 
+    def test_github_connector_routes_and_auth_gate(self):
+        from localcodeagent.connectors.github import GitHubConnector
+
+        calls = []
+
+        class StubClient:
+            authenticated = True
+
+            def request(self, method, path, *, params=None, body=None,
+                        require_auth=False):
+                calls.append((method, path, params, body, require_auth))
+                if path == "/rate_limit":
+                    return {"resources": {"core": {"remaining": 4990}}}
+                if path.endswith("/issues") and method == "GET":
+                    return [{"number": 7, "title": "bug", "state": "open",
+                             "labels": [{"name": "bug"}]},
+                            {"number": 8, "title": "pr", "state": "open",
+                             "pull_request": {}}]
+                if path.endswith("/issues") and method == "POST":
+                    return {"number": 9, "html_url": "https://x/9"}
+                return {}
+
+        reg = self._reg()
+        reg.register(GitHubConnector(
+            client_factory=lambda: StubClient(), slug="acme/widgets"))
+
+        health = reg.health("github")
+        self.assertTrue(health["ok"])
+        self.assertEqual(health["remaining"], 4990)
+
+        out = reg.call("github", "list_issues")
+        self.assertTrue(out["ok"], out)
+        # Pull-request-shaped rows are filtered out of issue lists.
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["issues"][0]["number"], 7)
+
+        out = reg.call("github", "create_issue", title="found it")
+        self.assertTrue(out["ok"])
+        self.assertTrue(calls[-1][4])  # require_auth on writes
+
+        out = reg.call("github", "ci_status")
+        self.assertTrue(out["ok"])
+        self.assertIn("/actions/runs", calls[-1][1])
+
+        # Missing slug surfaces a clear error, not a traceback.
+        reg2 = self._reg()
+        reg2.register(GitHubConnector(
+            client_factory=lambda: StubClient(), slug=""))
+        out = reg2.call("github", "repo")
+        self.assertFalse(out["ok"])
+        self.assertIn("slug", out["error"])
+
 
 class KnowledgeGraphTests(unittest.TestCase):
     def test_entities_edges_neighbors(self):
