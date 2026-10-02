@@ -81,7 +81,7 @@ class ToolManifestTests(unittest.TestCase):
         self.assertIn("read_file", {s["function"]["name"] for s in reg.schemas()})
 
     def test_disabled_state_persists(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = Path(td) / "tools_state.json"
             reg = _registry()
             reg.state_path = state
@@ -111,7 +111,7 @@ class PermissionManagerTests(unittest.TestCase):
         perms = {"filesystem.write": "session"}
         mgr = PermissionManager(perms)
         reg = ToolRegistry(mgr)
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             register_filesystem_tools(reg, Path(td))
             denied = reg.execute("write_file", {"path": "a.txt", "content": "x"})
             self.assertTrue(denied.startswith("APPROVAL_REQUIRED"))
@@ -179,7 +179,7 @@ class PermissionManagerTests(unittest.TestCase):
 
 class JobManagerTests(unittest.TestCase):
     def test_submit_update_cancel(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             mgr = JobManager(Path(td) / "jobs.json")
             job = mgr.submit("transcription", "Transcribe video.mp4")
             self.assertEqual(job.state, "queued")
@@ -192,7 +192,7 @@ class JobManagerTests(unittest.TestCase):
             self.assertTrue((Path(td) / "jobs.json").is_file())
 
     def test_restart_marks_active_jobs_failed(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             path = Path(td) / "jobs.json"
             mgr = JobManager(path)
             job = mgr.submit("render", "Render scene")
@@ -234,7 +234,7 @@ class PluginManifestTests(unittest.TestCase):
         self.assertEqual(manifest.category, "utilities")
 
     def test_manifest_tool_registers_and_invokes(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             mdir = root / "manifests"
             mdir.mkdir()
@@ -268,7 +268,7 @@ class PluginManifestTests(unittest.TestCase):
             self.assertIn("hello nexus", out["stdout"])
 
     def test_manifest_without_invoke_is_not_callable(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             mdir = root / "manifests"
             mdir.mkdir()
@@ -289,7 +289,7 @@ class PluginManifestTests(unittest.TestCase):
             self.assertIn("TOOL_NOT_INSTALLED", reg.execute("blender", {}))
 
     def test_installed_manifest_without_invoke_is_not_callable(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             mdir = root / "manifests"
             mdir.mkdir()
@@ -307,7 +307,7 @@ class PluginManifestTests(unittest.TestCase):
             self.assertIn("ERROR", reg.execute("comfyui", {}))
 
     def test_invalid_manifest_reports_error(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             mdir = Path(td)
             self._write(mdir, "bad.json", {"name": "no id"})
             result = load_plugin_manifests(mdir, _registry())
@@ -405,7 +405,7 @@ class TerminalToolTests(unittest.TestCase):
         return reg, tracker
 
     def test_terminal_run_streams_output_to_sink(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg, _ = self._reg(Path(td))
             chunks = []
             reg.context["stream_sink"] = lambda name, chunk: chunks.append((name, chunk))
@@ -420,7 +420,7 @@ class TerminalToolTests(unittest.TestCase):
             self.assertEqual(chunks, [])
 
     def test_background_job_cancel_kills_process(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             mgr = JobManager(ws / "jobs.json")
             reg, tracker = self._reg(ws, jobs=mgr)
@@ -439,7 +439,7 @@ class TerminalToolTests(unittest.TestCase):
             self.assertEqual(mgr.get(job_id).state, "cancelled")
 
     def test_run_process_streaming_timeout(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.tools.terminal import run_process_streaming
             code, out, err, timed_out = run_process_streaming(
                 [sys.executable, "-u", "-c", "import time;print('hi',flush=True);time.sleep(30)"],
@@ -456,7 +456,7 @@ class TerminalToolTests(unittest.TestCase):
             resolve_shell("fakeshell")
 
     def test_terminal_run_returns_json(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             ws = Path(tmp)
             reg, _ = self._reg(ws)
             out = reg.execute("terminal_run", {"command": "echo hello"})
@@ -466,7 +466,7 @@ class TerminalToolTests(unittest.TestCase):
             self.assertIn("shell", data)
 
     def test_terminal_run_rejects_cwd_outside_workspace(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             ws = Path(tmp) / "ws"
             ws.mkdir()
             reg, _ = self._reg(ws)
@@ -474,7 +474,7 @@ class TerminalToolTests(unittest.TestCase):
             self.assertTrue(out.startswith("ERROR"))
 
     def test_terminal_background_tracked_and_killable(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             ws = Path(tmp)
             jobs = JobManager(ws / "jobs.json")
             reg, tracker = self._reg(ws, jobs=jobs)
@@ -489,7 +489,7 @@ class TerminalToolTests(unittest.TestCase):
             self.assertEqual(jobs.get(out["job_id"]).state, "cancelled")
 
     def test_permission_denied_blocks_terminal(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             reg = ToolRegistry({"shell.execute": "deny"})
             register_terminal_tools(reg, Path(tmp), log_dir=Path(tmp) / ".logs")
             out = reg.execute("terminal_run", {"command": "echo nope"})
@@ -650,7 +650,7 @@ class FSUtilTests(unittest.TestCase):
         """Parallel writers to one path must not collide on a shared tmp name."""
         import threading
         from localcodeagent.fsutil import atomic_write_text
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             path = Path(td) / "state.json"
             errors = []
 
@@ -875,7 +875,7 @@ class MCPHTTPTests(unittest.TestCase):
 class BrowserRunnerTests(unittest.TestCase):
     def test_session_path_sanitized(self):
         from localcodeagent.webtools.browser import BrowserRunner
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             runner = BrowserRunner(artifacts_dir=Path(td))
             p = runner.session_path("my session/../evil")
             self.assertEqual(p.parent, Path(td))
@@ -885,7 +885,7 @@ class BrowserRunnerTests(unittest.TestCase):
 
     def test_health_reports_playwright_state(self):
         from localcodeagent.webtools.browser import BrowserRunner
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             runner = BrowserRunner(artifacts_dir=Path(td))
             h = runner.health()
             self.assertIn("ok", h)
@@ -894,7 +894,7 @@ class BrowserRunnerTests(unittest.TestCase):
 
 class SecretVaultTests(unittest.TestCase):
     def test_set_get_list_delete_and_persist(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             path = Path(td) / "secrets.vault"
             vault = SecretVault(path)
             vault.set("github.personal", "ghp_secret_value_123", description="GitHub PAT")
@@ -915,7 +915,7 @@ class SecretVaultTests(unittest.TestCase):
             self.assertIsNone(vault2.get("openai.api"))
 
     def test_name_validation(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             vault = SecretVault(Path(td) / "s.vault")
             with self.assertRaises(ValueError):
                 vault.set("../evil", "x")
@@ -925,7 +925,7 @@ class SecretVaultTests(unittest.TestCase):
                 vault.set("ok.name", "")
 
     def test_redact_masks_stored_values(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             vault = SecretVault(Path(td) / "s.vault")
             vault.set("api.key", "ghp_secret_value_123")
             vault.set("short", "abc")
@@ -937,7 +937,7 @@ class SecretVaultTests(unittest.TestCase):
 
 class CodeIntelTests(unittest.TestCase):
     def test_extract_symbols_python(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             p = Path(td) / "mod.py"
             p.write_text("import os\n\nclass Foo:\n    pass\n\ndef bar():\n    pass\n", encoding="utf-8")
             info = extract_symbols(p)
@@ -947,7 +947,7 @@ class CodeIntelTests(unittest.TestCase):
             self.assertIn(("import", "os"), kinds)
 
     def test_backend_field_reports_extraction_path(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             py = Path(td) / "m.py"
             py.write_text("def f():\n    pass\n", encoding="utf-8")
             js = Path(td) / "m.js"
@@ -959,7 +959,7 @@ class CodeIntelTests(unittest.TestCase):
             self.assertTrue(any(s["name"] == "helper" for s in js_info["symbols"]))
 
     def test_code_map_scans_tree(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             (ws / "a.py").write_text("class A:\n    pass\n", encoding="utf-8")
             (ws / "skip.txt").write_text("class X", encoding="utf-8")
@@ -981,7 +981,7 @@ class ApiToolTests(unittest.TestCase):
         self.assertIn("error", out)
 
     def test_auth_secret_reference(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             vault = SecretVault(Path(td) / "v.vault")
             vault.set("svc.key", "supersecret")
             reg = ToolRegistry({"external_api.call": "allow", "credentials.use": "allow"})
@@ -1023,7 +1023,7 @@ class DataToolTests(unittest.TestCase):
         self.assertIn('"rows"', out)
 
     def test_chart_svg_written(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             out = render_chart({"type": "bar", "labels": ["a", "b"], "values": [3, 7], "title": "T"}, Path(td) / "c.svg")
             text = out.read_text(encoding="utf-8")
             self.assertIn("<svg", text)
@@ -1054,7 +1054,7 @@ class MediaToolTests(unittest.TestCase):
         self.assertIn("concat=n=2", " ".join(merged))
 
     def test_media_tools_report_missing_ffmpeg(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             (ws / "in.mp4").write_bytes(b"fake")
             reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow", "shell.execute": "allow"})
@@ -1067,7 +1067,7 @@ class MediaToolTests(unittest.TestCase):
             self.assertTrue(out.startswith("ERROR"))
 
     def test_media_transcribe_pipeline_fails_cleanly(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             (ws / "clip.mp4").write_bytes(b"fake")
             reg = ToolRegistry({"shell.execute": "allow", "filesystem.write": "allow"})
@@ -1081,7 +1081,7 @@ class MediaToolTests(unittest.TestCase):
                 self.assertEqual(out.get("failed_step"), "extract_audio")
 
     def test_speak_text_requires_voice_model(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg = ToolRegistry({"shell.execute": "allow"})
             register_media_tools(reg, Path(td))
             out = reg.execute("speak_text", {"text": "hello"})
@@ -1090,7 +1090,7 @@ class MediaToolTests(unittest.TestCase):
 
     def test_manifest_invoker_stdin(self):
         import sys
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             manifest = {
                 "id": "echo_in", "name": "Echo In", "executables": [sys.executable],
@@ -1111,7 +1111,7 @@ class MediaToolTests(unittest.TestCase):
 
 class DocumentToolTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.ws = Path(self.tmp.name)
         self.reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow"})
         register_document_tools(self.reg, self.ws)
@@ -1157,7 +1157,7 @@ class DocumentToolTests(unittest.TestCase):
 
 class KnowledgeToolTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.ws = Path(self.tmp.name)
         self.reg = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow"})
         self.index = register_knowledge_tools(self.reg, self.ws)
@@ -1196,7 +1196,7 @@ class KnowledgeToolTests(unittest.TestCase):
 
 class SandboxToolTests(unittest.TestCase):
     def test_python_exec(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg = ToolRegistry({"shell.execute": "allow"})
             register_sandbox_tools(reg, Path(td))
             out = json.loads(reg.execute("python_exec", {"code": "print(6*7)"}))
@@ -1207,7 +1207,7 @@ class SandboxToolTests(unittest.TestCase):
             self.assertEqual(out["exit_code"], 3)
 
     def test_python_exec_isolated(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             out = run_python("import sys, json; print(json.dumps(sys.flags.isolated))", Path(td) / "sb")
             self.assertTrue(out["ok"])
             self.assertIn("1", out["stdout"])
@@ -1228,7 +1228,7 @@ class EventBusTests(unittest.TestCase):
 
     def test_jobs_and_registry_emit(self):
         bus = EventBus()
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             jobs = JobManager(Path(td) / "jobs.json")
             jobs.on_change = make_emitter(bus, "job")
             reg = ToolRegistry({"filesystem.read": "allow"})
@@ -1261,7 +1261,7 @@ class EventBusTests(unittest.TestCase):
 
 class WorkflowToolTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.ws = Path(self.tmp.name)
         self.wdir = self.ws / "workflows"
         self.wdir.mkdir()
@@ -1388,7 +1388,7 @@ class BlenderToolTests(unittest.TestCase):
         compile(script, "<blender-scene>", "exec")  # generated script is valid Python
 
     def test_blender_render_delegates_cleanly(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = Path(td)
             reg = ToolRegistry({"shell.execute": "allow", "filesystem.write": "allow"})
             register_blender_tools(reg, ws, jobs=JobManager(ws / "jobs.json"))
@@ -1410,7 +1410,7 @@ class DockerToolTests(unittest.TestCase):
         return reg, captured
 
     def test_docker_run_builds_safe_argv(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg, captured = self._registry_with_docker(Path(td))
             reg.execute("docker_run", {"image": "python:3.12", "command": "python -V"})
             argv = captured["argv"]
@@ -1422,13 +1422,13 @@ class DockerToolTests(unittest.TestCase):
             self.assertEqual(argv[-3:], ["sh", "-c", "python -V"])
 
     def test_docker_run_requires_image_and_command(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg, _ = self._registry_with_docker(Path(td))
             self.assertIn("image", reg.execute("docker_run", {"command": "x"}))
             self.assertIn("command", reg.execute("docker_run", {"image": "python"}))
 
     def test_docker_network_opt_in(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             reg, captured = self._registry_with_docker(Path(td))
             reg.execute("docker_run", {"image": "alpine", "command": ["ls"], "network": True})
             self.assertNotIn("--network", captured["argv"])
@@ -1452,7 +1452,7 @@ class RouterTelemetryTests(unittest.TestCase):
         self.assertGreater(scored["tool_a"], scored["tool_b"])
 
     def test_telemetry_persists_and_stats(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             path = Path(td) / "telemetry.jsonl"
             reg = self._registry()
             router = ToolRouter(reg, telemetry_path=path)
@@ -1470,7 +1470,7 @@ class RouterTelemetryTests(unittest.TestCase):
 
 class CodeIntelAstTests(unittest.TestCase):
     def test_python_ast_backend(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             p = Path(td) / "mod.py"
             p.write_text(
                 "import os\nfrom typing import Any\n\n"
@@ -1487,7 +1487,7 @@ class CodeIntelAstTests(unittest.TestCase):
             self.assertEqual(foo.get("bases"), ["Base"])
 
     def test_python_syntax_error_falls_back(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             p = Path(td) / "bad.py"
             p.write_text("class Broken(:\n    def nope(\n", encoding="utf-8")
             out = extract_symbols(p)
@@ -1510,7 +1510,7 @@ class AppStateWiringTests(unittest.TestCase):
         return AppState(cfg, Path(td), Path(td) / ".runtime")
 
     def test_core_tool_families_registered(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             names = {m["name"] for m in state.tools.manifests()}
             for expected in (
@@ -1531,7 +1531,7 @@ class AppStateWiringTests(unittest.TestCase):
     def test_repo_search_queries_incremental_index(self):
         import json
         from localcodeagent.server import stop_state
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             try:
                 (Path(td) / "mod.py").write_text(
@@ -1545,7 +1545,7 @@ class AppStateWiringTests(unittest.TestCase):
                 stop_state(state)
 
     def test_idle_comfyui_evicted_only_when_managed_and_idle(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             state.config.comfyui_idle_unload_seconds = 60.0
             rt = state.images.backend_runtime
@@ -1570,7 +1570,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertTrue(ev and ev[-1]["event"].get("model_id") == "comfyui")
 
     def test_readiness_reports_tools_summary(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             payload = state.readiness_payload(probe_external=False)
             summary = payload["tools_summary"]
@@ -1581,7 +1581,7 @@ class AppStateWiringTests(unittest.TestCase):
                              summary["total"])
 
     def test_autonomous_mode_auto_resumes_interrupted_task(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             from localcodeagent.workflow.tasks import TaskStore
@@ -1607,7 +1607,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(calls, [task.id])
 
     def test_autonomous_approval_timeout_fails_stale_task(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             ws = Path(td)
@@ -1632,7 +1632,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertIn("Approval timed out", updated.error)
 
     def test_approval_waits_forever_without_autonomous_mode(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             task = state.tasks.create("risky work", "auto")
             state.tasks.update(task.id, status="waiting_approval",
@@ -1643,7 +1643,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(state.tasks.get(task.id).status, "waiting_approval")
 
     def test_autonomous_error_retry_recovers_stale_error_task(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             from localcodeagent.agent.orchestrator import AgentOrchestrator
@@ -1671,7 +1671,7 @@ class AppStateWiringTests(unittest.TestCase):
 
     def test_work_queue_persists_and_pops_fifo(self):
         from localcodeagent.workqueue import WorkQueue
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             q = WorkQueue(Path(td))
             first = q.enqueue("task one")
             q.enqueue("task two")
@@ -1685,7 +1685,7 @@ class AppStateWiringTests(unittest.TestCase):
 
     def test_work_queue_is_bounded(self):
         from localcodeagent.workqueue import WorkQueue
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             q = WorkQueue(Path(td))
             for i in range(WorkQueue.MAX_ITEMS):
                 q.enqueue(f"task {i}")
@@ -1694,7 +1694,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(len(q), WorkQueue.MAX_ITEMS)
 
     def test_queue_dequeues_when_idle(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             from localcodeagent.agent.orchestrator import AgentOrchestrator
@@ -1718,7 +1718,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(len(state.queue), 0)
 
     def test_queue_waits_while_task_running(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             state.queue.enqueue("queued work")
             task = state.tasks.create("busy", "auto")
@@ -1729,7 +1729,7 @@ class AppStateWiringTests(unittest.TestCase):
     def test_queue_dequeue_is_single_flight(self):
         import threading
         from localcodeagent.agent.orchestrator import AgentOrchestrator
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             for i in range(3):
                 state.queue.enqueue(f"work {i}")
@@ -1761,7 +1761,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(len(state.queue), 0)
 
     def test_auto_resume_stays_off_when_disabled(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             from localcodeagent.workflow.tasks import TaskStore
@@ -1784,7 +1784,7 @@ class AppStateWiringTests(unittest.TestCase):
     def test_interrupted_task_auto_resumes_without_autonomous_mode(self):
         # Crash recovery is not an autonomous-mode feature: a restart should
         # continue interrupted work in every mode.
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.workflow.tasks import TaskStore
             from localcodeagent.agent.orchestrator import AgentOrchestrator
             ws = Path(td)
@@ -1801,7 +1801,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(calls, [task.id])
 
     def test_use_capability_routes_through_router(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             out = json.loads(state.tools.execute(
                 "use_capability",
@@ -1811,7 +1811,7 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertTrue(out["ok"] or out.get("attempts"), out)
 
     def test_events_bus_wired(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             sub = state.events.subscribe(replay=0)
             job = state.jobs.submit("test", "probe")
@@ -1821,7 +1821,7 @@ class AppStateWiringTests(unittest.TestCase):
 
     def test_bus_emit_filters_tokens_and_tags_task(self):
         import queue as _queue
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td)
             task = state.tasks.create("running work", "auto")
             state.tasks.update(task.id, status="running")
@@ -1852,7 +1852,7 @@ class GitWorktreeTests(unittest.TestCase):
         import shutil
         if not shutil.which("git"):
             self.skipTest("git not installed")
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             ws = self._repo(td)
             reg = ToolRegistry({"filesystem.read": "allow", "git.execute": "allow"})
             register_git_tools(reg, ws)
