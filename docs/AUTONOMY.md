@@ -144,11 +144,50 @@ Policy-filtered outbox (`all`/`important`/`failures`/`completion`/`silent`),
 30-minute dedupe, and quiet hours that still let failures/approvals
 through.
 
+## Evaluated goals (GoalManager)
+
+Distinct from *standing goals* (schedule/trigger-bound recurring runs),
+evaluated goals are durable desired-state records persisted to
+`data/autonomy/goals.json` and managed by
+`localcodeagent/autonomy/goals.py`:
+
+- Schema: id (`g-…`), title, description, owner, type (reliability,
+  performance, security, maintenance, capability_growth, cost_reduction,
+  test_coverage, code_quality, model_quality, knowledge_freshness,
+  infrastructure_health), priority, status, metrics + thresholds +
+  optional warn bands, constraints, budget, linked missions, health,
+  confidence, escalation policy, autonomy profile, review interval,
+  mission cooldown.
+- Evaluation measures every metric through `MetricRegistry`
+  (`autonomy/metrics.py`) — providers are wired in `server.py` against
+  real telemetry (crash history, mission failure rate, disk, Answer
+  Memory stats, model-call failure rate, startup timing, corrupt-store
+  count, notification backlog, pending approvals). A metric that cannot
+  be measured returns `ok=False` → the goal reports `unknown`, never a
+  fabricated healthy value.
+- Health: `healthy`/`satisfied` (terminal goals), `degrading` (warn band
+  or a failed linked repair), `violated` (hard breach), `blocked`
+  (remediation wanted but autonomy stopped/paused or spawn failed),
+  `unknown`.
+- Degrading/violated goals may self-generate a repair *mission*
+  (`source="goal"`, `created_by="goal_manager"`) carrying
+  `trigger_evidence` — the measured values that justified the work.
+  Spawns are deduplicated (one live mission per goal) and cooldown-bounded
+  (default 30 min, floor 60 s). `escalation_policy` selects `mission` /
+  `notify` / `observe`.
+- Terminal mission outcomes feed back through `tick()` → confidence EMA
+  (success +0.25 toward 1, failure −35%) and `mission_outcomes` counters.
+- First run seeds a system-owned health-floor goal (crash-free backend,
+  bounded mission failures, disk headroom, intact stores).
+- API: `GET /api/goals` (goals + available metric specs + summary),
+  `POST /api/goals` (create), `POST /api/goals/{id}/evaluate|enable|
+  disable|archive`. UI: Goals panel on `web/missions.html`.
+
 ## Integration
 
 - Server APIs: `/api/autonomy/*` (status, missions CRUD, approve/deny,
   pause/resume/cancel/replan, standing goals, schedules, triggers,
-  notifications, stop/resume autonomy)
+  notifications, stop/resume autonomy), `/api/goals*` (evaluated goals)
 - Chat commands: "make this a mission", "stop autonomy", "resume autonomy"
   answered locally without needing a coding model
 - Missions UI: `web/missions.html`
@@ -166,3 +205,11 @@ notification policies + quiet hours + dedupe, schedules/triggers/
 debounce/file watches, evaluator verdicts, approval pause→resume,
 denial→replan, stop-autonomy, lane arbitration, budgets, standing
 goals, daily summary, mission Q&A.
+
+`tests/test_goals.py` — evaluated-goal coverage: metric registry
+(measured/unknown/non-numeric/failing providers), goal schema +
+validation + persistence roundtrip, seed defaults, evaluation states
+(healthy/satisfied/violated/degrading/unknown), evidence-carrying repair
+spawns, live-mission dedupe, cooldown suppression, notify/observe
+policies, stop/pause blocking, confidence feedback from mission outcomes,
+and tick integration.

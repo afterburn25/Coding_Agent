@@ -898,7 +898,9 @@ class AppState:
         quiet = getattr(config, "autonomy_quiet_hours", None)
         quiet_hours = tuple(quiet) if isinstance(quiet, (list, tuple)) and len(quiet) == 2 else None
 
-        return AutonomousSupervisor(
+        from .autonomy.metrics import MetricRegistry
+        registry = MetricRegistry()
+        sup = AutonomousSupervisor(
             workspace=self.workspace,
             store_root=runtime_root / "data" / "autonomy",
             emit=emit,
@@ -913,7 +915,113 @@ class AppState:
             resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
             quiet_hours=quiet_hours,
             enabled=bool(getattr(config, "autonomy_enabled", True)),
+            metrics=registry,
         )
+        self._register_goal_metrics(registry, sup, runtime_root)
+        return sup
+
+    def _register_goal_metrics(self, registry, sup, runtime_root: Path) -> None:
+        """Bind real telemetry providers to goal-metric keys. Every metric
+        here is measured — never estimated — so goal health stays factual."""
+        import shutil as _shutil
+
+        def incidents_24h() -> float:
+            cutoff = time.time() - 86400
+            return float(sum(
+                1 for r in netdiag.crash_history(500)
+                if float(r.get("time") or 0) >= cutoff))
+
+        def mission_stats() -> dict:
+            rows = sup.missions.list()
+            cutoff = time.time() - 86400
+            recent = [m for m in rows
+                      if float(m.get("completed_at") or 0) >= cutoff]
+            terminal = [m for m in recent
+                        if str(m.get("status")) in
+                        {"completed", "completed_with_warnings",
+                         "failed", "cancelled"}]
+            failed = [m for m in terminal
+                      if str(m.get("status")) == "failed"]
+            live = [m for m in rows if str(m.get("status")) in
+                    {"active", "planning", "executing", "verifying",
+                     "evaluating", "replanning", "waiting_dependency"}]
+            return {"failed_24h": len(failed),
+                    "failure_rate": len(failed) / max(1, len(terminal)),
+                    "live": len(live)}
+
+        def memory_stat(key: str) -> float:
+            try:
+                stats = self.answer_memory.stats() or {}
+                return float(stats.get(key) or 0.0)
+            except Exception:
+                return 0.0
+
+        def model_failure_rate() -> float:
+            try:
+                summary = self.model_telemetry.summary() or {}
+                rows = summary.get("models") or summary.get("rows") or []
+                total = sum(int(r.get("samples") or 0) for r in rows)
+                fails = sum(int(r.get("failures") or 0) for r in rows)
+                return fails / total if total else 0.0
+            except Exception:
+                return 0.0
+
+        def startup_total_ms() -> float:
+            try:
+                data = json.loads(
+                    (runtime_root / "data" / "startup_last.json")
+                    .read_text(encoding="utf-8"))
+                return float(data.get("total_ms") or 0)
+            except Exception:
+                return 0.0
+
+        def corrupt_stores() -> float:
+            try:
+                return float(len(list(
+                    (runtime_root / "data" / "autonomy").glob("*.corrupt-*"))))
+            except Exception:
+                return 0.0
+
+        def unread_notifications() -> float:
+            return float(sum(
+                1 for r in sup.store.notifications.rows()
+                if not r.get("read")))
+
+        def pending_approvals() -> float:
+            return float(sum(
+                1 for r in sup.store.approvals.rows()
+                if str(r.get("status") or "") == "pending"))
+
+        registry.register("disk_free_gb",
+            lambda: _shutil.disk_usage(self.workspace).free / (1024 ** 3),
+            description="Free disk space on the workspace volume", unit="GB")
+        registry.register("backend_incidents_24h", incidents_24h,
+            description="Backend crash/recovery events, last 24h", unit="events")
+        registry.register("mission_failure_rate",
+            lambda: mission_stats()["failure_rate"],
+            description="Terminal missions that failed, last 24h", unit="rate")
+        registry.register("missions_failed_24h",
+            lambda: mission_stats()["failed_24h"],
+            description="Failed missions, last 24h", unit="missions")
+        registry.register("missions_active",
+            lambda: mission_stats()["live"],
+            description="Missions currently owned by the supervisor", unit="missions")
+        registry.register("answer_memory_hit_rate",
+            lambda: memory_stat("hit_rate"),
+            description="Answer Memory hit rate", unit="rate")
+        registry.register("answer_memory_corrections",
+            lambda: memory_stat("corrections"),
+            description="User corrections recorded by Answer Memory", unit="count")
+        registry.register("model_failure_rate", model_failure_rate,
+            description="Observed model-call failure rate", unit="rate")
+        registry.register("startup_total_ms", startup_total_ms,
+            description="Last measured cold-start total", unit="ms")
+        registry.register("corrupt_store_files", corrupt_stores,
+            description="Quarantined corrupt autonomy state files", unit="files")
+        registry.register("unread_notifications", unread_notifications,
+            description="Unread notifications backlog", unit="count")
+        registry.register("pending_approvals", pending_approvals,
+            description="Approvals waiting on the user", unit="count")
 
     def _build_brain(self, config: AgentConfig, runtime_root: Path):
         """Construct the cognitive architecture — regions wrap the existing
@@ -2903,7 +3011,8 @@ class Handler(BaseHTTPRequestHandler):
     # approvals, notifications, global control.
 
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
-                          "/api/schedules", "/api/standing-goals")
+                          "/api/schedules", "/api/standing-goals",
+                          "/api/goals")
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
@@ -3096,6 +3205,13 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/standing-goals":
             self._json({"goals": sup.standing_goals()})
+            return True
+        if path == "/api/goals":
+            # Durable evaluated goals + the measurable metric keys the UI
+            # can attach to new goals.
+            self._json({"goals": sup.goal_manager.list(),
+                        "metrics": sup.goal_manager.available_metrics(),
+                        "summary": sup.goal_manager.summary()})
             return True
         return False
 
@@ -3320,6 +3436,52 @@ class Handler(BaseHTTPRequestHandler):
                     return True
                 m = sup._spawn_goal_mission(goal, origin=f"manual:{gid}")
                 self._json({"ok": True, "mission": m})
+                return True
+            self._json({"error": "unknown goal action"}, 400)
+            return True
+
+        if path == "/api/goals":
+            try:
+                row = sup.goal_manager.add(
+                    str(body.get("title") or body.get("objective") or ""),
+                    description=str(body.get("description") or ""),
+                    type=str(body.get("type") or "reliability"),
+                    priority=str(body.get("priority") or "normal"),
+                    metrics=body.get("metrics")
+                        if isinstance(body.get("metrics"), list) else None,
+                    constraints=body.get("constraints")
+                        if isinstance(body.get("constraints"), list) else None,
+                    escalation_policy=str(
+                        body.get("escalation_policy") or "mission"),
+                    review_interval_s=float(
+                        body.get("review_interval_s") or 300),
+                    mission_cooldown_s=float(
+                        body.get("mission_cooldown_s") or 1800),
+                    continuous=bool(body.get("continuous", True)),
+                    enabled=bool(body.get("enabled", True)))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+                return True
+            self._json({"ok": True, "goal": row})
+            return True
+        if path.startswith("/api/goals/"):
+            rest = path[len("/api/goals/"):].strip("/")
+            if rest.endswith("/enable") or rest.endswith("/disable"):
+                gid = rest.rsplit("/", 1)[0]
+                self._json({"ok": sup.goal_manager.set_enabled(
+                    gid, rest.endswith("/enable"))})
+                return True
+            if rest.endswith("/evaluate"):
+                gid = rest[:-len("/evaluate")]
+                result = sup.goal_manager.evaluate(gid)
+                if result is None:
+                    self._json({"error": "goal not found"}, 404)
+                    return True
+                self._json({"ok": True, "evaluation": result})
+                return True
+            if rest.endswith("/archive") or rest.endswith("/delete"):
+                gid = rest.rsplit("/", 1)[0]
+                self._json({"ok": sup.goal_manager.archive(gid)})
                 return True
             self._json({"error": "unknown goal action"}, 400)
             return True

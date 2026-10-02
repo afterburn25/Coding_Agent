@@ -164,7 +164,8 @@ class NavigationTests(unittest.TestCase):
             "trainer": ['class="pipeline"'],
             "system": ["overallCard", "refreshAll"],
             "missions": ["autonomyStatus", "createMission", "standingGoals",
-                         "schedules", "triggers"],
+                         "schedules", "triggers", "evalGoals",
+                         "createEvalGoal", "dailySummary"],
             "image": ["imageBackend", "imageModels", "loraLibrary",
                       "imageInventory", "subjectProfiles"],
         }

@@ -20,6 +20,8 @@ from typing import Any, Callable
 
 from .budgets import BudgetManager
 from .evaluator import EvalVerdict, MissionEvaluator
+from .goals import GoalManager, _PRIORITY_TO_MISSION
+from .metrics import MetricRegistry
 from .missions import MissionStore, TERMINAL_MISSION_STATUSES, DEFAULT_BUDGETS
 from .notifications import NotificationCenter
 from .planner import MissionPlanner
@@ -55,6 +57,7 @@ class AutonomousSupervisor:
         resources: Callable[[], dict] | None = None,
         quiet_hours: tuple[int, int] | None = None,
         enabled: bool = True,
+        metrics: MetricRegistry | None = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -80,6 +83,20 @@ class AutonomousSupervisor:
         self.scheduler = Scheduler(self.store, on_fire=self._on_schedule_fired)
         self.triggers = TriggerEngine(
             self.store, on_fire=self._on_trigger_fired, workspace=self.workspace)
+        # Persistent Goal Manager — durable desired-state layer that
+        # evaluates measured metrics on each tick and generates repair
+        # missions when a goal degrades (deduped + cooldown-bounded).
+        self.metric_registry = metrics or MetricRegistry()
+        self.goal_manager = GoalManager(
+            self.store, self.metric_registry,
+            missions=self.missions,
+            spawn_mission=self._spawn_goal_repair_mission,
+            notify=lambda level, title, detail: self.notifications.notify(
+                title, level=level, detail=detail),
+            audit=self._audit,
+            emit=lambda p: self._emit("goal", p),
+            is_blocked=lambda: self.policy.is_stopped() or
+            self.policy.is_paused())
 
         self._executor = executor
         self._verify_runner = verify_runner or self._default_verify
@@ -398,6 +415,48 @@ class AutonomousSupervisor:
                                  detail=f"spawned by {origin}")
         return mission
 
+    def _spawn_goal_repair_mission(self, goal: dict, evidence: dict) -> dict | None:
+        """Self-generated repair mission for a degraded/violated goal.
+
+        The mission carries the evaluation evidence so every generated unit
+        of work is auditable back to the real measured trigger."""
+        metrics_text = "; ".join(
+            f"{r['key']}={r.get('value'):g} (limit {r['op']} {r['target']})"
+            for r in (evidence.get("metrics") or [])
+            if r.get("value") is not None)[:500]
+        objective = (
+            f"Restore goal '{goal.get('title')}'. "
+            f"Health: {evidence.get('health')}. "
+            f"Evidence: {metrics_text or evidence.get('detail')}. "
+            "Investigate the cause, apply the minimal safe repair, and "
+            "verify the fix. "
+            + (f"Goal description: {str(goal.get('description'))[:600]}"
+               if goal.get("description") else ""))
+        mission = self.missions.create(
+            objective=objective[:3900],
+            title=f"[{goal.get('id')}] {str(goal.get('title'))[:80]}",
+            scope="one_shot",
+            priority=_PRIORITY_TO_MISSION.get(
+                str(goal.get("priority") or "normal"), "background"),
+            success_criteria=[
+                {"kind": "all_tasks_completed",
+                 "description": "repair work finished"},
+                {"kind": "verify_passed",
+                 "description": "verification run passed"}],
+            constraints=goal.get("constraints"),
+            autonomy_profile=str(goal.get("autonomy_profile")
+                                 or "local_autonomous"),
+            notification_policy="important",
+            source="goal", source_id=str(goal.get("id")),
+            created_by="goal_manager",
+            workspace=str(self.workspace))
+        self.missions.update(mission["id"], goal_id=str(goal.get("id")),
+                             trigger_evidence=evidence)
+        self.missions.transition(
+            mission["id"], "ready",
+            detail=f"goal:{goal.get('id')} {evidence.get('health')}")
+        return mission
+
     # ------------------------------------------------------------------
     # triggers + schedules
 
@@ -465,6 +524,10 @@ class AutonomousSupervisor:
 
         # 2. standing goals whose schedule came due
         self._tick_goals(now)
+
+        # 2b. evaluated goals — outcome feedback + due reviews; a degraded
+        # goal generates a repair mission (deduped, cooldown-bounded)
+        self.goal_manager.tick(now)
 
         # 3. reclaim expired leases (worker died mid-task)
         for m in self.missions.list():

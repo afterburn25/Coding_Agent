@@ -39,6 +39,22 @@ and the Windows installer lands flat, update-aware, and junction-safe.
   backend health") without claiming an error before real timeout logic.
 - **Installer**: "Uninstall" button shown only when an existing install is
   detected; wizard wording switches to Update/Updating on upgrade runs.
+- **Evaluated Goal Manager** (`localcodeagent/autonomy/goals.py` +
+  `metrics.py`): durable desired-state goals — distinct from missions and
+  schedule-bound standing goals — persisted to `data/autonomy/goals.json`.
+  Each goal declares measurable metric thresholds evaluated against a
+  registry of real telemetry providers (crash history, mission failure
+  rate, disk, Answer Memory, model-call failures, startup timing, corrupt
+  stores, notification backlog, pending approvals). Health states
+  (healthy/satisfied/degrading/violated/blocked/unknown) are derived from
+  measured values only — unmeasurable metrics report `unknown`, never a
+  fabricated pass. Degrading/violated goals self-generate evidence-
+  carrying repair missions (`source="goal"`, `trigger_evidence`) with
+  one-live-mission dedupe and per-goal cooldowns; `escalation_policy`
+  selects auto-repair / notify / observe. Terminal mission outcomes feed
+  back into goal confidence. First run seeds a system health-floor goal.
+  API: `GET/POST /api/goals`, `POST /api/goals/{id}/evaluate|enable|
+  disable|archive`; Goals panel on Mission Control.
 - **Tests**: `desktop/StartupProgress.Tests` — fake-clock behavioral
   harness covering no-jump, monotonicity, phase ceilings, readiness finish,
   minimum-duration and long-startup paths, deceleration/acceleration,

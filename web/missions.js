@@ -13,7 +13,7 @@ let missions=[],selected=null;
 
 async function refresh(){
   try{
-    const [st,ms,appr,notes,goals,scheds,trigs]=await Promise.all([
+    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals]=await Promise.all([
       api('/api/autonomy/status'),
       api('/api/missions'),
       api('/api/autonomy/approvals?pending=1'),
@@ -22,6 +22,7 @@ async function refresh(){
       api('/api/schedules'),
       api('/api/triggers'),
       api('/api/autonomy/summary'),
+      api('/api/goals'),
     ]);
     renderStatus(st);
     missions=ms.missions||[];
@@ -29,7 +30,9 @@ async function refresh(){
     renderDetail();
     renderApprovals(appr.approvals||[]);
     renderNotes(notes.notifications||[]);
-    renderGoals(goals.goals||[]);
+    renderDailySummary(summary||{});
+    renderGoals(sgoals.goals||[]);
+    renderEvalGoals(goals.goals||[],goals.metrics||[]);
     renderSchedules(scheds.schedules||[]);
     renderTriggers(trigs.triggers||[]);
     if(Array.isArray(trigs.signals)&&trigs.signals.length&&
@@ -141,6 +144,38 @@ function renderNotes(rows){
     `<div class="hist-row"><b>${esc(n.level)}</b> ${esc(n.title||n.message).slice(0,120)}</div>`
   ).join('')||'<div class="hist-row">none</div>';
 }
+function renderDailySummary(s){
+  const el=$('#dailySummary');
+  if(!el)return;
+  el.innerHTML=
+    `<div class="hist-row">completed <b>${s.missions_completed||0}</b> · failed <b>${s.missions_failed||0}</b> · tasks <b>${s.tasks_completed||0}</b></div>`+
+    ((s.missions_blocked||[]).map(t=>`<div class="hist-row"><b>blocked</b> ${esc(t).slice(0,80)}</div>`).join(''))+
+    ((s.pending_approvals||[]).map(t=>`<div class="hist-row"><b>approval</b> ${esc(t).slice(0,80)}</div>`).join(''))+
+    `<div class="hist-row">${s.notifications||0} unread · next run ${s.next_scheduled?new Date(s.next_scheduled*1000).toLocaleTimeString():'—'}</div>`;
+}
+const HEALTH_CLASS={healthy:'ok',satisfied:'ok',degrading:'warn',violated:'bad',blocked:'bad',unknown:'unknown'};
+function renderEvalGoals(rows,metricSpecs){
+  $('#evalGoals').innerHTML=rows.map(g=>{
+    const live=(g.linked_missions||[]).filter(l=>!l.resolved&&l.status!=='missing'&&l.status!=='failed'&&l.status!=='completed'&&l.status!=='completed_with_warnings'&&l.status!=='cancelled').length;
+    const last=g.last_evaluated_at?new Date(g.last_evaluated_at*1000).toLocaleTimeString():'never';
+    const metrics=(g.metrics||[]).map(s=>`${s.key} ${s.op} ${s.target}`).join(' · ');
+    return `<div class="mission-card"><div class="title">${esc(g.title).slice(0,90)}</div>`+
+    `<div class="goal-evidence">${esc(g.health_detail||'')}</div>`+
+    `<div class="meta"><span class="gstatus ${HEALTH_CLASS[g.health]||'unknown'}">${esc(g.health)}</span>`+
+    `<span>${esc(g.type)}</span><span>${esc(g.priority)}</span>`+
+    `<span>conf ${Math.round((g.confidence||0)*100)}%</span></div>`+
+    `<div class="meta"><span style="flex:1">${metrics?esc(metrics.trim()):'no metrics'} · eval ${last}${live?` · ${live} live repair`+(live>1?'s':''):''}</span></div>`+
+    `<div class="meta"><button class="mini-button" data-goalact="${g.id}:evaluate">Evaluate</button>`+
+    (g.status!=='archived'&&g.status!=='completed'?`<button class="mini-button" data-goalact="${g.id}:${g.status==='active'?'disable':'enable'}">${g.status==='active'?'Pause':'Enable'}</button>`:'')+
+    (g.status!=='archived'?`<button class="mini-button danger" data-goalact="${g.id}:archive">Archive</button>`:'')+
+    `</div></div>`;
+  }).join('')||'<div class="hist-row">none</div>';
+  // Populate the metric picker once with measurable keys.
+  const sel=$('#newEvalGoalMetric');
+  if(sel&&!sel.options.length)
+    sel.innerHTML='<option value="">metric…</option>'+metricSpecs.map(m=>
+      `<option value="${esc(m.key)}">${esc(m.key)}${m.unit?` (${esc(m.unit)})`:''}</option>`).join('');
+}
 function renderGoals(rows){
   $('#standingGoals').innerHTML=rows.map(g=>
     `<div class="mission-card"><div class="title">${esc(g.objective).slice(0,80)}</div>`+
@@ -185,6 +220,10 @@ document.addEventListener('click',async e=>{
   if(gt){const[id,verb]=gt.dataset.goaltoggle.split(':');
     try{await api(`/api/standing-goals/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
     return;}
+  const ga=e.target.closest('[data-goalact]');
+  if(ga){const[id,verb]=ga.dataset.goalact.split(':');
+    try{await api(`/api/goals/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;}
   const sc=e.target.closest('[data-sched]');
   if(sc){const[id,verb]=sc.dataset.sched.split(':');
     try{await api(`/api/schedules/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
@@ -217,6 +256,23 @@ $('#createGoal').addEventListener('click',async()=>{
   try{
     await api('/api/standing-goals','POST',{objective});
     $('#newGoalObjective').value='';refresh();
+  }catch(err){alert(err.message);}
+});
+$('#createEvalGoal').addEventListener('click',async()=>{
+  const title=$('#newEvalGoalTitle').value.trim();
+  if(!title)return;
+  const key=$('#newEvalGoalMetric').value;
+  const target=parseFloat($('#newEvalGoalTarget').value);
+  const body={title,
+    type:'reliability',
+    priority:$('#newEvalGoalPriority').value,
+    escalation_policy:$('#newEvalGoalEsc').value};
+  if(key&&Number.isFinite(target))
+    body.metrics=[{key,op:$('#newEvalGoalOp').value,target}];
+  try{
+    await api('/api/goals','POST',body);
+    $('#newEvalGoalTitle').value='';$('#newEvalGoalTarget').value='';
+    refresh();
   }catch(err){alert(err.message);}
 });
 $('#createSchedule').addEventListener('click',async()=>{

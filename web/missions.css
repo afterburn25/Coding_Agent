@@ -54,6 +54,18 @@
 .hist-row{font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--panel2)}
 .hist-row b{color:var(--text-dim)}
 
+/* Goal health chips + evidence (evaluated goals panel) */
+.gstatus{display:inline-block;padding:1px 8px;border-radius:9px;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+.gstatus.ok{background:var(--line);color:var(--good)}
+.gstatus.warn{background:var(--line);color:var(--warn)}
+.gstatus.bad{background:var(--danger-tint);color:var(--danger)}
+.gstatus.unknown{background:var(--panel2);color:var(--muted)}
+.goal-evidence{color:var(--muted);font-size:11px;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+.goal-metric-row{display:flex;gap:6px}
+.goal-metric-row select{min-width:0}
+.goal-metric-row select:first-child{flex:1}
+.goal-metric-row input{width:70px}
+
 .mini-form{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
 .mini-form input,.mini-form select{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--text-dim);font:inherit;font-size:12px;padding:7px 9px;width:100%;box-sizing:border-box}
 .hist-row .mini-button{font-size:10px;padding:1px 8px;vertical-align:1px}

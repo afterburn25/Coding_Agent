@@ -116,7 +116,7 @@ class AutonomyStore:
     """Root handle for all persisted autonomy state."""
 
     FILES = (
-        "missions", "standing_goals", "triggers", "schedules",
+        "missions", "standing_goals", "goals", "triggers", "schedules",
         "grants", "notifications", "approvals",
     )
 
@@ -127,6 +127,10 @@ class AutonomyStore:
                                   default=None, key="missions", limit=200)
         self.standing_goals = JsonStore(self.root / "standing_goals.json",
                                         default=None, key="goals", limit=100)
+        # Durable evaluated goals (GoalManager) — distinct from
+        # standing_goals, which are schedule/trigger-bound recurring runs.
+        self.goals = JsonStore(self.root / "goals.json",
+                               default=None, key="goals", limit=100)
         self.triggers = JsonStore(self.root / "triggers.json",
                                   default=None, key="triggers", limit=200)
         self.schedules = JsonStore(self.root / "schedules.json",
@@ -152,6 +156,7 @@ class AutonomyStore:
             "schema_version": SCHEMA_VERSION,
             "missions": len(self.missions.rows()),
             "standing_goals": len(self.standing_goals.rows()),
+            "goals": len(self.goals.rows()),
             "triggers": len(self.triggers.rows()),
             "schedules": len(self.schedules.rows()),
             "notifications": len(self.notifications.rows()),

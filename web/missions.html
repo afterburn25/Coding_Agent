@@ -80,6 +80,35 @@
     <div id="notifications" class="inventory"></div>
     <div class="section-title">Daily summary</div>
     <div id="dailySummary" class="inventory"></div>
+    <div class="section-title">Goals</div>
+    <div id="evalGoals" class="inventory"></div>
+    <div class="mini-form">
+      <input id="newEvalGoalTitle" placeholder="Goal — desired state…" />
+      <div class="goal-metric-row">
+        <select id="newEvalGoalMetric"></select>
+        <select id="newEvalGoalOp">
+          <option value="&lt;=">≤</option>
+          <option value="&gt;=">≥</option>
+          <option value="&lt;">&lt;</option>
+          <option value="&gt;">&gt;</option>
+        </select>
+        <input id="newEvalGoalTarget" placeholder="target" type="number" step="any" />
+      </div>
+      <div class="goal-metric-row">
+        <select id="newEvalGoalPriority">
+          <option value="normal">Normal</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+        <select id="newEvalGoalEsc">
+          <option value="mission">Auto-repair mission</option>
+          <option value="notify">Notify only</option>
+          <option value="observe">Observe only</option>
+        </select>
+      </div>
+      <button id="createEvalGoal" class="mini-button" type="button">Add goal</button>
+    </div>
     <div class="section-title">Standing goals</div>
     <div id="standingGoals" class="inventory"></div>
     <div class="mini-form">
