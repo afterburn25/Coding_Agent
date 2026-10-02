@@ -2645,6 +2645,7 @@ class AppState:
             "models": models,
             "processes": self.processes.list(),
             "recent_failures": netdiag.recent_failures(),
+            "crash_history": netdiag.crash_history(50),
         }
 
 

@@ -24,6 +24,36 @@ function renderHealth(h){
   ).join('')||'<div class="off">No transitions recorded.</div>';
 }
 
+/* ---------- Diagnostics ---------- */
+function renderDiagnostics(d){
+  const models=(d.models||[]).map(m=>{
+    const b=m.backend||{};
+    const state=b.exit_code!=null?`exited ${b.exit_code}`:(b.pid?`pid ${b.pid}`:'not running');
+    const note=(b.crash_reason||b.error||'').trim();
+    const tail=(b.log_tail||'').trim();
+    return `<div><span class="k">${esc(m.id)}</span>${esc(m.runtime||'')} · ${esc(state)}`+
+      (b.restarts?` · ${b.restarts} restart${b.restarts===1?'':'s'}`:'')+
+      (note?` · ${esc(note)}`:'')+
+      (tail?`<div class="meta">${esc(tail.split('\n').slice(-3).join('\n'))}</div>`:'')+`</div>`;
+  }).join('');
+  $('#diagModels').innerHTML=models||'<div class="off">No model backends.</div>';
+  const failures=(d.recent_failures||[]).slice().reverse().map(f=>
+    `<div class="list-row"><b>${esc(f.subsystem||'?')} · ${esc(f.kind||'')}</b>
+     <span class="pill">${esc(f.phase||'')}</span>
+     <div class="meta">${esc(f.host||'')}${f.port?':'+f.port:''} ${f.model_id?'· '+esc(f.model_id):''}${f.request_id?' · req '+esc(f.request_id):''} · ${fmtTs(f.time)}${f.streaming?' · '+f.chunks_received+' chunks':''}</div>
+     <div class="meta">${esc(f.exception||f.detail||'')}</div>
+     <div class="meta">recovery: ${esc(f.recovery||'pending')}</div></div>`).join('');
+  $('#diagFailures').innerHTML=failures||'<div class="off">No transport failures recorded this session.</div>';
+  const hist=(d.crash_history||[]).slice().reverse().map(e=>{
+    if(e.recovery_for!==undefined&&e.recovery!==undefined&&!e.kind){
+      return `<div class="list-row"><b>recovery</b> <span class="meta">${esc(e.subsystem||'')} ${e.recovery_for?'· req '+esc(e.recovery_for):''} — ${esc(e.recovery)} · ${fmtTs(e.time)}</span></div>`;
+    }
+    return `<div class="list-row"><b>${esc(e.subsystem||'?')} · ${esc(e.kind||'')}</b>
+     <div class="meta">${esc(e.exception||e.detail||'')} · ${fmtTs(e.time)}${e.recovery?' · '+esc(e.recovery):''}</div></div>`;
+  }).join('');
+  $('#diagHistory').innerHTML=hist||'<div class="off">No persisted crash history.</div>';
+}
+
 /* ---------- Digital Twin ---------- */
 function renderTwin(t){
   const hw=t.hardware||{};
@@ -154,12 +184,14 @@ function renderExperiments(list){
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
       api('/api/skills'),api('/api/connectors'),api('/api/jobs'),
       api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
-      api('/api/backups'),api('/api/eval/history'),api('/api/experiments')]);
+      api('/api/backups'),api('/api/eval/history'),api('/api/experiments'),
+      api('/api/diagnostics')]);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
+    renderDiagnostics(dg);
     renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
     renderJobs(jb.jobs||[]);
     renderArtifacts(a.artifacts||[]);
