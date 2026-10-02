@@ -495,6 +495,17 @@ class ImageLibraryTests(unittest.TestCase):
         backend = describe_image_error(ConnectionError("connection refused by ComfyUI backend"))
         self.assertEqual(backend["code"], "backend_offline")
 
+    def test_transport_reset_keeps_friendly_message_and_diagnostic(self):
+        from localcodeagent.netdiag import BackendConnectionError
+        exc = BackendConnectionError(
+            ConnectionResetError(10054, "forcibly closed"),
+            subsystem="comfyui", url="http://127.0.0.1:8188/prompt")
+        row = describe_image_error(exc)
+        self.assertEqual(row["code"], "transport_connection_reset")
+        self.assertIn("ComfyUI", row["message"])
+        self.assertEqual(row["diagnostic"]["kind"], "connection_reset")
+        self.assertEqual(row["diagnostic"]["port"], 8188)
+
     def test_unknown_image_error_is_bounded_for_normal_ui(self):
         row = describe_image_error(RuntimeError("x" * 800))
         self.assertEqual(row["code"], "generation_failed")

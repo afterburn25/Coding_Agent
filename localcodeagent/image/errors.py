@@ -17,6 +17,12 @@ def describe_image_error(exc: BaseException) -> dict[str, Any]:
     def result(code: str, message: str) -> dict[str, str]:
         return {"code": code, "message": message, "technical_details": technical[:4000]}
 
+    from localcodeagent.netdiag import BackendConnectionError
+    if isinstance(exc, BackendConnectionError):
+        out = result(f"transport_{exc.kind}", exc.friendly)
+        out["diagnostic"] = exc.diagnostic()
+        return out
+
     if any(x in low for x in ("cuda out of memory", "outofmemoryerror", "cudnn_status_alloc_failed", "hip out of memory")):
         return result("cuda_out_of_memory", "The GPU ran out of memory while processing this image. Try a lower resolution, fewer images, a smaller/quantized model, or a more aggressive VRAM cleanup mode.")
     if any(x in low for x in ("no space left on device", "disk full", "insufficient disk")):
