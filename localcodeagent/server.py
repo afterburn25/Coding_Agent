@@ -1079,6 +1079,43 @@ class AppState:
             ok = bool(hooks.get("health_probe", lambda: False)())
             return {"ok": ok, "detail": "health probe"}
 
+        def _fix_disk_cleanup(ctx):
+            """Reclaim Nexus-managed scratch only — orphaned repair
+            worktrees and quarantined stores. User data is never touched;
+            if pressure persists the detector re-fires and escalates."""
+            import shutil as _s
+            freed = 0
+            removed = 0
+            repair = getattr(sup, "repair", None)
+            live = {str(r.get("id"))
+                    for r in (repair.list() if repair else [])}
+            wt_root = self.workspace / ".repair-worktrees"
+            if wt_root.is_dir():
+                for child in sorted(wt_root.iterdir()):
+                    if child.name in live:
+                        continue    # any incident may still need it
+                    try:
+                        freed += sum(p.stat().st_size
+                                     for p in child.rglob("*")
+                                     if p.is_file())
+                    except OSError:
+                        pass
+                    try:
+                        repair.patcher.cleanup(child, child.name)
+                    except Exception:
+                        _s.rmtree(child, ignore_errors=True)
+                    removed += 1
+            for p in list(sup.store.root.glob("*.corrupt-*")):
+                try:
+                    freed += p.stat().st_size
+                    p.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+            return {"ok": True,
+                    "detail": f"reclaimed {freed / 1e6:.1f} MB "
+                              f"({removed} item(s))"}
+
         def _tail_log() -> str:
             for cand in (runtime_root / "data" / "logs" / "backend-host.log",
                          Path(config.runtime_logs_dir) / "backend.log"):
@@ -1102,6 +1139,7 @@ class AppState:
                 "external_service": _fix_probe,
                 "environment": _fix_probe,
                 "hardware_pressure": _fix_evict,
+                "disk_pressure": _fix_disk_cleanup,
                 "corrupt_store": _fix_corrupt_store,
                 "bad_model_config": _fix_bad_model_config,
             },

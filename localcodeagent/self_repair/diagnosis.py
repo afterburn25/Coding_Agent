@@ -23,7 +23,7 @@ CATEGORIES = {
 # system; code repairs require the worktree pipeline.
 _OPERATIONAL = {"stale_process", "network_failure", "corrupt_store",
                 "bad_model_config", "hardware_pressure", "environment",
-                "port_collision", "external_service"}
+                "port_collision", "external_service", "disk_pressure"}
 
 
 def _has(msg: str, *needles: str) -> bool:
@@ -87,6 +87,11 @@ class Diagnostician:
                      "Elevated model-call failure rate — reset to safe "
                      "runtime defaults", 0.55,
                      ["model failure rate measured by detector"]))
+        if cls == "disk_pressure":
+            add(_hyp("disk_pressure",
+                     "Disk nearly full — reclaim Nexus-managed scratch "
+                     "(dead repair worktrees, quarantined stores)", 0.8,
+                     ["disk pressure measured by detector"]))
         if cls == "CorruptionError" or _has(msg, "corrupt", "json decode",
                                             "expecting value"):
             add(_hyp("corrupt_store",

@@ -300,6 +300,13 @@ class DiagnosisTests(unittest.TestCase):
         self.assertEqual(out["category"], "bad_model_config")
         self.assertEqual(out["repair_kind"], "operational")
 
+    def test_disk_pressure_maps_to_cleanup(self):
+        out = self.diag.diagnose(self._inc(
+            error_class="disk_pressure",
+            error_message="Disk free low: 3.1 GB"))
+        self.assertEqual(out["category"], "disk_pressure")
+        self.assertEqual(out["repair_kind"], "operational")
+
 
 class RepairMemoryTests(unittest.TestCase):
     def test_recall_prefers_success(self):
