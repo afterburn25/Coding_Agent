@@ -1113,8 +1113,42 @@ class AppState:
                 title, level=level, detail=detail),
             on_resumed=lambda op: sup.resume_interrupted(op),
             researcher=self._repair_researcher,
+            eval_recorder=lambda inc: self._record_repair_eval(inc),
         )
         return coord
+
+    def _record_repair_eval(self, inc: dict) -> None:
+        """Persist a terminal repair's verification evidence as an eval
+        run (suite 'self_repair', subject = failure signature) — repairs
+        become comparable over time, not just incident rows."""
+        ver = inc.get("verification") or {}
+        results = []
+        for r in ver.get("targeted") or []:
+            results.append({"case": f"targeted:{r.get('target','?')}",
+                            "passed": bool(r.get("ok")),
+                            "latency_s": float(r.get("elapsed_s") or 0)})
+        for r in ver.get("regression") or []:
+            results.append({"case": f"regression:{r.get('target','?')}",
+                            "passed": bool(r.get("ok")),
+                            "latency_s": float(r.get("elapsed_s") or 0)})
+        canary = ver.get("canary") or {}
+        if canary and canary.get("skipped") is not True:
+            results.append({"case": "canary",
+                            "passed": bool(canary.get("ok"))})
+        review = inc.get("review") or {}
+        if review:
+            results.append({"case": "review",
+                            "passed": bool(review.get("ok"))})
+        if not results:
+            results.append({"case": "outcome",
+                            "passed": inc.get("state") == "resolved"})
+        self.eval_lab.record_run(
+            "self_repair", str(inc.get("signature") or inc.get("id")),
+            results,
+            config={"repair_kind": inc.get("repair_kind"),
+                    "subsystem": inc.get("subsystem"),
+                    "state": inc.get("state"),
+                    "confidence": inc.get("confidence")})
 
     def _repair_researcher(self, inc: dict) -> dict | None:
         """Gather external evidence for a weak diagnosis — bounded query

@@ -79,7 +79,8 @@ class SelfRepairCoordinator:
                  emit: Callable[[dict], None] | None = None,
                  notify: Callable[[str, str, str], None] | None = None,
                  on_resumed: Callable[[dict], None] | None = None,
-                 researcher: Callable[[dict], dict | None] | None = None) -> None:
+                 researcher: Callable[[dict], dict | None] | None = None,
+                 eval_recorder: Callable[[dict], None] | None = None) -> None:
         self._store = store                     # AutonomyStore
         self.repo_root = Path(repo_root)
         self.state_root = Path(state_root or
@@ -110,6 +111,10 @@ class SelfRepairCoordinator:
         # (unknown hypothesis or low confidence). Attached as evidence;
         # never fabricates a hypothesis or inflates confidence.
         self._researcher = researcher
+        # Evaluation Lab sink — terminal incidents record their
+        # verification evidence as eval runs so repairs are comparable
+        # over time (suite="self_repair", subject=signature).
+        self._eval_recorder = eval_recorder
         self._lock = threading.RLock()
         self.detector = Detector(self._rows)
 
@@ -186,7 +191,21 @@ class SelfRepairCoordinator:
             self._save()
         self._emit({"type": "repair_state", "incident_id": inc["id"],
                     "state": state})
+        if state in {"resolved", "needs_human", "rolled_back",
+                     "abandoned"}:
+            self._record_eval(inc)
         return inc
+
+    def _record_eval(self, inc: dict) -> None:
+        """Once per incident: hand terminal verification evidence to the
+        eval recorder. Never blocks a transition on a recorder error."""
+        if self._eval_recorder is None or inc.get("_eval_recorded"):
+            return
+        inc["_eval_recorded"] = True
+        try:
+            self._eval_recorder(dict(inc))
+        except Exception:
+            pass
 
     def _fail_open(self, inc: dict, reason: str) -> None:
         """Not enough evidence/permission to continue autonomously."""

@@ -485,6 +485,51 @@ class ResearchHookTests(unittest.TestCase):
             self.assertNotEqual(coord.get(inc["id"])["state"], "diagnosing")
 
 
+class EvalRecorderTests(unittest.TestCase):
+    """Terminal incidents report verification evidence to EvalLab."""
+
+    def test_terminal_incident_records_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            runs = []
+            coord = make_coord(td, repo,
+                               patch_generator=good_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}),
+                               eval_recorder=runs.append)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            self.assertEqual(len(runs), 1)                 # exactly once
+            self.assertEqual(runs[0]["state"], "resolved")
+            self.assertIn("verification", runs[0])
+
+    def test_no_recorder_is_fine(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo, patch_generator=bad_generator)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"], max_steps=60)
+            self.assertIn(coord.get(inc["id"])["state"],
+                          {"needs_human", "abandoned", "planning",
+                           "patching"})
+
+    def test_evallab_record_run_shape(self):
+        from localcodeagent.eval import EvalLab
+        with tempfile.TemporaryDirectory() as td:
+            lab = EvalLab(Path(td))
+            run = lab.record_run(
+                "self_repair", "sig:x",
+                [{"case": "targeted:t1", "passed": True,
+                  "latency_s": 0.2},
+                 {"case": "canary", "passed": True}],
+                config={"repair_kind": "code"})
+            self.assertEqual(run["passed"], 2)
+            self.assertEqual(run["mean_score"], 1.0)
+            back = lab.history(suite="self_repair", subject="sig:x")
+            self.assertEqual(len(back), 1)
+            self.assertEqual(back[0]["config"]["repair_kind"], "code")
+
+
 class ScenarioB_BadPatchRejected(unittest.TestCase):
     """A patch that keeps failing tests must never promote."""
 

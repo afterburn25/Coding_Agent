@@ -63,6 +63,30 @@ class EvalLab:
                 fh.write(json.dumps(run, default=str) + "\n")
         return run
 
+    def record_run(self, suite: str, subject: str, results: list[dict],
+                   *, config: dict | None = None) -> dict:
+        """Persist a run computed elsewhere (e.g. the self-repair
+        verifier's checks) in the same shape `run_suite` produces, so
+        history/compare work uniformly."""
+        scores = [float(r.get("score", 1.0 if r.get("passed") else 0.0))
+                  for r in results]
+        lat = [float(r.get("latency_s", 0)) for r in results]
+        run = {
+            "id": f"ev-{uuid.uuid4().hex[:10]}",
+            "suite": suite, "subject": subject,
+            "config": dict(config or {}),
+            "ts": time.time(),
+            "cases": len(results),
+            "passed": sum(1 for r in results if r.get("passed")),
+            "mean_score": round(statistics.fmean(scores), 4) if scores else 0,
+            "p50_latency_s": (round(statistics.median(lat), 3) if lat else 0),
+            "results": results,
+        }
+        with self._lock:
+            with self.history_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(run, default=str) + "\n")
+        return run
+
     def history(self, *, suite: str = "", subject: str = "",
                 limit: int = 50) -> list[dict]:
         rows = []
