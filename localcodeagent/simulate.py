@@ -22,6 +22,7 @@ _TOOL_COSTS = {
     "github.write": {"risk": "high", "duration_s": 10},
     "packages.install": {"risk": "high", "duration_s": 120},
     "browser.control": {"risk": "medium", "duration_s": 20},
+    "image.generate": {"risk": "medium", "duration_s": 60},
     "network.read": {"risk": "low", "duration_s": 8},
     "filesystem.read": {"risk": "low", "duration_s": 1},
 }
@@ -32,8 +33,12 @@ def simulate_plan(plan: dict[str, Any], *, policy: Any = None,
                   twin: Any = None) -> dict[str, Any]:
     """Dry-run a plan dict with 'steps': [{title, tool, action, files}].
 
+    A mission-DAG dict with 'nodes' (id/title/kind/deps/metadata) is
+    translated into steps first, so dry-runs cover real mission graphs.
+
     Returns the plan's expected trajectory — never executes.
     """
+    plan = _nodes_to_steps(plan)
     perm_map = permission_map or {}
     steps = []
     required_perms: set[str] = set()
@@ -95,6 +100,51 @@ def simulate_plan(plan: dict[str, Any], *, policy: Any = None,
         "resource_note": resource_note,
         "ts": time.time(),
     }
+
+
+# Mission-DAG node kind → representative tool/permission for the dry run.
+_NODE_KIND_PERMS = {
+    "agent": "shell.execute",
+    "verify": "shell.execute",
+    "research": "network.read",
+    "internal": "filesystem.read",
+    "wait": "",
+}
+_JOB_OP_PERMS = {
+    "sandbox": "shell.execute",
+    "backup": "filesystem.write",
+    "rag_update": "filesystem.read",
+    "image": "image.generate",
+    "model_install": "packages.install",
+}
+
+
+def _nodes_to_steps(plan: dict[str, Any]) -> dict[str, Any]:
+    """Translate mission-DAG 'nodes' into generic simulation steps."""
+    nodes = plan.get("nodes") or []
+    if not nodes or plan.get("steps"):
+        return plan
+    steps = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        kind = str(n.get("kind") or "agent")
+        meta = dict(n.get("metadata") or {})
+        if kind == "job":
+            tool = _JOB_OP_PERMS.get(str(meta.get("job") or ""), "")
+            action = f"job:{meta.get('job') or '?'}"
+        else:
+            tool = _NODE_KIND_PERMS.get(kind, "")
+            action = f"node:{kind}"
+        steps.append({
+            "title": n.get("title") or n.get("id") or "node",
+            "tool": tool,
+            "action": action,
+            "files": meta.get("files") or [],
+        })
+    out = dict(plan)
+    out["steps"] = steps
+    return out
 
 
 def _action_for(perm: str) -> str:

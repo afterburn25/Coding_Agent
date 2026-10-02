@@ -248,6 +248,26 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(out["approvals_expected"], 1)
         self.assertTrue(out["failure_points"])
 
+    def test_mission_dag_nodes_translate_to_steps(self):
+        plan = {"nodes": [
+            {"id": "n1", "title": "Index repo", "kind": "job",
+             "metadata": {"job": "rag_update"}},
+            {"id": "n2", "title": "Fix bug", "kind": "agent"},
+            {"id": "n3", "title": "Verify", "kind": "verify"},
+            {"id": "n4", "title": "Render diagram", "kind": "job",
+             "metadata": {"job": "image"}},
+            {"id": "n5", "title": "Wait", "kind": "wait"}]}
+        out = simulate_plan(plan)
+        self.assertTrue(out["simulated"])
+        self.assertEqual(out["step_count"], 5)
+        self.assertIn("filesystem.read", out["permissions_required"])
+        self.assertIn("shell.execute", out["permissions_required"])
+        self.assertIn("image.generate", out["permissions_required"])
+        # Explicit steps win over nodes when both are present.
+        out2 = simulate_plan({**plan,
+                              "steps": [{"title": "s", "tool": "git.write"}]})
+        self.assertEqual(out2["step_count"], 1)
+
 
 class EvalLabTests(unittest.TestCase):
     def test_suite_run_and_history(self):

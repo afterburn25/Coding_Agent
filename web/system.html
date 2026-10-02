@@ -119,7 +119,7 @@
       <h2>Plan Simulation</h2>
       <p class="off" style="font-size:12px">Dry-run a plan — reports tools, permissions, verdicts, and failure points without executing anything.</p>
       <div class="row-actions">
-        <textarea id="simPlan" rows="6" style="flex:1;min-width:280px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px;font-family:inherit" placeholder='{"steps":[{"title":"Edit router","tool":"filesystem.write","files":["src/router.py"]},{"title":"Run tests","tool":"shell.execute"}]}'></textarea>
+        <textarea id="simPlan" rows="6" style="flex:1;min-width:280px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px;font-family:inherit" placeholder='{"steps":[{"title":"Edit router","tool":"filesystem.write","files":["src/router.py"]},{"title":"Run tests","tool":"shell.execute"}]} — or a mission DAG: {"nodes":[{"title":"Fix","kind":"agent"},{"title":"Verify","kind":"verify"}]}'></textarea>
       </div>
       <div class="row-actions">
         <button id="simRun" class="mini-button" type="button">Simulate</button>
