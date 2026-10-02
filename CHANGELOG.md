@@ -76,15 +76,53 @@ Performance tuning + live activity timeline.
   into `APP_VERSION`/`APP_NUMERIC_VERSION` for Inno defines and artifact
   names — the stale hardcoded `0.6.0-dev` overrides are gone.
 
+### Autonomy + platform wiring (0.7.1 third pass)
+
+- **Conservative resource mode yields GPU**: `BudgetManager.may_use_gpu`
+  is real — image `job` nodes stay `ready` while the interactive agent
+  lane is busy under `conservative`; `balanced`/`performance` unaffected.
+- **Unknown node kinds fail loudly** instead of completing with a
+  phantom `no-op` success — corrupted graphs now route into recovery.
+- **Mission jobs join the unified ledger**: every `job` op submits a
+  `mission_job` JobManager record (`mission_id`/`node_id` metadata) —
+  `/api/jobs` and the new System-page Jobs card show mission work.
+- **`model_install` job op** covers both LLM catalog downloads and
+  image-model profiles; **`wait`** nodes are a real bounded delay
+  (≤1 h, aborts on pause/cancel); **`research`** nodes run the real
+  `ResearchCoordinator` and persist findings into the knowledge graph.
+- **Knowledge graph → prompts**: `link()` resolves names to canonical
+  entity ids (legacy raw-name edges still queryable), `context_for`
+  feeds bounded entity context into orchestrator prompts via a lazy
+  resolver, and `KnowledgeGraph` uses per-call connections — no
+  persistent SQLite handle, no Windows tempdir locks.
+- **Plan simulation understands mission DAGs**: `simulate_plan`
+  translates `nodes[]` (kind → representative permission) so `/api/
+  simulate` dry-runs real mission graphs, not just tool-level steps.
+- **Idle context shrink is real config**: `context_shrink_idle_seconds`
+  /`context_shrink_factor` are parsed `AgentConfig` fields (previously
+  documented but silently ignored); a resident model launched at an
+  oversized window relaunches at its role-recommended context after the
+  idle threshold — warm, not evicted.
+- **Auto-tune re-scans**: the idle benchmark worker rechecks enabled
+  llama.cpp profiles every 10 idle minutes so mid-session installs get
+  tuned without a restart; `AppState._shutdown` stops it cleanly.
+- **Speculative-decoding draft discovery**: a configured model with the
+  `draft` role qualifies as a draft partner alongside `*-draft` ids.
+- **UI coverage**: per-mission activity timeline on the Missions page;
+  Jobs card on the System page; Missions + System linked from every
+  sidebar; config.example.json documents every parsed key.
+
 ### Tests
 
-- 796 passing (2 env skips). GitHub Actions green on `a44905c`/`2bdb8c0` including
-  the windows-desktop installer/package smoke job.
+- 812 passing (2 env skips). GitHub Actions green through `70cd34e`
+  including the windows-desktop installer/package smoke job.
 - New coverage: mark_bad persistence, error classification, sweep
   composition/skip-bad, context classes, launch fallback ladder,
   ctx-growth relaunch, cold/warm telemetry, mission-tagged timeline
   rows, progress clamping, summary rollup, idle auto-tune worker,
-  sandboxed verify commands, repo_search wiring.
+  sandboxed verify commands, repo_search wiring, conservative GPU
+  yield, unknown-kind loud failure, mission-job ledger records,
+  mission-DAG simulation, draft-role speculative pairing.
 
 ## [0.7.0] — Unreleased
 
