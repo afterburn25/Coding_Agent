@@ -123,6 +123,36 @@
     });
   }
 
+  function renderTierPlan(plan) {
+    const box = $("tierPlanList");
+    if (!plan || !Array.isArray(plan.tiers)) {
+      box.textContent = "Tier plan unavailable.";
+      return;
+    }
+    const hw = plan.hardware || {};
+    const head = `<div class="muted small" style="margin-bottom:6px">${esc(hw.gpu_name || "No GPU")} · ` +
+      `${fmtGB(hw.dedicated_vram_gb)} dedicated VRAM · ${fmtGB(hw.total_ram_gb)} RAM · ` +
+      `${esc(hw.gpu_backend)} backend</div>`;
+    const rows = plan.tiers.map((t) => {
+      const cls = t.supported ? "cap" : "off";
+      const sel = t.selected ? '<span class="chip gpu">install</span>' : "";
+      const near = t.near_native ? '<span class="chip">below recommended</span>' : "";
+      return `
+      <div class="proc-row">
+        <span class="name">${esc(t.display_name)}</span>
+        <span class="muted">tier ${esc(t.tier)} · ${esc(t.ladder_label)}</span>
+        <span class="chip ${cls}">${esc(t.execution_label)}</span>
+        ${sel}${near}
+        <span class="muted" title="${esc(t.reason)}">${esc(String(t.reason || "").slice(0, 70))}</span>
+      </div>`;
+    }).join("");
+    const foot = plan.download_gb
+      ? `<div class="muted small" style="margin-top:6px">Selected download: ${fmtGB(plan.download_gb)} · disk ${plan.disk_ok ? "ok" : "insufficient"}</div>`
+      : "";
+    box.innerHTML = head + rows + foot;
+    box.classList.remove("muted");
+  }
+
   function renderJobs(jobs) {
     const rows = jobs || [];
     if (!rows.length) { $("jobList").textContent = "No install jobs."; return; }
@@ -186,6 +216,16 @@
     renderPerf(data);
   }
 
+  async function loadTierPlan() {
+    try {
+      const data = await api("/api/model-plan");
+      renderTierPlan(data);
+    } catch (e) {
+      const box = $("tierPlanList");
+      if (box) box.textContent = "Tier plan unavailable.";
+    }
+  }
+
   function renderTuning(tuning, mode, models) {
     const box = $("tuningList");
     if (!tuning) { box.textContent = "Runtime tuner unavailable."; return; }
@@ -232,7 +272,7 @@
   }
 
   async function loadAll() {
-    await Promise.all([loadRuntime(), loadModels(), loadPerf(), loadTuning()]).catch((e) => alert(e.message));
+    await Promise.all([loadRuntime(), loadModels(), loadPerf(), loadTuning(), loadTierPlan()]).catch((e) => alert(e.message));
   }
 
   $("refreshAll").addEventListener("click", loadAll);
