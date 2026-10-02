@@ -209,12 +209,30 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertEqual(server.count("can_run_without_coding_model(message)"), 2)
         self.assertNotIn("and self.state.agent.can_answer_locally(message)", server)
 
+    def test_all_agent_entry_points_feed_voice(self):
+        """Every agent.run/resume/recover call must tee speech, otherwise a
+        response renders in chat but is never spoken. The final text must
+        also reach finish_task so token-less responses (memory hits, local
+        answers) are still spoken."""
+        server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
+        self.assertNotIn("event_callback=self._bus_emit", server)
+        self.assertNotIn("event_callback=self.state._bus_emit", server)
+        self.assertIn("def _voice_begin", server)
+        self.assertIn("def _voice_tee", server)
+        self.assertIn("def _voice_finish", server)
+        # stream + /api/chat + queue worker + auto-resume + auto-retry +
+        # resume + recover handlers
+        self.assertGreaterEqual(server.count("_voice_tee(voice_rid"), 7)
+        self.assertGreaterEqual(server.count("_voice_finish(voice_rid"), 7)
+        voice_js = (ROOT / "web" / "voice_global.js").read_text(encoding="utf-8")
+        self.assertIn("NotAllowedError", voice_js)
+
     def test_main_ui_uses_agent_sse_endpoint(self):
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
         self.assertIn("/api/chat/stream", app)
         self.assertIn("text/event-stream", server)
-        self.assertIn("event_callback=emit", server)
+        self.assertIn("event_callback=self.state._voice_tee(voice_rid, emit)", server)
         self.assertIn("name==='token'", app)
         self.assertIn("name==='tool'", app)
         self.assertIn("name==='image_job'", app)

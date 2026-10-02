@@ -333,6 +333,37 @@ class TestVoiceManager(unittest.TestCase):
         self.assertEqual(segs[0]["seq"], 0)
         self.assertTrue(self.m.segment_path(segs[0]["segment_id"]).exists())
 
+    def test_finish_without_tokens_speaks_final_text(self):
+        """Responses with no streamed tokens (local/memory/instant answers)
+        must still be spoken via the finish_task fallback."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-local")
+        self.m.finish_task("t-local", "This answer came from memory.")
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if any(p.get("event") == "segment" for p in published):
+                break
+            time.sleep(0.05)
+        segs = [p for p in published if p.get("event") == "segment"]
+        self.assertTrue(segs, published)
+        self.assertEqual(segs[0]["task_id"], "t-local")
+
+    def test_finish_flushes_unterminated_tail(self):
+        """Text after the last sentence terminator must not be dropped."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-tail")
+        self.m.feed_token("t-tail", "Spoken now. trailing fragment")
+        self.m.finish_task("t-tail", "Spoken now. trailing fragment")
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if len([p for p in published if p.get("event") == "segment"]) >= 2:
+                break
+            time.sleep(0.05)
+        segs = [p for p in published if p.get("event") == "segment"]
+        self.assertEqual([s["seq"] for s in segs], [0, 1])
+
     def test_no_speech_when_disabled(self):
         self.m.config.voice_enabled = False
         self.m.begin_task("t")

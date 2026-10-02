@@ -584,7 +584,15 @@ class AppState:
                             "event": "auto_resume",
                             "task_id": task.get("id"),
                         })
-                        self.agent.recover(str(task["id"]), event_callback=self._bus_emit)
+                        voice_rid = self._voice_begin()
+                        try:
+                            res = self.agent.recover(
+                                str(task["id"]),
+                                event_callback=self._voice_tee(voice_rid, self._bus_emit))
+                            self._voice_finish(voice_rid, res.content)
+                        except Exception:
+                            self._voice_finish(voice_rid)
+                            raise
                     except Exception as exc:
                         self.events.publish("task", {
                             "event": "auto_resume_failed",
@@ -1147,6 +1155,49 @@ class AppState:
             except Exception:
                 pass
 
+    def _voice_begin(self) -> str:
+        """Open a speech context for a new assistant response.
+
+        Starting at request time (rather than on the first streamed token)
+        interrupts prior speech immediately and pre-warms the engine while
+        the model is still thinking.
+        """
+        rid = f"chat-{secrets.token_hex(6)}"
+        voice = self.voice
+        if voice is not None:
+            try:
+                voice.begin_task(rid)
+            except Exception:
+                pass
+        return rid
+
+    def _voice_tee(self, rid: str, callback: Callable | None = None) -> Callable:
+        """Wrap an agent event_callback so token deltas also feed speech."""
+        voice = self.voice
+
+        def tee(event: dict) -> None:
+            if voice is not None:
+                try:
+                    if event.get("type") == "token":
+                        voice.feed_token(
+                            rid,
+                            str(event.get("text") or event.get("delta") or ""))
+                except Exception:
+                    pass
+            if callback is not None:
+                callback(event)
+
+        return tee
+
+    def _voice_finish(self, rid: str, final_text: str = "") -> None:
+        """Flush the streamer tail; speak final_text if nothing streamed."""
+        voice = self.voice
+        if voice is not None:
+            try:
+                voice.finish_task(rid, final_text)
+            except Exception:
+                pass
+
     def _dequeue_next(self, *, blocking: bool = False) -> None:
         """Start the next queued prompt when no task is active.
 
@@ -1180,16 +1231,19 @@ class AppState:
                 return
 
             def run_item(entry: dict) -> None:
+                voice_rid = self._voice_begin()
                 try:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
-                    self.agent.run(
+                    result = self.agent.run(
                         str(entry["prompt"]),
                         history=self.history,
                         mode=str(entry.get("mode") or "auto"),
-                        event_callback=self._bus_emit,
+                        event_callback=self._voice_tee(voice_rid, self._bus_emit),
                     )
+                    self._voice_finish(voice_rid, result.content)
                     self.history = self.conversation_manager.history(limit=32)
                 except Exception as exc:
+                    self._voice_finish(voice_rid)
                     self.events.publish("task", {
                         "event": "queue_item_failed", "queue_item": entry,
                         "error": f"{type(exc).__name__}: {exc}",
@@ -1248,10 +1302,15 @@ class AppState:
                 self._retrying_tasks.add(task_id)
 
                 def retry(tid: str = task_id) -> None:
+                    voice_rid = self._voice_begin()
                     try:
                         self.events.publish("task", {"event": "auto_retry", "task_id": tid})
-                        self.agent.recover(tid, event_callback=self._bus_emit)
+                        res = self.agent.recover(
+                            tid,
+                            event_callback=self._voice_tee(voice_rid, self._bus_emit))
+                        self._voice_finish(voice_rid, res.content)
                     except Exception as exc:
+                        self._voice_finish(voice_rid)
                         self.events.publish("task", {
                             "event": "auto_retry_failed", "task_id": tid,
                             "error": f"{type(exc).__name__}: {exc}",
@@ -3037,6 +3096,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.state._stream_sinks.append(events)
                 done = threading.Event()
                 started = time.monotonic()
+                # Speech context for this response — opened now so prior
+                # speech stops immediately and the TTS engine pre-warms while
+                # the model thinks. Feeding/finishing is wrapped into the
+                # agent callback by _voice_tee / _voice_finish.
+                voice_rid = self.state._voice_begin()
 
                 def emit(event: dict) -> None:
                     # Agent/model work may run for a while before the first token.
@@ -3048,27 +3112,6 @@ class Handler(BaseHTTPRequestHandler):
                         self.state._bus_emit(event)
                     except Exception:
                         pass
-                    # Tee assistant tokens into the speech pipeline — filtered,
-                    # sentence-segmented, and queued to the TTS worker. Failures
-                    # here must never affect the text response.
-                    if self.state.voice is not None:
-                        try:
-                            et = event.get("type")
-                            if et == "token":
-                                cur = self.state.tasks.current()
-                                tid = cur.id if cur else ""
-                                if tid:
-                                    self.state.voice.begin_task(tid)
-                                    self.state.voice.feed_token(
-                                        tid, str(event.get("text") or event.get("delta") or ""))
-                            elif et == "result":
-                                cur = self.state.tasks.current()
-                                tid = cur.id if cur else ""
-                                if tid:
-                                    self.state.voice.finish_task(
-                                        tid, str(event.get("content") or ""))
-                        except Exception:
-                            pass
                     # Token deltas and live-output chunks are drop-safe under
                     # backpressure (a disconnected or stalled client must not
                     # grow memory for the rest of the task); everything else —
@@ -3083,11 +3126,13 @@ class Handler(BaseHTTPRequestHandler):
                             message,
                             history=self.state.history,
                             mode=mode,
-                            event_callback=emit,
+                            event_callback=self.state._voice_tee(voice_rid, emit),
                         )
+                        self.state._voice_finish(voice_rid, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
                         events.put({"type": "result", **self._agent_payload(result)})
                     except Exception as exc:
+                        self.state._voice_finish(voice_rid)
                         err = f"{type(exc).__name__}: {exc}"
                         events.put({"type": "error", "error": err})
                         try:
@@ -3210,9 +3255,14 @@ class Handler(BaseHTTPRequestHandler):
                             "readiness": readiness,
                         }, 409)
                         return
+                voice_rid = self.state._voice_begin()
                 try:
                     result = self.state.agent.run(message, history=self.state.history, mode=mode,
-                                                  event_callback=self.state._bus_emit)
+                                                  event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
+                    self.state._voice_finish(voice_rid, result.content)
+                except Exception:
+                    self.state._voice_finish(voice_rid)
+                    raise
                 finally:
                     try:
                         self.state._dequeue_next()
@@ -3254,8 +3304,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not task_id:
                     self._json({"error": "task_id is required"}, 400)
                     return
+                voice_rid = self.state._voice_begin()
                 try:
-                    result = self.state.agent.resume(task_id, approved=approved, event_callback=self.state._bus_emit)
+                    result = self.state.agent.resume(task_id, approved=approved,
+                                                     event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
+                    self.state._voice_finish(voice_rid, result.content)
+                except Exception:
+                    self.state._voice_finish(voice_rid)
+                    raise
                 finally:
                     try:
                         self.state._dequeue_next()
@@ -3271,8 +3327,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not task_id:
                     self._json({"error": "task_id is required"}, 400)
                     return
+                voice_rid = self.state._voice_begin()
                 try:
-                    result = self.state.agent.recover(task_id, event_callback=self.state._bus_emit)
+                    result = self.state.agent.recover(task_id,
+                                                      event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
+                    self.state._voice_finish(voice_rid, result.content)
+                except Exception:
+                    self.state._voice_finish(voice_rid)
+                    raise
                 finally:
                     try:
                         self.state._dequeue_next()

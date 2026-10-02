@@ -78,7 +78,22 @@
     audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
     audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
     NV.current = audio;
-    audio.play().catch(() => { NV.current = null; NV._playNext(); });
+    audio.play().catch(err => {
+      if (err && err.name === 'NotAllowedError') {
+        // Autoplay policy blocked playback — hold the segment and replay it
+        // on the next user gesture instead of dropping it silently.
+        const retry = () => {
+          if (NV.current !== audio) return; // stopped/replaced meanwhile
+          NV.current = null;
+          if (!NV.muted && NV.enabled) NV.queue.unshift(item);
+          NV._playNext();
+        };
+        document.addEventListener('pointerdown', retry, { once: true });
+        document.addEventListener('keydown', retry, { once: true });
+        return;
+      }
+      if (NV.current === audio) { NV.current = null; NV._playNext(); }
+    });
   };
 
   NV.speak = async function (text, opts) {
