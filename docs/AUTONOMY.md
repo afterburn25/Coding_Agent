@@ -208,11 +208,16 @@ Findings dedupe by signature: repeat sightings refresh the row
 acted-on finding requires a 1 h cooldown. `POST /api/findings/scan`
 forces a pass; `POST /api/findings/{id}/dismiss` closes a row.
 Built-in detectors: crash storms, mission failure rate, model-call
-failures, disk pressure, repair thrash (same signature ≥3 incidents),
-answer-memory decay, startup regression vs the learned profile, stale
-approval backlog, and **CI failures** — when `gh` is installed and
-authed, failed runs (`gh run list --status failure`, cached 10 min)
-open one repair incident per failed-run signature.
+failures, disk pressure, RAM pressure (twin hardware sample), repair
+thrash (same signature ≥3 incidents), answer-memory decay, startup
+regression vs the learned profile, stale approval backlog, and **CI
+failures** — when `gh` is installed and authed, failed runs
+(`gh run list --status failure`, cached 10 min) open one repair
+incident per failed-run signature. The source also attaches a bounded
+`--log-failed` tail to each run, which the incident consumes as its
+stack trace — the localizer suffix-matches CI-runner paths
+(`/home/runner/work/<repo>/<repo>/…`) onto repo files so CI tracebacks
+localize like local ones.
 
 ## Priority scheduling & fairness
 

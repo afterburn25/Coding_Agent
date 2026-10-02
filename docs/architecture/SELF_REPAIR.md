@@ -115,8 +115,9 @@ patchers for tests.
   from the live instance), waits for `/api/health`, replays the original
   failing request path when the incident recorded one, then terminates
   the process. `self_repair_canary_enabled=false` falls back to the
-  honest `skipped` report, and `canary_required_for` subsystems refuse
-  promotion without a real canary either way.
+  honest `skipped` report, and `self_repair_canary_required_for`
+  (config list of subsystems) refuses promotion without a real canary
+  either way.
 - Promotion requires: confidence ≥ `min_promote_confidence`, targeted
   tests green, regression suite green when configured, review pass,
   canary pass/not-required — **and** `auto_promote` enabled
@@ -165,6 +166,16 @@ diagnosing fresh.
   republishes `repair`/`finding` events onto the cognitive bus as
   structural `HEALTH_EVENT`/`MISSION_EVENT`s — no raw evidence crosses.
   `diagnostics`/`repair` intents route to `diagnostics_brain`.
+- **Research-backed diagnosis**: when deterministic diagnosis stays
+  low-confidence/`unknown`, the coordinator invokes the injected
+  researcher (`research.research_topic`) with a bounded query built
+  from incident metadata; summary+sources are stored as `research`
+  evidence and a research-derived hypothesis is added when sources
+  are usable — inconclusive research never fabricates confidence.
+- **Eval Lab**: terminal incidents record a `self_repair` suite run via
+  `EvalLab.record_run` (`data/eval/history.jsonl`) carrying targeted/
+  regression/canary outcomes, confidence, and promotion state — repair
+  quality is measurable over time, not anecdotal.
 - **API**: `GET /api/self-repair`, `GET /api/self-repair/{id}`,
   `POST /api/self-repair/report`, `POST /api/self-repair/{id}/retry |
   process | rollback`.
