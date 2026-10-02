@@ -1501,9 +1501,12 @@ class AppStateWiringTests(unittest.TestCase):
     def _state(self, td: str):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import AppState
+        # autonomy_enabled=False: the supervisor thread would keep writing
+        # data/autonomy under the tempdir during rmtree → ENOTEMPTY races.
         cfg = AgentConfig(models=[ModelProfile(
             id="ext", endpoint="http://x/v1", model="m",
-            roles=["primary_coder"], runtime="external")])
+            roles=["primary_coder"], runtime="external")],
+            autonomy_enabled=False)
         return AppState(cfg, Path(td), Path(td) / ".runtime")
 
     def test_core_tool_families_registered(self):

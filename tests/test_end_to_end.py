@@ -394,7 +394,9 @@ class EndToEndAgentTests(unittest.TestCase):
         the desktop UI drives."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory() as td:
+        # Daemon threads may still be flushing state during teardown;
+        # Windows holds directory locks briefly.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -405,6 +407,7 @@ class EndToEndAgentTests(unittest.TestCase):
                     runtime="external")],
                 process_watchdog=False,
                 research_enabled=False,
+                autonomy_enabled=False,
             )
             server, state = create_server(cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
             t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -481,6 +484,7 @@ class EndToEndAgentTests(unittest.TestCase):
                     runtime="external")],
                 process_watchdog=False,
                 research_enabled=False,
+                autonomy_enabled=False,
             )
             server, state = create_server(cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
             threading.Thread(target=server.serve_forever, daemon=True).start()

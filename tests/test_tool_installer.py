@@ -355,7 +355,7 @@ class ServerInstallFlowTests(unittest.TestCase):
                             model="fake-model",
                             roles=["primary_coder", "utility", "fast_coder"],
                             runtime="external")],
-                        process_watchdog=False, research_enabled=False),
+                        process_watchdog=False, research_enabled=False, autonomy_enabled=False),
                     root / "workspace", root)
             except Exception:
                 server.shutdown()
@@ -479,7 +479,7 @@ class ServerPackageUninstallTests(unittest.TestCase):
                     model="fake-model",
                     roles=["primary_coder", "utility", "fast_coder"],
                     runtime="external")],
-                process_watchdog=False, research_enabled=False),
+                process_watchdog=False, research_enabled=False, autonomy_enabled=False),
             root / "workspace", root)
 
     def test_package_uninstall_runs_manager_command_as_job(self):
@@ -615,7 +615,7 @@ class UpdateCheckerTests(unittest.TestCase):
                         model="fake-model",
                         roles=["primary_coder", "utility", "fast_coder"],
                         runtime="external")],
-                    process_watchdog=False, research_enabled=False),
+                    process_watchdog=False, research_enabled=False, autonomy_enabled=False),
                 root / "workspace", root)
             try:
                 state.tool_updates._cache["pkgtool"] = {
@@ -681,7 +681,7 @@ class UpdateCheckerTests(unittest.TestCase):
                         model="fake-model",
                         roles=["primary_coder", "utility", "fast_coder"],
                         runtime="external")],
-                    process_watchdog=False, research_enabled=False),
+                    process_watchdog=False, research_enabled=False, autonomy_enabled=False),
                 root / "workspace", root)
             try:
                 out = state.check_tool_updates()
