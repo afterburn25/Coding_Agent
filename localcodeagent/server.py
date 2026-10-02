@@ -555,6 +555,7 @@ class AppState:
             # Callable keeps the knowledge-graph SQLite store lazily opened —
             # it must not lock files during AppState construction.
             knowledge_graph=lambda: self.knowledge,
+            skills=lambda: self.skills,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""

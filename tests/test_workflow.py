@@ -318,6 +318,45 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             self.assertIn("Knowledge graph relationships", system_text)
             self.assertIn("service:PaymentGateway --depends_on--> entity:Stripe", system_text)
 
+    def test_enabled_skill_instructions_reach_prompt(self):
+        from localcodeagent.skills import SkillRegistry
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            skills_root = root / "runtime"
+            skill_dir = root / "bundle" / "skills" / "deploy-helper"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "skill.json").write_text(json.dumps({
+                "name": "deploy-helper", "version": "1.0.0",
+                "description": "deployment helper",
+                "instructions": "ALWAYS run migrations before deploying."}))
+            reg = SkillRegistry(skills_root,
+                                bundled_dir=root / "bundle" / "skills")
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_research_unknown=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=ConversationManager(root / "conversations.json"),
+                skills=lambda: reg,
+            )
+            agent._provider_for = lambda *_a, **_kw: provider
+            agent.run("deploy the service")
+            system_text = "\n".join(
+                str(m.get("content", "")) for m in provider.messages
+                if m.get("role") == "system")
+            self.assertIn("Skill: deploy-helper", system_text)
+            self.assertIn("ALWAYS run migrations before deploying.", system_text)
+
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

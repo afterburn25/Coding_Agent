@@ -166,6 +166,7 @@ class AgentOrchestrator:
         activities=None,
         digital_twin=None,
         knowledge_graph=None,
+        skills=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -188,6 +189,9 @@ class AgentOrchestrator:
         # May be a graph instance or a zero-arg callable returning one — the
         # server passes a resolver so the SQLite store stays lazily opened.
         self.knowledge_graph = knowledge_graph
+        # SkillRegistry or zero-arg resolver — enabled skills inject bounded
+        # instruction context into prompts.
+        self.skills = skills
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -990,6 +994,19 @@ class AgentOrchestrator:
         except Exception:
             return ""
         return ""
+
+    def _skills_context(self) -> str:
+        """Instruction blocks from enabled skills, lazily resolved like the
+        knowledge graph so the registry is never touched when absent."""
+        if self.skills is None:
+            return ""
+        try:
+            reg = self.skills() if callable(self.skills) else self.skills
+            if reg is None:
+                return ""
+            return reg.instructions_for() or ""
+        except Exception:
+            return ""
 
     def _task_context(self, task_id: str) -> None:
         self.tools.context["task_id"] = task_id
@@ -3061,6 +3078,7 @@ class AgentOrchestrator:
                 "Knowledge graph relationships (stored facts about entities "
                 "mentioned here):\n" + kg_ctx)
         knowledge_context = "\n\n".join(knowledge_parts)
+        skills_context = self._skills_context()
         brain_skill_context = (
             self.nexus_brain.training_context(user_text)
             if self.nexus_brain is not None and self.nexus_brain.initialized
@@ -3178,6 +3196,7 @@ class AgentOrchestrator:
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,
+                skills_context,
                 memory_context,
             ]
             if research_context.get("summary"):
@@ -3288,6 +3307,7 @@ class AgentOrchestrator:
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,
+                skills_context,
                 memory_context,
                 self_hosting,
             ]
