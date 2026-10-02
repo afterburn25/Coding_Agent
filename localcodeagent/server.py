@@ -963,15 +963,50 @@ class AppState:
                 while time.time() < deadline:
                     cur = self.images.get_job(job.id)
                     if cur.state in ("finished", "failed", "cancelled"):
+                        arts = [job.id]
+                        if cur.state == "finished":
+                            arts = [self._register_output_artifact(
+                                p, mission_id=str(mission.get("id") or ""),
+                                task_id=str(node.get("id") or ""),
+                                tool="comfyui").get("id")
+                                for p in (getattr(cur, "outputs", []) or [])]
                         return {"ok": cur.state == "finished",
                                 "output": f"image job {cur.state}: {cur.stage}",
-                                "artifacts": [job.id]}
+                                "artifacts": arts}
                     time.sleep(1.0)
                 return {"ok": False, "output": "image job timed out",
                         "artifacts": [job.id]}
             return {"ok": False, "output": f"unknown job op: {op!r}"}
         except Exception as exc:
             return {"ok": False, "output": f"{op or 'job'} failed: {exc}"}
+
+    def _register_output_artifact(self, path, *, mission_id: str = "",
+                                  task_id: str = "", tool: str = "") -> dict:
+        """Register a produced file and record its provenance in the
+        knowledge graph (artifact produced-by task/mission, contained-in
+        repo) so prompts can surface real lineage."""
+        rec = self.artifacts.register(
+            path, creator="mission" if mission_id else "agent",
+            mission_id=mission_id, task_id=task_id, tool=tool)
+        try:
+            kg = self.knowledge
+            kg.add_entity("artifact", str(rec["name"]),
+                          attrs={"kind": rec.get("kind"),
+                                 "artifact_id": rec.get("id")})
+            kg.add_entity("repo", self.workspace.name)
+            kg.link(f"repo:{self.workspace.name}",
+                    f"artifact:{rec['name']}", "contains")
+            if task_id:
+                kg.add_entity("task", task_id)
+                kg.link(f"task:{task_id}",
+                        f"artifact:{rec['name']}", "produced")
+            if mission_id:
+                kg.add_entity("mission", mission_id)
+                kg.link(f"mission:{mission_id}",
+                        f"artifact:{rec['name']}", "produced")
+        except Exception:
+            pass
+        return rec
 
     # -- mission chat commands -----------------------------------------
     #

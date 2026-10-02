@@ -170,6 +170,28 @@ class JobNodeTests(unittest.TestCase):
             finally:
                 stop_state(state)
 
+    def test_register_output_artifact_records_kg_provenance(self):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                out = Path(td) / "render.png"
+                out.write_bytes(b"png")
+                rec = state._register_output_artifact(
+                    out, mission_id="m9", task_id="n1", tool="comfyui")
+                self.assertTrue(rec["id"].startswith("art-"))
+                self.assertEqual(rec["kind"], "image")
+                self.assertEqual(rec["mission_id"], "m9")
+                ctx = state.knowledge.context_for("render.png")
+                self.assertIn("produced", ctx)
+                self.assertIn("m9", ctx)
+            finally:
+                stop_state(state)
+
 
 class MissionStoreTests(unittest.TestCase):
     def test_create_and_get(self):
