@@ -46,6 +46,18 @@ letting it preempt the user.
   `gh run list --status failure` (cached 10 min, silent when `gh` is
   absent) and opens one repair incident per failed-run signature;
   detectors may emit multiple findings per scan.
+- **Research-backed diagnosis** — when the top hypothesis is `unknown`
+  or confidence < 0.45, the coordinator consults a `researcher` hook
+  (wired to `ResearchCoordinator.research_topic`); results attach to
+  `incident.research` as evidence for the patch mission and review —
+  they never fabricate a hypothesis or inflate confidence.
+- **Twin integration** — a `ram_pressure` detector reads the twin's live
+  hardware snapshot (sub-2 GB → repair-routed finding), and incidents
+  record a `twin.sample()` hardware row at detect time.
+- **Eval Lab integration** — `EvalLab.record_run` persists
+  externally-computed runs; the coordinator's `eval_recorder` hook fires
+  once per terminal incident, mapping targeted/regression/canary/review
+  checks into a `self_repair` suite run keyed on the failure signature.
 - **Production candidate canary** — `canary.production_launcher` boots
   the repaired Nexus from the incident worktree (PYTHONPATH-scoped code,
   free port, scratch config → isolated `data/canary/<incident>/` state),

@@ -15,6 +15,16 @@ Scheduling gains **priority aging** (`effective_rank`: background work
 promotes toward `normal` after 4 h/24 h waits but can never outrank
 interactive/urgent) and **urgent preemption** (critical recovery may
 claim the agent lane between user turns; everything else still yields).
+Self-repair gaps closed on the same line: a `diagnostics_brain`
+specialist records incidents as episodic memory via `HEALTH_EVENT`
+broadcasts; promoted repairs land as scoped auditable commits
+(`self_repair_commit_on_promote`); a real production canary boots the
+candidate Nexus from the incident worktree on an isolated port with
+scratch state (`self_repair_canary_enabled`); failed CI runs ingest as
+repair incidents via `gh`; weak diagnoses gather external evidence
+through the research coordinator; twin RAM snapshots feed both incident
+evidence and a `ram_pressure` detector; and terminal incidents record
+their verification checks into the Eval Lab's `self_repair` suite.
 
 ### Retained from v0.10 — Autonomous self-repair + evaluated goals
 
