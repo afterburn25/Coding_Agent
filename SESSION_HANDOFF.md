@@ -1131,3 +1131,37 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Version 0.7.1 synced across artifacts. Suite: **789 passing**
   (2 env skips). GitHub Actions green on `55c7d66` including the
   windows-desktop installer smoke job; final run `36982678215` green on `a44905c` (8m21s, includes installer build + update-preservation smoke).
+
+## v0.7.2 reliability + UX wave — commits 9f3d13f → 9aa3fcb
+
+- Durable state via junctions: `data`, `.agent`, `output` →
+  `%LOCALAPPDATA%\NexusCore`; `models` + `ComfyUI_windows_portable` →
+  `<install-drive>:\NexusCore` (Program.cs StateTargetRoot; build script
+  mirrors both tiers before wiping dist, never traverses junctions).
+  Rebuilds can no longer wipe chats, state, or 71GB of models.
+- Sidebar: one canonical nav rail on all 11 pages; page controls moved to
+  main/right-rail surfaces (`48ca2b5`). System page gains a Diagnostics
+  panel fed by `/api/diagnostics` crash_history (`ed3679d`).
+- Watchdog auto-restarts now persist to crash_history + component health
+  (`a4fadf8`); host records backend exits to crash_history.jsonl too.
+- `[nexus-port]` stdout marker — host health-checks the backend's actual
+  bound port (port-race fix).
+- Mid-stream failure UX: friendly message + diagnostic details +
+  one-click retry; SSE error events carry the full payload (`4fcea08`).
+- `color-scheme: dark` + themed `select option` — readable dropdowns
+  (`9f3d13f`).
+- Voice sync: response display holds until first TTS segment when voice
+  is on (8s cap + mute/stop release); muted = instant text. Streamer
+  emits first clause ~90 chars (`cc86378`).
+- Speech filter translates status glyphs to verdicts — ✅/✓/[x] →
+  "operating within normal parameters", ❌/✗/[ ] → "failed to
+  initialize" (`8345f71`). Hard-coded in `speech_filter.py`.
+- Identity: `creator_answer()` states the fact naturally; lock wording
+  only on write-attempt refusal (`34b1182`).
+- Permissive conversation: expanded `generic_topic_refusal` detection
+  (can't assist/provide, not appropriate-or-safe) w/ buffered retry;
+  `hard_specific` narrowed to illegal-content-only refusals so real
+  restrictions aren't retried away (`9aa3fcb`).
+- Runtime verified live: 5 junctions, all models resolve, ComfyUI
+  healthy through junction, 5 conversations + 146-msg history intact.
+- Suite: **868 passing** (2 env skips).
