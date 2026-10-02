@@ -142,6 +142,17 @@ class CodingReadinessTests(unittest.TestCase):
         self.assertIn("Not enough free disk space", js)
         self.assertIn('if path == "/api/readiness":', server)
 
+    def test_system_page_exists_and_is_linked(self):
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        page = (ROOT / "web" / "system.html").read_text(encoding="utf-8")
+        js = (ROOT / "web" / "system.js").read_text(encoding="utf-8")
+        self.assertIn('href="/system.html"', html)
+        for endpoint in ("/api/health", "/api/twin", "/api/rag", "/api/lsp",
+                         "/api/skills", "/api/artifacts", "/api/backups",
+                         "/api/eval/history", "/api/experiments"):
+            self.assertIn(endpoint, js, f"system.js missing {endpoint}")
+        self.assertIn("system.js", page)
+
 
 class ModelSetupPlannerTests(unittest.TestCase):
     def test_single_gguf_gets_all_core_coding_roles(self):

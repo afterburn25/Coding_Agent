@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core · System</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/system.css" />
+</head>
+<body>
+<div class="system-shell">
+  <aside class="system-side">
+    <div class="brand">Nexus Core <span>System</span></div>
+    <a class="workspace-link" href="/">← Chat</a>
+    <a class="workspace-link" href="/missions.html">Missions</a>
+    <a class="workspace-link" href="/tools.html">Tools</a>
+    <a class="workspace-link" href="/models.html">Models</a>
+    <div class="section-title">Overall</div>
+    <div id="overallCard" class="autonomy-card">Loading…</div>
+    <div class="side-actions"><button id="refreshAll" class="mini-button" type="button">Refresh</button></div>
+    <div class="section-title">Jump to</div>
+    <div class="jump-links">
+      <a href="#secHealth">Health</a>
+      <a href="#secTwin">Digital Twin</a>
+      <a href="#secRag">Repository Index</a>
+      <a href="#secLsp">LSP</a>
+      <a href="#secSkills">Skills</a>
+      <a href="#secArtifacts">Artifacts</a>
+      <a href="#secBackups">Backups</a>
+      <a href="#secEval">Evaluation Lab</a>
+      <a href="#secExperiments">Experiments</a>
+    </div>
+  </aside>
+  <main class="system-main">
+    <section class="panel" id="secHealth">
+      <h2>Health</h2>
+      <div id="healthStates" class="grid-cards"></div>
+      <div class="section-title">Recent transitions</div>
+      <div id="healthHistory" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secTwin">
+      <h2>Digital Twin</h2>
+      <div id="twinCard" class="kv"></div>
+    </section>
+    <section class="panel" id="secRag">
+      <h2>Repository Index</h2>
+      <div id="ragStats" class="kv"></div>
+      <div class="row-actions">
+        <input id="ragQuery" type="text" placeholder="Search symbols / chunks…" />
+        <button id="ragSearch" class="mini-button" type="button">Search</button>
+        <button id="ragUpdate" class="mini-button" type="button">Incremental update</button>
+        <button id="ragRebuild" class="mini-button danger" type="button">Full rebuild</button>
+      </div>
+      <div id="ragResults" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secLsp">
+      <h2>LSP Pool</h2>
+      <div id="lspStatus" class="kv"></div>
+    </section>
+    <section class="panel" id="secSkills">
+      <h2>Skills</h2>
+      <div id="skillsList" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secArtifacts">
+      <h2>Artifacts</h2>
+      <div class="row-actions">
+        <select id="artifactKind">
+          <option value="">All kinds</option>
+          <option value="code">Code</option>
+          <option value="report">Report</option>
+          <option value="image">Image</option>
+          <option value="audio">Audio</option>
+          <option value="archive">Archive</option>
+          <option value="installer">Installer</option>
+          <option value="dataset">Dataset</option>
+        </select>
+      </div>
+      <div id="artifactsList" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secBackups">
+      <h2>Backups</h2>
+      <div class="row-actions">
+        <input id="backupLabel" type="text" placeholder="Label (optional)" />
+        <button id="backupCreate" class="mini-button" type="button">Create backup</button>
+      </div>
+      <div id="backupsList" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secEval">
+      <h2>Evaluation Lab</h2>
+      <div id="evalHistory" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secExperiments">
+      <h2>Experiments</h2>
+      <div class="row-actions">
+        <input id="expHypothesis" type="text" placeholder="Hypothesis…" />
+        <button id="expCreate" class="mini-button" type="button">New experiment</button>
+      </div>
+      <div id="experimentsList" class="scroll-list"></div>
+    </section>
+  </main>
+</div>
+<script src="/system.js"></script>
+</body>
+</html>
