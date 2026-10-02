@@ -2711,3 +2711,22 @@ select {
   background:var(--panel2);
   color:var(--text);
 }
+
+/* Narrow-window escape hatch on pages whose sidebar collapses away. */
+.mobile-back {
+  display:none;
+}
+
+@media(max-width:700px) {
+  .mobile-back {
+    display:inline-block;
+    margin:0 0 12px;
+    padding:7px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    color:var(--link);
+    text-decoration:none;
+    font-size:12px;
+    background:var(--panel);
+  }
+}
