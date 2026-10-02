@@ -249,6 +249,41 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             self.assertIn("Conversation timing context from durable message timestamps", system_text)
             self.assertIn("Conversation quality rules: speak like a capable adult conversational partner", system_text)
 
+    def test_clock_block_is_last_system_message_for_prefix_cache(self):
+        # llama.cpp --cache-reuse reuses the leading token prefix. The clock
+        # text changes every minute, so it must sit AFTER the stable system
+        # blocks — otherwise every request invalidates the whole prompt.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["utility", "fast_coder", "primary_coder"], runtime="external",
+            )
+            config = AgentConfig(
+                models=[profile], permissions={}, research_enabled=False,
+                auto_research_unknown=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _CaptureProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models), ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+                conversation_manager=ConversationManager(root / "conversations.json"),
+            )
+            agent._provider_for = lambda *_a, **_kw: provider
+
+            agent.run("summarize this repository")
+            system = [m for m in provider.messages if m.get("role") == "system"]
+            self.assertGreater(len(system), 1)
+            self.assertIn("Nexus Core", str(system[0]["content"]))
+            self.assertIn("host system clock", str(system[-1]["content"]))
+            # Every block between the stable head and the clock tail must
+            # NOT contain volatile clock text.
+            for m in system[1:-1]:
+                self.assertNotIn("host system clock", str(m["content"]))
+
     def test_greeting_skips_repository_research_and_coding_tools(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

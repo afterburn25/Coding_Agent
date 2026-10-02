@@ -1274,7 +1274,6 @@ class AgentOrchestrator:
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "system", "content": self.current_time_context()},
             {
                 "role": "system",
                 "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
@@ -1311,6 +1310,9 @@ class AgentOrchestrator:
                 for item in task.verification[-4:]
             )
             messages.append({"role": "system", "content": "Previous verification results:\n" + verification})
+        # Clock last — volatile; keeping it at the tail preserves prefix
+        # cache reuse for every stable block ahead of it.
+        messages.append({"role": "system", "content": self.current_time_context()})
         messages.append({"role": "user", "content": task.prompt})
 
         session = _AgentSession(
@@ -3131,7 +3133,6 @@ class AgentOrchestrator:
 
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": UTILITY_PROMPT},
-                {"role": "system", "content": clock_context},
             ]
             optional_blocks = [
                 timing_context if self._brain_subroutine_enabled("temporal_context", True) else "",
@@ -3154,6 +3155,11 @@ class AgentOrchestrator:
                 text = cap(block) if block else ""
                 if text:
                     messages.append({"role": "system", "content": text})
+            # Volatile blocks go last: the clock changes every minute, so
+            # placing it here keeps the leading prefix (prompt + stable
+            # context) reusable by llama.cpp --cache-reuse instead of
+            # invalidating every block after position 1.
+            messages.append({"role": "system", "content": clock_context})
             history_turns = max(0, int(getattr(self.config, "fast_general_history_turns", 8)))
             if history and history_turns:
                 kept: list[dict[str, Any]] = []
@@ -3217,7 +3223,6 @@ class AgentOrchestrator:
                 self.tasks.update(task.id, research=research_context)
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "system", "content": clock_context},
                 {
                     "role": "system",
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
@@ -3260,6 +3265,10 @@ class AgentOrchestrator:
                 text = cap(block) if block else ""
                 if text:
                     messages.append({"role": "system", "content": text})
+            # Clock last among system blocks — it changes every minute, and
+            # leading it would poison prefix-cache reuse for every block
+            # after it (see the utility path comment above).
+            messages.append({"role": "system", "content": clock_context})
             if history:
                 kept = []
                 for msg in reversed(history[-24:]):
