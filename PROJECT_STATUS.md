@@ -198,7 +198,7 @@
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **783 tests passing** (2 environment skips).
+- Current automated checkpoint: **789 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
@@ -219,6 +219,24 @@
   `mission_id` filter and returns a per-task rollup (tools/models/errors/
   retries/elapsed); mission nodes appear as `task_graph` rows; auto-resume
   opens a `RECOVERING TASK` row; UI shows mission chip + progress bar.
+- **Idle auto-tuner**: `AppState._auto_tune_worker` benchmarks untuned
+  resident models while the machine is idle (no active tasks/queues) and
+  persists winning configs — tuning no longer requires a manual
+  `/api/tuning` call.
+- **Sandboxed verify**: generated node verify commands run through
+  `Sandbox.run` (repo cwd, limits, cleanup); detected project commands
+  still run on the host.
+- **RAG as tool**: `repo_search` registered in the ToolRegistry against
+  the lazy incremental index — agents can query symbols/chunks directly.
+- **CI**: worktree merges carry explicit git identity (fixes Linux-runner
+  `empty ident` failures); the Windows package workflow resolves
+  `VERSION` into `APP_VERSION`/`APP_NUMERIC_VERSION` for Inno defines and
+  artifact names instead of hardcoded `0.6.0-dev`. GitHub Actions green
+  on `55c7d66` including the windows-desktop package + installer smoke
+  job.
+- Final commits this wave: `6986514` (0.7.1 perf+timeline), `55c7d66`
+  (auto-tuner + CI identity fix), `2df6870` (sandboxed verify + RAG
+  tool), `b6e2572` (workflow version resolution).
 
 
 

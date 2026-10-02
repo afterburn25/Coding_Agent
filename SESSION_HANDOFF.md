@@ -1042,7 +1042,7 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   needs audio deps installed + mic device selection UI; Windows desktop
   CI/package run on the 0.7.0 line.
 
-## v0.7.1 perf + timeline checkpoint — pending commit
+## v0.7.1 perf + timeline checkpoint — commits 6986514 → b6e2572
 
 - Tuner: bounded sweep (batch/ubatch, threads, FA, KV q8_0, draft),
   mark_bad blacklist for OOM/crash configs, classify_launch_error,
@@ -1053,4 +1053,15 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Timeline: mission_id+progress on rows, /api/activity?mission_id=,
   rollup summary per task, mission node rows (task_graph category),
   RECOVERING TASK rows on auto-resume, UI mission chip + progress bar.
-- Version 0.7.1 synced across artifacts. Suite: 783 passing.
+- Idle-gated auto-tuner (`55c7d66`): benchmarks untuned resident models
+  when the machine is idle; winning configs persist.
+- Worktree merge carries explicit git identity — fixes the Linux-runner
+  `empty ident` CI failure.
+- Autonomy supervisor sandboxes generated node verify commands
+  (`Sandbox.run` with repo cwd); `repo_search` tool exposes the
+  incremental RAG index to agents (`2df6870`).
+- Windows package workflow resolves VERSION at run time — no more
+  hardcoded `0.6.0-dev` in Inno defines or artifact names (`b6e2572`).
+- Version 0.7.1 synced across artifacts. Suite: **789 passing**
+  (2 env skips). GitHub Actions green on `55c7d66` including the
+  windows-desktop installer smoke job; `b6e2572` run pending.

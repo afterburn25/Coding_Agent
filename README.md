@@ -10,9 +10,9 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 ## Current development version
 
-`0.6.0-dev`
+`0.7.1`
 
-v0.6 keeps the stable coding/research/image workflow and moves Nexus Core toward self-hosting: the approved chat-first shell is now the primary UI while runtime recovery, streaming, GitHub actions, and dogfood reliability are the next focus.
+v0.7 turns Nexus Core into a modular local-first AI workstation: measured runtime auto-tuning, a durable Devin-style activity timeline, persistent autonomy, computer use, sandboxes, LSP, repository RAG, skills, multi-agent worktrees, an evaluation lab, artifacts, backups, DPAPI-wrapped secrets, connectors, a knowledge graph, simulation, and a hardware Digital Twin. The canonical version lives in `VERSION`; `scripts/sync_version.py` derives every downstream artifact (pyproject, installer defaults, .NET project, PyInstaller resource, `.agent/project.json`).
 
 ## Nexus Core identity and v0.6 UI
 
@@ -439,7 +439,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **188 tests passing**.
+Current expected result: **789 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 

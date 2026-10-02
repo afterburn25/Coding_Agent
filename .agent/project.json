@@ -4,8 +4,8 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 783,
- "next_milestone": "v0.7.x workstation expansion continues: computer use, sandbox, LSP, RAG, skills, multi-agent worktrees, eval lab, artifacts, backups, DPAPI vault, connectors, knowledge graph, simulation, digital twin, health service, voice STT scaffold all landed on the 0.7.0 line. Next: autonomy executor routes through sandbox+RAG, UI surfaces for new services, async-job DAG node kinds, Windows CI/package on 0.7.0.",
+ "test_checkpoint": 789,
+ "next_milestone": "v0.7.x continues: perf tuner sweep + launch fallback + idle auto-tuner + cold/warm telemetry landed; mission-linked expandable activity timeline landed; generated verify commands now sandboxed; repo_search exposes RAG to agents; Windows package CI green on 0.7.x. Next: UI surfaces for health/artifacts/backups/skills/eval, async-job DAG node kinds, voice STT optional deps, auto-shrink of oversized resident context.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -422,10 +422,10 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "9a48b476b01064936f95d37bf16271278f493dbb",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388",
+  "verified_code_checkpoint": "b6e2572",
+  "verified_test_count": 789,
+  "verified_ci_run_id": 36981638438,
+  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36981638438",
   "verified_artifacts": [
    {
     "id": 11133807708,

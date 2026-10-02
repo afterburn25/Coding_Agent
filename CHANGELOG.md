@@ -47,12 +47,31 @@ Performance tuning + live activity timeline.
 - Timeline UI: mission chip + progress bar on rows; context-growth
   relaunches render as "Restarting Model" instead of "Rewarming".
 
+### Autonomy + platform wiring (0.7.1 follow-up)
+
+- **Idle auto-tuner**: `AppState._auto_tune_worker` benchmarks untuned
+  resident models while the machine is idle and persists winning configs
+  — tuning no longer requires a manual `/api/tuning` call.
+- **Sandboxed generated verification**: node-supplied verify commands in
+  the autonomy supervisor run through `Sandbox.run` with the repository
+  as cwd (limits + cleanup); detected project commands still run on the
+  host.
+- **RAG as agent tool**: `repo_search` is registered in the ToolRegistry
+  against the lazy incremental index.
+- **CI fixes**: worktree merges carry explicit git identity (Linux-runner
+  `empty ident` fix); the Windows package workflow resolves `VERSION`
+  into `APP_VERSION`/`APP_NUMERIC_VERSION` for Inno defines and artifact
+  names — the stale hardcoded `0.6.0-dev` overrides are gone.
+
 ### Tests
 
-- 783 passing (2 env skips). New coverage: mark_bad persistence, error
-  classification, sweep composition/skip-bad, context classes, launch
-  fallback ladder, ctx-growth relaunch, cold/warm telemetry,
-  mission-tagged timeline rows, progress clamping, summary rollup.
+- 789 passing (2 env skips). GitHub Actions green on `55c7d66` including
+  the windows-desktop installer/package smoke job.
+- New coverage: mark_bad persistence, error classification, sweep
+  composition/skip-bad, context classes, launch fallback ladder,
+  ctx-growth relaunch, cold/warm telemetry, mission-tagged timeline
+  rows, progress clamping, summary rollup, idle auto-tune worker,
+  sandboxed verify commands, repo_search wiring.
 
 ## [0.7.0] — Unreleased
 
