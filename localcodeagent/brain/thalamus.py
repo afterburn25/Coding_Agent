@@ -102,12 +102,14 @@ class Thalamus(BrainRegion):
             "coding": "coding", "code": "coding", "research": "research",
             "image": "image", "conversation": "conversation",
             "mission": "mission", "utility": "utility",
+            "diagnostics": "diagnostics", "repair": "diagnostics",
         }.get(intent, intent)
         decision.region = {
             "coding": "coding_brain", "code": "coding_brain",
             "research": "research_brain", "image": "vision_brain",
             "mission": ev.REGION_PFC, "utility": ev.REGION_THALAMUS,
             "conversation": "language_brain",
+            "diagnostics": "diagnostics_brain", "repair": "diagnostics_brain",
         }.get(intent, "language_brain")
 
         # Memory first — trusted memory answers without a model.

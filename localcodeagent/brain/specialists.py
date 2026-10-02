@@ -21,7 +21,7 @@ class SpecialistSpec:
     """Declarative specialist profile — wiring to real subsystems happens
     in core.NexusBrain, which hands each specialist the global services."""
     name: str                        # coding_brain, research_brain, ...
-    domain: str                      # coding|research|vision|review|systems|language
+    domain: str                      # coding|research|vision|review|systems|language|diagnostics
     preferred_requirement: ModelRequirement = field(default_factory=ModelRequirement)
     capabilities: tuple[str, ...] = ()   # tool capabilities it may request
     policy: dict[str, Any] = field(default_factory=dict)
@@ -61,6 +61,15 @@ SPECIALISTS: tuple[SpecialistSpec, ...] = (
                                                max_latency="realtime"),
         capabilities=(),
         description="Comprehension, intent, response generation, style."),
+    SpecialistSpec(
+        name="diagnostics_brain", domain="diagnostics",
+        preferred_requirement=ModelRequirement(coding=True, reasoning=True,
+                                               quality="auto"),
+        capabilities=("repo_search", "read_file", "run_shell", "run_tests",
+                      "system_status", "process_list", "health", "git"),
+        description="Failure localization, log/stack-trace analysis, "
+                    "regression analysis, and repair planning for the "
+                    "self-repair pipeline."),
 )
 
 
@@ -108,6 +117,17 @@ class SpecialistBrain(BrainRegion):
                 f"{subject} → {'ok' if c.get('ok', True) else 'failed'}",
                 detail=json.dumps(c, default=str)[:1000],
                 mission_id=event.mission_id, task_id=event.task_id)
+        elif event.type == EventType.HEALTH_EVENT and \
+                self.spec.domain == "diagnostics" and \
+                self.hippocampus is not None:
+            # Diagnostics keeps an episodic slice of repair/incident
+            # signals so prior failures surface in domain recall.
+            c = event.content
+            self.hippocampus.record_episode(
+                "diagnostics:outcome",
+                f"{c.get('kind', 'health')} → {c.get('state') or c.get('subsystem') or 'seen'}",
+                detail=json.dumps(c, default=str)[:800],
+                mission_id=event.mission_id)
         elif event.type == EventType.ACTION_SELECTION:
             self.local_context["last_selection"] = dict(event.content)
         elif event.type == EventType.LEARNING_EVENT:

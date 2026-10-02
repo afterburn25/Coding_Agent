@@ -812,6 +812,32 @@ class AppState:
                 self.events.publish(str(etype or "mission"), payload)
             except Exception:
                 pass
+            # Repair/detector signals also cross onto the cognitive bus —
+            # HEALTH_EVENT for incidents (the Thalamus already reacts to
+            # these), MISSION_EVENT for routed findings. Payloads stay
+            # structural; stack traces and evidence dumps never cross.
+            if self.brain is not None and etype in {"repair", "finding"}:
+                try:
+                    from .brain.events import (
+                        CognitiveEvent, EventType, Priority)
+                    sev = str((payload or {}).get("severity") or "")
+                    self.brain.bus.publish(CognitiveEvent(
+                        type=EventType.HEALTH_EVENT if etype == "repair"
+                             else EventType.MISSION_EVENT,
+                        source="self_repair", destination="",
+                        priority=(Priority.CRITICAL if sev == "critical"
+                                  else Priority.HIGH if sev == "high"
+                                  else Priority.NORMAL),
+                        content={"kind": str(payload.get("type") or etype),
+                                 "incident": str(payload.get("incident_id")
+                                     or payload.get("id") or ""),
+                                 "finding": str(payload.get("finding") or ""),
+                                 "severity": sev,
+                                 "state": str(payload.get("state") or ""),
+                                 "subsystem": str(
+                                     payload.get("subsystem") or "")}))
+                except Exception:
+                    pass
 
         def executor(mission: dict, node: dict, emit_cb) -> dict:
             voice_rid = self._voice_begin()
@@ -1041,6 +1067,8 @@ class AppState:
                                        .get("status"),
             auto_promote=bool(getattr(config, "self_repair_auto_promote",
                                       False)),
+            commit_on_promote=bool(getattr(
+                config, "self_repair_commit_on_promote", True)),
             is_blocked=lambda: sup.policy.is_stopped()
                                or sup.policy.is_paused(),
             audit=sup._audit,

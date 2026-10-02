@@ -365,6 +365,48 @@ class ScenarioA_CodeRepairPromoted(unittest.TestCase):
                           "canary", "promoting", "resolved"):
                 self.assertIn(stage, states)
 
+    def test_promotion_commits_repair_files(self):
+        """Promoted repairs land as a scoped, auditable commit — never a
+        silently dirty tree, never sweeping unrelated changes."""
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            # an unrelated dirty file must NOT join the repair commit
+            (repo / "unrelated.txt").write_text("dirty", encoding="utf-8")
+            coord = make_coord(td, repo,
+                               patch_generator=good_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}),
+                               commit_on_promote=True)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "resolved")
+            sha = (final.get("promotion") or {}).get("commit")
+            self.assertTrue(sha)
+            log = git("log", "--format=%s", cwd=repo).stdout
+            self.assertIn("Self-repair:", log)
+            # scoped commit — unrelated dirty file stays uncommitted
+            status = git("status", "--porcelain", cwd=repo).stdout
+            self.assertIn("unrelated.txt", status)
+            self.assertNotIn("calc.py", status)
+
+    def test_commit_disabled_leaves_working_tree(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=good_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}),
+                               commit_on_promote=False)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "resolved")
+            self.assertIsNone((final.get("promotion") or {}).get("commit"))
+            # fix present but uncommitted
+            self.assertIn("calc.py",
+                          git("status", "--porcelain", cwd=repo).stdout)
+
 
 class ScenarioB_BadPatchRejected(unittest.TestCase):
     """A patch that keeps failing tests must never promote."""

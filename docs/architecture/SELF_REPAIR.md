@@ -120,6 +120,12 @@ patchers for tests.
   candidate touches byte-for-byte under `lkg/<incident>/`; restore also
   removes files the candidate added. Post-promotion regressions reopen
   the incident or restore last-known-good.
+- After promotion, `Patcher.commit_promotion` commits exactly the
+  promoted paths with incident/root-cause/test-evidence metadata
+  (`Self-repair: …`, identity `Nexus Self-Repair` when the repo has no
+  configured identity) — auditable and revertible, never sweeping
+  unrelated staged work, never pushing. Disable with
+  `self_repair_commit_on_promote=false` (default **on**).
 
 ## Budgets
 
@@ -145,6 +151,14 @@ diagnosing fresh.
   `resume_interrupted` puts the mission back to `replanning` on success.
 - **Server**: coordinator built in `_build_self_repair` with live
   collectors (hardware/runtime/crash history/log tail) and fixers.
+- **Nexus Brain**: a `diagnostics_brain` specialist (domain
+  `diagnostics`, coding+reasoning requirement, repo/test/git/system
+  capabilities) subscribes to `HEALTH_EVENT` on the corpus callosum and
+  records repair incidents as `diagnostics:outcome` episodic memory, so
+  prior incidents inform future diagnosis. The supervisor `emit` bridge
+  republishes `repair`/`finding` events onto the cognitive bus as
+  structural `HEALTH_EVENT`/`MISSION_EVENT`s — no raw evidence crosses.
+  `diagnostics`/`repair` intents route to `diagnostics_brain`.
 - **API**: `GET /api/self-repair`, `GET /api/self-repair/{id}`,
   `POST /api/self-repair/report`, `POST /api/self-repair/{id}/retry |
   process | rollback`.

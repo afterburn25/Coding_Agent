@@ -644,7 +644,8 @@ class SpecialistTests(unittest.TestCase):
     def test_declared_specialists_cover_domains(self):
         domains = {s.domain for s in SPECIALISTS}
         self.assertEqual(domains, {"coding", "research", "vision",
-                                   "review", "systems", "language"})
+                                   "review", "systems", "language",
+                                   "diagnostics"})
 
     def test_specialist_requests_capability_not_model_name(self):
         spec = next(s for s in SPECIALISTS if s.name == "coding_brain")
@@ -748,7 +749,41 @@ class NexusBrainIntegrationTests(unittest.TestCase):
             self.assertEqual(set(st["regions"]), {
                 "brain_stem", "hippocampus", "thalamus", "prefrontal_cortex",
                 "basal_ganglia", "motor_cortex", "cerebellum"})
-            self.assertEqual(len(st["specialists"]), 6)
+            self.assertEqual(len(st["specialists"]), 7)
+            self.assertIn("diagnostics_brain", st["specialists"])
+            brain.close()
+
+    def test_diagnostics_specialist_records_repair_health_events(self):
+        """Self-repair broadcasts HEALTH_EVENTs onto the corpus callosum;
+        the diagnostics specialist must turn them into recallable
+        episodic memory so prior incidents inform future repair."""
+        from localcodeagent.brain.events import (
+            CognitiveEvent, EventType, Priority)
+        with tempfile.TemporaryDirectory() as d:
+            brain = NexusBrain(state_dir=Path(d))
+            self.addCleanup(brain.close)
+            self.assertIn("diagnostics_brain", brain.specialists)
+            brain.bus.publish(CognitiveEvent(
+                type=EventType.HEALTH_EVENT, source="self_repair",
+                priority=Priority.HIGH,
+                content={"kind": "incident_promoted",
+                         "incident": "inc-1",
+                         "subsystem": "llama_runtime",
+                         "state": "resolved"}))
+            res = brain.hippocampus.recall(
+                "incident_promoted resolved", kinds={"episodic"}, limit=5)
+            self.assertTrue(res.entries)
+            self.assertIn("diagnostics:outcome",
+                          res.entries[0].provenance)
+            brain.close()
+
+    def test_thalamus_routes_diagnostics_intent(self):
+        with tempfile.TemporaryDirectory() as d:
+            brain = NexusBrain(state_dir=Path(d))
+            self.addCleanup(brain.close)
+            brain.thalamus._classify_intent = lambda t: "diagnostics"
+            decision = brain.thalamus.route("why did llama.cpp crash?")
+            self.assertEqual(decision.region, "diagnostics_brain")
             brain.close()
 
     def test_state_persists_across_brain_restarts(self):

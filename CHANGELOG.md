@@ -36,6 +36,18 @@ letting it preempt the user.
   recovery can't wait); all other priorities still yield.
 - **Detected signals panel** on the Missions page (`#findingsPanel`) —
   severity chips, evidence, routing target, confidence, dismiss control.
+- **`diagnostics_brain` specialist** — a seventh Nexus Brain specialist
+  (coding+reasoning requirement, repo/test/git/system capabilities) that
+  subscribes to `HEALTH_EVENT` on the corpus callosum and records repair
+  incidents as `diagnostics:outcome` episodic memory; `diagnostics` and
+  `repair` intents route to it. Repair/finding events cross onto the
+  cognitive bus as structural events only.
+- **Commit-on-promote** — promoted code repairs land as a scoped git
+  commit (`Self-repair: …`, incident id + root cause + verification
+  evidence, `Nexus Self-Repair` identity fallback) instead of a silent
+  dirty tree. Bounds to the promoted paths only — unrelated staged work
+  is never swept; never pushes. `self_repair_commit_on_promote` config
+  (default on).
 
 ### Changed
 

@@ -102,9 +102,15 @@ class NexusBrain:
         # the learning loop that makes selection improve over time.
         self.thalamus._benchmark = lambda mid: self.cerebellum.trend(
             "inference", mid)
-        # Health events reach the Thalamus so routing reacts to dead models.
+        # Health events reach the Thalamus so routing reacts to dead models,
+        # and the diagnostics specialist so repair incidents become
+        # episodic memory it can recall when the same signature recurs.
         self.bus.subscribe_type(EventType.HEALTH_EVENT,
                               self.thalamus._guarded_handle)
+        if "diagnostics_brain" in self.specialists:
+            self.bus.subscribe_type(
+                EventType.HEALTH_EVENT,
+                self.specialists["diagnostics_brain"]._guarded_handle)
 
     # -- UI bridge ---------------------------------------------------------------
     _UI_FORWARD_TYPES = {

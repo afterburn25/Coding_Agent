@@ -71,6 +71,7 @@ class SelfRepairCoordinator:
                  verify_timeout_s: float = 300.0,
                  regression_suite: str | None = None,
                  auto_promote: bool = False,
+                 commit_on_promote: bool = True,
                  canary_required_for: set[str] | None = None,
                  min_promote_confidence: float = 0.6,
                  is_blocked: Callable[[], bool] | None = None,
@@ -96,6 +97,7 @@ class SelfRepairCoordinator:
         self.verify_timeout_s = verify_timeout_s
         self.regression_suite = regression_suite   # e.g. "tests"
         self.auto_promote = bool(auto_promote)
+        self.commit_on_promote = bool(commit_on_promote)
         self.canary_required_for = canary_required_for or set()
         self.min_promote_confidence = float(min_promote_confidence)
         self._is_blocked = is_blocked or (lambda: False)
@@ -517,6 +519,20 @@ class SelfRepairCoordinator:
             except Exception as exc:
                 self._fail_open(inc, f"promotion failed: {exc}")
                 return ""
+            # Auditable commit — the promoted diff lands as a named
+            # repair commit, not an anonymous dirty tree. Commit failure
+            # never blocks a verified promotion.
+            if self.commit_on_promote:
+                top = (inc.get("hypotheses") or [{}])[0]
+                sha = self.patcher.commit_promotion(
+                    files, incident_id=inc["id"],
+                    summary=f"{inc['error_class']} in {inc['subsystem']}",
+                    evidence=f"Root cause: {top.get('kind', 'unknown')} — "
+                             f"{top.get('detail', '')[:200]}"
+                             f"\nVerification: {len(ver.get('targeted') or [])} "
+                             "targeted check(s) passed")
+                if sha:
+                    inc["promotion"]["commit"] = sha
         self._set(inc, "resolved",
                   f"{inc['repair_kind']} repair applied")
         dur = time.time() - float(inc.get("created_at") or time.time())
