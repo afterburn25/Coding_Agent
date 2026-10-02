@@ -37,6 +37,40 @@
   MCP/ComfyUI transport diagnostics.
 - Version bumped via `VERSION` + `scripts/sync_version.py` → **0.7.2**.
 
+## v0.7.2 follow-up: nav-only sidebar + durable user state (commit `48ca2b5`+)
+
+- **Nav-only left rail**: every page uses the identical
+  `.sidebar`/`.primary-nav` (brand, 11 nav links, voice toggle, local
+  card). Page controls moved out — Missions autonomy/forms →
+  `.missions-right` rail; Image backend/models/LoRA → `.image-right`
+  rail; Chat "Local system" drawer → right-rail **System** utility tab;
+  Settings nav → in-page chips; Models hardware/files, Tools
+  categories/MCP, Voice engine/presets, System overall/jump links,
+  Trainer pipeline, Research mode/cache → main-content panels.
+- **Durable user state**: mutable dirs (`data/`, `.agent/`, `output/`)
+  are relocated to `%LOCALAPPDATA%\NexusCore` via directory junctions
+  created by the desktop host (`EnsureStateJunctions`, opt-out
+  `NEXUS_NO_STATE_REDIRECT=1` for the build smoke test). Existing
+  content merges into the state root on first redirect — rebuilds,
+  updates and reinstalls can no longer wipe chat history.
+- **Build safety**: `build_windows.ps1` merges dist state into the
+  per-user root *before* wiping `dist/`, removes junctions without
+  traversing them (`rmdir` only), and preserves `config.json`.
+- **Port sync**: backend emits `[nexus-port] N` on stdout after bind
+  (`boot.port_report`, emitted unconditionally); the host parses it via
+  `TryParsePortMarker` and health-checks/navigates the *announced* port,
+  so a collision fallback can no longer strand the host on a foreign
+  port. Port-owner probe distinguishes Nexus backend vs foreign process
+  vs Windows socket reservation (10013).
+- **System page**: new Backend Diagnostics panel — per-model backend
+  health (pid/exit/restarts/crash reason/log tail), recent transport
+  failures with recovery outcome, persisted crash history
+  (`crash_history` added to `/api/diagnostics`).
+- **Watchdog visibility**: process-manager auto-restarts now transition
+  the matching health component and persist to crash history — an
+  overnight recovery is auditable instead of silent.
+- Suite: **865+ passing** incl. watchdog→health/history wiring test.
+
 ## v0.6 Nexus Core UI checkpoint
 
 - The approved primary UI is implemented in `web/index.html` / `web/styles.css` / `web/app.js`.
