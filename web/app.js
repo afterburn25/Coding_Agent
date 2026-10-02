@@ -474,6 +474,10 @@ function connectAgentEvents(){
     });
     on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}});
     on('image_job',d=>{if(d.job){renderImageJobs([d.job]);imageJobActivityRow(d.job);}});
+    on('notification',d=>{const n=d.notification||{};if(n.level==='muted')return;
+      // The supervisor also mirrors notifications into the ActivityStore, so a
+      // persisted 'notification' activity row arrives separately on the bus.
+      setStatus(((n.title||'Notification')+(n.message?': '+n.message:'')).slice(0,120));});
     on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
   }catch(e){}
 }

@@ -72,7 +72,7 @@ class AutonomousSupervisor:
         self.policy = AutonomyPolicy(self.store, permission_manager)
         self.notifications = NotificationCenter(
             self.store,
-            publish=lambda p: self._emit("notification", p),
+            publish=self._publish_notification,
             quiet_hours=quiet_hours)
         self.scheduler = Scheduler(self.store, on_fire=self._on_schedule_fired)
         self.triggers = TriggerEngine(
@@ -192,6 +192,30 @@ class AutonomousSupervisor:
     def _audit(self, kind: str, **fields: Any) -> None:
         try:
             self.store.audit.append({"ts": time.time(), "kind": kind, **fields})
+        except Exception:
+            pass
+
+    def _publish_notification(self, payload: dict) -> None:
+        """Push a notification onto the event bus and mirror it onto the
+        activity timeline so it persists for reloads and mission views."""
+        self._emit("notification", payload)
+        store = self.activities
+        if store is None:
+            return
+        n = (payload or {}).get("notification") or {}
+        mission_id = str(n.get("mission_id") or "") or None
+        task_id = f"mission:{mission_id}" if mission_id else "mission:global"
+        level = str(n.get("level") or "info")
+        try:
+            row = store.open(
+                task_id, "notification",
+                str(n.get("title") or "Notification"),
+                str(n.get("message") or "")[:80],
+                details={"level": level, "detail": n.get("detail")},
+                mission_id=mission_id)
+            store.update(task_id, row["id"],
+                         state="failed" if level == "failure" else "completed",
+                         summary=str(n.get("message") or "")[:200])
         except Exception:
             pass
 

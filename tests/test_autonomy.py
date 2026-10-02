@@ -651,6 +651,23 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(out2["level"], "failure")
             sup.stop()
 
+    def test_notify_mirrors_activity_row(self):
+        from localcodeagent.workflow.activity import ActivityStore
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td, activities=ActivityStore(Path(td) / "data"))
+            sup.notifications.notify("mission done", level="important",
+                                     mission_id="m-1", title="Nexus Autonomy")
+            rows = sup.activities.for_task("mission:m-1")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["category"], "notification")
+            self.assertEqual(rows[0]["state"], "completed")
+            self.assertEqual(rows[0]["mission_id"], "m-1")
+            self.assertIn("mission done", rows[0]["summary"])
+            sup.notifications.notify("boom", level="failure")
+            failed = sup.activities.for_task("mission:global")
+            self.assertEqual(failed[-1]["state"], "failed")
+            sup.stop()
+
 
 class SchedulerTests(unittest.TestCase):
     def test_once_fires_and_disables(self):
