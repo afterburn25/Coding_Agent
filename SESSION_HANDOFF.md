@@ -941,3 +941,17 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   no hidden sanitizer anywhere in the path (verified by test).
 - Checkpoint verified on disk in installed app. Suite: 555 tests,
   OK (skipped=2).
+
+## 2026-10-02 — Juggernaut dogfood + animation fix (main)
+
+- Dogfood on RTX 3080 12GB, real ComfyUI:
+  - Portrait 1024x1024 auto→juggernaut: 138s cold (incl ~120s ckpt load), peak VRAM ~8.2GB
+  - Landscape 832x1216: 9s warm / Interior 1216x832: 16s warm
+  - Adult synthetic nude (policy-approved): 368s (incl model reload after FLUX); prompt reached workflow verbatim
+  - Draft 512x512 -> flux2-klein-4b: 126s cold
+  - Edit (jacket recolor) -> qwen-image-2.1: 707s (cold Qwen load + edit); edit quality confirmed visually
+  - All produced valid PNGs; no OOM/offload failure on the 12GB card. est_ram_gb corrected 24->16 after routing fell back to FLUX.
+- CSS: image shimmer now sweeps -45%..+45% (band fully exits card before
+  looping — was +-25% so it clipped at edges); indeterminate progress bar
+  reaches +400% so it fully exits right edge.
+- Commits: 301a6c8 (feature), 1b9cc9b (anim fix + RAM est). CI green both.
