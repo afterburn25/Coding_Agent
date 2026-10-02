@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 825,
+  "test_checkpoint": 827,
   "next_milestone": "v0.7.x continues: autonomy platform is now fully closed-loop — missions page has CRUD for standing goals/schedules/triggers (signals exposed via API), notifications mirror into the persisted activity timeline and chat status, worktree job op runs commands in isolated git worktrees with merge-back, GitHubConnector populates the connector registry (repo/issues/CI/create_issue), enabled skill packages inject instructions into prompts, missions pause on RAM pressure, and queue-worker crashes can no longer wedge the single-flight queue. Next: voice STT optional deps, real ComfyUI workflow import testing, accumulated on-hardware tuner data.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
