@@ -477,7 +477,8 @@ class DiagnosticsEndpointTests(unittest.TestCase):
                 base = f"http://127.0.0.1:{server.server_address[1]}"
                 data = json.loads(urllib.request.urlopen(
                     f"{base}/api/diagnostics", timeout=10).read())
-                self.assertEqual(data["version"], "0.6.1-dev")
+                from localcodeagent.version import version as _ver
+                self.assertEqual(data["version"], _ver())
                 self.assertEqual(data["models"][0]["id"], "fake")
                 self.assertTrue(data["recent_failures"])
                 self.assertEqual(data["recent_failures"][-1]["kind"],

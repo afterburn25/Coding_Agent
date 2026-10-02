@@ -23,6 +23,59 @@ Platform-expansion release line: persistent autonomy + modular AI workstation.
   `localcodeagent/version.py` + `scripts/sync_version.py` driving
   pyproject, Inno Setup defaults, the .NET desktop project, the
   PyInstaller backend version resource, and `.agent/project.json`.
+- **Computer Use** (`localcodeagent/computer_use/`, tools
+  `computer_*`): screenshots (PIL or PowerShell fallback), window
+  detection/focus, mouse move/click/scroll, Unicode text typing, key
+  combos, clipboard read/write — all behind new `computer.observe` /
+  `computer.control` permissions and recorded in the activity timeline.
+- **Execution sandboxes** (`localcodeagent/sandbox/`, `sandbox_run`
+  tool): temp-workspace Python/JS/shell execution with timeouts, Windows
+  Job Object memory + kill-on-close limits, network-deny mode, artifact
+  extraction.
+- **LSP client** (`localcodeagent/lsp/`): stdio JSON-RPC client for
+  definitions, references, document/workspace symbols, hover, and
+  diagnostics; pooled per language server, graceful when none installed.
+- **Repository RAG** (`localcodeagent/rag/`): incremental SQLite index
+  (files/symbols/chunks) keyed on mtime+sha — only changed files
+  re-parse; symbol+text search for coding workflows.
+- **Skills** (`localcodeagent/skills/`): installable skill packages
+  (skill.json or SKILL.md frontmatter) with capabilities, tools,
+  permissions, instructions; install/update/enable/disable persisted.
+- **Multi-agent worktrees** (`localcodeagent/multiagent.py`): role-scoped
+  agents (planner/researcher/coder/reviewer/tester/debugger/security)
+  each in an isolated git worktree+branch; controlled merge-back aborts
+  on conflict; supervisor stays in charge.
+- **Evaluation Lab + Experiments** (`localcodeagent/eval/`): benchmark
+  suites with persisted history and subject comparison; experiment
+  records with hypothesis, arms, metrics, conclusion.
+- **Artifact system** (`localcodeagent/artifacts.py`): unified registry
+  with type, path, creator task/mission, version, sha256, provenance.
+- **Backups** (`localcodeagent/backups.py`): versioned manifest-verified
+  backups of Brain/Answer Memory/missions/config/skills/indexes; verified
+  restore with pre-restore stash; pruning never deletes the last valid.
+- **Credential hardening**: vault key is DPAPI-wrapped on Windows
+  (per-user); pattern redaction for API keys/tokens/private keys in
+  logs/diagnostics on top of existing value redaction.
+- **Connector framework** (`localcodeagent/connectors/`): capability +
+  permission + rate-limit + health + reconnect + audit per integration.
+- **Knowledge graph** (`localcodeagent/knowledge/`): SQLite entities +
+  typed edges with bounded BFS context retrieval.
+- **Simulation mode** (`localcodeagent/simulate.py`, `/api/simulate`):
+  dry-run plans → steps/files/permissions/verdicts/failure points;
+  never executes.
+- **Digital Twin** (`localcodeagent/twin.py`, `/api/twin`): measured
+  hardware samples + model load/latency/TPS history; predicts fit,
+  RAM/VRAM, TTFT, TPS; invalidates on hardware-fingerprint change.
+- **Health service** (`localcodeagent/health.py`, `/api/health`):
+  per-component probe+recover with bounded attempts and persisted
+  history; autonomy + voice registered.
+- **Two-way voice scaffolding** (`localcodeagent/voice/stt.py`):
+  mic capture + Vosk/faster-whisper STT engines + barge-in session
+  interrupting TTS; graceful when audio deps absent.
+- **APIs**: `/api/health`, `/api/twin`, `/api/artifacts`, `/api/skills`,
+  `/api/connectors`, `/api/knowledge`, `/api/rag`, `/api/lsp`,
+  `/api/eval/history`, `/api/experiments`, `/api/backups`,
+  `/api/simulate`.
 
 ### Changed
 

@@ -34,6 +34,10 @@ _RISK_DEFAULTS = {
     "spend.money": "deny",
     "microphone.use": "deny",
     "camera.use": "deny",
+    # Computer Use — screen observation vs input injection are separate
+    # gates; control is always approval-tier by default.
+    "computer.observe": "ask",
+    "computer.control": "ask",
 }
 
 PROFILES: dict[str, dict[str, str]] = {

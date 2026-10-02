@@ -42,6 +42,7 @@ from .tools.docker_tool import register_docker_tools
 from .tools.documents import register_document_tools
 from .tools.knowledge import register_knowledge_tools
 from .tools.sandbox import register_sandbox_tools
+from .tools.computer_use import register_computer_use_tools
 from .tools.blender3d import register_blender_tools
 from .tools.workflows import register_workflow_tools
 from .tools.media import register_media_tools
@@ -72,6 +73,19 @@ from .version import version as _canonical_version
 
 
 VERSION = _canonical_version()
+
+
+class _LazyActivity:
+    """Resolves AppState.activities at call time (created after tools)."""
+
+    def __init__(self, state: "AppState") -> None:
+        self._state = state
+
+    def open(self, *a, **kw):
+        store = getattr(self._state, "activities", None)
+        if store is None:
+            return None
+        return store.open(*a, **kw)
 
 
 class AppState:
@@ -251,6 +265,47 @@ class AppState:
         register_document_tools(self.tools, self.workspace, jobs=self.jobs)
         register_knowledge_tools(self.tools, self.workspace)
         register_sandbox_tools(self.tools, self.workspace)
+        # activities store is created later in __init__ — resolve lazily.
+        self.computer_use = register_computer_use_tools(
+            self.tools, self.workspace,
+            activity=_LazyActivity(self))
+        # ---- Platform services (0.7 line) --------------------------------
+        from .twin import DigitalTwin
+        from .artifacts import ArtifactManager
+        from .backups import BackupService
+        from .health import HealthService
+        from .connectors import ConnectorRegistry
+        from .knowledge import KnowledgeGraph
+        from .skills import SkillRegistry
+        from .rag import RepoIndex
+        from .lsp import LspPool
+        from .eval import EvalLab, ExperimentStore
+        self.twin = DigitalTwin(runtime_root / "data" / "twin.json")
+        self.artifacts = ArtifactManager(runtime_root / "data" / "artifacts")
+        self.backups = BackupService(runtime_root)
+        self.health = HealthService(runtime_root / "data" / "health.json")
+        self.connectors = ConnectorRegistry(
+            state_path=runtime_root / "data" / "connectors_audit.json",
+            vault=self.secrets,
+            permission_check=lambda perm: self.permission_manager.effective(perm))
+        self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
+        self.skills = SkillRegistry(runtime_root)
+        self._rag_db = self.workspace / ".agent" / "rag_index.db"
+        self._lsp_pool: LspPool | None = None
+        self._knowledge_obj: KnowledgeGraph | None = None
+        self._knowledge_failed = False
+        self._rag_obj: RepoIndex | None = None
+        self.eval_lab = EvalLab(runtime_root / "data" / "eval")
+        self.experiments = ExperimentStore(runtime_root / "data" / "eval")
+        # Register core component probes with the health service.
+        self.health.register("autonomy",
+                             lambda: "healthy" if getattr(
+                                 getattr(self, "autonomy", None),
+                                 "enabled", False) else "stopped")
+        self.health.register("voice",
+                             lambda: "healthy" if getattr(
+                                 getattr(self, "voice", None),
+                                 "enabled", False) else "stopped")
         self.workflows_dir = Path(getattr(config, "workflows_dir", "workflows")).expanduser()
         if not self.workflows_dir.is_absolute():
             self.workflows_dir = self.workspace / self.workflows_dir
@@ -470,6 +525,36 @@ class AppState:
         self._start_auto_resume()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    # SQLite/subprocess-backed services are lazy — they hold OS handles
+    # (file locks, child processes) only once actually used.
+    @property
+    def rag_index(self):
+        if self._rag_obj is None:
+            from .rag import RepoIndex
+            self._rag_obj = RepoIndex(self.workspace,
+                                      db_path=self._rag_db)
+        return self._rag_obj
+
+    @property
+    def knowledge(self):
+        if self._knowledge_failed:
+            return None
+        if self._knowledge_obj is None:
+            try:
+                from .knowledge import KnowledgeGraph
+                self._knowledge_obj = KnowledgeGraph(self._knowledge_path)
+            except Exception:
+                self._knowledge_failed = True
+                return None
+        return self._knowledge_obj
+
+    @property
+    def lsp_pool(self):
+        if self._lsp_pool is None:
+            from .lsp import LspPool as _Pool
+            self._lsp_pool = _Pool(self.workspace)
+        return self._lsp_pool
 
     def exchange_for_message(self, message_id: str) -> tuple[str, str]:
         """Resolve a message id to (user_question, assistant_answer)."""
@@ -2021,6 +2106,127 @@ class Handler(BaseHTTPRequestHandler):
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
                           "/api/schedules", "/api/standing-goals")
 
+    _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
+                          "/api/skills", "/api/connectors", "/api/knowledge",
+                          "/api/rag", "/api/eval", "/api/experiments",
+                          "/api/lsp", "/api/backups", "/api/simulate")
+
+    def _platform_get(self, path: str) -> bool:
+        q = parse_qs(urlparse(self.path).query)
+        if path == "/api/health":
+            self.state.health.tick()
+            self._json(self.state.health.summary())
+            return True
+        if path == "/api/twin":
+            self._json(self.state.twin.status())
+            return True
+        if path == "/api/artifacts":
+            self._json({"artifacts": self.state.artifacts.list(
+                kind=(q.get("kind") or [""])[0],
+                mission_id=(q.get("mission") or [""])[0],
+                task_id=(q.get("task") or [""])[0])})
+            return True
+        if path == "/api/skills":
+            self._json({"skills": self.state.skills.list()})
+            return True
+        if path == "/api/connectors":
+            self._json({"connectors": self.state.connectors.status()})
+            return True
+        if path == "/api/knowledge":
+            if self.state.knowledge is None:
+                self._json({"available": False})
+                return True
+            name = (q.get("q") or [""])[0]
+            payload: dict = {"stats": self.state.knowledge.stats()}
+            if name:
+                payload["entities"] = self.state.knowledge.find_entities(
+                    name_like=name)
+                payload["context"] = self.state.knowledge.context_for(name)
+            self._json(payload)
+            return True
+        if path == "/api/rag":
+            query = (q.get("q") or [""])[0]
+            payload = {"stats": self.state.rag_index.stats()}
+            if query:
+                payload["results"] = self.state.rag_index.search(query)
+            self._json(payload)
+            return True
+        if path == "/api/lsp":
+            self._json(self.state.lsp_pool.status())
+            return True
+        if path == "/api/eval/history":
+            self._json({"runs": self.state.eval_lab.history(
+                suite=(q.get("suite") or [""])[0],
+                subject=(q.get("subject") or [""])[0])})
+            return True
+        if path == "/api/experiments":
+            self._json({"experiments": self.state.experiments.list()})
+            return True
+        if path == "/api/backups":
+            self._json({"backups": self.state.backups.list()})
+            return True
+        return False
+
+    def _platform_post(self, path: str, body: dict) -> bool:
+        if path == "/api/backups/create":
+            self._json(self.state.backups.create(
+                label=str(body.get("label", ""))))
+            return True
+        if path == "/api/backups/restore":
+            out = self.state.backups.restore(
+                str(body.get("backup", "")),
+                dry_run=bool(body.get("dry_run", False)))
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/simulate":
+            from .simulate import simulate_plan
+            perm_map = {t.name: t.permission
+                        for t in self.state.tools._tools.values()}
+            out = simulate_plan(dict(body.get("plan") or {}),
+                                policy=self.state.autonomy.policy,
+                                permission_map=perm_map,
+                                twin=self.state.twin)
+            self._json(out)
+            return True
+        if path == "/api/rag/update":
+            self._json(self.state.rag_index.update(
+                force=bool(body.get("force", False))))
+            return True
+        if path == "/api/skills/enable" or path == "/api/skills/disable":
+            ok = self.state.skills.set_enabled(
+                str(body.get("name", "")), path.endswith("enable"))
+            self._json({"ok": ok}, 404 if not ok else 200)
+            return True
+        if path == "/api/knowledge/entity" and self.state.knowledge:
+            self._json(self.state.knowledge.add_entity(
+                str(body.get("kind", "note")), str(body.get("name", "")),
+                attrs=body.get("attrs")))
+            return True
+        if path == "/api/knowledge/link" and self.state.knowledge:
+            self._json(self.state.knowledge.link(
+                str(body.get("src", "")), str(body.get("dst", "")),
+                str(body.get("rel", "related")), attrs=body.get("attrs")))
+            return True
+        if path == "/api/connectors/call":
+            out = self.state.connectors.call(
+                str(body.get("connector", "")),
+                str(body.get("capability", "")),
+                **dict(body.get("params") or {}))
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/experiments/create":
+            self._json(self.state.experiments.create(
+                str(body.get("hypothesis", "")),
+                arms=list(body.get("arms") or []),
+                metric=str(body.get("metric", "score"))))
+            return True
+        if path == "/api/experiments/conclude":
+            ok = self.state.experiments.conclude(
+                str(body.get("id", "")), str(body.get("conclusion", "")))
+            self._json({"ok": ok}, 404 if not ok else 200)
+            return True
+        return False
+
     def _autonomy_get(self, path: str) -> bool:
         """GET handler; returns True when the route was handled."""
         sup = self.state.autonomy
@@ -2827,6 +3033,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"error": "unknown autonomy route"}, 404)
             return
+        if path.startswith(self._PLATFORM_PREFIXES):
+            if self._platform_get(path):
+                return
+            self._json({"error": "unknown platform route"}, 404)
+            return
         if path == "/api/index":
             self._json(self.state.repository_index.summary())
             return
@@ -3041,6 +3252,11 @@ class Handler(BaseHTTPRequestHandler):
                 if self._autonomy_post(path, body):
                     return
                 self._json({"error": "unknown autonomy route"}, 404)
+                return
+            if path.startswith(self._PLATFORM_PREFIXES):
+                if self._platform_post(path, body):
+                    return
+                self._json({"error": "unknown platform route"}, 404)
                 return
 
             if path == "/api/nexus-brain/initialize":
@@ -4356,6 +4572,24 @@ def stop_state(state: AppState) -> None:
         state.images.backend_runtime.stop()
     finally:
         state.runtime.stop_all()
+    # Platform services holding OS handles/subprocesses.
+    try:
+        if getattr(state, "_lsp_pool", None) is not None:
+            state._lsp_pool.shutdown_all()
+    except Exception:
+        pass
+    for obj_name in ("_rag_obj", "_knowledge_obj"):
+        try:
+            obj = getattr(state, obj_name, None)
+            if obj is not None:
+                obj.close()
+        except Exception:
+            pass
+    try:
+        if getattr(state, "autonomy", None) is not None:
+            state.autonomy.stop()
+    except Exception:
+        pass
 
 
 def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: Path, runtime_root: Path, config_path: Path | None = None) -> None:
