@@ -7,6 +7,10 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
 
+Write-Host "Syncing version artifacts from VERSION..."
+& $Python "scripts\sync_version.py"
+if ($LASTEXITCODE -ne 0) { throw "version sync failed" }
+
 $LlamaAsset = "llama-$LlamaTag-bin-win-vulkan-x64.zip"
 $LlamaUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$LlamaTag/$LlamaAsset"
 $LlamaSha256 = "28800e708e4e4cc31dd77775d4ab34ddf000b5c3eb5da8fecf90308418540fd5"
@@ -47,6 +51,7 @@ Write-Host "Building hidden Python agent backend..."
     --distpath $BackendDist `
     --workpath $BackendWork `
     --specpath "build" `
+    --add-data "$Root\VERSION;." `
     --add-data "$Root\web;web" `
     --add-data "$Root\tools;tools" `
     --collect-submodules localcodeagent `

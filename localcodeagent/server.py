@@ -68,9 +68,10 @@ from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 from .workflow.activity import ActivityStore
 from .autonomy.missions import DEFAULT_BUDGETS as _DEFAULT_BUDGETS
+from .version import version as _canonical_version
 
 
-VERSION = "0.6.1-dev"
+VERSION = _canonical_version()
 
 
 class AppState:
