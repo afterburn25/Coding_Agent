@@ -47,10 +47,6 @@ class VersionTests(unittest.TestCase):
         self.assertIn(f'#define AppNumericVersion "{numeric}"', text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CheckpointConsistencyTests(unittest.TestCase):
     """The docs broadcast a single "current" test count in four places —
     this pins them so a partial sync fails the suite instead of drifting.
@@ -82,3 +78,9 @@ class CheckpointConsistencyTests(unittest.TestCase):
         for name, n in counts.items():
             self.assertEqual(n, self.EXPECTED,
                              f"{name} reports {n}, expected {self.EXPECTED}")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
