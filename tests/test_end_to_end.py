@@ -541,6 +541,37 @@ class EndToEndAgentTests(unittest.TestCase):
                 "bus never delivered the completed task event")
 
 
+    def test_mcp_servers_register_as_processes(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            cfg = AgentConfig(
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False,
+                autonomy_enabled=False,
+                research_enabled=False,
+                mcp_servers=[{
+                    "id": "testsrv", "name": "Test MCP",
+                    "command": ["python", "-c", "pass"],
+                    "auto_start": False,
+                }])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                svc = state.processes.get("mcp:testsrv")
+                self.assertIsNotNone(svc)
+                self.assertEqual(svc.kind, "mcp_server")
+                row = svc.describe()
+                self.assertEqual(row["id"], "testsrv")
+                self.assertEqual(row["state"], "disconnected")
+                ids = state.processes.service_ids(prefix="mcp:")
+                self.assertEqual(ids, ["mcp:testsrv"])
+            finally:
+                state.mcp.shutdown()
+
+
 class AutonomyApiTests(unittest.TestCase):
     """Autonomy CRUD endpoints — triggers expose the signal vocabulary for
     the UI form, and enable/disable/delete actually mutate the store."""

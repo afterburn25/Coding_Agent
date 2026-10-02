@@ -459,6 +459,11 @@ class MCPManager:
         with self._lock:
             return {"servers": [self._status_row(sid) for sid in self._configs]}
 
+    def status_row(self, server_id: str) -> dict[str, Any]:
+        """Single-server status for the ProcessManager describe hook."""
+        with self._lock:
+            return self._status_row(server_id)
+
     def _status_row(self, server_id: str) -> dict[str, Any]:
         config = self._configs.get(server_id)
         client = self._clients.get(server_id)

@@ -430,6 +430,7 @@ class AppState:
             self.mcp.connect_all()
         except Exception:
             pass
+        self._register_mcp_processes()
 
         def use_capability(args: dict[str, Any]) -> str:
             capability = str(args.get("capability", "")).strip()
@@ -1845,6 +1846,33 @@ class AppState:
                 stop=lambda: self.images.backend_runtime.stop(),
                 restart=lambda: self.images.backend_runtime.recover(),
                 metadata={"auto_restart": True},
+            ))
+
+    def _register_mcp_processes(self) -> None:
+        """Expose configured MCP servers as controllable mcp_server services."""
+        try:
+            rows = self.mcp.status().get("servers") or []
+        except Exception:
+            return
+        for row in rows:
+            sid = row.get("id")
+            if not sid:
+                continue
+            url = str(row.get("url") or "")
+            port = 0
+            if row.get("transport") == "http" and url:
+                port = self.runtime._port_from_endpoint(url) or 0
+            self.processes.register(ManagedService(
+                id=f"mcp:{sid}",
+                name=f"MCP · {row.get('name') or sid}",
+                kind="mcp_server",
+                port=port,
+                describe=lambda s=sid: self.mcp.status_row(s),
+                start=lambda s=sid: self.mcp.connect(s),
+                stop=lambda s=sid: self.mcp.disconnect(s),
+                restart=lambda s=sid: self.mcp.restart(s),
+                metadata={"transport": row.get("transport"),
+                          "auto_start": True},
             ))
 
     def _register_health_checks(self) -> None:
