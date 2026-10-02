@@ -175,17 +175,81 @@ async function setPolicyMode(mode,ethicalTemperature=null){
 async function loadStatus(probe=false){try{const url=probe?'/api/runtime':'/api/status';const data=await fetch(url).then(r=>r.json());if(probe){const s=await fetch('/api/status').then(r=>r.json());s.runtime=data;renderStatus(s);}else renderStatus(data);}catch(e){$('#status').textContent='Backend unavailable';}}
 async function runtimeAction(action,modelId){const res=await fetch(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:modelId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Runtime action failed');await loadStatus(false);}
 const imageJobEls=new Map();
-function imageJobActions(job){const first=(job.outputs||[])[0]||'';if(!first)return `<a class="image-action" href="/image.html">Open Image Workspace</a>`;return `<button class="image-action" data-image-action="edit" data-path="${esc(first)}">Edit</button><button class="image-action" data-image-action="variation" data-path="${esc(first)}">Variation</button><button class="image-action" data-image-action="upscale" data-path="${esc(first)}">Upscale</button><a class="image-action" href="${esc((job.output_urls||[])[0]||'#')}" download>Save</a><a class="image-action" href="/image.html">Image Workspace</a>`;}
-function paintImageJob(el,job){const pct=Math.max(0,Math.min(100,Math.round(Number(job.progress||0)*100)));const imgs=(job.output_urls||[]).map(u=>`<img src="${esc(u)}" alt="Generated image">`).join('');const message=job.error_message||job.error||'';const active=!['finished','failed','cancelled'].includes(String(job.state||''));
-  // Rebuild only when the card structure changes; otherwise update fields in
-  // place so the shimmer animation keeps looping instead of restarting.
-  const sig=[job.state,job.operation,job.model_id,active&&!imgs,message,job.technical_details||'',imgs].join('|');
-  if(el._jobSig!==sig){el._jobSig=sig;const err=message?`<div class="image-job-error">${esc(message)}</div>`:'';const tech=job.technical_details?`<details class="technical-details"><summary>Technical details</summary><pre>${esc(job.technical_details)}</pre></details>`:'';const placeholder=active&&!imgs?`<div class="image-generation-placeholder"><div class="image-generation-shimmer"></div><div class="image-generation-copy"><strong>Generating image…</strong><span class="image-job-stage">${esc(job.stage||'queued')}</span></div></div>`:'';const progressClass=active&&pct<5?' image-job-progress-indeterminate':'';el.innerHTML=`<div class="image-job-head"><strong>${esc(job.operation||'image')}</strong><span class="image-job-state">${esc(job.model_id||'')} · ${esc(job.state||'queued')}</span></div>${placeholder}<div class="image-job-progress${progressClass}"><span style="width:${Math.max(pct,active?6:0)}%"></span></div><small class="image-job-meta">${esc(job.stage||'queued')} · ${pct}%</small>${err}${tech}${imgs?`<div class="inline-image-gallery">${imgs}</div>`:''}<div class="inline-image-actions">${imageJobActions(job)}</div>`;el._jobPct=-1;return;}
-  if(el._jobPct!==pct){const bar=el.querySelector('.image-job-progress span');if(bar)bar.style.width=Math.max(pct,active?6:0)+'%';el._jobPct=pct;}
-  const stage=el.querySelector('.image-job-stage');if(stage&&stage.textContent!==String(job.stage||'queued'))stage.textContent=job.stage||'queued';
-  const meta=el.querySelector('.image-job-meta');if(meta)meta.textContent=`${job.stage||'queued'} · ${pct}%`;}
-async function pollImageJob(id){const el=imageJobEls.get(id);if(!el)return;try{const res=await fetch(`/api/image/job/${encodeURIComponent(id)}`);const data=await res.json();if(!res.ok)throw new Error(data.error||'Image job lookup failed');paintImageJob(el,data.job);if(!['finished','failed','cancelled'].includes(data.job.state))setTimeout(()=>pollImageJob(id),1000);}catch(e){el.querySelector('.image-job-error')?.remove();const d=document.createElement('div');d.className='image-job-error';d.textContent=e.message;el.appendChild(d);}}
-function renderImageJobs(jobs=[],afterEl=null){let appended=false;for(const job of jobs){let el=imageJobEls.get(job.id);if(!el){const wrap=document.createElement('div');wrap.className='message assistant image-result';wrap.innerHTML='<div class="role">IMAGE</div><div class="bubble image-job-card"></div>';if(afterEl)afterEl.insertAdjacentElement('afterend',wrap);else chat.appendChild(wrap);appended=true;el=wrap.querySelector('.image-job-card');imageJobEls.set(job.id,el);}paintImageJob(el,job);if(!['finished','failed','cancelled'].includes(job.state))setTimeout(()=>pollImageJob(job.id),500);}scrollChat(appended);}
+const IMAGE_ACTIVE=(job)=>!['finished','failed','cancelled'].includes(String(job.state||''));
+function imageJobActions(job,url){const first=url||(job.outputs||[])[0]||'';if(!first)return `<a class="image-action" href="/image.html">Open Image Workspace</a>`;return `<button class="image-action" data-image-action="edit" data-path="${esc(first)}">Edit</button><button class="image-action" data-image-action="variation" data-path="${esc(first)}">Variation</button><button class="image-action" data-image-action="upscale" data-path="${esc(first)}">Upscale</button><a class="image-action" href="${esc(url||(job.output_urls||[])[0]||'#')}" download>Save</a><a class="image-action" href="/image.html">Image Workspace</a>`;}
+function imageGalleryFor(afterEl){
+  // Consecutive image jobs in one turn share a single gallery: reuse the
+  // host right after the anchor (history restore) or the last chat node.
+  const host=afterEl?afterEl.nextElementSibling:chat.lastElementChild;
+  if(host&&host.classList&&host.classList.contains('image-gallery-host'))return host.querySelector('.image-gallery');
+  const wrap=document.createElement('div');
+  wrap.className='message assistant image-result image-gallery-host';
+  wrap.innerHTML='<div class="role">IMAGE</div><div class="bubble image-job-card"><div class="image-gallery"><div class="gallery-main"><div class="gallery-viewport"></div><div class="gallery-caption"></div></div><div class="gallery-thumbs"></div></div></div>';
+  if(afterEl)afterEl.insertAdjacentElement('afterend',wrap);else chat.appendChild(wrap);
+  return wrap.querySelector('.image-gallery');
+}
+function syncGalleryMain(gal){
+  const vp=gal.querySelector('.gallery-viewport'),cap=gal.querySelector('.gallery-caption');
+  const slots=[...gal.querySelectorAll('.gallery-slot')].map(s=>s._job).filter(Boolean);
+  if(!slots.length){vp.innerHTML='';cap.innerHTML='';return;}
+  let sel=gal._selected&&slots.find(j=>j.id===gal._selected.jid)?gal._selected:null;
+  if(!sel){
+    const done=[...slots].reverse().find(j=>(j.output_urls||[]).length);
+    sel={jid:(done||slots[slots.length-1]).id,oidx:done?(done.output_urls.length-1):-1};
+  }
+  gal._selected=sel;
+  const job=slots.find(j=>j.id===sel.jid);
+  const urls=(job.output_urls||[]).filter(Boolean);
+  const oidx=Math.min(sel.oidx<0?urls.length-1:sel.oidx,urls.length-1);
+  const url=urls[oidx]||'';
+  gal.querySelectorAll('.gallery-thumb').forEach(t=>{
+    const slot=t.closest('.gallery-slot');
+    t.classList.toggle('active',slot&&slot._job&&slot._job.id===job.id&&String(t.dataset.oidx)===String(oidx));
+  });
+  const active=IMAGE_ACTIVE(job),pct=Math.max(0,Math.min(100,Math.round(Number(job.progress||0)*100)));
+  const cold=job.backend_starting&&active;
+  if(url){
+    if(gal._viewed!==url){vp.innerHTML=`<img class="gallery-image" src="${esc(url)}" alt="Generated image">`;gal._viewed=url;}
+  }else if(gal._viewed!=='__pending__'+job.id){
+    vp.innerHTML=`<div class="image-generation-placeholder"><div class="image-generation-shimmer"></div><div class="image-generation-copy"><strong>${cold?'Starting image generator…':'Generating image…'}</strong><span class="image-job-stage">${esc(job.stage||'queued')}</span></div></div>`;
+    gal._viewed='__pending__'+job.id;
+  }else{
+    const st=vp.querySelector('.image-job-stage');if(st&&st.textContent!==String(job.stage||'queued'))st.textContent=job.stage||'queued';
+  }
+  const err=job.error_message||job.error||'';
+  let capHtml='';
+  if(cold)capHtml+=`<div class="backend-startup"><span>Starting image generator — first start can take a few minutes</span><div class="image-job-progress image-job-progress-indeterminate"><span></span></div></div>`;
+  if(String(job.state)==='finished'&&!err)capHtml+=`<div class="gallery-status done">Image Generation Complete</div>`;
+  else if(String(job.state)==='failed'||err)capHtml+=`<div class="gallery-status err">${esc(err||'image generation failed')}</div>`;
+  else capHtml+=`<div class="gallery-status">${esc(job.stage||'queued')} · ${pct}%</div><div class="image-job-progress"><span style="width:${Math.max(pct,6)}%"></span></div>`;
+  if(!active&&url)capHtml+=`<div class="inline-image-actions">${imageJobActions(job,(job.outputs||[])[oidx]||'')}</div>`;
+  if(job.technical_details)capHtml+=`<details class="technical-details"><summary>Technical details</summary><pre>${esc(job.technical_details)}</pre></details>`;
+  if(cap.innerHTML!==capHtml)cap.innerHTML=capHtml;
+}
+function paintImageJob(el,job){
+  const gal=el.closest('.image-gallery');
+  el._job=job;
+  const urls=(job.output_urls||[]).filter(Boolean);
+  const active=IMAGE_ACTIVE(job),pct=Math.max(0,Math.min(100,Math.round(Number(job.progress||0)*100)));
+  const idx=[...gal.querySelectorAll('.gallery-slot')].indexOf(el)+1;
+  if(urls.length){
+    if(el._tiles!==urls.length){
+      el.innerHTML=urls.map((u,i)=>`<button class="gallery-thumb" data-jid="${esc(job.id)}" data-oidx="${i}" title="Image ${idx}"><img src="${esc(u)}" alt="Generated image ${i+1}" loading="lazy"><span class="thumb-num">${urls.length>1?i+1:idx}</span></button>`).join('');
+      el._tiles=urls.length;el._pending=false;
+      // Auto-advance to the newest finished image unless the user picked one.
+      if(!gal._userPicked)gal._selected={jid:job.id,oidx:urls.length-1};
+    }
+  }else{
+    if(!el._pending){el.innerHTML=`<button class="gallery-thumb pending" data-jid="${esc(job.id)}" data-oidx="-1" title="Image ${idx}"><span class="thumb-shimmer"></span><em></em><span class="thumb-bar"><i></i></span><span class="thumb-num">${idx}</span></button>`;el._pending=true;el._tiles=0;}
+    el.classList.toggle('failed',String(job.state)==='failed');
+    const bar=el.querySelector('.thumb-bar i');if(bar)bar.style.width=Math.max(pct,active?8:0)+'%';
+    const lab=el.querySelector('em');const labTxt=job.state==='failed'?'failed':String(job.stage||'generating');if(lab&&lab.textContent!==labTxt)lab.textContent=labTxt;
+    if(!gal._selected&&!gal._userPicked)gal._selected={jid:job.id,oidx:-1};
+  }
+  if(gal)syncGalleryMain(gal);
+}
+async function pollImageJob(id){const el=imageJobEls.get(id);if(!el)return;try{const res=await fetch(`/api/image/job/${encodeURIComponent(id)}`);const data=await res.json();if(!res.ok)throw new Error(data.error||'Image job lookup failed');paintImageJob(el,data.job);if(IMAGE_ACTIVE(data.job))setTimeout(()=>pollImageJob(id),1000);}catch(e){el.classList.add('failed');const t=el.querySelector('.gallery-thumb em');if(t)t.textContent=e.message;}}
+function renderImageJobs(jobs=[],afterEl=null){let appended=false;for(const job of jobs){let el=imageJobEls.get(job.id);if(!el){const gal=imageGalleryFor(afterEl);el=document.createElement('div');el.className='gallery-slot';gal.querySelector('.gallery-thumbs').appendChild(el);imageJobEls.set(job.id,el);appended=true;}paintImageJob(el,job);if(IMAGE_ACTIVE(job))setTimeout(()=>pollImageJob(job.id),500);}scrollChat(appended);}
 function renderAgentResult(data,{addAssistant=true}={}){if(addAssistant)addMessage('assistant',data.content);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
 async function resumeTask(approved){if(!lastTask)return;send.disabled=true;try{const res=await fetch('/api/tasks/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:lastTask.id,approved})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not resume task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Resume error: ${err.message}`);}finally{send.disabled=false;}}
 async function recoverTask(taskId){send.disabled=true;try{addMessage('assistant','Recovering the interrupted task from its saved workspace/checkpoint state…');const res=await fetch('/api/tasks/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not recover task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Recovery error: ${err.message}`);}finally{send.disabled=false;}}
@@ -381,16 +445,18 @@ async function restoreActivityTimeline(taskId){
    phases: title/summary come straight from the job's reported stage. */
 function imageJobActivityRow(job){
   const stage=String(job.stage||job.state||'generation');
-  const state={queued:'waiting',completed:'completed',done:'completed',failed:'failed',error:'failed'}[stage]||'running';
+  const state={queued:'waiting',completed:'completed',done:'completed',finished:'completed',failed:'failed',error:'failed'}[stage]||'running';
+  const cold=job.backend_starting&&state!=='completed'&&state!=='failed';
+  const label=stage==='finished'?'Image Generation Complete':cold?'Starting image generator — first start can take a few minutes':stage.replaceAll('_',' ');
   upsertActivityRow({
     id:'img:'+String(job.id||'job'),
     task_id:job.task_id||'',
     category:'image',
     title:'Image Generation',
-    summary:stage.replaceAll('_',' ')+(job.progress!=null?' · '+Math.round(job.progress*100)+'%':''),
+    summary:label+(job.progress!=null&&!cold?' · '+Math.round(job.progress*100)+'%':''),
     details:{model:job.model_id||job.model||'',size:[job.width,job.height].filter(Boolean).join(' × ')},
     state,started_at:Number(job.started_at||Date.now()/1000),
-    ended_at:['completed','done','failed','error'].includes(stage)?(job.finished_at||Date.now()/1000):null,
+    ended_at:['completed','done','finished','failed','error'].includes(stage)?(job.finished_at||Date.now()/1000):null,
     elapsed:job.elapsed_seconds!=null?job.elapsed_seconds:null,
   });
 }
@@ -595,6 +661,7 @@ async function cancelCommand(taskId){try{const res=await fetch('/api/jobs/cancel
 async function cancelTask(taskId){if(!confirm('Stop this task? The agent will halt at the next checkpoint; file changes stay in place.'))return;try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`task-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');appendLiveActivity(`TASK · ${taskId} · cancelled`);}catch(e){addMessage('assistant',`Cancel error: ${e.message}`);}}
 $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-approve]');if(a){resumeTask(a.dataset.approve==='1');return;}const r=e.target.closest('[data-recover]');if(r){recoverTask(r.dataset.recover);return;}const u=e.target.closest('[data-undo]');if(u){undoTask(u.dataset.undo);return;}const c=e.target.closest('[data-cancel-task]');if(c)cancelTask(c.dataset.cancelTask);});
 chat.addEventListener('click',e=>{const b=e.target.closest('button.retry-send');if(!b||b.disabled)return;const msg=b._retryMessage;if(!msg)return;b.disabled=true;b.textContent='Retrying…';input.value=msg;form.requestSubmit();});
+chat.addEventListener('click',e=>{const t=e.target.closest('.gallery-thumb');if(!t)return;const gal=t.closest('.image-gallery');if(!gal)return;gal._selected={jid:t.dataset.jid,oidx:Number(t.dataset.oidx??-1)};gal._userPicked=true;syncGalleryMain(gal);});
 $('#recentTasks').addEventListener('click',async e=>{const row=e.target.closest('[data-task-id]');if(!row)return;const t=recentTaskCache[row.dataset.taskId];if(!t)return;lastTask=t;renderTask(t);renderDiff(t);try{const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(t.id));if(!lr.ok)return;const lg=await lr.json();const log=String(lg.log||'');if(!log.trim())return;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[t.id];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">task log '+esc(t.id)+'</code><span class="term-state">'+esc(t.status)+'</span></div><pre class="term-out"></pre>';blocks[t.id]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=log;setUtilityPanel('terminal');activity.scrollTop=activity.scrollHeight;restoreActivityTimeline(t.id);}catch{}});
 $('#models').addEventListener('click',async e=>{const btn=e.target.closest('.runtime-action');if(!btn)return;btn.disabled=true;try{await runtimeAction(btn.dataset.action,btn.dataset.model);}catch(err){addMessage('assistant',`Runtime error: ${err.message}`);}finally{btn.disabled=false;}});
 $('#readinessPanel').addEventListener('click',e=>{const plan=e.target.closest('[data-model-plan]');if(plan){installModelPlan(plan.dataset.modelPlan);return;}if(e.target.closest('#startSelfDevelopment')){prepareSelfDevelopmentTask();return;}if(e.target.closest('#applyModelSetup')){applySuggestedModelSetup();return;}const copy=e.target.closest('.copy-runtime-command'),install=e.target.closest('.catalog-install'),repair=e.target.closest('.catalog-repair'),cancel=e.target.closest('.catalog-cancel');if(copy)copyText(copy.dataset.command);else if(install)startCatalogInstall(install.dataset.catalog,false);else if(repair)startCatalogInstall(repair.dataset.catalog,true);else if(cancel)cancelCatalogInstall(cancel.dataset.job);});

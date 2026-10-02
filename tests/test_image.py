@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -755,6 +756,202 @@ class JuggernautDefaultTests(unittest.TestCase):
         js = (ROOT / "web" / "image.js").read_text(encoding="utf-8")
         self.assertIn("display_name", js)
         self.assertIn("tagline", js)
+
+
+class BackendStartingFlagTests(unittest.TestCase):
+    def _manager(self, root: Path) -> ImageManager:
+        profile = ImageModelProfile(
+            id="qwen", family="qwen-image", capabilities=["text_to_image"],
+            workflows={"text_to_image": "qwen/generate.json"},
+        )
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            image_resource_mode="balanced", image_auto_run_jobs=False,
+        )
+        return ImageManager(base_dir=root, models=[profile], config=config,
+                            workspace=root / "workspace")
+
+    def test_backend_starting_set_when_comfyui_offline(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            manager.backend = SimpleNamespace(health=lambda: (False, "down"))
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            self.assertTrue(job.backend_starting)
+            self.assertTrue(manager.get_job(job.id).as_dict()["backend_starting"])
+
+    def test_backend_starting_clear_when_comfyui_healthy(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            manager.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            self.assertFalse(job.backend_starting)
+
+    def test_health_probe_cached_across_batch_creation(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            calls = []
+            def health():
+                calls.append(1)
+                return (False, "down")
+            manager.backend = SimpleNamespace(health=health)
+            manager.create_job(ImageRequest(prompt="a cat"))
+            manager.create_job(ImageRequest(prompt="a dog"))
+            manager.create_job(ImageRequest(prompt="a sunset"))
+            self.assertEqual(len(calls), 1)
+
+    def test_health_probe_exception_treated_as_offline(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            def boom():
+                raise RuntimeError("connection refused")
+            manager.backend = SimpleNamespace(health=boom)
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            self.assertTrue(job.backend_starting)
+
+
+class MultiPromptToolTests(unittest.TestCase):
+    def _manager(self, root: Path) -> ImageManager:
+        profile = ImageModelProfile(
+            id="qwen", family="qwen-image", capabilities=["text_to_image"],
+            workflows={"text_to_image": "qwen/generate.json"},
+        )
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            image_resource_mode="balanced", image_auto_run_jobs=False,
+        )
+        return ImageManager(base_dir=root, models=[profile], config=config,
+                            workspace=root / "workspace")
+
+    def test_prompts_array_creates_one_job_per_prompt(self):
+        from localcodeagent.tools.base import ToolRegistry
+        from localcodeagent.tools.image import register_image_tools
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            manager.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            registry = ToolRegistry({"image.generate": "allow"})
+            register_image_tools(registry, manager)
+            result = json.loads(registry.execute("generate_image", {
+                "prompt": "a cat", "prompts": ["a cat", "a dog", "a sunset"],
+            }))
+            self.assertTrue(result["ok"])
+            self.assertEqual(len(result["jobs"]), 3)
+            prompts = [j["request"]["prompt"] for j in result["jobs"]]
+            self.assertEqual(prompts, ["a cat", "a dog", "a sunset"])
+
+    def test_single_prompts_entry_falls_back_to_one_job(self):
+        from localcodeagent.tools.base import ToolRegistry
+        from localcodeagent.tools.image import register_image_tools
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            manager.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            registry = ToolRegistry({"image.generate": "allow"})
+            register_image_tools(registry, manager)
+            result = json.loads(registry.execute("generate_image", {
+                "prompt": "a cat", "prompts": ["a cat"],
+            }))
+            self.assertTrue(result["ok"])
+            self.assertIn("job", result)
+
+
+class InterruptedJobResumeTests(unittest.TestCase):
+    def _manager(self, root: Path, auto_run: bool) -> ImageManager:
+        profile = ImageModelProfile(
+            id="qwen", family="qwen-image", capabilities=["text_to_image"],
+            workflows={"text_to_image": "qwen/generate.json"},
+        )
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            image_resource_mode="balanced", image_auto_run_jobs=auto_run,
+        )
+        return ImageManager(base_dir=root, models=[profile], config=config,
+                            workspace=root / "workspace")
+
+    def test_active_job_requeues_and_resumes_after_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m1 = self._manager(root, auto_run=False)
+            m1.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m1.create_job(ImageRequest(prompt="a cat"))
+            job.state = "generating"
+            job.error_message = "stale error"
+            m1._save_jobs(job)
+
+            started = []
+            with patch.object(ImageManager, "_backend_up", lambda self: False), \
+                 patch.object(ImageManager, "_run_job",
+                              lambda self, jid: started.append(jid)):
+                m2 = self._manager(root, auto_run=True)
+                deadline = time.time() + 3
+                while not started and time.time() < deadline:
+                    time.sleep(0.02)
+            self.assertEqual(started, [job.id])
+            resumed = m2.get_job(job.id)
+            self.assertEqual(resumed.state, "queued")
+            self.assertEqual(resumed.resume_count, 1)
+            self.assertEqual(resumed.error_message, "")
+            self.assertTrue(resumed.backend_starting)
+
+    def test_queued_job_stays_queued_in_manual_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m1 = self._manager(root, auto_run=False)
+            m1.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m1.create_job(ImageRequest(prompt="a cat"))
+            m2 = self._manager(root, auto_run=False)
+            reloaded = m2.get_job(job.id)
+            self.assertEqual(reloaded.state, "queued")
+            self.assertEqual(reloaded.stage, "queued")
+
+    def test_resume_bound_fails_crash_looping_job(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m1 = self._manager(root, auto_run=False)
+            m1.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m1.create_job(ImageRequest(prompt="a cat"))
+            job.state = "generating"
+            job.resume_count = 2
+            m1._save_jobs(job)
+            with patch.object(ImageManager, "_backend_up", lambda self: False):
+                m2 = self._manager(root, auto_run=True)
+            failed = m2.get_job(job.id)
+            self.assertEqual(failed.state, "failed")
+            self.assertEqual(failed.error_code, "application_restarted")
+
+
+class SplitImagePromptTests(unittest.TestCase):
+    def test_explicit_count_list_splits(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        parts = AgentOrchestrator._split_image_prompts(
+            "generate 3 images of a cat, a dog, and a sunset")
+        self.assertEqual(parts, ["a cat", "a dog", "a sunset"])
+
+    def test_ambiguous_and_stays_single(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        self.assertEqual(
+            AgentOrchestrator._split_image_prompts(
+                "generate an image of a cat and a dog in a park"), [])
+
+    def test_repeated_image_of_construction_splits(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        parts = AgentOrchestrator._split_image_prompts(
+            "generate an image of a cat and an image of a dog")
+        self.assertEqual(parts, ["a cat", "a dog"])
+
+    def test_jobs_list_extracted_from_tool_events(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        events = [{
+            "name": "generate_image",
+            "result": json.dumps({"ok": True, "jobs": [
+                {"id": "a"}, {"id": "b"}]}),
+        }]
+        self.assertEqual(
+            AgentOrchestrator._image_job_ids_from_events(events), ["a", "b"])
 
 
 if __name__ == "__main__":

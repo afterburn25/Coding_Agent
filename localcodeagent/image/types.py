@@ -104,6 +104,12 @@ class ImageJob:
     vram_before_gb: float = 0.0
     vram_after_gb: float = 0.0
     backend_job_id: str = ""
+    # True while the image backend (ComfyUI) is being cold-started for this
+    # job — the UI shows a dedicated "starting image generator" indicator.
+    backend_starting: bool = False
+    # How many times this job was requeued after an app restart — bounds
+    # crash-loop resumes.
+    resume_count: int = 0
     resolved_loras: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:

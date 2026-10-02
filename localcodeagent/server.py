@@ -724,16 +724,16 @@ class AppState:
             pass
 
     def _start_auto_resume(self) -> None:
-        """In autonomous mode, restart tasks interrupted by a core restart.
+        """Restart tasks interrupted by a core restart or crash.
 
         The task ledger already marks orphaned 'running' tasks as
         'interrupted' on load. recover() rebuilds the session from durable
         task/checkpoint state and re-inspects the repository, so no model
         context is required. Bounded by autonomous_max_recoveries so a
-        crash-looping task cannot resume forever.
+        crash-looping task cannot resume forever. Runs in every mode —
+        interrupted work should resume after a crash, not silently die.
         """
-        if not (getattr(self.config, "autonomous_mode", False)
-                and getattr(self.config, "autonomous_resume_interrupted", True)):
+        if not getattr(self.config, "autonomous_resume_interrupted", True):
             return
         max_recoveries = max(0, int(getattr(self.config, "autonomous_max_recoveries", 3)))
 
@@ -3506,11 +3506,15 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             try:
                 payload = json.loads(str(event.get("result") or "{}"))
-                job_id = str((payload.get("job") or {}).get("id") or "")
-                if not job_id or job_id in seen:
-                    continue
-                rows.append(self._image_job_payload(self.state.images.get_job(job_id)))
-                seen.add(job_id)
+                job_ids = [str((payload.get("job") or {}).get("id") or "")]
+                job_ids += [str(j.get("id") or "")
+                            for j in (payload.get("jobs") or [])
+                            if isinstance(j, dict)]
+                for job_id in job_ids:
+                    if not job_id or job_id in seen:
+                        continue
+                    rows.append(self._image_job_payload(self.state.images.get_job(job_id)))
+                    seen.add(job_id)
             except Exception:
                 continue
         return rows

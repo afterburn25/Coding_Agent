@@ -57,11 +57,15 @@ class ImageManager:
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
         self._ws_listener = None
+        self._backend_up_ts = 0.0
+        self._backend_up_val = False
         # Optional callback invoked with {"job": job.as_dict()} on each
         # persisted state transition — wired to the server EventBus.
         self.on_change = None
         self.last_activity = time.time()
+        self._resumable: list[str] = []
         self._load_jobs()
+        self.resume_interrupted_jobs()
 
     def _ws_progress_listener(self):
         """Lazy ComfyUI /ws listener for real per-node generation progress.
@@ -105,15 +109,57 @@ class ImageManager:
             rows = json.loads(self.jobs_path.read_text(encoding="utf-8"))
             for row in rows if isinstance(rows, list) else []:
                 job=ImageJob(**row)
-                if job.state in {"loading_model", "generating", "refining", "upscaling"}:
-                    job.state="failed"
-                    job.error_code="application_restarted"
-                    job.error_message="The application restarted while this image job was active."
-                    job.error=job.error_message
-                    job.technical_details="The persisted job was in an active state when Local Code Agent started."
+                if job.state in {"queued", "loading_model", "generating", "refining", "upscaling"}:
+                    # The app exited or crashed mid-flight: clear the stale
+                    # runtime state and mark for automatic resume instead of
+                    # showing a stranded failure.
+                    was_active = job.state != "queued"
+                    job.state="queued"; job.stage="resuming after restart"
+                    job.progress=0.0
+                    job.error=""; job.error_code=""; job.error_message=""
+                    job.technical_details=""
+                    job.started_at=0.0; job.finished_at=0.0
+                    self._resumable.append((job.id, was_active))
                 self._jobs[job.id]=job
         except Exception:
             pass
+
+    def resume_interrupted_jobs(self) -> int:
+        """Requeue jobs that were mid-flight when the app last exited.
+
+        Bounded by image_max_resumes so a job that reliably crashes the
+        backend can't loop forever; past the bound it fails with the honest
+        'application_restarted' marker.
+        """
+        pending = [(self._jobs[i], was_active) for i, was_active in self._resumable
+                   if i in self._jobs]
+        self._resumable = []
+        if not pending:
+            return 0
+        resumed = 0
+        max_resumes = max(1, int(getattr(self.config, "image_max_resumes", 2)))
+        auto_run = bool(getattr(self.config, "image_auto_run_jobs", True))
+        for job, was_active in pending:
+            if job.resume_count >= max_resumes or (not auto_run and was_active):
+                job.state="failed"; job.stage="failed"
+                job.error_code="application_restarted"
+                job.error_message="The application restarted while this image job was active."
+                job.error=job.error_message
+                job.technical_details="The persisted job was in an active state when Local Code Agent started."
+                job.backend_starting=False
+                self._save_jobs(job)
+                continue
+            if not auto_run:
+                # Manual mode: never-started jobs just stay queued.
+                job.stage="queued"
+                self._save_jobs(job)
+                continue
+            job.resume_count += 1
+            job.backend_starting = not self._backend_up()
+            self._save_jobs(job)
+            threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
+            resumed += 1
+        return resumed
 
     def _save_jobs(self, job: "ImageJob | None" = None) -> None:
         self.last_activity = time.time()
@@ -221,6 +267,19 @@ class ImageManager:
                     setattr(request,key,defaults[key])
         return subject
 
+    def _backend_up(self) -> bool:
+        """5s-cached health probe — a batch create_job loop must not pay a
+        connection-timeout per job when ComfyUI is down."""
+        now = time.time()
+        if now - self._backend_up_ts < 5.0:
+            return self._backend_up_val
+        try:
+            self._backend_up_val = bool(self.backend.health()[0])
+        except Exception:
+            self._backend_up_val = False
+        self._backend_up_ts = now
+        return self._backend_up_val
+
     def create_job(self, request: ImageRequest, *, real_person: bool = False) -> ImageJob:
         self._apply_subject_profile(request)
         if (
@@ -235,12 +294,16 @@ class ImageManager:
         if not allowed:
             raise PermissionError(reason)
         decision=self.router.choose(request)
+        # Probe once up front so the UI/copy can distinguish "ComfyUI is
+        # already up" from a cold start that may take minutes.
+        backend_up = self._backend_up()
         job=ImageJob(
             id=uuid.uuid4().hex,
             request=request.as_dict(),
             state="queued", stage="queued", progress=0.0,
             model_id=decision.model_id, operation=decision.operation, workflow=decision.workflow,
             created_at=time.time(), routing_reasons=decision.reasons,
+            backend_starting=not backend_up,
         )
         with self._lock:
             self._jobs[job.id]=job
@@ -352,8 +415,10 @@ class ImageManager:
                 if required and self.runtime.hardware.free_vram_gb < required:
                     stopped=self.runtime.release_managed_models_for_vram(required_vram_gb=required, mode=getattr(self.config,"image_resource_mode","balanced"))
             self._save_jobs(job)
-            job.stage="starting ComfyUI"; job.progress=max(job.progress,0.10); self._save_jobs(job)
+            job.stage="starting ComfyUI" if job.backend_starting else "connecting to ComfyUI"
+            job.progress=max(job.progress,0.10); self._save_jobs(job)
             self.backend_runtime.ensure_ready()
+            job.backend_starting=False
             job.stage="preparing workflow"; job.progress=max(job.progress,0.12); self._save_jobs(job)
             if profile.required_nodes:
                 info=self.backend.inspect().get("object_info", {})

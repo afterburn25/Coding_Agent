@@ -1760,7 +1760,30 @@ class AppStateWiringTests(unittest.TestCase):
             self.assertEqual(ran, ["work 0", "work 1", "work 2"])
             self.assertEqual(len(state.queue), 0)
 
-    def test_auto_resume_stays_off_without_autonomous_mode(self):
+    def test_auto_resume_stays_off_when_disabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            from localcodeagent.workflow.tasks import TaskStore
+            from localcodeagent.agent.orchestrator import AgentOrchestrator
+            ws = Path(td)
+            tasks = TaskStore(ws)
+            task = tasks.create("unfinished work", "auto")
+            tasks.update(task.id, status="interrupted")
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")],
+                autonomy_enabled=False, autonomous_resume_interrupted=False)
+            calls = []
+            with patch.object(AgentOrchestrator, "recover",
+                              lambda self, task_id, **kw: calls.append(task_id)):
+                AppState(cfg, ws, ws / ".runtime")
+                time.sleep(0.3)
+            self.assertEqual(calls, [])
+
+    def test_interrupted_task_auto_resumes_without_autonomous_mode(self):
+        # Crash recovery is not an autonomous-mode feature: a restart should
+        # continue interrupted work in every mode.
         with tempfile.TemporaryDirectory() as td:
             from localcodeagent.workflow.tasks import TaskStore
             from localcodeagent.agent.orchestrator import AgentOrchestrator
@@ -1772,8 +1795,10 @@ class AppStateWiringTests(unittest.TestCase):
             with patch.object(AgentOrchestrator, "recover",
                               lambda self, task_id, **kw: calls.append(task_id)):
                 self._state(td)
-                time.sleep(0.3)
-            self.assertEqual(calls, [])
+                deadline = time.time() + 5
+                while not calls and time.time() < deadline:
+                    time.sleep(0.05)
+            self.assertEqual(calls, [task.id])
 
     def test_use_capability_routes_through_router(self):
         with tempfile.TemporaryDirectory() as td:

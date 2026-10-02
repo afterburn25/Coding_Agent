@@ -380,8 +380,11 @@ class ConversationManager:
             "api", "query", "command", "uuid", "json",
         )
 
-        def contains_any(terms: tuple[str, ...]) -> bool:
-            return any(re.search(rf"\b{re.escape(term)}\b", t) for term in terms)
+        def contains_any(terms: tuple[str, ...], *, plural: bool = False) -> bool:
+            # plural=True lets "image" match "images", "picture" match
+            # "pictures", etc. — multi-image requests are the common case.
+            tail = "s?" if plural else ""
+            return any(re.search(rf"\b{re.escape(term)}{tail}\b", t) for term in terms)
 
         if contains_any(non_image_outputs):
             return False
@@ -389,7 +392,7 @@ class ConversationManager:
             return True
         return (
             any(re.match(rf"^{verb}\b", t) for verb in visual_verbs)
-            and contains_any(visual_terms)
+            and contains_any(visual_terms, plural=True)
         )
 
     @staticmethod

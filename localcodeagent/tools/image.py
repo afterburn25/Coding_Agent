@@ -10,7 +10,10 @@ from .base import ToolRegistry, ToolSpec
 
 def _schema(extra: dict[str, Any] | None = None, required: list[str] | None = None) -> dict[str, Any]:
     props={
-        "prompt":{"type":"string"}, "negative_prompt":{"type":"string"},
+        "prompt":{"type":"string"},
+        "prompts":{"type":"array","items":{"type":"string"},
+                   "description":"Distinct prompts — one job per prompt; each image appears in the chat gallery as it finishes."},
+        "negative_prompt":{"type":"string"},
         "source_image":{"type":"string"}, "reference_images":{"type":"array","items":{"type":"string"}},
         "mask_path":{"type":"string"}, "subject_profile":{"type":"string"},
         "model_override":{"type":"string","default":"auto"}, "quality":{"type":"string","default":"balanced"},
@@ -31,6 +34,18 @@ def register_image_tools(registry: ToolRegistry, manager: ImageManager) -> None:
         def handler(args: dict[str, Any]) -> str:
             fields={k:v for k,v in args.items() if k in ImageRequest.__dataclass_fields__}
             fields["operation"]=operation
+            # Distinct prompts → one job each so images stream into the chat
+            # gallery as they finish instead of waiting on a batch.
+            prompts=[str(p).strip() for p in (args.get("prompts") or [])
+                     if str(p).strip()]
+            if len(prompts) > 1 and operation == "text_to_image":
+                jobs=[]
+                for prompt in prompts[:8]:
+                    request=ImageRequest(**{**fields, "prompt": prompt})
+                    jobs.append(manager.create_job(
+                        request,
+                        real_person=bool(args.get("real_person",False))).as_dict())
+                return json.dumps({"ok":True,"jobs":jobs}, ensure_ascii=False)
             request=ImageRequest(**fields)
             job=manager.create_job(request, real_person=bool(args.get("real_person",False)))
             return json.dumps({"ok":True,"job":job.as_dict()}, ensure_ascii=False)

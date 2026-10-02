@@ -662,6 +662,62 @@ class AgentOrchestrator:
     def direct_image_generation_intent(user_text: str) -> bool:
         return ConversationManager.image_generation_intent(user_text)
 
+    @staticmethod
+    def _split_image_prompts(user_text: str) -> list[str]:
+        """Distinct prompts when a request clearly enumerates multiple
+        images. Conservative — ambiguous "a cat and a dog in a park" stays
+        one prompt; only explicit counts/lists split."""
+        t = re.sub(r"\s+", " ", str(user_text or "")).strip()
+        if not t:
+            return []
+        words = (
+            r"(?:\d+|two|three|four|five|six|seven|eight|several|multiple|"
+            r"different|separate|a\s+few|a\s+couple(?:\s+of)?)"
+        )
+        nouns = (
+            r"(?:different\s+|separate\s+)?(?:images?|pictures?|photos?|"
+            r"illustrations?|drawings?|paintings?|renders?|wallpapers?|"
+            r"posters?|logos?|icons?|avatars?|scenes?)"
+        )
+        polite = (
+            r"(?:hey(?:,)?\s+|please(?:,)?\s+|(?:can|could|would|will)\s+you\s+|"
+            r"i\s+(?:want|would\s+like)\s+(?:you\s+to\s+)?|i'?d\s+like\s+you\s+to\s+)*"
+        )
+        # "generate 3 images of: a cat, a dog, a sunset"
+        m = re.match(
+            polite + r"(?:generate|create|make|draw|paint|render|produce)\s+"
+            + words + r"\s*" + nouns + r"\s*(?:of|showing|depicting|featuring|:)\s*(.+)$",
+            t, re.IGNORECASE,
+        )
+        if m:
+            tail = m.group(1).strip()
+            parts = [
+                p.strip(" .,")
+                for p in re.split(r"\s*(?:,|;|\band\b|\bthen\b|&)\s*", tail)
+            ]
+            parts = [p for p in parts if len(p) > 2]
+            if len(parts) > 1:
+                return parts[:8]
+            return []
+        # repeated "image of X" / "picture of Y" constructions
+        hits = list(re.finditer(
+            r"\b(?:an?|the|each|every)\s+"
+            r"(?:image|picture|photo|illustration|drawing|wallpaper|poster)\s+of\s+",
+            t, re.IGNORECASE,
+        ))
+        if len(hits) > 1:
+            parts = []
+            for i, h in enumerate(hits):
+                end = hits[i + 1].start() if i + 1 < len(hits) else len(t)
+                seg = t[h.end():end].strip(" .,;")
+                seg = re.sub(r"^(?:and|then)\s+", "", seg)
+                seg = re.sub(r"\s+(?:and|then)$", "", seg).strip(" .,;")
+                if len(seg) > 2:
+                    parts.append(seg)
+            if len(parts) > 1:
+                return parts[:8]
+        return []
+
     @classmethod
     def can_run_without_coding_model(cls, user_text: str) -> bool:
         if cls.can_answer_locally(user_text):
@@ -1627,9 +1683,16 @@ class AgentOrchestrator:
             return
         try:
             payload = json.loads(result)
-            job = payload.get("job") if isinstance(payload, dict) else None
-            if isinstance(job, dict) and str(job.get("id") or ""):
-                self._safe_emit(callback, {"type": "image_job", "job": job})
+            if not isinstance(payload, dict):
+                return
+            jobs = []
+            if isinstance(payload.get("job"), dict):
+                jobs.append(payload["job"])
+            jobs.extend(j for j in (payload.get("jobs") or [])
+                        if isinstance(j, dict))
+            for job in jobs:
+                if str(job.get("id") or ""):
+                    self._safe_emit(callback, {"type": "image_job", "job": job})
         except Exception:
             pass
 
@@ -1643,10 +1706,15 @@ class AgentOrchestrator:
                 payload = json.loads(str(event.get("result") or "{}"))
             except Exception:
                 continue
-            job = payload.get("job") if isinstance(payload, dict) else None
-            job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
-            if job_id and job_id not in ids:
-                ids.append(job_id)
+            jobs = []
+            if isinstance(payload.get("job"), dict):
+                jobs.append(payload["job"])
+            jobs.extend(j for j in (payload.get("jobs") or [])
+                        if isinstance(j, dict))
+            for job in jobs:
+                job_id = str(job.get("id") or "")
+                if job_id and job_id not in ids:
+                    ids.append(job_id)
         return ids
 
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
@@ -2632,7 +2700,10 @@ class AgentOrchestrator:
             "reason": "chat model bypassed for image generation intent",
         }
         permission, permission_mode = self.tools.permission_for("generate_image")
+        prompt_list = self._split_image_prompts(user_text)
         arguments = {"prompt": user_text}
+        if len(prompt_list) > 1:
+            arguments["prompts"] = prompt_list
         if source_images:
             arguments["source_image"] = source_images[0]
             if len(source_images) > 1:
@@ -2756,12 +2827,28 @@ class AgentOrchestrator:
             )
 
         model_id = "image-router"
+        backend_starting = False
+        job_count = 1
         try:
             payload = json.loads(result)
-            model_id = str((payload.get("job") or {}).get("model_id") or model_id)
+            job_payload = payload.get("job") or {}
+            job_list = [j for j in (payload.get("jobs") or []) if isinstance(j, dict)]
+            if job_list:
+                job_payload = job_list[0]
+                job_count = len(job_list)
+            model_id = str(job_payload.get("model_id") or model_id)
+            backend_starting = any(
+                bool(j.get("backend_starting")) for j in (job_list or [job_payload]))
         except Exception:
             pass
-        content = "Image generation started."
+        if backend_starting:
+            content = ("Image generation started. The image generator is "
+                       "starting up — the first image can take a few minutes.")
+        elif job_count > 1:
+            content = (f"Image generation started — {job_count} images are "
+                       "generating and will appear one at a time as they finish.")
+        else:
+            content = "Image generation started."
         completed = self.tasks.update(
             task_id,
             status="completed",
