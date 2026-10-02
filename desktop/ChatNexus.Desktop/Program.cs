@@ -874,6 +874,7 @@ internal sealed class MainForm : Form
 
         await _webView.EnsureCoreWebView2Async(environment);
         ConfigureWebView();
+        await ClearStaleWebCacheAsync(userDataFolder);
         progress.Report(0.72, "INITIALIZING · NEXUS INTERFACE", "Initializing WebView2");
 
         var ready = WaitForInterfaceReadyAsync();
@@ -881,6 +882,39 @@ internal sealed class MainForm : Form
         progress.Report(0.85, "LOADING · NEXUS INTERFACE", "Rendering the Nexus Core application shell");
         progress.Report(0.93, "CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake");
         await ready;
+    }
+
+    /// <summary>
+    /// Clears the WebView2 disk cache once per backend payload change.
+    /// After an update, a heuristic-cached page from the previous build can
+    /// paint for a frame before the fresh (no-store) response replaces it —
+    /// a visible old-page-then-new-page flash. Keyed on the backend exe's
+    /// timestamp so it only runs when the payload actually changed.
+    /// </summary>
+    private async Task ClearStaleWebCacheAsync(string userDataFolder)
+    {
+        try
+        {
+            var marker = Path.Combine(userDataFolder, "nexus-core-webcache-stamp.txt");
+            var backendExe = Path.Combine(_appDir, "backend", "ChatNexus.Backend.exe");
+            var stamp = File.Exists(backendExe)
+                ? File.GetLastWriteTimeUtc(backendExe).Ticks.ToString()
+                : "unknown";
+            if (File.Exists(marker) && string.Equals(File.ReadAllText(marker).Trim(), stamp, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync(
+                CoreWebView2BrowsingDataKinds.DiskCache |
+                CoreWebView2BrowsingDataKinds.CacheStorage |
+                CoreWebView2BrowsingDataKinds.FileSystems);
+            File.WriteAllText(marker, stamp);
+        }
+        catch
+        {
+            // Cache maintenance must never block or fail startup.
+        }
     }
 
     /// <summary>
