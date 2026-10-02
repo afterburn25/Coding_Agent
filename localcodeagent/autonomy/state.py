@@ -92,13 +92,15 @@ class JsonlLog:
                     fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
                 self._ticks += 1
                 if self._ticks % 100 == 0 and self.path.stat().st_size > self._max:
-                    self.path.write_bytes(self.path.read_bytes()[-self._keep:])
+                    raw = self.path.read_bytes()[-self._keep:]
+                    nl = raw.find(b"\n")
+                    self.path.write_bytes(raw[nl + 1:] if nl != -1 else b"")
             except OSError:
                 pass
 
     def tail(self, n: int = 100) -> list[dict[str, Any]]:
         try:
-            lines = self.path.read_text(encoding="utf-8").splitlines()[-n:]
+            lines = self.path.read_bytes().splitlines()[-n:]
         except OSError:
             return []
         out = []

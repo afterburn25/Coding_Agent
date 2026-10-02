@@ -1146,5 +1146,33 @@ class SupervisorLifecycleTests(unittest.TestCase):
             sup.stop()
 
 
+class JsonlLogTests(unittest.TestCase):
+    def test_tail_tolerates_torn_utf8_and_partial_lines(self):
+        from localcodeagent.autonomy.state import JsonlLog
+        with tempfile.TemporaryDirectory() as td:
+            log = JsonlLog(Path(td) / "audit.jsonl", max_bytes=64,
+                           keep_tail=40)
+            # Multibyte row first so the byte-boundary cut lands inside a
+            # UTF-8 sequence, then enough rows to force truncation.
+            log.append({"msg": "中文".encode().decode("unicode_escape")})
+            for i in range(200):
+                log.append({"i": i, "pad": "x" * 32})
+            rows = log.tail(500)
+            self.assertTrue(rows)
+            self.assertTrue(all(isinstance(r, dict) for r in rows))
+            self.assertEqual(rows[-1]["i"], 199)
+
+    def test_truncation_drops_partial_first_line(self):
+        from localcodeagent.autonomy.state import JsonlLog
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "audit.jsonl"
+            log = JsonlLog(p, max_bytes=50, keep_tail=30)
+            for i in range(150):
+                log.append({"i": i, "pad": "y" * 32})
+            # Every surviving line must be complete JSON — no torn head.
+            for line in p.read_bytes().splitlines():
+                json.loads(line)
+
+
 if __name__ == "__main__":
     unittest.main()
