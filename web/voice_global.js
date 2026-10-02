@@ -111,8 +111,8 @@
     for (const mb of document.querySelectorAll('.voice-mute-btn')) {
       mb.classList.toggle('muted', NV.muted);
       mb.textContent = NV.muted ? '🔇' : '🔊';
-      mb.title = mb.getAttribute('aria-label') = NV.muted
-        ? 'Voice muted — click to unmute' : 'Voice on — click to mute';
+      mb.title = NV.muted ? 'Voice muted — click to unmute' : 'Voice on — click to mute';
+      mb.setAttribute('aria-label', mb.title);
     }
   };
 
