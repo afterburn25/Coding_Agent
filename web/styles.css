@@ -1,4 +1,8 @@
 :root {
+  /* Dark form controls: without this, <select> dropdowns, scrollbars and
+     checkboxes render with the OS light theme, leaving our light text
+     unreadable on white popups. */
+  color-scheme:dark;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   color:#eef6ff;
   background:#050b16;
@@ -2442,6 +2446,13 @@ input[type=range] {
 select {
   appearance:auto;
   cursor:pointer;
+}
+
+/* Dropdown popup items — keep text/panel on theme colors so options are
+   readable regardless of how the platform paints the popup. */
+select option {
+  background:var(--panel2);
+  color:var(--text);
 }
 
 /* Shared button language. Page-specific buttons keep their own classes —
