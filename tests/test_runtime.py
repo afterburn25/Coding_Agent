@@ -1,6 +1,7 @@
 import io
 import os
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -491,6 +492,70 @@ class RuntimeManagerTests(unittest.TestCase):
             ep = manager._start_llama_cpp(profile, ctx_override=8192)
             self.assertFalse(proc.terminated)
             self.assertEqual(ep, "http://x/v1")
+
+    def test_auto_tune_disabled_when_config_off(self):
+        from types import SimpleNamespace
+        from localcodeagent.server import AppState
+        with tempfile.TemporaryDirectory() as td:
+            state = AppState.__new__(AppState)
+            state.config = AgentConfig(
+                models=[self._profile()], runtime_auto_tune=False)
+            state.runtime = SimpleNamespace(tuner=None)
+            AppState._start_auto_tune(state)
+            self.assertFalse(
+                any(t.name == "runtime-auto-tune" and t.is_alive()
+                    for t in threading.enumerate()))
+
+    def test_auto_tune_benchmarks_untuned_profile(self):
+        from types import SimpleNamespace
+        from localcodeagent.server import AppState
+        import threading as _th
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            state = AppState.__new__(AppState)
+            state.config = AgentConfig(
+                models=[profile],
+                runtime_auto_tune=True,
+                runtime_auto_tune_idle_seconds=0.01)
+            state.tasks = SimpleNamespace(recent=lambda n: [])
+            state.events = SimpleNamespace(publish=lambda *a, **k: None)
+            benchmarked: list[str] = []
+
+            tuner = SimpleNamespace(
+                _data={"results": {}},
+                fingerprint=lambda p: "fp",
+                benchmark=lambda p: benchmarked.append(p.id)
+                    or {"status": "ok", "best": {"metrics": {"predicted_per_second": 42.0}}},
+            )
+            state.runtime = SimpleNamespace(tuner=tuner)
+            AppState._start_auto_tune(state)
+            deadline = time.time() + 10
+            while not benchmarked and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertEqual(benchmarked, [profile.id])
+
+    def test_auto_tune_skips_tuned_profile(self):
+        from types import SimpleNamespace
+        from localcodeagent.server import AppState
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            state = AppState.__new__(AppState)
+            state.config = AgentConfig(
+                models=[profile],
+                runtime_auto_tune=True,
+                runtime_auto_tune_idle_seconds=0.01)
+            state.tasks = SimpleNamespace(recent=lambda n: [])
+            state.events = SimpleNamespace(publish=lambda *a, **k: None)
+            benchmarked: list[str] = []
+            tuner = SimpleNamespace(
+                _data={"results": {profile.id: {"fingerprint": "fp", "args": []}}},
+                fingerprint=lambda p: "fp",
+                benchmark=lambda p: benchmarked.append(p.id) or {},
+            )
+            state.runtime = SimpleNamespace(tuner=tuner)
+            AppState._start_auto_tune(state)
+            time.sleep(0.5)
+            self.assertEqual(benchmarked, [])
 
     def test_prewarm_gives_up_after_bounded_attempts(self):
         from types import SimpleNamespace

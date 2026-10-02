@@ -523,6 +523,7 @@ class AppState:
         self.queue.enrich = self._queue_enrich_mission
         self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
         self._start_primary_prewarm()
+        self._start_auto_tune()
         self._start_auto_resume()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
@@ -1036,6 +1037,73 @@ class AppState:
                 # prevent UI startup.
                 return
             time.sleep(delay)
+
+    def _start_auto_tune(self) -> None:
+        """Idle-gated background benchmark for untuned managed models.
+
+        Runs once per boot: after the idle settle, each llama_cpp profile
+        without a valid fingerprinted tuned result gets a bounded sweep.
+        While any task is running the tuner waits — probes launch real
+        llama-server processes and must never compete with active work.
+        """
+        if not getattr(self.config, "runtime_auto_tune", True):
+            return
+        targets = [
+            p for p in self.config.models
+            if p.enabled and p.runtime == "llama_cpp" and p.model_path
+        ]
+        if not targets:
+            return
+
+        def _lane_busy() -> bool:
+            try:
+                if any(
+                    t.get("status") in {"running", "verifying", "reviewing"}
+                    for t in self.tasks.recent(10)
+                ):
+                    return True
+                return bool(getattr(self, "_queue_running", None))
+            except Exception:
+                return True  # uncertain → don't benchmark
+
+        def _has_result(profile) -> bool:
+            try:
+                tuner = self.runtime.tuner
+                stored = tuner._data["results"].get(profile.id)
+                return bool(stored and stored.get("fingerprint") == tuner.fingerprint(profile))
+            except Exception:
+                return True  # can't verify → leave it alone
+
+        def _worker() -> None:
+            time.sleep(max(5.0, float(getattr(
+                self.config, "runtime_auto_tune_idle_seconds", 45.0))))
+            for profile in targets:
+                if _has_result(profile):
+                    continue
+                # Wait for an idle window — missions/queues can start at
+                # any time; check cheaply every few seconds, bounded.
+                for _ in range(240):  # ~20 min max wait
+                    if not _lane_busy():
+                        break
+                    time.sleep(5.0)
+                if _lane_busy():
+                    return  # still busy after the window — skip this boot
+                try:
+                    self.events.publish("model", {"event": {
+                        "type": "auto_tune_start", "model_id": profile.id}})
+                    result = self.runtime.tuner.benchmark(profile)
+                    self.events.publish("model", {"event": {
+                        "type": "tuning_complete", "model_id": profile.id,
+                        "status": result.get("status"), "source": "auto",
+                        "tps": (result.get("best") or {}).get("metrics", {}).get(
+                            "predicted_per_second"),
+                    }})
+                except Exception as exc:
+                    self.events.publish("model", {"event": {
+                        "type": "auto_tune_failed", "model_id": profile.id,
+                        "error": f"{type(exc).__name__}: {exc}"[:200]}})
+
+        threading.Thread(target=_worker, name="runtime-auto-tune", daemon=True).start()
 
     def reload_model_configuration(self) -> dict:
         """Reload model profiles without allowing config.json to bypass a protected Brain."""

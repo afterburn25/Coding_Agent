@@ -83,8 +83,11 @@ class WorktreeAgent:
         merged."""
         rc, head = _git(self.repo, "rev-parse", "--abbrev-ref", "HEAD")
         base = head.strip() or "HEAD"
-        rc, out = _git(self.repo, "merge", "--no-ff", "--no-edit",
-                       self.branch)
+        # --no-ff creates a merge commit; CI runners/fresh machines may have
+        # no configured identity — attribute it to the agent runtime.
+        rc, out = _git(self.repo, "-c", "user.name=Nexus Agent",
+                       "-c", "user.email=nexus-agent@local",
+                       "merge", "--no-ff", "--no-edit", self.branch)
         if rc != 0:
             _git(self.repo, "merge", "--abort")
             return {"ok": False, "error": f"merge conflict — aborted: {out[:300]}",

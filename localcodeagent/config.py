@@ -200,6 +200,14 @@ class AgentConfig:
     # Performance profile for managed llama.cpp runtimes:
     # auto (benchmarked/intelligent), quiet, balanced, max.
     performance_mode: str = "auto"
+    # Idle-gated automatic benchmark: after boot settles and while no task is
+    # running, managed llama.cpp models without a valid tuned result for the
+    # current hardware/build fingerprint get a bounded benchmark sweep so
+    # tuned_flags() serves measured settings instead of heuristics.
+    runtime_auto_tune: bool = True
+    # Seconds of post-boot idle before the auto-tuner is allowed to start.
+    # Probes launch real llama-server processes — never run while busy.
+    runtime_auto_tune_idle_seconds: float = 45.0
     # Scale the launched llama.cpp context window to the model's routing role
     # (fast general 8K, coding 16K, deep/review 32K) instead of always using
     # the profile's maximum. Never exceeds the configured context_window.
@@ -559,6 +567,12 @@ def load_config(path: Path | None) -> AgentConfig:
     perf_mode = str(raw.get("performance_mode", cfg.performance_mode)).strip().lower()
     cfg.performance_mode = perf_mode if perf_mode in {"auto", "quiet", "balanced", "max"} else "auto"
     cfg.runtime_dynamic_context = bool(raw.get("runtime_dynamic_context", cfg.runtime_dynamic_context))
+    cfg.runtime_auto_tune = bool(raw.get("runtime_auto_tune", cfg.runtime_auto_tune))
+    try:
+        cfg.runtime_auto_tune_idle_seconds = float(
+            raw.get("runtime_auto_tune_idle_seconds", cfg.runtime_auto_tune_idle_seconds))
+    except (TypeError, ValueError):
+        pass
     cfg.memory_pressure_vram_gb = max(0.0, float(raw.get("memory_pressure_vram_gb", cfg.memory_pressure_vram_gb)))
     cfg.memory_pressure_ram_gb = max(0.0, float(raw.get("memory_pressure_ram_gb", cfg.memory_pressure_ram_gb)))
     cfg.max_resident_models = max(1, int(raw.get("max_resident_models", cfg.max_resident_models)))
