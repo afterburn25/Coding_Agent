@@ -183,6 +183,15 @@ class AgentConfig:
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
+    # A resident model launched at an oversized context (a big task grew its
+    # window via ensure_ready) is relaunched at the role-recommended window
+    # after this many idle seconds (0 disables). This frees the excess KV
+    # cache without a cold reload.
+    context_shrink_idle_seconds: float = 600.0
+    # The launched window must exceed context_shrink_factor x the role
+    # recommendation before shrinking (hysteresis so minor overages don't
+    # trigger relaunches).
+    context_shrink_factor: float = 1.5
     # Send a 1-token request right after a managed runtime reports healthy so
     # the first real generation doesn't pay the cold-load cost.
     model_warmup: bool = True
@@ -558,6 +567,8 @@ def load_config(path: Path | None) -> AgentConfig:
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
+    cfg.context_shrink_idle_seconds = max(0.0, float(raw.get("context_shrink_idle_seconds", cfg.context_shrink_idle_seconds)))
+    cfg.context_shrink_factor = max(1.0, float(raw.get("context_shrink_factor", cfg.context_shrink_factor)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
     cfg.fast_general_history_turns = max(0, int(raw.get("fast_general_history_turns", cfg.fast_general_history_turns)))
     cfg.fast_general_context_chars = max(500, int(raw.get("fast_general_context_chars", cfg.fast_general_context_chars)))
