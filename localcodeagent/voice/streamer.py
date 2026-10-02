@@ -24,9 +24,12 @@ class SentenceStreamer:
     """
 
     def __init__(self, filter_: SpeechTextFilter | None = None,
-                 max_clause: int = 400) -> None:
+                 max_clause: int = 400, first_clause: int = 90) -> None:
         self.filter = filter_ or SpeechTextFilter()
         self.max_clause = max_clause
+        # Speech should start as soon as the first clause is stable — waiting
+        # for a full opening sentence makes voice lag visibly behind text.
+        self.first_clause = first_clause
         self._raw = ""           # unprocessed deltas
         self._text = ""          # speakable text awaiting sentence boundary
         self._in_fence = False
@@ -99,7 +102,8 @@ class SentenceStreamer:
                     out.append(sent)
                     self._emitted += 1
                 break
-            if len(buf) > self.max_clause:
+            limit = self.first_clause if self._emitted == 0 else self.max_clause
+            if len(buf) > limit:
                 m2 = _CLAUSE.search(buf)
                 if m2:
                     sent, buf = buf[: m2.end()].strip(), buf[m2.end():]

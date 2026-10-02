@@ -225,7 +225,7 @@ function beginAssistantStream(){
   wrap.innerHTML='<div class="role">assistant</div><div class="bubble">'+nexusThinkingMarkup()+'</div>';
   chat.appendChild(wrap);scrollChat(true);
   const bubble=wrap.querySelector('.bubble');
-  const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,pendingText:'',flushScheduled:false,startedAt:Date.now()/1000,requestMessage:''};
+  const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,pendingText:'',flushScheduled:false,awaitingVoice:false,voiceHoldTimer:null,startedAt:Date.now()/1000,requestMessage:''};
   nexusThinkingStep(state,'Context link established','Reading conversation state','context');
   return state;
 }
@@ -403,12 +403,33 @@ function scheduleStreamFlush(state){
   const raf=(typeof requestAnimationFrame==='function')?requestAnimationFrame:(f)=>setTimeout(f,16);
   raf(()=>flushStreamText(state));
 }
+function releaseVoiceHold(state){
+  if(!state.awaitingVoice)return;
+  state.awaitingVoice=false;
+  if(state.voiceHoldTimer){clearTimeout(state.voiceHoldTimer);state.voiceHoldTimer=null;}
+  scheduleStreamFlush(state);
+}
+function armVoiceHold(state){
+  // Voice-first sync: when speech is active, hold the visible response until
+  // the first audio segment is ready so text and voice land together.
+  // Muted/off mode → text posts immediately (typed response wins).
+  const nv=window.NexusVoice;
+  const voiceMode=String(nv?.status?.mode||'responses');
+  if(!nv||!nv.enabled||nv.muted)return;
+  if(voiceMode!=='responses'&&voiceMode!=='responses_activity')return;
+  state.awaitingVoice=true;
+  state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),8000);
+}
 function handleAgentStreamEvent(name,data,state){
-  if(name==='voice'){try{window.NexusVoice?.onEvent(data);}catch{}return;}
+  if(name==='voice'){
+    try{window.NexusVoice?.onEvent(data);}catch{}
+    if(data&&(data.event==='segment'||data.event==='stop'||data.event==='muted'))releaseVoiceHold(state);
+    return;
+  }
   if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
   if(name==='token'){
     if(!state.receivedToken){state.receivedToken=true;state.hud?.classList.add('compact');nexusThinkingStep(state,'Synthesis stream online','Composing response','synthesis');}
-    state.pendingText=(state.pendingText||'')+String(data.text||'');scheduleStreamFlush(state);return;
+    state.pendingText=(state.pendingText||'')+String(data.text||'');if(!state.awaitingVoice)scheduleStreamFlush(state);return;
   }
   if(name==='activity'){upsertActivityRow(data.activity||data);return;}
   if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));scrollChat();return;}
@@ -435,8 +456,8 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';scrollChat();return;}
-  if(name==='result'){agentStreamActive=false;state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
-  if(name==='error'){agentStreamActive=false;state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
+  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
+  if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
 }
 function attachRetry(state){
   // Offer one-click resend after a failed/interrupted turn — especially a
@@ -504,7 +525,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&attachMenu)attachMe
 attachInput?.addEventListener('change',async()=>{const files=[...attachInput.files||[]];attachInput.value='';for(const f of files){if(pendingAttachments.filter(a=>!a.bad).length>=8){pendingAttachments.push({name:f.name,kind:'file',bad:'limit 8'});continue;}if(f.type.startsWith('image/')){if(f.size>12*1024*1024){pendingAttachments.push({name:f.name,kind:'image',bad:'>12 MB'});continue;}pendingAttachments.push({name:f.name,kind:'image',data_url:await readFileAs(f,'dataURL')});}else{const textLike=f.type.startsWith('text/')||f.type==='application/json'||TEXT_EXT.test(f.name);if(!textLike){pendingAttachments.push({name:f.name,kind:'file',bad:'binary — not inlined'});continue;}if(f.size>400*1024){pendingAttachments.push({name:f.name,kind:'file',bad:'>400 KB'});continue;}pendingAttachments.push({name:f.name,kind:'file',content:await readFileAs(f,'text')});}}renderAttachChips();});
 async function streamAgent(message,attachments){
   agentStreamActive=true;
-  const state=beginAssistantStream();state.requestMessage=message;
+  const state=beginAssistantStream();state.requestMessage=message;armVoiceHold(state);
   let res;
   try{res=await fetch('/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message,mode:mode.value,...(attachments?.length?{attachments}:{})})});}
   catch(e){agentStreamActive=false;throw e;}
@@ -628,7 +649,7 @@ function nexusAgePhrase(){
   const parts=[y?u(y,'year'):'',m?u(m,'month'):'',d?u(d,'day'):''].filter(Boolean);
   return (parts.length===3?`${parts[0]}, ${parts[1]}, and ${parts[2]}`:parts.join(' and '))+' old';
 }
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message+atts.map(a=>`\n📎 ${a.name}`).join(''));input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&builtinClientReply(message);if(builtin){addMessage('assistant',builtin);recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));try{window.NexusVoice?.speak(builtin);}catch{}input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message+atts.map(a=>`\n📎 ${a.name}`).join(''));input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&builtinClientReply(message);if(builtin){const nv=window.NexusVoice;let seg=null;if(nv&&nv.enabled&&!nv.muted){try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:builtin})});seg=await r.json();}catch{}}addMessage('assistant',builtin);if(seg&&seg.url){try{nv.enqueue(seg.url,{manual:true});}catch{}}recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',async e=>{const speak=e.target.closest('[data-speak]');if(speak){const msg=speak.closest('.message');const bubble=msg?.querySelector('.bubble');const text=(bubble?.textContent||'').trim();if(text&&window.NexusVoice){speak.disabled=true;try{await NexusVoice.speak(text);}finally{speak.disabled=false;}}return;}const feedback=e.target.closest('[data-feedback]');if(feedback){feedback.disabled=true;try{await fetch('/api/conversations/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:feedback.dataset.feedback,message_id:feedback.dataset.messageId||''})});feedback.textContent=feedback.dataset.feedback==='up'?'✓':'✕';}catch{}return;}const learn=e.target.closest('[data-learn]');if(learn){learn.disabled=true;try{const res=await fetch('/api/answer-memory/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:learn.dataset.messageId||''})});const d=await res.json();learn.textContent=res.ok&&d.ok?'✓ Learned':'✕';}catch{learn.textContent='✕';}return;}const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
 $('#newChatSmall').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
