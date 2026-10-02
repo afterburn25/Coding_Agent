@@ -1068,6 +1068,28 @@ class SupervisorLifecycleTests(unittest.TestCase):
                           {"paused", "blocked"})
             sup.stop()
 
+    def test_ram_pressure_pauses_mission(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td, resources=lambda: {
+                "total_ram_gb": 64.0, "available_ram_gb": 1.0})
+            m = sup.create_mission(objective="x")
+            sup.start_mission(m["id"])
+            sup.tick()
+            status = sup.missions.get(m["id"])["status"]
+            self.assertEqual(status, "paused")
+            sup.stop()
+
+    def test_ample_ram_does_not_pause(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td, resources=lambda: {
+                "total_ram_gb": 64.0, "available_ram_gb": 40.0})
+            m = sup.create_mission(objective="x")
+            sup.start_mission(m["id"])
+            drive(sup, m["id"])
+            status = sup.missions.get(m["id"])["status"]
+            self.assertNotEqual(status, "paused")
+            sup.stop()
+
     def test_standing_goal_spawns_mission(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)

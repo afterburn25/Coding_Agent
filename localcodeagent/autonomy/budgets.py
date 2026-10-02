@@ -64,6 +64,19 @@ class BudgetManager:
         if free_gb is not None and free_gb < 1.0:
             violations.append(f"disk nearly full ({free_gb} GB free)")
 
+        # RAM pressure — autonomous work must not push the host to the
+        # swap/OOM wall. Floor scales with machine size (≤2 GB or ~5% free).
+        hw = snap.get("hardware") or {}
+        avail_ram = hw.get("available_ram_gb")
+        total_ram = hw.get("total_ram_gb")
+        if (isinstance(avail_ram, (int, float))
+                and isinstance(total_ram, (int, float)) and total_ram > 0):
+            floor_gb = min(2.0, total_ram * 0.05)
+            if avail_ram < floor_gb:
+                violations.append(
+                    f"RAM pressure — {avail_ram:.1f} of "
+                    f"{total_ram:.0f} GB free (< {floor_gb:.1f} GB floor)")
+
         return {"ok": not violations, "violations": violations,
                 "snapshot": snap}
 
