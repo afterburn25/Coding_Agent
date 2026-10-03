@@ -1,9 +1,9 @@
 #ifndef AppVersion
-  #define AppVersion "0.12.0"
+  #define AppVersion "0.12.1"
 #endif
 
 #ifndef AppNumericVersion
-  #define AppNumericVersion "0.12.0.0"
+  #define AppNumericVersion "0.12.1.0"
 #endif
 
 #define AppName "Nexus Core"
@@ -144,7 +144,7 @@ var
   ModelProgressBar: TNewProgressBar;
   ModelBytesLabel: TNewStaticText;
   ModelProgressActive: Boolean;
-  CurrentModelProgressNumber: Integer;
+  CurrentProgressFile: String;
   LastModelBytesDone: Int64;
 
 function GetDriveType(lpRootPathName: String): UINT;
@@ -292,8 +292,59 @@ begin
   ModelBytesLabel.Visible := False;
 
   ModelProgressActive := False;
-  CurrentModelProgressNumber := 0;
+  CurrentProgressFile := '';
   LastModelBytesDone := 0;
+end;
+
+// Long operations (process shutdown, SHA-256 of multi-GB models) otherwise run
+// with a completely static wizard, which reads as "frozen". Push an explicit
+// stage message + marquee bar onto whichever page is currently visible.
+procedure ShowBusyStatus(const Primary, Detail: String);
+begin
+  if WizardSilent() then
+    Exit;
+
+  if WizardForm.CurPageID = wpReady then
+    WizardForm.ReadyLabel.Caption :=
+      Primary + #13#10 + #13#10 + Detail
+  else
+  begin
+    WizardForm.StatusLabel.Caption := Primary;
+    WizardForm.FilenameLabel.Caption := Detail;
+  end;
+
+  if ModelProgressLabel <> nil then
+  begin
+    ModelProgressLabel.Caption := Primary;
+    ModelProgressLabel.Visible := True;
+  end;
+  if ModelBytesLabel <> nil then
+  begin
+    ModelBytesLabel.Caption := Detail;
+    ModelBytesLabel.Visible := True;
+  end;
+  if ModelProgressBar <> nil then
+  begin
+    ModelProgressBar.Style := npbstMarquee;
+    ModelProgressBar.Visible := True;
+  end;
+
+  WizardForm.Update;
+end;
+
+// Sleep() alone freezes the wizard repaint; chunk it so status text stays live.
+procedure BusySleep(Milliseconds: Integer);
+begin
+  while Milliseconds > 0 do
+  begin
+    if Milliseconds > 200 then
+      Sleep(200)
+    else
+      Sleep(Milliseconds);
+    Milliseconds := Milliseconds - 200;
+    if not WizardSilent() then
+      WizardForm.Update;
+  end;
 end;
 
 function LargestTemporaryFileSize(const Directory: String): Int64;
@@ -321,26 +372,23 @@ end;
 
 procedure ShowModelDownloadProgress(
   const DisplayName, DownloadDirectory: String;
-  const ModelNumber: Integer;
   const ExpectedSize: Int64);
 var
   BytesDone: Int64;
   Position: Integer;
 begin
-  if CurrentModelProgressNumber <> ModelNumber then
+  if CurrentProgressFile <> DisplayName then
   begin
-    CurrentModelProgressNumber := ModelNumber;
+    CurrentProgressFile := DisplayName;
     LastModelBytesDone := 0;
     ModelProgressBar.Position := 0;
   end;
 
   ModelProgressActive := True;
+  ModelProgressBar.Style := npbstNormal;
   ModelProgressLabel.Visible := True;
   ModelProgressBar.Visible := True;
   ModelBytesLabel.Visible := True;
-
-  ModelProgressLabel.Caption :=
-    'Downloading component ' + IntToStr(ModelNumber) + ' of 2 - ' + DisplayName;
 
   BytesDone := LargestTemporaryFileSize(DownloadDirectory);
   if BytesDone < LastModelBytesDone then
@@ -350,6 +398,12 @@ begin
   if BytesDone > ExpectedSize then
     BytesDone := ExpectedSize;
   LastModelBytesDone := BytesDone;
+
+  if BytesDone >= ExpectedSize then
+    ModelProgressLabel.Caption :=
+      'Verifying ' + DisplayName + ' download (SHA-256)...'
+  else
+    ModelProgressLabel.Caption := 'Downloading ' + DisplayName + '...';
 
   if ExpectedSize > 0 then
     Position := (BytesDone * 1000) div ExpectedSize
@@ -367,11 +421,12 @@ begin
   if not ModelProgressActive then
     Exit;
 
+  ModelProgressBar.Style := npbstNormal;
   ModelProgressLabel.Caption := 'Bootstrap downloads complete';
   ModelProgressBar.Position := ModelProgressBar.Max;
-  ModelBytesLabel.Caption := '2 of 2 default model components ready';
+  ModelBytesLabel.Caption := 'All default model components are ready';
   LastModelBytesDone := 0;
-  CurrentModelProgressNumber := 0;
+  CurrentProgressFile := '';
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
@@ -446,6 +501,11 @@ begin
 
   try
     Log('Existing model has no trusted metadata; verifying SHA-256: ' + Target);
+    ShowBusyStatus(
+      'Verifying existing model file...',
+      'Computing SHA-256 of ' + FileName + ' (' +
+        IntToStr((ExpectedSize + 536870911) div 1073741824) + ' GB). ' +
+        'Large models can take a few minutes - Setup is still working, please do not close it.');
     ActualHash := GetSHA256OfFile(Target);
     if CompareText(ActualHash, ExpectedHash) = 0 then
     begin
@@ -681,20 +741,37 @@ begin
   // Avoid Restart Manager for Nexus Core because the desktop host owns a hidden
   // backend and llama.cpp child process. Close the desktop tree first, allow a
   // short grace period, then force-clean any orphaned children.
+  ShowBusyStatus(
+    'Closing Nexus Core...',
+    'Setup is asking the running application to shut down.');
   TaskKillImage('{#AppExeName}', False);
   TaskKillImage('ChatNexus.exe', False);  // legacy exe name from pre-Nexus-Core installs
-  Sleep(1500);
+  ShowBusyStatus(
+    'Waiting for Nexus Core to exit...',
+    'Giving the backend and AI runtime a moment to release files.');
+  BusySleep(1500);
+  ShowBusyStatus(
+    'Stopping remaining Nexus Core processes...',
+    'Cleaning up the backend and runtime so files can be replaced.');
   TaskKillImage('{#AppExeName}', True);
   TaskKillImage('ChatNexus.exe', True);
   TaskKillImage('ChatNexus.Backend.exe', True);
   TaskKillImage('llama-server.exe', True);
   TaskKillImage('llama.exe', True);
-  Sleep(500);
+  BusySleep(500);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  if UpgradeDetected then
+    ShowBusyStatus(
+      'Preparing update...',
+      'Setup is closing Nexus Core and checking the existing installation. Please wait.');
   StopRunningNexusCore();
+  if UpgradeDetected then
+    ShowBusyStatus(
+      'Preparing update...',
+      'Checking existing files before copying begins.');
   InstallBundledSource := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
 
   if InstallBundledSource then
@@ -752,9 +829,13 @@ begin
   CurrentFile := WizardForm.FilenameLabel.Caption;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), 1, {#Qwen14Size})
+    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
   else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), 2, {#Qwen30Size});
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
+  else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Kokoro voice model', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
+  else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Kokoro voices', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
