@@ -65,6 +65,31 @@ class StoreAndSchemaTests(unittest.TestCase):
             self.assertTrue(m.hit)
             am2.store.close()
 
+    def test_partially_stamped_v2_db_self_heals(self):
+        """A DB stamped user_version=2 but missing a migration-2 column
+        (interrupted migration, manual stamp, partial restore) must heal
+        on open — version-keyed migrations alone leave it broken forever."""
+        import sqlite3
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.store.close()
+            # Simulate the partial stamp: drop the column, keep v2.
+            conn = sqlite3.connect(str(Path(td) / "am.db"))
+            conn.execute(
+                "ALTER TABLE experiences DROP COLUMN profile_id")
+            conn.commit()
+            cols = {r[1] for r in conn.execute(
+                "PRAGMA table_info(experiences)")}
+            self.assertNotIn("profile_id", cols)
+            conn.close()
+            am2 = _mem(td)  # reopen — must re-assert missing columns
+            self.assertTrue(am2.available)
+            out = am2.record_exchange(
+                "What is a tensor?", "A multi-dimensional array.",
+                model_id="m", model_role="utility", inference_time_ms=10)
+            self.assertIsNotNone(out["experience_id"])
+            am2.store.close()
+
     def test_experience_record_saved(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)

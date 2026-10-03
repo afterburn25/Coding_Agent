@@ -57,6 +57,26 @@ def fts_available(conn: sqlite3.Connection) -> bool:
         return False
 
 
+def _heal_v2_columns(conn: sqlite3.Connection) -> None:
+    """Re-assert migration-2 columns regardless of the stamped version.
+
+    Migrations are keyed on PRAGMA user_version, so a database stamped v2
+    without both profile_id columns — an interrupted migration, a manual
+    stamp, or a partial restore — would report current while every
+    profile-scoped write fails. These statements are idempotent, so
+    asserting them on every open costs nothing and self-heals the gap.
+    """
+    _add_column_if_missing(
+        conn, "answers", "profile_id TEXT NOT NULL DEFAULT ''", "profile_id"
+    )
+    _add_column_if_missing(
+        conn, "experiences", "profile_id TEXT NOT NULL DEFAULT ''", "profile_id"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ans_profile ON answers(profile_id)"
+    )
+
+
 def apply(conn: sqlite3.Connection) -> int:
     """Bring the database to SCHEMA_VERSION. Returns the resulting version."""
     row = conn.execute("PRAGMA user_version").fetchone()
@@ -70,4 +90,6 @@ def apply(conn: sqlite3.Connection) -> int:
         # Database is newer than this build — read-only compatible columns
         # still work; do not downgrade or destroy anything.
         return version
+    if version >= 2:
+        _heal_v2_columns(conn)
     return SCHEMA_VERSION
