@@ -155,7 +155,7 @@
       // Bypasses NexusVoice.speak on purpose: mute silences chat replies,
       // not the onboarding welcome.
       if (ON_START) {
-        api("/api/voice/speak", {
+        post("/api/voice/speak", {
           text: "Welcome to Nexus Core. To unlock your workstation, fill " +
                 "out your profile below — every field on this page is required."
         }).then((out) => {
