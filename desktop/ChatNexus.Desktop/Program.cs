@@ -951,30 +951,70 @@ internal sealed class BackendProcess : IDisposable
             }
             using var orphan = Process.GetProcessById(pid);
             var orphanPath = orphan.MainModule?.FileName ?? "";
-            if (!string.Equals(orphanPath, backendExe, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(orphanPath, backendExe, StringComparison.OrdinalIgnoreCase))
             {
-                return;
-            }
-            // taskkill /T takes the orphan's children (llama-server, ComfyUI
-            // python, MCP servers) with it — killing only the parent would
-            // orphan them holding ports/VRAM.
-            var tk = Process.Start(new ProcessStartInfo
-            {
-                FileName = "taskkill",
-                Arguments = $"/F /T /PID {pid}",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-            });
-            tk?.WaitForExit(10000);
-            if (!orphan.HasExited)
-            {
-                orphan.Kill(entireProcessTree: true);
+                KillProcessTree(orphan);
             }
         }
         catch
         {
             // Stale pidfile, dead process, access denied — all fine; launch
             // proceeds regardless.
+        }
+
+        // The pidfile only covers backends this host launched. A backend
+        // orphaned some other way (host killed mid-launch, manual start)
+        // still holds shared state and can stall the next backend's
+        // /api/status. Match on the exe path — never on name alone — so an
+        // unrelated process is never touched.
+        foreach (var candidate in Process.GetProcesses())
+        {
+            try
+            {
+                if (candidate.Id == Environment.ProcessId)
+                {
+                    continue;
+                }
+                var path = candidate.MainModule?.FileName ?? "";
+                if (string.Equals(path, backendExe, StringComparison.OrdinalIgnoreCase))
+                {
+                    KillProcessTree(candidate);
+                }
+            }
+            catch
+            {
+                // Exited mid-scan or module inaccessible — skip it.
+            }
+            finally
+            {
+                candidate.Dispose();
+            }
+        }
+    }
+
+    private static void KillProcessTree(Process process)
+    {
+        // taskkill /T takes the orphan's children (llama-server, ComfyUI
+        // python, MCP servers) with it — killing only the parent would
+        // orphan them holding ports/VRAM.
+        try
+        {
+            var tk = Process.Start(new ProcessStartInfo
+            {
+                FileName = "taskkill",
+                Arguments = $"/F /T /PID {process.Id}",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            });
+            tk?.WaitForExit(10000);
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Already gone — nothing to reap.
         }
     }
 
