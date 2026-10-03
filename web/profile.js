@@ -72,15 +72,7 @@
       sessionStorage.removeItem("nexus-greeting");
     } catch {}
     if (!g || !g.text) return;
-    const t = document.createElement("div");
-    t.className = "greeting-toast";
-    t.innerHTML = `
-      <img class="ps-avatar" src="/assets/nexus-core-icon.png" alt="" />
-      <div class="gt-text">${esc(g.text)}</div>
-      <button class="gt-play" type="button" aria-label="Hear it" title="Hear it">▶</button>
-      <button class="gt-close" type="button" aria-label="Dismiss">✕</button>`;
-    t.querySelector(".gt-close").addEventListener("click", () => t.remove());
-    t.querySelector(".gt-play").addEventListener("click", async () => {
+    const playGreeting = async () => {
       const v = g.voice || {};
       try {
         const r = await post("/api/voice/preview", {
@@ -90,11 +82,25 @@
           speed: v.speed });
         if (r.url) new Audio(r.url).play().catch(() => {});
       } catch {}
-    });
+    };
+    const t = document.createElement("div");
+    t.className = "greeting-toast";
+    t.innerHTML = `
+      <img class="ps-avatar" src="/assets/nexus-core-icon.png" alt="" />
+      <div class="gt-text">${esc(g.text)}</div>
+      <button class="gt-play" type="button" aria-label="Hear it" title="Hear it">▶</button>
+      <button class="gt-close" type="button" aria-label="Dismiss">✕</button>`;
+    t.querySelector(".gt-close").addEventListener("click", () => t.remove());
+    t.querySelector(".gt-play").addEventListener("click", playGreeting);
     document.body.appendChild(t);
     setTimeout(() => t.classList.add("show"), 20);
     setTimeout(() => { t.classList.remove("show");
       setTimeout(() => t.remove(), 400); }, 12000);
+    // Voice greeting on every app open — not just a toast. Skipped only
+    // when the user muted voice; autoplay restrictions are already
+    // disabled in the desktop shell.
+    const nv = window.NexusVoice;
+    if (!nv || (nv.enabled && !nv.muted)) playGreeting();
   }
 
   function injectSwitcher(s) {

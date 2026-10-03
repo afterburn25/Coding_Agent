@@ -38,7 +38,20 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Update Nexus Core", self.installer)
 
     def test_update_contract_preserves_mutable_user_state(self):
-        self.assertIn(r'Excludes: "Source\*,models\*,tools\*,data\*,.agent\*,output\*,workflows\*,config.json"', self.installer)
+        # The top-level [Files] entry must NOT recurse: a bare-name Excludes
+        # pattern matches at ANY depth and silently stripped nested package
+        # files (backend\_internal\kokoro_onnx\config.json — killed voice;
+        # backend\_internal\tools\manifests; onnxruntime\transformers\models).
+        # Exclusions live only on the non-recursive top-level entry; payload
+        # subtrees install explicitly with no exclusions at all.
+        files_sec = self.installer.split("[Files]")[1].split("[", 1)[0]
+        top = [l for l in files_sec.splitlines()
+               if 'Source: "..\\dist\\ChatNexus\\*"' in l][0]
+        self.assertNotIn("recursesubdirs", top)
+        self.assertIn('Excludes: "config.json"', top)
+        self.assertIn(
+            r'Source: "..\dist\ChatNexus\backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs',
+            self.installer)
         self.assertIn("onlyifdoesntexist", self.installer)
         self.assertIn("ShouldInstallBundledSource", self.installer)
         self.assertIn("PrepareToInstall", self.installer)

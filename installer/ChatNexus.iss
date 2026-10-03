@@ -108,7 +108,13 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 ; Replace application/runtime files on every install or upgrade, but never overwrite
 ; mutable user state or the bundled self-development Git workspace.
-Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Source\*,models\*,tools\*,data\*,.agent\*,output\*,workflows\*,config.json"
+; Top-level files only, NO recursion: a bare-name Excludes pattern matches
+; at ANY depth, which silently stripped nested package files before
+; (kokoro_onnx\config.json, backend\_internal\tools\manifests, ...).
+Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion; Excludes: "config.json"
+; Payload subtrees are all needed — recursive with no exclusions.
+Source: "..\dist\ChatNexus\backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\ChatNexus\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Seed/update default workflows without replacing workflows imported or edited by the user.
 Source: "..\dist\ChatNexus\workflows\*"; DestDir: "{app}\workflows"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist
@@ -811,6 +817,17 @@ begin
   else Result := '';
 end;
 
+function ExpectedSizeFor(const FileName: String): Int64;
+begin
+  if FileName = '{#Qwen4FileName}' then Result := {#Qwen4Size}
+  else if FileName = '{#Qwen8FileName}' then Result := {#Qwen8Size}
+  else if FileName = '{#Qwen14FileName}' then Result := {#Qwen14Size}
+  else if FileName = '{#Qwen30FileName}' then Result := {#Qwen30Size}
+  else if FileName = 'kokoro-v1.0.onnx' then Result := {#KokoroModelSize}
+  else if FileName = 'voices-v1.0.bin' then Result := {#KokoroVoicesSize}
+  else Result := -1;
+end;
+
 function DlStagingDir(): String;
 // Logical path Inno writes downloads into. Physically it is a junction into
 // {code:ModelsDir}\.dl when EnsureDlStaging succeeded — bytes then land on
@@ -854,22 +871,41 @@ begin
   end;
 end;
 
-procedure MoveVerifiedDownload(const FileName: String);
-// Hash-check a completed file in the staging dir, move it into models\,
-// stamp catalog metadata. RenameFile is instant when staging sits on the
-// install drive (junction); FileCopy is the cross-drive fallback.
+procedure MoveVerifiedDownload(const FileName: String; const DeepVerify: Boolean);
+// Move a completed file from the staging dir into models\ and stamp catalog
+// metadata. DeepVerify=1 runs a full SHA-256 — reserved for .dl leftovers of
+// unknown provenance (crashed/aborted prior runs). Files Inno just reported
+// complete get an instant size check instead: SHA-256 of an 18 GB model is a
+// ~90-second synchronous block that froze the page between "downloaded" and
+// "installed". RenameFile is instant when staging sits on the install drive
+// (junction); CopyFile is the cross-drive fallback.
 var
   SrcPath, DestPath, SubDir: String;
+  ActualSize: Int64;
 begin
   SrcPath := DlStagingDir() + '\' + FileName;
   if not FileExists(SrcPath) then
     Exit;
-  if (ExpectedHashFor(FileName) <> '') and
-     (GetSHA256OfFile(SrcPath) <> ExpectedHashFor(FileName)) then
+  if DeepVerify then
   begin
-    Log('Hash mismatch — discarding download: ' + SrcPath);
-    DeleteFile(SrcPath);
-    Exit;
+    if (ExpectedHashFor(FileName) <> '') and
+       (GetSHA256OfFile(SrcPath) <> ExpectedHashFor(FileName)) then
+    begin
+      Log('Hash mismatch — discarding download: ' + SrcPath);
+      DeleteFile(SrcPath);
+      Exit;
+    end;
+  end
+  else
+  begin
+    if (ExpectedSizeFor(FileName) < 0) or
+       (not FileSize64(SrcPath, ActualSize)) or
+       (ActualSize <> ExpectedSizeFor(FileName)) then
+    begin
+      Log('Size mismatch — discarding incomplete download: ' + SrcPath);
+      DeleteFile(SrcPath);
+      Exit;
+    end;
   end;
   if (Pos('kokoro', FileName) > 0) or (Pos('voices', FileName) > 0) then
     SubDir := '\voice\'
@@ -918,25 +954,26 @@ begin
     if (not WizardSilent()) and (DownloadTotalLabel <> nil) then
     begin
       DownloadTotalLabel.Caption :=
-        'Saving completed downloads (' + IntToStr(I + 1) + ' of ' +
+        'Storing completed downloads (' + IntToStr(I + 1) + ' of ' +
         IntToStr(DlCompleted.Count) + '): ' + DlCompleted[I] + '...';
       DownloadTotalLabel.Update;
     end;
-    MoveVerifiedDownload(DlCompleted[I]);
+    MoveVerifiedDownload(DlCompleted[I], False);
   end;
 end;
 
 procedure SweepStagedDownloads();
 // The staging dir survives restarts (it lives under models\.dl). Any complete
-// file left by a crashed or aborted run is verified and moved into models\
-// now so the trust checks below skip re-downloading it.
+// file left by a crashed or aborted run is SHA-256 verified and moved into
+// models\ now so the trust checks below skip re-downloading it. Deep verify:
+// a leftover could be a truncated write from a killed process.
 begin
-  MoveVerifiedDownload('{#Qwen4FileName}');
-  MoveVerifiedDownload('{#Qwen8FileName}');
-  MoveVerifiedDownload('{#Qwen14FileName}');
-  MoveVerifiedDownload('{#Qwen30FileName}');
-  MoveVerifiedDownload('kokoro-v1.0.onnx');
-  MoveVerifiedDownload('voices-v1.0.bin');
+  MoveVerifiedDownload('{#Qwen4FileName}', True);
+  MoveVerifiedDownload('{#Qwen8FileName}', True);
+  MoveVerifiedDownload('{#Qwen14FileName}', True);
+  MoveVerifiedDownload('{#Qwen30FileName}', True);
+  MoveVerifiedDownload('kokoro-v1.0.onnx', True);
+  MoveVerifiedDownload('voices-v1.0.bin', True);
 end;
 
 function EnsureDlDiskSpace(): Boolean;
