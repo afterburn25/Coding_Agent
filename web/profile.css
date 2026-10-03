@@ -25,3 +25,4 @@
 .greeting-toast .ps-avatar{width:30px;height:30px}
 .greeting-toast .gt-text{font-size:12.5px;line-height:1.6;white-space:pre-wrap;flex:1}
 .greeting-toast .gt-close{background:none;border:0;color:var(--muted);cursor:pointer;font-size:12px}
+.greeting-toast .gt-play{background:none;border:0;color:var(--accent,#11cfff);cursor:pointer;font-size:12px}

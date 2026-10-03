@@ -169,6 +169,7 @@ class AgentOrchestrator:
         knowledge_graph=None,
         skills=None,
         health=None,
+        profile_context=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -197,6 +198,9 @@ class AgentOrchestrator:
         # HealthService (or resolver) — a backend transport failure pushes
         # "crashed" immediately rather than waiting for the next probe tick.
         self.health = health
+        # Zero-arg resolver returning the active profile's personality +
+        # personal-memory prompt block (presentation only).
+        self.profile_context = profile_context
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -3297,6 +3301,14 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else ""
         )
+        try:
+            resolver = self.profile_context
+            profile_ctx = str(resolver() or "") if callable(resolver) else ""
+        except Exception:
+            profile_ctx = ""
+        if profile_ctx:
+            personality_context = (
+                personality_context + "\n\n" + profile_ctx).strip()
         intent_context = (
             self.conversation_manager.intent_prompt(conversation_intent)
             if self.conversation_manager is not None

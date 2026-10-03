@@ -131,6 +131,7 @@
       <section class="pst-panel">
         <h3>Preview</h3>
         <button id="previewBtn" class="mini-button" type="button">Preview Personality</button>
+        <button id="previewVoiceBtn" class="mini-button" type="button">Preview Voice</button>
         <div id="previewOut" class="preview-box" hidden></div>
         <div id="previewVoice" class="preview-voice"></div>
       </section>
@@ -214,6 +215,35 @@
         vo.textContent = `Voice: speed ${v.speed} · pitch ${v.pitch_semitones} semitones · gain ${v.output_gain_db} dB` +
           ((v.preprocess || []).length ? ` · hints: ${v.preprocess.join("; ")}` : "");
       } catch (e) { out.textContent = e.message; out.hidden = false; }
+    });
+
+    $("previewVoiceBtn").addEventListener("click", async () => {
+      const vo = $("previewVoice");
+      try {
+        const r = await act(pid, {
+          action: "preview",
+          traits: work.traits, voice: work.voice });
+        const v = r.voice || {};
+        vo.textContent = "Synthesizing…";
+        const res = await fetch("/api/voice/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: "Hi, I'm Nexus. This is how I'll sound and respond "
+                + "with your current personality settings.",
+            // Rate rides the engine `speed` arg — tempo stays 1.0 so it
+            // isn't applied twice through the DSP chain.
+            overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
+                       output_gain_db: v.output_gain_db },
+            speed: v.speed }),
+        }).then((x) => x.json().then((d) => (x.ok ? d
+          : Promise.reject(new Error(d.error || x.status)))));
+        new Audio(res.url).play().catch(() => {});
+        vo.textContent = `Playing · speed ${v.speed} · pitch `
+          + `${v.pitch_semitones}st · gain ${v.output_gain_db}dB`
+          + ((v.preprocess || []).length
+             ? ` · hints: ${v.preprocess.join("; ")}` : "");
+      } catch (e) { vo.textContent = e.message; }
     });
 
     $("saveCustom")?.addEventListener("click", async () => {

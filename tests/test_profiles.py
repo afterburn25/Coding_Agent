@@ -550,6 +550,61 @@ class TestPersonalMemory(unittest.TestCase):
             self.assertFalse(m.forget(e["id"]))
 
 
+# ---------------------------------------------------------- prompt context
+
+class TestPromptContext(unittest.TestCase):
+    def test_no_profile_empty(self):
+        from localcodeagent.personality.prompt import prompt_context
+        self.assertEqual(prompt_context(None, {"name": "x"}), "")
+
+    def test_creator_address_preferred(self):
+        from localcodeagent.personality.prompt import prompt_context
+        out = prompt_context(
+            {"first_name": "John", "is_creator": True,
+             "creator_address": "Father"}, {"name": "Calm"})
+        self.assertIn("Father", out)
+        self.assertNotIn("profile: John", out)
+
+    def test_standouts_strength_and_boundary(self):
+        from localcodeagent.personality.prompt import prompt_context
+        pers = {"name": "Nerdy", "strength": 80, "mood": "focused",
+                "traits": {"nerdiness": 95, "humor": 20, "warmth": 50}}
+        out = prompt_context({"first_name": "Sam"}, pers)
+        self.assertIn("Nerdiness=95", out)
+        self.assertIn("Humor=20", out)
+        self.assertNotIn("Warmth", out)          # neutral slider omitted
+        self.assertIn("mood: focused", out)
+        self.assertIn("delivery style only", out)
+
+    def test_strength_zero_suppresses_standouts(self):
+        from localcodeagent.personality.prompt import prompt_context
+        out = prompt_context({"first_name": "Sam"},
+                             {"name": "x", "strength": 0,
+                              "traits": {"nerdiness": 100}})
+        self.assertNotIn("Nerdiness", out)
+
+    def test_memories_bounded(self):
+        from localcodeagent.personality.prompt import prompt_context
+        mems = [{"text": f"m{i}"} for i in range(30)]
+        out = prompt_context({"first_name": "Sam"}, {}, mems,
+                             max_memories=5)
+        self.assertIn("- m29", out)
+        self.assertNotIn("- m24", out)           # only the tail survives
+
+    def test_store_and_memory_feed_context(self):
+        """End-to-end: resolve_active + PersonalMemory → prompt block."""
+        from localcodeagent.personality.prompt import prompt_context
+        with tempfile.TemporaryDirectory() as td:
+            pdir = Path(td)
+            store = PersonalityStore(pdir)
+            active = store.resolve_active(is_adult=True)
+            PersonalMemory(pdir).remember("likes cats")
+            mems = PersonalMemory(pdir).list()
+            out = prompt_context({"first_name": "Sam"}, active, mems)
+            self.assertIn("likes cats", out)
+            self.assertIn(active["name"], out)
+
+
 # ---------------------------------------------------------------- migration
 
 class TestMigration(unittest.TestCase):

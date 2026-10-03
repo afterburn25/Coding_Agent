@@ -71,6 +71,9 @@ from .workflow.activity import ActivityStore
 from .autonomy.missions import DEFAULT_BUDGETS as _DEFAULT_BUDGETS
 from .profiles import ProfileManager
 from .profiles.api import ProfileAPI
+from .profiles.personal import PersonalMemory
+from .personality.store import PersonalityStore
+from .personality.prompt import prompt_context as _profile_prompt_text
 from .version import version as _canonical_version
 
 
@@ -570,6 +573,7 @@ class AppState:
             knowledge_graph=lambda: self.knowledge,
             skills=lambda: self.skills,
             health=lambda: self.health,
+            profile_context=self._profile_prompt_context,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -596,6 +600,23 @@ class AppState:
         self._start_auto_resume()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def _profile_prompt_context(self) -> str:
+        """Active profile's personality + personal memory for prompts.
+
+        Presentation-only context; failures degrade to "" so a profile
+        problem can never break a user turn."""
+        try:
+            prof = self.profiles.active()
+            if not prof:
+                return ""
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            active = PersonalityStore(pdir).resolve_active(
+                is_adult=bool(prof.get("is_adult")))
+            mems = PersonalMemory(pdir).list(limit=20)
+            return _profile_prompt_text(prof, active, mems)
+        except Exception:
+            return ""
 
     # SQLite/subprocess-backed services are lazy — they hold OS handles
     # (file locks, child processes) only once actually used.
@@ -3975,6 +3996,33 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(preset_raw, dict):
                     preset = VoicePreset.from_dict(preset_raw)
                     preset.id = preset.id or "_preview"
+                    pcm, sr, seg = voice._synthesize(
+                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))))
+                    seg_id = voice._register_segment(seg, "preview")
+                    self._json({"ok": True, "segment_id": seg_id,
+                                "url": f"/api/voice/audio/{seg_id}",
+                                "seconds": round(pcm.shape[0] / sr, 2)})
+                    return
+                overlay = body.get("overlay")
+                if isinstance(overlay, dict) and overlay:
+                    # Field-level override on top of the resolved preset —
+                    # used by Personality Studio so previews keep the
+                    # profile's chosen base voice while applying the
+                    # personality delivery map (pitch/gain via DSP; rate
+                    # rides the engine `speed` arg so it isn't applied
+                    # twice through preset.tempo).
+                    base = (voice.presets.get(str(body.get("preset_id") or ""))
+                            or voice.current_preset())
+                    if base is None:
+                        self._json({"error": "no voice preset configured"}, 400)
+                        return
+                    rawp = base.as_dict()
+                    allowed = VoicePreset.__dataclass_fields__
+                    rawp.update({k: v for k, v in overlay.items()
+                                 if k in allowed})
+                    rawp["id"] = "_preview_overlay"
+                    rawp["official"] = False
+                    preset = VoicePreset.from_dict(rawp)
                     pcm, sr, seg = voice._synthesize(
                         text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))))
                     seg_id = voice._register_segment(seg, "preview")

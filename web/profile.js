@@ -72,8 +72,20 @@
     t.innerHTML = `
       <img class="ps-avatar" src="/assets/nexus-core-icon.png" alt="" />
       <div class="gt-text">${esc(g.text)}</div>
+      <button class="gt-play" type="button" aria-label="Hear it" title="Hear it">▶</button>
       <button class="gt-close" type="button" aria-label="Dismiss">✕</button>`;
     t.querySelector(".gt-close").addEventListener("click", () => t.remove());
+    t.querySelector(".gt-play").addEventListener("click", async () => {
+      const v = g.voice || {};
+      try {
+        const r = await post("/api/voice/preview", {
+          text: String(g.text).slice(0, 2000),
+          overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
+                     output_gain_db: v.output_gain_db },
+          speed: v.speed });
+        if (r.url) new Audio(r.url).play().catch(() => {});
+      } catch {}
+    });
     document.body.appendChild(t);
     setTimeout(() => t.classList.add("show"), 20);
     setTimeout(() => { t.classList.remove("show");
