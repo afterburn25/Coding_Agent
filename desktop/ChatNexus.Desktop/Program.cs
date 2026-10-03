@@ -584,9 +584,26 @@ internal sealed class BackendProcess : IDisposable
 
     public static BackendProcess Start(string appDir)
     {
+        var logDir = Path.Combine(appDir, "data", "logs");
+        var logPath = Path.Combine(logDir, "backend-host.log");
+        try { Directory.CreateDirectory(logDir); } catch { }
+        AppendHostLog(logPath, "backend start requested");
+
+        // Right after an update the freshly-written backend exe can be
+        // briefly invisible/inaccessible while Defender scans it — the
+        // installer's post-install launch hits this window. Wait for the
+        // file to settle before declaring it missing.
         var backendExe = Path.Combine(appDir, "backend", "ChatNexus.Backend.exe");
+        var exeWaited = 0;
+        while (!File.Exists(backendExe) && exeWaited < 30000)
+        {
+            AppendHostLog(logPath, "backend exe not yet visible — waiting for it to be released");
+            System.Threading.Thread.Sleep(1000);
+            exeWaited += 1000;
+        }
         if (!File.Exists(backendExe))
         {
+            AppendHostLog(logPath, $"backend exe missing after {exeWaited / 1000}s: {backendExe}");
             throw new FileNotFoundException("Nexus Core backend executable is missing.", backendExe);
         }
 
@@ -605,9 +622,6 @@ internal sealed class BackendProcess : IDisposable
         // conversations before. Relocate those dirs under a per-user root
         // and leave junctions behind so backend paths keep resolving.
         // NEXUS_NO_STATE_REDIRECT=1 opts out (used by the build smoke test).
-        var logDir = Path.Combine(appDir, "data", "logs");
-        var logPath = Path.Combine(logDir, "backend-host.log");
-
         var stateNotes = new List<string>();
         if (Environment.GetEnvironmentVariable("NEXUS_NO_STATE_REDIRECT") != "1")
         {
