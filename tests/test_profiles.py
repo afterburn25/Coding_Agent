@@ -522,8 +522,9 @@ class TestAvatar(unittest.TestCase):
             self.assertEqual(px[256, 256][3], 255)
 
     def test_crop_clamped(self):
-        from PIL import Image
-        im = validate_image(self._png((400, 300)))
+        raw = self._png((400, 300))
+        from PIL import Image  # noqa: F401 — guarded by _png's skipTest
+        im = validate_image(raw)
         # Extreme offsets don't crash or leave the frame.
         out = crop_circle(im, {"cx": 0.999, "cy": 0.001, "zoom": 3})
         self.assertEqual(out.size, (512, 512))
