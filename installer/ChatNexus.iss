@@ -89,6 +89,11 @@ VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Nexus Core Installer
 VersionInfoCopyright=Nexus Core
 MinVersion=10.0.17763
+; Downloads stage on the install drive via a junction ({tmp}\dl ->
+; {ModelsDir}\.dl) because Inno can only write downloads under {tmp}.
+; RedirectionGuard would refuse to traverse that junction — disable it so
+; our own redirection is legal.
+RedirectionGuard=no
 ChangesEnvironment=no
 ChangesAssociations=no
 Uninstallable=yes
@@ -823,10 +828,19 @@ begin
   Target := ExpandConstant('{code:ModelsDir}\.dl');
   ForceDirectories(Target);
   Link := DlStagingDir();
-  if not DirExists(Link) then
-    Exec(ExpandConstant('{cmd}'),
-      '/c mklink /J "' + Link + '" "' + Target + '"',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // RedirectionGuard is off so our junction can be traversed — which also
+  // means a pre-planted dl junction would be honored. Never trust whatever
+  // is already there: delete it and always link to our own target.
+  if DirExists(Link) or FileExists(Link) then
+  begin
+    if (GetFileAttributesW(Link) and $400) <> 0 then
+      RemoveDir(Link)              // junction/symlink: unlink only, never traverse
+    else
+      DelTree(Link, True, True, True);
+  end;
+  Exec(ExpandConstant('{cmd}'),
+    '/c mklink /J "' + Link + '" "' + Target + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if DirExists(Link) then
   begin
     DlStagingRedirected := True;
@@ -1594,7 +1608,7 @@ begin
     // config.json is created by installer code rather than [Files], so upgrades and
     // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
-      FileCopy(ExampleConfig, UserConfig, False);
+      CopyFile(ExampleConfig, UserConfig, False);
 
     InstallCompleted := True;
 

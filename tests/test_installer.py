@@ -46,7 +46,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(r"{app}\Source\.git\HEAD", self.installer)
         self.assertIn(r'Source: "..\dist\ChatNexus\Source\.git\*"', self.installer)
         self.assertIn("if (not FileExists(UserConfig))", self.installer)
-        self.assertIn("FileCopy(ExampleConfig, UserConfig, False)", self.installer)
+        self.assertIn("CopyFile(ExampleConfig, UserConfig, False)", self.installer)
 
     def test_installer_bootstraps_missing_default_models_with_hash_verification(self):
         self.assertIn("Qwen3-14B-Q4_K_M.gguf", self.installer)
@@ -114,6 +114,17 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("mklink /J", self.installer)
         self.assertIn("function EnsureDlDiskSpace", self.installer)
         self.assertIn("GetSpaceOnDisk64", self.installer)
+        # Inno 6.4+ enables Windows RedirectionGuard in enforcing mode, which
+        # refuses to traverse the staging junction ("untrusted mount point").
+        # Our own junction must be traversable — the mitigation stays off.
+        self.assertIn("RedirectionGuard=no", self.installer)
+        # ...and since the guard is off, EnsureDlStaging must never trust a
+        # pre-existing dl entry: unlink reparse points, delete real dirs,
+        # then always link to the install-drive target.
+        staging = self.installer.split("procedure EnsureDlStaging")[1]
+        staging = staging.split("end;", 1)[0]
+        self.assertIn("RemoveDir(Link)", staging)
+        self.assertIn("DelTree(Link, True, True, True)", staging)
         # An abort must stop the whole queue and offer to exit — never retry
         # the file like a transient failure did (Break inside except does not
         # exit a for loop in Pascal Script).
