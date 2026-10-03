@@ -589,6 +589,33 @@ class TestPromptContext(unittest.TestCase):
                               "traits": {"nerdiness": 100}})
         self.assertNotIn("Nerdiness", out)
 
+    def test_style_cues_translate_standouts(self):
+        # Dogfood regression: a bare personality name + numbers left the
+        # model free to ignore the persona — standout sliders must render
+        # as prescriptive delivery cues the model can act on.
+        from localcodeagent.personality.prompt import prompt_context
+        out = prompt_context({"first_name": "Sam"},
+                             {"name": "Sassy", "strength": 100,
+                              "traits": {"sass": 95, "formality": 10,
+                                         "confidence": 70}})
+        self.assertIn("Delivery style", out)
+        self.assertIn("sass", out.lower())
+        self.assertIn("casual", out.lower())
+
+    def test_style_cues_low_slider_guides_down(self):
+        from localcodeagent.personality.prompt import prompt_context
+        out = prompt_context({"first_name": "Sam"},
+                             {"name": "Quiet", "strength": 100,
+                              "traits": {"verbosity": 10}})
+        self.assertIn("short", out.lower())
+
+    def test_style_cues_neutral_strength_suppressed(self):
+        from localcodeagent.personality.prompt import prompt_context
+        out = prompt_context({"first_name": "Sam"},
+                             {"name": "x", "strength": 0,
+                              "traits": {"sass": 100}})
+        self.assertNotIn("Delivery style", out)
+
     def test_memories_bounded(self):
         from localcodeagent.personality.prompt import prompt_context
         mems = [{"text": f"m{i}"} for i in range(30)]
