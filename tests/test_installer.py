@@ -67,11 +67,35 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WizardForm.ProgressGauge", self.installer)
         self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
         self.assertIn("procedure CurInstallProgressChanged", self.installer)
-        self.assertIn("Downloading component ' + IntToStr(ModelNumber) + ' of 2", self.installer)
+        self.assertIn("'Downloading ' + DisplayName + '...'", self.installer)
         self.assertIn("LargestTemporaryFileSize", self.installer)
-        self.assertIn("CurrentModelProgressNumber <> ModelNumber", self.installer)
+        self.assertIn("CurrentProgressFile <> DisplayName", self.installer)
         self.assertIn("Bootstrap downloads complete", self.installer)
-        self.assertIn("2 of 2 default model components ready", self.installer)
+        self.assertIn("All default model components are ready", self.installer)
+
+    def test_installer_reports_busy_stages_during_blocking_update_work(self):
+        # Update-time blocking work (process shutdown, multi-GB SHA-256
+        # checks) previously ran with a static wizard and read as frozen;
+        # every stage must push explicit status text to the wizard.
+        self.assertIn("procedure ShowBusyStatus", self.installer)
+        self.assertIn("npbstMarquee", self.installer)
+        self.assertIn("WizardForm.CurPageID = wpReady", self.installer)
+        self.assertIn("'Closing Nexus Core...'", self.installer)
+        self.assertIn("'Waiting for Nexus Core to exit...'", self.installer)
+        self.assertIn("'Stopping remaining Nexus Core processes...'", self.installer)
+        self.assertIn("'Preparing update...'", self.installer)
+        self.assertIn("'Verifying existing model file...'", self.installer)
+        self.assertIn("'Verifying ' + DisplayName + ' download (SHA-256)...'", self.installer)
+        # Sleeps must be chunked through BusySleep so the wizard keeps
+        # repainting instead of freezing for the whole grace period.
+        self.assertIn("procedure BusySleep", self.installer)
+        self.assertIn("BusySleep(1500);", self.installer)
+        self.assertIn("BusySleep(500);", self.installer)
+        shutdown = self.installer.split("procedure StopRunningNexusCore")[1]
+        shutdown = shutdown.split("function PrepareToInstall")[0]
+        self.assertNotRegex(shutdown, r"(?m)^\s*Sleep\(")
+        # The uninstaller wait loop must surface elapsed time while polling.
+        self.assertIn("'Uninstalling... ' + IntToStr(WaitCount div 2) + 's'", self.installer)
 
     def test_optional_tools_not_downloaded_by_installer(self):
         # ComfyUI and image model packs moved to the in-app Tools page so Setup

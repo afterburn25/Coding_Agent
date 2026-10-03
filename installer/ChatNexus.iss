@@ -240,6 +240,9 @@ begin
     begin
       Sleep(500);
       WaitCount := WaitCount + 1;
+      UninstallButton.Caption :=
+        'Uninstalling... ' + IntToStr(WaitCount div 2) + 's';
+      WizardForm.Update;
     end;
   end;
 
