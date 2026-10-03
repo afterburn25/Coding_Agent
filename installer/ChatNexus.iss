@@ -345,6 +345,11 @@ begin
   end;
 end;
 
+function InstalledUninstallKey(): String;
+begin
+  Result := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#StableAppId}_is1';
+end;
+
 function IsPreservedPayload(const Name: String): Boolean;
 // Payload that is never "install progress": user state, downloaded
 // models, tools, the Source workspace, and user workflows/config.
@@ -411,31 +416,19 @@ begin
   end;
 end;
 
-function LargestTemporaryFileSize(const Directory: String): Int64;
-var
-  FindRec: TFindRec;
-  Candidate: String;
-  Size: Int64;
-  SearchDir: String;
+function DownloadBytesDone(const FileName: String): Int64;
+// Inno's `external download` streams into {tmp} under the original
+// filename (verified in setup logs: {tmp}\Qwen3-14B-Q4_K_M.gguf), not
+// into the destination dir and not with a .tmp suffix — reading bytes
+// anywhere else leaves the gauge at zero.
 begin
-  Result := 0;
-  SearchDir := AddBackslash(Directory);
-  if FindFirst(SearchDir + '*.tmp', FindRec) then
-  begin
-    try
-      repeat
-        Candidate := SearchDir + FindRec.Name;
-        if FileSize64(Candidate, Size) and (Size > Result) then
-          Result := Size;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
+  if not FileSize64(ExpandConstant('{tmp}\') + FileName, Result) and
+     not FileSize64(ExpandConstant('{tmp}\') + FileName + '.tmp', Result) then
+    Result := -1;
 end;
 
 procedure ShowModelDownloadProgress(
-  const DisplayName, DownloadDirectory: String;
+  const DisplayName, DownloadFileName: String;
   const ExpectedSize: Int64);
 var
   BytesDone: Int64;
@@ -454,7 +447,7 @@ begin
   ModelProgressBar.Visible := True;
   ModelBytesLabel.Visible := True;
 
-  BytesDone := LargestTemporaryFileSize(DownloadDirectory);
+  BytesDone := DownloadBytesDone(DownloadFileName);
   if BytesDone < LastModelBytesDone then
     BytesDone := LastModelBytesDone;
   if BytesDone < 0 then
@@ -501,13 +494,13 @@ begin
   CurrentFile := WizardForm.FilenameLabel.Caption;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
+    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', '{#Qwen14FileName}', {#Qwen14Size})
   else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', '{#Qwen30FileName}', {#Qwen30Size})
   else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voice model', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
+    ShowModelDownloadProgress('Kokoro voice model', 'kokoro-v1.0.onnx', {#KokoroModelSize})
   else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voices', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
+    ShowModelDownloadProgress('Kokoro voices', 'voices-v1.0.bin', {#KokoroVoicesSize});
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
@@ -664,11 +657,6 @@ begin
     '{#KokoroVoicesSha256}',
     {#KokoroVoicesSize},
     'hexgrad/Kokoro-82M');
-end;
-
-function InstalledUninstallKey(): String;
-begin
-  Result := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#StableAppId}_is1';
 end;
 
 function DetectExistingInstall(): Boolean;

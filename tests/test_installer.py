@@ -72,7 +72,10 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("ModelBytesLabel", self.installer)
         self.assertIn("WizardForm.InstallingPage", self.installer)
         self.assertIn("procedure CurInstallProgressChanged", self.installer)
-        self.assertIn("LargestTemporaryFileSize", self.installer)
+        # Download bytes are read from {tmp} (Inno's external-download
+        # staging dir), not the models dir — that bug left the bar at 0.
+        self.assertIn("DownloadBytesDone", self.installer)
+        self.assertIn("'{tmp}\\'", self.installer)
         self.assertIn("ShowModelDownloadProgress", self.installer)
         self.assertIn("MarkModelDownloadsComplete", self.installer)
         # The bar must be initialized when the wizard is created and
