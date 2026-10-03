@@ -1232,8 +1232,17 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Emergency unblock applied to the installed copy only (NOT repo):
   `D:\Nexus_Core\config.json` `runtime_auto_start: false` + two stuck
   tasks' `recovery_count` capped past the resume budget. Self-test went
-  120s timeout → healthy in 5.9s. Restore `runtime_auto_start` freely on
-  the fixed build — the lock fix makes prewarm harmless.
+  120s timeout → healthy in 5.9s. `runtime_auto_start` was restored to
+  `true` after the fixed build installed and self-test passed again.
+- **Post-install silent launch failure** (`d6b61dd`, `46e1ba2`): Inno's
+  Run entry fired ~2 s after files landed, inside Defender's on-access
+  scan window for the fresh ~200 MB backend exe. `File.Exists` returned
+  false → `FileNotFoundException` → splash failure screen, and the check
+  ran before the first log write so `backend-host.log` stayed EMPTY.
+  Host now writes `backend start requested` first + waits up to 30 s for
+  the exe to settle, and `Main` writes a first-breath
+  `host process started` marker (distinguishes "exe never ran" from
+  "died before backend launch").
 - Suite: **1183 passing** (2 env skips); CI green on `8f164a1`,
   `5af1346`, `fdf0c08`. Latest fixed installer artifact verified at
   `dist/installer/NexusCore-Setup-0.12.1-Windows-x64.exe` (sha256
