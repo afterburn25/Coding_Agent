@@ -236,3 +236,14 @@ with zero approval parks — the full unattended path on the real 14B.
 Autonomous mode restored to off after the test.
 
 Final suite: **1207 tests green / 2 POSIX skips**.
+
+**Sustained-unattended soak**: autonomous mode enabled live; three
+tasks submitted back-to-back (two queued while the first drove). All
+drained in order — flatten_once → `completed`, kebab → `completed`
+(including a real verify→repair→re-verify round unattended),
+clamp_range → `completed` — zero approval parks across the entire
+soak. During the run the llama runtime crashed twice (connection
+refused, then mid-stream reset); the watchdog auto-restarted it both
+times inside the 3-per-10min cap and the affected drive recovered and
+finished. End state: all rows terminal, queue empty, runtime
+idle-stopped, no leaked drivers. Autonomous mode restored to off.
