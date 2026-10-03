@@ -153,6 +153,7 @@ var
   LastModelBytesDone: Int64;
   InstallFilesWritten: Boolean;
   InstallCompleted: Boolean;
+  LastLoggedFile: String;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -161,11 +162,12 @@ function GetFileAttributesW(lpFileName: String): DWORD;
   external 'GetFileAttributesW@kernel32.dll stdcall';
 
 // Models live in {app}\models like everything else. Older installs had
-// {app}\models junctioned to <drive>:\NexusCore\models — while that
-// junction/target still exists, downloads and catalog writes go to the
+// {app}\models junctioned to <drive>:\NexusCore\models — only while the
+// junction itself still exists do downloads/catalog writes go to the
 // real directory (junctions are untrusted mount points for creation);
 // the host's RehomeDriveStateDirs moves them into {app}\models on first
-// launch, after which Target no longer exists and Link is used.
+// launch. A bare leftover Target dir must NOT redirect — the existence
+// check recreated the legacy root and split the layout again.
 function ModelsDir(Param: String): String;
 var
   Link: String;
@@ -175,8 +177,7 @@ begin
   Link := ExpandConstant('{app}\models');
   Target := ExtractFileDrive(ExpandConstant('{app}')) + '\NexusCore\models';
   Attr := GetFileAttributesW(Link);
-  if DirExists(Target) or
-     ((Attr <> $FFFFFFFF) and ((Attr and $400) <> 0)) then
+  if (Attr <> $FFFFFFFF) and ((Attr and $400) <> 0) then
     Result := Target
   else
     Result := Link;
@@ -431,16 +432,17 @@ begin
 end;
 
 function DownloadBytesDone(const FileName, DestDir: String): Int64;
-// Inno does not document a stable temp name for [Files] external
-// downloads — observed behaviors across versions: streamed into {tmp}
-// under the original filename, under a generated name, or straight into
-// the destination path. Check every candidate, then fall back to the
-// largest file in {tmp} (the running setup stub is excluded by name).
+// Verified against live setup logs: [Files] external downloads stream
+// into the USER temp root (%TEMP%) as a GUID-named .tmp file — NOT into
+// {tmp} (the is-XXXXX.tmp setup dir) and not the dest dir until done.
+// {tmp} = %TEMP%\is-XXXXX.tmp, so the temp root is its parent. Scan
+// *.tmp there for the largest file; the other paths stay as fallbacks
+// for older Inno behavior.
 var
   FindRec: TFindRec;
   Candidate: String;
   Size: Int64;
-  TmpDir: String;
+  TmpDir, TempRoot: String;
 begin
   TmpDir := ExpandConstant('{tmp}\');
   Size := SizeOfFile(TmpDir + FileName);
@@ -452,19 +454,58 @@ begin
   Size := SizeOfFile(AddBackslash(DestDir) + FileName + '.tmp');
   if Size >= 0 then begin Result := Size; Exit; end;
   Result := -1;
+  TempRoot := AddBackslash(ExtractFileDir(RemoveBackslash(TmpDir)));
+  if FindFirst(TempRoot + '*.tmp', FindRec) then
+  begin
+    try
+      repeat
+        Candidate := TempRoot + FindRec.Name;
+        Size := SizeOfFile(Candidate);
+        if Size > Result then
+          Result := Size;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure LogModelDownloadScan(const TmpDir, DestDir: String);
+// One-shot diagnostic: what did the wizard report and what files
+// actually exist while the download is active. Written to the setup
+// log so a stalled bar can be diagnosed instead of guessed at.
+var
+  FindRec: TFindRec;
+  ItemPath: String;
+  Size: Int64;
+begin
+  Log('ModelDownload scan — tmp=' + TmpDir + ' dest=' + DestDir);
   if FindFirst(TmpDir + '*', FindRec) then
   begin
     try
       repeat
-        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
-           ((FindRec.Attributes and $10) = 0) and
-           (Pos('-Setup-', FindRec.Name) = 0) and
-           (CompareText(FindRec.Name, '_unins.tmp') <> 0) then
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
         begin
-          Candidate := TmpDir + FindRec.Name;
-          Size := SizeOfFile(Candidate);
-          if Size > Result then
-            Result := Size;
+          ItemPath := TmpDir + FindRec.Name;
+          Size := SizeOfFile(ItemPath);
+          Log('  tmp entry: ' + FindRec.Name + ' (' + IntToStr(Size) + ' bytes)');
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  if FindFirst(AddBackslash(DestDir) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           ((FindRec.Attributes and $10) = 0) then
+        begin
+          ItemPath := AddBackslash(DestDir) + FindRec.Name;
+          Size := SizeOfFile(ItemPath);
+          if Size > 0 then
+            Log('  dest entry: ' + FindRec.Name + ' (' + IntToStr(Size) + ' bytes)');
         end;
       until not FindNext(FindRec);
     finally
@@ -485,6 +526,7 @@ begin
     CurrentProgressFile := DisplayName;
     LastModelBytesDone := 0;
     ModelProgressBar.Position := 0;
+    LogModelDownloadScan(ExpandConstant('{tmp}\'), DestDir);
   end;
 
   ModelProgressActive := True;
@@ -494,6 +536,8 @@ begin
   ModelBytesLabel.Visible := True;
 
   BytesDone := DownloadBytesDone(DownloadFileName, DestDir);
+  if (LastModelBytesDone = 0) and (BytesDone > 0) then
+    Log('ModelDownload first bytes for ' + DisplayName + ': ' + IntToStr(BytesDone));
   if BytesDone < LastModelBytesDone then
     BytesDone := LastModelBytesDone;
   if BytesDone < 0 then
@@ -538,6 +582,14 @@ var
 begin
   InstallFilesWritten := True;
   CurrentFile := WizardForm.FilenameLabel.Caption;
+
+  if (CurrentFile <> LastLoggedFile) and
+     ((Pos('.gguf', CurrentFile) > 0) or (Pos('.onnx', CurrentFile) > 0) or
+      (Pos('voices-v1.0.bin', CurrentFile) > 0)) then
+  begin
+    LastLoggedFile := CurrentFile;
+    Log('progress event — filename label: ' + CurrentFile);
+  end;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
     ShowModelDownloadProgress('Qwen3 14B Q4_K_M', '{#Qwen14FileName}', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
