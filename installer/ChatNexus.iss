@@ -308,7 +308,9 @@ end;
 
 // Long operations (process shutdown, SHA-256 of multi-GB models) otherwise run
 // with a completely static wizard, which reads as "frozen". Push an explicit
-// stage message + marquee on the model bar so both gauges stay truthful.
+// stage message onto whichever page is currently visible. The model bar is
+// deliberately NOT shown here — it only appears once a real download starts
+// (ShowModelDownloadProgress), otherwise it sits empty on screen.
 procedure ShowBusyStatus(const Primary, Detail: String);
 begin
   if WizardSilent() then
@@ -321,22 +323,6 @@ begin
   begin
     WizardForm.StatusLabel.Caption := Primary;
     WizardForm.FilenameLabel.Caption := Detail;
-  end;
-
-  if ModelProgressLabel <> nil then
-  begin
-    ModelProgressLabel.Caption := Primary;
-    ModelProgressLabel.Visible := True;
-  end;
-  if ModelBytesLabel <> nil then
-  begin
-    ModelBytesLabel.Caption := Detail;
-    ModelBytesLabel.Visible := True;
-  end;
-  if ModelProgressBar <> nil then
-  begin
-    ModelProgressBar.Style := npbstMarquee;
-    ModelProgressBar.Visible := True;
   end;
 
   WizardForm.Update;
@@ -929,6 +915,9 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if CurPageID = wpInstalling then
+    WizardForm.PageNameLabel.Caption := 'Installing Nexus Core';
+
   if UninstallButton <> nil then
     UninstallButton.Visible := UpgradeDetected and
       ((CurPageID <= wpSelectDir) or (CurPageID = UpgradeInfoPage.ID));
