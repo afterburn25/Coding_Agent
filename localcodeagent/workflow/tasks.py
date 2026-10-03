@@ -176,7 +176,10 @@ class TaskStore:
         if path is None:
             return
         # Buffer small appends so chatty tool output does not hammer the
-        # filesystem with an open/write/stat cycle per chunk.
+        # filesystem with an open/write/stat cycle per chunk. The flush must
+        # stay inside the lock — popping/clearing the buffer before the write
+        # lands leaves a window where a concurrent read_log sees neither the
+        # pending text nor the file content (an "empty transcript" race).
         with self._lock:
             buf = self._log_buffers.setdefault(task_id, [])
             buf.append(text)
@@ -184,15 +187,14 @@ class TaskStore:
             if len(pending) < 8192:
                 return
             buf.clear()
-        self._flush_log(path, pending)
+            self._flush_log(path, pending)
 
     def flush_log(self, task_id: str) -> None:
         """Write any buffered transcript text for a task (call on completion)."""
+        path = self._log_path(self.root, task_id)
         with self._lock:
             buf = self._log_buffers.pop(task_id, None)
-        if buf:
-            path = self._log_path(self.root, task_id)
-            if path is not None:
+            if buf and path is not None:
                 self._flush_log(path, "".join(buf))
 
     def _flush_log(self, path: Path, text: str) -> None:
