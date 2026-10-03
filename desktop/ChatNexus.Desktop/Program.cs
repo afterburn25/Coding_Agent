@@ -865,12 +865,22 @@ internal sealed class BackendProcess : IDisposable
     }
 
     /// <summary>Mutable dirs that belong to the user, not the install.</summary>
-    private static readonly string[] StateDirs =
-        { "data", ".agent", "output", "models", "ComfyUI_windows_portable" };
+    private static readonly string[] StateDirs = { "data", ".agent", "output" };
 
-    /// <summary>Dirs too large for the profile drive — shared per install drive.</summary>
-    private static readonly HashSet<string> DriveStateDirs =
-        new(StringComparer.OrdinalIgnoreCase) { "models", "ComfyUI_windows_portable" };
+    /// <summary>
+    /// Legacy layout redirected these to {drive}\NexusCore\{name} via
+    /// junction — one app, two root dirs, which users rightly find
+    /// confusing ("there shouldn't be two install directories"). They now
+    /// live inside the install directory like everything else; installs
+    /// that still have the junction get re-homed on first launch. Each
+    /// entry is (legacy dir name, path inside the install dir) — models
+    /// sit at the root, tool payloads under tools\.
+    /// </summary>
+    private static readonly (string Name, string Dest)[] RehomeDirs =
+    {
+        ("models", "models"),
+        ("ComfyUI_windows_portable", Path.Combine("tools", "ComfyUI_windows_portable")),
+    };
 
     private static string UserStateRoot() =>
         Path.Combine(
@@ -878,20 +888,128 @@ internal sealed class BackendProcess : IDisposable
             "NexusCore");
 
     /// <summary>
-    /// Root a state dir's junction target under. Small state (chats, memory,
-    /// output) lives in the per-user profile; large installs (models, the
-    /// ComfyUI portable checkout — tens of GB) share a root on the install's
-    /// own drive so relocation stays a rename, never a cross-volume copy
-    /// onto a nearly-full C:.
+    /// Undo the legacy {drive}\NexusCore\{name} redirection: unlink the
+    /// junction (target untouched), then move the external target's
+    /// contents into the install dir. Same-drive moves stay renames —
+    /// the legacy root sits on the install drive by construction.
     /// </summary>
-    private static string StateTargetRoot(string appDir, string name)
+    private static void RehomeDriveStateDirs(string appDir, List<string> notes)
     {
-        if (DriveStateDirs.Contains(name))
+        var driveRoot = Path.GetPathRoot(Path.GetFullPath(appDir));
+        foreach (var (name, dest) in RehomeDirs)
         {
-            var driveRoot = Path.GetPathRoot(Path.GetFullPath(appDir));
-            return Path.Combine(driveRoot ?? appDir, "NexusCore");
+            var link = Path.Combine(appDir, dest);
+            var legacy = Path.Combine(driveRoot ?? appDir, "NexusCore", name);
+            try
+            {
+                if (Directory.Exists(link) &&
+                    (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0)
+                {
+                    // Directory.Delete on a junction removes the link
+                    // itself — the target is not traversed.
+                    Directory.Delete(link);
+                    notes.Add($"removed legacy {name}/ junction");
+                }
+                if (Directory.Exists(legacy))
+                {
+                    var parent = Path.GetDirectoryName(link);
+                    if (!string.IsNullOrEmpty(parent))
+                    {
+                        Directory.CreateDirectory(parent);
+                    }
+                    if (!Directory.Exists(link))
+                    {
+                        try
+                        {
+                            Directory.Move(legacy, link);
+                            notes.Add($"moved {name}/ to {dest}/ in the install directory");
+                        }
+                        catch (IOException)
+                        {
+                            MigrateDirectoryContents(legacy, link);
+                            try { Directory.Delete(legacy, recursive: true); } catch { }
+                            notes.Add($"migrated {name}/ to {dest}/ in the install directory");
+                        }
+                    }
+                    else
+                    {
+                        MigrateDirectoryContents(legacy, link);
+                        try { Directory.Delete(legacy, recursive: true); } catch { }
+                        notes.Add($"merged legacy {name}/ into {dest}/");
+                    }
+                }
+                Directory.CreateDirectory(link);
+            }
+            catch (Exception ex)
+            {
+                notes.Add($"could not re-home {name}/ ({ex.Message})");
+            }
         }
-        return UserStateRoot();
+        // Installs before the tools/ layout kept tool payloads at the app
+        // root (real dir, or a junction still pointing at the legacy
+        // drive root). Relocate or unlink them under tools\ as well.
+        foreach (var (name, dest) in RehomeDirs)
+        {
+            if (name == dest)
+            {
+                continue;
+            }
+            var rootPath = Path.Combine(appDir, name);
+            var target = Path.Combine(appDir, dest);
+            try
+            {
+                if (!Directory.Exists(rootPath))
+                {
+                    continue;
+                }
+                if ((File.GetAttributes(rootPath) & FileAttributes.ReparsePoint) != 0)
+                {
+                    Directory.Delete(rootPath); // link only — target untouched
+                    notes.Add($"removed legacy {name}/ junction");
+                    continue;
+                }
+                var parent = Path.GetDirectoryName(target);
+                if (!string.IsNullOrEmpty(parent))
+                {
+                    Directory.CreateDirectory(parent);
+                }
+                if (!Directory.Exists(target))
+                {
+                    try
+                    {
+                        Directory.Move(rootPath, target);
+                        notes.Add($"moved {name}/ under {dest.Split('\\', '/')[0]}/");
+                    }
+                    catch (IOException)
+                    {
+                        MigrateDirectoryContents(rootPath, target);
+                        try { Directory.Delete(rootPath, recursive: true); } catch { }
+                        notes.Add($"migrated {name}/ under tools/");
+                    }
+                }
+                else
+                {
+                    MigrateDirectoryContents(rootPath, target);
+                    try { Directory.Delete(rootPath, recursive: true); } catch { }
+                    notes.Add($"merged {name}/ into {dest}/");
+                }
+            }
+            catch (Exception ex)
+            {
+                notes.Add($"could not relocate {name}/ under tools/ ({ex.Message})");
+            }
+        }
+        // The legacy drive root only existed to host those two dirs —
+        // drop it once empty so no second Nexus-named root lingers.
+        try
+        {
+            var legacyRoot = Path.Combine(driveRoot ?? appDir, "NexusCore");
+            if (Directory.Exists(legacyRoot))
+            {
+                Directory.Delete(legacyRoot);
+            }
+        }
+        catch { }
     }
 
     /// <summary>
@@ -903,10 +1021,11 @@ internal sealed class BackendProcess : IDisposable
     /// </summary>
     private static void EnsureStateJunctions(string appDir, List<string> notes)
     {
+        RehomeDriveStateDirs(appDir, notes);
         foreach (var name in StateDirs)
         {
             var link = Path.Combine(appDir, name);
-            var target = Path.Combine(StateTargetRoot(appDir, name), name);
+            var target = Path.Combine(UserStateRoot(), name);
             try
             {
                 if (Directory.Exists(link))

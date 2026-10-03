@@ -38,7 +38,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Update Nexus Core", self.installer)
 
     def test_update_contract_preserves_mutable_user_state(self):
-        self.assertIn(r'Excludes: "Source\*,models\*,data\*,workflows\*,config.json"', self.installer)
+        self.assertIn(r'Excludes: "Source\*,models\*,tools\*,data\*,.agent\*,output\*,workflows\*,config.json"', self.installer)
         self.assertIn("onlyifdoesntexist", self.installer)
         self.assertIn("ShouldInstallBundledSource", self.installer)
         self.assertIn("PrepareToInstall", self.installer)
@@ -137,12 +137,12 @@ class InstallerContractTests(unittest.TestCase):
 
     def test_uninstall_purges_leftover_install_dir(self):
         # Inno only deletes files it tracked at install time; junctions the
-        # host creates (data/.agent/output/models/ComfyUI) plus generated
-        # files kept {app} alive — user-visible symptom was "uninstall only
-        # removes the registry entry". A post-uninstall sweep must remove
-        # untracked leftovers, unlink junctions without traversing them
-        # (targets hold user state/models), and skip the still-running
-        # unins000.* so Inno's own final cleanup can drop {app}.
+        # host creates (data/.agent/output) plus generated files kept {app}
+        # alive — user-visible symptom was "uninstall only removes the
+        # registry entry". A post-uninstall sweep must remove untracked
+        # leftovers, unlink junctions without traversing them (targets hold
+        # user state), and skip the still-running unins000.* so Inno's own
+        # final cleanup can drop {app}.
         self.assertIn("procedure CurUninstallStepChanged", self.installer)
         hook = self.installer.split("procedure CurUninstallStepChanged")[1]
         hook = hook.split("end;", 1)[0]
@@ -157,6 +157,29 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("RemoveDir(ItemPath)", purge)
         self.assertIn("DelTree(ItemPath, True, True, True)", purge)
         self.assertIn("RemoveDir(AppDir)", purge)
+
+    def test_uninstall_offers_data_scope_checkboxes(self):
+        # Uninstall must let the user keep profile, brain files, models, or
+        # tools via checkboxes — the categories map to real paths: profiles/
+        # brain+nexus_brain under %LOCALAPPDATA%\NexusCore, models/ and
+        # tools/ inside {app}.
+        self.assertIn("procedure AskUninstallScope", self.installer)
+        dlg = self.installer.split("procedure AskUninstallScope")[1]
+        dlg = dlg.split("function InitializeUninstall", 1)[0]
+        for label in ("Profile", "Brain files", "Models", "Tools"):
+            self.assertIn(label, dlg)
+        self.assertEqual(dlg.count("TCheckBox.Create"), 4)
+        self.assertEqual(dlg.count(".Checked := True"), 4)
+        # The hook must run the state purge after junction unlinking, and
+        # both purges must be gated on the checkbox globals.
+        hook = self.installer.split("procedure CurUninstallStepChanged")[1]
+        self.assertIn("PurgeUserState", hook)
+        purge = self.installer.split("procedure PurgeUserState")[1]
+        purge = purge.split("procedure CurUninstallStepChanged", 1)[0]
+        self.assertIn("localappdata", purge)
+        self.assertIn("UnDelBrain", purge)
+        self.assertIn("UnDelModels", purge)
+        self.assertIn("UnDelProfile", self.installer.split("function KeepStateEntry")[1])
 
     def test_optional_tools_not_downloaded_by_installer(self):
         # ComfyUI and image model packs moved to the in-app Tools page so Setup

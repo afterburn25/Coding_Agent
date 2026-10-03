@@ -28,25 +28,27 @@ $DesktopSplash = Join-Path $Root "desktop\ChatNexus.Desktop\nexus-core-splash.pn
 # real user data — merge it into the per-user state root before wiping, or
 # every rebuild would silently delete chat history, memory, and output.
 $StateRoot = Join-Path $env:LOCALAPPDATA "NexusCore"
-# Small state lives in the per-user profile; models can be tens of GB so the
-# host redirects them to a shared root on the install drive instead — the
-# merge below mirrors that split (see StateTargetRoot in Program.cs).
-# On a clean checkout dist\ChatNexus doesn't exist yet — Resolve-Path would
-# throw. PackageRoot is always under $Root, so fall back to $Root's drive.
-$PackageDrive = if (Test-Path $PackageRoot) { (Resolve-Path $PackageRoot).Path } else { $Root }
-$DriveStateRoot = Join-Path ([IO.Path]::GetPathRoot($PackageDrive)) "NexusCore"
-$DriveDirs = @("models", "ComfyUI_windows_portable")
-foreach ($stateDir in @("data", ".agent", "output", "models", "ComfyUI_windows_portable")) {
+# Per-user state (chats, memory, output) merges into the profile root;
+# models and tools (ComfyUI portable etc.) live inside the package like
+# everything else — a junction here just gets unlinked, its target
+# untouched.
+foreach ($stateDir in @("data", ".agent", "output", "models", "tools", "ComfyUI_windows_portable")) {
     $existing = Join-Path $PackageRoot $stateDir
     if (-not (Test-Path $existing)) { continue }
     $item = Get-Item $existing -Force
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        # Junction into the state root — remove only the link; a recursive
+        # Junction into a state root — remove only the link; a recursive
         # Remove-Item on a reparse point can traverse into the target.
         cmd /c rmdir "$existing" | Out-Null
         continue
     }
-    $dest = Join-Path $(if ($DriveDirs -contains $stateDir) { $DriveStateRoot } else { $StateRoot }) $stateDir
+    if ($stateDir -in @("models", "tools", "ComfyUI_windows_portable")) {
+        # Large content belongs to the install, not the user profile.
+        # If an older build junctioned it away, the installed host's
+        # RehomeDriveStateDirs moves it back on next launch.
+        continue
+    }
+    $dest = Join-Path $StateRoot $stateDir
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     Get-ChildItem $existing -Force | ForEach-Object {
         $d = Join-Path $dest $_.Name

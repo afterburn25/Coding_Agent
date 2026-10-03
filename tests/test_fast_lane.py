@@ -353,11 +353,14 @@ class BootMarkerTests(unittest.TestCase):
         self.assertIn("EnsureStateJunctions", src)
         self.assertIn("LocalApplicationData", src)
         self.assertIn("NEXUS_NO_STATE_REDIRECT", src)
-        # Models are far too large for the profile drive — they redirect to
-        # a shared root on the install's own drive instead.
-        self.assertIn('"models"', src)
-        self.assertIn("StateTargetRoot", src)
-        self.assertIn("GetPathRoot", src)
+        # Small per-user state (data/.agent/output) junctions to
+        # LocalApplicationData; large content (models, ComfyUI) lives in
+        # the install dir — one app, one root. Legacy drive-root
+        # junctions are re-homed, never recreated.
+        for name in ("data", ".agent", "output"):
+            self.assertIn(f'"{name}"', src)
+        self.assertIn("RehomeDriveStateDirs", src)
+        self.assertIn("ReparsePoint", src)
 
 
 class FrontendBufferTests(unittest.TestCase):

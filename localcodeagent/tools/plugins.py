@@ -45,7 +45,8 @@ _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _SCAN_SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
     "env", ".tox", ".mypy_cache", ".pytest_cache", "comfyui_windows_portable",
-    "comfyui", "models", "source", "$recycle.bin", "system volume information",
+    "comfyui", "models", "source", "tools",
+    "$recycle.bin", "system volume information",
 }
 _SCAN_MAX_DEPTH = 4
 _SCAN_MAX_ENTRIES = 60_000
@@ -268,6 +269,7 @@ def managed_python(install_root: Path | None) -> str | None:
         return sys.executable
     root = Path(install_root) if install_root else None
     candidates = [
+        root / "tools" / "ComfyUI_windows_portable" / "python_embeded" / "python.exe",
         root / "ComfyUI_windows_portable" / "python_embeded" / "python.exe",
         root / "python" / "python.exe",
     ] if root else []

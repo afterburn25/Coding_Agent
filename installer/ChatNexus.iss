@@ -89,7 +89,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Files]
 ; Replace application/runtime files on every install or upgrade, but never overwrite
 ; mutable user state or the bundled self-development Git workspace.
-Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Source\*,models\*,data\*,workflows\*,config.json"
+Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Source\*,models\*,tools\*,data\*,.agent\*,output\*,workflows\*,config.json"
 
 ; Seed/update default workflows without replacing workflows imported or edited by the user.
 Source: "..\dist\ChatNexus\workflows\*"; DestDir: "{app}\workflows"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist
@@ -129,7 +129,12 @@ Name: "{autoprograms}\Nexus Core"; Filename: "{app}\{#AppExeName}"; WorkingDir: 
 Name: "{autodesktop}\Nexus Core"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch Nexus Core"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+; Launch through cmd so the app never inherits setup's environment or
+; open handles: __COMPAT_LAYER (a PCA shim on this unsigned installer
+; propagates to children and wedges the single-file apphost pre-runtime)
+; is scrubbed, and a short settle lets AV/release scanning finish before
+; the 190MB exe first maps itself.
+Filename: "{cmd}"; Parameters: "/c timeout /t 3 /nobreak >nul & set ""__COMPAT_LAYER="" & start """" /D ""{app}"" ""{app}\{#AppExeName}"""; Description: "Launch Nexus Core"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent runhidden
 
 [Code]
 var
@@ -147,12 +152,12 @@ function GetDriveType(lpRootPathName: String): UINT;
 function GetFileAttributesW(lpFileName: String): DWORD;
   external 'GetFileAttributesW@kernel32.dll stdcall';
 
-// The desktop host (Program.cs EnsureStateJunctions) junctions
-// {app}\models to <drive>:\NexusCore\models after first launch. Windows
-// treats those junctions as untrusted mount points for file creation, so
-// downloads and catalog writes must target the real directory whenever
-// the junction or its target already exists. On a first install nothing
-// exists yet — files land in {app}\models and the host migrates them.
+// Models live in {app}\models like everything else. Older installs had
+// {app}\models junctioned to <drive>:\NexusCore\models — while that
+// junction/target still exists, downloads and catalog writes go to the
+// real directory (junctions are untrusted mount points for creation);
+// the host's RehomeDriveStateDirs moves them into {app}\models on first
+// launch, after which Target no longer exists and Link is used.
 function ModelsDir(Param: String): String;
 var
   Link: String;
@@ -833,6 +838,84 @@ begin
   end;
 end;
 
+var
+  // Set by the uninstall dialog — what to remove besides the program
+  // itself. All default to delete: the user's standing complaint was
+  // that uninstall left everything behind.
+  UnDelProfile, UnDelBrain, UnDelModels, UnDelTools: Boolean;
+
+procedure AskUninstallScope;
+var
+  Form: TForm;
+  Lbl: TLabel;
+  ChkProfile, ChkBrain, ChkModels, ChkTools: TCheckBox;
+  Btn: TButton;
+begin
+  UnDelProfile := True;
+  UnDelBrain := True;
+  UnDelModels := True;
+  UnDelTools := True;
+  Form := TForm.Create(nil);
+  try
+    Form.Caption := '{#AppName} — choose what to remove';
+    Form.BorderStyle := bsDialog;
+    Form.Position := poScreenCenter;
+    Form.ClientWidth := 400;
+    Form.ClientHeight := 210;
+    Lbl := TLabel.Create(Form);
+    Lbl.Parent := Form;
+    Lbl.Caption := 'The program is removed either way. Also remove:';
+    Lbl.Left := 16;
+    Lbl.Top := 12;
+    Lbl.Width := 370;
+    ChkProfile := TCheckBox.Create(Form);
+    ChkProfile.Parent := Form;
+    ChkProfile.Caption := 'Profile (accounts, personas, preferences)';
+    ChkProfile.Left := 24;
+    ChkProfile.Top := 40;
+    ChkProfile.Width := 360;
+    ChkProfile.Checked := True;
+    ChkBrain := TCheckBox.Create(Form);
+    ChkBrain.Parent := Form;
+    ChkBrain.Caption := 'Brain files (memory, learning, checkpoints)';
+    ChkBrain.Left := 24;
+    ChkBrain.Top := 64;
+    ChkBrain.Width := 360;
+    ChkBrain.Checked := True;
+    ChkModels := TCheckBox.Create(Form);
+    ChkModels.Parent := Form;
+    ChkModels.Caption := 'Models (downloaded LLM/voice/image weights)';
+    ChkModels.Left := 24;
+    ChkModels.Top := 88;
+    ChkModels.Width := 360;
+    ChkModels.Checked := True;
+    ChkTools := TCheckBox.Create(Form);
+    ChkTools.Parent := Form;
+    ChkTools.Caption := 'Tools (ComfyUI and other downloaded runtimes)';
+    ChkTools.Left := 24;
+    ChkTools.Top := 112;
+    ChkTools.Width := 360;
+    ChkTools.Checked := True;
+    Btn := TButton.Create(Form);
+    Btn.Parent := Form;
+    Btn.Caption := 'Continue uninstall';
+    Btn.ModalResult := mrOk;
+    Btn.Default := True;
+    Btn.Left := 140;
+    Btn.Top := 156;
+    Btn.Width := 130;
+    if Form.ShowModal = mrOk then
+    begin
+      UnDelProfile := ChkProfile.Checked;
+      UnDelBrain := ChkBrain.Checked;
+      UnDelModels := ChkModels.Checked;
+      UnDelTools := ChkTools.Checked;
+    end;
+  finally
+    Form.Free;
+  end;
+end;
+
 function InitializeUninstall(): Boolean;
 begin
   // A running NexusCore.exe holds {app} files open; uninstall would
@@ -850,6 +933,7 @@ begin
   TaskKillImage('llama.exe', True);
   KillBackendFromPidFile();
   StopProcessesUnderInstallDir();
+  AskUninstallScope;
   Result := True;
 end;
 
@@ -861,9 +945,9 @@ var
   AppDir, ItemPath: String;
 begin
   // Inno only removes files it tracked at install time. Everything the app
-  // created afterwards — the state junctions (data/.agent/output/models/
-  // ComfyUI), generated files, downloaded runtime extras — would keep
-  // {app} alive and make uninstall look like a no-op. Sweep it all.
+  // created afterwards — the state junctions (data/.agent/output), real
+  // models/tools dirs, generated files, downloaded runtime extras — would
+  // keep {app} alive and make uninstall look like a no-op. Sweep it all.
   // Reparse points are unlinked, never traversed: RemoveDir on a junction
   // deletes the link itself, leaving the external target (user state,
   // model files) untouched.
@@ -874,7 +958,9 @@ begin
       repeat
         if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
            (CompareText(FindRec.Name, 'unins000.exe') <> 0) and
-           (CompareText(FindRec.Name, 'unins000.dat') <> 0) then
+           (CompareText(FindRec.Name, 'unins000.dat') <> 0) and
+           (UnDelModels or (CompareText(FindRec.Name, 'models') <> 0)) and
+           (UnDelTools or (CompareText(FindRec.Name, 'tools') <> 0)) then
         begin
           ItemPath := AppDir + '\' + FindRec.Name;
           if (FindRec.Attributes and $10) <> 0 then
@@ -897,6 +983,59 @@ begin
   RemoveDir(AppDir);
 end;
 
+function KeepStateEntry(Name: String): Boolean;
+// Entries under {localappdata}\NexusCore\data the user asked to keep.
+begin
+  Result := (not UnDelProfile and (CompareText(Name, 'profiles') = 0)) or
+            (not UnDelBrain and
+             ((CompareText(Name, 'brain') = 0) or
+              (CompareText(Name, 'nexus_brain') = 0)));
+end;
+
+procedure PurgeUserState;
+// Junctions inside {app} were unlinked by PurgeLeftoverInstallDir — the
+// real state lives under %LOCALAPPDATA%\NexusCore. Delete it honoring
+// the profile/brain checkboxes.
+var
+  FindRec: TFindRec;
+  StateRoot, DataDir, ItemPath: String;
+begin
+  StateRoot := ExpandConstant('{localappdata}\NexusCore');
+  DataDir := StateRoot + '\data';
+  if FindFirst(DataDir + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           not KeepStateEntry(FindRec.Name) then
+        begin
+          ItemPath := DataDir + '\' + FindRec.Name;
+          if (FindRec.Attributes and $10) <> 0 then
+            DelTree(ItemPath, True, True, True)
+          else
+            DeleteFile(ItemPath);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  // .agent = checkpoints/memory/tasks → covered by the brain checkbox;
+  // output = generated artifacts → always removed with the app.
+  if UnDelBrain then
+    DelTree(StateRoot + '\.agent', True, True, True);
+  DelTree(StateRoot + '\output', True, True, True);
+  // Legacy models also lived at {drive}:\NexusCore\models before the
+  // single-root re-home — honor the models checkbox there too.
+  if UnDelModels then
+  begin
+    DelTree(ExtractFileDrive(ExpandConstant('{app}')) + '\NexusCore\models', True, True, True);
+    RemoveDir(ExtractFileDrive(ExpandConstant('{app}')) + '\NexusCore');
+  end;
+  RemoveDir(DataDir);
+  RemoveDir(StateRoot);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
@@ -911,5 +1050,7 @@ begin
     KillBackendFromPidFile();
     StopProcessesUnderInstallDir();
     PurgeLeftoverInstallDir;
+    // Junctions are gone — targets under %LOCALAPPDATA% are real dirs now.
+    PurgeUserState;
   end;
 end;

@@ -63,6 +63,10 @@ class ComfyUIRuntime:
         if configured:
             dirs.append(self._resolve(configured))
         dirs.extend([
+            # Canonical layout: tool payloads live under {app}/tools/.
+            self.base_dir / "tools" / "ComfyUI_windows_portable" / "ComfyUI",
+            self.base_dir / "tools" / "ComfyUI",
+            # Legacy layout — installs before the tools/ re-home.
             self.base_dir / "ComfyUI",
             self.base_dir / "comfyui",
             self.base_dir / "ComfyUI_windows_portable" / "ComfyUI",

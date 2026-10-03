@@ -432,7 +432,8 @@ class ManifestDetectTests(unittest.TestCase):
         self.assertEqual(m.install.get("format"), "7z")
         self.assertTrue(m.install.get("url", "").startswith("https://"))
         self.assertTrue(m.install.get("sha256"))
-        self.assertIn("ComfyUI_windows_portable/ComfyUI/main.py", m.detect_files)
+        self.assertIn("tools/ComfyUI_windows_portable/ComfyUI/main.py", m.detect_files)
+        self.assertEqual(m.install.get("dest"), "tools")
 
 
 class UninstallCommandTests(unittest.TestCase):

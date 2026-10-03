@@ -18,12 +18,12 @@
     "sha256": "8f137eac345707fd7e42bcf8e29377415243011ca15522a86aed6c77331fbd56",
     "size_bytes": 1994326521,
     "format": "7z",
-    "dest": "."
+    "dest": "tools"
   },
   "detect": {
     "files": [
-      "ComfyUI_windows_portable/ComfyUI/main.py",
-      "ComfyUI_windows_portable/python_embeded/python.exe"
+      "tools/ComfyUI_windows_portable/ComfyUI/main.py",
+      "tools/ComfyUI_windows_portable/python_embeded/python.exe"
     ]
   },
   "docs": "Official ComfyUI portable package. After install, the Image workspace detects it automatically (comfyui_dir)."
