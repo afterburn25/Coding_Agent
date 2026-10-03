@@ -252,3 +252,55 @@ connection-refused was the 14B mid-unload/respawn port gap, and the
 :8082 timeout/reset was the 30B running CPU-offloaded on 12GB VRAM at
 ~40 tok/s prompt eval during a benchmark probe, exceeding read
 timeouts. Watchdog handled both correctly; no task lost.
+
+## Mission-Loop Dogfood (autonomy supervisor, live)
+
+End-to-end live mission on the dogfood backend: `m-8ec0974d75ff`
+(objective: create `math_util.py` with `is_prime(n)`; success criteria
+`is_prime(7)==True`, `is_prime(8)==False`). Mission completed
+**across two backend restarts** — the persistence/restart-resume path
+verified live, not just in unit tests. Final graph: 9 nodes —
+6 completed (3 DAGs from replans), 2 dead-end nodes swept to `skipped`,
+verify nodes ran the isolated repo selftest (`rc=0`).
+
+### Defects found by dogfooding (all fixed + regression tests)
+
+1. **Persisted mission park froze the agent lane** — a mission node's
+   agent task parked `waiting_approval` (autonomous off at creation) and
+   survived the mission blocking; `lane_free` counted it as interactive
+   foreground forever, deadlocking all future missions. Fix: persisted
+   `mission_id` on `TaskRecord`, stamped at `AgentOrchestrator.run`;
+   mission-attributed parks excluded from interactive lane activity.
+   (`6c684c1`)
+
+2. **Mission agent nodes always reported `ok:false`** — the executor
+   checked `status in {"done","reverted"}` but the ledger vocabulary is
+   `completed`/`completed_with_warnings`/`reverted`; every successful
+   agent node wedged its dependents. Also `_mission_reply_result` wrote
+   the ghost status `"done"`. Fix: `_task_status_succeeded` helper on
+   the real terminal vocabulary. (`5e74928`)
+
+3. **Replan dead-end nodes blocked completion forever** — a no-failed-
+   node replan appended a fresh DAG while stale `blocked`/`planned`
+   nodes stayed pending; `all_tasks_completed` could never hold. Also
+   dependents of `skipped` nodes sat `planned` forever (skipped wasn't
+   a dead-dep trigger). Fix: `_refresh_ready` cascade-skips on dead
+   deps; `_do_replan` sweeps dead-end nodes to `skipped`. (`e3d68ff`)
+
+4. **Mission tasks double-recovered by the chat retrier** — error /
+   interrupted mission-node tasks were re-driven by
+   `_retry_failed_tasks`/`_resume_interrupted_tasks` even though node
+   results are final and the supervisor owns mission recovery; orphans
+   of a blocked mission churned through the dead-slow 30B route and
+   starved the lane. Fix: candidates skip `mission_id`-stamped rows and
+   ids recorded on any mission node result. (`16acf05`)
+
+### Operational notes
+
+- `POST /api/missions/{id}/resume` 404'd once during a restart race —
+  the boot-recovery path had already resumed/replanned the mission;
+  harmless.
+- Diagnostic mission nodes route by role — the auto-created health
+  mission escalated utility→deep_reasoner→30B (dead endpoint) and
+  blocked honestly. Candidate improvement: prefer live healthy routes
+  for diagnostic nodes when an equivalent role exists.
