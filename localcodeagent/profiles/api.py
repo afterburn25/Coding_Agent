@@ -237,6 +237,10 @@ class ProfileAPI:
                 return self._create(h, body)
             if path == "/api/profiles/switch":
                 return self._switch(h, body)
+            if path == "/api/onboarding/welcome-played":
+                self.mgr.mark_onboarding_welcome_played()
+                h._json({"ok": True})
+                return True
             if path == "/api/creator/verify":
                 return self._verify(h, body)
             if path.startswith("/api/profiles/"):
@@ -448,6 +452,10 @@ class ProfileAPI:
         "/api/onboarding", "/api/profiles", "/api/creator",
         "/api/postal", "/api/personalities", "/api/health",
         "/api/status", "/api/time",
+        # The Start Here page speaks the welcome instructions — voice
+        # read/playback routes must pass the onboarding gate for that.
+        "/api/voice/status", "/api/voice/speak", "/api/voice/stop",
+        "/api/voice/mute", "/api/voice/preview",
     )
 
     @classmethod

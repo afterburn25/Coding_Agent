@@ -852,3 +852,64 @@ begin
   StopProcessesUnderInstallDir();
   Result := True;
 end;
+
+procedure PurgeLeftoverInstallDir;
+// TFindRec.Attributes bit values (winnt.h): $10 = directory, $400 = reparse
+// point (junction/symlink). Pascal Script has no named constants for these.
+var
+  FindRec: TFindRec;
+  AppDir, ItemPath: String;
+begin
+  // Inno only removes files it tracked at install time. Everything the app
+  // created afterwards — the state junctions (data/.agent/output/models/
+  // ComfyUI), generated files, downloaded runtime extras — would keep
+  // {app} alive and make uninstall look like a no-op. Sweep it all.
+  // Reparse points are unlinked, never traversed: RemoveDir on a junction
+  // deletes the link itself, leaving the external target (user state,
+  // model files) untouched.
+  AppDir := ExpandConstant('{app}');
+  if FindFirst(AppDir + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           (CompareText(FindRec.Name, 'unins000.exe') <> 0) and
+           (CompareText(FindRec.Name, 'unins000.dat') <> 0) then
+        begin
+          ItemPath := AppDir + '\' + FindRec.Name;
+          if (FindRec.Attributes and $10) <> 0 then
+          begin
+            if (FindRec.Attributes and $400) <> 0 then
+              RemoveDir(ItemPath)
+            else
+              DelTree(ItemPath, True, True, True);
+          end
+          else
+            DeleteFile(ItemPath);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  // If anything survived (locked file, odd attributes) the app dir stays —
+  // remove what Inno can and let its own final cleanup drop {app}.
+  RemoveDir(AppDir);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Belt and braces: anything spawned mid-uninstall (health watchdog,
+    // tray relaunch) re-locks files before the sweep.
+    TaskKillImage('{#AppExeName}', True);
+    TaskKillImage('ChatNexus.exe', True);
+    TaskKillImage('ChatNexus.Backend.exe', True);
+    TaskKillImage('llama-server.exe', True);
+    TaskKillImage('llama.exe', True);
+    KillBackendFromPidFile();
+    StopProcessesUnderInstallDir();
+    PurgeLeftoverInstallDir;
+  end;
+end;

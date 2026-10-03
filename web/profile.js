@@ -142,6 +142,19 @@
     if (s.required) {
       removeSwitcher();
       if (!ON_START) location.replace("/start.html");
+      // First-run welcome voice — spoken once on the Start Here page.
+      // Only marked played when audio actually came back, so an engine
+      // still warming up retries on the next launch instead of going
+      // permanently silent.
+      if (ON_START && !s.welcome_played &&
+          window.NexusVoice && NexusVoice.speak) {
+        NexusVoice.speak(
+          "Welcome to Nexus Core. To unlock your workstation, fill out " +
+          "your profile below — every field on this page is required."
+        ).then((out) => {
+          if (out && out.url) post("/api/onboarding/welcome-played", {});
+        }).catch(() => {});
+      }
       return;
     }
     // start.html stays reachable when unlocked — it's also the

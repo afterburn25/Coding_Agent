@@ -135,6 +135,29 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("{#AppExeName}", uninst)
         self.assertIn("ChatNexus.Backend.exe", uninst)
 
+    def test_uninstall_purges_leftover_install_dir(self):
+        # Inno only deletes files it tracked at install time; junctions the
+        # host creates (data/.agent/output/models/ComfyUI) plus generated
+        # files kept {app} alive — user-visible symptom was "uninstall only
+        # removes the registry entry". A post-uninstall sweep must remove
+        # untracked leftovers, unlink junctions without traversing them
+        # (targets hold user state/models), and skip the still-running
+        # unins000.* so Inno's own final cleanup can drop {app}.
+        self.assertIn("procedure CurUninstallStepChanged", self.installer)
+        hook = self.installer.split("procedure CurUninstallStepChanged")[1]
+        hook = hook.split("end;", 1)[0]
+        self.assertIn("usPostUninstall", hook)
+        self.assertIn("{#AppExeName}", hook)
+        self.assertIn("PurgeLeftoverInstallDir", hook)
+        purge = self.installer.split("procedure PurgeLeftoverInstallDir")[1]
+        purge = purge.split("procedure CurUninstallStepChanged", 1)[0]
+        self.assertIn("unins000.exe", purge)
+        self.assertIn("unins000.dat", purge)
+        self.assertIn("and $400", purge)
+        self.assertIn("RemoveDir(ItemPath)", purge)
+        self.assertIn("DelTree(ItemPath, True, True, True)", purge)
+        self.assertIn("RemoveDir(AppDir)", purge)
+
     def test_optional_tools_not_downloaded_by_installer(self):
         # ComfyUI and image model packs moved to the in-app Tools page so Setup
         # stays fast; none of these artifacts may ship as installer downloads.

@@ -252,6 +252,33 @@ class TestProfileManager(unittest.TestCase):
             m.create(_fields())
             self.assertFalse(m.onboarding_required)
 
+    def test_voice_routes_pass_onboarding_gate(self):
+        # The Start Here page speaks the welcome instructions on first
+        # launch — the voice endpoints it needs must survive the
+        # onboarding route lock, while write/admin voice routes stay
+        # locked.
+        from localcodeagent.profiles.api import ProfileAPI
+        for route in ("/api/voice/status", "/api/voice/speak",
+                      "/api/voice/preview", "/api/voice/stop",
+                      "/api/voice/mute",
+                      "/api/onboarding/welcome-played"):
+            self.assertTrue(
+                ProfileAPI.allowed_while_locked(route), route)
+        self.assertFalse(
+            ProfileAPI.allowed_while_locked("/api/voice/assets/install"))
+        self.assertFalse(ProfileAPI.allowed_while_locked("/api/chat"))
+        self.assertFalse(ProfileAPI.allowed_while_locked("/api/runtime/start"))
+
+    def test_onboarding_welcome_played_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = ProfileManager(Path(td))
+            self.assertFalse(m.onboarding_welcome_played())
+            m.mark_onboarding_welcome_played()
+            self.assertTrue(m.onboarding_welcome_played())
+            # Persists across manager reloads — reloads the same root.
+            self.assertTrue(
+                ProfileManager(Path(td)).onboarding_welcome_played())
+
     def test_immutable_fields_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             m = ProfileManager(Path(td))

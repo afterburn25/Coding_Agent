@@ -20,13 +20,41 @@ internal static class Program
         // First-breath marker — if the host ever dies before the backend
         // launch path (splash/WebView2 init), this is the line that tells us
         // the process at least reached managed code.
+        string? earlyLogDir = null;
         try
         {
-            var earlyLogDir = Path.Combine(appDir, "data", "logs");
+            earlyLogDir = Path.Combine(appDir, "data", "logs");
             Directory.CreateDirectory(earlyLogDir);
             BackendProcess.NoteStartup(earlyLogDir, $"host process started (pid {Environment.ProcessId})");
         }
         catch { }
+
+        // Single instance — a second host's orphan sweep would kill the
+        // running backend by exe-path match, and two backends would fight
+        // over backend.pid, state dirs, and the GPU anyway.
+        using var singleInstance = new Mutex(true, @"Local\NexusCore.Desktop.Host", out var createdNew);
+        if (!createdNew)
+        {
+            try
+            {
+                if (earlyLogDir != null)
+                {
+                    BackendProcess.NoteStartup(
+                        earlyLogDir,
+                        $"second instance exited (pid {Environment.ProcessId}) — host already running");
+                }
+            }
+            catch { }
+            if (!selfTest)
+            {
+                MessageBox.Show(
+                    "Nexus Core is already running.",
+                    "Nexus Core",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            return 0;
+        }
 
         try
         {
@@ -1136,9 +1164,14 @@ internal sealed class MainForm : Form
         );
         Directory.CreateDirectory(userDataFolder);
 
+        // Desktop app, not a browser tab — greeting and voice playback
+        // should not have to wait for a user gesture. The default autoplay
+        // policy silently held queued voice segments until the first click.
         var environment = await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null,
-            userDataFolder: userDataFolder
+            userDataFolder: userDataFolder,
+            options: new CoreWebView2EnvironmentOptions(
+                additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required")
         );
 
         await _webView.EnsureCoreWebView2Async(environment);
