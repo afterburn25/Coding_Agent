@@ -836,6 +836,34 @@ class TaskRecoveryTests(unittest.TestCase):
             self.assertEqual(result.task["recovery_count"], 1)
             self.assertTrue(any(e.get("type") == "session_recovery" for e in result.model_events))
 
+    def test_recover_stamps_model_id_when_row_lacks_one(self):
+        """Recovered drives must stamp model_id on the task row — the
+        eviction busy-set uses it to pin the serving runtime, and an empty
+        value made a live request look idle to memory-pressure eviction."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(models=[profile], permissions={}, auto_verify_after_changes=False, review_after_changes=False)
+            tasks = TaskStore(root)
+            task = tasks.create("finish the interrupted work", "auto")
+            tasks.update(task.id, status="running", phase="working", steps=2)  # model_id left ""
+            tasks = TaskStore(root)  # restart normalizes to interrupted
+            self.assertEqual(tasks.get(task.id).status, "interrupted")
+            router = ModelRouter(config.models)
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, router, ToolRegistry(config.permissions), _FakeRuntime(),
+                tasks=tasks, checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: _FinishedProvider()
+            result = agent.recover(task.id)
+            self.assertEqual(result.task["status"], "completed")
+            self.assertEqual(result.task["model_id"], "local")
+
 
 class _RepairProvider:
     def __init__(self):
@@ -1155,6 +1183,21 @@ class AutonomousContinuationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             provider = _RepeatToolProvider(tool_calls=2)
             agent = self._agent(Path(td), provider, autonomous=False)
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(result.task["status"], "step_limit")
+
+    def test_step_limit_records_outcome_with_memory_components(self):
+        """Regression: the step-limit path passed conversation_manager kwargs
+        (intent/model_id) to ConversationMemory.record_exchange, a 2-arg
+        method — TypeError flipped the task to error instead of step_limit."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provider = _RepeatToolProvider(tool_calls=2)
+            agent = self._agent(root, provider, autonomous=False)
+            agent.conversation_memory = ConversationMemory(root / "conv_memory.json")
+            agent.conversation_manager = ConversationManager(root / "conversations.json")
 
             result = agent.run("do the thing")
 

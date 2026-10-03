@@ -106,6 +106,21 @@ worktree — candidate resolution fully isolated.
 - `f6ddc09` — Answer Memory self-heals partial v2 stamps: column/index
   assertions re-run idempotently on every open, closing the
   `user_version`-keyed migration gap flagged above.
+- `<pending>` — **14B disconnect root cause found and fixed**: the
+  recurring `connection_reset` on 127.0.0.1:8081 was not a crash or
+  VRAM contention — memory-pressure eviction (`memory_pressure_vram_gb:
+  1.0` floor, reached while the 14B served a 17k-token prompt) evicted
+  the *serving* runtime mid-request because the recovered task's ledger
+  row had `model_id=""`. `_drive_or_error` now restamps
+  `model_id`/`model_role` at every drive start (run/resume/recover all
+  funnel through it), and the eviction busy-set pins *all* resident
+  models when a live driver's model can't be identified. Live-verified:
+  same task, same 17k prompt, VRAM below the floor — server survived,
+  drive continued to a legitimate `step_limit`. Also fixed: the
+  step-limit outcome path passed `conversation_manager` kwargs to
+  `ConversationMemory.record_exchange` (a 2-arg method) — TypeError
+  flipped `step_limit` tasks to `error`. Regression tests cover all
+  three fixes.
 - `04d2ca3` — Reaper check-and-claim is atomic under `agent._drive_lock`
   (RLock) — a drive registering between the liveness check and the
   terminal mark can no longer be clobbered mid-drive.

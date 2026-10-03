@@ -2364,6 +2364,19 @@ class AgentOrchestrator:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
         with self._drive_lock:
             self._drive_threads[session.task_id] = threading.current_thread()
+        # The ledger row's model_id pins the serving runtime against idle/pressure
+        # eviction. run() stamps it at routing, but recover/resume paths rebuild the
+        # session without rewriting the row — restamp here so every live drive is
+        # attributable to a model.
+        try:
+            if not self.tasks.get(session.task_id).model_id:
+                self.tasks.update(
+                    session.task_id,
+                    model_id=session.decision.model_id,
+                    model_role=session.decision.role,
+                )
+        except Exception:
+            pass
         try:
             return self._drive(session)
         except Exception as exc:
@@ -2691,7 +2704,9 @@ class AgentOrchestrator:
         )
         self._record_outcome(session, "step_limit")
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(
+            self.conversation_memory.record_exchange(session.user_text, session.main_content)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(
                 session.user_text,
                 session.main_content,
                 intent=self.conversation_manager.classify_intent(session.user_text),

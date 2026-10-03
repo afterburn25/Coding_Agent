@@ -3097,12 +3097,25 @@ class AppState:
                     tid for tid, th in self.agent._drive_threads.items()
                     if th.is_alive()
                 ]
+            unknown_model = False
             for tid in live_ids:
                 try:
-                    busy.add(str(self.tasks.get(tid).model_id or ""))
+                    model_id = str(self.tasks.get(tid).model_id or "")
+                except Exception:
+                    model_id = ""
+                if model_id:
+                    busy.add(model_id)
+                else:
+                    unknown_model = True
+            busy.discard("")
+            if unknown_model:
+                # A live drive with an unattributed model could be serving any
+                # resident runtime — pin them all rather than kill a request
+                # mid-stream under memory pressure.
+                try:
+                    busy.update(self.runtime.resident_model_ids())
                 except Exception:
                     pass
-            busy.discard("")
             stopped = self.runtime.evict_idle(busy_models=busy)
             for model_id in stopped:
                 self.events.publish("model", {"event": {"type": "idle_evicted",

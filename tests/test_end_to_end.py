@@ -491,6 +491,30 @@ class EndToEndAgentTests(unittest.TestCase):
                 state.runtime.evict_idle = orig
             self.assertIn("qwen3-14b", captured.get("busy_models") or set())
 
+    def test_evict_idle_unknown_live_driver_pins_all_residents(self):
+        """A live drive whose task row has no model_id could be serving any
+        resident runtime — pressure eviction must pin all of them rather
+        than kill an in-flight request."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            task = state.tasks.create("unattributed drive", "auto")
+            state.tasks.update(task.id, status="running")  # model_id stays ""
+            state.agent._drive_threads[task.id] = threading.current_thread()
+            state.runtime.resident_model_ids = lambda: ["qwen3-14b", "qwen3-4b"]
+            captured: dict = {}
+            orig = state.runtime.evict_idle
+            state.runtime.evict_idle = lambda **kw: (
+                captured.update(kw) or [])
+            try:
+                state._evict_idle_models()
+            finally:
+                state.runtime.evict_idle = orig
+            busy = captured.get("busy_models") or set()
+            self.assertIn("qwen3-14b", busy)
+            self.assertIn("qwen3-4b", busy)
+
     def test_full_stack_sse_stream_end_to_end(self):
         """Real HTTP server + SSE + event bus + fake model — the exact path
         the desktop UI drives."""
