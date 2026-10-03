@@ -81,6 +81,27 @@ class InstallerContractTests(unittest.TestCase):
         wiz = wiz.split("end;", 1)[0]
         self.assertIn("InitializeModelProgressControls", wiz)
 
+    def test_aborted_install_cleans_partial_progress(self):
+        # Canceling mid-install must not leave a half-installed app that
+        # the next setup (or the app itself) treats as installed. After
+        # Inno's tracked-file rollback, DeinitializeSetup sweeps untracked
+        # leftovers — but never preserved payloads (models/tools/state/
+        # Source) — and clears the stale uninstall registry entry.
+        self.assertIn("procedure DeinitializeSetup", self.installer)
+        deinit = self.installer.split("procedure DeinitializeSetup")[1]
+        deinit = deinit.split("end;", 1)[0]
+        self.assertIn("InstallFilesWritten", deinit)
+        self.assertIn("not InstallCompleted", deinit)
+        self.assertIn("CleanupAbortedInstall", deinit)
+        self.assertIn("RegDeleteKeyIncludingSubkeys", deinit)
+        cleanup = self.installer.split("procedure CleanupAbortedInstall")[1]
+        cleanup = cleanup.split("procedure DeinitializeSetup", 1)[0]
+        for keep in ("models", "tools", "data", ".agent", "output", "Source", "workflows"):
+            self.assertIn(f"'{keep}'", self.installer.split("function IsPreservedPayload")[1])
+        self.assertIn("RemoveDir(AppDir)", cleanup)
+        # The marker must flip only after ssPostInstall completes.
+        self.assertIn("InstallCompleted := True", self.installer)
+
     def test_leftover_files_do_not_count_as_registered_install(self):
         # A partial uninstall that leaves NexusCore.exe behind must NOT
         # brand the next run "Update Nexus Core" — only a live uninstall

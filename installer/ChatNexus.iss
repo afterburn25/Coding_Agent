@@ -151,6 +151,8 @@ var
   ModelProgressActive: Boolean;
   CurrentProgressFile: String;
   LastModelBytesDone: Int64;
+  InstallFilesWritten: Boolean;
+  InstallCompleted: Boolean;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -343,6 +345,72 @@ begin
   end;
 end;
 
+function IsPreservedPayload(const Name: String): Boolean;
+// Payload that is never "install progress": user state, downloaded
+// models, tools, the Source workspace, and user workflows/config.
+begin
+  Result := (CompareText(Name, 'models') = 0) or
+            (CompareText(Name, 'tools') = 0) or
+            (CompareText(Name, 'data') = 0) or
+            (CompareText(Name, '.agent') = 0) or
+            (CompareText(Name, 'output') = 0) or
+            (CompareText(Name, 'Source') = 0) or
+            (CompareText(Name, 'workflows') = 0) or
+            (CompareText(Name, 'config.json') = 0);
+end;
+
+procedure CleanupAbortedInstall;
+// Inno's built-in rollback already removes files it tracked. What's
+// left on abort is the {app} skeleton plus untracked bits — sweep them
+// so a canceled install does not leave a half-install that the next
+// launch (or the next setup's detection) mistakes for a real install.
+// Preserved payloads (models, tools, state, Source) stay: they are not
+// install progress, and they may predate this run on updates.
+var
+  FindRec: TFindRec;
+  AppDir, ItemPath: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  if FindFirst(AppDir + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           not IsPreservedPayload(FindRec.Name) then
+        begin
+          ItemPath := AppDir + '\' + FindRec.Name;
+          if (FindRec.Attributes and $10) <> 0 then
+          begin
+            if (FindRec.Attributes and $400) <> 0 then
+              RemoveDir(ItemPath)
+            else
+              DelTree(ItemPath, True, True, True);
+          end
+          else
+            DeleteFile(ItemPath);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  RemoveDir(AppDir);
+end;
+
+procedure DeinitializeSetup();
+begin
+  if InstallFilesWritten and not InstallCompleted then
+  begin
+    Log('Setup aborted after files were written — cleaning partial install.');
+    CleanupAbortedInstall;
+    // An aborted update also leaves the previous install's registry
+    // entry describing a now-broken install — drop it so the next run
+    // is a clean fresh install, not an "update" of a partial.
+    RegDeleteKeyIncludingSubkeys(HKCU, InstalledUninstallKey());
+    RegDeleteKeyIncludingSubkeys(HKLM, InstalledUninstallKey());
+  end;
+end;
+
 function LargestTemporaryFileSize(const Directory: String): Int64;
 var
   FindRec: TFindRec;
@@ -429,6 +497,7 @@ procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
 var
   CurrentFile: String;
 begin
+  InstallFilesWritten := True;
   CurrentFile := WizardForm.FilenameLabel.Caption;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
@@ -971,6 +1040,7 @@ begin
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
 
+    InstallCompleted := True;
     MarkModelDownloadsComplete();
 
     // Keep installer-downloaded models recognized as verified by Nexus Core.
