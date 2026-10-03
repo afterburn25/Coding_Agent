@@ -207,6 +207,20 @@ Findings dedupe by signature: repeat sightings refresh the row
 (sightings++, confidence max) instead of re-firing, and re-routing an
 acted-on finding requires a 1 h cooldown. `POST /api/findings/scan`
 forces a pass; `POST /api/findings/{id}/dismiss` closes a row.
+
+**Lifecycle**: every tick, `reconcile` marks an `acted` finding
+`resolved` once its routed target finishes (repair incident terminal,
+or the investigation mission terminal — a missing target also counts);
+a `resolved` signature that fires again re-opens and re-routes fresh,
+while `dismissed` stays silent. Closed rows older than 30 d are pruned
+and the store is hard-capped at 500 rows.
+
+Detector-generated repair incidents carry the measured cause in
+`error_class`, and the diagnoser maps those kinds straight onto
+operational hypotheses instead of guessing: `ram_pressure` → evict
+idle models, `model_failure_rate` → stop models to safe defaults,
+`disk_pressure` → reclaim orphaned repair worktrees + quarantined
+stores (Nexus-managed scratch only — never user data).
 Built-in detectors: crash storms, mission failure rate, model-call
 failures, disk pressure, RAM pressure (twin hardware sample), repair
 thrash (same signature ≥3 incidents), answer-memory decay, startup
