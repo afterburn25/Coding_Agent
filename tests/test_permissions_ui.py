@@ -68,6 +68,20 @@ class AuditTests(unittest.TestCase):
                 m.record_event("denied", "k.x")
             self.assertLessEqual(len(m.audit_entries(limit=AUDIT_LIMIT + 100)), AUDIT_LIMIT)
 
+    def test_audit_file_is_bounded_too(self):
+        """Regression: the JSONL audit log appended a line per event forever —
+        in-memory was capped at AUDIT_LIMIT but the file was not. Over long
+        unattended sessions that is an unbounded disk leak."""
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "audit.jsonl"
+            m = PermissionManager({}, audit_path=path)
+            for i in range(AUDIT_LIMIT * 3 + 10):
+                m.record_event("denied", "k.x")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            # Compaction fires at >2x the limit, so the file stays bounded
+            # regardless of total event volume.
+            self.assertLessEqual(len(lines), AUDIT_LIMIT * 2)
+
     def test_audit_never_stores_large_or_secret_payloads(self):
         with tempfile.TemporaryDirectory() as td:
             m = self._manager(td)

@@ -282,6 +282,10 @@ class PermissionManager:
         # Bounded decision/change audit, persisted as JSONL.
         self._audit_path = Path(audit_path) if audit_path else None
         self._audit: list[dict[str, Any]] = []
+        # Lines currently believed to be in the JSONL file — the file has no
+        # natural bound, so it is compacted once it outlives 2x AUDIT_LIMIT.
+        # Seeded from the real line count by _load_audit.
+        self._audit_appends = 0
         self._load_audit()
 
     def creator_ok(self) -> bool:
@@ -294,6 +298,7 @@ class PermissionManager:
             return
         try:
             lines = self._audit_path.read_text(encoding="utf-8").splitlines()
+            self._audit_appends = len(lines)
             for line in lines[-AUDIT_LIMIT:]:
                 try:
                     entry = json.loads(line)
@@ -323,8 +328,29 @@ class PermissionManager:
                 self._audit_path.parent.mkdir(parents=True, exist_ok=True)
                 with self._audit_path.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                self._audit_appends += 1
+                if self._audit_appends > AUDIT_LIMIT * 2:
+                    self._compact_audit()
             except OSError:
                 pass
+
+    def _compact_audit(self) -> None:
+        """Rewrite the JSONL audit log with the bounded in-memory tail.
+
+        The log is append-only, so without periodic compaction it grows a
+        line per permission event forever — over long unattended sessions
+        that is an unbounded disk leak. The in-memory audit is already
+        capped at AUDIT_LIMIT, so a rewrite is the whole fix.
+        """
+        try:
+            with self._lock:
+                rows = [json.dumps(row, ensure_ascii=False) for row in self._audit]
+            tmp = self._audit_path.with_suffix(self._audit_path.suffix + ".tmp")
+            tmp.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+            tmp.replace(self._audit_path)
+            self._audit_appends = len(rows)
+        except OSError:
+            pass
 
     def audit_entries(self, limit: int = 200, permission: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
