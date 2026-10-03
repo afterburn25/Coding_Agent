@@ -612,6 +612,69 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertFalse(proc.terminated)
             self.assertEqual(ep, "http://x/v1")
 
+    def test_statuses_answers_while_model_load_in_flight(self):
+        # Regression: ensure_ready held _lock for the entire spawn-and-wait,
+        # so /api/status stalled for the whole model load and the desktop
+        # host health check timed out and killed the backend.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            manager._enforce_residency = lambda p: None
+            manager._reclaim_orphaned_port = lambda port: None
+            release = threading.Event()
+
+            def slow_spawn(p, port, endpoint, **kwargs):
+                release.wait(timeout=30)
+                return endpoint
+
+            manager._spawn_and_wait = slow_spawn
+            thread = threading.Thread(
+                target=manager.ensure_ready, args=(profile,), daemon=True)
+            thread.start()
+            try:
+                deadline = time.time() + 10
+                while profile.id not in manager._starting and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertIn(profile.id, manager._starting)
+                started = time.time()
+                statuses = manager.statuses()
+                self.assertLess(
+                    time.time() - started, 5.0,
+                    "statuses() blocked on an in-flight model load")
+                self.assertTrue(statuses)
+            finally:
+                release.set()
+                thread.join(timeout=10)
+
+    def test_statuses_falls_back_under_lock_contention(self):
+        # A long stop/reclaim can hold _lock for several seconds; the
+        # status endpoint must still answer with the last-known snapshot.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
+            held = threading.Event()
+            release = threading.Event()
+
+            def hold():
+                with manager._lock:
+                    held.set()
+                    release.wait(timeout=30)
+
+            thread = threading.Thread(target=hold, daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(held.wait(timeout=5))
+                started = time.time()
+                statuses = manager.statuses()
+                self.assertLess(
+                    time.time() - started, 3.0,
+                    "statuses() did not fall back while the lock was held")
+                self.assertEqual(
+                    [s["model_id"] for s in statuses], [profile.id])
+            finally:
+                release.set()
+                thread.join(timeout=10)
+
     def test_shrink_oversized_context_relaunches_idle_resident(self):
         # Resident grown to 32k by a big task, now idle past the grace
         # period — relaunch at the 16k role recommendation, not evict.
