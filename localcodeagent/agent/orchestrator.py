@@ -3081,6 +3081,11 @@ class AgentOrchestrator:
         task = self.tasks.create(user_text, mode)
         if mission_id:
             self._mission_by_task[task.id] = mission_id
+            # Persist attribution on the ledger row too — the in-memory map
+            # dies with the process, and the mission-lane busy check must be
+            # able to tell mission parks from interactive parks after a
+            # restart (mission parks are mission work, never foreground).
+            self.tasks.update(task.id, mission_id=mission_id)
         event_callback = self._logging_callback(task.id, event_callback)
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")

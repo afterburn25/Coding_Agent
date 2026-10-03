@@ -2644,15 +2644,23 @@ class AppState:
         an in-flight drive.
         """
         statuses = {"running", "verifying", "reviewing"}
-        if include_waiting_approval:
-            statuses = statuses | {"waiting_approval"}
+        def _blocks_lane(row: dict) -> bool:
+            if row.get("status") in statuses:
+                return True
+            # waiting_approval parks block the lane only for interactive
+            # work — a mission-attributed park is mission work (its own
+            # approval flow resumes it), and an abandoned mission park must
+            # never freeze the lane for every future mission.
+            return (include_waiting_approval
+                    and row.get("status") == "waiting_approval"
+                    and not row.get("mission_id"))
         try:
             by_status = getattr(self.tasks, "by_status", None)
             if by_status is not None:
-                if by_status(*statuses):
+                if any(_blocks_lane(r) for r in by_status(
+                        *(statuses | {"waiting_approval"} if include_waiting_approval else statuses))):
                     return True
-            elif any(t.get("status") in statuses
-                     for t in self.tasks.recent(50)):
+            elif any(_blocks_lane(t) for t in self.tasks.recent(50)):
                 # Stub/duck-typed stores without by_status degrade to the
                 # bounded ledger read rather than leaning busy forever.
                 return True

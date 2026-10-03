@@ -131,6 +131,31 @@ class EndToEndAgentTests(unittest.TestCase):
         )
         return AppState(cfg, Path(td), Path(td) / ".runtime")
 
+    def test_mission_park_does_not_block_lane(self):
+        # A mission-attributed waiting_approval row is mission work — its own
+        # approval flow resumes it — and must never freeze the agent lane
+        # (an abandoned mission park used to block every future mission).
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            mission_task = state.tasks.create("mission node work", "auto")
+            state.tasks.update(
+                mission_task.id, status="waiting_approval",
+                phase="waiting_approval",
+                pending_approval={"kind": "tool", "name": "run_shell",
+                                  "arguments": {"command": "ls"}},
+                mission_id="m-abc")
+            self.assertFalse(
+                state._agent_lane_active(include_waiting_approval=True))
+            # An interactive park still outranks background missions.
+            interactive = state.tasks.create("user work", "auto")
+            state.tasks.update(
+                interactive.id, status="waiting_approval",
+                phase="waiting_approval",
+                pending_approval={"kind": "tool", "name": "run_shell",
+                                  "arguments": {"command": "ls"}})
+            self.assertTrue(
+                state._agent_lane_active(include_waiting_approval=True))
+
     def test_task_runs_real_tool_call_and_persists_transcript(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
