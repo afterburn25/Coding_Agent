@@ -43,6 +43,14 @@ static wizard (looking frozen) now report exactly what Setup is doing.
 - **Orphaned backend reaping** — the host also sweeps processes matching
   the backend exe path, not just the recorded pidfile entry, so backends
   orphaned outside the normal launch path can't hold shared state.
+- **Silent failure on post-install launch** — the installer's Run entry
+  fired ~2 s after files landed, inside the window where Defender still
+  scans the freshly-written backend exe; `File.Exists` returned false and
+  the host threw "backend executable is missing" *before* writing a single
+  log line. The host now writes `backend start requested` first, then
+  waits up to 30 s for the exe to settle, and `Main` records a
+  first-breath `host process started` marker so "never ran" vs "died in
+  UI init" are distinguishable.
 - **Empty host log after launch failure** — the desktop host now writes state
   notes, launch intent, and failure reasons to `backend-host.log` *before*
   `Process.Start`, so a launch that dies early no longer shows "check the
