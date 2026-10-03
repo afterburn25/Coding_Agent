@@ -6164,10 +6164,19 @@ class Handler(BaseHTTPRequestHandler):
                         task = self.state.tasks.update(
                             task_id, status="cancelled", phase="done",
                             summary="Cancelled by user.",
+                            pending_approval=None,
                         )
                     except KeyError:
                         self._json({"error": "agent task not found"}, 404)
                         return
+                    # A parked task has no live drive to notice the cancel —
+                    # drop its session so it can't hold memory or be resumed.
+                    try:
+                        agent = getattr(self.state, "agent", None)
+                        if agent is not None:
+                            agent._close_session(task_id)
+                    except Exception:
+                        pass
                     try:
                         self.state.events.publish("task", {"task": task.as_dict(), "event": "cancelled"})
                     except Exception:

@@ -794,6 +794,54 @@ class AutonomyApiTests(unittest.TestCase):
             except urllib.error.HTTPError as e:
                 self.assertEqual(e.code, 400)
 
+    def test_cancel_parked_task_closes_session_and_clears_approval(self):
+        """Regression: /api/jobs/cancel on a waiting_approval task left the
+        session in _sessions (leaked memory + resumable stale state) and
+        kept pending_approval in the ledger row. A parked task has no live
+        drive to notice the cancel, so the endpoint must clean up itself."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import create_server, stop_state
+            ws = Path(td)
+            cfg = AgentConfig(profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+                autonomy_enabled=False,
+            )
+            server, state = create_server(
+                cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(lambda: (server.shutdown(),
+                                     server.server_close(),
+                                     stop_state(state)))
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            task = state.tasks.create("parked work", mode="auto")
+            from localcodeagent.agent.orchestrator import _AgentSession
+            session = _AgentSession(
+                task_id=task.id, user_text=task.prompt, mode=task.mode,
+                messages=[], decision=None, profile=None, provider=None,
+                pending_approval={"kind": "tool", "call": {"name": "x"}})
+            state.agent._sessions[task.id] = session
+            state.tasks.update(
+                task.id, status="waiting_approval", phase="waiting",
+                pending_approval=session.pending_approval)
+
+            req = urllib.request.Request(
+                f"{base}/api/jobs/cancel",
+                data=json.dumps({"job_id": f"task-{task.id}"}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            out = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            self.assertTrue(out["ok"], out)
+
+            self.assertNotIn(task.id, state.agent._sessions)
+            row = state.tasks.get(task.id)
+            self.assertEqual(row.status, "cancelled")
+            self.assertIsNone(row.pending_approval)
+
 
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user
