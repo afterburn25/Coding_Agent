@@ -215,6 +215,22 @@ a `resolved` signature that fires again re-opens and re-routes fresh,
 while `dismissed` stays silent. Closed rows older than 30 d are pruned
 and the store is hard-capped at 500 rows.
 
+**Procedural memory** (`autonomy/procedures.py`,
+`data/autonomy/procedures.json`, 300-row cap) — terminal outcomes of
+source-keyed missions (`detector:<signature>`, `goal:<id>`,
+`schedule:<id>`) are recorded idempotently every tick. Recurring
+signatures get two things:
+
+- *Recall*: the next occurrence's objective carries a bounded
+  "Prior runs" line (count, last status, duration, task completion),
+  so an investigation doesn't redo identical work.
+- *Suppression*: when a signature's last 2 runs all ended
+  failed/cancelled, auto-respawn backs off 6 h instead of re-spawning
+  on every cooldown — detector missions return `"suppressed"` and goal
+  repair missions record `suppressed: prior_runs_failing` in goal
+  history (the goal stays degraded, never mis-marked blocked). User
+  schedules are never suppressed; they get recall context only.
+
 Detector-generated repair incidents carry the measured cause in
 `error_class`, and the diagnoser maps those kinds straight onto
 operational hypotheses instead of guessing: `ram_pressure` → evict

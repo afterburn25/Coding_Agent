@@ -82,6 +82,15 @@ letting it preempt the user.
   (+ Dismiss button on needs_human rows) closes an unreviewed candidate
   and frees its worktree/branch; `rollback_incident` now frees the
   worktree too — dead candidates can no longer leak on disk.
+- **Mission procedural memory** — `autonomy/procedures.py` +
+  `procedures.json` (300-row cap): terminal outcomes of source-keyed
+  missions (detector, goal, schedule, trigger origins) are learned each
+  tick. Recurring signatures get a "Prior runs" context line injected
+  into the next objective, and signatures whose last 2 runs all failed
+  back off 6 h instead of re-spawning on cooldown — the loop the
+  findings/goal cooldowns couldn't see. Suppressed goal missions record
+  `suppressed: prior_runs_failing` in history without marking the goal
+  blocked; user schedules get recall context but are never suppressed.
 - **Findings lifecycle** — `SignalScanner.reconcile` (runs per tick)
   marks an `acted` finding `resolved` when its routed target finishes;
   a `resolved` signature that re-fires re-opens and re-routes fresh

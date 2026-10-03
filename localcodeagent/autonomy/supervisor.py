@@ -112,6 +112,11 @@ class AutonomousSupervisor:
         self.scanner = SignalScanner(
             self.store, sources=dict(signal_sources or {}),
             route=self._route_finding)
+        # Procedural memory — terminal outcomes of source-keyed missions
+        # feed recall (prior-run context) and suppression (known-failing
+        # signatures back off instead of looping on every cooldown).
+        from .procedures import ProcedureMemory
+        self.procedures = ProcedureMemory(self.store)
 
         self._executor = executor
         self._verify_runner = verify_runner or self._default_verify
@@ -441,10 +446,22 @@ class AutonomousSupervisor:
 
         The mission carries the evaluation evidence so every generated unit
         of work is auditable back to the real measured trigger."""
+        gid = str(goal.get("id"))
+        if self.procedures.failing("goal", gid):
+            # Generated repairs keep failing identically — back off
+            # rather than re-spawning the same doomed mission each
+            # cooldown; the goal evaluation continues reporting health.
+            self._audit("goal_mission_suppressed", goal=gid,
+                        reason="prior_runs_failing")
+            self._emit("goal", {"type": "mission_suppressed",
+                                "goal_id": gid})
+            return {"suppressed": "prior_runs_failing"}
         metrics_text = "; ".join(
             f"{r['key']}={r.get('value'):g} (limit {r['op']} {r['target']})"
             for r in (evidence.get("metrics") or [])
             if r.get("value") is not None)[:500]
+        prior = self.procedures.summary({"source": "goal",
+                                         "source_id": gid})
         objective = (
             f"Restore goal '{goal.get('title')}'. "
             f"Health: {evidence.get('health')}. "
@@ -452,7 +469,8 @@ class AutonomousSupervisor:
             "Investigate the cause, apply the minimal safe repair, and "
             "verify the fix. "
             + (f"Goal description: {str(goal.get('description'))[:600]}"
-               if goal.get("description") else ""))
+               if goal.get("description") else "")
+            + (f" {prior}" if prior else ""))
         mission = self.missions.create(
             objective=objective[:3900],
             title=f"[{goal.get('id')}] {str(goal.get('title'))[:80]}",
@@ -561,8 +579,10 @@ class AutonomousSupervisor:
             objective = str(action.get("objective") or "").strip()
             if not objective:
                 return
+            prior = self.procedures.summary(
+                {"source": origin.split(":")[0], "source_id": origin})
             mission = self.missions.create(
-                objective=objective,
+                objective=(objective + (f" {prior}" if prior else ""))[:3900],
                 title=action.get("title") or objective[:90],
                 scope=str(action.get("scope") or "one_shot"),
                 priority=str(action.get("priority") or "normal"),
@@ -608,6 +628,18 @@ class AutonomousSupervisor:
         try:
             self.scanner.tick(now)
             self.scanner.reconcile(self._finding_done)
+        except Exception:
+            pass
+
+        # 2e. procedural learning — terminal source-keyed missions teach
+        # the next occurrence; idempotent on mission id. Runs even while
+        # paused so outcomes that landed mid-pause aren't lost.
+        try:
+            known = self.procedures.recorded_ids()
+            for m in self.missions.list():
+                if str(m.get("status")) in TERMINAL_MISSION_STATUSES \
+                        and str(m.get("id")) not in known:
+                    self.procedures.record_terminal(m)
         except Exception:
             pass
 
@@ -1281,18 +1313,32 @@ class AutonomousSupervisor:
                         str(m.get("source_id")) == sig and \
                         str(m.get("status")) not in TERMINAL_MISSION_STATUSES:
                     return str(m.get("id"))
+            if self.procedures.failing("detector", sig):
+                # Same signature keeps failing identically — a 1 h
+                # cooldown re-spawn is a loop, not recovery. Back off;
+                # the finding reconciles away and the next sighting
+                # re-evaluates after the back-off.
+                self._audit("finding_suppressed",
+                            finding=finding.get("id"), signature=sig,
+                            reason="prior_runs_failing")
+                self._emit("finding", {"type": "finding_suppressed",
+                                       "finding": finding.get("id")})
+                return "suppressed"
             ev = "; ".join(f"{k}={v}" for k, v in
                            (finding.get("evidence") or {}).items()
                            if not isinstance(v, (dict, list)))[:600]
             priority = {"critical": "urgent", "high": "normal"}.get(
                 str(finding.get("severity")), "background")
+            prior = self.procedures.summary(
+                {"source": "detector", "source_id": sig})
             mission = self.missions.create(
                 objective=(
                     f"Investigate: {finding.get('title')}. "
                     f"Evidence: {ev or finding.get('detail')}. "
                     "Find the root cause, fix it if safely fixable, and "
                     "verify. If it needs a decision or external action, "
-                    "report findings instead of acting.")[:3900],
+                    "report findings instead of acting."
+                    + (f" {prior}" if prior else ""))[:3900],
                 title=f"[{finding.get('kind')}] "
                       f"{str(finding.get('title'))[:80]}",
                 scope="one_shot", priority=priority,

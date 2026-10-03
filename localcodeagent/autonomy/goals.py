@@ -392,6 +392,10 @@ class GoalManager:
             self._set_blocked(goal, "mission spawn failed")
             evaluation["blocked"] = "mission spawn failed"
             return None, "spawn failed"
+        if mission.get("suppressed"):
+            # The spawner refused on learned-failure grounds — the goal
+            # stays degraded (not blocked) and history records why.
+            return None, f"suppressed: {str(mission['suppressed'])[:120]}"
         self._audit("goal_mission_spawned", goal=goal["id"],
                     mission=mission.get("id"), health=evaluation["health"],
                     evidence=ev_text)

@@ -149,6 +149,12 @@ class AutonomyStore:
         # SignalScanner emits (deduped by signature, cooldown-bounded).
         self.findings = JsonStore(self.root / "findings.json",
                                   default=None, key="findings", limit=200)
+        # Procedure memory — terminal outcomes of source-keyed missions
+        # (detector investigations, goal repairs, schedules) so recurring
+        # signatures recall what worked and stop looping on what didn't.
+        self.procedures = JsonStore(self.root / "procedures.json",
+                                    default=None, key="procedures",
+                                    limit=300)
         self.control = JsonStore(self.root / "control.json",
                                  default={"version": SCHEMA_VERSION,
                                           "paused": False,
