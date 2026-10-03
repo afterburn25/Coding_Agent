@@ -87,24 +87,38 @@ worktree — candidate resolution fully isolated.
 | Crash/restart continuity | `taskkill` mid-drive → restart → auto-resumed (`autonomous_resume_interrupted`) → drove real work to legitimate approval parks |
 | Startup perf | 1.36s to health; AppState 0.47s (hardware detect ~0.13s, already parallelized) — healthy, no fix needed |
 | UI sweep | 41 web assets — all pages 200, all JS parses (node --check), zero broken internal links, every UI-called API endpoint exists (404s were POST routes correctly rejecting GET) |
-| Full test suite | **1196 tests, OK** (2 skipped — POSIX-only fake-executable tests, expected on Windows), 230s |
+| Full test suite | **1197 tests, OK** (2 skipped — POSIX-only fake-executable tests, expected on Windows), ~230s |
 
 ## Known remaining rough edges (not blocking)
 
 - `waiting_approval` parks accumulate in "ask" permission mode — by
-  design, but unattended use wants `autonomous_mode` or `session`-
-  scoped grants for shell/filesystem.
-- Answer-memory migration is column-idempotent but keyed on
-  `PRAGMA user_version` — a partially stamped DB stays broken. The
-  dogfood DB was observed healed (v2 + both columns); consider a
-  version-independent column assertion at open for defense in depth.
-- `debounce.py` dogfood artifact deleted from repo root (agent wrote it
-  without `import threading` — itself the verification failure that
-  triggered the repair round that exposed the wedge).
+  design (a pending human decision shouldn't be silently skipped), but
+  unattended use wants `autonomous_mode` or `session`-scoped grants for
+  shell/filesystem. In autonomous mode they expire via
+  `autonomous_approval_timeout_seconds`.
+- `debounce.py`/`test_memoization.py` dogfood artifacts deleted from
+  repo root (the debounce write missed `import threading` — itself the
+  verification failure that triggered the repair round exposing the
+  wedge).
+
+## Follow-on fixes (post-report)
+
+- `f6ddc09` — Answer Memory self-heals partial v2 stamps: column/index
+  assertions re-run idempotently on every open, closing the
+  `user_version`-keyed migration gap flagged above.
+- `04d2ca3` — Reaper check-and-claim is atomic under `agent._drive_lock`
+  (RLock) — a drive registering between the liveness check and the
+  terminal mark can no longer be clobbered mid-drive.
+- `7eab984`/`bf0dc30` — handoff/architecture/autonomy docs updated.
 
 ## Commits this session
 
 ```
+04d2ca3 Queue: make reap check-and-claim atomic against driver registration
+bf0dc30 docs: driver-liveness reaper in AUTONOMY recovery + ARCHITECTURE flow
+7eab984 docs: handoff + start-here for overnight queue-wedge and dogfood fixes
+f6ddc09 Answer Memory: self-heal partially stamped v2 schemas
+2b6a058 docs: overnight hardening + dogfood report 2026-10-03
 c4050e5 Queue: dead drive threads can no longer wedge task processing
 5c01bd4 Personality: per-style voice defaults make presets audible
 60538d2 Personality: render standout sliders as delivery-style cues
