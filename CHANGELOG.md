@@ -19,12 +19,23 @@ static wizard (looking frozen) now report exactly what Setup is doing.
   the grace sleeps are chunked so the wizard keeps repainting.
 - **Silent multi-GB SHA-256 checks** — when an existing model lacks trusted
   catalog metadata, Setup now shows "Verifying existing model file…" with the
-  filename, size, and a marquee progress bar before hashing, instead of
-  sitting motionless for minutes.
-- **Post-download verify label** — the bootstrap progress area now switches
-  to "Verifying … download (SHA-256)…" when a model tmp file is full, and
-  covers all four bootstrap downloads (Qwen models + Kokoro assets), not
-  just the two Qwen components.
+  filename and size before hashing, instead of sitting motionless for minutes.
+- **"DeleteFile failed; code 5" during update** — an orphaned backend could
+  survive the image-name taskkill sweep and keep `ChatNexus.Backend.exe`
+  locked mid-install. Setup now also kills the backend pid recorded in
+  `data\logs\backend.pid`, sweeps every process whose executable lives under
+  the install directory via PowerShell, and probes the replaceable binaries
+  for write locks — waiting up to 45 s with visible status before Inno
+  starts replacing files.
+- **Misleading second progress bar** — removed; the native Inno gauge is the
+  single progress indicator and already tracks extraction and external
+  downloads. Stage text through the Inno-owned file-analysis window
+  ("Analyzing files to update…") keeps the Ready page honest instead.
+- **Empty host log after launch failure** — the desktop host now writes state
+  notes, launch intent, and failure reasons to `backend-host.log` *before*
+  `Process.Start`, so a launch that dies early no longer shows "check the
+  log" over an empty file. Health-check stalls also log the last probe
+  result (HTTP status or exception) every 15 s.
 
 ## [0.12.0] — Unreleased
 
