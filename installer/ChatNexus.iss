@@ -98,7 +98,7 @@ SignedUninstaller=yes
 #endif
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Files]
 ; Replace application/runtime files on every install or upgrade, but never overwrite
@@ -175,6 +175,8 @@ var
   DlTotalBytes, DlDoneBytes: Int64;
   DlLastFile: String;
   DlLastCounted: Boolean;
+  DlCompleted: TStringList;
+  DlLastCompleted: Boolean;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -328,12 +330,25 @@ begin
   begin
     DlLastFile := FileName;
     DlLastCounted := False;
+    DlLastCompleted := False;
   end;
   if (Progress = ProgressMax) and (not DlLastCounted) then
   begin
     DlLastCounted := True;
     DlDoneBytes := DlDoneBytes + ProgressMax;
     Log('Download complete: ' + FileName + ' (' + IntToStr(Progress) + ' bytes)');
+  end;
+  if (Progress = ProgressMax) and (not DlLastCompleted) then
+  begin
+    DlLastCompleted := True;
+    if DlCompleted <> nil then
+      DlCompleted.Add(FileName);
+    // Inno now verifies this file's SHA-256 before starting the next —
+    // a visible pause between files. Label it so it reads as work, and
+    // so a slow-responding Abort during verify makes sense.
+    if not WizardSilent() then
+      DownloadTotalLabel.Caption :=
+        'Verifying ' + FileName + ' (SHA-256) — please wait';
   end;
 end;
 
@@ -350,6 +365,7 @@ begin
       'disk and verified are skipped.',
     @ModelDlProgress);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
+  DlCompleted := TStringList.Create;
 
   DownloadTotalLabel := TNewStaticText.Create(DownloadPage);
   DownloadTotalLabel.Parent := DownloadPage.Surface;
@@ -558,6 +574,12 @@ begin
       'Computing SHA-256 of ' + FileName + ' (' +
         IntToStr((ExpectedSize + 536870911) div 1073741824) + ' GB). ' +
         'Large models can take a few minutes - Setup is still working, please do not close it.');
+    if (not WizardSilent()) and (DownloadPage <> nil) then
+      DownloadPage.SetText(
+        'Checking existing models',
+        'Computing SHA-256 of ' + FileName + ' (' +
+          IntToStr((ExpectedSize + 536870911) div 1073741824) + ' GB). ' +
+          'Large models can take a minute — please wait.');
     ActualHash := GetSHA256OfFile(Target);
     if CompareText(ActualHash, ExpectedHash) = 0 then
     begin
@@ -728,82 +750,6 @@ begin
   end;
 end;
 
-// Returns False when the user aborted the download page (stay on Ready).
-function PerformModelDownloads(): Boolean;
-var
-  Attempt: Integer;
-begin
-  Result := True;
-  if SkipModelDownloads then
-  begin
-    Log('Model downloads skipped (CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1).');
-    Exit;
-  end;
-
-  EvaluateModelChecks();
-  if not AnyModelQueued() then
-  begin
-    Log('All planned models already installed and trusted; nothing to download.');
-    Exit;
-  end;
-
-  QueueModelDownloads();
-  DownloadPage.Show;
-  try
-    // One automatic retry — transient CDN/proxy hiccups ("internal error",
-    // dropped connections) are common on multi-GB pulls and should not
-    // punt the user back to the Ready page for no reason. Files already
-    // verified in {tmp} are skipped on the retry.
-    for Attempt := 0 to 1 do
-    begin
-      try
-        DownloadPage.Download;
-        Break;
-      except
-        if DownloadPage.AbortedByUser then
-        begin
-          Log('Model downloads aborted by user.');
-          Result := False;
-          Break;
-        end
-        else if Attempt = 0 then
-          Log('Download failed, retrying once: ' + GetExceptionMessage)
-        else
-        begin
-          Result := SuppressibleMsgBox(
-            'A model download failed:' + #13#10 + GetExceptionMessage + #13#10 + #13#10 +
-            'Continue the installation anyway? Missing models can be fetched ' +
-            'later from the app.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
-          Break;
-        end;
-      end;
-    end;
-  finally
-    DownloadPage.Hide;
-  end;
-end;
-
-// Silent installs never reach NextButtonClick — run the same queue
-// headlessly when the install step starts.
-procedure PerformModelDownloadsSilent();
-begin
-  if SkipModelDownloads then
-    Exit;
-  EvaluateModelChecks();
-  if DoQwen4 then
-    DownloadTemporaryFile('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}', @ModelDlProgress);
-  if DoQwen8 then
-    DownloadTemporaryFile('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}', @ModelDlProgress);
-  if DoQwen14 then
-    DownloadTemporaryFile('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}', @ModelDlProgress);
-  if DoQwen30 then
-    DownloadTemporaryFile('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}', @ModelDlProgress);
-  if DoKokoroModel then
-    DownloadTemporaryFile('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}', @ModelDlProgress);
-  if DoKokoroVoices then
-    DownloadTemporaryFile('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}', @ModelDlProgress);
-end;
-
 function ModelStaged(Param: String): Boolean;
 begin
   Result := FileExists(ExpandConstant('{tmp}\') + Param);
@@ -849,6 +795,149 @@ begin
     '{#KokoroVoicesSha256}', {#KokoroVoicesSize}, 'hexgrad/Kokoro-82M');
 end;
 
+procedure StageVerifiedDownloads();
+// Called when the download page exits — success, abort, or failure. Any
+// file that reached 100% already passed Inno's SHA-256 check, so copy it
+// into models\ and stamp catalog metadata NOW. An aborted run then keeps
+// every completed model: a restart finds them trusted and skips them.
+var
+  I: Integer;
+  FileName, TmpPath, DestPath, SubDir: String;
+begin
+  if DlCompleted = nil then
+    Exit;
+  for I := 0 to DlCompleted.Count - 1 do
+  begin
+    FileName := DlCompleted[I];
+    TmpPath := ExpandConstant('{tmp}\') + FileName;
+    if not FileExists(TmpPath) then
+      Continue;
+    if (Pos('kokoro', FileName) > 0) or (Pos('voices', FileName) > 0) then
+      SubDir := '\voice\'
+    else
+      SubDir := '\';
+    DestPath := ExpandConstant('{code:ModelsDir}') + SubDir + FileName;
+    ForceDirectories(ExtractFileDir(DestPath));
+    if not FileCopy(TmpPath, DestPath, False) then
+    begin
+      Log('Could not stage verified download: ' + DestPath);
+      Continue;
+    end;
+    Log('Staged verified download: ' + DestPath);
+    if FileName = '{#Qwen4FileName}' then
+      CatalogQwen4()
+    else if FileName = '{#Qwen8FileName}' then
+      CatalogQwen8()
+    else if FileName = '{#Qwen14FileName}' then
+      CatalogQwen14()
+    else if FileName = '{#Qwen30FileName}' then
+      CatalogQwen30()
+    else if FileName = 'kokoro-v1.0.onnx' then
+      CatalogKokoroModel()
+    else if FileName = 'voices-v1.0.bin' then
+      CatalogKokoroVoices();
+  end;
+end;
+
+procedure PerformModelDownloadsSilent();
+begin
+  if SkipModelDownloads then
+    Exit;
+  EvaluateModelChecks();
+  if DoQwen4 then
+    DownloadTemporaryFile('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}', @ModelDlProgress);
+  if DoQwen8 then
+    DownloadTemporaryFile('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}', @ModelDlProgress);
+  if DoQwen14 then
+    DownloadTemporaryFile('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}', @ModelDlProgress);
+  if DoQwen30 then
+    DownloadTemporaryFile('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}', @ModelDlProgress);
+  if DoKokoroModel then
+    DownloadTemporaryFile('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}', @ModelDlProgress);
+  if DoKokoroVoices then
+    DownloadTemporaryFile('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}', @ModelDlProgress);
+  StageVerifiedDownloads();
+end;
+
+
+// Returns False when the user aborted the download page (stay on Ready).
+function PerformModelDownloads(): Boolean;
+var
+  Attempt: Integer;
+  Done: Boolean;
+begin
+  Result := True;
+  if SkipModelDownloads then
+  begin
+    Log('Model downloads skipped (CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1).');
+    Exit;
+  end;
+
+  // Show the page BEFORE the trust checks: hashing leftover multi-GB models
+  // takes tens of seconds and would otherwise leave the Ready page frozen.
+  DownloadPage.Show;
+  try
+    DownloadPage.SetText(
+      'Checking existing models',
+      'Verifying models already on disk. Large files can take a minute to ' +
+        'check — Setup is working, please wait.');
+    EvaluateModelChecks();
+    if not AnyModelQueued() then
+    begin
+      Log('All planned models already installed and trusted; nothing to download.');
+      Exit;
+    end;
+
+    DownloadPage.SetText(
+      'Downloading models',
+      'Fetching the models selected for this hardware. Models already on ' +
+        'disk and verified are skipped.');
+    QueueModelDownloads();
+
+    // One automatic retry — transient CDN/proxy hiccups ("internal error",
+    // dropped connections) are common on multi-GB pulls and should not
+    // punt the user back to the Ready page for no reason. Files already
+    // verified in {tmp} are skipped on the retry. (While/done-flag loop:
+    // Break inside except does not reliably exit a for loop in Pascal
+    // Script — a user abort was being retried as a failure.)
+    Attempt := 0;
+    Done := False;
+    while not Done do
+    begin
+      try
+        DownloadPage.Download;
+        Done := True;
+      except
+        if DownloadPage.AbortedByUser then
+        begin
+          Log('Model downloads aborted by user.');
+          Result := False;
+          Done := True;
+        end
+        else if Attempt = 0 then
+        begin
+          Attempt := 1;
+          Log('Download failed, retrying once: ' + GetExceptionMessage);
+        end
+        else
+        begin
+          Result := SuppressibleMsgBox(
+            'A model download failed:' + #13#10 + GetExceptionMessage + #13#10 + #13#10 +
+            'Continue the installation anyway? Missing models can be fetched ' +
+            'later from the app.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
+          Done := True;
+        end;
+      end;
+    end;
+  finally
+    // Success, abort, or failure — keep every file Inno already verified.
+    StageVerifiedDownloads();
+    DownloadPage.Hide;
+  end;
+end;
+
+// Silent installs never reach NextButtonClick — run the same queue
+// headlessly when the install step starts.
 function DetectExistingInstall(): Boolean;
 var
   Key: String;
