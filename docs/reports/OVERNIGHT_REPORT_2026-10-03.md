@@ -87,7 +87,7 @@ worktree — candidate resolution fully isolated.
 | Crash/restart continuity | `taskkill` mid-drive → restart → auto-resumed (`autonomous_resume_interrupted`) → drove real work to legitimate approval parks |
 | Startup perf | 1.36s to health; AppState 0.47s (hardware detect ~0.13s, already parallelized) — healthy, no fix needed |
 | UI sweep | 41 web assets — all pages 200, all JS parses (node --check), zero broken internal links, every UI-called API endpoint exists (404s were POST routes correctly rejecting GET) |
-| Full test suite | **1197 tests, OK** (2 skipped — POSIX-only fake-executable tests, expected on Windows), ~230s |
+| Full test suite | **1199 tests, OK** (2 skipped — POSIX-only fake-executable tests, expected on Windows), ~230s |
 
 ## Known remaining rough edges (not blocking)
 
@@ -119,6 +119,16 @@ worktree — candidate resolution fully isolated.
   live-driver models so a deep-ledger task's runtime can't be unloaded
   mid-drive.
 - `7eab984`/`bf0dc30` — handoff/architecture/autonomy docs updated.
+- `33b1241` — `_agent_lane_active` treats an absent agent as
+  no-drivers rather than busy (suite stub fixture regression).
+- **Definitive live closure**: the originally-wedged task
+  (`a47765e9395f`, `running/researching_failure` with no driver for
+  6+ min on old code) was resumed on the new code — tool approval →
+  verification approval → suite re-ran → `EXIT_CODE=0` → `completed`.
+  The suite passing also re-verified the canary `PYTHONPATH` fix live:
+  `test_candidate_exit_reported` correctly fails dead worktrees under
+  selftest's exported `PYTHONPATH` now. Dogfood ledger ends fully
+  terminal: 2 completed, 1 recoverable error, queue empty.
 
 ## Commits this session
 
