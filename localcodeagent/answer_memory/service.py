@@ -48,6 +48,7 @@ class AnswerMemory:
         repo_head_fn: Callable[[], str] | None = None,
         handlers: dict[str, Callable[[], str]] | None = None,
         brain_revision_fn: Callable[[], str] | None = None,
+        profile_id_fn: Callable[[], str] | None = None,
     ) -> None:
         self.enabled = enabled
         self.auto_learn = auto_learn
@@ -59,6 +60,7 @@ class AnswerMemory:
         self._config_fp_fn = config_fingerprint_fn or (lambda: "")
         self._repo_head_fn = repo_head_fn or (lambda: "")
         self._brain_rev_fn = brain_revision_fn or (lambda: "")
+        self._profile_id_fn = profile_id_fn or (lambda: "")
         self.handlers = dict(handlers or {})
         self._embedder = embeddings.embedder()
         self._last_hit: dict[str, dict[str, Any]] = {}
@@ -133,7 +135,9 @@ class AnswerMemory:
                     kind="no_match", reason=f"cacheability={cacheability}",
                     latency_ms=(time.monotonic() - started) * 1000,
                 )
-            match = self.retriever.lookup(question, project_id=project_id)
+            match = self.retriever.lookup(
+                question, project_id=project_id, profile_id=_safe(self._profile_id_fn)
+            )
             if match.answer is not None:
                 match = self._resolve_dependency(match, project_id)
                 if match.hit and not confidence.may_bypass(match.answer):
@@ -272,6 +276,7 @@ class AnswerMemory:
             return out
         try:
             deps = self._deps()
+            profile_id = _safe(self._profile_id_fn)
             exp_id = learning.record_experience(
                 self.store,
                 question=question, answer=answer,
@@ -281,7 +286,7 @@ class AnswerMemory:
                 tools_used=tools_used, research_used=research_used,
                 sources=sources, project_id=project_id, repository=repository,
                 git_commit=deps["git_commit"], brain_revision=deps["brain_revision"],
-                outcome=outcome, embedder=self._embedder,
+                outcome=outcome, profile_id=profile_id, embedder=self._embedder,
             )
             out["experience_id"] = exp_id
             if exp_id is None:
@@ -292,8 +297,8 @@ class AnswerMemory:
             normalized = normalize_question(question)
             existing = self.store.query_one(
                 "SELECT * FROM answers WHERE normalized_question=? AND project_id=? "
-                "ORDER BY confidence DESC LIMIT 1",
-                (normalized, project_id),
+                "AND profile_id IN ('', ?) ORDER BY confidence DESC LIMIT 1",
+                (normalized, project_id, profile_id),
             )
             if existing is not None:
                 learning.add_alias(self.store, question=question, answer_id=existing["id"])
@@ -308,7 +313,9 @@ class AnswerMemory:
             # question resolves instantly instead of paying for inference again.
             if self.retriever is not None:
                 try:
-                    best, score, _near = self.retriever.semantic(question, project_id)
+                    best, score, _near = self.retriever.semantic(
+                        question, project_id, profile_id
+                    )
                     if (
                         best is not None
                         and score >= self.retriever.possible_threshold
@@ -342,6 +349,7 @@ class AnswerMemory:
                 question=question, answer=answer,
                 trust_state=initial_state, source_type=source_type,
                 project_id=project_id, project_scope=project_scope,
+                profile_id=profile_id,
                 repository=repository, git_commit=deps["git_commit"],
                 config_fingerprint=deps["config_fingerprint"],
                 brain_revision=deps["brain_revision"],
@@ -383,6 +391,7 @@ class AnswerMemory:
             trust_state="trusted", source_type="user",
             project_id=project_id if scope != "global" else "",
             project_scope=scope,
+            profile_id=_safe(self._profile_id_fn),
             git_commit=deps["git_commit"],
             config_fingerprint=deps["config_fingerprint"],
             brain_revision=deps["brain_revision"],
@@ -435,6 +444,7 @@ class AnswerMemory:
             corrected_question=question,
             embedder=self._embedder,
             project_id=project_id,
+            profile_id=_safe(self._profile_id_fn),
             auto_promote=self.auto_promote,
             **self._deps(),
         )
@@ -463,7 +473,8 @@ class AnswerMemory:
         if rating in {"up", "positive"}:
             if exp is not None:
                 learning.apply_positive_feedback(
-                    self.store, exp["id"], auto_promote=self.auto_promote
+                    self.store, exp["id"], auto_promote=self.auto_promote,
+                    profile_id=exp.get("profile_id") or _safe(self._profile_id_fn),
                 )
             if answer_id:
                 learning.bump_occurrence(self.store, answer_id, positive=True,
@@ -561,8 +572,8 @@ class AnswerMemory:
         if question:
             return self.store.query_one(
                 "SELECT * FROM answers WHERE normalized_question=? AND invalidated=0 "
-                "ORDER BY confidence DESC LIMIT 1",
-                (normalize_question(question),),
+                "AND profile_id IN ('', ?) ORDER BY confidence DESC LIMIT 1",
+                (normalize_question(question), _safe(self._profile_id_fn)),
             )
         return None
 
@@ -578,7 +589,7 @@ class AnswerMemory:
     ) -> list[dict[str, Any]]:
         if self.store is None:
             return []
-        clauses, params = ["1=1"], []
+        clauses, params = ["a.profile_id IN ('', ?)"], [_safe(self._profile_id_fn)]
         if trust:
             clauses.append("a.trust_state=?")
             params.append(trust)
@@ -785,6 +796,7 @@ class AnswerMemory:
                 source_type="import",
                 project_scope=row.get("project_scope", "global"),
                 project_id=row.get("project_id", ""),
+                profile_id=row.get("profile_id", ""),
                 freshness=row.get("freshness", "static"),
                 answer_type=row.get("answer_type", "fact"),
                 topic=row.get("topic", ""),

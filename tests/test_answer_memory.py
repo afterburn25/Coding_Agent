@@ -41,7 +41,7 @@ class StoreAndSchemaTests(unittest.TestCase):
             self.assertTrue(am.available)
             self.assertTrue(Path(td, "am.db").exists())
             row = am.store.query_one("PRAGMA user_version")
-            self.assertEqual(int(row["user_version"]), 1)
+            self.assertEqual(int(row["user_version"]), 2)
             am.store.close()
 
     def test_wal_and_indexes(self):
@@ -385,6 +385,100 @@ class FreshnessAndScopeTests(unittest.TestCase):
             self.assertFalse(am.lookup("Which model is default?").hit)
             am.refresh(r["id"])
             self.assertTrue(am.lookup("Which model is default?").hit)
+            am.store.close()
+
+
+class ProfileIsolationTests(unittest.TestCase):
+    """Profile-scoped learned answers must never leak to another profile —
+    neither through trusted bypass nor through prompt-context hints."""
+
+    def _swap_profile(self, am: AnswerMemory, holder: list[str], pid: str) -> None:
+        holder[0] = pid
+
+    def test_profile_answer_not_served_to_other_profile(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            current = ["alice"]
+            am = _mem(td, profile_id_fn=lambda: current[0])
+            am.learn("What editor do I prefer?", "Visual Studio")
+            row = am.store.query_one(
+                "SELECT profile_id FROM answers WHERE normalized_question=?",
+                ("what editor do i prefer",),
+            )
+            self.assertEqual(row["profile_id"], "alice")
+            self.assertTrue(am.lookup("What editor do I prefer?").hit)
+            # Bob sees neither a direct hit nor a context hint.
+            current[0] = "bob"
+            match = am.lookup("What editor do I prefer?")
+            self.assertIsNone(match.answer)
+            self.assertEqual(match.context_answers, [])
+            # Paraphrase must not leak either (semantic path).
+            match = am.lookup("Which editor is my preference?")
+            visible = [match.answer, *match.context_answers]
+            self.assertFalse(
+                any(r and "Visual Studio" in r.get("answer_text", "") for r in visible)
+            )
+            am.store.close()
+
+    def test_learned_list_scoped_to_profile(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            current = [""]
+            am = _mem(td, profile_id_fn=lambda: current[0])
+            am.learn("What is the main branch?", "master")  # shared/legacy row
+            current[0] = "alice"
+            am.learn("What editor do I prefer?", "Visual Studio")
+            am.learn("Where is my config?", "~/.nexus")  # alice-private too
+            current[0] = "bob"
+            am.learn("What editor do I prefer?", "VS Code")
+            rows = am.list_answers()
+            texts = {r["canonical_question"]: r["answer_text"] for r in rows}
+            self.assertEqual(texts["What editor do I prefer?"], "VS Code")
+            self.assertEqual(texts["What is the main branch?"], "master")
+            self.assertNotIn("Where is my config?", texts)
+            self.assertEqual(am.lookup("What editor do I prefer?").answer["answer_text"], "VS Code")
+            # Alice still sees her own answer — profiles coexist, not collide.
+            current[0] = "alice"
+            self.assertEqual(
+                am.lookup("What editor do I prefer?").answer["answer_text"],
+                "Visual Studio",
+            )
+            am.store.close()
+
+    def test_recorded_exchange_stamps_active_profile(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            current = ["alice"]
+            am = _mem(td, profile_id_fn=lambda: current[0])
+            am.record_exchange("What is your favorite drink?", "Coffee")
+            exp = am.store.query_one("SELECT profile_id FROM experiences LIMIT 1")
+            self.assertEqual(exp["profile_id"], "alice")
+            am.store.close()
+
+    def test_unprofiled_answers_stay_shared(self):
+        # Rows recorded before profiles existed (profile_id='') remain visible
+        # to every profile — technical knowledge is intentionally shared.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td, profile_id_fn=lambda: "")
+            am.learn("What port does the backend use?", "8081")
+            am.store.execute(
+                "UPDATE answers SET profile_id='' WHERE normalized_question=?",
+                ("what port does the backend use",),
+            )
+            current = ["alice"]
+            am._profile_id_fn = lambda: current[0]
+            self.assertTrue(am.lookup("What port does the backend use?").hit)
+            current[0] = "bob"
+            self.assertTrue(am.lookup("What port does the backend use?").hit)
+            am.store.close()
+
+    def test_forget_cannot_reach_other_profile(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            current = ["alice"]
+            am = _mem(td, profile_id_fn=lambda: current[0])
+            am.learn("What editor do I prefer?", "Visual Studio")
+            current[0] = "bob"
+            result = am.forget(question="What editor do I prefer?")
+            self.assertFalse(result.get("ok"))
+            current[0] = "alice"
+            self.assertTrue(am.lookup("What editor do I prefer?").hit)
             am.store.close()
 
 

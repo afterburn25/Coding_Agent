@@ -24,7 +24,27 @@ def _migration_1(conn: sqlite3.Connection) -> None:
         pass
 
 
-MIGRATIONS = {1: _migration_1}
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, ddl: str, column: str) -> None:
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def _migration_2(conn: sqlite3.Connection) -> None:
+    # Profile scoping: answers/experiences recorded while a profile is active
+    # belong to that profile; only unscoped ('') rows are shared globally.
+    _add_column_if_missing(
+        conn, "answers", "profile_id TEXT NOT NULL DEFAULT ''", "profile_id"
+    )
+    _add_column_if_missing(
+        conn, "experiences", "profile_id TEXT NOT NULL DEFAULT ''", "profile_id"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ans_profile ON answers(profile_id)"
+    )
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2}
 
 
 def fts_available(conn: sqlite3.Connection) -> bool:

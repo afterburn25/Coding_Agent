@@ -39,6 +39,7 @@ def record_experience(
     git_commit: str = "",
     brain_revision: str = "",
     outcome: str = "",
+    profile_id: str = "",
     embedder=None,
 ) -> str | None:
     """Persist an experience. Returns experience id or None when suppressed."""
@@ -58,14 +59,16 @@ def record_experience(
         "INSERT INTO experiences(id, conversation_id, response_id, ts, raw_question,"
         " normalized_question, embedding, raw_answer, model_id, model_role,"
         " inference_time_ms, tools_used, research_used, sources, project_id,"
-        " repository, git_commit, brain_revision, final_outcome, cacheability)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " repository, git_commit, brain_revision, final_outcome, cacheability,"
+        " profile_id)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             exp_id, conversation_id, response_id, time.time(), question.strip(),
             normalize_question(question), emb, answer.strip(), model_id, model_role,
             float(inference_time_ms), json.dumps(tools_used or []),
             1 if research_used else 0, json.dumps(sources or []),
             project_id, repository, git_commit, brain_revision, outcome, cacheability,
+            profile_id,
         ),
     )
     store.bump("questions_seen")
@@ -89,6 +92,7 @@ def upsert_answer(
     answer_type: str = "fact",
     topic: str = "",
     handler_key: str = "",
+    profile_id: str = "",
     source_metadata: dict[str, Any] | None = None,
     embedder=None,
     now: float | None = None,
@@ -102,8 +106,8 @@ def upsert_answer(
     normalized = normalize_question(question)
     existing = store.query_one(
         "SELECT * FROM answers WHERE normalized_question=? AND project_id=? "
-        "ORDER BY confidence DESC LIMIT 1",
-        (normalized, project_id),
+        "AND profile_id IN ('', ?) ORDER BY confidence DESC LIMIT 1",
+        (normalized, project_id, profile_id),
     )
     if existing is None:
         alias = store.query_one(
@@ -111,6 +115,8 @@ def upsert_answer(
         )
         if alias:
             existing = store.query_one("SELECT * FROM answers WHERE id=?", (alias["answer_id"],))
+            if existing is not None and existing.get("profile_id") not in ("", profile_id):
+                existing = None
     emb = None
     if embedder is not None:
         try:
@@ -150,8 +156,9 @@ def upsert_answer(
         " embedding, embedding_model, topic, answer_type, confidence, trust_state,"
         " source_type, source_metadata, created_at, updated_at, last_verified_at,"
         " expires_at, project_scope, project_id, repository, git_commit,"
-        " config_fingerprint, brain_revision, content_hash, freshness, handler_key)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " config_fingerprint, brain_revision, content_hash, freshness, handler_key,"
+        " profile_id)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             ans_id, question.strip(), normalized, answer.strip(), emb,
             getattr(embedder, "id", "") if embedder else "", topic, answer_type,
@@ -159,7 +166,7 @@ def upsert_answer(
             json.dumps(source_metadata or {}), now, now, now,
             ttl.expiry_for(freshness, now), project_scope, project_id,
             repository, git_commit, config_fingerprint, brain_revision,
-            content_hash(answer), freshness, handler_key,
+            content_hash(answer), freshness, handler_key, profile_id,
         ),
     )
     return ans_id
@@ -204,7 +211,7 @@ def invalidate_answer(store, answer_id: str, reason: str) -> None:
     )
 
 
-def apply_positive_feedback(store, experience_id: str, *, auto_promote: bool = True) -> None:
+def apply_positive_feedback(store, experience_id: str, *, auto_promote: bool = True, profile_id: str = "") -> None:
     exp = store.query_one("SELECT * FROM experiences WHERE id=?", (experience_id,))
     if exp is None:
         return
@@ -212,8 +219,9 @@ def apply_positive_feedback(store, experience_id: str, *, auto_promote: bool = T
         "UPDATE experiences SET user_feedback='positive' WHERE id=?", (experience_id,)
     )
     answer = store.query_one(
-        "SELECT * FROM answers WHERE normalized_question=? AND invalidated=0",
-        (exp["normalized_question"],),
+        "SELECT * FROM answers WHERE normalized_question=? AND invalidated=0 "
+        "AND profile_id IN ('', ?)",
+        (exp["normalized_question"], profile_id),
     )
     if answer is not None:
         bump_occurrence(store, answer["id"], positive=True, auto_promote=auto_promote)
@@ -228,6 +236,7 @@ def apply_correction(
     embedder=None,
     project_id: str = "",
     project_scope: str = "global",
+    profile_id: str = "",
     auto_promote: bool = True,
     **deps,
 ) -> dict[str, Any]:
@@ -248,8 +257,9 @@ def apply_correction(
     else:
         target_norm = normalize_question(corrected_question)
     old = store.query_one(
-        "SELECT * FROM answers WHERE normalized_question=? AND invalidated=0",
-        (target_norm,),
+        "SELECT * FROM answers WHERE normalized_question=? AND invalidated=0 "
+        "AND profile_id IN ('', ?)",
+        (target_norm, profile_id),
     )
     if old is not None:
         invalidate_answer(store, old["id"], "user correction")
@@ -270,6 +280,7 @@ def apply_correction(
             source_type="correction",
             project_id=project_id,
             project_scope=project_scope,
+            profile_id=profile_id,
             embedder=embedder,
             freshness=freshness,
             **deps,

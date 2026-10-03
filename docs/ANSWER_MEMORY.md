@@ -145,6 +145,16 @@ Every answer has `project_scope` (`global`/`repository`/`project`) +
 the current workspace — answers learned inside one project never leak into
 another.
 
+Answers and experiences are additionally stamped with `profile_id` — the
+profile that was active when they were recorded. Retrieval, learned-answer
+lists, `forget`, corrections, and positive feedback only see unscoped
+(`profile_id=''`) rows plus rows stamped with the *active* profile. A
+personal answer learned under Profile A is therefore never served to or
+mutated by Profile B — not through trusted bypass, not through
+prompt-context hints, and not through the Learned Answers UI. Rows recorded
+before profiles existed (or with no active profile) keep `profile_id=''`
+and remain shared, so general technical knowledge still benefits everyone.
+
 ## Commands
 
 Natural-language, parsed before model routing:

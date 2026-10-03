@@ -55,20 +55,21 @@ class Retriever:
 
     # -- internals -----------------------------------------------------------
 
-    def _answers(self, project_id: str) -> list[dict[str, Any]]:
+    def _answers(self, project_id: str, profile_id: str = "") -> list[dict[str, Any]]:
         return [
             r for r in self.store.cached("answers")
             if not r.get("invalidated")
             and (r.get("project_scope") == "global" or r.get("project_id") == project_id)
+            and (r.get("profile_id") or "") in ("", profile_id)
         ]
 
-    def _candidates(self, project_id: str) -> list[dict[str, Any]]:
-        rows = self._answers(project_id)
+    def _candidates(self, project_id: str, profile_id: str = "") -> list[dict[str, Any]]:
+        rows = self._answers(project_id, profile_id)
         rows.sort(key=lambda r: r.get("confidence") or 0.0, reverse=True)
         return rows[: self.max_semantic_candidates]
 
-    def _embed_index(self, project_id: str) -> list[tuple[dict[str, Any], Any]]:
-        rows = self._candidates(project_id)
+    def _embed_index(self, project_id: str, profile_id: str = "") -> list[tuple[dict[str, Any], Any]]:
+        rows = self._candidates(project_id, profile_id)
         out = []
         for row in rows:
             vec = embeddings.decode(row.get("embedding"))
@@ -78,9 +79,9 @@ class Retriever:
 
     # -- public --------------------------------------------------------------
 
-    def exact(self, normalized: str, project_id: str) -> dict[str, Any] | None:
+    def exact(self, normalized: str, project_id: str, profile_id: str = "") -> dict[str, Any] | None:
         best: dict[str, Any] | None = None
-        for row in self._answers(project_id):
+        for row in self._answers(project_id, profile_id):
             if row.get("normalized_question") != normalized:
                 continue
             if best is None or (row.get("confidence") or 0.0) > (best.get("confidence") or 0.0):
@@ -94,7 +95,7 @@ class Retriever:
                 break
         if target is None:
             return None
-        for row in self._answers(project_id):
+        for row in self._answers(project_id, profile_id):
             if row.get("id") == target:
                 row = dict(row)
                 row["_via_alias"] = True
@@ -151,7 +152,7 @@ class Retriever:
         blend -= 0.02 * vocab_unc + 0.08 * other_unc
         return blend
 
-    def semantic(self, text: str, project_id: str) -> tuple[dict[str, Any] | None, float, list[dict[str, Any]]]:
+    def semantic(self, text: str, project_id: str, profile_id: str = "") -> tuple[dict[str, Any] | None, float, list[dict[str, Any]]]:
         """Best semantic match. Returns (row, score, near-miss context rows)."""
         if not self.semantic_enabled:
             return None, 0.0, []
@@ -161,7 +162,7 @@ class Retriever:
         best: dict[str, Any] | None = None
         best_score = 0.0
         near: list[tuple[float, dict[str, Any]]] = []
-        for row, rvec in self._embed_index(project_id):
+        for row, rvec in self._embed_index(project_id, profile_id):
             cos = embeddings.cosine(vec, rvec)
             score = self._score_pair(
                 text,
@@ -176,7 +177,7 @@ class Retriever:
         near.sort(key=lambda t: t[0], reverse=True)
         return best, best_score, [r for _s, r in near[:3]]
 
-    def fts_search(self, text: str, project_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    def fts_search(self, text: str, project_id: str, profile_id: str = "", limit: int = 5) -> list[dict[str, Any]]:
         if not self.store.fts:
             return []
         try:
@@ -186,8 +187,9 @@ class Retriever:
             return self.store.query(
                 "SELECT a.* FROM answers_fts f JOIN answers a ON a.rowid=f.rowid "
                 "WHERE answers_fts MATCH ? AND a.invalidated=0 "
-                "AND (a.project_scope='global' OR a.project_id=?) LIMIT ?",
-                (terms, project_id, limit),
+                "AND (a.project_scope='global' OR a.project_id=?) "
+                "AND (a.profile_id='' OR a.profile_id=?) LIMIT ?",
+                (terms, project_id, profile_id, limit),
             )
         except Exception:
             return []
@@ -197,6 +199,7 @@ class Retriever:
         question: str,
         *,
         project_id: str = "",
+        profile_id: str = "",
         now: float | None = None,
     ) -> MemoryMatch:
         started = time.monotonic()
@@ -204,7 +207,7 @@ class Retriever:
         if not normalized:
             return MemoryMatch(reason="empty")
 
-        row = self.exact(normalized, project_id)
+        row = self.exact(normalized, project_id, profile_id)
         if row is not None:
             result = MemoryMatch(
                 kind="exact", answer=row, similarity=1.0,
@@ -212,7 +215,7 @@ class Retriever:
             )
             return result
 
-        best, score, near = self.semantic(question, project_id)
+        best, score, near = self.semantic(question, project_id, profile_id)
         if best is not None and score >= self.semantic_threshold:
             return MemoryMatch(
                 kind="semantic", answer=best, similarity=score,
@@ -229,7 +232,7 @@ class Retriever:
                 latency_ms=(time.monotonic() - started) * 1000,
                 reason="below bypass threshold",
             )
-        fts = self.fts_search(question, project_id)
+        fts = self.fts_search(question, project_id, profile_id)
         if fts:
             context = fts
         return MemoryMatch(

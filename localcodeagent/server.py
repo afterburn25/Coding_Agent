@@ -747,6 +747,9 @@ class AppState:
             brain_revision_fn=lambda: str(
                 (self.nexus_brain.summary() or {}).get("schema_version", "")
             ),
+            # profiles is initialised later in __init__ — resolve lazily at
+            # lookup time; _safe() in the service returns "" when unset.
+            profile_id_fn=lambda: self.profiles.active_id(),
             handlers={
                 "app_version": lambda: f"Nexus Core {VERSION}",
                 "installed_text_models": _installed_text_models,

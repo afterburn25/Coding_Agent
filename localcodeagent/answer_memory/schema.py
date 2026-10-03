@@ -10,7 +10,7 @@ Two conceptual data areas live here:
 - ``metrics`` — learning-quality counters.
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS experiences (
@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS experiences (
     correction_text     TEXT NOT NULL DEFAULT '',
     final_outcome       TEXT NOT NULL DEFAULT '',
     cacheability        TEXT NOT NULL DEFAULT 'reusable',
+    profile_id          TEXT NOT NULL DEFAULT '',
     suppressed          INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_exp_norm ON experiences(normalized_question);
@@ -75,11 +76,13 @@ CREATE TABLE IF NOT EXISTS answers (
     content_hash         TEXT NOT NULL DEFAULT '',
     freshness            TEXT NOT NULL DEFAULT 'static',
     handler_key          TEXT NOT NULL DEFAULT '',
+    profile_id           TEXT NOT NULL DEFAULT '',
     last_used_at         REAL
 );
 CREATE INDEX IF NOT EXISTS idx_ans_norm ON answers(normalized_question);
 CREATE INDEX IF NOT EXISTS idx_ans_trust ON answers(trust_state);
 CREATE INDEX IF NOT EXISTS idx_ans_scope ON answers(project_scope, project_id);
+CREATE INDEX IF NOT EXISTS idx_ans_profile ON answers(profile_id);
 
 CREATE TABLE IF NOT EXISTS aliases (
     normalized_question TEXT PRIMARY KEY,
