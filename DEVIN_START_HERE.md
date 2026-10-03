@@ -9,9 +9,10 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
 - Current development version: `0.12.1` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
-- Verified unit checkpoint: **1180 passing** (2 environment skips) on `042be1c`
+- Verified unit checkpoint: **1197 passing** (2 environment skips) on `f6ddc09`
 - v0.12.0 shipped Profiles + Creator Identity + Personality Studio + First-Run Onboarding (`localcodeagent/profiles/`, `localcodeagent/personality/`, `web/start.html`); v0.12.1 added installer update busy-status reporting (see PROJECT_STATUS.md)
-- Latest commits: `042be1c` (status docs), `e811656` (derived creator passcode in tests), `078ccdf`/`0d3a765` (installer update progress UX), `9cc450e` (v0.12.0 docs)
+- 2026-10-03 overnight dogfood (`docs/reports/OVERNIGHT_REPORT_2026-10-03.md`): fixed a real queue-wedge — `resume()` leaked `_finalize()`'s internal repair-round `None`, stranding tasks `running` forever with no driver; now a driver registry + watchdog reaper fails driverless active tasks after `stalled_task_grace_seconds`. Also: Answer Memory profile scoping (privacy), personality delivery cues, preset voice defaults, canary `PYTHONPATH` isolation, v2-schema self-heal.
+- Latest commits: `f6ddc09` (AM schema self-heal), `2b6a058` (overnight report), `c4050e5` (queue-wedge fix), `5c01bd4`/`60538d2`/`43065f7` (voice/personality/memory fixes)
 - GitHub Actions: all-green on the last several pushes; windows-desktop job compiles the real Inno installer and smokes install→update-twice including a fake-process kill check
 
 The `main` branch includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint or takeover anchor.**

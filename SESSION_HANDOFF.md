@@ -11,6 +11,33 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## 2026-10-03 overnight dogfood + queue-wedge fix (commits `43065f7`–`f6ddc09`)
+
+- Full session detail: `docs/reports/OVERNIGHT_REPORT_2026-10-03.md`.
+- **Queue wedge root cause (do not regress)**: `_finalize()` returns
+  `None` as an internal "repair round started, keep driving" signal.
+  `_drive` honors it via `continue`; `resume()` used to leak it to the
+  HTTP handler → handler died → task stranded `running` forever →
+  single-flight queue permanently blocked. `resume()` now re-enters
+  `_drive_or_error`; `agent._drive_threads` + `has_live_driver()` let
+  `_reap_stalled_tasks()` (watchdog, before retry/dequeue) fail any
+  active task whose driver vanished after `stalled_task_grace_seconds`
+  (120s default, config-floored at 15s). `waiting_approval` is parked,
+  never reaped.
+- **Answer Memory is profile-scoped**: schema v2 adds `profile_id` to
+  `answers`+`experiences`; lookup/injection serve profile-stamped rows
+  only to the recording profile ('' = shared). Column assertions
+  re-run on every open — `user_version` stamps alone no longer gate
+  healing.
+- **Personality is now load-bearing**: standout sliders render as
+  prescriptive delivery cues (`personality/prompt.py`), and every
+  preset resolves audible voice params via style families
+  (`personality/presets.py`). Both verified live on the 8901 backend.
+- **Canary isolation**: `self_repair/canary.py` *replaces* `PYTHONPATH`
+  with the worktree (not prepend) — an inherited repo path let the
+  canary boot stable code on a dead worktree (the
+  `test_candidate_exit_reported` live failure).
+
 ## v0.7.2 UI unification + transport hardening checkpoint
 
 - **One design system**: `web/styles.css` defines the token palette
