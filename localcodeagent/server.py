@@ -913,12 +913,12 @@ class AppState:
 
         def executor(mission: dict, node: dict, emit_cb) -> dict:
             voice_rid = self._voice_begin()
-            self.agent.current_mission_id = str(mission.get("id") or "") or None
             try:
                 result = self.agent.run(
                     str(node.get("instruction") or node.get("title") or ""),
                     history=[], mode="auto",
                     event_callback=emit_cb,
+                    mission_id=str(mission.get("id") or "") or None,
                 )
                 task = result.task or {}
                 status = str(task.get("status") or "")
@@ -965,7 +965,6 @@ class AppState:
                         pass
                 return out
             finally:
-                self.agent.current_mission_id = None
                 self._voice_finish(voice_rid)
 
         def lane_free() -> bool:

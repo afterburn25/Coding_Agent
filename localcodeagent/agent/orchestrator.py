@@ -206,6 +206,10 @@ class AgentOrchestrator:
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
+        # task_id -> mission_id for runs launched by the mission executor.
+        # Task-scoped so a concurrent chat drive (or a parallel mission node)
+        # can't steal or clear another lane's attribution.
+        self._mission_by_task: dict[str, str] = {}
         self._sessions: dict[str, _AgentSession] = {}
         # task_id -> thread currently executing a synchronous drive for that
         # task. Registered for the whole drive (including tool/verification
@@ -238,7 +242,7 @@ class AgentOrchestrator:
             return None
         row = self.activities.open(
             task_id, category, title, summary, details=details, parent=parent,
-            mission_id=self.current_mission_id)
+            mission_id=self._mission_by_task.get(task_id) or self.current_mission_id)
         self._safe_emit(callback, {"type": "activity", "task_id": task_id, "activity": dict(row)})
         return row
 
@@ -2405,6 +2409,7 @@ class AgentOrchestrator:
 
     def _close_session(self, task_id: str) -> None:
         self._sessions.pop(task_id, None)
+        self._mission_by_task.pop(task_id, None)
         sinks = self.tools.context.get("stream_sinks")
         if sinks is not None:
             sinks.pop(task_id, None)
@@ -3071,8 +3076,11 @@ class AgentOrchestrator:
         mode: str = "auto",
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        mission_id: str | None = None,
     ) -> AgentResult:
         task = self.tasks.create(user_text, mode)
+        if mission_id:
+            self._mission_by_task[task.id] = mission_id
         event_callback = self._logging_callback(task.id, event_callback)
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")
