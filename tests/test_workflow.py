@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -725,6 +726,60 @@ class ApprovalResumeTests(unittest.TestCase):
             self.assertEqual(seen, ["ok"])
             self.assertEqual(second.content, "finished")
             self.assertEqual(second.task["status"], "completed")
+
+    def test_concurrent_resume_single_flights_the_drive(self):
+        """Regression: resume() claimed pending_approval non-atomically and
+        registered drivers unconditionally — two concurrent resumes
+        (double-click/UI retry) both executed the action and spawned
+        competing drives on one session."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ModelProfile(
+                id="local", endpoint="http://unused/v1", model="x",
+                roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external",
+            )
+            config = AgentConfig(models=[profile], permissions={"test.execute": "ask"}, auto_verify_after_changes=False, review_after_changes=False)
+            router = ModelRouter(config.models)
+            tools = ToolRegistry(config.permissions)
+            seen = []
+            gate = threading.Event()
+            def handler(args):
+                seen.append(args["value"])
+                gate.wait(timeout=15)
+                return "OK"
+            tools.register(ToolSpec("dangerous_test_tool", "test", {
+                "type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]
+            }, "test.execute", handler))
+            tasks = TaskStore(root)
+            index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(
+                config, router, tools, _FakeRuntime(),
+                tasks=tasks, checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: _SequencedProvider()
+
+            first = agent.run("do the thing")
+            self.assertEqual(first.task["status"], "waiting_approval")
+
+            holder: dict = {}
+            driver = threading.Thread(
+                target=lambda: holder.setdefault("r", agent.resume(first.task["id"], approved=True)),
+                daemon=True)
+            driver.start()
+            deadline = time.time() + 10
+            while not seen and time.time() < deadline:
+                time.sleep(0.01)
+
+            # The first resume is inside the approved tool call; a second
+            # must be rejected, not double-executed or double-driven.
+            with self.assertRaises(Exception):
+                agent.resume(first.task["id"], approved=True)
+            gate.set()
+            driver.join(timeout=15)
+
+            self.assertEqual(seen, ["ok"])
+            self.assertEqual(holder["r"].task["status"], "completed")
 
     def test_persisted_approval_resumes_after_process_restart(self):
         with tempfile.TemporaryDirectory() as td:

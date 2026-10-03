@@ -2416,10 +2416,20 @@ class AgentOrchestrator:
         except Exception:
             pass
 
+    def _claim_drive(self, task_id: str) -> None:
+        """Single-flight driver registration — refuses if another live
+        thread already drives this task. Same-thread re-registration is
+        allowed (resume/recover nest through _drive_or_error)."""
+        with self._drive_lock:
+            existing = self._drive_threads.get(str(task_id))
+            if (existing is not None and existing.is_alive()
+                    and existing is not threading.current_thread()):
+                raise KeyError(f"Task {task_id} already has a live driver")
+            self._drive_threads[str(task_id)] = threading.current_thread()
+
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
-        with self._drive_lock:
-            self._drive_threads[session.task_id] = threading.current_thread()
+        self._claim_drive(session.task_id)
         # The ledger row's model_id pins the serving runtime against idle/pressure
         # eviction. run() stamps it at routing, but recover/resume paths rebuild the
         # session without rewriting the row — restamp here so every live drive is
@@ -3713,8 +3723,7 @@ class AgentOrchestrator:
         task = self.tasks.get(task_id)
         if task.status not in {"interrupted", "error"}:
             raise ValueError(f"Task {task_id} is not recoverable from status {task.status}")
-        with self._drive_lock:
-            self._drive_threads[str(task_id)] = threading.current_thread()
+        self._claim_drive(str(task_id))
         try:
             return self._recover_impl(
                 task_id, task=task, event_callback=event_callback)
@@ -3763,8 +3772,7 @@ class AgentOrchestrator:
         # The whole call is a synchronous drive — tool/verification execution
         # and any repair re-drive included — so the watchdog knows this task
         # has a live driver even outside _drive_or_error.
-        with self._drive_lock:
-            self._drive_threads[str(task_id)] = threading.current_thread()
+        self._claim_drive(str(task_id))
         try:
             return self._resume_impl(
                 task_id, approved=approved, event_callback=event_callback)
@@ -3786,10 +3794,14 @@ class AgentOrchestrator:
         session.event_callback = self._logging_callback(task_id, event_callback)
         if str(self.tasks.get(task_id).status or "") == "cancelled":
             raise KeyError(f"Task {task_id} was cancelled and cannot be resumed")
-        if not session.pending_approval:
-            raise KeyError(f"No resumable approval is pending for task {task_id}")
-        pending = session.pending_approval
-        session.pending_approval = None
+        # Claim the pending approval atomically — two concurrent resume
+        # calls (double-click, UI retry) must not both execute the action
+        # and spawn competing drives on the same session.
+        with self._drive_lock:
+            if not session.pending_approval:
+                raise KeyError(f"No resumable approval is pending for task {task_id}")
+            pending = session.pending_approval
+            session.pending_approval = None
         self._task_context(task_id)
 
         if pending["kind"] == "tool":
