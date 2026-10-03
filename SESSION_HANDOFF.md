@@ -11,6 +11,40 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
+
+- **Uninstall actually removes {app}**: Inno only deletes tracked files;
+  host-created junctions (`data`/`.agent`/`output`/`models`/`ComfyUI`)
+  and generated files kept the dir alive. `CurUninstallStepChanged(
+  usPostUninstall)` → `PurgeLeftoverInstallDir` re-kills the tree,
+  unlinks reparse points via `RemoveDir` (never traverses — external
+  state/model targets preserved), `DelTree`s normal dirs, deletes
+  leftover files, skips `unins000.*` for Inno's final cleanup.
+- **Single-instance host**: no mutex meant a second `NexusCore.exe`
+  spawned a host whose `ReapOrphanedBackend` path-sweep killed the
+  *live* backend → `backend exited -1` at ~98% + "cannot start" when
+  users double-clicked during a slow splash. `Local\NexusCore.Desktop.Host`
+  mutex added — second launch says "already running", exits 0.
+- **Process kill on every install path** (`5178fca`): `StopRunningNexusCore`
+  was gated on `UpgradeDetected`; the uninstall-then-fresh-install path
+  reset it → surviving app locked `NexusCore.exe` → DeleteFile code 5 →
+  abort → rollback deleted `backend\ChatNexus.Backend.exe`. Kill +
+  `WaitForInstallFilesUnlock` now unconditional; `InitializeUninstall`
+  kills the tree before the uninstaller touches files.
+- **Onboarding voice**: `start.html` never loaded `voice_global.js` and
+  `welcome_played` was dead code → voice instructions never played.
+  Page now loads the client, speaks the welcome once (marks
+  `welcome_played` via `POST /api/onboarding/welcome-played` only when
+  audio returns — a cold engine retries next launch). Voice read/play
+  prefixes added to `ProfileAPI.SAFE_PREFIXES`; WebView2 gets
+  `--autoplay-policy=no-user-gesture-required` (desktop app — playback
+  must not wait for a click).
+- **Start Here scroll**: global `body{overflow:hidden}` clipped the
+  tall form — `.start-body` now `overflow:auto`.
+- Build/verify: `packaging/build_windows.ps1` → `ISCC installer/ChatNexus.iss`
+  → `dist/installer/NexusCore-Setup-*-Windows-x64.exe`. 97 profile +
+  installer tests green; C# 0 errors; ISCC compile clean.
+
 ## 2026-10-03 overnight dogfood + queue-wedge fix (commits `43065f7`–`f6ddc09`)
 
 - Full session detail: `docs/reports/OVERNIGHT_REPORT_2026-10-03.md`.
