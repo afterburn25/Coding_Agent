@@ -1569,6 +1569,9 @@ class AgentOrchestrator:
         if pending["kind"] == "direct_image":
             self.tasks.update(
                 task_id,
+                status="running",
+                phase="working",
+                pending_approval=None,
                 recovery_count=task.recovery_count + 1,
                 error="",
             )
