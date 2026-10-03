@@ -224,8 +224,9 @@ stores (Nexus-managed scratch only — never user data).
 Built-in detectors: crash storms, mission failure rate, model-call
 failures, disk pressure, RAM pressure (twin hardware sample), repair
 thrash (same signature ≥3 incidents), answer-memory decay, startup
-regression vs the learned profile, stale approval backlog, and **CI
-failures** — when `gh` is installed and authed, failed runs
+regression vs the learned profile, stale approval backlog, orphaned
+repair worktrees (≥3 dead `.repair-worktrees` candidates → suggestion),
+and **CI failures** — when `gh` is installed and authed, failed runs
 (`gh run list --status failure`, cached 10 min) open one repair
 incident per failed-run signature. The source also attaches a bounded
 `--log-failed` tail to each run, which the incident consumes as its
