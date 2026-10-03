@@ -802,9 +802,8 @@ class AppState:
         def resume() -> None:
             try:
                 candidates = [
-                    t for t in self.tasks.recent(50)
-                    if t.get("status") == "interrupted"
-                    and int(t.get("recovery_count") or 0) < max_recoveries
+                    t for t in self.tasks.by_status("interrupted")
+                    if int(t.get("recovery_count") or 0) < max_recoveries
                 ]
                 for task in candidates:
                     try:
@@ -2650,7 +2649,7 @@ class AppState:
             statuses = statuses | {"waiting_approval"}
         try:
             if any(t.get("status") in statuses
-                   for t in self.tasks.recent(50)):
+                   for t in self.tasks.by_status(*statuses)):
                 return True
             if getattr(self, "_queue_running", None):
                 return True
@@ -2837,8 +2836,8 @@ class AppState:
         if not self._dequeue_lock.acquire(timeout=2 if blocking else 0):
             return
         try:
-            recent = self.tasks.recent(50)
-            if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
+            if self.tasks.by_status(
+                    "running", "verifying", "reviewing", "waiting_approval"):
                 return
             # Ledger position isn't authoritative — enough newer rows can
             # push an active task out of the recent window. A live driver
@@ -2939,8 +2938,8 @@ class AppState:
             if getattr(self, "_queue_running", None):
                 return
             now = time.time()
-            recent = self.tasks.recent(50)
-            if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
+            if self.tasks.by_status(
+                    "running", "verifying", "reviewing", "waiting_approval"):
                 return
             # Same single-flight backstop as _dequeue_next — a live driver
             # is authoritative no matter how deep in the ledger its task is.
@@ -2948,9 +2947,8 @@ class AppState:
                 if any(t.is_alive() for t in self.agent._drive_threads.values()):
                     return
             stale = [
-                t for t in recent
-                if t.get("status") == "error"
-                and int(t.get("recovery_count") or 0) < max_recoveries
+                t for t in self.tasks.by_status("error")
+                if int(t.get("recovery_count") or 0) < max_recoveries
                 and now - float(t.get("updated_at") or now) >= retry_after
                 and str(t.get("id")) not in self._retrying_tasks
             ]
@@ -2997,10 +2995,8 @@ class AppState:
                 float(getattr(self.config, "stalled_task_grace_seconds", 120.0) or 120.0),
             )
             now = time.time()
-            for task in self.tasks.recent(50):
-                if str(task.get("status") or "") not in {
-                        "running", "verifying", "reviewing"}:
-                    continue
+            for task in self.tasks.by_status(
+                    "running", "verifying", "reviewing"):
                 task_id = str(task.get("id") or "")
                 if not task_id:
                     continue
@@ -3048,9 +3044,7 @@ class AppState:
             return
         try:
             now = time.time()
-            for item in self.tasks.recent(50):
-                if item.get("status") != "waiting_approval":
-                    continue
+            for item in self.tasks.by_status("waiting_approval"):
                 if now - float(item.get("updated_at") or now) < timeout:
                     continue
                 task = self.tasks.update(
@@ -3086,8 +3080,7 @@ class AppState:
         try:
             busy = {
                 str(t.get("model_id") or "")
-                for t in self.tasks.recent(50)
-                if t.get("status") in {"running", "verifying", "reviewing"}
+                for t in self.tasks.by_status("running", "verifying", "reviewing")
             }
             # A live drive is authoritative even when its task row has aged
             # out of the recent window — evicting its model mid-drive would

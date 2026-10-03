@@ -239,3 +239,12 @@ class TaskStore:
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             return [self._tasks[i].as_dict() for i in self._order[-max(1, limit):]][::-1]
+
+    def by_status(self, *statuses: str) -> list[dict[str, Any]]:
+        """All tasks with any of ``statuses``, newest first — the full-ledger
+        alternative to bounded ``recent()`` windows for correctness-sensitive
+        scans (a task must not become invisible because newer rows arrived)."""
+        wanted = set(statuses)
+        with self._lock:
+            return [self._tasks[i].as_dict() for i in reversed(self._order)
+                    if self._tasks[i].status in wanted]
