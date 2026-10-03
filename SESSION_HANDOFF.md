@@ -37,6 +37,23 @@
   with the worktree (not prepend) — an inherited repo path let the
   canary boot stable code on a dead worktree (the
   `test_candidate_exit_reported` live failure).
+- **Serving runtime is never an eviction candidate (do not regress)**:
+  the recurring 14B `connection_reset` mid-prompt was memory-pressure
+  eviction killing the *serving* llama-server — a recovered task's
+  ledger row had `model_id=""`, so it never entered the busy set.
+  `_drive_or_error` restamps `model_id`/`model_role` at every drive
+  start, and `_evict_idle_models` pins *all* resident models when a
+  live driver's model can't be attributed. Verified live: same task,
+  same 17k-token prompt, VRAM below the floor — server survived.
+- **Identical failing calls are dedup-blocked**: a 14B retried the same
+  failing `apply_patch` ~5× — each retry an approval + a step, ending
+  at `step_limit`. `(name, args)` signatures that already errored fail
+  fast without executing (reset on any successful mutation), and the
+  failures>=2 escalation path injects a one-time corrective hint when
+  no higher-tier model resolves — it used to silently no-op.
+- **Step-limit records both memory stores**: it previously passed
+  `conversation_manager` kwargs to `ConversationMemory.record_exchange`
+  (a 2-arg method) — TypeError flipped `step_limit` → `error`.
 
 ## v0.7.2 UI unification + transport hardening checkpoint
 
