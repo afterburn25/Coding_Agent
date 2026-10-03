@@ -173,8 +173,17 @@ class ImageManager:
     def _save_jobs(self, job: "ImageJob | None" = None) -> None:
         self.last_activity = time.time()
         with self._lock:
-            rows=[j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:500]]
+            ordered = sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)
+            rows=[j.as_dict() for j in ordered[:500]]
             _atomic_json_write(self.jobs_path, rows)
+            # The file keeps the newest 500 — evict evicted rows from memory
+            # too, unless the job is still live (a running job must stay
+            # reachable even if it somehow falls past the tail).
+            _LIVE = {"queued", "loading_model", "generating", "refining",
+                     "upscaling", "cancelling"}
+            for stale in ordered[500:]:
+                if stale.state not in _LIVE:
+                    self._jobs.pop(stale.id, None)
         if job is not None and self.on_change is not None:
             try:
                 self.on_change({"job": job.as_dict()})
