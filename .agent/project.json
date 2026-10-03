@@ -4,7 +4,7 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1180,
+ "test_checkpoint": 1183,
  "next_milestone": "v0.12.1 shipped: profiles + creator identity + personality studio + first-run onboarding (v0.12.0), then installer update busy-status UX (stage text + marquee for process shutdown, multi-GB SHA-256 checks, uninstall wait, all four bootstrap downloads). Next: code signing for unsigned-exe SmartScreen delay, real 14B/30B dogfood tasks.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
