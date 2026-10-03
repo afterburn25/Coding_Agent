@@ -131,6 +131,18 @@ class EndToEndAgentTests(unittest.TestCase):
         )
         return AppState(cfg, Path(td), Path(td) / ".runtime")
 
+    def test_mission_node_ok_maps_real_task_statuses(self):
+        # Regression: the mission executor mapped ok={"done","reverted"} —
+        # "done" isn't a ledger status, so every successful agent node
+        # reported ok=false and wedged its dependents.
+        from localcodeagent.server import _task_status_succeeded
+        self.assertTrue(_task_status_succeeded("completed"))
+        self.assertTrue(_task_status_succeeded("completed_with_warnings"))
+        self.assertTrue(_task_status_succeeded("reverted"))
+        for st in ("error", "failed", "step_limit", "cancelled",
+                   "waiting_approval", "running", "interrupted", ""):
+            self.assertFalse(_task_status_succeeded(st), st)
+
     def test_mission_park_does_not_block_lane(self):
         # A mission-attributed waiting_approval row is mission work — its own
         # approval flow resumes it — and must never freeze the agent lane

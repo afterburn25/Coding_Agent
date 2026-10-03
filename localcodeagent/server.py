@@ -835,7 +835,7 @@ class AppState:
                                 status = str((res.task or {}).get("status") or "")
                                 self.activities.update(
                                     tid, rec_row_id,
-                                    state="completed" if status == "done" else "failed",
+                                    state="completed" if _task_status_succeeded(status) else "failed",
                                     summary=f"Resumed · task {status or 'finished'}")
                         except Exception:
                             self._voice_finish(voice_rid)
@@ -923,7 +923,7 @@ class AppState:
                 task = result.task or {}
                 status = str(task.get("status") or "")
                 out = {
-                    "ok": status in {"done", "reverted"},
+                    "ok": _task_status_succeeded(status),
                     "output": result.content or str(task.get("error") or ""),
                     "task_id": str(task.get("id") or ""),
                     "artifacts": list(task.get("files_changed") or [])[:20],
@@ -1987,7 +1987,7 @@ class AppState:
         """Synthesize an agent-result-shaped payload for command replies."""
         task = self.tasks.create("autonomy command", "auto")
         task = self.tasks.update(
-            task.id, status="done", phase="done",
+            task.id, status="completed", phase="done",
             model_id="autonomy", model_role="mission",
             summary=text[:200], final_content=text)
         return {
@@ -3468,6 +3468,17 @@ class AppState:
             "recent_failures": netdiag.recent_failures(),
             "crash_history": netdiag.crash_history(50),
         }
+
+
+def _task_status_succeeded(status: str) -> bool:
+    """Whether a task-ledger status means a mission node's work succeeded.
+
+    The ledger vocabulary is `completed` / `completed_with_warnings` /
+    `reverted` for success — never `"done"`. An earlier mapping checked
+    `{"done", "reverted"}`, which made every successful agent node report
+    `ok: false` and wedge its dependents.
+    """
+    return str(status).startswith("completed") or str(status) == "reverted"
 
 
 def _clean_attachments(body: dict) -> list[dict]:
