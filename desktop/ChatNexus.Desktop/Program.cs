@@ -17,6 +17,17 @@ internal static class Program
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var selfTest = args.Any(a => string.Equals(a, "--self-test", StringComparison.OrdinalIgnoreCase));
 
+        // First-breath marker — if the host ever dies before the backend
+        // launch path (splash/WebView2 init), this is the line that tells us
+        // the process at least reached managed code.
+        try
+        {
+            var earlyLogDir = Path.Combine(appDir, "data", "logs");
+            Directory.CreateDirectory(earlyLogDir);
+            BackendProcess.NoteStartup(earlyLogDir, $"host process started (pid {Environment.ProcessId})");
+        }
+        catch { }
+
         try
         {
             if (selfTest)
@@ -581,6 +592,11 @@ internal sealed class BackendProcess : IDisposable
             // Logging must never block startup.
         }
     }
+
+    /// Writable before any BackendProcess instance exists — the earliest
+    /// possible evidence that the host process reached managed code.
+    public static void NoteStartup(string logDir, string line) =>
+        AppendHostLog(Path.Combine(logDir, "backend-host.log"), line);
 
     public static BackendProcess Start(string appDir)
     {
