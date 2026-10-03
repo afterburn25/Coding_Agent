@@ -1196,3 +1196,45 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Known item: unsigned setup.exe still gets SmartScreen/Defender
   pre-launch scanning — fix is `NEXUS_CODESIGN_*` secrets, already
   supported by the workflow.
+
+## v0.12.x checkpoint — startup lock-stall crash loop root-caused and fixed
+
+- **Root cause** (`8f164a1`): `ensure_ready()` held the runtime manager's
+  global `_lock` across the entire `_spawn_and_wait` llama-server load
+  (up to 180s × 3 fallback attempts). `/api/status` calls `statuses()`
+  under the same lock → health probes timed out → host killed the
+  backend → interrupted-task auto-resume retried on next boot →
+  permanent crash loop. Boot prewarm (`runtime_auto_start`) triggers the
+  same path. Fix: per-model `_starting` claim + `_starting_cond`, model
+  launch waits run lock-free with shared-state mutations in short lock
+  sections, `statuses()` does a bounded acquire and returns the
+  last-known snapshot under contention. Regression tests
+  `test_statuses_answers_while_model_load_in_flight` +
+  `test_statuses_falls_back_under_lock_contention` (`d7f8ed1`).
+- **Host** (`adae6c0`, `fdf0c08`): writes `backend-host.log` before
+  `Process.Start` (launch failures were leaving an empty log), logs
+  health-probe state every 15s + last HTTP/error on timeout, reaps
+  orphaned backends by exe path not just pidfile, health timeout 2s→10s
+  and UI probe 5s→15s. `ReapOrphanedBackend` validates PID reuse against
+  the executable path and kills the process tree.
+- **Installer** (`adae6c0`): second inert progress bar removed — native
+  Inno gauge only; kill escalation name→pidfile→PowerShell path sweep of
+  any process running under the install dir; `FileIsWriteLocked` probe
+  on `NexusCore.exe`/`ChatNexus.Backend.exe`/`llama-server.exe` with a
+  45s live-countdown wait before Inno touches files (fixes "DeleteFile
+  failed; code 5" when a backend lingers); stage text covers the file-
+  analysis gap between Update click and extraction start.
+- **Live diagnosis**: real setup logs showed update runs #003/#004
+  killed mid-SHA-256 of `kokoro-v1.0.onnx` (~5s in, static wizard) —
+  the "frozen" update was the silent hash, now narrated. "Could not
+  start" traced to the lock stall above; a stray test backend produced
+  the delete-file-5 update failure and was the concrete repro.
+- Emergency unblock applied to the installed copy only (NOT repo):
+  `D:\Nexus_Core\config.json` `runtime_auto_start: false` + two stuck
+  tasks' `recovery_count` capped past the resume budget. Self-test went
+  120s timeout → healthy in 5.9s. Restore `runtime_auto_start` freely on
+  the fixed build — the lock fix makes prewarm harmless.
+- Suite: **1183 passing** (2 env skips); CI green on `8f164a1`,
+  `5af1346`, `fdf0c08`. Latest fixed installer artifact verified at
+  `dist/installer/NexusCore-Setup-0.12.1-Windows-x64.exe` (sha256
+  `65bf088aff885a21b711232bfd8a9f435b458fea139563f0dd17b3f5ac0c0626`).

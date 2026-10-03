@@ -1,16 +1,37 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1179 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1183 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.12.1 — Installer update progress reporting
 
 v0.12.1 fixes the update path reading as frozen: Inno Setup now reports
 live stage text for every blocking operation — closing Nexus Core
 processes, waiting for exit, forced cleanup, SHA-256 verification of
-existing multi-GB model files, and post-download verification — with a
-marquee bar for unmeasurable work and chunked sleeps so the wizard keeps
-repainting. The uninstaller wait loop shows elapsed seconds, and the
-bootstrap progress area covers all four downloads (Qwen ×2 + Kokoro ×2).
+existing multi-GB model files, and post-download verification — with the
+native wizard progress gauge as the only bar (the inert custom second
+bar was removed). The uninstaller wait loop shows elapsed seconds, and
+the bootstrap progress area covers all four downloads (Qwen ×2 + Kokoro
+×2). Process shutdown escalates through the pidfile and a path-based
+sweep of anything running from the install dir, and a `FileIsWriteLocked`
+probe waits on the replaceable executables with a live countdown —
+"DeleteFile failed; code 5" from a lingering process can no longer blind
+the copy step.
+
+v0.12.1 also fixes the startup health-check crash loop that made the
+app report "could not start" after updates: `ensure_ready()` held the
+runtime manager's global lock for the entire llama-server model load
+(up to the 180s startup timeout ×3 fallback attempts), so `/api/status` —
+which reads `statuses()` under that same lock — stalled for minutes.
+Boot-time prewarm (`runtime_auto_start`) or interrupted-task auto-resume
+triggered a load → health probes timed out → the desktop host killed the
+backend → tasks stayed interrupted → every subsequent boot repeated it.
+Model launches now claim a per-model slot and wait lock-free (concurrent
+callers share one launch via a condition variable), `statuses()` falls
+back to the last-known snapshot under lock contention, and the host's
+probe timeouts were raised (2s→10s health, 5s→15s UI). The host also
+reaps orphaned backends by executable path (not just the pidfile) and
+writes `backend-host.log` before `Process.Start`, so early launch
+failures are now recorded instead of leaving an empty log.
 
 ### v0.12.0 — Profiles + Creator Identity + Personality Studio
 
