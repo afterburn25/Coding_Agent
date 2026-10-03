@@ -416,19 +416,65 @@ begin
   end;
 end;
 
-function DownloadBytesDone(const FileName: String): Int64;
-// Inno's `external download` streams into {tmp} under the original
-// filename (verified in setup logs: {tmp}\Qwen3-14B-Q4_K_M.gguf), not
-// into the destination dir and not with a .tmp suffix — reading bytes
-// anywhere else leaves the gauge at zero.
+function SizeOfFile(const Path: String): Int64;
+// FindFirst/FindRec.Size reads a file's size even while it is still
+// open for writing (FileSize64 can fail on the in-progress download).
+var
+  FindRec: TFindRec;
 begin
-  if not FileSize64(ExpandConstant('{tmp}\') + FileName, Result) and
-     not FileSize64(ExpandConstant('{tmp}\') + FileName + '.tmp', Result) then
-    Result := -1;
+  Result := -1;
+  if FindFirst(Path, FindRec) then
+  begin
+    Result := (Int64(FindRec.SizeHigh) shl 32) or FindRec.SizeLow;
+    FindClose(FindRec);
+  end;
+end;
+
+function DownloadBytesDone(const FileName, DestDir: String): Int64;
+// Inno does not document a stable temp name for [Files] external
+// downloads — observed behaviors across versions: streamed into {tmp}
+// under the original filename, under a generated name, or straight into
+// the destination path. Check every candidate, then fall back to the
+// largest file in {tmp} (the running setup stub is excluded by name).
+var
+  FindRec: TFindRec;
+  Candidate: String;
+  Size: Int64;
+  TmpDir: String;
+begin
+  TmpDir := ExpandConstant('{tmp}\');
+  Size := SizeOfFile(TmpDir + FileName);
+  if Size >= 0 then begin Result := Size; Exit; end;
+  Size := SizeOfFile(TmpDir + FileName + '.tmp');
+  if Size >= 0 then begin Result := Size; Exit; end;
+  Size := SizeOfFile(AddBackslash(DestDir) + FileName);
+  if Size >= 0 then begin Result := Size; Exit; end;
+  Size := SizeOfFile(AddBackslash(DestDir) + FileName + '.tmp');
+  if Size >= 0 then begin Result := Size; Exit; end;
+  Result := -1;
+  if FindFirst(TmpDir + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           ((FindRec.Attributes and $10) = 0) and
+           (Pos('-Setup-', FindRec.Name) = 0) and
+           (CompareText(FindRec.Name, '_unins.tmp') <> 0) then
+        begin
+          Candidate := TmpDir + FindRec.Name;
+          Size := SizeOfFile(Candidate);
+          if Size > Result then
+            Result := Size;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
 end;
 
 procedure ShowModelDownloadProgress(
-  const DisplayName, DownloadFileName: String;
+  const DisplayName, DownloadFileName, DestDir: String;
   const ExpectedSize: Int64);
 var
   BytesDone: Int64;
@@ -447,7 +493,7 @@ begin
   ModelProgressBar.Visible := True;
   ModelBytesLabel.Visible := True;
 
-  BytesDone := DownloadBytesDone(DownloadFileName);
+  BytesDone := DownloadBytesDone(DownloadFileName, DestDir);
   if BytesDone < LastModelBytesDone then
     BytesDone := LastModelBytesDone;
   if BytesDone < 0 then
@@ -494,13 +540,13 @@ begin
   CurrentFile := WizardForm.FilenameLabel.Caption;
 
   if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', '{#Qwen14FileName}', {#Qwen14Size})
+    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', '{#Qwen14FileName}', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
   else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', '{#Qwen30FileName}', {#Qwen30Size})
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', '{#Qwen30FileName}', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
   else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voice model', 'kokoro-v1.0.onnx', {#KokoroModelSize})
+    ShowModelDownloadProgress('Kokoro voice model', 'kokoro-v1.0.onnx', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
   else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voices', 'voices-v1.0.bin', {#KokoroVoicesSize});
+    ShowModelDownloadProgress('Kokoro voices', 'voices-v1.0.bin', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
