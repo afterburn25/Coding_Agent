@@ -466,6 +466,31 @@ class EndToEndAgentTests(unittest.TestCase):
             state._dequeue_next()
             self.assertEqual(len(state.queue), 1)  # driver seen — held
 
+    def test_evict_idle_pins_live_driver_models(self):
+        """A live drive's model must stay resident even when its task row
+        has aged out of the recent() window — evicting it mid-drive would
+        kill the in-flight request."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            deep = state.tasks.create("deep running task", "auto")
+            state.tasks.update(
+                deep.id, status="running", model_id="qwen3-14b")
+            for i in range(55):  # push it beyond recent(50)
+                pad = state.tasks.create(f"pad {i}", "auto")
+                state.tasks.update(pad.id, status="completed")
+            state.agent._drive_threads[deep.id] = threading.current_thread()
+            captured: dict = {}
+            orig = state.runtime.evict_idle
+            state.runtime.evict_idle = lambda **kw: (
+                captured.update(kw) or [])
+            try:
+                state._evict_idle_models()
+            finally:
+                state.runtime.evict_idle = orig
+            self.assertIn("qwen3-14b", captured.get("busy_models") or set())
+
     def test_full_stack_sse_stream_end_to_end(self):
         """Real HTTP server + SSE + event bus + fake model — the exact path
         the desktop UI drives."""

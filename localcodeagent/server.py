@@ -971,18 +971,7 @@ class AppState:
 
         def lane_free() -> bool:
             """Interactive chat/queued work outranks background missions."""
-            try:
-                recent = self.tasks.recent(10)
-                if any(t.get("status") in {"running", "verifying", "reviewing",
-                                           "waiting_approval"} for t in recent):
-                    return False
-                if getattr(self, "_queue_running", None):
-                    return False
-                if getattr(self, "_retrying_tasks", None):
-                    return False
-                return True
-            except Exception:
-                return False
+            return not self._agent_lane_active(include_waiting_approval=True)
 
         hooks = {
             "evict_idle_models": lambda: self.runtime.evict_idle(),
@@ -2111,15 +2100,7 @@ class AppState:
             return
 
         def _lane_busy() -> bool:
-            try:
-                if any(
-                    t.get("status") in {"running", "verifying", "reviewing"}
-                    for t in self.tasks.recent(10)
-                ):
-                    return True
-                return bool(getattr(self, "_queue_running", None))
-            except Exception:
-                return True  # uncertain → don't benchmark
+            return self._agent_lane_active()
 
         def _has_result(profile) -> bool:
             try:
@@ -2655,6 +2636,37 @@ class AppState:
             if spec and spec.health_check is None:
                 spec.health_check = always_ok("native subprocess execution")
 
+    def _agent_lane_active(self, *, include_waiting_approval: bool = False) -> bool:
+        """True while interactive chat/queued work owns the model lane.
+
+        Combines ledger status (recent window), in-flight queue/retry
+        markers, and the authoritative driver registry — a task whose row
+        has aged out of recent() is still busy while its driver lives.
+        Uncertain answers lean busy so missions/tuning never contend with
+        an in-flight drive.
+        """
+        statuses = {"running", "verifying", "reviewing"}
+        if include_waiting_approval:
+            statuses = statuses | {"waiting_approval"}
+        try:
+            if any(t.get("status") in statuses
+                   for t in self.tasks.recent(50)):
+                return True
+            if getattr(self, "_queue_running", None):
+                return True
+            if getattr(self, "_retrying_tasks", None):
+                return True
+            try:
+                with self.agent._drive_lock:
+                    if any(t.is_alive()
+                           for t in self.agent._drive_threads.values()):
+                        return True
+            except Exception:
+                return True  # can't verify liveness → lean busy
+        except Exception:
+            return True  # uncertain → lean busy
+        return False
+
     def _watchdog_maintenance(self) -> None:
         self._evict_idle_models()
         self._expire_stale_approvals()
@@ -3075,6 +3087,19 @@ class AppState:
                 for t in self.tasks.recent(50)
                 if t.get("status") in {"running", "verifying", "reviewing"}
             }
+            # A live drive is authoritative even when its task row has aged
+            # out of the recent window — evicting its model mid-drive would
+            # kill the in-flight request.
+            with self.agent._drive_lock:
+                live_ids = [
+                    tid for tid, th in self.agent._drive_threads.items()
+                    if th.is_alive()
+                ]
+            for tid in live_ids:
+                try:
+                    busy.add(str(self.tasks.get(tid).model_id or ""))
+                except Exception:
+                    pass
             busy.discard("")
             stopped = self.runtime.evict_idle(busy_models=busy)
             for model_id in stopped:
