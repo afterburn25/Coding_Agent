@@ -119,7 +119,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def _state(self, td: str, endpoint: str):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import AppState
-        cfg = AgentConfig(
+        cfg = AgentConfig(profiles_onboarding_gate=False, 
             models=[ModelProfile(
                 id="fake", endpoint=endpoint, model="fake-model",
                 roles=["primary_coder", "utility", "fast_coder"], runtime="external")],
@@ -400,7 +400,7 @@ class EndToEndAgentTests(unittest.TestCase):
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint=fake.endpoint, model="fake-model",
                     roles=["primary_coder", "utility", "fast_coder"],
@@ -477,7 +477,7 @@ class EndToEndAgentTests(unittest.TestCase):
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint=fake.endpoint, model="fake-model",
                     roles=["primary_coder", "utility", "fast_coder"],
@@ -545,7 +545,7 @@ class EndToEndAgentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint="http://127.0.0.1:1/v1",
                     model="fake-model", roles=["primary_coder"],
@@ -585,7 +585,7 @@ class AutonomyApiTests(unittest.TestCase):
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint="http://127.0.0.1:1/v1",
                     model="fake-model", roles=["primary_coder"],
@@ -640,7 +640,7 @@ class AutonomyApiTests(unittest.TestCase):
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint="http://127.0.0.1:1/v1",
                     model="fake-model", roles=["primary_coder"],
@@ -677,7 +677,7 @@ class ChatAttachmentTests(unittest.TestCase):
     def _state(self, td: str, endpoint: str):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import AppState
-        cfg = AgentConfig(
+        cfg = AgentConfig(profiles_onboarding_gate=False, 
             models=[ModelProfile(
                 id="fake", endpoint=endpoint, model="fake-model",
                 roles=["primary_coder", "utility", "fast_coder"],

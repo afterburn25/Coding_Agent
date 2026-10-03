@@ -177,6 +177,10 @@ class AgentConfig:
     # goals. Runs inside the backend so missions continue while the UI is
     # closed; missions never widen tool permissions.
     autonomy_enabled: bool = True
+    # Onboarding gate: while no profile exists, protected APIs return
+    # 403 and the UI is locked to Start Here. Real installs leave this
+    # on; test harnesses that exercise unrelated APIs disable it.
+    profiles_onboarding_gate: bool = True
     # Optional quiet-hours window [start_hour, end_hour] local time during
     # which noncritical notifications are muted.
     autonomy_quiet_hours: list[int] | None = None
@@ -579,6 +583,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.autonomy_enabled = bool(raw.get("autonomy_enabled", cfg.autonomy_enabled))
+    cfg.profiles_onboarding_gate = bool(raw.get(
+        "profiles_onboarding_gate", cfg.profiles_onboarding_gate))
     cfg.self_repair_auto_promote = bool(raw.get(
         "self_repair_auto_promote", cfg.self_repair_auto_promote))
     cfg.self_repair_commit_on_promote = bool(raw.get(

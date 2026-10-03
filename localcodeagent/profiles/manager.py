@@ -153,11 +153,14 @@ class ProfileManager:
         elif creator_passcode is not None:
             raise ProfileError(
                 "passcode is only valid for the reserved profile")
+        first = not self.list_ids()
         profile = new_profile(fields)
         if reserved:
             profile.update(creator_fields(True))
         self._write(profile)
-        if not self.active_id():
+        if first:
+            # The first-created profile becomes active — recorded
+            # explicitly in the index, never inferred from dir order.
             idx = self._index()
             idx["active"] = profile["profile_id"]
             self._save_index(idx)

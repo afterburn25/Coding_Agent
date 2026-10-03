@@ -4122,7 +4122,8 @@ class Handler(BaseHTTPRequestHandler):
         # Onboarding lock: until a profile exists, only onboarding-safe
         # APIs + static assets pass — everything else is gated
         # server-side, not by CSS.
-        if (self.state.profiles.onboarding_required
+        if (self.state.config.profiles_onboarding_gate
+                and self.state.profiles.onboarding_required
                 and not ProfileAPI.allowed_while_locked(path)):
             self._json({"error": "onboarding_required",
                         "locked": True}, HTTPStatus.FORBIDDEN)
@@ -4703,7 +4704,8 @@ class Handler(BaseHTTPRequestHandler):
         """PATCH exists only for the profile API — PATCH /api/profiles/{id}
         and PATCH /api/profiles/{id}/personality per spec."""
         path = urlparse(self.path).path
-        if (self.state.profiles.onboarding_required
+        if (self.state.config.profiles_onboarding_gate
+                and self.state.profiles.onboarding_required
                 and not ProfileAPI.allowed_while_locked(path)):
             self._json({"error": "onboarding_required",
                         "locked": True}, HTTPStatus.FORBIDDEN)
@@ -4725,7 +4727,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if (self.state.profiles.onboarding_required
+        if (self.state.config.profiles_onboarding_gate
+                and self.state.profiles.onboarding_required
                 and not ProfileAPI.allowed_while_locked(path)):
             self._json({"error": "onboarding_required",
                         "locked": True}, HTTPStatus.FORBIDDEN)

@@ -204,7 +204,7 @@ class PermissionApiTests(unittest.TestCase):
         from localcodeagent.server import create_server, stop_state
         cls._td = tempfile.TemporaryDirectory()
         td = Path(cls._td.name)
-        cfg = AgentConfig(
+        cfg = AgentConfig(profiles_onboarding_gate=False, 
             models=[ModelProfile(id="fake", endpoint="http://127.0.0.1:1/v1", model="m",
                                  roles=["utility"], runtime="external")],
             process_watchdog=False, research_enabled=False)

@@ -276,7 +276,7 @@ class _AlwaysFailProvider:
 
 class RecoveryLoopTests(unittest.TestCase):
     def _agent(self, root: Path, runtime: _FakeRuntime) -> AgentOrchestrator:
-        config = AgentConfig(
+        config = AgentConfig(profiles_onboarding_gate=False, 
             models=[_profile()], permissions={},
             runtime_recovery_attempts=2,
             auto_verify_after_changes=False, review_after_changes=False,
@@ -405,7 +405,7 @@ class BackendHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             profile = _profile()
-            manager = RuntimeManager(AgentConfig(models=[profile]),
+            manager = RuntimeManager(AgentConfig(profiles_onboarding_gate=False, models=[profile]),
                                      base_dir=root)
             log = root / "llama.log"
             log.write_text(
@@ -435,7 +435,7 @@ class BackendHealthTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             profile = _profile()
-            manager = RuntimeManager(AgentConfig(models=[profile]),
+            manager = RuntimeManager(AgentConfig(profiles_onboarding_gate=False, models=[profile]),
                                      base_dir=Path(td))
             status = manager._status[profile.id]
             status.managed = True
@@ -487,7 +487,7 @@ class DiagnosticsEndpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ws = Path(td)
             (ws / "web").mkdir()
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint="http://127.0.0.1:9/v1",
                     model="fake-model", roles=["primary_coder"],
@@ -530,7 +530,7 @@ class DiagnosticsEndpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ws = Path(td)
             (ws / "web").mkdir()
-            cfg = AgentConfig(
+            cfg = AgentConfig(profiles_onboarding_gate=False, 
                 models=[ModelProfile(
                     id="fake", endpoint="http://127.0.0.1:9/v1",
                     model="fake-model", roles=["primary_coder"],
@@ -646,7 +646,7 @@ class PortCollisionTests(unittest.TestCase):
     picks a free port."""
 
     def _cfg(self) -> AgentConfig:
-        return AgentConfig(
+        return AgentConfig(profiles_onboarding_gate=False, 
             models=[ModelProfile(
                 id="fake", endpoint="http://127.0.0.1:9/v1",
                 model="fake-model", roles=["primary_coder"],
