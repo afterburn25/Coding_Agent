@@ -1,8 +1,35 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1089 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1155 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.11.0 — Signal detection + fair scheduling
+## Active version: 0.12.0 — Profiles + Creator Identity + Personality Studio
+
+v0.12 puts Nexus Core on durable human profiles
+(`localcodeagent/profiles/`): a fresh install boots locked into a
+**Start Here** onboarding page — all protected APIs 403 server-side
+until the first profile is created. Profiles are UUID-keyed under
+`data/profiles/<uuid>/` with immutable identity (name/sex/birthdate),
+editable contact/location, a real circular-crop avatar pipeline
+(Pillow → normalized 512px WebP), and isolated per-profile personality,
+voice, settings, greeting state, and personal memory. The reserved
+normalized name `John Hamburn` triggers Creator authentication —
+PBKDF2-HMAC-SHA256 (stdlib, 600k) with bootstrap→enrollment re-hash into
+`data/creator_credential.json`, persisted exponential-backoff rate
+limiting, and neutral errors; `is_creator` exists only via that path
+and never widens tool/safety boundaries. **Personality Studio**
+(`localcodeagent/personality/` + `web/personality.html`) ships 73
+immutable presets (8 adult-only), a 47-slider whitelist, Personality
+Strength, 7 moods, custom personalities, and a voice map onto real
+engine params (Kokoro speed, DSP pitch/tempo/gain — unsupported
+acoustics become documented prosody hints). Adult gating derives only
+from the immutable birthdate and is enforced backend-side (adult
+presets excluded, adult sliders stripped). The structured greeting
+service gives once-per-profile introductions, rotating
+personality-aware returning greetings, and Creator preferred-address.
+Legacy state migrates idempotently — everything preserved in place.
+Docs: `docs/PROFILES.md`. 66 new tests.
+
+### Retained from v0.11 — Signal detection + fair scheduling
 
 v0.11 adds `localcodeagent/autonomy/detectors.py` — `SignalScanner`
 periodically measures live telemetry (crash history, mission outcomes,

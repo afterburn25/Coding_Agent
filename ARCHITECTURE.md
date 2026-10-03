@@ -306,3 +306,23 @@ The main application talks only to the `ImageBackend` interface. `ComfyUIBackend
 ### Internet boundary
 
 Public research and interactive browsing use separate permissions. `web_search` and `fetch_url` are read-only research tools under `network.read`. Full Chromium automation is exposed as `browser_run` under the stronger `browser.control` permission and is optional at install time.
+
+## Profile identity layer (v0.12)
+
+Nexus Core runs on durable human profiles — `localcodeagent/profiles/`
+(UUID-keyed dirs under `data/profiles/<uuid>/`) and
+`localcodeagent/personality/` (presets, slider whitelist, strength,
+moods, voice map, greetings). While `ProfileManager.onboarding_required`
+the HTTP handler returns 403 for every protected API; onboarding-safe
+endpoints and static assets pass. Identity fields are immutable,
+protected fields (`is_creator`, `creator_*`) are produced only by the
+Creator verification path (PBKDF2-HMAC-SHA256, bootstrap→enrollment
+credential file, persisted rate limiting), and adult eligibility is
+always derived from the immutable birthdate — enforced in the services,
+not the UI. Personality is a presentation-only layer over reasoning:
+whitelisted sliders/presets shape text style and voice delivery
+(`voice_map` → Kokoro speed + DSP pitch/tempo/gain, documented prosody
+hints for unsupported acoustics); facts, code correctness, tool
+permissions, and safety state are untouched. Personal memory is isolated
+per profile; chats/models/Brain stay device-global. See
+`docs/PROFILES.md` for the full model.
