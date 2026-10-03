@@ -139,14 +139,18 @@ class TaskStore:
             # direct-completion paths (image router, early failures) skip
             # the event-log emitter entirely.
             if (task.status in _TERMINAL_STATUSES
-                    and prev_status not in _TERMINAL_STATUSES
-                    and not self.read_log(task_id).strip()):
-                detail = task.error or task.summary or task.final_content
-                self.append_log(
-                    task_id,
-                    f"## task {task.status}"
-                    + (f": {str(detail)[:300]}" if detail else "")
-                    + "\n")
+                    and prev_status not in _TERMINAL_STATUSES):
+                if not self.read_log(task_id).strip():
+                    detail = task.error or task.summary or task.final_content
+                    self.append_log(
+                        task_id,
+                        f"## task {task.status}"
+                        + (f": {str(detail)[:300]}" if detail else "")
+                        + "\n")
+                # Always flush — a populated buffer is still a leak:
+                # _log_buffers entries only clear on flush, so terminal
+                # paths that skip _close_session would hold the transcript
+                # in memory forever (and lose it on restart).
                 self.flush_log(task_id)
             return task
 

@@ -3395,6 +3395,14 @@ class AgentOrchestrator:
                 self.activities.close_open(task.id, "failed")
             act = self._act(task.id, "error", "Error", error_task.error[:240], callback=event_callback)
             self._act_update(task.id, act, state="failed", callback=event_callback)
+            # No session exists yet, so _close_session won't run — flush the
+            # buffered transcript now or it leaks in _log_buffers forever and
+            # the terminal log is lost on restart.
+            try:
+                self.tasks.flush_log(task.id)
+            except Exception:
+                pass
+            self._mission_by_task.pop(task.id, None)
             raise
         lightweight = decision.role == "utility"
         if self.nexus_brain is not None and self.nexus_brain.initialized:
