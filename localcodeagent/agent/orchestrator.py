@@ -3802,6 +3802,10 @@ class AgentOrchestrator:
                 raise KeyError(f"No resumable approval is pending for task {task_id}")
             pending = session.pending_approval
             session.pending_approval = None
+        # The claim consumed the park — reflect it in the ledger immediately so
+        # approval-expiry and UIs don't see waiting_approval during execution.
+        self.tasks.update(
+            task_id, status="running", phase="working", pending_approval=None)
         self._task_context(task_id)
 
         if pending["kind"] == "tool":
