@@ -148,12 +148,11 @@
     if (s.required) {
       removeSwitcher();
       if (!ON_START) location.replace("/start.html");
-      // First-run welcome voice — spoken once on the Start Here page.
-      // Only marked played when audio actually came back, so an engine
-      // still warming up retries on the next launch instead of going
-      // permanently silent.
-      if (ON_START && !s.welcome_played &&
-          window.NexusVoice && NexusVoice.speak) {
+      // First-run welcome voice — spoken EVERY time the Start Here page
+      // loads while no profile exists. s.required flips false the moment a
+      // profile is created, so this silences itself permanently; an
+      // unfinished onboarding keeps reminding the user each launch.
+      if (ON_START && window.NexusVoice && NexusVoice.speak) {
         NexusVoice.speak(
           "Welcome to Nexus Core. To unlock your workstation, fill out " +
           "your profile below — every field on this page is required."
