@@ -106,6 +106,15 @@ worktree — candidate resolution fully isolated.
 - `f6ddc09` — Answer Memory self-heals partial v2 stamps: column/index
   assertions re-run idempotently on every open, closing the
   `user_version`-keyed migration gap flagged above.
+- `167f2c9` — Identical-failing-call dedup + escalation nudge: the live
+  task's terminal log showed the 14B re-emitting the same failing
+  `apply_patch` ~5×, each burning an approval + step to `step_limit`.
+  Identical `(name, args)` calls now fail fast without executing
+  (signatures reset on any successful mutation), and when repeated
+  failures can't escalate to a bigger model the corrective hint fires
+  once instead of silently no-oping. Verified live with a fresh task
+  (clamp utility): 14B under 0.8GB free VRAM survived the full drive —
+  write → test → selftest (ran the new dedup test itself) → `completed`.
 - `351f601` — **14B disconnect root cause found and fixed**: the
   recurring `connection_reset` on 127.0.0.1:8081 was not a crash or
   VRAM contention — memory-pressure eviction (`memory_pressure_vram_gb:

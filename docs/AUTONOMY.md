@@ -102,6 +102,16 @@ repair, replan, escalate — with hard caps:
 A repeated identical failure signature stops the mission instead of
 looping forever.
 
+Inside a single task drive the same anti-loop protections apply at the
+tool-call level: a call whose `(name, arguments)` signature already
+returned an error is fed back as an error without executing — no
+approval round-trip, no step burned — and the signatures reset after
+any successful mutating call so retry-after-state-change still works.
+When repeated failures would escalate to a larger model but none
+resolves (the current model is already the top tier), a one-time
+corrective hint is injected into the conversation instead of the
+escalation silently no-oping.
+
 A driverless task can never wedge the queue: every synchronous drive
 (`run`, `resume`, `recover`) registers its thread in
 `agent._drive_threads`, and the watchdog's `_reap_stalled_tasks()` —
