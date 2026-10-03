@@ -448,6 +448,24 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(
                 state.tasks.get(parked.id).status, "waiting_approval")
 
+    def test_dequeue_respects_live_driver_beyond_ledger_window(self):
+        """An active task pushed out of the recent() window by newer rows
+        must still hold single-flight — the driver registry, not ledger
+        position, is the authoritative liveness check."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            deep = state.tasks.create("deep running task", "auto")
+            state.tasks.update(deep.id, status="running", phase="working")
+            for i in range(55):  # push it beyond recent(50)
+                pad = state.tasks.create(f"pad {i}", "auto")
+                state.tasks.update(pad.id, status="completed")
+            state.agent._drive_threads[deep.id] = threading.current_thread()
+            state.queue.enqueue("queued work")
+            state._dequeue_next()
+            self.assertEqual(len(state.queue), 1)  # driver seen — held
+
     def test_full_stack_sse_stream_end_to_end(self):
         """Real HTTP server + SSE + event bus + fake model — the exact path
         the desktop UI drives."""

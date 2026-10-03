@@ -2823,8 +2823,16 @@ class AppState:
         if not self._dequeue_lock.acquire(timeout=2 if blocking else 0):
             return
         try:
-            recent = self.tasks.recent(20)
+            recent = self.tasks.recent(50)
             if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
+                return
+            # Ledger position isn't authoritative — enough newer rows can
+            # push an active task out of the recent window. A live driver
+            # thread is: single-flight must hold regardless of ledger age.
+            with self.agent._drive_lock:
+                live_drivers = any(
+                    t.is_alive() for t in self.agent._drive_threads.values())
+            if live_drivers:
                 return
             if getattr(self, "_retrying_tasks", None) or self._queue_running:
                 return
@@ -2920,6 +2928,11 @@ class AppState:
             recent = self.tasks.recent(50)
             if any(t.get("status") in {"running", "verifying", "reviewing", "waiting_approval"} for t in recent):
                 return
+            # Same single-flight backstop as _dequeue_next — a live driver
+            # is authoritative no matter how deep in the ledger its task is.
+            with self.agent._drive_lock:
+                if any(t.is_alive() for t in self.agent._drive_threads.values()):
+                    return
             stale = [
                 t for t in recent
                 if t.get("status") == "error"
@@ -2970,7 +2983,7 @@ class AppState:
                 float(getattr(self.config, "stalled_task_grace_seconds", 120.0) or 120.0),
             )
             now = time.time()
-            for task in self.tasks.recent(20):
+            for task in self.tasks.recent(50):
                 if str(task.get("status") or "") not in {
                         "running", "verifying", "reviewing"}:
                     continue
