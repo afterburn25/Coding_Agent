@@ -169,3 +169,64 @@ c4050e5 Queue: dead drive threads can no longer wedge task processing
 60538d2 Personality: render standout sliders as delivery-style cues
 43065f7 Answer Memory: scope learned answers to the recording profile
 ```
+
+## Follow-on rounds (post-report hardening sweep)
+
+After the ledger drained, a systematic audit of every failure class that
+could degrade an unattended multi-day run landed the following fixes —
+all unit-tested, several live-verified on the dogfood backend:
+
+**Concurrency & approvals**
+
+- `95a4124` — `resume()` claimed `session.pending_approval`
+  non-atomically: two simultaneous approvals executed the action twice
+  and spawned competing drives on one session. New `_claim_drive()`
+  single-flights all drive entries (run/resume/recover, nested re-entry
+  allowed); the approval claim happens under `_drive_lock`.
+- `f909222` / `8ce18dc` / `884440d` — every resume branch (session tool,
+  persisted tool/verification, direct image) left the row at
+  `waiting_approval` while the approved action ran — approval-expiry
+  could reap mid-execution, and the UI showed a stale park. The ledger
+  now flips to `running`/`working` at claim time.
+- `edc3011` — `/api/jobs/cancel` on a parked task left the session in
+  `_sessions` (leaked + resumable stale state) and kept
+  `pending_approval` in the row; the endpoint now closes the session and
+  clears the field.
+- `04a88ca` — `current_mission_id` was a mutable orchestrator global;
+  parallel lanes (mission node + chat) mis-stamped activities.
+  `run(mission_id=…)` registers per-task now.
+
+**Marker-then-spawn wedges** (a failed `Thread.start()` left permanent
+stuck state): `584d177` queue/retry sets (+ lost popped item re-queued),
+`41c8e07` mission `_workers` + image jobs + model installs marked
+failed, `3c810db` MCP/LSP PIPE'd children killed when reader threads
+fail to spawn.
+
+**Unbounded resources**
+
+- Logs: `3f8a74a` permission audit JSONL (2×AUDIT_LIMIT compaction),
+  `97bab0b` eval history + cerebellum opt log (512KiB tail bound;
+  `history()` also re-read the whole file per call), `ca75984` probe log
+  handle leak + `probe-*.log` count prune.
+- Memory: `98a3be2` TaskStore in-memory rows evict to the persisted set
+  (previously every row ever created stayed in RAM), `0e2d001` image
+  `_jobs` same divergence, `7445b1e` install `_cancel` flags popped on
+  worker exit.
+- `6cf18b1` — `_log_buffers` leaked on every early-return terminal path
+  (brain fast-path, builtin, direct image, answer memory, activate
+  failure); terminal status transitions now flush unconditionally.
+
+**Verified, no fix needed**: lock ordering (`_dequeue_lock` →
+`_drive_lock` → `tasks._lock`, never reversed — no ABBA), `agent_lane`
+resource lock enforces `_lane_mission` single-ownership, ActivityStore
+bounds, brain stores locked/sqlite, EventBus slow-consumer drops, SSE
+unsubscribe, all process waits timeout-guarded or cancelable,
+TaskStore atomic writes + corrupt quarantine, restart storm cap
+(3 restarts / 10 min), schedule catch-up fires once (no storm),
+research cache TTL+cap, voice task map bound.
+
+**Live verification**: fresh attended task `429985175318` (fib utility)
+on qwen3-14b — write_file → run_shell → verification selftest →
+`completed`, all through approval gates on final code.
+
+Final suite: **1207 tests green / 2 POSIX skips**.
