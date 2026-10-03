@@ -1582,8 +1582,14 @@ class AgentOrchestrator:
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
         session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
+        # The approval is claimed — flip the ledger out of waiting_approval
+        # before executing so expiry/UIs don't see a stale park while the
+        # (possibly long) approved action runs.
         self.tasks.update(
             task_id,
+            status="running",
+            phase="working",
+            pending_approval=None,
             recovery_count=task.recovery_count + 1,
             error="",
         )
