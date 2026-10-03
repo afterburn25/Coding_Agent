@@ -113,6 +113,26 @@ do-not-regress invariants:
   to alive servers are stale sockets; retries bound by
   `runtime_recovery_attempts`, never retry 4xx or mid-stream failures
   with `delivered_output`.
+- **Mission loop invariants (do not regress)**, all found by live
+  dogfooding and now test-covered (`e3d68ff`, `5e74928`, `6c684c1`,
+  `16acf05`):
+  - `TaskRecord.mission_id` persists; `AgentOrchestrator.run` stamps it;
+    mission-attributed `waiting_approval` rows never count as
+    interactive lane work (interactive parks still outrank missions).
+  - Mission node success maps through `_task_status_succeeded` on the
+    real ledger terminal set (`completed`, `completed_with_warnings`,
+    `reverted`) — never `"done"`, which is not a ledger status.
+  - `skipped` is a dead-dependency trigger: `_refresh_ready`
+    cascade-skips dependents; `_do_replan` sweeps stale
+    `blocked`/`planned` dead ends to `skipped` so
+    `all_tasks_completed` can hold for the replacement DAG.
+  - Chat-level auto-resume/error retry never re-drives mission-owned
+    tasks (`mission_id` stamp or id recorded on a mission node
+    result) — the supervisor owns mission recovery via node
+    retries/replans.
+  - Verified live: mission `m-8ec0974d75ff` (`math_util.is_prime`)
+    completed across two backend restarts; see
+    `docs/reports/OVERNIGHT_REPORT_2026-10-03.md` mission-loop section.
 
 ## v0.7.2 UI unification + transport hardening checkpoint
 
