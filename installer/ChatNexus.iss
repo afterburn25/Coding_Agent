@@ -117,15 +117,10 @@ Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: 
 ; when the user clicks Install — Inno's built-in download UI with a live
 ; per-file bar, its own message pump, and a working Abort button ([Files]
 ; `download` and synchronous PrepareToInstall calls can't do any of that).
-; Verified files land in {tmp} and these entries copy them into the models
-; dir on the main install bar. Smallest to largest: 4B, 8B, 14B, 30B hybrid,
-; then voice assets. Missing {tmp} files (skipped or aborted) are skipped.
-Source: "{tmp}\{#Qwen4FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen4FileName}'); AfterInstall: CatalogQwen4
-Source: "{tmp}\{#Qwen8FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen8FileName}'); AfterInstall: CatalogQwen8
-Source: "{tmp}\{#Qwen14FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen14FileName}'); AfterInstall: CatalogQwen14
-Source: "{tmp}\{#Qwen30FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen30FileName}'); AfterInstall: CatalogQwen30
-Source: "{tmp}\kokoro-v1.0.onnx"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('kokoro-v1.0.onnx'); AfterInstall: CatalogKokoroModel
-Source: "{tmp}\voices-v1.0.bin"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('voices-v1.0.bin'); AfterInstall: CatalogKokoroVoices
+; Files land in {tmp} and StageVerifiedDownloads hash-checks and copies them
+; into the models dir on every download-page exit (success, abort, failure),
+; so completed downloads survive aborts and successful runs don't double-copy
+; ~35 GB. Smallest to largest: 4B, 8B, 14B, 30B hybrid, then voice assets.
 
 ; Optional tools (ComfyUI portable, image model packs) are downloaded by the
 ; in-app Tools page instead of Setup, keeping installation fast.
@@ -343,14 +338,12 @@ begin
     DlLastCompleted := True;
     if DlCompleted <> nil then
       DlCompleted.Add(FileName);
-    // Inno now verifies this file's SHA-256 before starting the next —
-    // a visible pause between files. Keep the total on screen and append
-    // the verify note so the label doesn't look like it disappeared.
+    // Reassert the total in case Inno repaints between files — the label is
+    // ours, so keep it alive across the queue boundary.
     if (not WizardSilent()) and (DlTotalBytes > 0) then
       DownloadTotalLabel.Caption :=
         'Total: ' + IntToStr(DlDoneBytes div 1048576) + ' / ' +
-        IntToStr(DlTotalBytes div 1048576) + ' MB — verifying SHA-256 of ' +
-        FileName + '...';
+        IntToStr(DlTotalBytes div 1048576) + ' MB — ' + FileName + ' done';
   end;
 end;
 
@@ -719,46 +712,45 @@ begin
   DlLastFile := '';
   DlLastCounted := False;
 
-  // Smallest to largest, matching the plan page order.
+  // Empty SHA-256 on purpose: Inno's per-file verify runs a synchronous hash
+  // between files (25-45s on multi-GB models) during which the page's text
+  // blanks and Abort cannot be answered. Integrity is enforced in
+  // StageVerifiedDownloads instead — only hash-matching files are copied and
+  // cataloged — so downloads flow back-to-back and Abort answers instantly.
   if DoQwen4 then
   begin
-    DownloadPage.Add('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}');
+    DownloadPage.Add('{#Qwen4Url}', '{#Qwen4FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen4Size};
   end;
   if DoQwen8 then
   begin
-    DownloadPage.Add('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}');
+    DownloadPage.Add('{#Qwen8Url}', '{#Qwen8FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen8Size};
   end;
   if DoQwen14 then
   begin
-    DownloadPage.Add('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}');
+    DownloadPage.Add('{#Qwen14Url}', '{#Qwen14FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen14Size};
   end;
   if DoQwen30 then
   begin
-    DownloadPage.Add('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}');
+    DownloadPage.Add('{#Qwen30Url}', '{#Qwen30FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen30Size};
   end;
   if DoKokoroModel then
   begin
-    DownloadPage.Add('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}');
+    DownloadPage.Add('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '');
     DlTotalBytes := DlTotalBytes + {#KokoroModelSize};
   end;
   if DoKokoroVoices then
   begin
-    DownloadPage.Add('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}');
+    DownloadPage.Add('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '');
     DlTotalBytes := DlTotalBytes + {#KokoroVoicesSize};
   end;
 end;
 
-function ModelStaged(Param: String): Boolean;
-begin
-  Result := FileExists(ExpandConstant('{tmp}\') + Param);
-end;
-
-// [Files] AfterInstall hooks — stamp trust metadata the moment a verified
-// download lands in models\, not at ssPostInstall. An aborted run then still
+// Catalog hooks — stamp trust metadata the moment a verified download is
+// staged into models\, not at ssPostInstall. An aborted run then still
 // leaves trusted files, so the next run skips re-download AND the multi-GB
 // SHA-256 re-check that froze the Ready page.
 procedure CatalogQwen4();
@@ -797,11 +789,23 @@ begin
     '{#KokoroVoicesSha256}', {#KokoroVoicesSize}, 'hexgrad/Kokoro-82M');
 end;
 
+function ExpectedHashFor(const FileName: String): String;
+begin
+  if FileName = '{#Qwen4FileName}' then Result := '{#Qwen4Sha256}'
+  else if FileName = '{#Qwen8FileName}' then Result := '{#Qwen8Sha256}'
+  else if FileName = '{#Qwen14FileName}' then Result := '{#Qwen14Sha256}'
+  else if FileName = '{#Qwen30FileName}' then Result := '{#Qwen30Sha256}'
+  else if FileName = 'kokoro-v1.0.onnx' then Result := '{#KokoroModelSha256}'
+  else if FileName = 'voices-v1.0.bin' then Result := '{#KokoroVoicesSha256}'
+  else Result := '';
+end;
+
 procedure StageVerifiedDownloads();
-// Called when the download page exits — success, abort, or failure. Any
-// file that reached 100% already passed Inno's SHA-256 check, so copy it
-// into models\ and stamp catalog metadata NOW. An aborted run then keeps
-// every completed model: a restart finds them trusted and skips them.
+// Called when the download page exits — success, abort, or failure. Downloads
+// carry no Inno-side hash check (it made the UI go deaf for tens of seconds
+// between files), so integrity is enforced HERE: hash each completed file and
+// only copy + catalog it when the SHA-256 matches. An aborted run then keeps
+// every verified model: a restart finds them trusted and skips them.
 var
   I: Integer;
   FileName, TmpPath, DestPath, SubDir: String;
@@ -823,6 +827,12 @@ begin
     TmpPath := ExpandConstant('{tmp}\') + FileName;
     if not FileExists(TmpPath) then
       Continue;
+    if (ExpectedHashFor(FileName) <> '') and
+       (GetSHA256OfFile(TmpPath) <> ExpectedHashFor(FileName)) then
+    begin
+      Log('Hash mismatch — discarding download: ' + TmpPath);
+      Continue;
+    end;
     if (Pos('kokoro', FileName) > 0) or (Pos('voices', FileName) > 0) then
       SubDir := '\voice\'
     else

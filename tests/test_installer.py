@@ -93,10 +93,11 @@ class InstallerContractTests(unittest.TestCase):
         wiz = self.installer.split("procedure InitializeWizard")[1]
         wiz = wiz.split("end;", 1)[0]
         self.assertIn("InitializeDownloadPage", wiz)
-        # Verified {tmp} downloads are staged into the models dir via
-        # [Files] copies so Inno tracks them for rollback/uninstall.
-        self.assertIn('Source: "{tmp}\\{#Qwen4FileName}"', self.installer)
-        self.assertIn("function ModelStaged", self.installer)
+        # Verified {tmp} downloads are staged into the models dir by
+        # StageVerifiedDownloads on every download-page exit (success, abort,
+        # failure) — not [Files] copies, which would double-copy ~35 GB on
+        # the success path and skip aborted runs entirely.
+        self.assertNotIn('Source: "{tmp}\\{#Qwen4FileName}"', self.installer)
         # Completed downloads are preserved on abort: StageVerifiedDownloads
         # copies every verified {tmp} file into models\ + stamps catalog
         # metadata on the download-page exit path (success, abort, failure).
