@@ -2975,7 +2975,7 @@ class AppState:
                         "running", "verifying", "reviewing"}:
                     continue
                 task_id = str(task.get("id") or "")
-                if not task_id or self.agent.has_live_driver(task_id):
+                if not task_id:
                     continue
                 try:
                     updated = float(task.get("updated_at") or now)
@@ -2983,13 +2983,19 @@ class AppState:
                     updated = now
                 if now - updated < grace:
                     continue
-                try:
-                    self.agent._close_session(task_id)
-                except Exception:
-                    pass
-                self.tasks.update(
-                    task_id, status="error", phase="done",
-                    error="Task driver exited unexpectedly — marked failed by watchdog.")
+                # Check-and-claim under the driver lock: a drive registering
+                # between the liveness check and the terminal mark would get
+                # clobbered otherwise.
+                with self.agent._drive_lock:
+                    if self.agent.has_live_driver(task_id):
+                        continue
+                    try:
+                        self.agent._close_session(task_id)
+                    except Exception:
+                        pass
+                    self.tasks.update(
+                        task_id, status="error", phase="done",
+                        error="Task driver exited unexpectedly — marked failed by watchdog.")
                 self.tasks.append_log(
                     task_id,
                     "## error: task driver lost — marked failed by watchdog\n")

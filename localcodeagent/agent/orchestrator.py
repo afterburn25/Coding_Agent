@@ -209,12 +209,16 @@ class AgentOrchestrator:
         # task. Registered for the whole drive (including tool/verification
         # execution inside resume) so the watchdog can tell a live drive from
         # a task whose driver thread died without marking it terminal.
+        # _drive_lock guards check-and-claim: the reaper holds it across its
+        # liveness check + terminal mark so a drive can't register in between.
+        self._drive_lock = threading.RLock()
         self._drive_threads: dict[str, threading.Thread] = {}
 
     def has_live_driver(self, task_id: str) -> bool:
         """True while a registered thread is still driving this task."""
-        thread = self._drive_threads.get(str(task_id))
-        return bool(thread and thread.is_alive())
+        with self._drive_lock:
+            thread = self._drive_threads.get(str(task_id))
+            return bool(thread and thread.is_alive())
 
     def _act(
         self,
@@ -2358,7 +2362,8 @@ class AgentOrchestrator:
 
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
-        self._drive_threads[session.task_id] = threading.current_thread()
+        with self._drive_lock:
+            self._drive_threads[session.task_id] = threading.current_thread()
         try:
             return self._drive(session)
         except Exception as exc:
@@ -2389,7 +2394,8 @@ class AgentOrchestrator:
             self._close_session(session.task_id)
             raise
         finally:
-            self._drive_threads.pop(session.task_id, None)
+            with self._drive_lock:
+                self._drive_threads.pop(session.task_id, None)
 
     _TOOL_ACTIVITY_CATEGORY = {
         "run_shell": "command", "terminal_run": "command", "shell": "command",
@@ -3636,12 +3642,14 @@ class AgentOrchestrator:
         task = self.tasks.get(task_id)
         if task.status not in {"interrupted", "error"}:
             raise ValueError(f"Task {task_id} is not recoverable from status {task.status}")
-        self._drive_threads[str(task_id)] = threading.current_thread()
+        with self._drive_lock:
+            self._drive_threads[str(task_id)] = threading.current_thread()
         try:
             return self._recover_impl(
                 task_id, task=task, event_callback=event_callback)
         finally:
-            self._drive_threads.pop(str(task_id), None)
+            with self._drive_lock:
+                self._drive_threads.pop(str(task_id), None)
 
     def _recover_impl(
         self,
@@ -3684,12 +3692,14 @@ class AgentOrchestrator:
         # The whole call is a synchronous drive — tool/verification execution
         # and any repair re-drive included — so the watchdog knows this task
         # has a live driver even outside _drive_or_error.
-        self._drive_threads[str(task_id)] = threading.current_thread()
+        with self._drive_lock:
+            self._drive_threads[str(task_id)] = threading.current_thread()
         try:
             return self._resume_impl(
                 task_id, approved=approved, event_callback=event_callback)
         finally:
-            self._drive_threads.pop(str(task_id), None)
+            with self._drive_lock:
+                self._drive_threads.pop(str(task_id), None)
 
     def _resume_impl(
         self,
