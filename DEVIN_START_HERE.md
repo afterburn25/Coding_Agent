@@ -8,13 +8,11 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Branch to continue from: `main`
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
-- Latest fully verified code-changing checkpoint at takeover: `b1d9a079a08a2aec5cf8a80485083e2c10388456`
-- Latest code checkpoint after Phase 1 tool-system foundation: `d55bf52716b01ea266ff6d1fb503ac1f2837078e` (verify with `git rev-parse HEAD`)
-- Current development version: `0.7.1` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
-- Verified unit checkpoint: **789 / 789 passing** (2 environment skips) after the 0.7.1 perf-tuner + activity-timeline wave
-- Last verified GitHub Actions run: `36982678215` — green including the windows-desktop installer/package smoke job (commit `a44905c`)
-- Verified run URL: https://github.com/afterburn25/Coding_Agent/actions/runs/36982678215
-- Latest commits: `a44905c` (CI contract-test fix), `b6e2572` (workflow version resolution), `2df6870` (sandboxed verify + repo_search), `55c7d66` (idle auto-tuner + CI git-identity fix), `6986514` (0.7.1 perf + timeline)
+- Current development version: `0.12.1` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
+- Verified unit checkpoint: **1180 passing** (2 environment skips) on `042be1c`
+- v0.12.0 shipped Profiles + Creator Identity + Personality Studio + First-Run Onboarding (`localcodeagent/profiles/`, `localcodeagent/personality/`, `web/start.html`); v0.12.1 added installer update busy-status reporting (see PROJECT_STATUS.md)
+- Latest commits: `042be1c` (status docs), `e811656` (derived creator passcode in tests), `078ccdf`/`0d3a765` (installer update progress UX), `9cc450e` (v0.12.0 docs)
+- GitHub Actions: all-green on the last several pushes; windows-desktop job compiles the real Inno installer and smokes install→update-twice including a fake-process kill check
 
 The `main` branch includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint or takeover anchor.**
 

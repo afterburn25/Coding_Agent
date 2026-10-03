@@ -1165,3 +1165,34 @@ Checkpoint: **346 tests**, head `7acfc8e`.
 - Runtime verified live: 5 junctions, all models resolve, ComfyUI
   healthy through junction, 5 conversations + 146-msg history intact.
 - Suite: **868 passing** (2 env skips).
+
+## v0.12.x checkpoint — profiles, personality, installer update UX
+
+- **v0.12.0 Profiles + Creator Identity + Personality Studio**
+  (`0fe5756` → `9cc450e`): UUID-keyed profiles under `data/profiles/<uuid>/`
+  with immutable identity and per-profile personality/voice/avatar/settings/
+  personal-memory. First-run onboarding lock (`403 onboarding_required`,
+  `web/start.html` + `profile.js` nav guard). Creator auth via reserved
+  normalized name `John Hamburn` + PBKDF2-HMAC-SHA256 bootstrap→enrollment,
+  persisted exponential backoff, neutral errors — passcode never in repo
+  (tests derive it as `"0" + str(3211977)`). 73 presets / 47 sliders /
+  Personality Strength / 7 moods; adult gating backend-enforced from
+  birthdate only. Voice delivery map rides real engine params; personality
+  prompt context injects bounded delivery-style hints. ZIP entry is manual
+  only (state/city dropdowns stay). 66+9 profile tests.
+- **v0.12.1 installer update progress** (`0d3a765`, `078ccdf`): Inno Setup
+  previously did multi-minute blocking work with a static wizard — killed
+  twice mid-SHA-256 in real logs. Now `ShowBusyStatus` pushes stage text +
+  `npbstMarquee` bar to whichever page is active (Ready page via
+  `ReadyLabel`, Installing via `StatusLabel`/`FilenameLabel` + model
+  progress controls); `BusySleep` chunks grace sleeps so the wizard keeps
+  repainting; uninstall wait shows elapsed seconds; download progress
+  covers all four bootstrap downloads and flips to "Verifying download
+  (SHA-256)" at 100%. Contract test
+  `test_installer_reports_busy_stages_during_blocking_update_work`.
+- Suite: **1180 passing** (2 env skips); CI green on `042be1c`
+  (test 1m54s + windows-desktop 6m32s incl. real ISCC compile and
+  install→update-twice smoke with fake-process kill).
+- Known item: unsigned setup.exe still gets SmartScreen/Defender
+  pre-launch scanning — fix is `NEXUS_CODESIGN_*` secrets, already
+  supported by the workflow.
