@@ -2648,8 +2648,14 @@ class AppState:
         if include_waiting_approval:
             statuses = statuses | {"waiting_approval"}
         try:
-            if any(t.get("status") in statuses
-                   for t in self.tasks.by_status(*statuses)):
+            by_status = getattr(self.tasks, "by_status", None)
+            if by_status is not None:
+                if by_status(*statuses):
+                    return True
+            elif any(t.get("status") in statuses
+                     for t in self.tasks.recent(50)):
+                # Stub/duck-typed stores without by_status degrade to the
+                # bounded ledger read rather than leaning busy forever.
                 return True
             if getattr(self, "_queue_running", None):
                 return True
