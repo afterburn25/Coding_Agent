@@ -120,12 +120,12 @@ Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: 
 ; Verified files land in {tmp} and these entries copy them into the models
 ; dir on the main install bar. Smallest to largest: 4B, 8B, 14B, 30B hybrid,
 ; then voice assets. Missing {tmp} files (skipped or aborted) are skipped.
-Source: "{tmp}\{#Qwen4FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen4FileName}')
-Source: "{tmp}\{#Qwen8FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen8FileName}')
-Source: "{tmp}\{#Qwen14FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen14FileName}')
-Source: "{tmp}\{#Qwen30FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen30FileName}')
-Source: "{tmp}\kokoro-v1.0.onnx"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('kokoro-v1.0.onnx')
-Source: "{tmp}\voices-v1.0.bin"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('voices-v1.0.bin')
+Source: "{tmp}\{#Qwen4FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen4FileName}'); AfterInstall: CatalogQwen4
+Source: "{tmp}\{#Qwen8FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen8FileName}'); AfterInstall: CatalogQwen8
+Source: "{tmp}\{#Qwen14FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen14FileName}'); AfterInstall: CatalogQwen14
+Source: "{tmp}\{#Qwen30FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen30FileName}'); AfterInstall: CatalogQwen30
+Source: "{tmp}\kokoro-v1.0.onnx"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('kokoro-v1.0.onnx'); AfterInstall: CatalogKokoroModel
+Source: "{tmp}\voices-v1.0.bin"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('voices-v1.0.bin'); AfterInstall: CatalogKokoroVoices
 
 ; Optional tools (ComfyUI portable, image model packs) are downloaded by the
 ; in-app Tools page instead of Setup, keeping installation fast.
@@ -730,6 +730,8 @@ end;
 
 // Returns False when the user aborted the download page (stay on Ready).
 function PerformModelDownloads(): Boolean;
+var
+  Attempt: Integer;
 begin
   Result := True;
   if SkipModelDownloads then
@@ -748,20 +750,32 @@ begin
   QueueModelDownloads();
   DownloadPage.Show;
   try
-    try
-      DownloadPage.Download;
-    except
-      if DownloadPage.AbortedByUser then
-      begin
-        Log('Model downloads aborted by user.');
-        Result := False;
-      end
-      else
-      begin
-        Result := SuppressibleMsgBox(
-          'A model download failed:' + #13#10 + GetExceptionMessage + #13#10 + #13#10 +
-          'Continue the installation anyway? Missing models can be fetched ' +
-          'later from the app.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
+    // One automatic retry — transient CDN/proxy hiccups ("internal error",
+    // dropped connections) are common on multi-GB pulls and should not
+    // punt the user back to the Ready page for no reason. Files already
+    // verified in {tmp} are skipped on the retry.
+    for Attempt := 0 to 1 do
+    begin
+      try
+        DownloadPage.Download;
+        Break;
+      except
+        if DownloadPage.AbortedByUser then
+        begin
+          Log('Model downloads aborted by user.');
+          Result := False;
+          Break;
+        end
+        else if Attempt = 0 then
+          Log('Download failed, retrying once: ' + GetExceptionMessage)
+        else
+        begin
+          Result := SuppressibleMsgBox(
+            'A model download failed:' + #13#10 + GetExceptionMessage + #13#10 + #13#10 +
+            'Continue the installation anyway? Missing models can be fetched ' +
+            'later from the app.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
+          Break;
+        end;
       end;
     end;
   finally
@@ -793,6 +807,46 @@ end;
 function ModelStaged(Param: String): Boolean;
 begin
   Result := FileExists(ExpandConstant('{tmp}\') + Param);
+end;
+
+// [Files] AfterInstall hooks — stamp trust metadata the moment a verified
+// download lands in models\, not at ssPostInstall. An aborted run then still
+// leaves trusted files, so the next run skips re-download AND the multi-GB
+// SHA-256 re-check that froze the Ready page.
+procedure CatalogQwen4();
+begin
+  WriteCatalogMetadata('{#Qwen4CatalogId}', '{#Qwen4FileName}',
+    '{#Qwen4Sha256}', {#Qwen4Size}, '{#Qwen4SourceRepo}');
+end;
+
+procedure CatalogQwen8();
+begin
+  WriteCatalogMetadata('{#Qwen8CatalogId}', '{#Qwen8FileName}',
+    '{#Qwen8Sha256}', {#Qwen8Size}, '{#Qwen8SourceRepo}');
+end;
+
+procedure CatalogQwen14();
+begin
+  WriteCatalogMetadata('{#Qwen14CatalogId}', '{#Qwen14FileName}',
+    '{#Qwen14Sha256}', {#Qwen14Size}, '{#Qwen14SourceRepo}');
+end;
+
+procedure CatalogQwen30();
+begin
+  WriteCatalogMetadata('{#Qwen30CatalogId}', '{#Qwen30FileName}',
+    '{#Qwen30Sha256}', {#Qwen30Size}, '{#Qwen30SourceRepo}');
+end;
+
+procedure CatalogKokoroModel();
+begin
+  WriteCatalogMetadata('kokoro-v1-0-onnx', 'kokoro-v1.0.onnx',
+    '{#KokoroModelSha256}', {#KokoroModelSize}, 'hexgrad/Kokoro-82M');
+end;
+
+procedure CatalogKokoroVoices();
+begin
+  WriteCatalogMetadata('kokoro-voices-v1-0', 'voices-v1.0.bin',
+    '{#KokoroVoicesSha256}', {#KokoroVoicesSize}, 'hexgrad/Kokoro-82M');
 end;
 
 function DetectExistingInstall(): Boolean;
