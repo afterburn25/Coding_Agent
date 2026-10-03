@@ -136,6 +136,8 @@ class _AgentSession:
     refusal_retries: int = 0
     continuations: int = 0
     verification_round_start: int = 0
+    failed_signatures: set[str] = field(default_factory=set)
+    escalation_nudged: bool = False
     research_context: dict[str, Any] = field(default_factory=dict)
     event_callback: Callable[[dict[str, Any]], None] | None = None
     max_tokens: int | None = None
@@ -1735,9 +1737,26 @@ class AgentOrchestrator:
                     ids.append(job_id)
         return ids
 
+    @staticmethod
+    def _call_signature(name: str, args: dict[str, Any]) -> str:
+        try:
+            return json.dumps([name, args], sort_keys=True, default=str)
+        except Exception:
+            return f"{name}:{args!r}"
+
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
+            session.failed_signatures.add(self._call_signature(name, args))
+        else:
+            # A successful mutating call changes the workspace — a previously
+            # failed call may now legitimately succeed, so unblock retries.
+            try:
+                perm = str(self.tools.permission_for(name)[0] or "")
+                if perm and perm not in self._READ_ONLY_TOOL_PERMS:
+                    session.failed_signatures.clear()
+            except Exception:
+                pass
         event = {"name": name, "arguments": args, "result": result}
         session.tool_events.append(event)
         redactor = self.tools.context.get("redactor")
@@ -1764,6 +1783,7 @@ class AgentOrchestrator:
             failures=session.failures,
         )
         if escalated.model_id == session.decision.model_id:
+            self._nudge_repeated_failures(session)
             return
         previous = session.decision.model_id
         try:
@@ -1786,6 +1806,7 @@ class AgentOrchestrator:
             self._emit(session, "model", event=unavailable_event)
             return
         if escalated.model_id == session.decision.model_id:
+            self._nudge_repeated_failures(session)
             return
         session.decision = escalated
         session.profile = next_profile
@@ -1804,6 +1825,29 @@ class AgentOrchestrator:
             "content": "The previous model encountered repeated tool failures. Re-evaluate the problem carefully before continuing.",
         })
         self.tasks.update(session.task_id, model_id=escalated.model_id, model_role=escalated.role)
+
+    def _nudge_repeated_failures(self, session: _AgentSession) -> None:
+        """Repeated failures but no higher-tier model can take over — tell the
+        current model plainly that re-emitting the same calls keeps failing.
+        Emitted once per session so the hint can't itself become a loop."""
+        if session.escalation_nudged:
+            return
+        session.escalation_nudged = True
+        event = {
+            "type": "escalation_nudge",
+            "model_id": session.decision.model_id,
+            "reason": "repeated tool failures; no higher-tier model available",
+        }
+        session.model_events.append(event)
+        self._emit(session, "model", event=event)
+        session.messages.append({
+            "role": "system",
+            "content": (
+                "Several tool calls have failed and no larger model is available to "
+                "take over. Read each tool's error message carefully and change approach "
+                "— do not re-emit the same or similar calls."
+            ),
+        })
 
     # Permissions whose tools only observe state — safe to run concurrently.
     _READ_ONLY_TOOL_PERMS = frozenset({
@@ -1872,6 +1916,18 @@ class AgentOrchestrator:
             if brain_block:
                 self._append_tool_result(session, call, name, args, brain_block)
                 session.pending_call_index += 1
+                continue
+            if self._call_signature(name, args) in session.failed_signatures:
+                # Identical retry of a call that already failed — running it
+                # would burn an approval round-trip and a step on the same
+                # error. Feed the failure back so the model changes approach.
+                self._append_tool_result(
+                    session, call, name, args,
+                    f"ERROR: '{name}' was already run with these exact arguments earlier in "
+                    "this task and failed. Repeating it will fail again — change the "
+                    "arguments or use a different tool/approach.")
+                session.pending_call_index += 1
+                self._maybe_escalate(session)
                 continue
             requires, permission = self.tools.requires_approval(name)
             if requires:

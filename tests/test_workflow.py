@@ -1188,6 +1188,28 @@ class AutonomousContinuationTests(unittest.TestCase):
 
             self.assertEqual(result.task["status"], "step_limit")
 
+    def test_identical_failing_call_is_dedup_blocked(self):
+        """Regression: a 14B retried the same failing apply_patch ~5 times,
+        each burning an approval + step until step_limit. An identical call
+        to an already-failed tool must not execute again."""
+        with tempfile.TemporaryDirectory() as td:
+            invoked = []
+            provider = _RepeatToolProvider(tool_calls=3, tool_name="flaky_tool")
+            agent = self._agent(Path(td), provider, autonomous=False)
+            agent.config.max_agent_steps = 8
+            agent.tools.register(ToolSpec(
+                "flaky_tool", "always fails", {"type": "object", "properties": {}},
+                "probe.execute", lambda args: invoked.append(args) or "ERROR: simulated failure"))
+
+            result = agent.run("do the thing")
+
+            self.assertEqual(len(invoked), 1)  # executed once; retries dedup-blocked
+            dedup = [e for e in result.tool_events
+                     if "already run with these exact arguments" in str(e.get("result") or "")]
+            self.assertEqual(len(dedup), 2)
+            nudge = [e for e in result.model_events if e.get("type") == "escalation_nudge"]
+            self.assertEqual(len(nudge), 1)
+
     def test_step_limit_records_outcome_with_memory_components(self):
         """Regression: the step-limit path passed conversation_manager kwargs
         (intent/model_id) to ConversationMemory.record_exchange, a 2-arg
