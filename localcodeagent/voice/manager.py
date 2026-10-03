@@ -43,8 +43,13 @@ class VoiceManager:
     def __init__(self, config, preset_dir: Path, cache_dir: Path,
                  publish: Callable[[str, dict], None] | None = None,
                  asset_dir: Path | None = None,
-                 persist: Callable[[], None] | None = None) -> None:
+                 persist: Callable[[], None] | None = None,
+                 personality_voice: Callable[[], dict] | None = None) -> None:
         self.config = config
+        # Zero-arg resolver returning the active profile's delivery map
+        # ({preset_id?, speed?, pitch_semitones?, output_gain_db?});
+        # failures/None mean "no personality delivery".
+        self._personality_voice = personality_voice
         self.asset_dir = Path(asset_dir) if asset_dir else None
         self._persist = persist or (lambda: None)
         self.presets = VoicePresetStore(Path(preset_dir))
@@ -274,8 +279,38 @@ class VoiceManager:
                 "seconds": round(pcm.shape[0] / sr, 2),
             })
 
-    def _synthesize(self, text: str, preset: VoicePreset, speed: float):
+    def _apply_delivery(self, preset: VoicePreset, speed: float,
+                        vmap: dict) -> tuple[VoicePreset, float]:
+        """Fold the profile's personality delivery into (preset, speed).
+
+        Rate rides the engine `speed` arg — preset.tempo stays as saved
+        so the rate isn't applied twice through the DSP chain."""
+        pid = vmap.get("preset_id")
+        if pid:
+            p2 = self.presets.get(str(pid))
+            if p2 is not None:
+                preset = p2
+        changes = {k: vmap[k] for k in ("pitch_semitones", "output_gain_db")
+                   if isinstance(vmap.get(k), (int, float)) and vmap[k]}
+        if changes:
+            raw = preset.as_dict()
+            raw.update(changes)
+            preset = VoicePreset.from_dict(raw)
+        if isinstance(vmap.get("speed"), (int, float)) and vmap["speed"]:
+            speed = max(0.5, min(2.0, float(speed) * float(vmap["speed"])))
+        return preset, speed
+
+    def _synthesize(self, text: str, preset: VoicePreset, speed: float,
+                    *, apply_personality: bool = True):
         """Full pipeline → stereo WAV on disk. Returns (pcm, sr, path)."""
+        if apply_personality:
+            try:
+                vmap = (self._personality_voice() or {}
+                        if callable(self._personality_voice) else {})
+            except Exception:
+                vmap = {}
+            if vmap:
+                preset, speed = self._apply_delivery(preset, speed, vmap)
         engine = self.engine(preset.engine)
         preset_json = preset.to_json()
         key = AudioCache.key(text, preset.engine, engine.version,

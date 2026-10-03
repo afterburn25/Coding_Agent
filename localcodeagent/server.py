@@ -402,6 +402,7 @@ class AppState:
                     config, preset_dir=pdir, cache_dir=cdir, asset_dir=vdir,
                     publish=lambda kind, payload: self._voice_publish(payload),
                     persist=_persist_voice,
+                    personality_voice=self._voice_delivery_map,
                 )
                 register_voice_tools(self.tools, self.voice)
             except Exception as exc:
@@ -617,6 +618,38 @@ class AppState:
             return _profile_prompt_text(prof, active, mems)
         except Exception:
             return ""
+
+    def _voice_delivery_map(self) -> dict:
+        """Active profile's voice delivery for the TTS pipeline.
+
+        Resolves voice.json's preset_id (profile-scoped voice choice) plus
+        the personality voice map. Cached ~10 s — _synthesize calls this
+        per utterance; profile switches take effect without a restart."""
+        try:
+            now = time.monotonic()
+            if now < getattr(self, "_vdm_until", 0.0):
+                return self._vdm_cache
+            out: dict = {}
+            prof = self.profiles.active()
+            if prof:
+                pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+                try:
+                    vsel = json.loads(
+                        (pdir / "voice.json").read_text(encoding="utf-8"))
+                    if vsel.get("preset_id"):
+                        out["preset_id"] = str(vsel["preset_id"])
+                except Exception:
+                    pass
+                act = PersonalityStore(pdir).resolve_active(
+                    is_adult=bool(prof.get("is_adult")))
+                from .personality.voice_map import map_voice
+                out.update(map_voice(act.get("voice"), act.get("traits"),
+                                     strength=act.get("strength", 70),
+                                     mood=act.get("mood") or ""))
+            self._vdm_cache, self._vdm_until = out, now + 10.0
+            return out
+        except Exception:
+            return {}
 
     # SQLite/subprocess-backed services are lazy — they hold OS handles
     # (file locks, child processes) only once actually used.
@@ -3997,7 +4030,8 @@ class Handler(BaseHTTPRequestHandler):
                     preset = VoicePreset.from_dict(preset_raw)
                     preset.id = preset.id or "_preview"
                     pcm, sr, seg = voice._synthesize(
-                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))))
+                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",
@@ -4024,7 +4058,8 @@ class Handler(BaseHTTPRequestHandler):
                     rawp["official"] = False
                     preset = VoicePreset.from_dict(rawp)
                     pcm, sr, seg = voice._synthesize(
-                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))))
+                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",

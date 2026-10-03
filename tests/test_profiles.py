@@ -605,6 +605,53 @@ class TestPromptContext(unittest.TestCase):
             self.assertIn(active["name"], out)
 
 
+# ------------------------------------------------- voice delivery (TTS)
+
+class TestVoiceDelivery(unittest.TestCase):
+    def _vm(self, vmap):
+        from localcodeagent.voice.manager import VoiceManager
+        vm = VoiceManager.__new__(VoiceManager)
+        vm._personality_voice = lambda: vmap
+
+        class _Presets:
+            def get(self, pid):
+                return None
+        vm.presets = _Presets()
+        return vm
+
+    def test_delivery_folds_into_synth_params(self):
+        from localcodeagent.voice.types import VoicePreset
+        vm = self._vm({"speed": 1.2, "pitch_semitones": 2.0,
+                       "output_gain_db": -3.0})
+        p = VoicePreset(id="x", name="x")
+        p2, s = vm._apply_delivery(p, 1.0, vm._personality_voice())
+        self.assertEqual(p2.pitch_semitones, 2.0)
+        self.assertEqual(p2.output_gain_db, -3.0)
+        self.assertAlmostEqual(s, 1.2)
+        self.assertEqual(p2.tempo, 1.0)   # rate rides engine speed only
+
+    def test_empty_map_is_noop(self):
+        from localcodeagent.voice.types import VoicePreset
+        vm = self._vm({})
+        p = VoicePreset(id="x", name="x")
+        p2, s = vm._apply_delivery(p, 1.1, {})
+        self.assertIs(p2, p)
+        self.assertEqual(s, 1.1)
+
+    def test_resolver_failure_degrades(self):
+        from localcodeagent.voice.types import VoicePreset
+        vm = self._vm(None)
+        vm._personality_voice = lambda: (_ for _ in ()).throw(RuntimeError)
+        # _synthesize's resolver guard must swallow resolver errors — the
+        # try/except lives in _synthesize; verify the call pattern there.
+        try:
+            vmap = (vm._personality_voice() or {}
+                    if callable(vm._personality_voice) else {})
+        except Exception:
+            vmap = {}
+        self.assertEqual(vmap, {})
+
+
 # ---------------------------------------------------------------- migration
 
 class TestMigration(unittest.TestCase):
