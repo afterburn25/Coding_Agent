@@ -78,6 +78,13 @@ class RuntimeManager:
         self._managed: dict[str, _ManagedProcess] = {}
         self._status: dict[str, RuntimeStatus] = {}
         self._lock = threading.RLock()
+        # In-flight model launches. A llama-server load takes up to
+        # startup_timeout seconds and must NOT hold _lock — every status
+        # reader (including /api/status, the desktop host health check)
+        # would block for the whole load. Claiming here serializes
+        # duplicate starts while the wait itself runs lock-free.
+        self._starting: set[str] = set()
+        self._launch_cond = threading.Condition(self._lock)
         self._last_used: dict[str, float] = {}
         self.twin: Any = None  # optional DigitalTwin, attached by AppState
         self._launch_ctx: dict[str, int] = {}
@@ -769,6 +776,7 @@ class RuntimeManager:
         if grace <= 0:
             return []
         shrunk: list[str] = []
+        targets: list[ModelProfile] = []
         with self._lock:
             now = time.time()
             profiles = {m.id: m for m in self.config.models}
@@ -794,13 +802,17 @@ class RuntimeManager:
                     "relaunch", mid,
                     f"shrinking idle context {launched}→{want}")
                 self._stop_managed(mid)
-                try:
-                    self._start_llama_cpp(profile)
-                except Exception as exc:
-                    self._emit_residency(
-                        "evict", mid, f"context shrink failed: {exc}")
-                    continue
-                shrunk.append(mid)
+                targets.append(profile)
+        # Restarts run off the lock — each ensure_ready claims its own
+        # single-flight launch and waits lock-free for the model load.
+        for profile in targets:
+            try:
+                self.ensure_ready(profile)
+            except Exception as exc:
+                self._emit_residency(
+                    "evict", profile.id, f"context shrink failed: {exc}")
+                continue
+            shrunk.append(profile.id)
         return shrunk
 
     def rewarm_keep_loaded(self) -> list[str]:
@@ -896,14 +908,21 @@ class RuntimeManager:
             free_vram = float(self.hardware.free_vram_gb)
 
     def _start_llama_cpp(self, profile: ModelProfile, ctx_override: int | None = None) -> str:
-        existing = self._managed.get(profile.id)
+        # Called WITHOUT self._lock — the caller claimed profile.id in
+        # self._starting, so at most one launch per model is in flight.
+        # Shared-state reads/writes take the lock in short sections only;
+        # network probes and the load wait stay lock-free.
+        with self._lock:
+            existing = self._managed.get(profile.id)
         if existing and existing.process.poll() is None:
             healthy, _ = self._health(existing.endpoint)
-            launched_ctx = self._launch_ctx.get(profile.id, 0)
+            with self._lock:
+                launched_ctx = self._launch_ctx.get(profile.id, 0)
             ctx_ok = not ctx_override or launched_ctx >= ctx_override or not launched_ctx
             if healthy and ctx_ok:
-                existing.status.healthy = True
-                existing.status.state = "running"
+                with self._lock:
+                    existing.status.healthy = True
+                    existing.status.state = "running"
                 return existing.endpoint
             if healthy and not ctx_ok:
                 # Task needs a bigger window than the resident server was
@@ -912,11 +931,14 @@ class RuntimeManager:
                 self._emit_residency(
                     "relaunch", profile.id,
                     f"expanding context {launched_ctx}→{ctx_override}")
-            self._stop_managed(profile.id)
+            with self._lock:
+                self._stop_managed(profile.id)
 
-        self._enforce_residency(profile)
+        with self._lock:
+            self._enforce_residency(profile)
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
-        self._reclaim_orphaned_port(port)
+        with self._lock:
+            self._reclaim_orphaned_port(port)
         endpoint = self._profile_endpoint(profile, port)
         return self._launch_with_fallback(profile, port, endpoint, ctx_override)
 
@@ -929,8 +951,9 @@ class RuntimeManager:
         must never leave the model unable to start."""
         tuned: list[str] = []
         try:
-            tuned = self.tuner.tuned_flags(
-                profile, mode=str(getattr(self.config, "performance_mode", "auto")))
+            with self._lock:
+                tuned = self.tuner.tuned_flags(
+                    profile, mode=str(getattr(self.config, "performance_mode", "auto")))
         except Exception:
             pass
         attempts = [
@@ -956,7 +979,8 @@ class RuntimeManager:
                 last_exc = exc
                 if label == "tuned" and tuned:
                     try:
-                        self.tuner.mark_bad(profile, tuned, str(exc))
+                        with self._lock:
+                            self.tuner.mark_bad(profile, tuned, str(exc))
                     except Exception:
                         pass
                 continue
@@ -990,55 +1014,60 @@ class RuntimeManager:
             text=True,
             creationflags=creationflags,
         )
-        status = self._status[profile.id]
-        status.state = "loading"
-        status.endpoint = endpoint
-        status.pid = process.pid
-        status.managed = True
-        status.healthy = False
-        status.started_at = time.time()
-        status.error = ""
-        status.log_path = str(log_path)
-        self._managed[profile.id] = _ManagedProcess(profile, process, endpoint, log_handle, status)
-        # Remember the tuned arg-set this process launched with — if it dies
-        # mid-run the recovery path can mark exactly this config bad instead
-        # of relaunching it identically forever.
-        try:
-            self._launch_tuning[profile.id] = list(
-                self.tuner.tuned_flags(
-                    profile, mode=str(getattr(self.config, "performance_mode", "auto")))
-            ) if apply_tuning else []
-        except Exception:
-            self._launch_tuning[profile.id] = []
+        with self._lock:
+            status = self._status[profile.id]
+            status.state = "loading"
+            status.endpoint = endpoint
+            status.pid = process.pid
+            status.managed = True
+            status.healthy = False
+            status.started_at = time.time()
+            status.error = ""
+            status.log_path = str(log_path)
+            self._managed[profile.id] = _ManagedProcess(profile, process, endpoint, log_handle, status)
+            # Remember the tuned arg-set this process launched with — if it dies
+            # mid-run the recovery path can mark exactly this config bad instead
+            # of relaunching it identically forever.
+            try:
+                self._launch_tuning[profile.id] = list(
+                    self.tuner.tuned_flags(
+                        profile, mode=str(getattr(self.config, "performance_mode", "auto")))
+                ) if apply_tuning else []
+            except Exception:
+                self._launch_tuning[profile.id] = []
 
+        # The load wait deliberately runs WITHOUT self._lock: it can last
+        # startup_timeout seconds and /api/status must keep answering.
         deadline = time.monotonic() + max(5, profile.startup_timeout)
         last_detail = ""
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                status.state = "error"
-                status.error = f"llama-server exited with code {process.returncode}; see {log_path}"
-                status.pid = None
-                self._managed.pop(profile.id, None)
-                try:
-                    log_handle.close()
-                except Exception:
-                    pass
+                with self._lock:
+                    status.state = "error"
+                    status.error = f"llama-server exited with code {process.returncode}; see {log_path}"
+                    status.pid = None
+                    self._managed.pop(profile.id, None)
+                    try:
+                        log_handle.close()
+                    except Exception:
+                        pass
                 raise RuntimeError(status.error)
             healthy, detail = self._health(endpoint)
             last_detail = detail
             if healthy:
-                status.state = "running"
-                status.healthy = True
-                self._last_used[profile.id] = time.time()
-                self._launch_ctx[profile.id] = self._ctx_from_command(command)
+                with self._lock:
+                    status.state = "running"
+                    status.healthy = True
+                    self._last_used[profile.id] = time.time()
+                    self._launch_ctx[profile.id] = self._ctx_from_command(command)
                 self._warmup(profile, endpoint)
                 return endpoint
             time.sleep(0.25)
 
-        status.state = "error"
-        status.error = f"Timed out waiting for model health: {last_detail[:300]}"
-        self._stop_managed(profile.id)
-        status.state = "error"
+        with self._lock:
+            status.state = "error"
+            status.error = f"Timed out waiting for model health: {last_detail[:300]}"
+            self._stop_managed(profile.id)
         raise TimeoutError(status.error)
 
     @staticmethod
@@ -1154,13 +1183,25 @@ class RuntimeManager:
                 raise RuntimeError(f"Unsupported runtime '{profile.runtime}' for model '{profile.id}'")
             if not self.config.runtime_auto_start:
                 return self._profile_endpoint(profile)
+            # Single-flight launch: if another thread is already starting
+            # this model, wait on the condition (which releases _lock) so
+            # status readers keep working during the load — then take the
+            # claim for ourselves if the launch is finished.
+            while profile.id in self._starting:
+                self._launch_cond.wait(timeout=30)
+            self._starting.add(profile.id)
+        try:
             return self._start_llama_cpp(profile, ctx_override=min_context)
+        finally:
+            with self._lock:
+                self._starting.discard(profile.id)
+                self._launch_cond.notify_all()
 
     def recover(self, profile: ModelProfile) -> str:
+        if profile.runtime == "external":
+            return self.ensure_ready(profile)
         with self._lock:
             status = self._status[profile.id]
-            if profile.runtime == "external":
-                return self.ensure_ready(profile)
             status.restarts += 1
             # If this exact tuned configuration keeps dying mid-run, mark it
             # bad so the next launch falls back instead of looping on the same
@@ -1187,10 +1228,17 @@ class RuntimeManager:
                         pass
                 status.crash_reason = cause or status.crash_reason
             self._stop_managed(profile.id)
-            return self._start_llama_cpp(profile)
+        # The relaunch itself runs through ensure_ready — the wait for the
+        # model load happens off _lock so status readers stay live.
+        return self.ensure_ready(profile)
 
     def statuses(self, *, probe_external: bool = False) -> list[dict]:
-        with self._lock:
+        # Bounded acquire: stop/reclaim paths can hold the lock for a few
+        # seconds (process waits). The status endpoint must always answer —
+        # fall back to the last-known snapshot rather than stall.
+        if not self._lock.acquire(timeout=1.0):
+            return [self._status[m.id].as_dict() for m in self.config.models]
+        try:
             for profile in self.config.models:
                 status = self._status[profile.id]
                 if profile.id in self._managed:
@@ -1217,6 +1265,8 @@ class RuntimeManager:
                     status.state = "running" if healthy else "external_unreachable"
                     status.error = "" if healthy else detail[:300]
             return [self._status[m.id].as_dict() for m in self.config.models]
+        finally:
+            self._lock.release()
 
     _CRASH_SIGNATURES = (
         # (pattern, human-readable cause) — first match wins. These turn a

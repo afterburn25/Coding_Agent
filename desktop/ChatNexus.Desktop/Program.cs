@@ -722,7 +722,10 @@ internal sealed class BackendProcess : IDisposable
 
     public async Task WaitUntilHealthyAsync(TimeSpan timeout)
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        // Per-request timeout must tolerate a warming backend: /api/status
+        // can take 10s+ while model services spin up, and aborting early
+        // just queues more work on an already busy server.
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         var deadline = DateTime.UtcNow + timeout;
         string? last = null;
         var lastLogged = DateTime.UtcNow;
@@ -770,7 +773,7 @@ internal sealed class BackendProcess : IDisposable
 
     public async Task ProbeUiAsync()
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         foreach (var route in new[] { "", "image.html", "research.html", "voice.html" })
         {
             var body = await client.GetStringAsync(BaseUrl + route);
