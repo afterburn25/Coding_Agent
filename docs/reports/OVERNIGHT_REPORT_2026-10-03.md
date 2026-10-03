@@ -229,4 +229,10 @@ research cache TTL+cap, voice task map bound.
 on qwen3-14b — write_file → run_shell → verification selftest →
 `completed`, all through approval gates on final code.
 
+**Unattended verification**: autonomous mode enabled live via
+`/api/permissions/autonomous`; task `a8b351e1ad2f` (countdown util)
+drove write_file → run_shell → repo selftest → review → `completed`
+with zero approval parks — the full unattended path on the real 14B.
+Autonomous mode restored to off after the test.
+
 Final suite: **1207 tests green / 2 POSIX skips**.
