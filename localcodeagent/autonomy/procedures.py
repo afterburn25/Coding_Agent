@@ -91,6 +91,13 @@ class ProcedureMemory:
         self._save()
         return row
 
+    def list(self, key: str = "", *, limit: int = 100) -> list[dict]:
+        """Learned outcomes, newest first; optionally one signature."""
+        rows = [dict(r) for r in self._rows()
+                if not key or r.get("key") == key]
+        rows.sort(key=lambda r: -(r.get("finished_at") or 0))
+        return rows[:limit]
+
     def recall(self, source: str, source_id: str, *,
                limit: int = _RECALL_LIMIT) -> list[dict]:
         """Recent runs for a signature, newest first."""

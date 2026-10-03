@@ -714,6 +714,15 @@ class PortCollisionTests(unittest.TestCase):
                 self.assertTrue(reported, "serve() must report its bound port")
                 self.assertNotEqual(reported[-1], held_port,
                                     "reported port must be the fallback, not the held port")
+                # Autonomy GET handlers must not NameError on query parsing
+                # (regression: /api/findings referenced an undefined `q`).
+                import urllib.request
+                for ep, key in (("/api/findings", "findings"),
+                                ("/api/procedures", "procedures")):
+                    with urllib.request.urlopen(
+                            f"http://127.0.0.1:{reported[-1]}{ep}",
+                            timeout=10) as resp:
+                        self.assertIn(key, json.loads(resp.read()), ep)
         finally:
             stop.set()
             if t is not None:

@@ -3349,7 +3349,7 @@ class Handler(BaseHTTPRequestHandler):
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
                           "/api/schedules", "/api/standing-goals",
                           "/api/goals", "/api/self-repair",
-                          "/api/findings")
+                          "/api/findings", "/api/procedures")
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
@@ -3572,8 +3572,17 @@ class Handler(BaseHTTPRequestHandler):
             scanner = getattr(sup, "scanner", None)
             self._json({
                 "findings": scanner.list(
-                    include_closed=(q.get("all") or [""])[0] == "1")
+                    include_closed=(query.get("all") or [""])[0] == "1")
                 if scanner else []})
+            return True
+        if path == "/api/procedures":
+            # Learned outcomes of recurring missions — what worked,
+            # what keeps failing. Newest first; ?key= filters one
+            # signature.
+            procs = getattr(sup, "procedures", None)
+            key = (query.get("key") or [""])[0]
+            self._json({"procedures":
+                        procs.list(key) if procs is not None else []})
             return True
         return False
 
