@@ -97,6 +97,18 @@ class InstallerContractTests(unittest.TestCase):
         # [Files] copies so Inno tracks them for rollback/uninstall.
         self.assertIn('Source: "{tmp}\\{#Qwen4FileName}"', self.installer)
         self.assertIn("function ModelStaged", self.installer)
+        # Completed downloads are preserved on abort: StageVerifiedDownloads
+        # copies every verified {tmp} file into models\ + stamps catalog
+        # metadata on the download-page exit path (success, abort, failure).
+        self.assertIn("procedure StageVerifiedDownloads", self.installer)
+        self.assertIn("DlCompleted.Add(FileName)", self.installer)
+        # An abort must stop the whole queue and offer to exit — never retry
+        # the file like a transient failure did (Break inside except does not
+        # exit a for loop in Pascal Script).
+        perform = self.installer.split("function PerformModelDownloads")[1]
+        perform = perform.split("function DetectExistingInstall", 1)[0]
+        self.assertIn("while not Done do", perform)
+        self.assertIn("WizardForm.Close", perform)
 
     def test_aborted_install_cleans_partial_progress(self):
         # Canceling mid-install must not leave a half-installed app that

@@ -332,23 +332,25 @@ begin
     DlLastCounted := False;
     DlLastCompleted := False;
   end;
-  if (Progress = ProgressMax) and (not DlLastCounted) then
+  if (Progress = ProgressMax) and (ProgressMax > 0) and (not DlLastCounted) then
   begin
     DlLastCounted := True;
     DlDoneBytes := DlDoneBytes + ProgressMax;
     Log('Download complete: ' + FileName + ' (' + IntToStr(Progress) + ' bytes)');
   end;
-  if (Progress = ProgressMax) and (not DlLastCompleted) then
+  if (Progress = ProgressMax) and (ProgressMax > 0) and (not DlLastCompleted) then
   begin
     DlLastCompleted := True;
     if DlCompleted <> nil then
       DlCompleted.Add(FileName);
     // Inno now verifies this file's SHA-256 before starting the next —
-    // a visible pause between files. Label it so it reads as work, and
-    // so a slow-responding Abort during verify makes sense.
-    if not WizardSilent() then
+    // a visible pause between files. Keep the total on screen and append
+    // the verify note so the label doesn't look like it disappeared.
+    if (not WizardSilent()) and (DlTotalBytes > 0) then
       DownloadTotalLabel.Caption :=
-        'Verifying ' + FileName + ' (SHA-256) — please wait';
+        'Total: ' + IntToStr(DlDoneBytes div 1048576) + ' / ' +
+        IntToStr(DlTotalBytes div 1048576) + ' MB — verifying SHA-256 of ' +
+        FileName + '...';
   end;
 end;
 
@@ -809,6 +811,15 @@ begin
   for I := 0 to DlCompleted.Count - 1 do
   begin
     FileName := DlCompleted[I];
+    // Copying multi-GB completed files into models\ can take a while on the
+    // abort path — say so on the still-visible page instead of looking hung.
+    if (not WizardSilent()) and (DownloadTotalLabel <> nil) then
+    begin
+      DownloadTotalLabel.Caption :=
+        'Saving completed downloads (' + IntToStr(I + 1) + ' of ' +
+        IntToStr(DlCompleted.Count) + '): ' + FileName + '...';
+      DownloadTotalLabel.Update;  // repaint now — FileCopy blocks the thread next
+    end;
     TmpPath := ExpandConstant('{tmp}\') + FileName;
     if not FileExists(TmpPath) then
       Continue;
@@ -934,6 +945,13 @@ begin
     StageVerifiedDownloads();
     DownloadPage.Hide;
   end;
+
+  // An aborted download should not silently bounce back to the Ready page —
+  // route through the native cancel confirmation ("Setup is not complete —
+  // exit?") so Yes closes the whole installer. Choosing No still lands back
+  // on Ready with every verified download already staged and skipped next run.
+  if (not Result) and (not WizardSilent()) and DownloadPage.AbortedByUser then
+    WizardForm.Close;
 end;
 
 // Silent installs never reach NextButtonClick — run the same queue
