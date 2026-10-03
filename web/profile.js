@@ -96,11 +96,11 @@
     setTimeout(() => t.classList.add("show"), 20);
     setTimeout(() => { t.classList.remove("show");
       setTimeout(() => t.remove(), 400); }, 12000);
-    // Voice greeting on every app open — not just a toast. Skipped only
-    // when the user muted voice; autoplay restrictions are already
-    // disabled in the desktop shell.
-    const nv = window.NexusVoice;
-    if (!nv || (nv.enabled && !nv.muted)) playGreeting();
+    // Voice greeting on every app open — not just a toast. The chat mute
+    // switch governs response playback, not the startup greeting, so this
+    // plays regardless; autoplay restrictions are already disabled in the
+    // desktop shell.
+    playGreeting();
   }
 
   function injectSwitcher(s) {
@@ -152,12 +152,17 @@
       // loads while no profile exists. s.required flips false the moment a
       // profile is created, so this silences itself permanently; an
       // unfinished onboarding keeps reminding the user each launch.
-      if (ON_START && window.NexusVoice && NexusVoice.speak) {
-        NexusVoice.speak(
-          "Welcome to Nexus Core. To unlock your workstation, fill out " +
-          "your profile below — every field on this page is required."
-        ).then((out) => {
-          if (out && out.url) post("/api/onboarding/welcome-played", {});
+      // Bypasses NexusVoice.speak on purpose: mute silences chat replies,
+      // not the onboarding welcome.
+      if (ON_START) {
+        api("/api/voice/speak", {
+          text: "Welcome to Nexus Core. To unlock your workstation, fill " +
+                "out your profile below — every field on this page is required."
+        }).then((out) => {
+          if (out && out.url) {
+            new Audio(out.url).play().catch(() => {});
+            post("/api/onboarding/welcome-played", {});
+          }
         }).catch(() => {});
       }
       return;
