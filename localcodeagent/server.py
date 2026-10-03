@@ -801,9 +801,12 @@ class AppState:
 
         def resume() -> None:
             try:
+                mission_owned = self._mission_owned_task_ids()
                 candidates = [
                     t for t in self.tasks.by_status("interrupted")
                     if int(t.get("recovery_count") or 0) < max_recoveries
+                    and not t.get("mission_id")
+                    and str(t.get("id")) not in mission_owned
                 ]
                 for task in candidates:
                     try:
@@ -2942,6 +2945,29 @@ class AppState:
         finally:
             self._dequeue_lock.release()
 
+    def _mission_owned_task_ids(self) -> set:
+        """Task ids claimed by mission nodes — the supervisor owns their
+        recovery via node retries/replans, so chat-level auto-resume and
+        error retry must not re-drive them (their recorded node results
+        are already final). Covers rows predating the persisted
+        ``mission_id`` stamp by scanning mission graph results."""
+        out = set()
+        try:
+            sup = getattr(self, "autonomy", None)
+            if sup is None:
+                return out
+            missions = getattr(sup, "missions", None)
+            if missions is None:
+                return out
+            for m in missions.list(include_archived=True):
+                for n in ((m.get("graph") or {}).get("nodes") or []):
+                    tid = str((n.get("result") or {}).get("task_id") or "")
+                    if tid:
+                        out.add(tid)
+        except Exception:
+            pass
+        return out
+
     def _retry_failed_tasks(self) -> None:
         """Re-drive error tasks in autonomous mode after a backoff.
 
@@ -2974,11 +3000,14 @@ class AppState:
             with self.agent._drive_lock:
                 if any(t.is_alive() for t in self.agent._drive_threads.values()):
                     return
+            mission_owned = self._mission_owned_task_ids()
             stale = [
                 t for t in self.tasks.by_status("error")
                 if int(t.get("recovery_count") or 0) < max_recoveries
                 and now - float(t.get("updated_at") or now) >= retry_after
                 and str(t.get("id")) not in self._retrying_tasks
+                and not t.get("mission_id")
+                and str(t.get("id")) not in mission_owned
             ]
             for item in stale[:1]:  # one retry per tick
                 task_id = str(item["id"])

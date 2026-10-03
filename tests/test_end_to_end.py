@@ -168,6 +168,32 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertTrue(
                 state._agent_lane_active(include_waiting_approval=True))
 
+    def test_mission_owned_tasks_excluded_from_chat_recovery(self):
+        # Mission-node tasks are supervisor-owned — node retries and replans
+        # handle them. Chat-level auto-resume/error retry must not re-drive
+        # them: the recorded node result is final, and re-driving an orphan
+        # of a terminal mission just clogs the agent lane.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+
+            class _Missions:
+                def list(self, include_archived=True):
+                    return [{"graph": {"nodes": [
+                        {"result": {"task_id": "t-claimed"}},
+                        {"result": {"ok": True}},
+                    ]}}]
+
+            class _Sup:
+                missions = _Missions()
+
+            state.autonomy = _Sup()
+            owned = state._mission_owned_task_ids()
+            self.assertIn("t-claimed", owned)
+            self.assertNotIn("t-free", owned)
+
+            state.autonomy = None
+            self.assertEqual(state._mission_owned_task_ids(), set())
+
     def test_task_runs_real_tool_call_and_persists_transcript(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
