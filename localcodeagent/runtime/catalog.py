@@ -274,3 +274,6 @@ class CodingModelCatalogManager:
         except Exception as exc:
             temp.unlink(missing_ok=True)
             self._update(job_id, state="failed", message=f"{type(exc).__name__}: {exc}", error=f"{type(exc).__name__}: {exc}", finished_at=time.time())
+        finally:
+            with self._lock:
+                self._cancel.pop(job_id, None)
