@@ -140,12 +140,6 @@ var
   UninstallButton: TNewButton;
   InstallBundledSource: Boolean;
   SkipModelDownloads: Boolean;
-  ModelProgressLabel: TNewStaticText;
-  ModelProgressBar: TNewProgressBar;
-  ModelBytesLabel: TNewStaticText;
-  ModelProgressActive: Boolean;
-  CurrentProgressFile: String;
-  LastModelBytesDone: Int64;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -262,46 +256,10 @@ begin
     mbInformation, MB_OK);
 end;
 
-procedure InitializeModelProgressControls();
-begin
-  ModelProgressLabel := TNewStaticText.Create(WizardForm);
-  ModelProgressLabel.Parent := WizardForm.InstallingPage;
-  ModelProgressLabel.Left := WizardForm.ProgressGauge.Left;
-  ModelProgressLabel.Top :=
-    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(14);
-  ModelProgressLabel.Width := WizardForm.ProgressGauge.Width;
-  ModelProgressLabel.Caption := 'Bootstrap download';
-  ModelProgressLabel.Visible := False;
-
-  ModelProgressBar := TNewProgressBar.Create(WizardForm);
-  ModelProgressBar.Parent := WizardForm.InstallingPage;
-  ModelProgressBar.Left := WizardForm.ProgressGauge.Left;
-  ModelProgressBar.Top :=
-    ModelProgressLabel.Top + ModelProgressLabel.Height + ScaleY(4);
-  ModelProgressBar.Width := WizardForm.ProgressGauge.Width;
-  ModelProgressBar.Height := WizardForm.ProgressGauge.Height;
-  ModelProgressBar.Min := 0;
-  ModelProgressBar.Max := 1000;
-  ModelProgressBar.Position := 0;
-  ModelProgressBar.Visible := False;
-
-  ModelBytesLabel := TNewStaticText.Create(WizardForm);
-  ModelBytesLabel.Parent := WizardForm.InstallingPage;
-  ModelBytesLabel.Left := WizardForm.ProgressGauge.Left;
-  ModelBytesLabel.Top :=
-    ModelProgressBar.Top + ModelProgressBar.Height + ScaleY(4);
-  ModelBytesLabel.Width := WizardForm.ProgressGauge.Width;
-  ModelBytesLabel.Caption := '';
-  ModelBytesLabel.Visible := False;
-
-  ModelProgressActive := False;
-  CurrentProgressFile := '';
-  LastModelBytesDone := 0;
-end;
-
 // Long operations (process shutdown, SHA-256 of multi-GB models) otherwise run
 // with a completely static wizard, which reads as "frozen". Push an explicit
-// stage message + marquee bar onto whichever page is currently visible.
+// stage message onto whichever page is currently visible. No second progress
+// bar: the native gauge stays the single, truthful progress indicator.
 procedure ShowBusyStatus(const Primary, Detail: String);
 begin
   if WizardSilent() then
@@ -314,22 +272,6 @@ begin
   begin
     WizardForm.StatusLabel.Caption := Primary;
     WizardForm.FilenameLabel.Caption := Detail;
-  end;
-
-  if ModelProgressLabel <> nil then
-  begin
-    ModelProgressLabel.Caption := Primary;
-    ModelProgressLabel.Visible := True;
-  end;
-  if ModelBytesLabel <> nil then
-  begin
-    ModelBytesLabel.Caption := Detail;
-    ModelBytesLabel.Visible := True;
-  end;
-  if ModelProgressBar <> nil then
-  begin
-    ModelProgressBar.Style := npbstMarquee;
-    ModelProgressBar.Visible := True;
   end;
 
   WizardForm.Update;
@@ -348,88 +290,6 @@ begin
     if not WizardSilent() then
       WizardForm.Update;
   end;
-end;
-
-function LargestTemporaryFileSize(const Directory: String): Int64;
-var
-  FindRec: TFindRec;
-  Candidate: String;
-  Size: Int64;
-  SearchDir: String;
-begin
-  Result := 0;
-  SearchDir := AddBackslash(Directory);
-  if FindFirst(SearchDir + '*.tmp', FindRec) then
-  begin
-    try
-      repeat
-        Candidate := SearchDir + FindRec.Name;
-        if FileSize64(Candidate, Size) and (Size > Result) then
-          Result := Size;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-end;
-
-procedure ShowModelDownloadProgress(
-  const DisplayName, DownloadDirectory: String;
-  const ExpectedSize: Int64);
-var
-  BytesDone: Int64;
-  Position: Integer;
-begin
-  if CurrentProgressFile <> DisplayName then
-  begin
-    CurrentProgressFile := DisplayName;
-    LastModelBytesDone := 0;
-    ModelProgressBar.Position := 0;
-  end;
-
-  ModelProgressActive := True;
-  ModelProgressBar.Style := npbstNormal;
-  ModelProgressLabel.Visible := True;
-  ModelProgressBar.Visible := True;
-  ModelBytesLabel.Visible := True;
-
-  BytesDone := LargestTemporaryFileSize(DownloadDirectory);
-  if BytesDone < LastModelBytesDone then
-    BytesDone := LastModelBytesDone;
-  if BytesDone < 0 then
-    BytesDone := 0;
-  if BytesDone > ExpectedSize then
-    BytesDone := ExpectedSize;
-  LastModelBytesDone := BytesDone;
-
-  if BytesDone >= ExpectedSize then
-    ModelProgressLabel.Caption :=
-      'Verifying ' + DisplayName + ' download (SHA-256)...'
-  else
-    ModelProgressLabel.Caption := 'Downloading ' + DisplayName + '...';
-
-  if ExpectedSize > 0 then
-    Position := (BytesDone * 1000) div ExpectedSize
-  else
-    Position := 0;
-
-  ModelProgressBar.Position := Position;
-  ModelBytesLabel.Caption :=
-    IntToStr(BytesDone div 1048576) + ' MB / ' +
-    IntToStr(ExpectedSize div 1048576) + ' MB';
-end;
-
-procedure MarkModelDownloadsComplete();
-begin
-  if not ModelProgressActive then
-    Exit;
-
-  ModelProgressBar.Style := npbstNormal;
-  ModelProgressLabel.Caption := 'Bootstrap downloads complete';
-  ModelProgressBar.Position := ModelProgressBar.Max;
-  ModelBytesLabel.Caption := 'All default model components are ready';
-  LastModelBytesDone := 0;
-  CurrentProgressFile := '';
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
@@ -667,8 +527,6 @@ procedure InitializeWizard();
 var
   MessageText: String;
 begin
-  InitializeModelProgressControls();
-
   if UpgradeDetected then
   begin
     WizardForm.Caption := 'Update Nexus Core';
@@ -734,6 +592,114 @@ begin
     Log('Could not execute taskkill for ' + ImageName);
 end;
 
+// taskkill /IM matches on image name only. An orphaned backend (started by a
+// previous host launch, or by a leftover helper the desktop host already lost
+// track of) can survive the name sweep while still holding {app} files open.
+// Two backstops close that gap:
+//  - the backend.pid file the desktop host writes after every backend launch
+//  - a PowerShell sweep that stops ANY process whose executable lives under
+//    the install directory, regardless of image name
+procedure KillBackendFromPidFile();
+var
+  PidPath, PidText: String;
+  Content: AnsiString;
+  SepPos, Pid, ResultCode: Integer;
+begin
+  PidPath := ExpandConstant('{app}\data\logs\backend.pid');
+  if not FileExists(PidPath) then
+    Exit;
+  if not LoadStringFromFile(PidPath, Content) then
+    Exit;
+  SepPos := Pos('|', Content);
+  if SepPos > 0 then
+    PidText := Copy(Content, 1, SepPos - 1)
+  else
+    PidText := Content;
+  Pid := StrToIntDef(Trim(PidText), 0);
+  if Pid <= 0 then
+    Exit;
+  if Exec('taskkill.exe', '/PID ' + IntToStr(Pid) + ' /T /F', '',
+          SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('taskkill on recorded backend pid ' + IntToStr(Pid) +
+        ' returned ' + IntToStr(ResultCode))
+  else
+    Log('Could not execute taskkill for recorded backend pid ' + IntToStr(Pid));
+end;
+
+procedure StopProcessesUnderInstallDir();
+var
+  PsCommand: String;
+  ResultCode: Integer;
+begin
+  PsCommand :=
+    'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+    AddBackslash(ExpandConstant('{app}')) +
+    ''') } | Stop-Process -Force';
+  if not Exec('powershell.exe',
+              '-NoProfile -ExecutionPolicy Bypass -Command "' + PsCommand + '"',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('Could not execute PowerShell install-dir process sweep.')
+  else if ResultCode <> 0 then
+    Log('PowerShell install-dir process sweep returned ' + IntToStr(ResultCode));
+end;
+
+// Opening an exe for write fails while a process is running it — the same
+// lock that produces "DeleteFile failed; code 5" during file replacement.
+function FileIsWriteLocked(const Path: String): Boolean;
+var
+  Stream: TFileStream;
+begin
+  Result := True;
+  if not FileExists(Path) then
+  begin
+    Result := False;
+    Exit;
+  end;
+  try
+    Stream := TFileStream.Create(Path, fmOpenReadWrite or fmShareDenyNone);
+    try
+      Stream.Free;
+      Result := False;
+    except
+    end;
+  except
+  end;
+end;
+
+function InstallFilesLocked(): Boolean;
+begin
+  Result :=
+    FileIsWriteLocked(ExpandConstant('{app}\{#AppExeName}')) or
+    FileIsWriteLocked(ExpandConstant('{app}\backend\ChatNexus.Backend.exe')) or
+    FileIsWriteLocked(ExpandConstant('{app}\runtime\llama\llama-server.exe'));
+end;
+
+procedure WaitForInstallFilesUnlock();
+var
+  Seconds: Integer;
+begin
+  Seconds := 0;
+  while InstallFilesLocked() and (Seconds < 45) do
+  begin
+    if Seconds = 5 then
+      StopProcessesUnderInstallDir();  // escalate once early, then keep waiting
+    ShowBusyStatus(
+      'Waiting for Nexus Core files to be released...',
+      'A running process still has application files open. Setup keeps ' +
+        'retrying for up to 45 seconds (' + IntToStr(Seconds) + 's).');
+    BusySleep(1000);
+    Seconds := Seconds + 1;
+  end;
+  if InstallFilesLocked() then
+  begin
+    Log('Install files still locked after waiting; Inno file-replace retry will prompt the user.');
+    ShowBusyStatus(
+      'Nexus Core files are still in use',
+      'Please close every Nexus Core window and try again. If the problem ' +
+        'persists, restart the computer and run this setup again.');
+  end;
+end;
+
 procedure StopRunningNexusCore();
 begin
   if not UpgradeDetected then
@@ -761,6 +727,8 @@ begin
   TaskKillImage('ChatNexus.Backend.exe', True);
   TaskKillImage('llama-server.exe', True);
   TaskKillImage('llama.exe', True);
+  KillBackendFromPidFile();
+  StopProcessesUnderInstallDir();
   BusySleep(500);
 end;
 
@@ -772,9 +740,12 @@ begin
       'Setup is closing Nexus Core and checking the existing installation. Please wait.');
   StopRunningNexusCore();
   if UpgradeDetected then
+    WaitForInstallFilesUnlock();
+  if UpgradeDetected then
     ShowBusyStatus(
-      'Preparing update...',
-      'Checking existing files before copying begins.');
+      'Analyzing files to update...',
+      'Setup is building the list of files to replace. Extraction will ' +
+        'begin shortly and progress will move to the bar below.');
   InstallBundledSource := not FileExists(ExpandConstant('{app}\Source\.git\HEAD'));
 
   if InstallBundledSource then
@@ -825,22 +796,6 @@ begin
   end;
 end;
 
-procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
-var
-  CurrentFile: String;
-begin
-  CurrentFile := WizardForm.FilenameLabel.Caption;
-
-  if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
-  else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
-  else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voice model', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
-  else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voices', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ExampleConfig: String;
@@ -855,8 +810,6 @@ begin
     // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
-
-    MarkModelDownloadsComplete();
 
     // Keep installer-downloaded models recognized as verified by Nexus Core.
     if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen14FileName}')) then

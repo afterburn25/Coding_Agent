@@ -63,29 +63,29 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WriteCatalogMetadata", self.installer)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.installer)
 
-    def test_installer_shows_overall_and_per_component_download_progress(self):
-        self.assertIn("WizardForm.ProgressGauge", self.installer)
-        self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
-        self.assertIn("procedure CurInstallProgressChanged", self.installer)
-        self.assertIn("'Downloading ' + DisplayName + '...'", self.installer)
-        self.assertIn("LargestTemporaryFileSize", self.installer)
-        self.assertIn("CurrentProgressFile <> DisplayName", self.installer)
-        self.assertIn("Bootstrap downloads complete", self.installer)
-        self.assertIn("All default model components are ready", self.installer)
+    def test_installer_uses_only_the_native_progress_bar(self):
+        # The native gauge already tracks extraction and external downloads;
+        # a second custom bar was misleading and must not come back.
+        self.assertNotIn("ModelProgressBar", self.installer)
+        self.assertNotIn("ModelProgressLabel", self.installer)
+        self.assertNotIn("ModelBytesLabel", self.installer)
+        self.assertNotIn("procedure CurInstallProgressChanged", self.installer)
+        self.assertNotIn("LargestTemporaryFileSize", self.installer)
+        self.assertNotIn("ShowModelDownloadProgress", self.installer)
+        self.assertNotIn("MarkModelDownloadsComplete", self.installer)
 
     def test_installer_reports_busy_stages_during_blocking_update_work(self):
         # Update-time blocking work (process shutdown, multi-GB SHA-256
         # checks) previously ran with a static wizard and read as frozen;
         # every stage must push explicit status text to the wizard.
         self.assertIn("procedure ShowBusyStatus", self.installer)
-        self.assertIn("npbstMarquee", self.installer)
         self.assertIn("WizardForm.CurPageID = wpReady", self.installer)
         self.assertIn("'Closing Nexus Core...'", self.installer)
         self.assertIn("'Waiting for Nexus Core to exit...'", self.installer)
         self.assertIn("'Stopping remaining Nexus Core processes...'", self.installer)
         self.assertIn("'Preparing update...'", self.installer)
         self.assertIn("'Verifying existing model file...'", self.installer)
-        self.assertIn("'Verifying ' + DisplayName + ' download (SHA-256)...'", self.installer)
+        self.assertIn("'Analyzing files to update...'", self.installer)
         # Sleeps must be chunked through BusySleep so the wizard keeps
         # repainting instead of freezing for the whole grace period.
         self.assertIn("procedure BusySleep", self.installer)
@@ -96,6 +96,21 @@ class InstallerContractTests(unittest.TestCase):
         self.assertNotRegex(shutdown, r"(?m)^\s*Sleep\(")
         # The uninstaller wait loop must surface elapsed time while polling.
         self.assertIn("'Uninstalling... ' + IntToStr(WaitCount div 2) + 's'", self.installer)
+
+    def test_installer_releases_locked_files_before_replacing(self):
+        # A leftover backend once survived the image-name taskkill sweep and
+        # produced "DeleteFile failed; code 5" mid-update. The script must
+        # escalate beyond name matching and verify files are actually
+        # unlocked before Inno starts replacing them.
+        self.assertIn("backend.pid", self.installer)
+        self.assertIn("procedure KillBackendFromPidFile", self.installer)
+        self.assertIn("procedure StopProcessesUnderInstallDir", self.installer)
+        self.assertIn("Get-Process", self.installer)
+        self.assertIn("Stop-Process -Force", self.installer)
+        self.assertIn("function FileIsWriteLocked", self.installer)
+        self.assertIn("fmOpenReadWrite", self.installer)
+        self.assertIn("procedure WaitForInstallFilesUnlock", self.installer)
+        self.assertIn("'Waiting for Nexus Core files to be released...'", self.installer)
 
     def test_optional_tools_not_downloaded_by_installer(self):
         # ComfyUI and image model packs moved to the in-app Tools page so Setup

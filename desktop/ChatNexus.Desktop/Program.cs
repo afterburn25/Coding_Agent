@@ -565,6 +565,23 @@ internal sealed class BackendProcess : IDisposable
         }
     }
 
+    /// Append a HOST line before a BackendProcess exists. The failure screen
+    /// points users at this log — a launch that dies before Process.Start
+    /// must still leave evidence here.
+    private static void AppendHostLog(string logPath, string line)
+    {
+        try
+        {
+            File.AppendAllText(
+                logPath,
+                $"{DateTimeOffset.Now:O} [HOST] {line}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging must never block startup.
+        }
+    }
+
     public static BackendProcess Start(string appDir)
     {
         var backendExe = Path.Combine(appDir, "backend", "ChatNexus.Backend.exe");
@@ -588,22 +605,44 @@ internal sealed class BackendProcess : IDisposable
         // conversations before. Relocate those dirs under a per-user root
         // and leave junctions behind so backend paths keep resolving.
         // NEXUS_NO_STATE_REDIRECT=1 opts out (used by the build smoke test).
+        var logDir = Path.Combine(appDir, "data", "logs");
+        var logPath = Path.Combine(logDir, "backend-host.log");
+
         var stateNotes = new List<string>();
         if (Environment.GetEnvironmentVariable("NEXUS_NO_STATE_REDIRECT") != "1")
         {
-            EnsureStateJunctions(appDir, stateNotes);
+            try
+            {
+                EnsureStateJunctions(appDir, stateNotes);
+            }
+            catch (Exception ex)
+            {
+                // The failure screen points here — leave the reason behind.
+                try { Directory.CreateDirectory(logDir); } catch { }
+                AppendHostLog(logPath, $"state redirect failed: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
         }
-
-        var logDir = Path.Combine(appDir, "data", "logs");
         Directory.CreateDirectory(logDir);
+        foreach (var note in stateNotes)
+        {
+            AppendHostLog(logPath, note);
+        }
 
         // If a previous host died without reaping its backend (force-kill,
         // crash), the orphaned backend keeps running forever — holding its
         // port, model servers, and VRAM. The pidfile identifies it as ours
         // (path must match this install) so the new instance can reap it
         // along with its whole child tree instead of double-running.
-        ReapOrphanedBackend(appDir, backendExe, logDir);
-        var logPath = Path.Combine(logDir, "backend-host.log");
+        try
+        {
+            ReapOrphanedBackend(appDir, backendExe, logDir);
+        }
+        catch (Exception ex)
+        {
+            AppendHostLog(logPath, $"orphan cleanup failed: {ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
         // The host log appends every backend stdout/stderr line forever —
         // keep only a tail so long unattended sessions cannot grow it.
         try
@@ -649,8 +688,23 @@ internal sealed class BackendProcess : IDisposable
         start.ArgumentList.Add("--config");
         start.ArgumentList.Add(config);
 
-        var process = Process.Start(start)
-            ?? throw new InvalidOperationException("Could not start Nexus Core backend.");
+        AppendHostLog(
+            logPath,
+            $"launching backend {backendExe} --port {port} --workspace {workspace} --config {config}");
+
+        Process process;
+        try
+        {
+            process = Process.Start(start)
+                ?? throw new InvalidOperationException("Process.Start returned null.");
+        }
+        catch (Exception ex)
+        {
+            // Antivirus scanning a freshly-updated unsigned exe can block
+            // CreateProcess — record it so the failure log isn't empty.
+            AppendHostLog(logPath, $"backend launch failed: {ex.GetType().Name}: {ex.Message}");
+            throw new InvalidOperationException("Could not start Nexus Core backend.", ex);
+        }
         try
         {
             File.WriteAllText(BackendPidPath(logDir), $"{process.Id}|{backendExe}");
@@ -660,10 +714,6 @@ internal sealed class BackendProcess : IDisposable
             // Best-effort bookkeeping — never block startup on it.
         }
         var backend = new BackendProcess(process, port, logPath);
-        foreach (var note in stateNotes)
-        {
-            backend.WriteLog("HOST", note);
-        }
         backend.WriteLog("HOST", $"started backend pid {process.Id} on port {port}");
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -674,7 +724,8 @@ internal sealed class BackendProcess : IDisposable
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         var deadline = DateTime.UtcNow + timeout;
-        Exception? last = null;
+        string? last = null;
+        var lastLogged = DateTime.UtcNow;
 
         while (DateTime.UtcNow < deadline)
         {
@@ -692,17 +743,27 @@ internal sealed class BackendProcess : IDisposable
                 {
                     return;
                 }
+                last = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
             }
             catch (Exception ex)
             {
-                last = ex;
+                last = $"{ex.GetType().Name}: {ex.Message}";
+            }
+
+            // Long stalls otherwise look identical to a dead backend in the
+            // log; note what the health probe is actually seeing.
+            if (DateTime.UtcNow - lastLogged > TimeSpan.FromSeconds(15))
+            {
+                WriteLog("HOST", $"still waiting for /api/status on port {Port}: {last}");
+                lastLogged = DateTime.UtcNow;
             }
 
             await Task.Delay(150);
         }
 
+        WriteLog("HOST", $"health check timed out after {timeout.TotalSeconds:0}s; last result: {last ?? "no request completed"}");
         throw new TimeoutException(
-            $"Nexus Core backend did not become ready within {timeout.TotalSeconds:0} seconds. {last?.Message} " +
+            $"Nexus Core backend did not become ready within {timeout.TotalSeconds:0} seconds. {last} " +
             $"Check {LogPath} for backend errors."
         );
     }
