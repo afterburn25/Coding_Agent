@@ -1020,6 +1020,21 @@ class AppState:
             cache["ts"], cache["rows"] = now, rows
             return rows
 
+        def _orphan_worktrees() -> list[dict]:
+            """Repair worktrees whose incident no longer exists."""
+            repair = getattr(sup, "repair", None)
+            live = {str(r.get("id"))
+                    for r in (repair.list() if repair else [])}
+            wt = self.workspace / ".repair-worktrees"
+            out = []
+            try:
+                if wt.is_dir():
+                    out = [{"id": c.name} for c in wt.iterdir()
+                           if c.name not in live]
+            except OSError:
+                pass
+            return out
+
         sup.scanner.sources.update({
             "ci_failures": _ci_failures,
             "crash_history": netdiag.crash_history,
@@ -1035,6 +1050,8 @@ class AppState:
                               .get("ram_free_gb") or 0.0),
             "repairs":
                 lambda: sup.repair.list() if sup.repair else [],
+            "orphan_worktrees":
+                lambda: _orphan_worktrees(),
             "startup_ms": _startup,
             "pending_approvals":
                 lambda: [r for r in sup.store.approvals.rows()

@@ -13,7 +13,7 @@ from localcodeagent.autonomy.detectors import (
     detect_approval_backlog, detect_ci_failures, detect_crash_storm,
     detect_disk_pressure, detect_mission_failures, detect_model_failures,
     detect_ram_pressure, detect_repair_thrash, detect_startup_regression,
-    new_finding)
+    detect_repair_workspace_bloat, new_finding)
 from localcodeagent.autonomy.state import AutonomyStore
 
 
@@ -179,6 +179,21 @@ class DetectorUnitTests(unittest.TestCase):
         self.assertEqual(f["severity"], "normal")
         self.assertEqual(f["confidence"], 1.0)
         self.assertEqual(f["status"], "open")
+
+
+class WorkspaceBloatTests(unittest.TestCase):
+    def test_fires_at_threshold(self):
+        out = detect_repair_workspace_bloat({
+            "orphan_worktrees": lambda: [{"id": "a"}, {"id": "b"},
+                                         {"id": "c"}]})
+        self.assertIsNotNone(out)
+        self.assertEqual(out["route"], "suggestion")
+        self.assertEqual(out["evidence"]["orphan_count"], 3)
+
+    def test_below_threshold_silent(self):
+        self.assertIsNone(detect_repair_workspace_bloat(
+            {"orphan_worktrees": lambda: [{"id": "a"}]}))
+        self.assertIsNone(detect_repair_workspace_bloat({}))
 
 
 class ScannerTests(unittest.TestCase):

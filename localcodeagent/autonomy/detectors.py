@@ -275,6 +275,28 @@ def detect_ram_pressure(sources: dict) -> dict | None:
         route="repair", signature="ram_pressure")
 
 
+def detect_repair_workspace_bloat(sources: dict) -> dict | None:
+    """Orphaned repair worktrees on disk — candidates whose incident is
+    gone still occupy .repair-worktrees. Countable, not estimated."""
+    fn = sources.get("orphan_worktrees")
+    if not fn:
+        return None
+    try:
+        rows = list(fn() or [])
+    except Exception:
+        return None
+    if len(rows) < 3:
+        return None
+    return new_finding(
+        kind="repair_workspace_bloat", severity="low", confidence=0.8,
+        title=f"{len(rows)} orphaned repair worktrees on disk",
+        detail="Dead repair candidates still occupy .repair-worktrees — "
+               "the disk_pressure fixer reclaims them, or review and "
+               "dismiss stale needs_human incidents.",
+        evidence={"orphan_count": len(rows)},
+        route="suggestion", signature="repair_workspace_bloat")
+
+
 def detect_ci_failures(sources: dict) -> dict | None:
     """Newly-failed GitHub/CI runs — each failed run becomes a repair
     incident once (signature keys on the run id)."""
@@ -317,6 +339,7 @@ DETECTORS: list[Callable[[dict], dict | None]] = [
     detect_answer_memory_decay,
     detect_startup_regression,
     detect_approval_backlog,
+    detect_repair_workspace_bloat,
     detect_ci_failures,
 ]
 
