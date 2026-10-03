@@ -2658,6 +2658,7 @@ class AppState:
     def _watchdog_maintenance(self) -> None:
         self._evict_idle_models()
         self._expire_stale_approvals()
+        self._reap_stalled_tasks()
         self._retry_failed_tasks()
         self._dequeue_next()
         self._check_disk_space()
@@ -2948,6 +2949,58 @@ class AppState:
                         self._retrying_tasks.discard(tid)
 
                 threading.Thread(target=retry, name=f"auto-retry-{task_id}", daemon=True).start()
+        except Exception:
+            pass
+
+    def _reap_stalled_tasks(self) -> None:
+        """Fail in-flight tasks whose driver thread vanished.
+
+        A task in a driving status (running/verifying/reviewing) is always
+        being executed by a registered thread (agent._drive_threads). If
+        that thread exits without a terminal update — an unhandled return
+        path or any bug that bypasses _drive_or_error — the row wedges the
+        single-flight queue forever: _dequeue_next refuses to start queued
+        work and _retry_failed_tasks only looks at 'error' rows. Reap it so
+        autonomous retry and the queue can move on. waiting_approval is a
+        legitimately parked state and is never reaped.
+        """
+        try:
+            grace = max(
+                15.0,
+                float(getattr(self.config, "stalled_task_grace_seconds", 120.0) or 120.0),
+            )
+            now = time.time()
+            for task in self.tasks.recent(20):
+                if str(task.get("status") or "") not in {
+                        "running", "verifying", "reviewing"}:
+                    continue
+                task_id = str(task.get("id") or "")
+                if not task_id or self.agent.has_live_driver(task_id):
+                    continue
+                try:
+                    updated = float(task.get("updated_at") or now)
+                except (TypeError, ValueError):
+                    updated = now
+                if now - updated < grace:
+                    continue
+                try:
+                    self.agent._close_session(task_id)
+                except Exception:
+                    pass
+                self.tasks.update(
+                    task_id, status="error", phase="done",
+                    error="Task driver exited unexpectedly — marked failed by watchdog.")
+                self.tasks.append_log(
+                    task_id,
+                    "## error: task driver lost — marked failed by watchdog\n")
+                self.tasks.flush_log(task_id)
+                if getattr(self, "activities", None) is not None:
+                    try:
+                        self.activities.close_open(task_id, "failed")
+                    except Exception:
+                        pass
+                self.events.publish("task", {
+                    "event": "task_driver_lost", "task_id": task_id})
         except Exception:
             pass
 

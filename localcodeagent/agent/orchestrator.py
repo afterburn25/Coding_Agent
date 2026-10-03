@@ -32,7 +32,7 @@ from ..workflow.knowledge_memory import KnowledgeMemory
 from ..workflow.nexus_brain import NexusBrain
 from ..training.model_growth import ModelGrowthLab
 from ..workflow.repository import RepositoryIndex
-from ..workflow.tasks import TaskStore
+from ..workflow.tasks import TaskRecord, TaskStore
 from ..workflow.verify import detect_verification_commands
 
 
@@ -205,6 +205,16 @@ class AgentOrchestrator:
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
         self._sessions: dict[str, _AgentSession] = {}
+        # task_id -> thread currently executing a synchronous drive for that
+        # task. Registered for the whole drive (including tool/verification
+        # execution inside resume) so the watchdog can tell a live drive from
+        # a task whose driver thread died without marking it terminal.
+        self._drive_threads: dict[str, threading.Thread] = {}
+
+    def has_live_driver(self, task_id: str) -> bool:
+        """True while a registered thread is still driving this task."""
+        thread = self._drive_threads.get(str(task_id))
+        return bool(thread and thread.is_alive())
 
     def _act(
         self,
@@ -2348,6 +2358,7 @@ class AgentOrchestrator:
 
     def _drive_or_error(self, session: _AgentSession) -> AgentResult:
         """Run the drive loop; on unexpected failure mark the task and re-raise."""
+        self._drive_threads[session.task_id] = threading.current_thread()
         try:
             return self._drive(session)
         except Exception as exc:
@@ -2377,6 +2388,8 @@ class AgentOrchestrator:
             self._record_outcome(session, "error")
             self._close_session(session.task_id)
             raise
+        finally:
+            self._drive_threads.pop(session.task_id, None)
 
     _TOOL_ACTIVITY_CATEGORY = {
         "run_shell": "command", "terminal_run": "command", "shell": "command",
@@ -3623,6 +3636,20 @@ class AgentOrchestrator:
         task = self.tasks.get(task_id)
         if task.status not in {"interrupted", "error"}:
             raise ValueError(f"Task {task_id} is not recoverable from status {task.status}")
+        self._drive_threads[str(task_id)] = threading.current_thread()
+        try:
+            return self._recover_impl(
+                task_id, task=task, event_callback=event_callback)
+        finally:
+            self._drive_threads.pop(str(task_id), None)
+
+    def _recover_impl(
+        self,
+        task_id: str,
+        *,
+        task: TaskRecord,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         session = self._restore_session(
             task_id,
             reason=f"Previous status was {task.status}; previous phase was {task.interrupted_from or task.phase}.",
@@ -3648,6 +3675,23 @@ class AgentOrchestrator:
         return self._drive_or_error(session)
 
     def resume(
+        self,
+        task_id: str,
+        *,
+        approved: bool,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
+        # The whole call is a synchronous drive — tool/verification execution
+        # and any repair re-drive included — so the watchdog knows this task
+        # has a live driver even outside _drive_or_error.
+        self._drive_threads[str(task_id)] = threading.current_thread()
+        try:
+            return self._resume_impl(
+                task_id, approved=approved, event_callback=event_callback)
+        finally:
+            self._drive_threads.pop(str(task_id), None)
+
+    def _resume_impl(
         self,
         task_id: str,
         *,
@@ -3694,12 +3738,20 @@ class AgentOrchestrator:
             session.tool_events.append({"name": "run_shell", "arguments": args, "result": result, "phase": "verification"})
             session.verification_index += 1
             try:
-                return self._finalize(session)
+                final = self._finalize(session)
             except Exception as exc:
                 error_task = self.tasks.update(task_id, status="error", phase="done", error=f"{type(exc).__name__}: {exc}")
                 self._emit(session, "task", task=error_task.as_dict())
                 self._emit(session, "error", error=error_task.error)
                 self._close_session(task_id)
                 raise
+            if final is not None:
+                return final
+            # _finalize returned None — it queued an automatic repair round
+            # and expects the drive loop to continue (same contract as the
+            # 'continue' in _drive). Re-enter the drive so the repair actually
+            # runs; returning here would strand the task 'running' with no
+            # live driver.
+            return self._drive_or_error(session)
 
         raise ValueError(f"Unknown approval kind {pending['kind']}")

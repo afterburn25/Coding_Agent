@@ -389,6 +389,65 @@ class EndToEndAgentTests(unittest.TestCase):
                 log = state.tasks.read_log(t["id"])
                 self.assertTrue(log.strip(), f"task {t['id']} wrote no transcript")
 
+    def test_stalled_task_reaper_unwedges_queue(self):
+        """A task record stuck 'running' with no live driver thread must not
+        wedge the single-flight queue — the watchdog marks it failed so the
+        queued item can start."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            stranded = state.tasks.create("ghost task", "auto")
+            state.tasks.update(
+                stranded.id, status="running", phase="researching_failure")
+            # Push updated_at past the reap grace so the watchdog treats the
+            # driverless row as stranded (update() always refreshes it, so
+            # backdate the record directly).
+            state.tasks.get(stranded.id).updated_at = time.time() - 600.0
+            self.assertFalse(state.agent.has_live_driver(stranded.id))
+
+            state.queue.enqueue("real follow-up task")
+            state._reap_stalled_tasks()
+            self.assertEqual(state.tasks.get(stranded.id).status, "error")
+            state._dequeue_next()
+
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                done = [t for t in state.tasks.recent(5)
+                        if t.get("status") in {"completed", "error", "cancelled"}]
+                if len(done) >= 2 and not len(state.queue):
+                    break
+                time.sleep(0.1)
+            self.assertEqual(len(state.queue), 0)
+            self.assertEqual(
+                state.tasks.get(stranded.id).status, "error")
+            completed = [t for t in state.tasks.recent(5)
+                         if t.get("status") == "completed"]
+            self.assertEqual(len(completed), 1)
+
+    def test_reaper_leaves_live_drive_alone(self):
+        """A running task with a live registered driver is never reaped."""
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            task = state.tasks.create("still driving", "auto")
+            state.tasks.update(task.id, status="running", phase="working")
+            state.tasks.get(task.id).updated_at = time.time() - 600.0
+            state.agent._drive_threads[task.id] = threading.current_thread()
+            state._reap_stalled_tasks()
+            self.assertEqual(state.tasks.get(task.id).status, "running")
+            # And a stale waiting_approval task is a legitimate parked state,
+            # not a dead driver — never reaped.
+            parked = state.tasks.create("awaiting user", "auto")
+            state.tasks.update(
+                parked.id, status="waiting_approval", phase="waiting_approval",
+                pending_approval={"kind": "tool", "name": "x"})
+            state.tasks.get(parked.id).updated_at = time.time() - 600.0
+            state._reap_stalled_tasks()
+            self.assertEqual(
+                state.tasks.get(parked.id).status, "waiting_approval")
+
     def test_full_stack_sse_stream_end_to_end(self):
         """Real HTTP server + SSE + event bus + fake model — the exact path
         the desktop UI drives."""

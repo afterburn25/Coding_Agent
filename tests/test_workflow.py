@@ -887,6 +887,53 @@ class VerificationRepairLoopTests(unittest.TestCase):
             self.assertTrue(any(e.get("type") == "verification_repair" for e in result.model_events))
             self.assertEqual((root / "a.txt").read_text(encoding="utf-8"), "new\n")
 
+    def test_resume_after_failed_verification_redrives_repair(self):
+        """A verification approval whose command fails starts an auto-repair
+        round — _finalize returns None to mean 'keep driving'. resume() must
+        re-enter the drive loop instead of returning None and stranding the
+        task 'running' with no driver (queue-wedging regression)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.txt").write_text("old\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+            (root / "tests").mkdir()
+            profile = ModelProfile(id="local", endpoint="http://unused/v1", model="x", roles=["primary_coder", "fast_coder", "deep_reasoner", "reviewer"], runtime="external")
+            config = AgentConfig(
+                models=[profile],
+                permissions={"filesystem.read": "allow", "filesystem.write": "allow", "shell.execute": "ask"},
+                auto_verify_after_changes=True, review_after_changes=False, max_auto_repair_cycles=1,
+            )
+            router = ModelRouter(config.models)
+            tools = ToolRegistry(config.permissions)
+            tasks = TaskStore(root); checkpoints = CheckpointManager(root)
+            register_filesystem_tools(tools, root, checkpoints=checkpoints, tasks=tasks)
+            shell_calls = []
+            def fake_shell(args):
+                shell_calls.append(args["command"])
+                return ("OUTPUT:\nfailed\nEXIT_CODE=1" if len(shell_calls) == 1 else "OUTPUT:\npassed\nEXIT_CODE=0")
+            tools.register(ToolSpec("run_shell", "test shell", {"type": "object", "properties": {"command": {"type": "string"}}}, "shell.execute", fake_shell))
+            memory = ProjectMemory(root); index = RepositoryIndex(root); index.build()
+            agent = AgentOrchestrator(config, router, tools, _FakeRuntime(), tasks=tasks, checkpoints=checkpoints, memory=memory, repository_index=index)
+            provider = _RepairProvider(); agent._provider_for = lambda _: provider
+
+            first = agent.run("change the file and make tests pass")
+            self.assertEqual(first.task["status"], "waiting_approval")
+            self.assertEqual(first.pending_approval["kind"], "verification")
+
+            # Approval runs the failing command, _finalize kicks a repair
+            # round, and the drive must continue — the repair turn re-asks
+            # for verification approval rather than stranding the task.
+            second = agent.resume(first.task["id"], approved=True)
+            self.assertIsNotNone(second)
+            self.assertEqual(second.task["status"], "waiting_approval")
+            self.assertEqual(second.pending_approval["kind"], "verification")
+            self.assertEqual(provider.calls, 3)
+
+            third = agent.resume(first.task["id"], approved=True)
+            self.assertEqual(third.task["status"], "completed")
+            self.assertEqual(len(shell_calls), 2)
+            self.assertFalse(agent.has_live_driver(first.task["id"]))
+
 
 class _PatchThenReviewProvider:
     def __init__(self):

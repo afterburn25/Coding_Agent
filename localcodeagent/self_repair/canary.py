@@ -87,8 +87,12 @@ def production_launcher(*, state_parent: Path,
             # Minimal config → defaults resolve under the scratch root.
             cfg_path.write_text("{}", encoding="utf-8")
         env = dict(os.environ)
-        env["PYTHONPATH"] = str(worktree) + os.pathsep + \
-            env.get("PYTHONPATH", "")
+        # Replace — not prepend — PYTHONPATH: the candidate must resolve
+        # localcodeagent only from the worktree. An inherited entry pointing
+        # at the stable repo would silently boot the wrong code and the
+        # canary would validate nothing (also breaks any test harness that
+        # exports PYTHONPATH to run the suite, e.g. selftest).
+        env["PYTHONPATH"] = str(worktree)
         kwargs: dict[str, Any] = {}
         if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP

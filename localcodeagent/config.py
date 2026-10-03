@@ -146,6 +146,10 @@ class AgentConfig:
     runtime_auto_start: bool = True
     runtime_recovery_attempts: int = 1
     max_resident_models: int = 1
+    # Seconds a task may sit in a driving status (running/verifying/reviewing)
+    # with no live driver thread before the watchdog marks it failed so the
+    # queue can move on. waiting_approval is a parked state, never reaped.
+    stalled_task_grace_seconds: float = 120.0
 
     # v0.8 unattended operation. autonomous_mode auto-approves permission
     # levels "ask"/"session" for reversible workspace actions; irreversible
@@ -574,6 +578,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.model_telemetry_max_events = max(20, int(raw.get("model_telemetry_max_events", cfg.model_telemetry_max_events)))
     cfg.runtime_auto_start = bool(raw.get("runtime_auto_start", cfg.runtime_auto_start))
     cfg.runtime_recovery_attempts = max(0, int(raw.get("runtime_recovery_attempts", cfg.runtime_recovery_attempts)))
+    cfg.stalled_task_grace_seconds = max(15.0, float(raw.get("stalled_task_grace_seconds", cfg.stalled_task_grace_seconds)))
     cfg.autonomous_mode = bool(raw.get("autonomous_mode", cfg.autonomous_mode))
     cfg.autonomous_max_continuations = max(0, int(raw.get("autonomous_max_continuations", cfg.autonomous_max_continuations)))
     cfg.autonomous_resume_interrupted = bool(raw.get("autonomous_resume_interrupted", cfg.autonomous_resume_interrupted))
