@@ -172,6 +172,8 @@ var
   DlLastCounted: Boolean;
   DlCompleted: TStringList;
   DlLastCompleted: Boolean;
+  DlStagingRedirected: Boolean;
+  DlForceExit: Boolean;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -336,8 +338,10 @@ begin
   if (Progress = ProgressMax) and (ProgressMax > 0) and (not DlLastCompleted) then
   begin
     DlLastCompleted := True;
+    // Queued basenames carry the 'dl\' staging-dir prefix — store the leaf
+    // name so hash lookups and catalog writes match.
     if DlCompleted <> nil then
-      DlCompleted.Add(FileName);
+      DlCompleted.Add(ExtractFileName(FileName));
     // Reassert the total in case Inno repaints between files — the label is
     // ours, so keep it alive across the queue boundary.
     if (not WizardSilent()) and (DlTotalBytes > 0) then
@@ -712,39 +716,41 @@ begin
   DlLastFile := '';
   DlLastCounted := False;
 
-  // Empty SHA-256 on purpose: Inno's per-file verify runs a synchronous hash
-  // between files (25-45s on multi-GB models) during which the page's text
-  // blanks and Abort cannot be answered. Integrity is enforced in
-  // StageVerifiedDownloads instead — only hash-matching files are copied and
-  // cataloged — so downloads flow back-to-back and Abort answers instantly.
+  // Basenames carry the 'dl\' prefix so every file lands in the staging dir —
+  // a junction onto the install drive (see EnsureDlStaging), where the space
+  // actually is. Empty SHA-256 on purpose: Inno's per-file verify ran a
+  // synchronous hash between files (25-45s on multi-GB models) during which
+  // the page's text blanked and Abort could not be answered. Integrity is
+  // enforced in StageVerifiedDownloads instead — only hash-matching files are
+  // moved into models\ and cataloged.
   if DoQwen4 then
   begin
-    DownloadPage.Add('{#Qwen4Url}', '{#Qwen4FileName}', '');
+    DownloadPage.Add('{#Qwen4Url}', 'dl\{#Qwen4FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen4Size};
   end;
   if DoQwen8 then
   begin
-    DownloadPage.Add('{#Qwen8Url}', '{#Qwen8FileName}', '');
+    DownloadPage.Add('{#Qwen8Url}', 'dl\{#Qwen8FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen8Size};
   end;
   if DoQwen14 then
   begin
-    DownloadPage.Add('{#Qwen14Url}', '{#Qwen14FileName}', '');
+    DownloadPage.Add('{#Qwen14Url}', 'dl\{#Qwen14FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen14Size};
   end;
   if DoQwen30 then
   begin
-    DownloadPage.Add('{#Qwen30Url}', '{#Qwen30FileName}', '');
+    DownloadPage.Add('{#Qwen30Url}', 'dl\{#Qwen30FileName}', '');
     DlTotalBytes := DlTotalBytes + {#Qwen30Size};
   end;
   if DoKokoroModel then
   begin
-    DownloadPage.Add('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '');
+    DownloadPage.Add('{#KokoroModelUrl}', 'dl\kokoro-v1.0.onnx', '');
     DlTotalBytes := DlTotalBytes + {#KokoroModelSize};
   end;
   if DoKokoroVoices then
   begin
-    DownloadPage.Add('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '');
+    DownloadPage.Add('{#KokoroVoicesUrl}', 'dl\voices-v1.0.bin', '');
     DlTotalBytes := DlTotalBytes + {#KokoroVoicesSize};
   end;
 end;
@@ -800,83 +806,191 @@ begin
   else Result := '';
 end;
 
+function DlStagingDir(): String;
+// Logical path Inno writes downloads into. Physically it is a junction into
+// {code:ModelsDir}\.dl when EnsureDlStaging succeeded — bytes then land on
+// the install drive (which had the free space), not the system drive.
+begin
+  Result := ExpandConstant('{tmp}\dl');
+end;
+
+procedure EnsureDlStaging();
+var
+  Link, Target: String;
+  ResultCode: Integer;
+begin
+  DlStagingRedirected := False;
+  Target := ExpandConstant('{code:ModelsDir}\.dl');
+  ForceDirectories(Target);
+  Link := DlStagingDir();
+  if not DirExists(Link) then
+    Exec(ExpandConstant('{cmd}'),
+      '/c mklink /J "' + Link + '" "' + Target + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if DirExists(Link) then
+  begin
+    DlStagingRedirected := True;
+    Log('Download staging junctioned to install drive: ' + Link + ' -> ' + Target);
+  end
+  else
+  begin
+    // mklink failed (non-NTFS target, locked dir, ...) — real dir in {tmp}.
+    ForceDirectories(Link);
+    Log('Download staging junction failed; downloads stay under ' + Link);
+  end;
+end;
+
+procedure MoveVerifiedDownload(const FileName: String);
+// Hash-check a completed file in the staging dir, move it into models\,
+// stamp catalog metadata. RenameFile is instant when staging sits on the
+// install drive (junction); FileCopy is the cross-drive fallback.
+var
+  SrcPath, DestPath, SubDir: String;
+begin
+  SrcPath := DlStagingDir() + '\' + FileName;
+  if not FileExists(SrcPath) then
+    Exit;
+  if (ExpectedHashFor(FileName) <> '') and
+     (GetSHA256OfFile(SrcPath) <> ExpectedHashFor(FileName)) then
+  begin
+    Log('Hash mismatch — discarding download: ' + SrcPath);
+    DeleteFile(SrcPath);
+    Exit;
+  end;
+  if (Pos('kokoro', FileName) > 0) or (Pos('voices', FileName) > 0) then
+    SubDir := '\voice\'
+  else
+    SubDir := '\';
+  DestPath := ExpandConstant('{code:ModelsDir}') + SubDir + FileName;
+  ForceDirectories(ExtractFileDir(DestPath));
+  if RenameFile(SrcPath, DestPath) then
+    Log('Staged verified download (moved): ' + DestPath)
+  else if CopyFile(SrcPath, DestPath, False) then
+    Log('Staged verified download (copied): ' + DestPath)
+  else
+  begin
+    Log('Could not stage verified download: ' + DestPath);
+    Exit;
+  end;
+  if FileName = '{#Qwen4FileName}' then
+    CatalogQwen4()
+  else if FileName = '{#Qwen8FileName}' then
+    CatalogQwen8()
+  else if FileName = '{#Qwen14FileName}' then
+    CatalogQwen14()
+  else if FileName = '{#Qwen30FileName}' then
+    CatalogQwen30()
+  else if FileName = 'kokoro-v1.0.onnx' then
+    CatalogKokoroModel()
+  else if FileName = 'voices-v1.0.bin' then
+    CatalogKokoroVoices();
+end;
+
 procedure StageVerifiedDownloads();
 // Called when the download page exits — success, abort, or failure. Downloads
 // carry no Inno-side hash check (it made the UI go deaf for tens of seconds
 // between files), so integrity is enforced HERE: hash each completed file and
-// only copy + catalog it when the SHA-256 matches. An aborted run then keeps
+// only move + catalog it when the SHA-256 matches. An aborted run then keeps
 // every verified model: a restart finds them trusted and skips them.
 var
   I: Integer;
-  FileName, TmpPath, DestPath, SubDir: String;
 begin
   if DlCompleted = nil then
     Exit;
   for I := 0 to DlCompleted.Count - 1 do
   begin
-    FileName := DlCompleted[I];
-    // Copying multi-GB completed files into models\ can take a while on the
-    // abort path — say so on the still-visible page instead of looking hung.
+    // Renames are instant on the install drive, but hashing the source is
+    // still multi-GB work — keep the page honest about what it is doing.
     if (not WizardSilent()) and (DownloadTotalLabel <> nil) then
     begin
       DownloadTotalLabel.Caption :=
         'Saving completed downloads (' + IntToStr(I + 1) + ' of ' +
-        IntToStr(DlCompleted.Count) + '): ' + FileName + '...';
-      DownloadTotalLabel.Update;  // repaint now — FileCopy blocks the thread next
+        IntToStr(DlCompleted.Count) + '): ' + DlCompleted[I] + '...';
+      DownloadTotalLabel.Update;
     end;
-    TmpPath := ExpandConstant('{tmp}\') + FileName;
-    if not FileExists(TmpPath) then
-      Continue;
-    if (ExpectedHashFor(FileName) <> '') and
-       (GetSHA256OfFile(TmpPath) <> ExpectedHashFor(FileName)) then
-    begin
-      Log('Hash mismatch — discarding download: ' + TmpPath);
-      Continue;
-    end;
-    if (Pos('kokoro', FileName) > 0) or (Pos('voices', FileName) > 0) then
-      SubDir := '\voice\'
-    else
-      SubDir := '\';
-    DestPath := ExpandConstant('{code:ModelsDir}') + SubDir + FileName;
-    ForceDirectories(ExtractFileDir(DestPath));
-    if not FileCopy(TmpPath, DestPath, False) then
-    begin
-      Log('Could not stage verified download: ' + DestPath);
-      Continue;
-    end;
-    Log('Staged verified download: ' + DestPath);
-    if FileName = '{#Qwen4FileName}' then
-      CatalogQwen4()
-    else if FileName = '{#Qwen8FileName}' then
-      CatalogQwen8()
-    else if FileName = '{#Qwen14FileName}' then
-      CatalogQwen14()
-    else if FileName = '{#Qwen30FileName}' then
-      CatalogQwen30()
-    else if FileName = 'kokoro-v1.0.onnx' then
-      CatalogKokoroModel()
-    else if FileName = 'voices-v1.0.bin' then
-      CatalogKokoroVoices();
+    MoveVerifiedDownload(DlCompleted[I]);
   end;
+end;
+
+procedure SweepStagedDownloads();
+// The staging dir survives restarts (it lives under models\.dl). Any complete
+// file left by a crashed or aborted run is verified and moved into models\
+// now so the trust checks below skip re-downloading it.
+begin
+  MoveVerifiedDownload('{#Qwen4FileName}');
+  MoveVerifiedDownload('{#Qwen8FileName}');
+  MoveVerifiedDownload('{#Qwen14FileName}');
+  MoveVerifiedDownload('{#Qwen30FileName}');
+  MoveVerifiedDownload('kokoro-v1.0.onnx');
+  MoveVerifiedDownload('voices-v1.0.bin');
+end;
+
+function EnsureDlDiskSpace(): Boolean;
+// Pre-flight the drive that will actually hold the download bytes. Past
+// builds queued multi-GB pulls into C:\Temp and died mid-run with a raw
+// "not enough space" stream error — check first and explain it instead.
+var
+  CheckDrive: String;
+  FreeBytes, TotalBytes, NeededBytes: Int64;
+begin
+  Result := True;
+  // 2 GB allowance for the app payload itself; staged downloads are moved
+  // (not duplicated) so DlTotalBytes is the real peak requirement.
+  NeededBytes := DlTotalBytes + (Int64(2) * 1073741824);
+  if DlStagingRedirected then
+    CheckDrive := ExtractFileDrive(ExpandConstant('{code:ModelsDir}')) + '\'
+  else
+    CheckDrive := ExtractFileDrive(ExpandConstant('{tmp}')) + '\';
+  if not GetSpaceOnDisk64(CheckDrive, FreeBytes, TotalBytes) then
+    Exit;
+  if FreeBytes >= NeededBytes then
+    Exit;
+  Log('Insufficient space on ' + CheckDrive + ': need ' +
+    IntToStr(NeededBytes) + ' bytes, have ' + IntToStr(FreeBytes) + '.');
+  SuppressibleMsgBox(
+    'Drive ' + CheckDrive + ' does not have enough free space for this ' +
+    'installation.' + #13#10 + #13#10 +
+    'Required: ' + IntToStr(NeededBytes div 1073741824) + ' GB' + #13#10 +
+    'Available: ' + IntToStr(FreeBytes div 1073741824) + ' GB' + #13#10 + #13#10 +
+    'Free up space on this drive and run Setup again.',
+    mbCriticalError, MB_OK, IDOK);
+  Result := False;
 end;
 
 procedure PerformModelDownloadsSilent();
 begin
   if SkipModelDownloads then
     Exit;
+  EnsureDlStaging();
+  SweepStagedDownloads();
   EvaluateModelChecks();
+  // Compute the same total the interactive queue uses, then refuse to pull
+  // on a drive that cannot fit it — silent runs get a log line instead of a
+  // raw stream-write crash mid-download.
+  DlTotalBytes := 0;
+  if DoQwen4 then DlTotalBytes := DlTotalBytes + {#Qwen4Size};
+  if DoQwen8 then DlTotalBytes := DlTotalBytes + {#Qwen8Size};
+  if DoQwen14 then DlTotalBytes := DlTotalBytes + {#Qwen14Size};
+  if DoQwen30 then DlTotalBytes := DlTotalBytes + {#Qwen30Size};
+  if DoKokoroModel then DlTotalBytes := DlTotalBytes + {#KokoroModelSize};
+  if DoKokoroVoices then DlTotalBytes := DlTotalBytes + {#KokoroVoicesSize};
+  if (DlTotalBytes > 0) and (not EnsureDlDiskSpace()) then
+  begin
+    Log('Silent mode: insufficient disk space — skipping model downloads.');
+    Exit;
+  end;
   if DoQwen4 then
-    DownloadTemporaryFile('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#Qwen4Url}', 'dl\{#Qwen4FileName}', '{#Qwen4Sha256}', @ModelDlProgress);
   if DoQwen8 then
-    DownloadTemporaryFile('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#Qwen8Url}', 'dl\{#Qwen8FileName}', '{#Qwen8Sha256}', @ModelDlProgress);
   if DoQwen14 then
-    DownloadTemporaryFile('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#Qwen14Url}', 'dl\{#Qwen14FileName}', '{#Qwen14Sha256}', @ModelDlProgress);
   if DoQwen30 then
-    DownloadTemporaryFile('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#Qwen30Url}', 'dl\{#Qwen30FileName}', '{#Qwen30Sha256}', @ModelDlProgress);
   if DoKokoroModel then
-    DownloadTemporaryFile('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#KokoroModelUrl}', 'dl\kokoro-v1.0.onnx', '{#KokoroModelSha256}', @ModelDlProgress);
   if DoKokoroVoices then
-    DownloadTemporaryFile('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}', @ModelDlProgress);
+    DownloadTemporaryFile('{#KokoroVoicesUrl}', 'dl\voices-v1.0.bin', '{#KokoroVoicesSha256}', @ModelDlProgress);
   StageVerifiedDownloads();
 end;
 
@@ -902,6 +1016,12 @@ begin
       'Checking existing models',
       'Verifying models already on disk. Large files can take a minute to ' +
         'check — Setup is working, please wait.');
+    // Downloads stage in {tmp}\dl — junctioned onto the install drive, which
+    // is the disk the user actually sized for. Then recover any completed
+    // downloads left in the staging dir by an earlier run before deciding
+    // what still needs fetching.
+    EnsureDlStaging();
+    SweepStagedDownloads();
     EvaluateModelChecks();
     if not AnyModelQueued() then
     begin
@@ -914,6 +1034,13 @@ begin
       'Fetching the models selected for this hardware. Models already on ' +
         'disk and verified are skipped.');
     QueueModelDownloads();
+    if not EnsureDlDiskSpace() then
+    begin
+      Log('Aborting download queue: insufficient disk space.');
+      Result := False;
+      DlForceExit := True;
+      Exit;
+    end;
 
     // One automatic retry — transient CDN/proxy hiccups ("internal error",
     // dropped connections) are common on multi-GB pulls and should not
@@ -956,11 +1083,13 @@ begin
     DownloadPage.Hide;
   end;
 
-  // An aborted download should not silently bounce back to the Ready page —
-  // route through the native cancel confirmation ("Setup is not complete —
-  // exit?") so Yes closes the whole installer. Choosing No still lands back
-  // on Ready with every verified download already staged and skipped next run.
-  if (not Result) and (not WizardSilent()) and DownloadPage.AbortedByUser then
+  // An aborted download (or a failed disk-space pre-flight) should not
+  // silently bounce back to the Ready page — route through the native cancel
+  // confirmation ("Setup is not complete — exit?") so Yes closes the whole
+  // installer. Choosing No still lands back on Ready with every verified
+  // download already staged and skipped next run.
+  if (not Result) and (not WizardSilent()) and
+     (DownloadPage.AbortedByUser or DlForceExit) then
     WizardForm.Close;
 end;
 

@@ -93,16 +93,27 @@ class InstallerContractTests(unittest.TestCase):
         wiz = self.installer.split("procedure InitializeWizard")[1]
         wiz = wiz.split("end;", 1)[0]
         self.assertIn("InitializeDownloadPage", wiz)
-        # Verified {tmp} downloads are staged into the models dir by
+        # Verified downloads are staged into the models dir by
         # StageVerifiedDownloads on every download-page exit (success, abort,
         # failure) — not [Files] copies, which would double-copy ~35 GB on
         # the success path and skip aborted runs entirely.
         self.assertNotIn('Source: "{tmp}\\{#Qwen4FileName}"', self.installer)
         # Completed downloads are preserved on abort: StageVerifiedDownloads
-        # copies every verified {tmp} file into models\ + stamps catalog
+        # moves every verified staged file into models\ + stamps catalog
         # metadata on the download-page exit path (success, abort, failure).
+        # Queued basenames carry the 'dl\' staging-prefix (a junction onto
+        # the install drive — see EnsureDlStaging), so the leaf name is what
+        # gets tracked.
         self.assertIn("procedure StageVerifiedDownloads", self.installer)
-        self.assertIn("DlCompleted.Add(FileName)", self.installer)
+        self.assertIn("DlCompleted.Add(ExtractFileName(FileName))", self.installer)
+        # Download bytes must land on the install drive, not {tmp} on the
+        # system drive — a junction redirects {tmp}\dl into
+        # {ModelsDir}\.dl, and a pre-flight check refuses to start on a
+        # drive that cannot fit the queue.
+        self.assertIn("EnsureDlStaging", self.installer)
+        self.assertIn("mklink /J", self.installer)
+        self.assertIn("function EnsureDlDiskSpace", self.installer)
+        self.assertIn("GetSpaceOnDisk64", self.installer)
         # An abort must stop the whole queue and offer to exit — never retry
         # the file like a transient failure did (Break inside except does not
         # exit a for loop in Pascal Script).
