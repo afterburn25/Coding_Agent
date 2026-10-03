@@ -1109,9 +1109,10 @@ class RuntimeManager:
     class _Probe:
         """Unmanaged llama-server process used by the tuner benchmark."""
 
-        def __init__(self, process, endpoint: str):
+        def __init__(self, process, endpoint: str, log_file=None):
             self.process = process
             self.endpoint = endpoint
+            self.log_file = log_file
 
         def stop(self) -> None:
             try:
@@ -1122,6 +1123,11 @@ class RuntimeManager:
                     self.process.kill()
                 except Exception:
                     pass
+            try:
+                if self.log_file is not None and self.log_file is not subprocess.DEVNULL:
+                    self.log_file.close()
+            except Exception:
+                pass
 
     def launch_probe(self, profile: ModelProfile, port: int, extra_args: list[str]) -> "RuntimeManager._Probe":
         """Start an unmanaged llama-server for candidate benchmarking.
@@ -1139,6 +1145,19 @@ class RuntimeManager:
             log_file = open(log_path, "a", encoding="utf-8", errors="replace")
         except OSError:
             log_file = subprocess.DEVNULL
+        try:
+            # Probe logs are per-launch diagnostics — prune to the newest few
+            # so a benchmark grid can't accumulate files forever.
+            probe_logs = sorted(
+                self.logs_dir.glob("probe-*.log"),
+                key=lambda p: p.stat().st_mtime)
+            for stale in probe_logs[:-20]:
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
         process = subprocess.Popen(
             command,
             cwd=str(self.base_dir),
@@ -1151,17 +1170,27 @@ class RuntimeManager:
         # profile's configured endpoint, silently measuring a resident server
         # (or polling a dead port) instead of the candidate under test.
         endpoint = f"http://{profile.host}:{probe_port}/v1"
+
+        def _close_log() -> None:
+            try:
+                if log_file is not subprocess.DEVNULL:
+                    log_file.close()
+            except Exception:
+                pass
+
         deadline = time.monotonic() + max(5, profile.startup_timeout)
         while time.monotonic() < deadline:
             if process.poll() is not None:
+                _close_log()
                 raise RuntimeError(
                     f"probe llama-server exited with code {process.returncode} "
                     f"(log: {log_path})")
             healthy, _ = self._health(endpoint)
             if healthy:
-                return self._Probe(process, endpoint)
+                return self._Probe(process, endpoint, log_file=log_file)
             time.sleep(0.25)
         process.kill()
+        _close_log()
         raise TimeoutError(
             f"probe llama-server did not become healthy within "
             f"{max(5, profile.startup_timeout)}s (log: {log_path})")
