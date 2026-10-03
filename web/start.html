@@ -76,8 +76,9 @@
             <datalist id="cityList"></datalist>
           </label>
           <label>State
-            <input id="state" list="stateList" required maxlength="2" placeholder="TX" autocomplete="off" />
-            <datalist id="stateList"></datalist>
+            <select id="state" required autocomplete="off">
+              <option value="">Select…</option>
+            </select>
           </label>
           <label>ZIP Code
             <input id="zip" required inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="5 digits" autocomplete="postal-code" />

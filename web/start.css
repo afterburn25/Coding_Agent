@@ -14,7 +14,7 @@
 .start-card input:focus,.start-card select:focus{outline:1px solid var(--cyan)}
 .start-card input:invalid{border-color:rgba(255,120,120,.35)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.grid3{display:grid;grid-template-columns:90px 1fr 130px;gap:14px}
+.grid3{display:grid;grid-template-columns:1fr 130px 130px;gap:14px}
 .birth-block{display:flex;flex-direction:column;gap:6px}
 .birth-block .lbl{font-size:12px;color:var(--muted)}
 .birth-row{display:grid;grid-template-columns:1fr 80px 110px;gap:8px}

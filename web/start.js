@@ -58,12 +58,12 @@
 
   // ---------- postal (manual ZIP — no autofill) ----------
   api("/api/postal/states").then((s) => {
-    $("stateList").innerHTML = (s.states || [])
-      .map((v) => `<option value="${v.code}">${v.name}</option>`).join("");
+    $("state").innerHTML = `<option value="">Select…</option>` +
+      (s.states || [])
+        .map((v) => `<option value="${v.code}">${v.name}</option>`).join("");
   }).catch(() => {});
   $("state").addEventListener("change", () => {
     const st = $("state").value.trim().toUpperCase();
-    $("state").value = st;
     $("cityList").innerHTML = "";
     if (st.length === 2) {
       api(`/api/postal/cities?state=${encodeURIComponent(st)}`)
