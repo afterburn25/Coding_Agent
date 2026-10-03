@@ -211,6 +211,13 @@
     if (reserved()) body.creator_passcode = $("creatorPasscode").value;
     try {
       const r = await post("/api/profiles", body);
+      // Creating a profile from Start Here means "become this profile" —
+      // for the first profile this is a no-op; for later ones it makes
+      // the active session match the intro about to be shown.
+      if (r.profile && r.profile.profile_id) {
+        try { await post("/api/profiles/switch",
+                         { profile_id: r.profile.profile_id }); } catch {}
+      }
       if (r.greeting && r.greeting.text) {
         $("introText").textContent = r.greeting.text;
         $("introOverlay").hidden = false;
