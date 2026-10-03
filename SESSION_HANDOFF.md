@@ -60,6 +60,60 @@
   `conversation_manager` kwargs to `ConversationMemory.record_exchange`
   (a 2-arg method) — TypeError flipped `step_limit` → `error`.
 
+## 2026-10-03 follow-on hardening rounds (commits `95a4124`–`523af72`)
+
+Full detail in the overnight report's "Follow-on rounds" section. The
+do-not-regress invariants:
+
+- **Drive entry is single-flight (do not regress)**: `run()`,
+  `resume()`, `recover()` all claim via `_claim_drive()` under
+  `_drive_lock` before doing work; the approval claim on
+  `session.pending_approval` happens under the same lock — two
+  simultaneous approvals can no longer execute a tool twice or spawn
+  competing drives on one session.
+- **Ledger flips `waiting_approval` → `running` at claim time** in
+  every resume branch (session tool, persisted tool/verification,
+  direct image) — a row left parked while the approved action runs
+  can be reaped by approval-expiry mid-execution.
+- **`/api/jobs/cancel` on a parked task closes the session and clears
+  `pending_approval`** — the session must not survive the cancel.
+- **Mission attribution is task-scoped**: `run(mission_id=…)`
+  registers in `_mission_by_task`; `current_mission_id` as a mutable
+  global mis-stamped activities under parallel lanes.
+- **Marker-then-spawn is always `try: start() except: cleanup`**
+  (do not regress): queue/retry sets, mission `_workers`, image jobs,
+  model installs all pop their marker and fail the row if
+  `Thread.start()` raises — a leaked marker wedges dispatch forever.
+  MCP/LSP children are killed when their reader threads fail to spawn
+  (PIPE'd child would block forever on a full pipe).
+- **Every append-only file is bounded** (do not regress):
+  permission_audit.jsonl, eval history, cerebellum opt log compact on
+  size; probe-*.log prunes to newest 20; model logs 8MB→4MB; task
+  terminal logs ~512KiB/task + startup prune; and in-memory maps must
+  match their file bounds (TaskStore rows, image `_jobs` evict to the
+  persisted set on save; install `_cancel` flags pop on exit).
+- **`tasks.update()` flushes `_log_buffers` on every terminal
+  transition** — early-return paths (brain fast-path, builtin, direct
+  image, answer memory, activate failure) used to leak buffers and
+  lose transcripts on restart.
+- **Lock order is `_dequeue_lock` → `_drive_lock` → `tasks._lock`** —
+  never acquire out of order.
+- **Autonomous mode verified live end-to-end**: `PermissionManager
+  (autonomous=True)` upgrades `ask`/`session` → `allow` for workspace
+  actions (hard gates spend/message/mic never auto-approve).
+  `/api/permissions/autonomous` toggles runtime + config. 3-task soak:
+  queue drained, a verify→repair→re-verify round ran unattended, and
+  tasks survived two real llama crashes via capped watchdog restarts
+  (3/10min). Runtime crashes diagnosed as environmental — 14B respawn
+  port gap + 30B CPU-offload at ~40 tok/s on 12GB VRAM.
+- **Runtime recovery semantics (do not regress)**: `ensure_ready`
+  single-flights launches via `_starting` + `_launch_cond`;
+  `recover()` only blacklists a tuning config on a real process exit
+  (`poll() is not None`) with a crash signature — refused connections
+  to alive servers are stale sockets; retries bound by
+  `runtime_recovery_attempts`, never retry 4xx or mid-stream failures
+  with `delivered_output`.
+
 ## v0.7.2 UI unification + transport hardening checkpoint
 
 - **One design system**: `web/styles.css` defines the token palette
