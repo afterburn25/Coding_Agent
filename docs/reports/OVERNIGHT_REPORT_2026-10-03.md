@@ -109,11 +109,22 @@ worktree — candidate resolution fully isolated.
 - `04d2ca3` — Reaper check-and-claim is atomic under `agent._drive_lock`
   (RLock) — a drive registering between the liveness check and the
   terminal mark can no longer be clobbered mid-drive.
+- `830b5e1` — Single-flight holds past the ledger window: dequeue and
+  error-retry now consult the driver registry as the authoritative
+  liveness check (a task aged past `recent()` can't let a second drive
+  start); reaper scans the same wider window.
+- `f205c69` — One `_agent_lane_active()` helper (ledger + queue/retry
+  markers + driver registry) now backs mission dispatch (`lane_free`)
+  and auto-tune benchmarking (`_lane_busy`); idle-model eviction pins
+  live-driver models so a deep-ledger task's runtime can't be unloaded
+  mid-drive.
 - `7eab984`/`bf0dc30` — handoff/architecture/autonomy docs updated.
 
 ## Commits this session
 
 ```
+f205c69 Queue: lane checks share one authoritative liveness helper
+830b5e1 Queue: driver registry is the authoritative single-flight check
 04d2ca3 Queue: make reap check-and-claim atomic against driver registration
 bf0dc30 docs: driver-liveness reaper in AUTONOMY recovery + ARCHITECTURE flow
 7eab984 docs: handoff + start-here for overnight queue-wedge and dogfood fixes
