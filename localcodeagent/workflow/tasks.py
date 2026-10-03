@@ -41,6 +41,12 @@ class TaskRecord:
         return asdict(self)
 
 
+_TERMINAL_STATUSES = frozenset({
+    "completed", "completed_with_warnings", "error", "failed",
+    "cancelled", "reverted", "step_limit",
+})
+
+
 class TaskStore:
     """Small durable task ledger kept under .agent/tasks.json."""
 
@@ -111,11 +117,25 @@ class TaskStore:
     def update(self, task_id: str, **changes: Any) -> TaskRecord:
         with self._lock:
             task = self.get(task_id)
+            prev_status = task.status
             for key, value in changes.items():
                 if hasattr(task, key):
                     setattr(task, key, value)
             task.updated_at = time.time()
             self._save()
+            # A terminal transition must never leave an empty transcript —
+            # direct-completion paths (image router, early failures) skip
+            # the event-log emitter entirely.
+            if (task.status in _TERMINAL_STATUSES
+                    and prev_status not in _TERMINAL_STATUSES
+                    and not self.read_log(task_id).strip()):
+                detail = task.error or task.summary or task.final_content
+                self.append_log(
+                    task_id,
+                    f"## task {task.status}"
+                    + (f": {str(detail)[:300]}" if detail else "")
+                    + "\n")
+                self.flush_log(task_id)
             return task
 
     def add_changed_file(self, task_id: str, path: str) -> TaskRecord:
