@@ -31,6 +31,18 @@ static wizard (looking frozen) now report exactly what Setup is doing.
   single progress indicator and already tracks extraction and external
   downloads. Stage text through the Inno-owned file-analysis window
   ("Analyzing files to update…") keeps the Ready page honest instead.
+- **"Nexus Core could not start" after update** — `ensure_ready` held the
+  runtime-manager lock for the entire llama-server load (up to 180 s per
+  attempt, three fallback attempts), and `/api/status` shares that lock.
+  Boot-time model prewarm and interrupted-task auto-resume triggered the
+  load on every launch, the host health check timed out, the backend was
+  killed, and the loop repeated. Model loads now run the wait lock-free
+  behind a per-model single-flight claim, `statuses()` falls back to
+  last-known state under contention, and the host health-probe timeout
+  was raised (2 s → 10 s request, UI probe 5 s → 15 s).
+- **Orphaned backend reaping** — the host also sweeps processes matching
+  the backend exe path, not just the recorded pidfile entry, so backends
+  orphaned outside the normal launch path can't hold shared state.
 - **Empty host log after launch failure** — the desktop host now writes state
   notes, launch intent, and failure reasons to `backend-host.log` *before*
   `Process.Start`, so a launch that dies early no longer shows "check the
