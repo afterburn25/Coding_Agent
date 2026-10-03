@@ -58,10 +58,22 @@ class EvalLab:
             "p50_latency_s": (round(statistics.median(lat), 3) if lat else 0),
             "results": results,
         }
-        with self._lock:
-            with self.history_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(run, default=str) + "\n")
+        self._append_history(run)
         return run
+
+    def _append_history(self, run: dict) -> None:
+        """Append a run record; the file feeds history()'s tail reads, so it
+        is compacted past 512KiB — without this, months of verification runs
+        grow it (and every history() read) without bound."""
+        with self._lock:
+            try:
+                with self.history_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(run, default=str) + "\n")
+                if self.history_path.stat().st_size > 512 * 1024:
+                    lines = self.history_path.read_text("utf-8").splitlines()[-500:]
+                    atomic_write_text(self.history_path, "\n".join(lines) + "\n")
+            except OSError:
+                pass
 
     def record_run(self, suite: str, subject: str, results: list[dict],
                    *, config: dict | None = None) -> dict:
@@ -82,9 +94,7 @@ class EvalLab:
             "p50_latency_s": (round(statistics.median(lat), 3) if lat else 0),
             "results": results,
         }
-        with self._lock:
-            with self.history_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(run, default=str) + "\n")
+        self._append_history(run)
         return run
 
     def history(self, *, suite: str = "", subject: str = "",

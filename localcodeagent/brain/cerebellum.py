@@ -133,6 +133,14 @@ class Cerebellum(BrainRegion):
             with self.opt_path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(self._optimizations[-1],
                                     ensure_ascii=False) + "\n")
+            # Load only ever feeds the last-500 tail — rewrite the file to
+            # that window when it doubles, so the log can't grow forever
+            # across long unattended sessions.
+            if self.opt_path.stat().st_size > 512 * 1024:
+                lines = self.opt_path.read_text(encoding="utf-8").splitlines()[-500:]
+                tmp = self.opt_path.with_suffix(self.opt_path.suffix + ".tmp")
+                tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                tmp.replace(self.opt_path)
         except OSError:
             pass
 
