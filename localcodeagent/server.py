@@ -2913,7 +2913,22 @@ class AppState:
                     self._dequeue_next(blocking=True)
 
             self._queue_running.add(item_id)
-            threading.Thread(target=run_item, args=(item,), name=f"queue-{item_id}", daemon=True).start()
+            try:
+                threading.Thread(
+                    target=run_item, args=(item,), name=f"queue-{item_id}",
+                    daemon=True).start()
+            except Exception:
+                # Never leak the marker or silently drop the prompt — a
+                # stranded id would wedge the queue (running-set non-empty)
+                # and the popped item would be lost entirely.
+                self._queue_running.discard(item_id)
+                try:
+                    self.queue.enqueue(
+                        str(item.get("prompt") or ""),
+                        mode=str(item.get("mode") or "auto"))
+                except Exception:
+                    pass
+                raise
         except Exception:
             pass
         finally:
@@ -2978,7 +2993,15 @@ class AppState:
                     finally:
                         self._retrying_tasks.discard(tid)
 
-                threading.Thread(target=retry, name=f"auto-retry-{task_id}", daemon=True).start()
+                try:
+                    threading.Thread(
+                        target=retry, name=f"auto-retry-{task_id}",
+                        daemon=True).start()
+                except Exception:
+                    # Never leak the marker — a stranded id would exclude the
+                    # task from retry candidates and wedge _dequeue_next, which
+                    # refuses to dispatch while _retrying_tasks is non-empty.
+                    self._retrying_tasks.discard(task_id)
         except Exception:
             pass
 
