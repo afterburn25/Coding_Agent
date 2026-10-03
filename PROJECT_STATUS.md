@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1082 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1089 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.11.0 — Signal detection + fair scheduling
 
@@ -55,9 +55,9 @@ proven fixes and suppresses known-bad ones → interrupted missions resume.
 Incidents persist in `data/autonomy/repairs.json`; exhausted mission
 recovery playbooks open incidents automatically. API `/api/self-repair*`;
 Self Repair panel on Mission Control. Docs: `docs/architecture/SELF_REPAIR.md`.
-Fault-injection suite `tests/test_self_repair.py` (27 tests) proves all
+Fault-injection suite `tests/test_self_repair.py` (42 tests) proves all
 five scenarios: promote, reject, rollback, procedural repair, and
-mid-repair restart resume.
+mid-repair restart resume — plus abandon/dismiss candidate cleanup.
 
 Shipped alongside on the 0.9.0 line: the evaluated Goal Manager
 (`autonomy/goals.py` + `metrics.py`) — durable metric-driven goals that
