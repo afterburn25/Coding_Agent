@@ -260,7 +260,7 @@ class TestProfileManager(unittest.TestCase):
         from localcodeagent.profiles.api import ProfileAPI
         for route in ("/api/voice/status", "/api/voice/speak",
                       "/api/voice/preview", "/api/voice/stop",
-                      "/api/voice/mute",
+                      "/api/voice/mute", "/api/voice/audio/abc123",
                       "/api/onboarding/welcome-played"):
             self.assertTrue(
                 ProfileAPI.allowed_while_locked(route), route)

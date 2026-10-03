@@ -455,7 +455,7 @@ class ProfileAPI:
         # The Start Here page speaks the welcome instructions — voice
         # read/playback routes must pass the onboarding gate for that.
         "/api/voice/status", "/api/voice/speak", "/api/voice/stop",
-        "/api/voice/mute", "/api/voice/preview",
+        "/api/voice/mute", "/api/voice/preview", "/api/voice/audio",
     )
 
     @classmethod
