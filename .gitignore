@@ -64,3 +64,6 @@ tools_*.png
 .shots/
 .shots-baseline/
 .agent/rag_index.db
+
+# Recovered feature spec (session artifact)
+.spec_full.txt
