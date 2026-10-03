@@ -31,6 +31,7 @@ from .scheduler import Scheduler
 from .state import AutonomyStore
 from .task_graph import ResourceLocks, TaskGraph, new_task
 from .triggers import TriggerEngine
+from ..self_repair.models import TERMINAL_REPAIR_STATES
 
 
 class AutonomousSupervisor:
@@ -606,6 +607,7 @@ class AutonomousSupervisor:
         # suggestions in the findings store.
         try:
             self.scanner.tick(now)
+            self.scanner.reconcile(self._finding_done)
         except Exception:
             pass
 
@@ -1312,6 +1314,20 @@ class AutonomousSupervisor:
                                    "target": mission["id"]})
             return str(mission["id"])
         return ""
+
+    def _finding_done(self, target_id: str) -> bool:
+        """True when a finding's routed target reached a terminal state —
+        repair incident resolved/rolled back/abandoned, or the
+        investigation mission finished. Missing targets count as done so
+        their findings can close instead of lingering 'acted' forever."""
+        if self.repair is not None:
+            inc = self.repair.get(target_id)
+            if inc is not None:
+                return str(inc.get("state")) in TERMINAL_REPAIR_STATES
+        m = self.missions.get(target_id)
+        if m is not None:
+            return str(m.get("status")) in TERMINAL_MISSION_STATUSES
+        return True
 
     def resume_interrupted(self, op: dict) -> None:
         """Self-repair resolved → restart the work it interrupted."""

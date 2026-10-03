@@ -399,11 +399,14 @@ class SignalScanner:
                       and row.get("routed_to")
                       and now - float(row.get("routed_at") or 0)
                       > ROUTE_COOLDOWN_S)
-            if cooled:
+            # A resolved signature firing again means the problem is
+            # back — re-open and route fresh. Dismissed stays silent.
+            reopened = row.get("status") == "resolved"
+            if cooled or reopened:
                 row["status"] = "open"
                 row["routed_to"] = ""
             self._save()
-            if fresh or cooled:
+            if fresh or cooled or reopened:
                 return self._route_finding(row, now)
             return None
         self._rows().append(finding)
@@ -414,6 +417,42 @@ class SignalScanner:
         """Run a scan now, ignoring the interval gate."""
         self._last_scan = 0.0
         return self.tick(now)
+
+    def reconcile(self, is_done, now: float | None = None) -> int:
+        """Close findings whose routed work finished, then prune dead
+        rows so findings.json stays bounded. `is_done(target_id)` → bool.
+        Returns the number of rows changed."""
+        now = now or time.time()
+        changed = 0
+        for r in self._rows():
+            if r.get("status") != "acted" or not r.get("routed_to"):
+                continue
+            try:
+                if is_done(str(r["routed_to"])):
+                    r["status"] = "resolved"
+                    r["updated_at"] = now
+                    changed += 1
+            except Exception:
+                pass
+        # prune: closed rows older than 30d, hard cap 500 total
+        cutoff = now - 30 * 86400
+        rows = self._rows()
+        keep = [r for r in rows
+                if r.get("status") in {"open", "acted"}
+                or float(r.get("updated_at") or 0) >= cutoff]
+        if len(keep) > 500:
+            closed = sorted((r for r in keep
+                             if r.get("status") not in {"open", "acted"}),
+                            key=lambda r: r.get("updated_at") or 0)
+            drop = {id(r) for r in closed[:len(keep) - 500]}
+            keep = [r for r in keep if id(r) not in drop]
+        if len(keep) != len(rows):
+            del rows[:]
+            rows.extend(keep)
+            changed += 1
+        if changed:
+            self._save()
+        return changed
 
     def _route_finding(self, row: dict, now: float) -> dict:
         if self._route is None or row.get("route") == "suggestion":

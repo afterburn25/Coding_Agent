@@ -282,6 +282,51 @@ class ScannerTests(unittest.TestCase):
         sc2 = make_scanner(td, detectors=[det])
         self.assertEqual(len(sc2.list()), 1)   # durable across instances
 
+    def test_reconcile_resolves_finished_targets(self):
+        det = lambda s: new_finding(kind="k", title="t",
+                                    signature="sig:re", route="repair")
+        sc = make_scanner(self._td(), detectors=[det],
+                          route=lambda f: "inc-9")
+        sc.tick(NOW)
+        self.assertEqual(sc.list()[0]["status"], "acted")
+        # target still running — stays acted
+        sc.reconcile(lambda rid: False, NOW + 10)
+        self.assertEqual(sc.list()[0]["status"], "acted")
+        # target finished — finding resolves and leaves the default view
+        sc.reconcile(lambda rid: True, NOW + 20)
+        self.assertEqual(sc.list(), [])
+        self.assertEqual(sc.list(include_closed=True)[0]["status"],
+                         "resolved")
+
+    def test_resolved_signature_reopens_on_recurrence(self):
+        det = lambda s: new_finding(kind="k", title="t",
+                                    signature="sig:rec", route="repair")
+        routed = []
+        sc = make_scanner(self._td(), detectors=[det],
+                          route=lambda f: routed.append(f) or
+                          f"inc-{len(routed)}")
+        sc.tick(NOW)
+        sc.reconcile(lambda rid: True, NOW + 10)
+        # the problem recurs — the resolved row must re-open and re-route
+        sc.force(NOW + 20)
+        self.assertEqual(len(routed), 2)
+        self.assertEqual(sc.list()[0]["status"], "acted")
+        self.assertEqual(sc.list()[0]["routed_to"], "inc-2")
+
+    def test_reconcile_prunes_dead_rows(self):
+        det = lambda s: new_finding(kind="k", title="t",
+                                    signature="sig:pr", route="repair")
+        sc = make_scanner(self._td(), detectors=[det],
+                          route=lambda f: "inc-1")
+        sc.tick(NOW)
+        # age the finding past the 30d prune window and close it
+        row = sc._rows()[0]
+        row["status"] = "dismissed"
+        row["updated_at"] = NOW - 31 * 86400
+        sc._save()
+        sc.reconcile(lambda rid: False, NOW + 100)
+        self.assertEqual(sc.list(include_closed=True), [])
+
     def test_severity_ordering(self):
         dets = [lambda s: new_finding(kind="lo", title="low",
                                       severity="low", signature="a"),
