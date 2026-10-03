@@ -55,34 +55,48 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("huggingface.co/lm-kit/qwen3-coder-30b-a3b-instruct-gguf", self.installer)
         self.assertIn("500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0", self.installer)
         self.assertIn("956682fa9d36d4d0e5a80eb90ff8a001f2c48f988a497e565ae4d0c42af4fe44", self.installer)
-        self.assertGreaterEqual(self.installer.count("Flags: external download ignoreversion nocompression"), 2)
-        self.assertIn("Check: ShouldDownloadQwen14", self.installer)
-        self.assertIn("Check: ShouldDownloadQwen30", self.installer)
+        # Models download on TDownloadWizardPage (Inno's built-in responsive
+        # download UI) when Install is clicked; silent installs fall back to
+        # DownloadTemporaryFile. [Files] `download` has no script-visible
+        # progress, and synchronous PrepareToInstall downloads froze the UI.
+        self.assertIn("TDownloadWizardPage", self.installer)
+        self.assertIn("DownloadTemporaryFile(", self.installer)
+        self.assertIn("procedure QueueModelDownloads", self.installer)
+        self.assertIn("ShouldDownloadQwen4()", self.installer)
+        self.assertIn("ShouldDownloadQwen8()", self.installer)
+        self.assertIn("ShouldDownloadQwen14()", self.installer)
+        self.assertIn("ShouldDownloadQwen30()", self.installer)
         self.assertIn("ModelIsInstalledAndTrusted", self.installer)
         self.assertIn("GetSHA256OfFile", self.installer)
         self.assertIn("WriteCatalogMetadata", self.installer)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.installer)
 
-    def test_installer_shows_dual_progress_bars(self):
-        # The native gauge tracks overall install progress; a second bar
-        # under it tracks the active model download. This was removed once
-        # and reported as a regression — it must not disappear again.
-        self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
-        self.assertIn("ModelProgressLabel", self.installer)
-        self.assertIn("ModelBytesLabel", self.installer)
-        self.assertIn("WizardForm.InstallingPage", self.installer)
-        self.assertIn("procedure CurInstallProgressChanged", self.installer)
-        # Download bytes are read from {tmp} (Inno's external-download
-        # staging dir), not the models dir — that bug left the bar at 0.
-        self.assertIn("DownloadBytesDone", self.installer)
-        self.assertIn("'{tmp}\\'", self.installer)
-        self.assertIn("ShowModelDownloadProgress", self.installer)
-        self.assertIn("MarkModelDownloadsComplete", self.installer)
-        # The bar must be initialized when the wizard is created and
-        # finalized at ssPostInstall.
+    def test_installer_shows_live_download_progress(self):
+        # Downloads run on TDownloadWizardPage — Inno's built-in page with a
+        # live per-file bar, its own message pump (window stays movable),
+        # and a working Abort button. A second bar on the page tracks total
+        # bytes across the whole queue. Synchronous PrepareToInstall
+        # downloads were tried and froze the wizard — must not come back.
+        self.assertIn("DownloadPage := CreateDownloadPage", self.installer)
+        self.assertIn("DownloadTotalBar: TNewProgressBar", self.installer)
+        self.assertIn("DownloadTotalLabel", self.installer)
+        self.assertIn("DownloadPage.Add(", self.installer)
+        self.assertIn("DownloadPage.Download", self.installer)
+        self.assertIn("DownloadPage.AbortedByUser", self.installer)
+        self.assertIn("function NextButtonClick", self.installer)
+        # Live bytes stream in through the TOnDownloadProgress callback —
+        # polling temp files was a dead end because [Files] `download`
+        # reports no progress to script at all.
+        self.assertIn("function ModelDlProgress", self.installer)
+        self.assertIn("const Progress, ProgressMax: Int64", self.installer)
+        # The page must be created when the wizard is initialized.
         wiz = self.installer.split("procedure InitializeWizard")[1]
         wiz = wiz.split("end;", 1)[0]
-        self.assertIn("InitializeModelProgressControls", wiz)
+        self.assertIn("InitializeDownloadPage", wiz)
+        # Verified {tmp} downloads are staged into the models dir via
+        # [Files] copies so Inno tracks them for rollback/uninstall.
+        self.assertIn('Source: "{tmp}\\{#Qwen4FileName}"', self.installer)
+        self.assertIn("function ModelStaged", self.installer)
 
     def test_aborted_install_cleans_partial_progress(self):
         # Canceling mid-install must not leave a half-installed app that

@@ -11,6 +11,20 @@
 #define AppExeName "NexusCore.exe"
 #define StableAppId "ChatNexus.Afterburn25"
 
+#define Qwen4CatalogId "qwen3-4b-instruct-q4-k-m"
+#define Qwen4FileName "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+#define Qwen4Url "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+#define Qwen4Sha256 "2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e"
+#define Qwen4Size 2497280736
+#define Qwen4SourceRepo "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF"
+
+#define Qwen8CatalogId "qwen3-8b-q4-k-m"
+#define Qwen8FileName "Qwen3-8B-Q4_K_M.gguf"
+#define Qwen8Url "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf"
+#define Qwen8Sha256 "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+#define Qwen8Size 5027783488
+#define Qwen8SourceRepo "Qwen/Qwen3-8B-GGUF"
+
 #define Qwen14CatalogId "qwen3-14b-q4-k-m"
 #define Qwen14FileName "Qwen3-14B-Q4_K_M.gguf"
 #define Qwen14Url "https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf"
@@ -99,16 +113,19 @@ Source: "..\dist\ChatNexus\workflows\*"; DestDir: "{app}\workflows"; Flags: igno
 Source: "..\dist\ChatNexus\Source\*"; DestDir: "{app}\Source"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
 Source: "..\dist\ChatNexus\Source\.git\*"; DestDir: "{app}\Source\.git"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: ShouldInstallBundledSource
 
-; Coding models are downloaded by Setup directly into the final model directory.
-; Inno Setup shows download/install progress, verifies SHA-256 before the final
-; filename is committed, and the Check functions skip already-trusted models.
-Source: "{#Qwen14Url}"; DestDir: "{code:ModelsDir}"; DestName: "{#Qwen14FileName}"; ExternalSize: {#Qwen14Size}; Hash: "{#Qwen14Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen14
-Source: "{#Qwen30Url}"; DestDir: "{code:ModelsDir}"; DestName: "{#Qwen30FileName}"; ExternalSize: {#Qwen30Size}; Hash: "{#Qwen30Sha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadQwen30
-
-; Local TTS engine assets (Kokoro-82M ONNX + voices). Small enough for Setup;
-; skips download when already installed and hash-verified.
-Source: "{#KokoroModelUrl}"; DestDir: "{code:ModelsDir}\voice"; DestName: "kokoro-v1.0.onnx"; ExternalSize: {#KokoroModelSize}; Hash: "{#KokoroModelSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroModel
-Source: "{#KokoroVoicesUrl}"; DestDir: "{code:ModelsDir}\voice"; DestName: "voices-v1.0.bin"; ExternalSize: {#KokoroVoicesSize}; Hash: "{#KokoroVoicesSha256}"; Flags: external download ignoreversion nocompression; Check: ShouldDownloadKokoroVoices
+; Coding models and the Kokoro voice assets are fetched by TDownloadWizardPage
+; when the user clicks Install — Inno's built-in download UI with a live
+; per-file bar, its own message pump, and a working Abort button ([Files]
+; `download` and synchronous PrepareToInstall calls can't do any of that).
+; Verified files land in {tmp} and these entries copy them into the models
+; dir on the main install bar. Smallest to largest: 4B, 8B, 14B, 30B hybrid,
+; then voice assets. Missing {tmp} files (skipped or aborted) are skipped.
+Source: "{tmp}\{#Qwen4FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen4FileName}')
+Source: "{tmp}\{#Qwen8FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen8FileName}')
+Source: "{tmp}\{#Qwen14FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen14FileName}')
+Source: "{tmp}\{#Qwen30FileName}"; DestDir: "{code:ModelsDir}"; Flags: external ignoreversion; Check: ModelStaged('{#Qwen30FileName}')
+Source: "{tmp}\kokoro-v1.0.onnx"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('kokoro-v1.0.onnx')
+Source: "{tmp}\voices-v1.0.bin"; DestDir: "{code:ModelsDir}\voice"; Flags: external ignoreversion; Check: ModelStaged('voices-v1.0.bin')
 
 ; Optional tools (ComfyUI portable, image model packs) are downloaded by the
 ; in-app Tools page instead of Setup, keeping installation fast.
@@ -145,21 +162,28 @@ var
   UninstallButton: TNewButton;
   InstallBundledSource: Boolean;
   SkipModelDownloads: Boolean;
-  ModelProgressLabel: TNewStaticText;
-  ModelProgressBar: TNewProgressBar;
-  ModelBytesLabel: TNewStaticText;
-  ModelProgressActive: Boolean;
-  CurrentProgressFile: String;
-  LastModelBytesDone: Int64;
+  ModelPlanPage: TOutputMsgWizardPage;
+  RamGB, VramGB, CoreCount: Integer;
+  GpuDesc, CpuDesc: String;
+  RecQwen4, RecQwen8, RecQwen14, RecQwen30: Boolean;
+  DownloadTotalLabel: TNewStaticText;
+  DownloadTotalBar: TNewProgressBar;
   InstallFilesWritten: Boolean;
   InstallCompleted: Boolean;
-  LastLoggedFile: String;
+  DownloadPage: TDownloadWizardPage;
+  DoQwen4, DoQwen8, DoQwen14, DoQwen30, DoKokoroModel, DoKokoroVoices: Boolean;
+  DlTotalBytes, DlDoneBytes: Int64;
+  DlLastFile: String;
+  DlLastCounted: Boolean;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
 
 function GetFileAttributesW(lpFileName: String): DWORD;
   external 'GetFileAttributesW@kernel32.dll stdcall';
+
+function GetPhysicallyInstalledSystemMemory(var TotalMemoryInKilobytes: Int64): BOOL;
+  external 'GetPhysicallyInstalledSystemMemory@kernel32.dll stdcall';
 
 // Models live in {app}\models like everything else. Older installs had
 // {app}\models junctioned to <drive>:\NexusCore\models — only while the
@@ -270,50 +294,85 @@ begin
     mbInformation, MB_OK);
 end;
 
-procedure InitializeModelProgressControls();
+// ---------------------------------------------------------------------------
+// Model downloads — driven by TDownloadWizardPage, Inno's built-in download
+// UI. It runs its own message pump, so the wizard stays responsive, shows a
+// live per-file progress bar, and has a working Abort button. [Files]
+// `external download` cannot do any of that from script: it exposes no
+// progress callback (CurInstallProgressChanged fires once per file) and
+// running DownloadTemporaryFile synchronously in PrepareToInstall froze the
+// whole window. Files land in {tmp} and [Files] copies them into the models
+// dir during install.
+// ---------------------------------------------------------------------------
+
+function ModelDlProgress(
+  const Url, FileName: String;
+  const Progress, ProgressMax: Int64): Boolean;
+var
+  TotalSoFar: Int64;
 begin
-  // Second progress bar under the native gauge: the top bar tracks the
-  // whole install, this one tracks the active model download.
-  ModelProgressLabel := TNewStaticText.Create(WizardForm);
-  ModelProgressLabel.Parent := WizardForm.InstallingPage;
-  ModelProgressLabel.Left := WizardForm.ProgressGauge.Left;
-  ModelProgressLabel.Top :=
-    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(14);
-  ModelProgressLabel.Width := WizardForm.ProgressGauge.Width;
-  ModelProgressLabel.Caption := 'Bootstrap download';
-  ModelProgressLabel.Visible := False;
+  Result := True;
 
-  ModelProgressBar := TNewProgressBar.Create(WizardForm);
-  ModelProgressBar.Parent := WizardForm.InstallingPage;
-  ModelProgressBar.Left := WizardForm.ProgressGauge.Left;
-  ModelProgressBar.Top :=
-    ModelProgressLabel.Top + ModelProgressLabel.Height + ScaleY(4);
-  ModelProgressBar.Width := WizardForm.ProgressGauge.Width;
-  ModelProgressBar.Height := WizardForm.ProgressGauge.Height;
-  ModelProgressBar.Min := 0;
-  ModelProgressBar.Max := 1000;
-  ModelProgressBar.Position := 0;
-  ModelProgressBar.Visible := False;
+  // The page's own bar shows this file's bytes live; our extra bar shows
+  // the running total across the whole queue.
+  if (not WizardSilent()) and (DlTotalBytes > 0) then
+  begin
+    TotalSoFar := DlDoneBytes + Progress;
+    DownloadTotalBar.Position := (TotalSoFar * 1000) div DlTotalBytes;
+    DownloadTotalLabel.Caption :=
+      'Total: ' + IntToStr(TotalSoFar div 1048576) + ' / ' +
+      IntToStr(DlTotalBytes div 1048576) + ' MB';
+  end;
 
-  ModelBytesLabel := TNewStaticText.Create(WizardForm);
-  ModelBytesLabel.Parent := WizardForm.InstallingPage;
-  ModelBytesLabel.Left := WizardForm.ProgressGauge.Left;
-  ModelBytesLabel.Top :=
-    ModelProgressBar.Top + ModelProgressBar.Height + ScaleY(4);
-  ModelBytesLabel.Width := WizardForm.ProgressGauge.Width;
-  ModelBytesLabel.Caption := '';
-  ModelBytesLabel.Visible := False;
+  if FileName <> DlLastFile then
+  begin
+    DlLastFile := FileName;
+    DlLastCounted := False;
+  end;
+  if (Progress = ProgressMax) and (not DlLastCounted) then
+  begin
+    DlLastCounted := True;
+    DlDoneBytes := DlDoneBytes + ProgressMax;
+    Log('Download complete: ' + FileName + ' (' + IntToStr(Progress) + ' bytes)');
+  end;
+end;
 
-  ModelProgressActive := False;
-  CurrentProgressFile := '';
-  LastModelBytesDone := 0;
+procedure InitializeDownloadPage();
+begin
+  // Inno's built-in download page: it pumps its own messages, so the wizard
+  // stays movable, its per-file bar streams live bytes, and Abort actually
+  // works — none of which synchronous script downloads can do. We add one
+  // extra bar tracking total bytes across every queued model so the page
+  // shows per-file AND overall progress.
+  DownloadPage := CreateDownloadPage(
+    'Downloading models',
+    'Fetching the models selected for this hardware. Models already on ' +
+      'disk and verified are skipped.',
+    @ModelDlProgress);
+  DownloadPage.ShowBaseNameInsteadOfUrl := True;
+
+  DownloadTotalLabel := TNewStaticText.Create(DownloadPage);
+  DownloadTotalLabel.Parent := DownloadPage.Surface;
+  DownloadTotalLabel.Left := DownloadPage.ProgressBar.Left;
+  DownloadTotalLabel.Width := DownloadPage.ProgressBar.Width;
+  DownloadTotalLabel.Top := DownloadPage.SurfaceHeight - ScaleY(52);
+  DownloadTotalLabel.Caption := 'Total download';
+
+  DownloadTotalBar := TNewProgressBar.Create(DownloadPage);
+  DownloadTotalBar.Parent := DownloadPage.Surface;
+  DownloadTotalBar.Left := DownloadPage.ProgressBar.Left;
+  DownloadTotalBar.Top :=
+    DownloadTotalLabel.Top + DownloadTotalLabel.Height + ScaleY(4);
+  DownloadTotalBar.Width := DownloadPage.ProgressBar.Width;
+  DownloadTotalBar.Height := DownloadPage.ProgressBar.Height;
+  DownloadTotalBar.Min := 0;
+  DownloadTotalBar.Max := 1000;
+  DownloadTotalBar.Position := 0;
 end;
 
 // Long operations (process shutdown, SHA-256 of multi-GB models) otherwise run
 // with a completely static wizard, which reads as "frozen". Push an explicit
-// stage message onto whichever page is currently visible. The model bar is
-// deliberately NOT shown here — it only appears once a real download starts
-// (ShowModelDownloadProgress), otherwise it sits empty on screen.
+// stage message onto whichever page is currently visible.
 procedure ShowBusyStatus(const Primary, Detail: String);
 begin
   if WizardSilent() then
@@ -417,198 +476,9 @@ begin
   end;
 end;
 
-function SizeOfFile(const Path: String): Int64;
-// FindFirst/FindRec.Size reads a file's size even while it is still
-// open for writing (FileSize64 can fail on the in-progress download).
-var
-  FindRec: TFindRec;
-begin
-  Result := -1;
-  if FindFirst(Path, FindRec) then
-  begin
-    Result := (Int64(FindRec.SizeHigh) shl 32) or FindRec.SizeLow;
-    FindClose(FindRec);
-  end;
-end;
-
-function DownloadBytesDone(const FileName, DestDir: String): Int64;
-// Verified against live setup logs: [Files] external downloads stream
-// into the USER temp root (%TEMP%) as a GUID-named .tmp file — NOT into
-// {tmp} (the is-XXXXX.tmp setup dir) and not the dest dir until done.
-// {tmp} = %TEMP%\is-XXXXX.tmp, so the temp root is its parent. Scan
-// *.tmp there for the largest file; the other paths stay as fallbacks
-// for older Inno behavior.
-var
-  FindRec: TFindRec;
-  Candidate: String;
-  Size, NewestTime: Int64;
-  TmpDir, TempRoot: String;
-begin
-  TmpDir := ExpandConstant('{tmp}\');
-  Size := SizeOfFile(TmpDir + FileName);
-  if Size >= 0 then begin Result := Size; Exit; end;
-  Size := SizeOfFile(TmpDir + FileName + '.tmp');
-  if Size >= 0 then begin Result := Size; Exit; end;
-  Size := SizeOfFile(AddBackslash(DestDir) + FileName);
-  if Size >= 0 then begin Result := Size; Exit; end;
-  Size := SizeOfFile(AddBackslash(DestDir) + FileName + '.tmp');
-  if Size >= 0 then begin Result := Size; Exit; end;
-  // Newest .tmp wins, not largest — a bigger stale orphan from a
-  // previous canceled download would otherwise freeze the bar at its
-  // frozen size while the real download keeps going.
-  Result := -1;
-  NewestTime := 0;
-  Candidate := '';
-  TempRoot := AddBackslash(ExtractFileDir(RemoveBackslash(TmpDir)));
-  if FindFirst(TempRoot + '*.tmp', FindRec) then
-  begin
-    try
-      repeat
-        Size := (Int64(FindRec.LastWriteTime.dwHighDateTime) shl 32) or
-                FindRec.LastWriteTime.dwLowDateTime;
-        if Size > NewestTime then
-        begin
-          NewestTime := Size;
-          Candidate := TempRoot + FindRec.Name;
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-  if Candidate <> '' then
-    Result := SizeOfFile(Candidate);
-end;
-
-procedure LogModelDownloadScan(const TmpDir, DestDir: String);
-// One-shot diagnostic: what did the wizard report and what files
-// actually exist while the download is active. Written to the setup
-// log so a stalled bar can be diagnosed instead of guessed at.
-var
-  FindRec: TFindRec;
-  ItemPath: String;
-  Size: Int64;
-begin
-  Log('ModelDownload scan — tmp=' + TmpDir + ' dest=' + DestDir);
-  if FindFirst(TmpDir + '*', FindRec) then
-  begin
-    try
-      repeat
-        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
-        begin
-          ItemPath := TmpDir + FindRec.Name;
-          Size := SizeOfFile(ItemPath);
-          Log('  tmp entry: ' + FindRec.Name + ' (' + IntToStr(Size) + ' bytes)');
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-  if FindFirst(AddBackslash(DestDir) + '*', FindRec) then
-  begin
-    try
-      repeat
-        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
-           ((FindRec.Attributes and $10) = 0) then
-        begin
-          ItemPath := AddBackslash(DestDir) + FindRec.Name;
-          Size := SizeOfFile(ItemPath);
-          if Size > 0 then
-            Log('  dest entry: ' + FindRec.Name + ' (' + IntToStr(Size) + ' bytes)');
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-end;
-
-procedure ShowModelDownloadProgress(
-  const DisplayName, DownloadFileName, DestDir: String;
-  const ExpectedSize: Int64);
-var
-  BytesDone: Int64;
-  Position: Integer;
-begin
-  if CurrentProgressFile <> DisplayName then
-  begin
-    CurrentProgressFile := DisplayName;
-    LastModelBytesDone := 0;
-    ModelProgressBar.Position := 0;
-    LogModelDownloadScan(ExpandConstant('{tmp}\'), DestDir);
-  end;
-
-  ModelProgressActive := True;
-  ModelProgressBar.Style := npbstNormal;
-  ModelProgressLabel.Visible := True;
-  ModelProgressBar.Visible := True;
-  ModelBytesLabel.Visible := True;
-
-  BytesDone := DownloadBytesDone(DownloadFileName, DestDir);
-  if (LastModelBytesDone = 0) and (BytesDone > 0) then
-    Log('ModelDownload first bytes for ' + DisplayName + ': ' + IntToStr(BytesDone));
-  if BytesDone < LastModelBytesDone then
-    BytesDone := LastModelBytesDone;
-  if BytesDone < 0 then
-    BytesDone := 0;
-  if BytesDone > ExpectedSize then
-    BytesDone := ExpectedSize;
-  LastModelBytesDone := BytesDone;
-
-  if BytesDone >= ExpectedSize then
-    ModelProgressLabel.Caption :=
-      'Verifying ' + DisplayName + ' download (SHA-256)...'
-  else
-    ModelProgressLabel.Caption := 'Downloading ' + DisplayName + '...';
-
-  if ExpectedSize > 0 then
-    Position := (BytesDone * 1000) div ExpectedSize
-  else
-    Position := 0;
-
-  ModelProgressBar.Position := Position;
-  ModelBytesLabel.Caption :=
-    IntToStr(BytesDone div 1048576) + ' MB / ' +
-    IntToStr(ExpectedSize div 1048576) + ' MB';
-end;
-
-procedure MarkModelDownloadsComplete();
-begin
-  if not ModelProgressActive then
-    Exit;
-
-  ModelProgressBar.Style := npbstNormal;
-  ModelProgressLabel.Caption := 'Bootstrap downloads complete';
-  ModelProgressBar.Position := ModelProgressBar.Max;
-  ModelBytesLabel.Caption := 'All default model components are ready';
-  LastModelBytesDone := 0;
-  CurrentProgressFile := '';
-end;
-
 procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
-var
-  CurrentFile: String;
 begin
   InstallFilesWritten := True;
-  CurrentFile := WizardForm.FilenameLabel.Caption;
-
-  if (CurrentFile <> LastLoggedFile) and
-     ((Pos('.gguf', CurrentFile) > 0) or (Pos('.onnx', CurrentFile) > 0) or
-      (Pos('voices-v1.0.bin', CurrentFile) > 0)) then
-  begin
-    LastLoggedFile := CurrentFile;
-    Log('progress event — filename label: ' + CurrentFile);
-  end;
-
-  if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', '{#Qwen14FileName}', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
-  else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', '{#Qwen30FileName}', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
-  else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voice model', 'kokoro-v1.0.onnx', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
-  else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
-    ShowModelDownloadProgress('Kokoro voices', 'voices-v1.0.bin', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
@@ -703,9 +573,41 @@ begin
   end;
 end;
 
+function ShouldDownloadQwen4(): Boolean;
+begin
+  if SkipModelDownloads or not RecQwen4 then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    '{#Qwen4FileName}',
+    '{#Qwen4CatalogId}',
+    '{#Qwen4Sha256}',
+    {#Qwen4Size},
+    '{#Qwen4SourceRepo}');
+end;
+
+function ShouldDownloadQwen8(): Boolean;
+begin
+  if SkipModelDownloads or not RecQwen8 then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  Result := not ModelIsInstalledAndTrusted(
+    '{#Qwen8FileName}',
+    '{#Qwen8CatalogId}',
+    '{#Qwen8Sha256}',
+    {#Qwen8Size},
+    '{#Qwen8SourceRepo}');
+end;
+
 function ShouldDownloadQwen14(): Boolean;
 begin
-  if SkipModelDownloads then
+  if SkipModelDownloads or not RecQwen14 then
   begin
     Result := False;
     Exit;
@@ -721,7 +623,7 @@ end;
 
 function ShouldDownloadQwen30(): Boolean;
 begin
-  if SkipModelDownloads then
+  if SkipModelDownloads or not RecQwen30 then
   begin
     Result := False;
     Exit;
@@ -765,6 +667,132 @@ begin
     '{#KokoroVoicesSha256}',
     {#KokoroVoicesSize},
     'hexgrad/Kokoro-82M');
+end;
+
+procedure EvaluateModelChecks();
+// May SHA-256 multi-GB existing files — show busy text first so the wait
+// reads as work, not a freeze.
+begin
+  DoQwen4 := ShouldDownloadQwen4();
+  DoQwen8 := ShouldDownloadQwen8();
+  DoQwen14 := ShouldDownloadQwen14();
+  DoQwen30 := ShouldDownloadQwen30();
+  DoKokoroModel := ShouldDownloadKokoroModel();
+  DoKokoroVoices := ShouldDownloadKokoroVoices();
+end;
+
+function AnyModelQueued(): Boolean;
+begin
+  Result := DoQwen4 or DoQwen8 or DoQwen14 or DoQwen30 or
+    DoKokoroModel or DoKokoroVoices;
+end;
+
+procedure QueueModelDownloads();
+begin
+  DownloadPage.Clear;
+  DlTotalBytes := 0;
+  DlDoneBytes := 0;
+  DlLastFile := '';
+  DlLastCounted := False;
+
+  // Smallest to largest, matching the plan page order.
+  if DoQwen4 then
+  begin
+    DownloadPage.Add('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}');
+    DlTotalBytes := DlTotalBytes + {#Qwen4Size};
+  end;
+  if DoQwen8 then
+  begin
+    DownloadPage.Add('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}');
+    DlTotalBytes := DlTotalBytes + {#Qwen8Size};
+  end;
+  if DoQwen14 then
+  begin
+    DownloadPage.Add('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}');
+    DlTotalBytes := DlTotalBytes + {#Qwen14Size};
+  end;
+  if DoQwen30 then
+  begin
+    DownloadPage.Add('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}');
+    DlTotalBytes := DlTotalBytes + {#Qwen30Size};
+  end;
+  if DoKokoroModel then
+  begin
+    DownloadPage.Add('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}');
+    DlTotalBytes := DlTotalBytes + {#KokoroModelSize};
+  end;
+  if DoKokoroVoices then
+  begin
+    DownloadPage.Add('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}');
+    DlTotalBytes := DlTotalBytes + {#KokoroVoicesSize};
+  end;
+end;
+
+// Returns False when the user aborted the download page (stay on Ready).
+function PerformModelDownloads(): Boolean;
+begin
+  Result := True;
+  if SkipModelDownloads then
+  begin
+    Log('Model downloads skipped (CHAT_NEXUS_SKIP_MODEL_DOWNLOADS=1).');
+    Exit;
+  end;
+
+  EvaluateModelChecks();
+  if not AnyModelQueued() then
+  begin
+    Log('All planned models already installed and trusted; nothing to download.');
+    Exit;
+  end;
+
+  QueueModelDownloads();
+  DownloadPage.Show;
+  try
+    try
+      DownloadPage.Download;
+    except
+      if DownloadPage.AbortedByUser then
+      begin
+        Log('Model downloads aborted by user.');
+        Result := False;
+      end
+      else
+      begin
+        Result := SuppressibleMsgBox(
+          'A model download failed:' + #13#10 + GetExceptionMessage + #13#10 + #13#10 +
+          'Continue the installation anyway? Missing models can be fetched ' +
+          'later from the app.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
+      end;
+    end;
+  finally
+    DownloadPage.Hide;
+  end;
+end;
+
+// Silent installs never reach NextButtonClick — run the same queue
+// headlessly when the install step starts.
+procedure PerformModelDownloadsSilent();
+begin
+  if SkipModelDownloads then
+    Exit;
+  EvaluateModelChecks();
+  if DoQwen4 then
+    DownloadTemporaryFile('{#Qwen4Url}', '{#Qwen4FileName}', '{#Qwen4Sha256}', @ModelDlProgress);
+  if DoQwen8 then
+    DownloadTemporaryFile('{#Qwen8Url}', '{#Qwen8FileName}', '{#Qwen8Sha256}', @ModelDlProgress);
+  if DoQwen14 then
+    DownloadTemporaryFile('{#Qwen14Url}', '{#Qwen14FileName}', '{#Qwen14Sha256}', @ModelDlProgress);
+  if DoQwen30 then
+    DownloadTemporaryFile('{#Qwen30Url}', '{#Qwen30FileName}', '{#Qwen30Sha256}', @ModelDlProgress);
+  if DoKokoroModel then
+    DownloadTemporaryFile('{#KokoroModelUrl}', 'kokoro-v1.0.onnx', '{#KokoroModelSha256}', @ModelDlProgress);
+  if DoKokoroVoices then
+    DownloadTemporaryFile('{#KokoroVoicesUrl}', 'voices-v1.0.bin', '{#KokoroVoicesSha256}', @ModelDlProgress);
+end;
+
+function ModelStaged(Param: String): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{tmp}\') + Param);
 end;
 
 function DetectExistingInstall(): Boolean;
@@ -811,10 +839,84 @@ begin
   end;
 end;
 
+procedure ProbeHardware();
+// Reads installed RAM (kernel32) plus the largest dedicated GPU VRAM
+// reported under the display-adapter class key, then pre-selects the
+// model-download page defaults for this machine. Recommendations only —
+// every model stays user-checkable.
+var
+  TotalKB, MaxVram, V: Int64;
+  D: Cardinal;
+  S: AnsiString;
+  SubKey, GpuClassKey: String;
+  Names: TArrayOfString;
+  I: Integer;
+begin
+  TotalKB := 0;
+  if not GetPhysicallyInstalledSystemMemory(TotalKB) then
+    TotalKB := 0;
+  RamGB := TotalKB div 1048576;
+
+  GpuClassKey :=
+    'SYSTEM\CurrentControlSet\Control\Class\' +
+    '{4D36E968-E325-11CE-BFC1-08002BE10318}';
+  MaxVram := 0;
+  GpuDesc := '';
+  if RegGetSubkeyNames(HKLM, GpuClassKey, Names) then
+  begin
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      SubKey := GpuClassKey + '\' + Names[I];
+      V := 0;
+      if RegQueryBinaryValue(HKLM, SubKey,
+           'HardwareInformation.qwMemorySize', S) and (Length(S) >= 8) then
+        V := Int64(Ord(S[1])) or (Int64(Ord(S[2])) shl 8) or
+             (Int64(Ord(S[3])) shl 16) or (Int64(Ord(S[4])) shl 24) or
+             (Int64(Ord(S[5])) shl 32) or (Int64(Ord(S[6])) shl 40) or
+             (Int64(Ord(S[7])) shl 48) or (Int64(Ord(S[8])) shl 56)
+      else if RegQueryBinaryValue(HKLM, SubKey,
+                'HardwareInformation.MemorySize', S) and (Length(S) = 4) then
+        V := Int64(Ord(S[1])) or (Int64(Ord(S[2])) shl 8) or
+             (Int64(Ord(S[3])) shl 16) or (Int64(Ord(S[4])) shl 24)
+      else if RegQueryDWordValue(HKLM, SubKey,
+                'HardwareInformation.MemorySize', D) then
+        V := D;
+      if V > MaxVram then
+      begin
+        MaxVram := V;
+        RegQueryStringValue(HKLM, SubKey, 'DriverDesc', GpuDesc);
+      end;
+    end;
+  end;
+  VramGB := MaxVram div 1073741824;
+
+  CpuDesc := '';
+  RegQueryStringValue(
+    HKLM,
+    'HARDWARE\DESCRIPTION\System\CentralProcessor\0',
+    'ProcessorNameString', CpuDesc);
+  CpuDesc := Trim(CpuDesc);
+  CoreCount := StrToIntDef(GetEnv('NUMBER_OF_PROCESSORS'), 0);
+
+  // Q4_K_M fit, smallest to largest. The 30B is a MoE that llama.cpp can
+  // run hybrid — hot expert layers on the GPU, the rest in system RAM —
+  // so combined VRAM+RAM qualifies it, not VRAM alone.
+  RecQwen4 := (VramGB >= 4) or (RamGB >= 6);
+  RecQwen8 := (VramGB >= 8) or (RamGB >= 12);
+  RecQwen14 := (VramGB >= 12) or (RamGB >= 16);
+  RecQwen30 := (VramGB >= 24) or ((RamGB + VramGB) >= 40);
+  Log('Hardware scan: CPU=' + CpuDesc + ' (' + IntToStr(CoreCount) +
+      ' threads), RAM=' + IntToStr(RamGB) + ' GB, GPU=' + GpuDesc +
+      ' (' + IntToStr(VramGB) + ' GB VRAM); recommend 4B=' +
+      IntToStr(Ord(RecQwen4)) + ' 8B=' + IntToStr(Ord(RecQwen8)) +
+      ' 14B=' + IntToStr(Ord(RecQwen14)) + ' 30B=' + IntToStr(Ord(RecQwen30)));
+end;
+
 function InitializeSetup(): Boolean;
 var
   Prompt: String;
 begin
+  ProbeHardware();
   SkipModelDownloads := CompareText(GetEnv('CHAT_NEXUS_SKIP_MODEL_DOWNLOADS'), '1') = 0;
   UpgradeDetected := DetectExistingInstall();
   Result := True;
@@ -842,9 +944,10 @@ end;
 
 procedure InitializeWizard();
 var
-  MessageText: String;
+  MessageText, Plan: String;
+  TotalBytes: Int64;
 begin
-  InitializeModelProgressControls();
+  InitializeDownloadPage();
 
   if UpgradeDetected then
   begin
@@ -878,6 +981,50 @@ begin
       WizardForm.CancelButton.Width;
     UninstallButton.OnClick := @UninstallButtonClick;
   end;
+
+  if GpuDesc = '' then
+    GpuDesc := 'unknown adapter';
+  Plan := '';
+  TotalBytes := 0;
+  if RecQwen4 then
+  begin
+    Plan := Plan + '  Qwen3 4B Instruct — fastest, quick tasks (2.4 GB)' + #13#10;
+    TotalBytes := TotalBytes + {#Qwen4Size};
+  end;
+  if RecQwen8 then
+  begin
+    Plan := Plan + '  Qwen3 8B — balanced everyday tasks (4.9 GB)' + #13#10;
+    TotalBytes := TotalBytes + {#Qwen8Size};
+  end;
+  if RecQwen14 then
+  begin
+    Plan := Plan + '  Qwen3 14B — general agent model (8.9 GB)' + #13#10;
+    TotalBytes := TotalBytes + {#Qwen14Size};
+  end;
+  if RecQwen30 then
+  begin
+    Plan := Plan + '  Qwen3-Coder 30B-A3B — deep coding, hybrid GPU+CPU (18.2 GB)' + #13#10;
+    TotalBytes := TotalBytes + {#Qwen30Size};
+  end;
+  if Plan = '' then
+    Plan := '  None recommended for this hardware — the app can fetch ' +
+            'models later from the Tools page.' + #13#10;
+  ModelPlanPage := CreateOutputMsgPage(
+    wpWelcome,
+    'Hardware scan & model downloads',
+    'Setup scanned this hardware and auto-selected the models below.',
+    '  CPU: ' + CpuDesc + ' (' + IntToStr(CoreCount) + ' threads)' + #13#10 +
+    '  GPU: ' + GpuDesc + ' — ' + IntToStr(VramGB) + ' GB VRAM' + #13#10 +
+    '  System RAM: ' + IntToStr(RamGB) + ' GB' + #13#10 + #13#10 +
+    '  Models that will be downloaded:' + #13#10 + Plan + #13#10 +
+    '  Total download: ' + Format('%.1f', [TotalBytes / 1073741824.0]) +
+      ' GB' + #13#10 +
+    '  Total install size (app + models): ~' +
+      Format('%.1f', [(TotalBytes + 850000000) / 1073741824.0]) +
+      ' GB' + #13#10 + #13#10 +
+    '  The app routes each request to the smallest model that can ' +
+      'handle it.'
+  );
 end;
 
 function ShouldInstallBundledSource(): Boolean;
@@ -1075,7 +1222,20 @@ begin
   else
     Log('Existing Source Git workspace detected; preserving it unchanged during update.');
 
+  // Interactive installs download on the TDownloadWizardPage shown from
+  // NextButtonClick (wpReady) — it stays responsive and abortable. Silent
+  // installs never see that page, so fetch headlessly here instead.
+  if WizardSilent() then
+    PerformModelDownloadsSilent();
+
   Result := '';
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = wpReady then
+    Result := PerformModelDownloads();
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -1137,9 +1297,24 @@ begin
       FileCopy(ExampleConfig, UserConfig, False);
 
     InstallCompleted := True;
-    MarkModelDownloadsComplete();
 
     // Keep installer-downloaded models recognized as verified by Nexus Core.
+    if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen4FileName}')) then
+      WriteCatalogMetadata(
+        '{#Qwen4CatalogId}',
+        '{#Qwen4FileName}',
+        '{#Qwen4Sha256}',
+        {#Qwen4Size},
+        '{#Qwen4SourceRepo}');
+
+    if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen8FileName}')) then
+      WriteCatalogMetadata(
+        '{#Qwen8CatalogId}',
+        '{#Qwen8FileName}',
+        '{#Qwen8Sha256}',
+        {#Qwen8Size},
+        '{#Qwen8SourceRepo}');
+
     if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen14FileName}')) then
       WriteCatalogMetadata(
         '{#Qwen14CatalogId}',
@@ -1155,6 +1330,22 @@ begin
         '{#Qwen30Sha256}',
         {#Qwen30Size},
         '{#Qwen30SourceRepo}');
+
+    if FileExists(ExpandConstant('{code:ModelsDir}\voice\kokoro-v1.0.onnx')) then
+      WriteCatalogMetadata(
+        'kokoro-v1-0-onnx',
+        'kokoro-v1.0.onnx',
+        '{#KokoroModelSha256}',
+        {#KokoroModelSize},
+        'hexgrad/Kokoro-82M');
+
+    if FileExists(ExpandConstant('{code:ModelsDir}\voice\voices-v1.0.bin')) then
+      WriteCatalogMetadata(
+        'kokoro-voices-v1-0',
+        'voices-v1.0.bin',
+        '{#KokoroVoicesSha256}',
+        {#KokoroVoicesSize},
+        'hexgrad/Kokoro-82M');
   end;
 end;
 
