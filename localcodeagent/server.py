@@ -2656,13 +2656,15 @@ class AppState:
                 return True
             if getattr(self, "_retrying_tasks", None):
                 return True
-            try:
-                with self.agent._drive_lock:
-                    if any(t.is_alive()
-                           for t in self.agent._drive_threads.values()):
-                        return True
-            except Exception:
-                return True  # can't verify liveness → lean busy
+            agent = getattr(self, "agent", None)
+            if agent is not None:
+                try:
+                    with agent._drive_lock:
+                        if any(t.is_alive()
+                               for t in agent._drive_threads.values()):
+                            return True
+                except Exception:
+                    return True  # can't verify liveness → lean busy
         except Exception:
             return True  # uncertain → lean busy
         return False
