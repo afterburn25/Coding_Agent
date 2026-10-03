@@ -51,6 +51,11 @@
   fast without executing (reset on any successful mutation), and the
   failures>=2 escalation path injects a one-time corrective hint when
   no higher-tier model resolves — it used to silently no-op.
+- **Status scans are full-ledger (do not regress)**: every
+  correctness-sensitive task query — auto-resume, approval expiry,
+  error retry, eviction busy-set, lane activity, stalled reaper — uses
+  `TaskStore.by_status()`; `recent()` is display-only. `tasks.json`
+  still tails to 100 rows but non-terminal tasks are always persisted.
 - **Step-limit records both memory stores**: it previously passed
   `conversation_manager` kwargs to `ConversationMemory.record_exchange`
   (a 2-arg method) — TypeError flipped `step_limit` → `error`.
