@@ -123,6 +123,14 @@ always drains. `waiting_approval` is a legitimate parked state and is
 never reaped (in autonomous mode it instead expires via
 `autonomous_approval_timeout_seconds`).
 
+Drive registration is also the single-flight gate: `_claim_drive()`
+refuses when another live thread already drives the task, so two
+simultaneous `resume()`/`recover()` calls (double-clicked approval, UI
+retry racing the watchdog) cannot both consume the pending approval and
+execute it twice — the approval itself is claimed under the same lock,
+and every resume branch flips the ledger to `running` before executing
+so expiry never sees a stale `waiting_approval` mid-action.
+
 The supervisor also pauses all mission execution under RAM pressure —
 when free host RAM drops below ``min(2 GB, 5% of total)`` the tick skips
 dispatching nodes entirely (existing work finishes or re-parks on
