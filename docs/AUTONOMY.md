@@ -102,6 +102,17 @@ repair, replan, escalate — with hard caps:
 A repeated identical failure signature stops the mission instead of
 looping forever.
 
+A driverless task can never wedge the queue: every synchronous drive
+(`run`, `resume`, `recover`) registers its thread in
+`agent._drive_threads`, and the watchdog's `_reap_stalled_tasks()` —
+running before retry/dequeue each tick — marks any task stuck in
+`running`/`verifying`/`reviewing` with no live driver as `error` after
+`stalled_task_grace_seconds` (120s default, floored at 15s). Reaped
+tasks flow through normal error retry, so the single-flight queue
+always drains. `waiting_approval` is a legitimate parked state and is
+never reaped (in autonomous mode it instead expires via
+`autonomous_approval_timeout_seconds`).
+
 The supervisor also pauses all mission execution under RAM pressure —
 when free host RAM drops below ``min(2 GB, 5% of total)`` the tick skips
 dispatching nodes entirely (existing work finishes or re-parks on

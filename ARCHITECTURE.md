@@ -182,6 +182,9 @@ bounded execution: agent_tool_timeout_seconds, context trimming,
   ↓
 failure → autonomous_error_retry_seconds backoff, bounded by
   autonomous_max_recoveries; crash → startup auto-resume
+driver liveness: _drive_threads registry + watchdog
+  _reap_stalled_tasks — an active task with no live driver past
+  stalled_task_grace_seconds is marked error so the queue drains
 ```
 
 - `EventBus` (`events.py`) fans events to `/api/events` SSE subscribers with a
