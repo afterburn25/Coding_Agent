@@ -63,16 +63,38 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("WriteCatalogMetadata", self.installer)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.installer)
 
-    def test_installer_uses_only_the_native_progress_bar(self):
-        # The native gauge already tracks extraction and external downloads;
-        # a second custom bar was misleading and must not come back.
-        self.assertNotIn("ModelProgressBar", self.installer)
-        self.assertNotIn("ModelProgressLabel", self.installer)
-        self.assertNotIn("ModelBytesLabel", self.installer)
-        self.assertNotIn("procedure CurInstallProgressChanged", self.installer)
-        self.assertNotIn("LargestTemporaryFileSize", self.installer)
-        self.assertNotIn("ShowModelDownloadProgress", self.installer)
-        self.assertNotIn("MarkModelDownloadsComplete", self.installer)
+    def test_installer_shows_dual_progress_bars(self):
+        # The native gauge tracks overall install progress; a second bar
+        # under it tracks the active model download. This was removed once
+        # and reported as a regression — it must not disappear again.
+        self.assertIn("ModelProgressBar: TNewProgressBar", self.installer)
+        self.assertIn("ModelProgressLabel", self.installer)
+        self.assertIn("ModelBytesLabel", self.installer)
+        self.assertIn("WizardForm.InstallingPage", self.installer)
+        self.assertIn("procedure CurInstallProgressChanged", self.installer)
+        self.assertIn("LargestTemporaryFileSize", self.installer)
+        self.assertIn("ShowModelDownloadProgress", self.installer)
+        self.assertIn("MarkModelDownloadsComplete", self.installer)
+        # The bar must be initialized when the wizard is created and
+        # finalized at ssPostInstall.
+        wiz = self.installer.split("procedure InitializeWizard")[1]
+        wiz = wiz.split("end;", 1)[0]
+        self.assertIn("InitializeModelProgressControls", wiz)
+
+    def test_leftover_files_do_not_count_as_registered_install(self):
+        # A partial uninstall that leaves NexusCore.exe behind must NOT
+        # brand the next run "Update Nexus Core" — only a live uninstall
+        # registry entry marks a real install. File-presence detection may
+        # still log the leftover location for diagnostics.
+        detect = self.installer.split("function DetectExistingInstall")[1]
+        detect = detect.split("function InitializeSetup", 1)[0]
+        self.assertIn("RegQueryStringValue(HKCU", detect)
+        self.assertIn("RegQueryStringValue(HKLM", detect)
+        fallback = detect.split("ChatNexus.exe", 1)[0]
+        # The file-presence tail sets a location for logging but never
+        # Result := True — fresh installs stay fresh.
+        tail = detect.rsplit("DefaultPath := ExpandConstant('{localappdata}\\Programs\\Chat Nexus')", 1)[1]
+        self.assertNotIn("Result := True", tail)
 
     def test_installer_reports_busy_stages_during_blocking_update_work(self):
         # Update-time blocking work (process shutdown, multi-GB SHA-256

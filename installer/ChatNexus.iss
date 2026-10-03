@@ -145,6 +145,12 @@ var
   UninstallButton: TNewButton;
   InstallBundledSource: Boolean;
   SkipModelDownloads: Boolean;
+  ModelProgressLabel: TNewStaticText;
+  ModelProgressBar: TNewProgressBar;
+  ModelBytesLabel: TNewStaticText;
+  ModelProgressActive: Boolean;
+  CurrentProgressFile: String;
+  LastModelBytesDone: Int64;
 
 function GetDriveType(lpRootPathName: String): UINT;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -261,10 +267,48 @@ begin
     mbInformation, MB_OK);
 end;
 
+procedure InitializeModelProgressControls();
+begin
+  // Second progress bar under the native gauge: the top bar tracks the
+  // whole install, this one tracks the active model download.
+  ModelProgressLabel := TNewStaticText.Create(WizardForm);
+  ModelProgressLabel.Parent := WizardForm.InstallingPage;
+  ModelProgressLabel.Left := WizardForm.ProgressGauge.Left;
+  ModelProgressLabel.Top :=
+    WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(14);
+  ModelProgressLabel.Width := WizardForm.ProgressGauge.Width;
+  ModelProgressLabel.Caption := 'Bootstrap download';
+  ModelProgressLabel.Visible := False;
+
+  ModelProgressBar := TNewProgressBar.Create(WizardForm);
+  ModelProgressBar.Parent := WizardForm.InstallingPage;
+  ModelProgressBar.Left := WizardForm.ProgressGauge.Left;
+  ModelProgressBar.Top :=
+    ModelProgressLabel.Top + ModelProgressLabel.Height + ScaleY(4);
+  ModelProgressBar.Width := WizardForm.ProgressGauge.Width;
+  ModelProgressBar.Height := WizardForm.ProgressGauge.Height;
+  ModelProgressBar.Min := 0;
+  ModelProgressBar.Max := 1000;
+  ModelProgressBar.Position := 0;
+  ModelProgressBar.Visible := False;
+
+  ModelBytesLabel := TNewStaticText.Create(WizardForm);
+  ModelBytesLabel.Parent := WizardForm.InstallingPage;
+  ModelBytesLabel.Left := WizardForm.ProgressGauge.Left;
+  ModelBytesLabel.Top :=
+    ModelProgressBar.Top + ModelProgressBar.Height + ScaleY(4);
+  ModelBytesLabel.Width := WizardForm.ProgressGauge.Width;
+  ModelBytesLabel.Caption := '';
+  ModelBytesLabel.Visible := False;
+
+  ModelProgressActive := False;
+  CurrentProgressFile := '';
+  LastModelBytesDone := 0;
+end;
+
 // Long operations (process shutdown, SHA-256 of multi-GB models) otherwise run
 // with a completely static wizard, which reads as "frozen". Push an explicit
-// stage message onto whichever page is currently visible. No second progress
-// bar: the native gauge stays the single, truthful progress indicator.
+// stage message + marquee on the model bar so both gauges stay truthful.
 procedure ShowBusyStatus(const Primary, Detail: String);
 begin
   if WizardSilent() then
@@ -277,6 +321,22 @@ begin
   begin
     WizardForm.StatusLabel.Caption := Primary;
     WizardForm.FilenameLabel.Caption := Detail;
+  end;
+
+  if ModelProgressLabel <> nil then
+  begin
+    ModelProgressLabel.Caption := Primary;
+    ModelProgressLabel.Visible := True;
+  end;
+  if ModelBytesLabel <> nil then
+  begin
+    ModelBytesLabel.Caption := Detail;
+    ModelBytesLabel.Visible := True;
+  end;
+  if ModelProgressBar <> nil then
+  begin
+    ModelProgressBar.Style := npbstMarquee;
+    ModelProgressBar.Visible := True;
   end;
 
   WizardForm.Update;
@@ -295,6 +355,104 @@ begin
     if not WizardSilent() then
       WizardForm.Update;
   end;
+end;
+
+function LargestTemporaryFileSize(const Directory: String): Int64;
+var
+  FindRec: TFindRec;
+  Candidate: String;
+  Size: Int64;
+  SearchDir: String;
+begin
+  Result := 0;
+  SearchDir := AddBackslash(Directory);
+  if FindFirst(SearchDir + '*.tmp', FindRec) then
+  begin
+    try
+      repeat
+        Candidate := SearchDir + FindRec.Name;
+        if FileSize64(Candidate, Size) and (Size > Result) then
+          Result := Size;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure ShowModelDownloadProgress(
+  const DisplayName, DownloadDirectory: String;
+  const ExpectedSize: Int64);
+var
+  BytesDone: Int64;
+  Position: Integer;
+begin
+  if CurrentProgressFile <> DisplayName then
+  begin
+    CurrentProgressFile := DisplayName;
+    LastModelBytesDone := 0;
+    ModelProgressBar.Position := 0;
+  end;
+
+  ModelProgressActive := True;
+  ModelProgressBar.Style := npbstNormal;
+  ModelProgressLabel.Visible := True;
+  ModelProgressBar.Visible := True;
+  ModelBytesLabel.Visible := True;
+
+  BytesDone := LargestTemporaryFileSize(DownloadDirectory);
+  if BytesDone < LastModelBytesDone then
+    BytesDone := LastModelBytesDone;
+  if BytesDone < 0 then
+    BytesDone := 0;
+  if BytesDone > ExpectedSize then
+    BytesDone := ExpectedSize;
+  LastModelBytesDone := BytesDone;
+
+  if BytesDone >= ExpectedSize then
+    ModelProgressLabel.Caption :=
+      'Verifying ' + DisplayName + ' download (SHA-256)...'
+  else
+    ModelProgressLabel.Caption := 'Downloading ' + DisplayName + '...';
+
+  if ExpectedSize > 0 then
+    Position := (BytesDone * 1000) div ExpectedSize
+  else
+    Position := 0;
+
+  ModelProgressBar.Position := Position;
+  ModelBytesLabel.Caption :=
+    IntToStr(BytesDone div 1048576) + ' MB / ' +
+    IntToStr(ExpectedSize div 1048576) + ' MB';
+end;
+
+procedure MarkModelDownloadsComplete();
+begin
+  if not ModelProgressActive then
+    Exit;
+
+  ModelProgressBar.Style := npbstNormal;
+  ModelProgressLabel.Caption := 'Bootstrap downloads complete';
+  ModelProgressBar.Position := ModelProgressBar.Max;
+  ModelBytesLabel.Caption := 'All default model components are ready';
+  LastModelBytesDone := 0;
+  CurrentProgressFile := '';
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  CurrentFile: String;
+begin
+  CurrentFile := WizardForm.FilenameLabel.Caption;
+
+  if Pos('{#Qwen14FileName}', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Qwen3 14B Q4_K_M', ExpandConstant('{code:ModelsDir}'), {#Qwen14Size})
+  else if Pos('{#Qwen30FileName}', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Qwen3-Coder 30B-A3B', ExpandConstant('{code:ModelsDir}'), {#Qwen30Size})
+  else if Pos('kokoro-v1.0.onnx', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Kokoro voice model', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroModelSize})
+  else if Pos('voices-v1.0.bin', CurrentFile) > 0 then
+    ShowModelDownloadProgress('Kokoro voices', ExpandConstant('{code:ModelsDir}\voice'), {#KokoroVoicesSize});
 end;
 
 function CatalogMetadataPath(const CatalogId: String): String;
@@ -482,9 +640,11 @@ begin
     Exit;
   end;
 
-  // Also recognize an unpacked/older install at the normal installer
-  // locations (drive-root Nexus_Core dir with NexusCore.exe, the legacy
-  // Programs\Nexus Core dir, or the legacy Chat Nexus dir).
+  // Leftover files without a registered uninstall entry are NOT an
+  // upgrade — a partial uninstall that leaves NexusCore.exe behind must
+  // not brand the next run as "Update" (that was a reported regression:
+  // fresh installs showed the update flow). State is still preserved by
+  // the [Files] excludes; the process sweep is unconditional.
   DefaultPath := PreferredInstallDir('');
   if not FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') then
     DefaultPath := ExpandConstant('{localappdata}\Programs\Nexus Core');
@@ -493,9 +653,10 @@ begin
   if FileExists(AddBackslash(DefaultPath) + '{#AppExeName}') or
      FileExists(AddBackslash(DefaultPath) + 'ChatNexus.exe') then
   begin
-    ExistingVersion := 'unknown / portable build';
+    ExistingVersion := '';
     ExistingInstallDir := DefaultPath;
-    Result := True;
+    Log('Unregistered files found at ' + DefaultPath +
+        ' — proceeding as a fresh install over the leftovers.');
   end;
 end;
 
@@ -532,6 +693,8 @@ procedure InitializeWizard();
 var
   MessageText: String;
 begin
+  InitializeModelProgressControls();
+
   if UpgradeDetected then
   begin
     WizardForm.Caption := 'Update Nexus Core';
@@ -818,6 +981,8 @@ begin
     // uninstall bookkeeping never overwrite/delete the user's customized config.
     if (not FileExists(UserConfig)) and FileExists(ExampleConfig) then
       FileCopy(ExampleConfig, UserConfig, False);
+
+    MarkModelDownloadsComplete();
 
     // Keep installer-downloaded models recognized as verified by Nexus Core.
     if FileExists(ExpandConstant('{code:ModelsDir}\{#Qwen14FileName}')) then
