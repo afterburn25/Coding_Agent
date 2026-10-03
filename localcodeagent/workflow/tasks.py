@@ -96,8 +96,20 @@ class TaskStore:
             except OSError:
                 pass
 
+    _NONTERMINAL = frozenset({
+        "running", "verifying", "reviewing", "waiting_approval", "interrupted",
+    })
+
     def _save(self) -> None:
-        payload = {"version": 1, "tasks": [self._tasks[i].as_dict() for i in self._order[-100:]]}
+        # Keep the newest 100 rows for history, but never drop a non-terminal
+        # task — a long-running or parked task pushed past the window would
+        # otherwise vanish from disk and be unrecoverable after a restart.
+        tail = set(self._order[-100:])
+        ordered = [
+            i for i in self._order
+            if i in tail or self._tasks[i].status in self._NONTERMINAL
+        ]
+        payload = {"version": 1, "tasks": [self._tasks[i].as_dict() for i in ordered]}
         atomic_write_text(self.path, json.dumps(payload, indent=2, ensure_ascii=False))
 
     def create(self, prompt: str, mode: str) -> TaskRecord:

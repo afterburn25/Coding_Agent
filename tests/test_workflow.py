@@ -836,6 +836,24 @@ class TaskRecoveryTests(unittest.TestCase):
             self.assertEqual(result.task["recovery_count"], 1)
             self.assertTrue(any(e.get("type") == "session_recovery" for e in result.model_events))
 
+    def test_nonterminal_task_survives_persistence_window(self):
+        """Regression: _save() kept only the newest 100 rows — a parked or
+        interrupted task pushed past the window vanished from tasks.json
+        and could never be recovered after a restart."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tasks = TaskStore(root)
+            parked = tasks.create("long parked task", "auto")
+            tasks.update(parked.id, status="waiting_approval",
+                         pending_approval={"kind": "tool", "name": "x"})
+            for i in range(120):
+                pad = tasks.create(f"pad {i}", "auto")
+                tasks.update(pad.id, status="completed")
+
+            reloaded = TaskStore(root)
+
+            self.assertEqual(reloaded.get(parked.id).status, "waiting_approval")
+
     def test_recover_stamps_model_id_when_row_lacks_one(self):
         """Recovered drives must stamp model_id on the task row — the
         eviction busy-set uses it to pin the serving runtime, and an empty
