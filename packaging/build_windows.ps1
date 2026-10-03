@@ -94,6 +94,7 @@ Write-Host "Building hidden Python agent backend..."
     --add-data "$Root\web;web" `
     --add-data "$Root\tools;tools" `
     --collect-submodules localcodeagent `
+    --collect-data localcodeagent `
     --collect-submodules py7zr `
     --collect-all cryptography `
     --collect-all onnxruntime `
