@@ -106,7 +106,7 @@ worktree — candidate resolution fully isolated.
 - `f6ddc09` — Answer Memory self-heals partial v2 stamps: column/index
   assertions re-run idempotently on every open, closing the
   `user_version`-keyed migration gap flagged above.
-- `<pending>` — **14B disconnect root cause found and fixed**: the
+- `351f601` — **14B disconnect root cause found and fixed**: the
   recurring `connection_reset` on 127.0.0.1:8081 was not a crash or
   VRAM contention — memory-pressure eviction (`memory_pressure_vram_gb:
   1.0` floor, reached while the 14B served a 17k-token prompt) evicted
