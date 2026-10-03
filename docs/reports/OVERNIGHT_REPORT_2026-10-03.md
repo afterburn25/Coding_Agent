@@ -247,3 +247,8 @@ refused, then mid-stream reset); the watchdog auto-restarted it both
 times inside the 3-per-10min cap and the affected drive recovered and
 finished. End state: all rows terminal, queue empty, runtime
 idle-stopped, no leaked drivers. Autonomous mode restored to off.
+Crash root-cause: environmental, not a Nexus defect — the :8081
+connection-refused was the 14B mid-unload/respawn port gap, and the
+:8082 timeout/reset was the 30B running CPU-offloaded on 12GB VRAM at
+~40 tok/s prompt eval during a benchmark probe, exceeding read
+timeouts. Watchdog handled both correctly; no task lost.
