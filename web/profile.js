@@ -83,6 +83,8 @@
         if (r.url) new Audio(r.url).play().catch(() => {});
       } catch {}
     };
+    // First-entry introduction is voice-only — never rendered as text.
+    if (g.kind === "intro") { playGreeting(); return; }
     const t = document.createElement("div");
     t.className = "greeting-toast";
     t.innerHTML = `
@@ -171,7 +173,12 @@
     // "Create Profile" surface for additional users.
     injectSwitcher(s);
     if (!ON_START) {
+      // A stashed greeting (post-onboarding intro, profile switch) is
+      // consumed once — it suppresses the fresh fetch so two greetings
+      // never play back-to-back.
+      const hadStashed = !!sessionStorage.getItem("nexus-greeting");
       showGreetingToast();
+      if (hadStashed) sessionStorage.setItem("nexus-greeted", "1");
       // Startup greeting once per browser session — the backend owns
       // once-per-profile intro + returning-greeting rotation.
       if (!sessionStorage.getItem("nexus-greeted") && s.active) {

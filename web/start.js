@@ -218,12 +218,16 @@
         try { await post("/api/profiles/switch",
                          { profile_id: r.profile.profile_id }); } catch {}
       }
+      // The intro greeting is SPOKEN on first entry into the app — never
+      // shown as text. Stash it so profile.js picks it up across the
+      // navigation; it is consumed exactly once.
       if (r.greeting && r.greeting.text) {
-        $("introText").textContent = r.greeting.text;
-        $("introOverlay").hidden = false;
-      } else {
-        location.href = "/";
+        try {
+          sessionStorage.setItem("nexus-greeting",
+            JSON.stringify(r.greeting));
+        } catch {}
       }
+      location.href = "/";
     } catch (ex) {
       err.textContent = ex.message;
       err.hidden = false;
@@ -231,5 +235,4 @@
       btn.textContent = "Create Profile & Unlock Nexus";
     }
   });
-  $("introDone").addEventListener("click", () => { location.href = "/"; });
 })();

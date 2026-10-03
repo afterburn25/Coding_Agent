@@ -71,13 +71,13 @@
           <input id="street" required autocomplete="street-address" />
         </label>
         <div class="grid3">
-          <label>State
-            <input id="state" list="stateList" required maxlength="2" placeholder="TX" autocomplete="off" />
-            <datalist id="stateList"></datalist>
-          </label>
           <label>City
             <input id="city" list="cityList" required autocomplete="off" />
             <datalist id="cityList"></datalist>
+          </label>
+          <label>State
+            <input id="state" list="stateList" required maxlength="2" placeholder="TX" autocomplete="off" />
+            <datalist id="stateList"></datalist>
           </label>
           <label>ZIP Code
             <input id="zip" required inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="5 digits" autocomplete="postal-code" />
@@ -114,13 +114,6 @@
       <button id="createBtn" class="create-btn" type="submit" disabled>Create Profile &amp; Unlock Nexus</button>
     </form>
 
-    <div id="introOverlay" class="intro-overlay" hidden>
-      <div class="intro-card">
-        <img src="/assets/nexus-core-icon.png" alt="" class="intro-emblem" />
-        <pre id="introText" class="intro-text"></pre>
-        <button id="introDone" class="create-btn" type="button">Enter Nexus Core</button>
-      </div>
-    </div>
   </div>
   <script src="/voice_global.js"></script>
   <script src="/profile.js"></script>

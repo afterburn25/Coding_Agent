@@ -109,9 +109,10 @@ def prompt_context(profile: dict | None, personality: dict | None,
     if not isinstance(profile, dict):
         return ""
     p = personality or {}
-    address = ((profile.get("creator_address") or "")
-               if profile.get("is_creator")
-               else "") or profile.get("first_name") or "the user"
+    address = (((profile.get("creator_address") or "Father")
+                if profile.get("is_creator")
+                and profile.get("creator_title_conversation", True)
+                else "") or profile.get("first_name") or "the user")
     lines = [f"Active user profile: {address}."]
     name = str(p.get("name") or "")
     strength = schema.clean_strength(p.get("strength"))

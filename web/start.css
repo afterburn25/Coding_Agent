@@ -30,8 +30,4 @@
 .form-error{padding:10px 14px;border:1px solid rgba(255,120,120,.4);border-radius:9px;background:rgba(255,80,80,.08);color:#ff9a9a;font-size:12px}
 .create-btn{padding:13px 18px;border:0;border-radius:11px;background:linear-gradient(135deg,var(--cyan,#11cfff),#0a8fd4);color:#04121c;font:inherit;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.3px}
 .create-btn:disabled{opacity:.4;cursor:not-allowed}
-.intro-overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(4,10,20,.88);backdrop-filter:blur(6px)}
-.intro-card{width:min(680px,92vw);border:1px solid var(--line);border-radius:16px;background:var(--panel,#0d1b2e);padding:28px;display:flex;flex-direction:column;gap:18px;align-items:center}
-.intro-emblem{width:44px;height:44px}
-.intro-text{white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.7;color:var(--text);margin:0;max-height:50vh;overflow:auto}
 @media (max-width:640px){.grid2,.grid3{grid-template-columns:1fr}.avatar-row{flex-direction:column}}

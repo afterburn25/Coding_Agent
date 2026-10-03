@@ -213,10 +213,10 @@ class TestCreatorAuth(unittest.TestCase):
                          creator_passcode=_PASS)
             with self.assertRaises(ProfileError):
                 m.update_creator_settings(
-                    p["profile_id"], {"creator_address": "Father"},
+                    p["profile_id"], {"creator_address": "Boss"},
                     passcode="wrong")
             self.assertEqual(
-                m.get(p["profile_id"])["creator_address"], "")
+                m.get(p["profile_id"])["creator_address"], "Father")
 
     def test_creator_settings_require_reauth(self):
         # Success path only — a preceding wrong attempt would engage

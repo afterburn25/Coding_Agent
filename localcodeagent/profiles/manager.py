@@ -264,6 +264,7 @@ class ProfileManager:
         chose one, otherwise first name."""
         if not profile:
             return ""
-        if profile.get("is_creator") and profile.get("creator_address"):
-            return str(profile["creator_address"])
+        if profile.get("is_creator"):
+            if profile.get("creator_title_greetings", True):
+                return str(profile.get("creator_address") or "Father")
         return str(profile.get("first_name") or "")
