@@ -13,12 +13,36 @@ from __future__ import annotations
 #   default, warm, professional, playful, nerdy, calm, sassy, flirty
 
 
+# Per-style voice defaults (0-100 controls) so every preset sounds
+# distinct without hand-authoring each dict. An explicit per-preset
+# ``voice`` always wins over the style fallback. Direction follows the
+# personality family: calm=slower/softer/longer pauses, playful=faster/
+# expressive/pitch-varied, professional=moderate/controlled/emphasised,
+# nerdy=energetic/clear emphasis, sassy=confident/expressive.
+_STYLE_VOICE: dict[str, dict] = {
+    "default": {},
+    "warm": {"speaking_speed": 42, "softness": 60, "expressiveness": 62},
+    "professional": {"speaking_speed": 50, "vocal_confidence": 65,
+                     "emphasis": 60, "expressiveness": 45},
+    "playful": {"speaking_speed": 62, "energy": 68, "expressiveness": 72,
+                "pitch_variation": 62},
+    "nerdy": {"speaking_speed": 55, "energy": 60, "emphasis": 60,
+              "expressiveness": 55},
+    "calm": {"speaking_speed": 32, "softness": 68, "pause_length": 62,
+             "energy": 30},
+    "sassy": {"speaking_speed": 55, "vocal_confidence": 72,
+              "expressiveness": 62, "pitch_variation": 55},
+    "flirty": {"speaking_speed": 42, "softness": 62, "expressiveness": 68},
+}
+
+
 def _P(id_: str, name: str, category: str, style: str,
        traits: dict, voice: dict | None = None,
        adult_only: bool = False) -> dict:
     return {"id": id_, "name": name, "category": category,
             "greeting_style": style, "traits": traits,
-            "voice": voice or {}, "adult_only": adult_only,
+            "voice": dict(voice) if voice else dict(_STYLE_VOICE.get(style, {})),
+            "adult_only": adult_only,
             "builtin": True}
 
 

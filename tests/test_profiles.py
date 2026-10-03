@@ -671,6 +671,38 @@ class TestVoiceDelivery(unittest.TestCase):
         self.assertIs(p2, p)
         self.assertEqual(s, 1.1)
 
+    def test_presets_carry_style_voice_defaults(self):
+        # Dogfood regression: presets shipped with empty voice dicts, so
+        # switching personalities was inaudible. Style families must map
+        # to directional delivery — calm slower/softer, playful faster.
+        import localcodeagent.personality.presets as P
+        from localcodeagent.personality.voice_map import map_voice
+        all_p = {p["id"]: p for grp in dir(P)
+                 if grp.isupper() and isinstance(getattr(P, grp), list)
+                 for p in getattr(P, grp)}
+        calm = map_voice(all_p["calm"]["voice"], all_p["calm"]["traits"], strength=100)
+        play = map_voice(all_p["playful"]["voice"], all_p["playful"]["traits"], strength=100)
+        prof = map_voice(all_p["professional"]["voice"], all_p["professional"]["traits"], strength=100)
+        dflt = map_voice(all_p["default-nexus"]["voice"], all_p["default-nexus"]["traits"], strength=100)
+        self.assertLess(calm["speed"], dflt["speed"])      # calm slower
+        self.assertLess(calm["output_gain_db"], 0)          # calm softer
+        self.assertTrue(any("pause" in h for h in calm["preprocess"]))
+        self.assertGreater(play["speed"], dflt["speed"])    # playful faster
+        self.assertGreater(play["pitch_semitones"], 0)      # more pitch life
+        self.assertGreater(prof["output_gain_db"], 0)       # controlled presence
+        # All within intelligible bounds — never overdone DSP.
+        for m in (calm, play, prof):
+            self.assertGreaterEqual(m["speed"], 0.5)
+            self.assertLessEqual(m["speed"], 2.0)
+            self.assertGreaterEqual(m["output_gain_db"], -6.0)
+
+    def test_explicit_preset_voice_beats_style_default(self):
+        import localcodeagent.personality.presets as P
+        all_p = {p["id"]: p for grp in dir(P)
+                 if grp.isupper() and isinstance(getattr(P, grp), list)
+                 for p in getattr(P, grp)}
+        self.assertEqual(all_p["confident"]["voice"], {"vocal_confidence": 80})
+
     def test_resolver_failure_degrades(self):
         from localcodeagent.voice.types import VoicePreset
         vm = self._vm(None)
