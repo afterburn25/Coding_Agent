@@ -437,6 +437,17 @@
         <span id="pfMsg" class="muted small" style="margin-left:10px"></span>
       </div>
       <div class="settings-section">
+        <h3>Personal Memory</h3>
+        <p class="muted small">Private to this profile — Nexus uses these in
+        conversation; other profiles can't see them.</p>
+        <div id="pmList" class="pm-list"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input id="pmText" placeholder="Remember something about you…"
+                 style="flex:1" maxlength="4000" />
+          <button id="pmAdd" class="mini-button" type="button">Remember</button>
+        </div>
+      </div>
+      <div class="settings-section">
         <h3>All Profiles</h3>
         ${(ob.profiles || []).map((x) => `
           <div class="custom-item ${x.profile_id === ob.active ? "active" : ""}">
@@ -465,6 +476,37 @@
         try { await post("/api/profiles/switch", { profile_id: b.dataset.switch }); location.reload(); }
         catch (e) { alert(e.message); }
       }));
+
+    // --- personal memory (profile-isolated) ---
+    const pmBase = `/api/profiles/${encodeURIComponent(p.profile_id)}/memory`;
+    const loadMem = async () => {
+      const list = host.querySelector("#pmList");
+      try {
+        const r = await api(pmBase);
+        list.innerHTML = (r.memories || []).map((m) => `
+          <div class="pm-item" data-mid="${esc(m.id)}">
+            <span class="pm-text">${esc(m.text)}</span>
+            <button class="mini-button pm-forget" type="button">Forget</button>
+          </div>`).join("")
+          || '<span class="muted small">Nothing remembered yet.</span>';
+      } catch { list.innerHTML = '<span class="muted small">Unavailable.</span>'; }
+    };
+    host.querySelector("#pmAdd").addEventListener("click", async () => {
+      const t = $("pmText").value.trim();
+      if (!t) return;
+      try {
+        await post(pmBase, { text: t });
+        $("pmText").value = ""; loadMem();
+      } catch (e) { alert(e.message); }
+    });
+    host.querySelector("#pmList").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".pm-forget");
+      if (!btn) return;
+      const id = btn.closest(".pm-item").dataset.mid;
+      try { await post(`${pmBase}/forget`, { id }); loadMem(); }
+      catch (e2) { alert(e2.message); }
+    });
+    loadMem();
 
     // --- avatar change (same circular-crop model as onboarding) ---
     const cvs = host.querySelector("#profAvatarCanvas");

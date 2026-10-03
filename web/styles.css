@@ -506,6 +506,16 @@ body {
   color:#fff;
 }
 
+.message.user .role.has-avatar {
+  background-position:center;
+  background-size:cover;
+  box-shadow:0 0 13px rgba(57,83,255,.28);
+}
+
+.message.user .role.has-avatar:after {
+  content:"";
+}
+
 .message.user .bubble {
   grid-column:1;
   grid-row:1;

@@ -24,6 +24,11 @@
     refresh: () => api("/api/onboarding/status").then((s) => {
       _status = s; return s;
     }),
+    userAvatar: () => {
+      const p = ((_status && _status.profiles) || [])
+        .find((x) => x.profile_id === (_status && _status.active));
+      return (p && p.avatar_path) ? NP.avatarUrl(p) : "";
+    },
   };
 
   function removeSwitcher() {
