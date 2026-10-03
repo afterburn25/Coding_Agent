@@ -111,6 +111,13 @@ class TaskStore:
         ]
         payload = {"version": 1, "tasks": [self._tasks[i].as_dict() for i in ordered]}
         atomic_write_text(self.path, json.dumps(payload, indent=2, ensure_ascii=False))
+        # The in-memory store must not outgrow what the file preserves —
+        # terminal rows past the tail are unreachable after a restart anyway,
+        # so holding them in RAM only leaks memory across long sessions.
+        keep = set(ordered)
+        for stale in (i for i in self._order if i not in keep):
+            self._tasks.pop(stale, None)
+        self._order[:] = ordered
 
     def create(self, prompt: str, mode: str) -> TaskRecord:
         with self._lock:
