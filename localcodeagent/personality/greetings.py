@@ -155,6 +155,12 @@ class GreetingService:
             kind, text = "intro", INTRO_TEMPLATE.format(address=address)
         else:
             variants = RETURNING.get(style) or RETURNING["default"]
+            # Creators always hear their chosen address — prefer
+            # variants that carry {address}.
+            if profile and profile.get("is_creator"):
+                with_addr = [v for v in variants if "{address}" in v]
+                if with_addr:
+                    variants = with_addr
             kind = "returning"
             text = variants[self._next_rotation(len(variants))].format(
                 address=address)

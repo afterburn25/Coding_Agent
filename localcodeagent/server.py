@@ -69,6 +69,8 @@ from .workflow.repository import RepositoryIndex
 from .workflow.tasks import TaskStore
 from .workflow.activity import ActivityStore
 from .autonomy.missions import DEFAULT_BUDGETS as _DEFAULT_BUDGETS
+from .profiles import ProfileManager
+from .profiles.api import ProfileAPI
 from .version import version as _canonical_version
 
 
@@ -289,6 +291,8 @@ class AppState:
         self.artifacts = ArtifactManager(runtime_root / "data" / "artifacts")
         self.backups = BackupService(runtime_root)
         self.health = HealthService(runtime_root / "data" / "health.json")
+        self.profiles = ProfileManager(runtime_root / "data" / "profiles")
+        self.profile_api = ProfileAPI(self)
         # Durable crash/recovery history — patterns feed diagnostics, the
         # tuner and Digital Twin calibration across restarts.
         netdiag.configure_history(runtime_root / "data" / "crash_history.jsonl")
@@ -4115,6 +4119,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        # Onboarding lock: until a profile exists, only onboarding-safe
+        # APIs + static assets pass — everything else is gated
+        # server-side, not by CSS.
+        if (self.state.profiles.onboarding_required
+                and not ProfileAPI.allowed_while_locked(path)):
+            self._json({"error": "onboarding_required",
+                        "locked": True}, HTTPStatus.FORBIDDEN)
+            return
+        if (path.startswith("/api/profiles")
+                or path.startswith("/api/onboarding")
+                or path.startswith("/api/creator")
+                or path.startswith("/api/postal")
+                or path.startswith("/api/personalities")):
+            q = parse_qs(urlparse(self.path).query)
+            if self.state.profile_api.handle_get(self, path, q):
+                return
+            self._json({"error": "unknown profile route"}, 404)
+            return
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
@@ -4677,10 +4699,46 @@ class Handler(BaseHTTPRequestHandler):
     def _agent_response(self, result) -> None:
         self._json(self._agent_payload(result))
 
-    def do_POST(self) -> None:
+    def do_PATCH(self) -> None:
+        """PATCH exists only for the profile API — PATCH /api/profiles/{id}
+        and PATCH /api/profiles/{id}/personality per spec."""
         path = urlparse(self.path).path
+        if (self.state.profiles.onboarding_required
+                and not ProfileAPI.allowed_while_locked(path)):
+            self._json({"error": "onboarding_required",
+                        "locked": True}, HTTPStatus.FORBIDDEN)
+            return
+        if not path.startswith("/api/profiles/"):
+            self._json({"error": "PATCH not supported for this route"}, 405)
+            return
         try:
             body = self._body()
+        except Exception:
+            self._json({"error": "invalid JSON body"}, 400)
+            return
+        # PATCH /api/profiles/<id> → field patch; suffix routes
+        # (e.g. /personality) dispatch to the same action handler.
+        route = path if path.count("/") > 3 else f"{path}/patch"
+        if self.state.profile_api.handle_post(self, route, body):
+            return
+        self._json({"error": "unknown profile route"}, 404)
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        if (self.state.profiles.onboarding_required
+                and not ProfileAPI.allowed_while_locked(path)):
+            self._json({"error": "onboarding_required",
+                        "locked": True}, HTTPStatus.FORBIDDEN)
+            return
+        try:
+            body = self._body()
+            if (path.startswith("/api/profiles")
+                    or path.startswith("/api/onboarding")
+                    or path.startswith("/api/creator")):
+                if self.state.profile_api.handle_post(self, path, body):
+                    return
+                self._json({"error": "unknown profile route"}, 404)
+                return
             if path.startswith("/api/voice/"):
                 if self.state.voice is None:
                     self._json({"error": "voice subsystem is disabled"}, 503)
