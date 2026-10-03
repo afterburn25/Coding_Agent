@@ -1,0 +1,27 @@
+/* Profile switcher (injected into .primary-nav by profile.js) */
+.profile-switcher{position:relative;margin-top:6px}
+.ps-chip{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font:inherit;font-size:12px;cursor:pointer;text-align:left}
+.ps-chip:hover{border-color:var(--info)}
+.ps-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none}
+.ps-initials{display:inline-flex;align-items:center;justify-content:center;background:var(--cyan,#11cfff);color:#04121c;font-size:10px;font-weight:700}
+.ps-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ps-caret{color:var(--muted);font-size:10px}
+.ps-creator{font-style:normal;font-size:9px;color:var(--good);border:1px solid rgba(43,229,154,.35);border-radius:8px;padding:0 5px;margin-left:4px}
+.ps-menu{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:60;background:var(--panel,#0d1b2e);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 8px 28px rgba(0,0,0,.5)}
+.ps-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:0;border-radius:7px;background:transparent;color:var(--text);font:inherit;font-size:12px;cursor:pointer;text-align:left;text-decoration:none}
+.ps-item:hover{background:rgba(17,207,255,.08)}
+.ps-item.active{outline:1px solid rgba(43,229,154,.4)}
+.ps-ico{width:24px;text-align:center;color:var(--muted)}
+.ps-sep{height:1px;background:var(--line);margin:5px 4px}
+
+/* Shared profile UI bits */
+.avatar-preview{width:96px;height:96px;border-radius:50%;object-fit:cover;border:2px solid var(--line)}
+.field-locked{opacity:.55;pointer-events:none}
+.field-locked input,.field-locked select{background:var(--panel2)!important;color:var(--muted)!important}
+
+/* Greeting toast — shown once after a profile switch */
+.greeting-toast{position:fixed;right:22px;bottom:22px;z-index:200;display:flex;align-items:flex-start;gap:10px;max-width:min(420px,90vw);padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel,#0d1b2e);box-shadow:0 10px 34px rgba(0,0,0,.55);opacity:0;transform:translateY(12px);transition:opacity .3s,transform .3s}
+.greeting-toast.show{opacity:1;transform:none}
+.greeting-toast .ps-avatar{width:30px;height:30px}
+.greeting-toast .gt-text{font-size:12.5px;line-height:1.6;white-space:pre-wrap;flex:1}
+.greeting-toast .gt-close{background:none;border:0;color:var(--muted);cursor:pointer;font-size:12px}

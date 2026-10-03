@@ -1,6 +1,6 @@
 // Settings — secondary sections. `permissions` is the primary surface:
 // authorization boundaries, profiles, per-key levels, scopes, and audit.
-(() => {
+(async () => {
   "use strict";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -9,10 +9,13 @@
   const fmtTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : "—");
 
   const SECTIONS = [
-    ["general", "General"], ["permissions", "Permissions"], ["models", "Models"],
+    ["profile", "Profile"], ["general", "General"],
+    ["permissions", "Permissions"], ["models", "Models"],
     ["appearance", "Appearance"], ["privacy", "Privacy"],
     ["notifications", "Notifications"], ["advanced", "Advanced"],
   ];
+  let activeProfile = null;   // /api/profiles/active — Creator section
+                              // is appended only for is_creator.
   const LEVEL_LABEL = { allow: "Allowed", session: "Session Only", ask: "Ask First", creator: "Creator Only", deny: "Denied" };
   const PROFILE_DESC = {
     safe: "Reads allowed; writes, shell, git, and network ask first.",
@@ -59,6 +62,10 @@
       if (section === "permissions") {
         if (!manager) await refreshPermissions();
         renderPermissions(host);
+      } else if (section === "profile") {
+        await renderProfile(host);
+      } else if (section === "creator") {
+        await renderCreator(host);
       } else {
         if (!status) status = await api("/api/status");
         renderPlain(host);
@@ -376,6 +383,209 @@
     };
     host.innerHTML = bodies[section] || bodies.general;
   }
+
+  // ------------------------------------------------------------- profile
+
+  const ro = (label, val) =>
+    `<label class="field-locked">${esc(label)}
+       <input value="${esc(val)}" disabled tabindex="-1" /></label>`;
+
+  async function renderProfile(host) {
+    const ob = await api("/api/onboarding/status");
+    const p = (ob.profiles || []).find((x) => x.profile_id === ob.active) || null;
+    if (!p) {
+      host.innerHTML = `<div class="settings-title"><div><h2>Profile</h2><p>No profile exists yet.</p></div></div>
+        <div class="settings-section"><a class="mini-button" href="/start.html">Start Here →</a></div>`;
+      return;
+    }
+    const avUrl = p.avatar_path
+      ? `/api/profiles/${encodeURIComponent(p.profile_id)}/avatar` : "";
+    host.innerHTML = `
+      <div class="settings-title"><div><h2>Profile</h2>
+        <p>Identity is locked at creation. Contact and location stay editable.</p></div></div>
+      <div class="settings-section prof-identity">
+        <div class="prof-avatar-col">
+          ${avUrl
+            ? `<img class="avatar-preview" src="${esc(avUrl)}" alt="avatar" />`
+            : `<div class="avatar-preview ps-initials" style="display:flex;align-items:center;justify-content:center;font-size:28px">${esc((p.first_name || "?")[0])}</div>`}
+          <input id="profAvatarFile" type="file" accept="image/*" hidden />
+          <button id="profAvatarBtn" class="mini-button" type="button">Change Avatar</button>
+          <canvas id="profAvatarCanvas" width="160" height="160" class="crop-canvas" hidden></canvas>
+          <input id="profAvatarZoom" type="range" min="100" max="400" value="100" hidden />
+          <button id="profAvatarSave" class="mini-button" type="button" hidden>Save Avatar</button>
+        </div>
+        <div class="prof-fields">
+          ${ro("First Name", p.first_name || "")}
+          ${ro("Last Name", p.last_name || "")}
+          ${ro("Sex", p.sex || "")}
+          ${ro("Birthdate", p.birth_date || "")}
+          ${ro("Age", p.age != null ? `${p.age}${p.is_adult ? " (18+)" : ""}` : "—")}
+          ${p.is_creator ? `<div class="pd-row"><span class="k">Role</span><span class="v"><span class="badge allow">Nexus Creator</span></span></div>` : ""}
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Contact &amp; Location</h3>
+        <div class="prof-fields">
+          <label>Email <input id="pfEmail" value="${esc(p.email || "")}" /></label>
+          <label>Phone <input id="pfPhone" value="${esc(p.phone || "")}" /></label>
+          <label>Street <input id="pfStreet" value="${esc(p.street_address || "")}" /></label>
+          <label>City <input id="pfCity" value="${esc(p.city || "")}" /></label>
+          <label>State <input id="pfState" maxlength="2" value="${esc(p.state || "")}" /></label>
+          <label>ZIP <input id="pfZip" maxlength="5" inputmode="numeric" value="${esc(p.zip_code || "")}" /></label>
+        </div>
+        <button id="pfSave" class="mini-button" type="button" style="margin-top:10px">Save Changes</button>
+        <span id="pfMsg" class="muted small" style="margin-left:10px"></span>
+      </div>
+      <div class="settings-section">
+        <h3>All Profiles</h3>
+        ${(ob.profiles || []).map((x) => `
+          <div class="custom-item ${x.profile_id === ob.active ? "active" : ""}">
+            <span class="ci-name">${esc(x.display_name || x.first_name)}${x.is_creator ? ' <em class="ps-creator">Creator</em>' : ""}</span>
+            ${x.profile_id !== ob.active ? `<button class="mini-button" data-switch="${esc(x.profile_id)}" type="button">Switch</button>` : '<span class="muted small">active</span>'}
+          </div>`).join("")}
+        <div class="pst-actions" style="margin-top:10px">
+          <a class="mini-button" href="/start.html">Create Profile</a>
+          <a class="mini-button" href="/personality.html">Personality Studio</a>
+        </div>
+      </div>`;
+
+    host.querySelector("#pfSave").addEventListener("click", async () => {
+      const msg = host.querySelector("#pfMsg");
+      try {
+        await post(`/api/profiles/${encodeURIComponent(p.profile_id)}/patch`, {
+          email: $("pfEmail").value.trim(), phone: $("pfPhone").value.trim(),
+          street_address: $("pfStreet").value.trim(), city: $("pfCity").value.trim(),
+          state: $("pfState").value.trim().toUpperCase(), zip_code: $("pfZip").value.trim(),
+        });
+        msg.textContent = "Saved.";
+      } catch (e) { msg.textContent = e.message; }
+    });
+    host.querySelectorAll("[data-switch]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try { await post("/api/profiles/switch", { profile_id: b.dataset.switch }); location.reload(); }
+        catch (e) { alert(e.message); }
+      }));
+
+    // --- avatar change (same circular-crop model as onboarding) ---
+    const cvs = host.querySelector("#profAvatarCanvas");
+    const ctx = cvs.getContext("2d");
+    const V = 160, R = 70;
+    let img = null, dataURL = "", s0 = 1, drag = { x: 0, y: 0 };
+    const draw = () => {
+      ctx.clearRect(0, 0, V, V); ctx.fillStyle = "#0a1626"; ctx.fillRect(0, 0, V, V);
+      if (img) { const z = $("profAvatarZoom").value / 100, s = s0 * z;
+        ctx.drawImage(img, drag.x, drag.y, img.width * s, img.height * s); }
+      ctx.save(); ctx.fillStyle = "rgba(4,10,20,.55)";
+      ctx.beginPath(); ctx.rect(0, 0, V, V);
+      ctx.arc(V / 2, V / 2, R, 0, Math.PI * 2, true); ctx.fill("evenodd");
+      ctx.strokeStyle = "#11cfff"; ctx.beginPath();
+      ctx.arc(V / 2, V / 2, R, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    };
+    const clamp = () => { if (!img) return;
+      const z = $("profAvatarZoom").value / 100, s = s0 * z;
+      const w = img.width * s, h = img.height * s;
+      drag.x = Math.min(V / 2 - R, Math.max(V / 2 + R - w, drag.x));
+      drag.y = Math.min(V / 2 - R, Math.max(V / 2 + R - h, drag.y)); };
+    let dg = null;
+    cvs.addEventListener("pointerdown", (e) => { dg = { x: e.clientX - drag.x, y: e.clientY - drag.y }; cvs.setPointerCapture(e.pointerId); });
+    cvs.addEventListener("pointermove", (e) => { if (!dg || !img) return; drag.x = e.clientX - dg.x; drag.y = e.clientY - dg.y; clamp(); draw(); });
+    cvs.addEventListener("pointerup", () => { dg = null; });
+    $("profAvatarZoom").addEventListener("input", () => { clamp(); draw(); });
+    host.querySelector("#profAvatarBtn").addEventListener("click", () => $("profAvatarFile").click());
+    $("profAvatarFile").addEventListener("change", () => {
+      const f = $("profAvatarFile").files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => { dataURL = rd.result;
+        const im = new Image();
+        im.onload = () => { img = im;
+          s0 = V / Math.min(im.width, im.height);
+          drag = { x: (V - im.width * s0) / 2, y: (V - im.height * s0) / 2 };
+          cvs.hidden = false; $("profAvatarZoom").hidden = false;
+          $("profAvatarSave").hidden = false; clamp(); draw(); };
+        im.src = dataURL; };
+      rd.readAsDataURL(f);
+    });
+    host.querySelector("#profAvatarSave").addEventListener("click", async () => {
+      if (!img) return;
+      const z = $("profAvatarZoom").value / 100, s = s0 * z;
+      const crop = { cx: +((V / 2 - drag.x) / s / img.width).toFixed(4),
+        cy: +((V / 2 - drag.y) / s / img.height).toFixed(4),
+        zoom: +(Math.min(img.width, img.height) * s / (R * 2)).toFixed(4) };
+      try {
+        await post(`/api/profiles/${encodeURIComponent(p.profile_id)}/avatar`,
+          { data_url: dataURL, crop });
+        location.reload();
+      } catch (e) { alert(e.message); }
+    });
+  }
+
+  // ------------------------------------------------------------- creator
+
+  async function renderCreator(host) {
+    const p = activeProfile;
+    if (!p || !p.is_creator) {
+      host.innerHTML = `<div class="settings-title"><div><h2>Creator</h2>
+        <p>Creator settings are only available to the verified Creator profile.</p></div></div>`;
+      return;
+    }
+    const ADDR = ["John", "Father", "Creator", "Sir", "Master"];
+    host.innerHTML = `
+      <div class="settings-title"><div><h2>Creator</h2>
+        <p>How Nexus addresses its verified creator. Changes require the Creator passcode.</p></div></div>
+      <div class="settings-section">
+        <h3>How should Nexus address you?</h3>
+        <div class="mood-row">
+          ${ADDR.map((a) => `<button class="mood-chip ${p.creator_address === a ? "active" : ""}" data-addr="${esc(a)}" type="button">${esc(a)}</button>`).join("")}
+          <button class="mood-chip ${p.creator_address && !ADDR.includes(p.creator_address) ? "active" : ""}" data-addr="__custom" type="button">Custom…</button>
+          <button class="mood-chip ${!p.creator_address ? "active" : ""}" data-addr="" type="button">First name</button>
+        </div>
+        <label style="margin-top:10px">Custom address
+          <input id="crCustomAddr" maxlength="40" value="${esc(ADDR.includes(p.creator_address) ? "" : (p.creator_address || ""))}" /></label>
+        <div class="prof-fields" style="margin-top:12px">
+          <label><input id="crGreet" type="checkbox" ${p.creator_title_greetings ? "checked" : ""} /> Use address in greetings</label>
+          <label><input id="crConv" type="checkbox" ${p.creator_title_conversation ? "checked" : ""} /> Use address in conversation</label>
+          <label><input id="crNotif" type="checkbox" ${p.creator_title_notifications ? "checked" : ""} /> Use address in notifications</label>
+        </div>
+        <label style="margin-top:12px">Creator Passcode
+          <input id="crPass" type="password" autocomplete="off" inputmode="numeric" /></label>
+        <button id="crSave" class="mini-button" type="button" style="margin-top:10px">Save Creator Settings</button>
+        <span id="crMsg" class="muted small" style="margin-left:10px"></span>
+      </div>`;
+    let chosen = p.creator_address || "";
+    host.querySelectorAll("[data-addr]").forEach((b) =>
+      b.addEventListener("click", () => {
+        chosen = b.dataset.addr === "__custom" ? $("crCustomAddr").value.trim() : b.dataset.addr;
+        host.querySelectorAll("[data-addr]").forEach((x) => x.classList.toggle("active", x === b));
+      }));
+    host.querySelector("#crSave").addEventListener("click", async () => {
+      const msg = host.querySelector("#crMsg");
+      const custom = $("crCustomAddr").value.trim();
+      const address = custom || chosen;
+      try {
+        await post(`/api/profiles/${encodeURIComponent(p.profile_id)}/creator`, {
+          passcode: $("crPass").value,
+          fields: {
+            creator_address: address,
+            creator_title_greetings: $("crGreet").checked,
+            creator_title_conversation: $("crConv").checked,
+            creator_title_notifications: $("crNotif").checked,
+          },
+        });
+        msg.textContent = "Saved.";
+        $("crPass").value = "";
+      } catch (e) { msg.textContent = e.message; }
+    });
+  }
+
+  // Boot: fetch the active profile first so the Creator section is only
+  // offered to verified Creator profiles.
+  try {
+    const a = await api("/api/profiles/active");
+    activeProfile = a.profile || null;
+    if (activeProfile && activeProfile.is_creator) {
+      SECTIONS.push(["creator", "Creator"]);
+    }
+  } catch { /* profiles API unavailable — sections stay as-is */ }
 
   renderNav();
   renderBody();

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <meta name="theme-color" content="#07101f" />
+  <title>Nexus Core — Start Here</title>
+  <style>html,body{background:#07101f}</style>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/profile.css" />
+  <link rel="stylesheet" href="/start.css" />
+</head>
+<body class="start-body">
+  <div class="start-shell">
+    <header class="start-head">
+      <img src="/assets/nexus-core-icon.png" alt="" class="start-emblem" />
+      <div>
+        <h1>Start Here</h1>
+        <p class="start-sub">Nexus Core runs on profiles. Create yours to unlock the workstation — everything below is required.</p>
+      </div>
+    </header>
+
+    <form id="profileForm" class="start-form" novalidate>
+      <section class="start-card">
+        <h2>Identity <small>permanently locked after creation</small></h2>
+        <div class="grid2">
+          <label>First Name
+            <input id="firstName" required maxlength="60" autocomplete="given-name" />
+          </label>
+          <label>Last Name
+            <input id="lastName" required maxlength="60" autocomplete="family-name" />
+          </label>
+        </div>
+        <div class="grid2">
+          <label>Sex
+            <select id="sex" required>
+              <option value="">Select…</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <div class="birth-block">
+            <span class="lbl">Birthdate</span>
+            <div class="birth-row">
+              <select id="birthMonth" required aria-label="Month"></select>
+              <select id="birthDay" required aria-label="Day"></select>
+              <select id="birthYear" required aria-label="Year"></select>
+            </div>
+            <div id="ageReadout" class="age-readout">Age: —</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="start-card">
+        <h2>Contact</h2>
+        <div class="grid2">
+          <label>Email
+            <input id="email" type="email" required autocomplete="email" />
+          </label>
+          <label>Phone
+            <input id="phone" type="tel" required autocomplete="tel" placeholder="555-123-4567" />
+          </label>
+        </div>
+      </section>
+
+      <section class="start-card">
+        <h2>Location</h2>
+        <label>Street Address
+          <input id="street" required autocomplete="street-address" />
+        </label>
+        <div class="grid3">
+          <label>State
+            <input id="state" list="stateList" required maxlength="2" placeholder="TX" autocomplete="off" />
+            <datalist id="stateList"></datalist>
+          </label>
+          <label>City
+            <input id="city" list="cityList" required autocomplete="off" />
+            <datalist id="cityList"></datalist>
+          </label>
+          <label>ZIP Code
+            <input id="zip" required inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="5 digits" autocomplete="postal-code" />
+          </label>
+        </div>
+        <small class="hint">Enter your ZIP manually — 5 digits.</small>
+      </section>
+
+      <section class="start-card">
+        <h2>Profile Photo</h2>
+        <div class="avatar-row">
+          <canvas id="cropCanvas" width="240" height="240" class="crop-canvas" aria-label="Avatar crop area"></canvas>
+          <div class="avatar-controls">
+            <input id="avatarFile" type="file" accept="image/*" hidden />
+            <button id="pickAvatar" type="button" class="mini-button">Choose image…</button>
+            <label class="zoom-row">Zoom
+              <input id="avatarZoom" type="range" min="100" max="400" value="100" />
+            </label>
+            <small class="hint">Drag to reposition. The circle is your avatar.</small>
+          </div>
+        </div>
+      </section>
+
+      <section id="creatorCard" class="start-card creator-card" hidden>
+        <h2>Creator verification required</h2>
+        <p class="hint">This name is reserved. Enter the Creator passcode to continue.</p>
+        <label>Creator Passcode
+          <input id="creatorPasscode" type="password" autocomplete="off" inputmode="numeric" />
+        </label>
+      </section>
+
+      <div id="formError" class="form-error" role="alert" hidden></div>
+
+      <button id="createBtn" class="create-btn" type="submit" disabled>Create Profile &amp; Unlock Nexus</button>
+    </form>
+
+    <div id="introOverlay" class="intro-overlay" hidden>
+      <div class="intro-card">
+        <img src="/assets/nexus-core-icon.png" alt="" class="intro-emblem" />
+        <pre id="introText" class="intro-text"></pre>
+        <button id="introDone" class="create-btn" type="button">Enter Nexus Core</button>
+      </div>
+    </div>
+  </div>
+  <script src="/profile.js"></script>
+  <script src="/start.js"></script>
+</body>
+</html>

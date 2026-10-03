@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from ..fsutil import atomic_write_text
 from ..personality import (
-    GreetingService, PersonalityStore, list_presets,
+    GreetingService, PersonalityStore, clean_traits, clean_voice,
+    list_presets,
 )
 from ..personality import SLIDERS, VOICE_CONTROLS, MOODS, CATEGORY_LABELS
 from . import avatar as avatar_svc
@@ -390,9 +391,18 @@ class ProfileAPI:
         elif action == "preview":
             # Personality-aware sample text + voice params — no TTS call.
             active = store.resolve_active(is_adult=adult)
+            # Optional unsaved edits preview — whitelisted + gated.
+            if isinstance(body.get("traits"), dict):
+                active["traits"] = clean_traits(
+                    body["traits"], is_adult=adult)
+            if isinstance(body.get("voice"), dict):
+                active["voice"] = clean_voice(body["voice"])
+            # Preview always renders the returning-greeting style —
+            # never the once-per-profile intro.
+            preview_profile = dict(p, has_completed_intro=True)
             g = GreetingService(
                 self.mgr.profile_dir(pid)).greeting(
-                p, active, is_adult=adult)
+                preview_profile, active, is_adult=adult)
             h._json({"ok": True, "preview": g["text"],
                      "voice": g["voice"], "personality": active})
         else:

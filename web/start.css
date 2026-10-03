@@ -1,0 +1,37 @@
+/* Start Here — first-run onboarding */
+.start-body{margin:0;min-height:100vh;display:flex;justify-content:center;background:radial-gradient(1200px 700px at 50% -10%,rgba(17,207,255,.09),transparent 60%),#07101f;color:var(--text);font-family:inherit}
+.start-shell{width:min(760px,94vw);padding:36px 0 64px}
+.start-head{display:flex;gap:18px;align-items:center;margin-bottom:22px}
+.start-emblem{width:56px;height:56px}
+.start-head h1{margin:0;font-size:26px;letter-spacing:.4px}
+.start-sub{margin:4px 0 0;color:var(--muted);font-size:13px}
+.start-form{display:flex;flex-direction:column;gap:16px}
+.start-card{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--panel2,#0d1b2e)}
+.start-card h2{margin:0 0 14px;font-size:15px;display:flex;align-items:baseline;gap:10px}
+.start-card h2 small{font-size:10px;color:var(--warn);font-weight:400;text-transform:uppercase;letter-spacing:.6px}
+.start-card label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.start-card input,.start-card select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#0a1626;color:var(--text);font:inherit;font-size:13px}
+.start-card input:focus,.start-card select:focus{outline:1px solid var(--cyan)}
+.start-card input:invalid{border-color:rgba(255,120,120,.35)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:90px 1fr 130px;gap:14px}
+.birth-block{display:flex;flex-direction:column;gap:6px}
+.birth-block .lbl{font-size:12px;color:var(--muted)}
+.birth-row{display:grid;grid-template-columns:1fr 80px 110px;gap:8px}
+.age-readout{font-size:12px;color:var(--cyan);min-height:16px}
+.age-readout.adult-ok::after{content:" · 18+ unlocked";color:var(--good)}
+.hint{color:var(--muted);font-size:11px}
+.avatar-row{display:flex;gap:20px;align-items:center}
+.crop-canvas{border:1px dashed var(--line);border-radius:12px;cursor:grab;background:#0a1626}
+.crop-canvas:active{cursor:grabbing}
+.avatar-controls{display:flex;flex-direction:column;gap:10px}
+.zoom-row{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+.creator-card{border-color:rgba(255,180,60,.45)}
+.form-error{padding:10px 14px;border:1px solid rgba(255,120,120,.4);border-radius:9px;background:rgba(255,80,80,.08);color:#ff9a9a;font-size:12px}
+.create-btn{padding:13px 18px;border:0;border-radius:11px;background:linear-gradient(135deg,var(--cyan,#11cfff),#0a8fd4);color:#04121c;font:inherit;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.3px}
+.create-btn:disabled{opacity:.4;cursor:not-allowed}
+.intro-overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(4,10,20,.88);backdrop-filter:blur(6px)}
+.intro-card{width:min(680px,92vw);border:1px solid var(--line);border-radius:16px;background:var(--panel,#0d1b2e);padding:28px;display:flex;flex-direction:column;gap:18px;align-items:center}
+.intro-emblem{width:44px;height:44px}
+.intro-text{white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.7;color:var(--text);margin:0;max-height:50vh;overflow:auto}
+@media (max-width:640px){.grid2,.grid3{grid-template-columns:1fr}.avatar-row{flex-direction:column}}
