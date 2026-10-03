@@ -441,7 +441,7 @@ function DownloadBytesDone(const FileName, DestDir: String): Int64;
 var
   FindRec: TFindRec;
   Candidate: String;
-  Size: Int64;
+  Size, NewestTime: Int64;
   TmpDir, TempRoot: String;
 begin
   TmpDir := ExpandConstant('{tmp}\');
@@ -453,21 +453,31 @@ begin
   if Size >= 0 then begin Result := Size; Exit; end;
   Size := SizeOfFile(AddBackslash(DestDir) + FileName + '.tmp');
   if Size >= 0 then begin Result := Size; Exit; end;
+  // Newest .tmp wins, not largest — a bigger stale orphan from a
+  // previous canceled download would otherwise freeze the bar at its
+  // frozen size while the real download keeps going.
   Result := -1;
+  NewestTime := 0;
+  Candidate := '';
   TempRoot := AddBackslash(ExtractFileDir(RemoveBackslash(TmpDir)));
   if FindFirst(TempRoot + '*.tmp', FindRec) then
   begin
     try
       repeat
-        Candidate := TempRoot + FindRec.Name;
-        Size := SizeOfFile(Candidate);
-        if Size > Result then
-          Result := Size;
+        Size := (Int64(FindRec.LastWriteTime.dwHighDateTime) shl 32) or
+                FindRec.LastWriteTime.dwLowDateTime;
+        if Size > NewestTime then
+        begin
+          NewestTime := Size;
+          Candidate := TempRoot + FindRec.Name;
+        end;
       until not FindNext(FindRec);
     finally
       FindClose(FindRec);
     end;
   end;
+  if Candidate <> '' then
+    Result := SizeOfFile(Candidate);
 end;
 
 procedure LogModelDownloadScan(const TmpDir, DestDir: String);
