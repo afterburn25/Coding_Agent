@@ -702,10 +702,11 @@ end;
 
 procedure StopRunningNexusCore();
 begin
-  if not UpgradeDetected then
-    Exit;
-
-  Log('Update detected; closing running Nexus Core processes before replacing files.');
+  // Always sweep — never gate on UpgradeDetected. A running app survives
+  // its own uninstaller (locked exes are left behind), so an
+  // uninstall+reinstall leaves NexusCore.exe holding {app} files open and
+  // the "fresh" install hits DeleteFile code 5.
+  Log('Closing any running Nexus Core processes before replacing files.');
 
   // Avoid Restart Manager for Nexus Core because the desktop host owns a hidden
   // backend and llama.cpp child process. Close the desktop tree first, allow a
@@ -739,8 +740,10 @@ begin
       'Preparing update...',
       'Setup is closing Nexus Core and checking the existing installation. Please wait.');
   StopRunningNexusCore();
-  if UpgradeDetected then
-    WaitForInstallFilesUnlock();
+  // The unlock wait is cheap when nothing holds files — run it on every
+  // install path, not just detected upgrades (uninstall survivors lock
+  // files the same way).
+  WaitForInstallFilesUnlock();
   if UpgradeDetected then
     ShowBusyStatus(
       'Analyzing files to update...',
@@ -828,4 +831,24 @@ begin
         {#Qwen30Size},
         '{#Qwen30SourceRepo}');
   end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  // A running NexusCore.exe holds {app} files open; uninstall would
+  // silently leave them behind (locked files can't be deleted), and the
+  // surviving process then blocks the next install with DeleteFile
+  // code 5. Stop the app tree before any file is touched. Plain Sleep —
+  // WizardForm/BusySleep don't exist in the uninstaller.
+  TaskKillImage('{#AppExeName}', False);
+  TaskKillImage('ChatNexus.exe', False);
+  Sleep(1500);
+  TaskKillImage('{#AppExeName}', True);
+  TaskKillImage('ChatNexus.exe', True);
+  TaskKillImage('ChatNexus.Backend.exe', True);
+  TaskKillImage('llama-server.exe', True);
+  TaskKillImage('llama.exe', True);
+  KillBackendFromPidFile();
+  StopProcessesUnderInstallDir();
+  Result := True;
 end;

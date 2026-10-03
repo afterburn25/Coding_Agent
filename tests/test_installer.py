@@ -112,6 +112,29 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("procedure WaitForInstallFilesUnlock", self.installer)
         self.assertIn("'Waiting for Nexus Core files to be released...'", self.installer)
 
+    def test_process_kill_runs_on_uninstall_reinstall_path(self):
+        # A running NexusCore.exe survives its own uninstaller (locked
+        # exes can't be deleted). UninstallButtonClick then clears
+        # UpgradeDetected, so the sweep must not be gated on it — the
+        # real-world failure was "DeleteFile failed; code 5" on
+        # NexusCore.exe during the follow-on fresh install.
+        stop = self.installer.split("procedure StopRunningNexusCore")[1]
+        stop = stop.split("end;", 1)[0]
+        self.assertNotIn("if not UpgradeDetected then", stop)
+        self.assertNotIn("if UpgradeDetected then", stop)
+        prep = self.installer.split("function PrepareToInstall")[1]
+        prep = prep.split("InstallBundledSource :=", 1)[0]
+        self.assertNotIn("if UpgradeDetected then\n    WaitForInstallFilesUnlock", prep)
+        self.assertIn("StopRunningNexusCore", prep)
+        self.assertIn("WaitForInstallFilesUnlock", prep)
+        # And the uninstaller must stop the app before deleting files so
+        # no locked exe survives in the first place.
+        self.assertIn("function InitializeUninstall", self.installer)
+        uninst = self.installer.split("function InitializeUninstall")[1]
+        uninst = uninst.split("end;", 1)[0]
+        self.assertIn("{#AppExeName}", uninst)
+        self.assertIn("ChatNexus.Backend.exe", uninst)
+
     def test_optional_tools_not_downloaded_by_installer(self):
         # ComfyUI and image model packs moved to the in-app Tools page so Setup
         # stays fast; none of these artifacts may ship as installer downloads.
