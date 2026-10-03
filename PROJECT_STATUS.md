@@ -2,7 +2,17 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1179 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.12.0 — Profiles + Creator Identity + Personality Studio
+## Active version: 0.12.1 — Installer update progress reporting
+
+v0.12.1 fixes the update path reading as frozen: Inno Setup now reports
+live stage text for every blocking operation — closing Nexus Core
+processes, waiting for exit, forced cleanup, SHA-256 verification of
+existing multi-GB model files, and post-download verification — with a
+marquee bar for unmeasurable work and chunked sleeps so the wizard keeps
+repainting. The uninstaller wait loop shows elapsed seconds, and the
+bootstrap progress area covers all four downloads (Qwen ×2 + Kokoro ×2).
+
+### v0.12.0 — Profiles + Creator Identity + Personality Studio
 
 v0.12 puts Nexus Core on durable human profiles
 (`localcodeagent/profiles/`): a fresh install boots locked into a
