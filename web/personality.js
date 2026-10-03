@@ -20,12 +20,19 @@
   let pid = "", data = null;
   let work = { traits: {}, voice: {} };  // unsaved edits
   let dirty = false;
+  let voicePresets = [], voiceSel = "";
 
   async function load() {
     const a = await api("/api/profiles/active");
     if (!a.profile) { location.replace("/start.html"); return; }
     pid = a.profile.profile_id;
     data = await api(`/api/profiles/${encodeURIComponent(pid)}/personality`);
+    try {
+      voicePresets = (await api("/api/voice/presets")).presets || [];
+      voiceSel = ((await api(
+        `/api/profiles/${encodeURIComponent(pid)}/voice`)).voice || {})
+        .preset_id || "";
+    } catch { voicePresets = []; voiceSel = ""; }
     const t = data.active || {};
     work = { traits: { ...(t.traits || {}) },
              voice: { ...(t.voice || {}) } };
@@ -62,9 +69,15 @@
   function voiceSection() {
     const rows = Object.entries(data.voice_controls)
       .map(([k, v]) => sliderRow(k, v.label, voice(k), true));
+    const picker = `<label class="pst-vsel">Base voice preset
+      <select id="voicePreset">
+        <option value="">System default</option>
+        ${voicePresets.map((p) =>
+          `<option value="${esc(p.id)}" ${p.id === voiceSel ? "selected" : ""}>${esc(p.name)}</option>`).join("")}
+      </select></label>`;
     return `<details class="pst-sec">
       <summary>Voice Performance</summary>
-      <div class="sec-body">${rows.join("")}
+      <div class="sec-body">${picker}${rows.join("")}
         <small class="hint">Unsupported acoustics become prosody hints — never faked.</small>
       </div>
     </details>`;
@@ -202,6 +215,15 @@
       b.addEventListener("click", () => {
         delete work.voice[b.dataset.vreset]; render(); dirty = true;
       }));
+    $("voicePreset")?.addEventListener("change", async (e) => {
+      try {
+        await fetch(`/api/profiles/${encodeURIComponent(pid)}/voice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ preset_id: e.target.value }) });
+        voiceSel = e.target.value;
+      } catch (e2) { alert(e2.message); }
+    });
 
     $("previewBtn").addEventListener("click", async () => {
       const out = $("previewOut"), vo = $("previewVoice");

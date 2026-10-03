@@ -167,6 +167,13 @@ class ProfileAPI:
                     return True
                 h._json({"memories": self._memory(pid).list()})
                 return True
+            if path.endswith("/voice"):
+                pid = self._pid(path, "/api/profiles/", "/voice")
+                if self.mgr.get(pid) is None:
+                    h._json({"error": "no such profile"}, 404)
+                    return True
+                h._json({"voice": self._voice_state(pid)})
+                return True
             if path.endswith("/settings"):
                 pid = self._pid(path, "/api/profiles/", "/settings")
                 p = self.mgr.get(pid)
@@ -409,6 +416,15 @@ class ProfileAPI:
             h._json({"error": "unknown personality action"}, 400)
         return True
 
+    def _voice_state(self, pid: str) -> dict:
+        try:
+            cur = json.loads(
+                (self.mgr.profile_dir(pid) / "voice.json")
+                .read_text(encoding="utf-8"))
+            return cur if isinstance(cur, dict) else {}
+        except Exception:
+            return {}
+
     def _voice_post(self, h, pid: str, body: dict) -> bool:
         """Profile-scoped voice selection — stored in voice.json inside
         the profile dir (not the global voice preset store)."""
@@ -417,12 +433,7 @@ class ProfileAPI:
             h._json({"error": "no such profile"}, 404)
             return True
         vpath = self.mgr.profile_dir(pid, create=True) / "voice.json"
-        try:
-            cur = json.loads(vpath.read_text(encoding="utf-8"))
-            if not isinstance(cur, dict):
-                cur = {}
-        except Exception:
-            cur = {}
+        cur = self._voice_state(pid)
         for key in ("preset_id", "speed", "prosody"):
             if key in body:
                 cur[key] = body[key]

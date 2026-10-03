@@ -37,3 +37,7 @@ details.pst-sec .sec-body{padding:4px 14px 12px}
 .mood-row{display:flex;gap:8px;flex-wrap:wrap}
 .mood-chip{padding:5px 12px;border:1px solid var(--line);border-radius:14px;background:#0a1626;color:var(--text);font-size:11px;cursor:pointer}
 .mood-chip.active{border-color:var(--cyan);color:var(--cyan)}
+
+/* base-voice preset picker inside Voice Performance */
+.pst-vsel{display:block;font-size:12px;color:var(--muted);margin-bottom:10px}
+.pst-vsel select{display:block;margin-top:4px;width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px}
