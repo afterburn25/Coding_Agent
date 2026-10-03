@@ -77,7 +77,24 @@ and survive restarts.
   `POST /api/creator/verify`.
 - **`profiles_onboarding_gate` config flag** (default on) for test
   harnesses that spin unrelated API servers.
-- **66 new tests** (`tests/test_profiles.py`) covering the spec matrix.
+- **Personality in prompts** — `personality/prompt.py` renders the
+  active profile (preferred address, standout sliders, mood, bounded
+  personal memory) as prompt context via the orchestrator's
+  `profile_context` resolver, with an explicit delivery-only boundary.
+- **Personality on real speech** — the voice delivery map feeds
+  `VoiceManager._synthesize`: engine speed carries rate, pitch/gain
+  overlay the preset, `voice.json` preset_id swaps the base voice —
+  profile voice selection is truly profile-scoped. Preview Voice
+  button in the Studio, play button on greeting toasts.
+- **Personal Memory panel** in Settings → Profile (add/forget) backed
+  by the isolated per-profile store; memories reach the model through
+  prompt context.
+- **Profile avatar in chat** — user messages render the circular
+  avatar (YOU chip fallback).
+- **Terminal transcripts guaranteed** — `TaskStore.update` appends a
+  status marker whenever a task goes terminal with an empty log
+  (direct-completion paths previously left nothing).
+- **75 new tests** (`tests/test_profiles.py`) covering the spec matrix.
 
 ## [0.11.0] — Unreleased
 

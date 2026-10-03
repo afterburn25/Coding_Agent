@@ -93,6 +93,12 @@ correctness, tool permissions, or safety state.
   (`voice_map.map_voice`): Kokoro `speed`, DSP `pitch_semitones`,
   `tempo`, `output_gain_db`. Breathiness/pause/emphasis/intensity have
   no direct engine equivalent → documented `preprocess` hints.
+- **Delivery on real speech** — `AppState._voice_delivery_map` feeds
+  `VoiceManager._synthesize` (10 s cache): rate rides the engine
+  `speed` arg (preset.tempo untouched so it isn't applied twice),
+  pitch/gain overlay onto the resolved preset, and the profile's
+  `voice.json` `preset_id` can swap the base voice entirely. Explicit
+  previews pass `apply_personality=False`.
 
 ## Adult gating
 
@@ -113,6 +119,20 @@ outputs = text + voice params.
   via `greeting_seq.json`. Creators always hear their preferred address.
 - Flirty templates degrade to default for minors; degraded health
   appends a short systems note.
+
+## Prompt & voice integration
+
+- `personality/prompt.py::prompt_context` renders the active profile
+  block — preferred address, personality name/strength, standout
+  sliders (deviation ≥ 12 after strength scaling, top 8), mood, the
+  explicit delivery-only boundary, and the bounded personal-memory
+  tail. `AppState._profile_prompt_context` resolves it lazily for the
+  orchestrator's `profile_context` hook; any failure degrades to "".
+- Personal memory is managed via `/api/profiles/{id}/memory` +
+  `/memory/forget` and a panel in Settings → Profile.
+- The profile avatar propagates to the nav switcher, Settings →
+  Profile, and the chat transcript (user messages show the circular
+  avatar, falling back to the YOU chip).
 
 ## Isolation vs. sharing
 
