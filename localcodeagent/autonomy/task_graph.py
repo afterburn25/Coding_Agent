@@ -132,6 +132,11 @@ class TaskGraph:
                 n["state"] = "ready"
             elif any(d is not None and d.get("state") in {"failed", "cancelled"} for d in deps):
                 n["state"] = "blocked"
+            elif any(d is not None and d.get("state") == "skipped" for d in deps):
+                # Skipped dep = superseded work — the dependent is superseded
+                # too, not left planned forever (it could never become ready
+                # and would hold all_tasks_completed permanently).
+                n["state"] = "skipped"
 
     def refresh(self) -> None:
         self._refresh_ready()

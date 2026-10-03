@@ -630,6 +630,17 @@ class TaskGraphTests(unittest.TestCase):
         g.refresh()
         self.assertEqual(b["state"], "blocked")
 
+    def test_skipped_dependency_skips_dependent(self):
+        # A skipped dep means superseded work — the dependent is superseded
+        # too, not stranded in `planned` forever (it could never complete
+        # and would hold all_tasks_completed unmet permanently).
+        g = self._graph()
+        a = g.add(new_task("A", "a"))
+        b = g.add(new_task("B", "b", deps=[a["id"]]))
+        g.mark(a["id"], "skipped")
+        g.refresh()
+        self.assertEqual(b["state"], "skipped")
+
     def test_cycle_rejected(self):
         g = self._graph()
         a = g.add(new_task("A", "a"))
@@ -1040,6 +1051,38 @@ class SupervisorLifecycleTests(unittest.TestCase):
             # continued to completion rather than stalling.
             self.assertEqual(final["status"], "completed")
             self.assertGreater(len(final["graph"]["nodes"]), 3)
+            sup.stop()
+
+    def test_replan_skips_dead_end_nodes(self):
+        # Regression: a replan appended a fresh DAG but left blocked /
+        # dead-dep nodes from the aborted plan pending forever, so
+        # all_tasks_completed could never be met.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x")
+            sup.start_mission(m["id"])
+            sup.tick()
+            time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            graph = TaskGraph(row)
+            dead_dep = graph.add(new_task("dead dep", "d"))
+            dead_dep["state"] = "cancelled"
+            stranded = graph.add(new_task("stranded", "s", deps=[dead_dep["id"]]))
+            stranded["state"] = "planned"
+            blocked_node = graph.add(new_task("blocked", "b", deps=[dead_dep["id"]]))
+            blocked_node["state"] = "blocked"
+            sup.missions.update(m["id"], graph=graph.graph)
+            sup.missions.mutate(
+                m["id"],
+                lambda r: sup._do_replan(r, "resume replan", failed_node=None))
+            after = sup.missions.get(m["id"])
+            states = {n["id"]: n["state"] for n in after["graph"]["nodes"]}
+            self.assertEqual(states[stranded["id"]], "skipped")
+            self.assertEqual(states[blocked_node["id"]], "skipped")
+            # New plan tasks stay live — only dead ends are superseded.
+            self.assertTrue(any(s in {"planned", "ready"}
+                                for nid, s in states.items()
+                                if nid not in {stranded["id"], blocked_node["id"], dead_dep["id"]}))
             sup.stop()
 
     def test_stop_autonomy_pauses_missions(self):

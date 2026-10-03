@@ -913,6 +913,24 @@ class AutonomousSupervisor:
                 if n.get("state") == "blocked":
                     n["state"] = "planned"
             failed_node["state"] = "skipped"
+        # Supersede dead-end nodes the new plan replaces — a blocked node
+        # can never reschedule (nothing clears it outside this repoint
+        # path), and pending nodes on dead deps can never become ready.
+        # Left in place they hold all_tasks_completed unmet forever — the
+        # mission can never complete even when the new plan succeeds.
+        dead_states = {"failed", "cancelled", "blocked", "skipped"}
+        for n in graph.nodes:
+            if n["id"] in new_ids or n.get("state") == "running":
+                continue
+            state = n.get("state")
+            if state == "blocked":
+                n["state"] = "skipped"
+            elif state in {"planned", "ready", "waiting_dependency",
+                           "waiting_approval"} and any(
+                    (dep := graph.get(d)) is not None
+                    and dep.get("state") in dead_states
+                    for d in (n.get("deps") or [])):
+                n["state"] = "skipped"
         graph.refresh()
 
     def _complete_mission(self, mission_id: str, *, warnings: bool) -> None:
