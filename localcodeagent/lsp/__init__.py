@@ -61,7 +61,17 @@ class LspClient:
         self._alive = True
         self._reader = threading.Thread(target=self._read_loop,
                                         daemon=True)
-        self._reader.start()
+        try:
+            self._reader.start()
+        except Exception:
+            # No reader means the child blocks on a full pipe — kill it and
+            # report the client as down instead of hanging in _initialize.
+            self._alive = False
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            return False
         return self._initialize()
 
     def _send(self, payload: dict) -> None:

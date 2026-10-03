@@ -130,8 +130,19 @@ class MCPClient:
             self._proc = None
             raise MCPError(f"failed to launch MCP server '{self.config.id}': {exc}") from exc
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
-        self._reader.start()
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        try:
+            self._reader.start()
+            threading.Thread(target=self._drain_stderr, daemon=True).start()
+        except Exception:
+            # A PIPE'd child with no reader blocks on a full pipe and lingers
+            # until the handshake times out — kill it and fail the launch now.
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+            raise MCPError(
+                f"failed to start readers for MCP server '{self.config.id}'")
         # Job Object lets close() kill the whole tree — an MCP server whose
         # command is a shell wrapper would otherwise orphan its child holding
         # our pipes, and a crashed backend would leave the server running.
