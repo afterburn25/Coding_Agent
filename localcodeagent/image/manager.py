@@ -157,7 +157,16 @@ class ImageManager:
             job.resume_count += 1
             job.backend_starting = not self._backend_up()
             self._save_jobs(job)
-            threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
+            try:
+                threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
+            except Exception as exc:
+                job.state = "failed"
+                job.stage = "failed"
+                job.error_code = "worker_spawn_failed"
+                job.error_message = f"worker spawn failed: {type(exc).__name__}: {exc}"
+                job.error = job.error_message
+                self._save_jobs(job)
+                continue
             resumed += 1
         return resumed
 
@@ -309,7 +318,15 @@ class ImageManager:
             self._jobs[job.id]=job
             self._save_jobs(job)
         if bool(getattr(self.config, "image_auto_run_jobs", True)):
-            threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
+            try:
+                threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
+            except Exception as exc:
+                job.state = "failed"
+                job.stage = "failed"
+                job.error_code = "worker_spawn_failed"
+                job.error_message = f"worker spawn failed: {type(exc).__name__}: {exc}"
+                job.error = job.error_message
+                self._save_jobs(job)
         return job
 
     def _safe_input_path(self, value: str) -> Path:

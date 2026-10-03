@@ -219,7 +219,14 @@ class CodingModelCatalogManager:
         with self._lock:
             self._jobs[job_id] = job
             self._cancel[job_id] = cancel
-        threading.Thread(target=self._install_worker, args=(job_id, asset, cancel, repair), name=f"chat-nexus-model-{asset.id}", daemon=True).start()
+        try:
+            threading.Thread(target=self._install_worker, args=(job_id, asset, cancel, repair), name=f"chat-nexus-model-{asset.id}", daemon=True).start()
+        except Exception as exc:
+            with self._lock:
+                job["state"] = "failed"
+                job["error"] = f"worker spawn failed: {type(exc).__name__}: {exc}"
+                job["finished_at"] = time.time()
+                self._cancel.pop(job_id, None)
         return dict(job)
 
     def _update(self, job_id: str, **values: Any) -> None:

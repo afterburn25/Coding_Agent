@@ -992,7 +992,16 @@ class AutonomousSupervisor:
                 self.wake()
         t = threading.Thread(target=work, name=f"mission-{node_id}", daemon=True)
         self._workers[node_id] = t
-        t.start()
+        try:
+            t.start()
+        except Exception as exc:
+            # Never leak a dead entry — _workers is the live-worker census
+            # and a stranded id would misreport forever. The node still gets
+            # a terminal result so the mission can recover/replan.
+            self._workers.pop(node_id, None)
+            self._finish_node(mission_id, node_id,
+                              {"ok": False,
+                               "output": f"worker spawn failed: {type(exc).__name__}: {exc}"})
 
     def _run_node(self, mission_id: str, node_id: str) -> None:
         m = self.missions.get(mission_id)
