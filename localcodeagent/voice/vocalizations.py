@@ -675,6 +675,23 @@ class VocalizationEngine:
             targets.extend(_GESTURE)
         for cat in targets:
             sup[cat] = now + 3600.0
+        # Re-enable — "more sighs", "laugh again", "bring back the hums"
+        # clears the suppression window for named categories. "no more"
+        # is suppression, not re-enable — exclude negated more.
+        _more = bool(re.search(r"\bmore\b", t)) and not re.search(
+            r"\b(?:no|not|any|fewer|less)\s+more\b", t)
+        if _more or re.search(r"\b(again|resume|keep|bring\s+back)\b", t):
+            for kw, cats in {
+                    "sigh": ["sigh"], "laugh": ["amusement", "playfulness"],
+                    "giggl": ["playfulness", "amusement"],
+                    "hum": ["humming", "pleasure", "thinking"],
+                    "gasp": ["surprise"], "yawn": ["fatigue"],
+                    "groan": ["frustration"], "moan": ["pleasure"],
+                    "whisper": ["warmth"],
+                    "vocal": list(_GESTURE)}.items():
+                if kw in t:
+                    for c in cats:
+                        sup.pop(c, None)
 
     # -- context ------------------------------------------------------------
 

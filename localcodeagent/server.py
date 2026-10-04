@@ -926,6 +926,12 @@ class AppState:
                                     or "relaxed"),
                 manual_mood=str(active.get("mood") or ""))
             dyn.note_reply(reply_text)
+            # Vocal complaints in plain chat ("stop sighing", "fewer
+            # giggles") suppress categories — no-op on ordinary text.
+            v = getattr(self, "voice", None)
+            if v is not None:
+                v.vocal.record_feedback(str(prof["profile_id"]),
+                                        user_text)
         except Exception:
             pass
 
@@ -7565,6 +7571,44 @@ class Handler(BaseHTTPRequestHandler):
                             conversation_id=conv_id,
                             question=q,
                         )
+                except Exception:
+                    pass
+                # Persona adaptation — a rated reply that contained humor
+                # feeds the per-profile humor-style ledger; note text like
+                # "fewer sighs" teaches the vocalization engine.
+                try:
+                    _prof = self.state.profiles.active()
+                    _pid = str((_prof or {}).get("profile_id") or "")
+                    if _pid:
+                        _note = str(body.get("note", ""))
+                        _v = getattr(self.state, "voice", None)
+                        if _note and _v is not None:
+                            _v.vocal.record_feedback(_pid, _note)
+                        _rating = str(body.get("rating", ""))
+                        _m = self.state.conversation_manager.find_message(
+                            str(body.get("message_id", "")),
+                            str(body.get("conversation_id", "")) or None)
+                        _txt = str((_m or {}).get("content") or "")
+                        if (_m or {}).get("role") == "assistant" and _txt \
+                                and _rating in ("up", "down"):
+                            _humorish = re.search(
+                                r"\*(?:laughs|giggles|chuckles|grins|"
+                                r"smirks|snorts|cackles)\*|"
+                                r"\((?:laughs|giggles|chuckles|grins|"
+                                r"smirks)\)|\b(?:ha\s*ha|he\s*he|lol)\b",
+                                _txt, re.I)
+                            if _humorish:
+                                _pdir = self.state.profiles.profile_dir(_pid)
+                                _pers = PersonalityStore(
+                                    _pdir).resolve_active(
+                                    is_adult=bool(_prof.get("is_adult")))
+                                from .personality.behavior import (
+                                    behavior_for_personality)
+                                _ht = str(behavior_for_personality(
+                                    _pers).get("humor_type") or "")
+                                if _ht and _ht != "none":
+                                    PersonaDynamics(_pdir).humor_feedback(
+                                        _ht, _rating == "up")
                 except Exception:
                     pass
                 self._json({"ok": True, "feedback": saved})

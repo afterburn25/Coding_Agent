@@ -245,6 +245,10 @@ class PersonaDynamics:
     _REPLY_HUMOR = re.compile(
         r"\b(?:ha(?:ha)+|hehe?|lol)\b|[😂😄😉]|punchline|"
         r"just\s+kidding", re.I)
+    _REPLY_ANALOGY = re.compile(
+        r"\b(?:it'?s\s+like|like\s+a|like\s+when|as\s+if|imagine|"
+        r"think\s+of\s+(?:it|this)\s+as|picture\s+this|similar\s+to)\b",
+        re.I)
 
     def note_reply(self, reply_text: str) -> None:
         """Track opener/closer n-grams for the repetition guard, plus
@@ -275,6 +279,14 @@ class PersonaDynamics:
             if self._REPLY_HUMOR.search(text):
                 met["humor"] = int(met.get("humor") or 0) + 1
                 self._bump_saturation(st, "humor")
+            am = self._REPLY_ANALOGY.search(text)
+            if am:
+                try:
+                    from . import continuity as _cont
+                    _cont.note_pattern(st, "analogy",
+                                       am.group(0).lower())
+                except Exception:
+                    pass
             st["last_outcome"] = ("failed"
                                   if self._REPLY_FAIL.search(text)
                                   else "ok")

@@ -102,6 +102,13 @@ class FeedbackCoverage(unittest.TestCase):
         out = eng.resolve("*gasps* wow.", ctx=_ctx()).speech_text
         self.assertNotIn("ah!", out.lower())
 
+    def test_reenable_clears_suppression(self):
+        eng = _engine()
+        eng.record_feedback("p1", "fewer giggles please")
+        eng.record_feedback("p1", "you can giggle again")
+        out = eng.resolve("*giggles* cute.", ctx=_ctx()).speech_text
+        self.assertIn("hee", out.lower())
+
     def test_feedback_is_profile_scoped(self):
         eng = _engine()
         eng.record_feedback("p2", "fewer giggles")
@@ -287,6 +294,60 @@ class ComparativeCommands(unittest.TestCase):
         self.assertEqual(p("you can call me Ash")["address"], "Ash")
         self.assertEqual(p("call me Boss.")["address"], "Boss")
         self.assertIsNone(p("call me when it is done"))
+
+
+class AnalogyMemory(unittest.TestCase):
+    """Reply analogy shapes recorded → the next compile warns to vary."""
+
+    def test_reply_analogy_reaches_card(self):
+        from localcodeagent.personality.dynamics import PersonaDynamics
+        from localcodeagent.personality.effective import (
+            card_guidance, compile_effective)
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            dyn = PersonaDynamics(Path(td))
+            dyn.note_reply("Think of it like a recipe — "
+                           "each step feeds the next.")
+            st = dyn.state()
+            pats = (st.get("patterns") or {}).get("analogy") or []
+            self.assertTrue(pats)
+            card = compile_effective(
+                {"name": "Nexus", "base_preset": "professional"},
+                state=st)
+            self.assertTrue(card["recent_analogies"])
+            lines = card_guidance(card)
+            self.assertTrue(any("fresh comparison" in l
+                                for l in lines))
+
+    def test_no_analogy_no_line(self):
+        from localcodeagent.personality.dynamics import PersonaDynamics
+        from localcodeagent.personality.effective import (
+            card_guidance, compile_effective)
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            dyn = PersonaDynamics(Path(td))
+            dyn.note_reply("The build is fixed.")
+            card = compile_effective(
+                {"name": "Nexus", "base_preset": "professional"},
+                state=dyn.state())
+            self.assertFalse(card["recent_analogies"])
+            self.assertFalse(any("fresh comparison" in l
+                                 for l in card_guidance(card)))
+
+
+class HumorFeedbackWiring(unittest.TestCase):
+    def test_feedback_marks_adaptation(self):
+        from localcodeagent.personality.dynamics import PersonaDynamics
+        from localcodeagent.personality.continuity import (
+            humor_adaptation)
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            dyn = PersonaDynamics(Path(td))
+            for _ in range(3):
+                dyn.humor_feedback("sarcastic", positive=False)
+            adapt = humor_adaptation(dyn.state())
+            self.assertIn("poorly", adapt)
+            self.assertIn("sarcastic", adapt)
 
 
 if __name__ == "__main__":
