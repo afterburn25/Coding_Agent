@@ -1424,7 +1424,7 @@ class AppState:
         checkout, so after an update it can lag the packaged backend.
         A fast-forward-only merge keeps it current; local commits, a
         dirty tree, a different branch, or no remote all skip cleanly."""
-        if not getattr(config, "sync_source_on_start", True):
+        if not getattr(self.config, "sync_source_on_start", True):
             return
         if not (self.workspace / ".git" / "HEAD").exists():
             return
