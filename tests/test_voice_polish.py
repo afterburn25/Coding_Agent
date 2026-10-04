@@ -180,13 +180,34 @@ class WorkerFinishedEvent(unittest.TestCase):
         m.release("w-nope", outcome="completed")
         self.assertFalse([e for e in events if e[0] == "worker_finished"])
 
+    def test_clean_streak_emits_capacity_restored(self):
+        events = []
+        mon = ResourceMonitor(self.tmp, sampler=_snap, sample_ttl=0)
+        m = AdaptiveWorkerManager(self.tmp, monitor=mon,
+                                  on_queue_event=lambda et, p:
+                                  events.append((et, p)))
+        m.record_resource_failure()  # drop the ceiling first
+        for _ in range(5):
+            out = m.submit("job", role="tool")
+            if out["status"] != "admitted":
+                break
+            wid = out["worker"]["id"]
+            m.worker_started(wid)
+            m.release(wid, outcome="completed")
+        self.assertTrue([e for e in events
+                         if e[0] == "worker_capacity_restored"])
+
 
 class _StubVoice:
     def __init__(self):
         self.enqueued = []
+        self.muted = False
 
     def enqueue(self, task_id, text):
         self.enqueued.append((task_id, text))
+
+    def set_muted(self, muted):
+        self.muted = bool(muted)
 
 
 class _StubState:
@@ -204,6 +225,7 @@ class _StubState:
 
     _speak_notice = AppState._speak_notice
     _speak_queue_notice = AppState._speak_queue_notice
+    _persona_command = AppState._persona_command
     _queue_notice_line = AppState._queue_notice_line
     _on_worker_queue_event = AppState._on_worker_queue_event
     _spoken_notice_line = AppState._spoken_notice_line
@@ -320,6 +342,39 @@ class SpokenNotices(unittest.TestCase):
                 "message": ""}}
             self.assertTrue(st._spoken_notice_line(ev), title)
             self.assertIn(want, st.voice.enqueued[-1][1], title)
+
+    def test_interrupted_reads_as_cancelled(self):
+        st = _StubState()
+        st._on_worker_queue_event("worker_finished", {
+            "worker": {"id": "w-i", "user_initiated": True,
+                       "title": "render", "status": "interrupted"},
+            "outcome": "interrupted"})
+        self.assertTrue(st.voice.enqueued)
+        self.assertIn("cancelled:", st.voice.enqueued[-1][1])
+
+    def test_capacity_restored_speaks(self):
+        st = _StubState()
+        st._on_worker_queue_event("worker_capacity_restored",
+                                  {"ceiling": 4})
+        self.assertEqual(len(st.voice.enqueued), 1)
+        self.assertIn("recovering", st.voice.enqueued[0][1])
+        # Oscillation: reduce → restore → reduce again speaks each move.
+        st._on_worker_queue_event("worker_capacity_reduced",
+                                  {"ceiling": 3})
+        st._on_worker_queue_event("worker_capacity_restored",
+                                  {"ceiling": 4})
+        st._on_worker_queue_event("worker_capacity_reduced",
+                                  {"ceiling": 3})
+        self.assertEqual(len(st.voice.enqueued), 4)
+
+    def test_mute_speaks_farewell_before_muting(self):
+        st = _StubState()
+        res = st._persona_command("stop talking")
+        self.assertEqual(res["applied"], "voice_mute")
+        self.assertTrue(st.voice.muted)
+        tid, text = st.voice.enqueued[0]
+        self.assertEqual(tid, "voice-mute-ack")
+        self.assertIn("status:", text)
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

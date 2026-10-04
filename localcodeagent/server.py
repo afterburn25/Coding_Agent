@@ -865,6 +865,17 @@ class AppState:
                 if v is None:
                     return {"applied": cmd["op"],
                             "ack": "Voice isn't available right now."}
+                if cmd["op"] == "voice_mute":
+                    # Say goodbye BEFORE muting — the reply-path ack
+                    # is enqueued post-mute and gets dropped.
+                    try:
+                        v.enqueue("voice-mute-ack",
+                                  self._persona_notice(
+                                      "status",
+                                      "Going quiet — text only "
+                                      "from here."))
+                    except Exception:
+                        pass
                 v.set_muted(cmd["op"] == "voice_mute")
                 return {"applied": cmd["op"],
                         "ack": ("Muted — I'll keep it text-only."
@@ -3521,7 +3532,8 @@ class AppState:
                 return
             outcome = str(payload.get("outcome") or w.get("status") or "")
             kind = ("completed" if outcome == "completed"
-                    else "cancelled" if outcome in ("cancelled", "killed")
+                    else "cancelled" if outcome in
+                    ("cancelled", "killed", "interrupted")
                     else "failed")
             title = str(w.get("title") or "").strip() or "the queued task"
             fact = title if kind != "failed" \
@@ -3530,10 +3542,22 @@ class AppState:
             return
         if event_type == "worker_capacity_reduced":
             # Resource pressure explains slowdowns — speak once per
-            # distinct ceiling so repeated failures don't nag.
+            # distinct ceiling so repeated failures don't nag. Clear
+            # the restore id so a later recovery speaks again.
+            ceiling = payload.get("ceiling")
+            # Next restore lands at ceiling+1 — let it speak again.
+            self._queue_announced.discard(f"cap-up-{int(ceiling or 0) + 1}")
             self._speak_notice(
-                f"cap-{payload.get('ceiling')}", "status",
+                f"cap-{ceiling}", "status",
                 "Worker capacity reduced — heavy jobs may run slower.")
+            return
+        if event_type == "worker_capacity_restored":
+            ceiling = payload.get("ceiling")
+            # Next reduction lands at ceiling-1 — let it speak again.
+            self._queue_announced.discard(f"cap-{int(ceiling or 0) - 1}")
+            self._speak_notice(
+                f"cap-up-{ceiling}", "status",
+                "Workers are recovering — capacity is back up.")
             return
         if event_type == "queued_task_started":
             w = payload.get("worker") or {}

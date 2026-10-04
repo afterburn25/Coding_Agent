@@ -591,26 +591,32 @@ class AdaptiveWorkerManager:
                 vram_mb=float(obs.get("vram_mb") or 0),
                 cpu_cores=float(obs.get("cpu_cores") or 0),
                 duration_s=float(w.elapsed_s or 0))
-        if never_started:
-            pass  # released before launch — no telemetry, no streaks
-        elif outcome in {"failed", "interrupted"}:
-            err = str((result or {}).get("error") or "")
-            if any(k in err.lower() for k in
-                   ("oom", "out of memory", "vram", "crash", "cuda",
-                    "resource")):
-                self.record_resource_failure()
+        # Never-started releases carry no telemetry and no streaks.
+        restored = False
+        if not never_started:
+            if outcome in {"failed", "interrupted"}:
+                err = str((result or {}).get("error") or "")
+                if any(k in err.lower() for k in
+                       ("oom", "out of memory", "vram", "crash", "cuda",
+                        "resource")):
+                    self.record_resource_failure()
+                else:
+                    self._fail_streak += 1
+                    self._clean_streak = 0
             else:
-                self._fail_streak += 1
-                self._clean_streak = 0
-        else:
-            self._clean_streak += 1
-            self._fail_streak = 0
-            # Restore ceiling slowly — one clean streak of 5 → +1.
-            if self._ceiling < self.max_workers and self._clean_streak >= 5:
-                self._ceiling += 1
-                self._clean_streak = 0
+                self._clean_streak += 1
+                self._fail_streak = 0
+                # Restore ceiling slowly — one clean streak of 5 → +1.
+                if (self._ceiling < self.max_workers
+                        and self._clean_streak >= 5):
+                    self._ceiling += 1
+                    self._clean_streak = 0
+                    restored = True
         self._emit("worker_finished", {"worker": row,
                                        "outcome": w.status})
+        if restored:
+            self._emit("worker_capacity_restored",
+                       {"ceiling": self._ceiling})
 
     def record_resource_failure(self) -> None:
         """OOM / backend crash / GPU error → immediately reduce safe
