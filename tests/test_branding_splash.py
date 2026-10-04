@@ -234,8 +234,12 @@ class UpgradeIdentityTests(unittest.TestCase):
         self.assertIn("NexusCore-Setup-${env:APP_VERSION}-Windows-x64.exe", WORKFLOW)
 
     def test_upgrade_preserves_user_data(self):
-        self.assertIn(r'Excludes: "Source\*,models\*,data\*,workflows\*,config.json"', INSTALLER)
+        # Mutable user state survives upgrades: the user config is excluded
+        # from the top-level copy, imported workflows install only when
+        # absent, and an existing Source workspace is never overwritten.
+        self.assertIn(r'Excludes: "config.json"', INSTALLER)
         self.assertIn("onlyifdoesntexist", INSTALLER)
+        self.assertIn("ShouldInstallBundledSource", INSTALLER)
         self.assertIn("UPGRADE_PRESERVE.marker", WORKFLOW)
 
 
