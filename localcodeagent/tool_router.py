@@ -26,19 +26,23 @@ class ToolRouter:
     and records routing telemetry analogous to model telemetry.
     """
 
-    def __init__(
+    def __init__(  # noqa: D107 — args documented inline below
         self,
         registry: ToolRegistry,
         *,
         resources: Callable[[], dict[str, Any]] | dict[str, Any] | None = None,
         prefer: Iterable[str] | None = None,
         telemetry_path: Path | None = None,
+        tracker: Any = None,
     ) -> None:
         self.registry = registry
         self._resources = resources
         self.prefer = {str(p).lower() for p in (prefer or [])}
         self.telemetry: deque[dict[str, Any]] = deque(maxlen=500)
         self.telemetry_path = Path(telemetry_path) if telemetry_path else None
+        # Persisted reliability — every routed outcome also lands in the
+        # durable tracker so tool health survives restarts.
+        self._tracker = tracker
         self._health_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._lock = threading.RLock()
         if self.telemetry_path and self.telemetry_path.is_file():
@@ -235,6 +239,24 @@ class ToolRouter:
         }
         with self._lock:
             self.telemetry.append(entry)
+        if self._tracker is not None:
+            try:
+                self._tracker.record(
+                    f"capability:{capability}", ok=ok,
+                    latency_s=elapsed_ms / 1000.0,
+                    error_class="" if ok else "routing_failed",
+                    retries=max(0, len(attempts) - 1))
+                if chosen:
+                    err_cls = ""
+                    if not ok:
+                        err_cls = str((attempts or [{}])[-1].get(
+                            "outcome") or "failed")[:60]
+                    self._tracker.record(
+                        f"tool:{chosen}", ok=ok,
+                        latency_s=elapsed_ms / 1000.0,
+                        error_class=err_cls)
+            except Exception:
+                pass
         if self.telemetry_path:
             try:
                 self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)

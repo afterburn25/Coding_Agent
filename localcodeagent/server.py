@@ -150,6 +150,9 @@ class AppState:
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .evidence import EvidenceBoard
         self.evidence = EvidenceBoard(runtime_root / "data" / "evidence.json")
+        from .reliability import CapabilityHealth, ReliabilityTracker
+        self.reliability = ReliabilityTracker(runtime_root / "data" / "reliability.json")
+        self.capabilities = CapabilityHealth(self.reliability)
         from .preferences import PreferenceStore
         self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
@@ -535,7 +538,9 @@ class AppState:
             resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
             prefer=getattr(config, "preferred_tools", []),
             telemetry_path=runtime_root / "data" / "routing_telemetry.jsonl",
+            tracker=self.reliability,
         )
+        self.capabilities.registry = self.tools
         self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])),
                               vault=self.secrets)
         if getattr(config, "mcp_servers", None):
@@ -5243,6 +5248,23 @@ class Handler(BaseHTTPRequestHandler):
                 str((q.get("action") or [""])[0]),
                 target=str((q.get("target") or [""])[0])))
             return
+        if path == "/api/reliability":
+            q = parse_qs(urlparse(self.path).query)
+            subject = str((q.get("subject") or [""])[0])
+            if subject:
+                self._json(self.state.reliability.score(subject))
+            else:
+                self._json({"subjects": self.state.reliability.all(),
+                            "summary": self.state.reliability.summary()})
+            return
+        if path == "/api/capabilities":
+            q = parse_qs(urlparse(self.path).query)
+            name = str((q.get("name") or [""])[0])
+            if name:
+                self._json(self.state.capabilities.status(name))
+            else:
+                self._json(self.state.capabilities.summary())
+            return
         if path == "/api/evidence":
             q = parse_qs(urlparse(self.path).query)
             query = str((q.get("q") or [""])[0])
@@ -6672,6 +6694,32 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "unknown entry"}, 404)
                     return
                 self._json({"ok": True, "entry": ent})
+                return
+
+            if path == "/api/reliability/record":
+                subject = str(body.get("subject") or "").strip()
+                if not subject:
+                    self._json({"error": "subject is required"}, 400)
+                    return
+                row = self.state.reliability.record(
+                    subject, ok=bool(body.get("ok")),
+                    latency_s=float(body.get("latency_s") or 0.0),
+                    error_class=str(body.get("error_class") or ""),
+                    retries=int(body.get("retries") or 0))
+                self._json({"ok": True, "subject": row,
+                            "status": self.state.reliability.status(
+                                subject)})
+                return
+
+            if path == "/api/capabilities/probe":
+                name = str(body.get("name") or "")
+                if not name:
+                    self._json({"error": "name is required"}, 400)
+                    return
+                res = self.state.capabilities.probe(name)
+                self._json({"ok": res["ok"], "probe": res,
+                            "status": self.state.capabilities.status(
+                                name)})
                 return
 
             if path == "/api/conversation-memory/exchange":
