@@ -1,8 +1,49 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1705 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1705 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.19.0 lands the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
 
-## Active version: 0.16.0 — Persona depth + autonomous workstation layers
+## Active version: 0.19.0 — Autonomous development workstation (P0)
+
+v0.19.0 is the first station of the workstation program — the P0
+dependency layer is in place and everything it reports is probed, not
+narrated:
+
+- **Capability honesty** — `localcodeagent/capabilities.py` gives every
+  important capability a real probed state and claim disposition,
+  exposed at `GET /api/capabilities`. Blocked capabilities are named in
+  the system prompt, and the truth gate flags claims that contradict a
+  hard-negative capability even when other tools ran.
+- **Workspace/filesystem foundation** — `WorkspaceManager` inspects,
+  adopts, and persists workspaces (project type, toolchain, build/test/
+  dev commands, git state, conventions). Registered roots extend the
+  file/shell/terminal/build boundary — never the whole disk.
+- **Application-builder loop** — 7 working scaffolds plus
+  `project_setup` dependency steps and `app_health` verification; the
+  model is instructed to drive adopt → deps → build → test → launch →
+  verify → evidence.
+- **Native Git + GitHub** — the full local-git surface (init through
+  stash/revert/conflicts/user-changes) and an authenticated GitHub
+  connector (vaulted PAT, repos, clone, PR inspection, Actions runs,
+  rerun, issue comments, compare) behind `github.read`/`github.write`
+  permissions.
+- **Coding workspace UI** — `/workspace.html`: file tree, tabbed
+  editor (line numbers, lightweight highlighting, stale-write 409
+  protection), bounded terminal, Problems-from-real-output, and a Git
+  panel.
+- **Canonical portrait** — the creator-supplied physical-form portrait
+  now drives chat avatars via `web/assets/nexus-portrait.jpg`.
+- **Long-paste attachments** — >20 lines of user input auto-converts to
+  a file attachment on the same turn.
+
+Remaining program: P1 (integrated test/build/runtime/preview,
+coding-agent orchestration, self-modification bootstrapper, full LKG
+rollback, unified Command Center) and P2 (canonical identity manager,
+global search, richer project/knowledge/activity UI, remaining
+workstation capabilities) are specified in `SESSION_HANDOFF.md`.
+
+## Historical milestones
+
+### v0.16.0 — Persona depth + autonomous workstation layers
 
 v0.16.0 makes personas feel like coherent characters rather than
 slider sets — stable motivations, aversions, signature habits, humor

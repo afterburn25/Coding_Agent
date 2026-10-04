@@ -11,7 +11,57 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.16.0 persona depth
+## Current milestone — v0.19.0 autonomous development workstation (P0)
+
+(Previous: v0.18.x honesty hardening · v0.16.0 persona depth · v0.15.0
+autonomous workstation layers)
+
+The workstation program's P0 dependency layer is implemented, tested,
+and pushed in milestone commits (`19fd457` portrait → `7e09fa7`
+workspace UI → `f33b173` paste-attachments):
+
+- **Capability Registry** — `localcodeagent/capabilities.py`; probed
+  states + dispositions for filesystem, code editing, terminal, git,
+  github, toolchains, testing, browser preview, deployment, image gen,
+  STT, TTS, desktop control, coding model. `GET /api/capabilities`,
+  prompt injection of blocked caps, and capability-contradiction
+  flagging in the truth gate (25 tests).
+- **Workspace Manager** — `localcodeagent/workspace.py` +
+  `tools/workspace.py`; detect/adopt/persist workspaces, registered
+  roots extend `_safe_path`/shell/terminal/build boundaries (15 tests).
+- **Application-builder loop** — `localcodeagent/scaffold.py` (7
+  templates) + `tools/project.py` (`project_scaffold`, `project_setup`,
+  `app_health`, `project_templates`); pipeline guidance added to
+  SYSTEM_PROMPT (13 tests).
+- **Git + GitHub** — extended `tools/git.py` (14 ops incl.
+  `git_user_changes` pre-flight) and `tools/github.py` (connect/
+  disconnect/auth-status/repos/clone/PR-inspect/actions-run/rerun/
+  issue-comment/compare/checkout-pr, vault-backed token);
+  `register_github_tools` now takes `vault` + `workspaces` (10 tests).
+- **Workspace UI** — `web/workspace.{html,css,js}` +
+  `/api/fs/{tree,file,mkdir,delete,rename,reveal}`,
+  `/api/git/{status,diff}`, `/api/terminal/run`; nav added to all pages;
+  layout contract updated (24/24).
+- **Identity** — `web/assets/nexus-portrait.jpg` (creator-supplied
+  canonical face) now feeds `/api/nexus/avatar`.
+- **Composer** — >20-line input auto-becomes an attachment.
+
+### Workstation program — what remains
+
+- **P1** — integrated test/build/runtime/preview, coding-agent
+  orchestration (worker pipeline Understand→…→Git), self-modification/
+  update bootstrapper, full LKG rollback/recovery, unified Command
+  Center.
+- **P2** — canonical identity manager (expression sets/gesture mapping),
+  global search/command (Ctrl+K), richer project/knowledge/activity UI,
+  remaining workstation capabilities (deploy adapters, coverage,
+  debugger, E2E/browser tests, dependency/security scan, etc.).
+- Honesty rules that must never regress: no action claims without
+  execution; pushes only count when the remote confirms; tests only
+  "pass" when they ran; workspace writes stay inside registered roots;
+  destructive ops require authorization.
+
+## Historical milestone — v0.16.0 persona depth
 
 (Previous: v0.15.0 autonomous workstation layers)
 
