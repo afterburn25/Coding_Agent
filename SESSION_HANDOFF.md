@@ -142,8 +142,15 @@
   untested/disabled/unavailable), `CapabilityHealth` with self-test
   probes, and `ToolRouter` now records every outcome into the durable
   tracker. API: `/api/reliability` (+record), `/api/capabilities`
-  (+probe). Docs: `docs/RELIABILITY.md`. Next: regression
-  memory/bisect, resource modes,
+  (+probe). Docs: `docs/RELIABILITY.md`.
+- **Phase 6** — regression memory + baselines + bounded bisect
+  (`regressions.py`, `bisect.py`): verified behaviors open
+  `regression_detected` events with `known_good_head`; Welford
+  baselines flag only statistically meaningful regressions;
+  `GitBisector` binary-searches `good..bad` inside a throwaway
+  worktree (endpoint contract verified, bounded steps, always cleaned
+  up). API: `/api/regressions`, `/api/baselines`, `/api/bisect`.
+  Docs: `docs/REGRESSIONS.md`. Next: resource modes,
   offline/egress, lineage, Safe Mode, golden config, RC scorecard.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
@@ -1026,7 +1033,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1460 tests` passing (2 environment skips).
+Expected at this checkpoint: `1468 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
