@@ -535,11 +535,15 @@ class AppState:
         register_workflow_tools(self.tools, self.workspace, workflows_dir=self.workflows_dir, jobs=self.jobs)
         register_blender_tools(self.tools, self.workspace, jobs=self.jobs)
         register_docker_tools(self.tools, self.workspace)
-        register_git_tools(self.tools, self.workspace)
+        register_git_tools(self.tools, self.workspace,
+                           extra_roots=self.workspaces.allowed_roots)
         from .tools.queue import register_queue_tools
         register_queue_tools(self.tools, self.queue)
         if config.github_enabled:
-            register_github_tools(self.tools, self.workspace, config)
+            register_github_tools(
+                self.tools, self.workspace, config,
+                vault=self.secrets,
+                workspaces=self.workspaces)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)

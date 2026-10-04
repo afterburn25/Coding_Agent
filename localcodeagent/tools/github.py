@@ -100,7 +100,7 @@ class GitHubCodingClient:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def request(
+    def request_meta(
         self,
         method: str,
         path: str,
@@ -108,7 +108,9 @@ class GitHubCodingClient:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
         require_auth: bool = False,
-    ) -> Any:
+    ) -> tuple[Any, dict[str, str]]:
+        """Like request() but also returns response headers — needed for
+        X-OAuth-Scopes on the auth-status surface."""
         if require_auth and not self.authenticated:
             raise RuntimeError(
                 f"GitHub write action requires a token in environment variable {self.token_env}"
@@ -129,7 +131,8 @@ class GitHubCodingClient:
                 response = self._opener(request, self.timeout)
             with response as handle:
                 raw = handle.read()
-                return json.loads(raw.decode("utf-8")) if raw else None
+                data = json.loads(raw.decode("utf-8")) if raw else None
+                return data, dict(handle.headers.items())
         except HTTPError as exc:
             try:
                 data = json.loads(exc.read().decode("utf-8", errors="replace"))
@@ -140,10 +143,35 @@ class GitHubCodingClient:
         except (URLError, TimeoutError, OSError) as exc:
             raise RuntimeError(f"GitHub API unavailable: {exc}") from exc
 
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        require_auth: bool = False,
+    ) -> Any:
+        data, _ = self.request_meta(
+            method, path, params=params, body=body,
+            require_auth=require_auth)
+        return data
 
-def register_github_tools(registry: ToolRegistry, workspace: Path, config: AgentConfig) -> None:
+
+def register_github_tools(registry: ToolRegistry, workspace: Path,
+                          config: AgentConfig, *, vault=None,
+                          workspaces=None) -> None:
     client = GitHubCodingClient(config)
     remote_default = config.github_default_remote or "origin"
+
+    def _ensure_token() -> None:
+        """Vault fallback — a token connected after boot authenticates
+        without a restart; env var always wins."""
+        if not client.token and vault is not None:
+            try:
+                client.token = vault.get("github_token") or ""
+            except Exception:
+                pass
 
     def git_current_branch(_: dict) -> str:
         return _current_branch(workspace)
@@ -303,6 +331,264 @@ def register_github_tools(registry: ToolRegistry, workspace: Path, config: Agent
             })
         return json.dumps({"repository": repo, "branch": branch, "runs": rows}, indent=2)
 
+    # -- authenticated GitHub surface --------------------------------------
+
+    def github_auth_status(_: dict) -> str:
+        _ensure_token()
+        if not client.authenticated:
+            return json.dumps({
+                "authenticated": False,
+                "setup_required": f"token in env {client.token_env} "
+                                  "or github_connect",
+            }, indent=2)
+        data, headers = client.request_meta("GET", "/user")
+        scopes = headers.get("X-OAuth-Scopes") or \
+            headers.get("x-oauth-scopes") or ""
+        return json.dumps({
+            "authenticated": True,
+            "login": (data or {}).get("login"),
+            "name": (data or {}).get("name"),
+            "scopes": [s.strip() for s in scopes.split(",") if s.strip()],
+        }, indent=2)
+
+    def github_connect(args: dict) -> str:
+        token = str(args.get("token") or "").strip()
+        if not token:
+            raise ValueError("token is required")
+        # Validate against /user before persisting anything.
+        probe = GitHubCodingClient(config)
+        probe.token = token
+        try:
+            data, headers = probe.request_meta("GET", "/user")
+        except RuntimeError as exc:
+            return json.dumps({"connected": False,
+                               "error": str(exc)}, indent=2)
+        if vault is None:
+            return "ERROR: no secret vault — cannot store credential"
+        vault.set("github_token", token,
+                  description="GitHub personal access token")
+        client.token = token
+        scopes = headers.get("X-OAuth-Scopes") or \
+            headers.get("x-oauth-scopes") or ""
+        return json.dumps({
+            "connected": True,
+            "login": (data or {}).get("login"),
+            "scopes": [s.strip() for s in scopes.split(",") if s.strip()],
+        }, indent=2)
+
+    def github_disconnect(_: dict) -> str:
+        removed = False
+        if vault is not None:
+            try:
+                removed = bool(vault.delete("github_token"))
+            except Exception:
+                pass
+        client.token = os.environ.get(client.token_env, "")
+        return json.dumps({"disconnected": True,
+                           "removed_stored_token": removed}, indent=2)
+
+    def github_list_repos(args: dict) -> str:
+        _ensure_token()
+        limit = max(1, min(50, int(args.get("limit") or 20)))
+        visibility = str(args.get("visibility") or "all").lower()
+        if visibility not in {"all", "public", "private"}:
+            raise ValueError("visibility must be all, public, or private")
+        rows = client.request("GET", "/user/repos", params={
+            "per_page": limit, "visibility": visibility,
+            "sort": "updated"}, require_auth=True) or []
+        return json.dumps({"repositories": [{
+            "full_name": r.get("full_name"),
+            "private": bool(r.get("private")),
+            "default_branch": r.get("default_branch"),
+            "updated_at": r.get("updated_at"),
+            "description": r.get("description"),
+        } for r in rows[:limit]]}, indent=2)
+
+    def github_clone(args: dict) -> str:
+        slug = str(args.get("repo") or "").strip().rstrip("/")
+        if slug.endswith(".git"):
+            slug = slug[:-4]
+        if "/" not in slug:
+            raise ValueError("repo must be owner/name or a GitHub URL")
+        if "github.com" in slug:
+            slug = slug.split("github.com/", 1)[-1] \
+                .split("github.com:", 1)[-1].lstrip("/")
+        raw_dest = str(args.get("dest") or "").strip()
+        if not raw_dest:
+            raise ValueError("dest directory is required")
+        dest = Path(raw_dest).expanduser()
+        dest = (workspace / dest).resolve() if not dest.is_absolute() \
+            else dest.resolve()
+        roots = [workspace.resolve()]
+        if workspaces is not None:
+            try:
+                roots = workspaces.allowed_roots()
+            except Exception:
+                pass
+        parent = dest.parent
+        if not any(parent == b or b in parent.parents for b in roots) \
+                and not any(dest == b or b in dest.parents for b in roots):
+            raise ValueError(
+                "clone destination must be inside a registered workspace")
+        if dest.exists() and any(dest.iterdir()):
+            return f"ERROR: destination is not empty: {dest}"
+        _ensure_token()
+        url = f"https://github.com/{slug}.git"
+        argv = ["git"]
+        if client.authenticated:
+            # Header-scoped auth: the token never lands in .git/config or
+            # the process-visible remote URL.
+            argv += ["-c",
+                     f"http.extraHeader=AUTHORIZATION: bearer {client.token}"]
+        argv += ["clone", url, str(dest)]
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=600)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"git clone failed: {(proc.stderr or proc.stdout)[-2000:]}")
+        if workspaces is not None:
+            try:
+                workspaces.open(dest)
+            except Exception:
+                pass
+        return json.dumps({"cloned": slug, "dest": str(dest)},
+                          indent=2)
+
+    def github_pull_request(args: dict) -> str:
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_slug(workspace, remote)
+        owner, name = repo.split("/", 1)
+        num = int(args.get("number") or 0)
+        if num <= 0:
+            raise ValueError("number is required")
+        _ensure_token()
+        oq, nq = quote(owner, safe=''), quote(name, safe='')
+        pr = client.request("GET", f"/repos/{oq}/{nq}/pulls/{num}") or {}
+        files = client.request(
+            "GET", f"/repos/{oq}/{nq}/pulls/{num}/files",
+            params={"per_page": 50}) or []
+        reviews = client.request(
+            "GET", f"/repos/{oq}/{nq}/pulls/{num}/reviews",
+            params={"per_page": 20}) or []
+        checks = client.request(
+            "GET", f"/repos/{oq}/{nq}/commits/"
+            f"{pr.get('head', {}).get('sha', '')}/check-runs",
+            params={"per_page": 20}) or {}
+        return json.dumps({
+            "number": pr.get("number"), "title": pr.get("title"),
+            "state": pr.get("state"), "draft": pr.get("draft"),
+            "mergeable": pr.get("mergeable"),
+            "mergeable_state": pr.get("mergeable_state"),
+            "head": pr.get("head", {}).get("ref"),
+            "base": pr.get("base", {}).get("ref"),
+            "url": pr.get("html_url"),
+            "files": [{"file": f.get("filename"),
+                       "status": f.get("status"),
+                       "changes": f.get("changes")}
+                      for f in files[:50]],
+            "reviews": [{"user": (r.get("user") or {}).get("login"),
+                         "state": r.get("state")} for r in reviews[:20]],
+            "checks": [{"name": c.get("name"),
+                        "status": c.get("status"),
+                        "conclusion": c.get("conclusion")}
+                       for c in (checks.get("check_runs") or [])[:20]],
+        }, indent=2)
+
+    def github_actions_run(args: dict) -> str:
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_slug(workspace, remote)
+        owner, name = repo.split("/", 1)
+        run_id = int(args.get("run_id") or 0)
+        if run_id <= 0:
+            raise ValueError("run_id is required")
+        _ensure_token()
+        oq, nq = quote(owner, safe=''), quote(name, safe='')
+        run = client.request(
+            "GET", f"/repos/{oq}/{nq}/actions/runs/{run_id}") or {}
+        jobs = client.request(
+            "GET", f"/repos/{oq}/{nq}/actions/runs/{run_id}/jobs",
+            params={"per_page": 30}) or {}
+        return json.dumps({
+            "run": {"id": run.get("id"), "name": run.get("name"),
+                    "title": run.get("display_title"),
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "sha": run.get("head_sha"),
+                    "url": run.get("html_url")},
+            "jobs": [{"id": j.get("id"), "name": j.get("name"),
+                      "status": j.get("status"),
+                      "conclusion": j.get("conclusion"),
+                      "failed_steps": [s.get("name") for s in
+                                       (j.get("steps") or [])
+                                       if s.get("conclusion") == "failure"]}
+                     for j in (jobs.get("jobs") or [])[:30]],
+        }, indent=2)
+
+    def github_rerun(args: dict) -> str:
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_slug(workspace, remote)
+        owner, name = repo.split("/", 1)
+        run_id = int(args.get("run_id") or 0)
+        if run_id <= 0:
+            raise ValueError("run_id is required")
+        _ensure_token()
+        client.request(
+            "POST",
+            f"/repos/{quote(owner, safe='')}/{quote(name, safe='')}"
+            f"/actions/runs/{run_id}/rerun", require_auth=True)
+        return json.dumps({"rerun": run_id, "repository": repo}, indent=2)
+
+    def github_issue_comment(args: dict) -> str:
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_slug(workspace, remote)
+        owner, name = repo.split("/", 1)
+        num = int(args.get("number") or 0)
+        body_text = str(args.get("body") or "").strip()
+        if num <= 0 or not body_text:
+            raise ValueError("number and body are required")
+        _ensure_token()
+        data = client.request(
+            "POST",
+            f"/repos/{quote(owner, safe='')}/{quote(name, safe='')}"
+            f"/issues/{num}/comments", body={"body": body_text},
+            require_auth=True) or {}
+        return json.dumps({"commented": num, "url": data.get("html_url")},
+                          indent=2)
+
+    def github_compare(args: dict) -> str:
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_slug(workspace, remote)
+        owner, name = repo.split("/", 1)
+        base = str(args.get("base") or "").strip()
+        head = str(args.get("head") or "").strip()
+        if not base or not head:
+            raise ValueError("base and head are required")
+        _ensure_token()
+        data = client.request(
+            "GET", f"/repos/{quote(owner, safe='')}/{quote(name, safe='')}"
+            f"/compare/{quote(base, safe='')}...{quote(head, safe='')}") or {}
+        return json.dumps({
+            "repository": repo, "base": base, "head": head,
+            "status": data.get("status"),
+            "ahead_by": data.get("ahead_by"),
+            "behind_by": data.get("behind_by"),
+            "files": [{"file": f.get("filename"),
+                       "status": f.get("status")}
+                      for f in (data.get("files") or [])[:50]],
+        }, indent=2)
+
+    def github_checkout_pr(args: dict) -> str:
+        num = int(args.get("number") or 0)
+        if num <= 0:
+            raise ValueError("number is required")
+        remote = str(args.get("remote") or remote_default).strip()
+        branch = f"pr-{num}"
+        out = _run_git(workspace, [
+            "fetch", remote, f"pull/{num}/head:{branch}"], timeout=120)
+        _run_git(workspace, ["switch", branch])
+        return json.dumps({"checked_out": branch, "pr": num,
+                           "output": out[-2000:]}, indent=2)
+
     registry.register(ToolSpec("git_current_branch", "Show the current local Git branch.", {
         "type": "object", "properties": {}
     }, "filesystem.read", git_current_branch))
@@ -375,3 +661,103 @@ def register_github_tools(registry: ToolRegistry, workspace: Path, config: Agent
             "limit": {"type": "integer", "minimum": 1, "maximum": 20},
         },
     }, "github.read", github_ci_status))
+
+    registry.register(ToolSpec("github_auth_status", "Show GitHub connection state: authenticated account, granted scopes, or setup instructions.", {
+        "type": "object", "properties": {}
+    }, "github.read", github_auth_status, category="github",
+        capabilities=["github_auth", "connection_status"]))
+
+    registry.register(ToolSpec("github_connect", "Connect GitHub: validate a personal access token against /user then store it in the encrypted local vault. Never echoes the token back.", {
+        "type": "object",
+        "properties": {"token": {"type": "string"}},
+        "required": ["token"],
+    }, "github.write", github_connect, category="github",
+        capabilities=["github_auth", "connect_account"]))
+
+    registry.register(ToolSpec("github_disconnect", "Disconnect GitHub: remove the stored vault token (env-var credentials are untouched).", {
+        "type": "object", "properties": {}
+    }, "github.write", github_disconnect, category="github",
+        capabilities=["github_auth", "disconnect_account"]))
+
+    registry.register(ToolSpec("github_list_repos", "List the connected account's repositories (requires github_connect or env token).", {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "default": 20},
+            "visibility": {"type": "string",
+                           "enum": ["all", "public", "private"]},
+        },
+    }, "github.read", github_list_repos, category="github",
+        capabilities=["github_repos", "list_repositories"]))
+
+    registry.register(ToolSpec("github_clone", "Clone a GitHub repository into a registered workspace (dest parent must be inside a registered root). Uses header-scoped auth — the token never persists in .git/config.", {
+        "type": "object",
+        "properties": {
+            "repo": {"type": "string",
+                     "description": "owner/name or GitHub URL"},
+            "dest": {"type": "string"},
+        },
+        "required": ["repo", "dest"],
+    }, "github.write", github_clone, category="github",
+        capabilities=["github_clone", "clone_repository"]))
+
+    registry.register(ToolSpec("github_pull_request", "Inspect a pull request: mergeable state, changed files, reviews, and check runs.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "number": {"type": "integer"},
+        },
+        "required": ["number"],
+    }, "github.read", github_pull_request, category="github",
+        capabilities=["github_pr", "inspect_pr"]))
+
+    registry.register(ToolSpec("github_actions_run", "Inspect a GitHub Actions run: status, jobs, and failed step names.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "run_id": {"type": "integer"},
+        },
+        "required": ["run_id"],
+    }, "github.read", github_actions_run, category="github",
+        capabilities=["github_actions", "ci_inspection"]))
+
+    registry.register(ToolSpec("github_rerun", "Re-run a GitHub Actions workflow run (requires authorization).", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "run_id": {"type": "integer"},
+        },
+        "required": ["run_id"],
+    }, "github.write", github_rerun, category="github",
+        capabilities=["github_actions", "rerun_workflow"]))
+
+    registry.register(ToolSpec("github_issue_comment", "Comment on a GitHub issue or pull request (requires authorization).", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "number": {"type": "integer"},
+            "body": {"type": "string"},
+        },
+        "required": ["number", "body"],
+    }, "github.write", github_issue_comment, category="github",
+        capabilities=["github_issues", "comment"]))
+
+    registry.register(ToolSpec("github_compare", "Compare two refs on the remote: ahead/behind and changed files.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "base": {"type": "string"},
+            "head": {"type": "string"},
+        },
+        "required": ["base", "head"],
+    }, "github.read", github_compare, category="github",
+        capabilities=["github_compare", "diff_refs"]))
+
+    registry.register(ToolSpec("github_checkout_pr", "Fetch and check out a pull request locally as pr-<number>.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "number": {"type": "integer"},
+        },
+        "required": ["number"],
+    }, "git.execute", github_checkout_pr, category="github",
+        capabilities=["github_pr", "checkout_pr"]))
