@@ -8,7 +8,8 @@ from unittest.mock import patch
 from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.runtime.hardware import GPUInfo, HardwareSnapshot
 from localcodeagent.runtime.manager import RuntimeManager
-from localcodeagent.runtime.setup import suggest_model_profiles, write_suggested_models
+from localcodeagent.config import ModelProfile
+from localcodeagent.runtime.setup import apply_detected_models, suggest_model_profiles, write_suggested_models
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -243,6 +244,70 @@ class ModelSetupPlannerTests(unittest.TestCase):
         self.assertIn("fast_coder", suggestions[0]["roles"])
         self.assertIn("primary_coder", suggestions[1]["roles"])
         self.assertIn("deep_reasoner", suggestions[2]["roles"])
+
+    def _inventory(self, root: Path, names_sizes: list[tuple[str, float]]) -> list[dict]:
+        rows = []
+        for name, gb in names_sizes:
+            p = Path(root) / "models" / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"x")
+            rows.append({"name": name, "path": str(p), "size_gb": gb})
+        return rows
+
+    def _profile(self, pid: str, fname: str, roles: list[str], *, enabled: bool = True) -> ModelProfile:
+        return ModelProfile(
+            id=pid, endpoint="http://127.0.0.1:8090/v1", model=fname[:-5],
+            model_path=f"models/{fname}", roles=list(roles),
+            runtime="llama_cpp", enabled=enabled)
+
+    def test_autodetect_adds_profile_for_unconfigured_tier_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            inv = self._inventory(Path(td), [
+                ("Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf", 2.5),
+                ("Qwen3-8B-Q4_K_M.gguf", 5.0),
+            ])
+            models: list[ModelProfile] = []
+            changes = apply_detected_models(models, inv, Path(td))
+            self.assertEqual(
+                changes["added"], ["qwen3-4b-instruct", "qwen3-8b"])
+            self.assertEqual(len(models), 2)
+            q8 = next(m for m in models if m.id == "qwen3-8b")
+            self.assertIn("lightweight_reasoner", q8.roles)
+            self.assertEqual(q8.model_path, "models/Qwen3-8B-Q4_K_M.gguf")
+
+    def test_autodetect_disables_profile_whose_file_is_gone(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = self._profile("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf", ["primary_coder"])
+            changes = apply_detected_models([m], [], Path(td))
+            self.assertEqual(changes["disabled"], ["qwen3-14b"])
+            self.assertFalse(m.enabled)
+
+    def test_autodetect_migrates_uncovered_roles_after_model_loss(self):
+        """30B deleted: its deep/reviewer lane must land on the remaining
+        largest tier (14B), not die with the disabled profile."""
+        with tempfile.TemporaryDirectory() as td:
+            inv = self._inventory(Path(td), [("Qwen3-14B-Q4_K_M.gguf", 9.0)])
+            m14 = self._profile("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf",
+                                ["fast_coder", "primary_coder"])
+            m30 = self._profile("qwen3-coder-30b",
+                                "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+                                ["deep_reasoner", "reviewer"])
+            models = [m14, m30]
+            changes = apply_detected_models(models, inv, Path(td))
+            self.assertEqual(changes["disabled"], ["qwen3-coder-30b"])
+            self.assertTrue(
+                {"deep_reasoner", "reviewer", "utility"}.issubset(set(m14.roles)))
+            self.assertIn("qwen3-14b", changes["roles_merged"])
+
+    def test_autodetect_never_reenables_user_disabled_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            inv = self._inventory(Path(td), [("Qwen3-8B-Q4_K_M.gguf", 5.0)])
+            m = self._profile("qwen3-8b", "Qwen3-8B-Q4_K_M.gguf",
+                              ["lightweight_reasoner"], enabled=False)
+            changes = apply_detected_models([m], inv, Path(td))
+            self.assertFalse(m.enabled)
+            self.assertEqual(changes["roles_merged"], [])
+            self.assertEqual(changes["added"], [])
 
     def test_setup_writer_preserves_non_model_config(self):
         with tempfile.TemporaryDirectory() as td:

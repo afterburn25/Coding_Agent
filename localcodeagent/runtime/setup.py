@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 from pathlib import Path
 
+from ..config import ModelProfile
 from ..fsutil import atomic_write_text
 from typing import Any
 
@@ -155,6 +157,87 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             "notes": f"Auto-suggested from local GGUF: {item['name']}. Review before use.",
         })
     return suggestions
+
+
+_PROFILE_FIELDS = {f.name for f in fields(ModelProfile)}
+
+
+def apply_detected_models(
+    models: list[ModelProfile],
+    inventory: list[dict[str, Any]],
+    base_dir: Path,
+) -> dict[str, list[str]]:
+    """Autodetect installed GGUFs against the configured profile list.
+
+    - A discovered file with no profile gets one (roles from the tier
+      suggestion so the new model lands on the right complexity lane).
+    - An enabled profile whose file supplies an otherwise-uncovered role
+      absorbs that role — e.g. deleting the 30B hands deep_reasoner to
+      the largest remaining model instead of leaving the lane dead.
+    - An enabled llama_cpp profile whose file no longer exists is
+      disabled so the router can never select a dead endpoint.
+    - Disabled profiles are never re-enabled or role-edited: a user who
+      turned a model off stays off.
+
+    Mutates ``models`` in place; callers persist when the returned
+    summary is non-empty.
+    """
+    changes: dict[str, list[str]] = {
+        "added": [], "roles_merged": [], "disabled": []}
+    base = Path(base_dir).resolve()
+    by_name = {
+        Path(str(m.model_path or "")).name.lower(): m
+        for m in models
+        if m.runtime == "llama_cpp" and m.model_path
+    }
+
+    # Missing files first: a dead profile must be disabled BEFORE coverage
+    # is measured, or its orphaned roles would look served and never
+    # migrate to the models that remain.
+    disk_names = {
+        Path(str(row.get("path") or "")).name.lower()
+        for row in inventory if row.get("path")}
+    for m in models:
+        if m.runtime != "llama_cpp" or not m.enabled or not m.model_path:
+            continue
+        mp = Path(str(m.model_path))
+        if mp.name.lower() in disk_names:
+            continue
+        candidates = [mp] if mp.is_absolute() else [
+            base / mp, base / "models" / mp.name]
+        if not any(c.is_file() for c in candidates):
+            m.enabled = False
+            changes["disabled"].append(m.id)
+
+    covered = {
+        r for m in models if m.enabled for r in (m.roles or [])}
+
+    for sug in suggest_model_profiles(inventory):
+        key = Path(str(sug.get("model_path") or "")).name.lower()
+        roles = [str(r) for r in (sug.get("roles") or [])]
+        existing = by_name.get(key)
+        if existing is not None:
+            if not existing.enabled:
+                continue
+            missing = [r for r in roles if r not in covered]
+            if missing:
+                existing.roles = sorted(set(existing.roles or []) | set(missing))
+                covered.update(missing)
+                changes["roles_merged"].append(existing.id)
+            continue
+        payload = {k: v for k, v in sug.items() if k in _PROFILE_FIELDS}
+        try:
+            payload["model_path"] = (
+                Path(str(sug["model_path"])).resolve()
+                .relative_to(base).as_posix())
+        except (ValueError, OSError):
+            pass
+        profile = ModelProfile(**payload)
+        models.append(profile)
+        by_name[key] = profile
+        covered.update(roles)
+        changes["added"].append(profile.id)
+    return changes
 
 
 def write_suggested_models(config_path: Path, suggestions: list[dict[str, Any]]) -> dict[str, Any]:
