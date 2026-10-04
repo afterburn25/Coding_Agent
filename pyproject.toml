@@ -1,6 +1,6 @@
 [project]
 name = "local-code-agent"
-version = "0.19.0"
+version = "0.20.0"
 description = "Chat Nexus: a local-first AI coding workstation with automatic model routing, research/browser tooling, image generation/editing, transactional workflows, and modular tools."
 requires-python = ">=3.11"
 license = {text = "MIT"}

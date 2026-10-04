@@ -11,7 +11,7 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.19.0 autonomous development workstation (P0)
+## Current milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
 
 (Previous: v0.18.x honesty hardening · v0.16.0 persona depth · v0.15.0
 autonomous workstation layers)
