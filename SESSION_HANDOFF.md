@@ -17,7 +17,9 @@
 autonomous workstation layers)
 
 The workstation program's P0 dependency layer is implemented, tested,
-and pushed in milestone commits (`19fd457` portrait → `7e09fa7`
+and pushed in milestone commits. **Last verified: `3d3f0f3` — full
+local suite 1789 tests (1 port-contention flake, passes standalone),
+GitHub Actions `Nexus Core Tests` green on main.** (`19fd457` portrait → `7e09fa7`
 workspace UI → `f33b173` paste-attachments):
 
 - **Capability Registry** — `localcodeagent/capabilities.py`; probed
