@@ -79,6 +79,7 @@ class SelfRepairCoordinator:
                  emit: Callable[[dict], None] | None = None,
                  notify: Callable[[str, str, str], None] | None = None,
                  on_resumed: Callable[[dict], None] | None = None,
+                 on_resolved: Callable[[dict], None] | None = None,
                  researcher: Callable[[dict], dict | None] | None = None,
                  eval_recorder: Callable[[dict], None] | None = None,
                  hypotheses: Any = None,
@@ -116,6 +117,10 @@ class SelfRepairCoordinator:
         self._emit = emit or (lambda payload: None)
         self._notify = notify or (lambda level, title, detail: None)
         self._on_resumed = on_resumed
+        # Post-resolution hook — the server sweeps stale error evidence
+        # (crash history, failure telemetry) so fixed faults can't
+        # re-trigger the detectors that filed this incident.
+        self._on_resolved = on_resolved
         # External evidence gatherer — consulted when diagnosis is weak
         # (unknown hypothesis or low confidence). Attached as evidence;
         # never fabricates a hypothesis or inflates confidence.
@@ -667,6 +672,11 @@ class SelfRepairCoordinator:
                     inc["promotion"]["commit"] = sha
         self._set(inc, "resolved",
                   f"{inc['repair_kind']} repair applied")
+        if self._on_resolved:
+            try:
+                self._on_resolved(dict(inc))
+            except Exception:
+                pass
         dur = time.time() - float(inc.get("created_at") or time.time())
         self.memory.record(inc["signature"], kind=inc["repair_kind"] or "code",
                            steps=inc["repair_procedure"], success=True,

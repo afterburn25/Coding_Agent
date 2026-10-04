@@ -1704,12 +1704,25 @@ class AppState:
                 r = _sp.run(
                     ["gh", "run", "list", "--status", "failure",
                      "--limit", "5", "--json",
-                     "databaseId,displayTitle,name,conclusion"],
+                     "databaseId,displayTitle,name,conclusion,headSha"],
                     cwd=str(self.workspace), capture_output=True,
                     text=True, errors="replace", timeout=20)
                 rows = json.loads(r.stdout) if r.returncode == 0 else []
             except Exception:
                 rows = []
+            # Only failures on the checkout's own commit are actionable —
+            # a run that failed on an older commit was already fixed or
+            # superseded; filing it re-reports stale CI every install.
+            try:
+                head = _sp.run(
+                    ["git", "rev-parse", "HEAD"], cwd=str(self.workspace),
+                    capture_output=True, text=True, timeout=10)
+                head_sha = head.stdout.strip() if head.returncode == 0 else ""
+            except Exception:
+                head_sha = ""
+            if head_sha:
+                rows = [row for row in rows
+                        if str(row.get("headSha") or "") == head_sha]
             # Attach a bounded failed-job log tail per run — the repair
             # incident's localizer needs real frames to map onto repo files.
             for row in rows[:3]:
@@ -1905,6 +1918,7 @@ class AppState:
             notify=lambda level, title, detail: sup.notifications.notify(
                 title, level=level, detail=detail),
             on_resumed=lambda op: sup.resume_interrupted(op),
+            on_resolved=lambda inc: self._clear_stale_error_evidence(),
             researcher=self._repair_researcher,
             eval_recorder=lambda inc: self._record_repair_eval(inc),
             hypotheses=self.hypotheses,
@@ -1912,6 +1926,21 @@ class AppState:
             decisions=self.decisions,
         )
         return coord
+
+    def _clear_stale_error_evidence(self) -> None:
+        """A verified repair means the recorded faults are stale. Drop the
+        crash history and model-failure telemetry so the detectors that
+        filed the incident don't re-fire on pre-fix evidence."""
+        try:
+            netdiag.clear_history()
+        except Exception:
+            pass
+        try:
+            tel = getattr(self, "model_telemetry", None)
+            if tel is not None and hasattr(tel, "reset"):
+                tel.reset()
+        except Exception:
+            pass
 
     def _record_repair_eval(self, inc: dict) -> None:
         """Persist a terminal repair's verification evidence as an eval

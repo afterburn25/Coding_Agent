@@ -69,6 +69,17 @@ class ModelPerformanceTelemetry:
         }
         atomic_write_text(self.path, json.dumps(payload, indent=2, ensure_ascii=False))
 
+    def reset(self) -> None:
+        """Forget all recorded samples. Called after a verified repair —
+        failure modes that were just fixed must stop counting against
+        routing scores and the model-failure detector."""
+        if not self.enabled:
+            return
+        with self._lock:
+            self._events.clear()
+            self._generations.clear()
+            self._save()
+
     def record(
         self,
         *,

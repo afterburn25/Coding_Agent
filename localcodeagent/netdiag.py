@@ -313,3 +313,17 @@ def crash_history(limit: int = 50) -> list[dict]:
         return log.tail(limit)
     except Exception:
         return []
+
+
+def clear_history() -> None:
+    """Forget persisted crash/recovery history. Called after a verified
+    repair — the pre-fix faults must not keep re-triggering the
+    crash-storm detector."""
+    log = _HISTORY
+    if log is None:
+        return
+    try:
+        with _HISTORY_LOCK:
+            log.path.write_bytes(b"")
+    except OSError:
+        pass

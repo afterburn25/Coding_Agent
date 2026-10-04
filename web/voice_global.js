@@ -111,7 +111,12 @@
       if (e.ts && Date.now() / 1000 - Number(e.ts) > 15) return;
       NV.enqueue(e.url, e); NV._emit(e);
     }
-    else if (e.event === 'stop' || e.event === 'muted') { if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; } } NV.refresh(); }
+    else if (e.event === 'stop' || e.event === 'muted') {
+      // Replayed history must never kill live playback — a 'stop' from
+      // the previous session's shutdown would otherwise silence whatever
+      // is speaking seconds after page load.
+      if (e.ts && Date.now() / 1000 - Number(e.ts) > 15) return;
+      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; } } NV.refresh(); }
     else NV._emit(e);
   };
 
