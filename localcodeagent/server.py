@@ -952,7 +952,18 @@ class AppState:
                 return {"applied": cmd["op"], "ack": ack}
             if cmd.get("op") == "voice_repeat":
                 v = getattr(self, "voice", None)
-                ok = bool(v and v.repeat_last())
+                if v is None:
+                    return {"applied": "voice_repeat",
+                            "ack": "Voice isn't available right now."}
+                try:
+                    muted = v.muted()
+                except Exception:
+                    muted = False
+                if muted:
+                    return {"applied": "voice_repeat",
+                            "ack": "Voice is muted — say \"speak "
+                                   "again\" first."}
+                ok = bool(v.repeat_last())
                 return {"applied": "voice_repeat",
                         "ack": ("Sure — once more."
                                 if ok else "Nothing to repeat yet.")}
@@ -3774,27 +3785,42 @@ class AppState:
 
     def _notice_loop(self, q: queue.Queue) -> None:
         last_spoke = 0.0
+        pending = None  # one stashed urgent event awaiting its gap
         try:
             while True:
                 try:
                     ev = q.get(timeout=30)
                 except queue.Empty:
+                    ev = None
                     if self._shutdown.is_set():
                         return
-                    continue
                 try:
+                    now = time.time()
+                    if pending is not None:
+                        # Service the stashed urgent notice once its
+                        # gap has elapsed (on any event or tick).
+                        prow = pending.get("notification") or {}
+                        plevel = str(prow.get("level") or "")
+                        pgap = (self._NOTICE_GAP_URGENT_S
+                                if plevel in ("failure", "approval")
+                                else self._NOTICE_GAP_S)
+                        if now - last_spoke >= pgap:
+                            if self._spoken_notice_line(pending):
+                                last_spoke = now
+                            pending = None
+                    if ev is None:
+                        continue
                     level = str((ev.get("notification") or {})
                                 .get("level") or "")
-                    gap = (self._NOTICE_GAP_URGENT_S
-                           if level in ("failure", "approval")
+                    urgent = level in ("failure", "approval")
+                    gap = (self._NOTICE_GAP_URGENT_S if urgent
                            else self._NOTICE_GAP_S)
-                    now = time.time()
                     if now - last_spoke < gap:
+                        if urgent and pending is None:
+                            pending = ev
                         continue
-                    line = self._spoken_notice_line(ev)
-                    if not line:
-                        continue
-                    last_spoke = now
+                    if self._spoken_notice_line(ev):
+                        last_spoke = now
                 except Exception:
                     continue
         finally:

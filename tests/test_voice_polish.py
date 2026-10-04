@@ -16,6 +16,8 @@ import json
 import queue
 import random
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -233,7 +235,7 @@ class WorkerFinishedEvent(unittest.TestCase):
 class _StubVoice:
     def __init__(self):
         self.enqueued = []
-        self.muted = False
+        self._muted = False
         self.repeated = 0
         self._repeat_ok = True
 
@@ -241,7 +243,10 @@ class _StubVoice:
         self.enqueued.append((task_id, text))
 
     def set_muted(self, muted):
-        self.muted = bool(muted)
+        self._muted = bool(muted)
+
+    def muted(self):
+        return self._muted
 
     def repeat_last(self):
         if not self._repeat_ok:
@@ -262,7 +267,9 @@ class _StubState:
         self.voice = _StubVoice()
         self.events = SimpleNamespace(published=[],
                                       publish=lambda t, p:
-                                      self.events.published.append((t, p)))
+                                      self.events.published.append((t, p)),
+                                      unsubscribe=lambda q: None)
+        self._shutdown = threading.Event()
         self._persona_notice = \
             lambda kind, fact, seq=None: f"{kind}:{seq}:{fact}"
 
@@ -274,6 +281,7 @@ class _StubState:
     _queue_notice_line = AppState._queue_notice_line
     _on_worker_queue_event = AppState._on_worker_queue_event
     _spoken_notice_line = AppState._spoken_notice_line
+    _notice_loop = AppState._notice_loop
     _SPOKEN_LEVELS = AppState._SPOKEN_LEVELS
     _LEVEL_KIND = AppState._LEVEL_KIND
     _QUEUED_LINES = AppState._QUEUED_LINES
@@ -416,7 +424,7 @@ class SpokenNotices(unittest.TestCase):
         st = _StubState()
         res = st._persona_command("stop talking")
         self.assertEqual(res["applied"], "voice_mute")
-        self.assertTrue(st.voice.muted)
+        self.assertTrue(st.voice.muted())
         tid, text = st.voice.enqueued[0]
         self.assertEqual(tid, "voice-mute-ack")
         self.assertIn("status:", text)
@@ -596,6 +604,41 @@ class SpokenNotices(unittest.TestCase):
             "message": ""}}
         self.assertTrue(st._spoken_notice_line(ev))
         self.assertIn("needs a look", st.voice.enqueued[-1][1])
+
+    def test_urgent_notice_stashed_not_dropped(self):
+        st = _StubState()
+        st._NOTICE_GAP_S = 0.3
+        st._NOTICE_GAP_URGENT_S = 0.2
+        q = queue.Queue()
+        t = threading.Thread(target=st._notice_loop, args=(q,),
+                             daemon=True)
+        t.start()
+        try:
+            q.put({"type": "notification", "notification": {
+                "id": "n-f", "level": "failure", "title": "it broke",
+                "message": ""}})
+            q.put({"type": "notification", "notification": {
+                "id": "n-a", "level": "approval",
+                "title": "approve deploy", "message": ""}})
+            time.sleep(0.35)          # urgent gap elapses
+            q.put({"type": "tick"})   # wake → pending is serviced
+            deadline = time.time() + 5
+            while time.time() < deadline and len(st.voice.enqueued) < 2:
+                time.sleep(0.05)
+        finally:
+            st._shutdown.set()
+            q.put({"type": "tick"})
+            t.join(timeout=3)
+        ids = [tid for tid, _ in st.voice.enqueued]
+        self.assertEqual(len(ids), 2)
+        self.assertIn("notice-n-f", ids)
+        self.assertIn("notice-n-a", ids)
+
+    def test_repeat_muted_ack(self):
+        st = _StubState()
+        st.voice.set_muted(True)
+        res = st._persona_command("say that again")
+        self.assertIn("muted", res["ack"].lower())
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")
