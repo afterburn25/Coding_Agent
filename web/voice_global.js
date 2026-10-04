@@ -150,6 +150,18 @@
       es.addEventListener('voice', ev => {
         try { NV.onEvent(JSON.parse(ev.data)); } catch (e) {}
       });
+      // Semantic gesture events from the Vocalization Engine — consumed
+      // by the avatar layer when it exists; stashed + reflected on
+      // <body data-gesture> so CSS/visual hooks can already react.
+      const gq = [];
+      es.addEventListener('gesture', ev => {
+        try {
+          const g = JSON.parse(ev.data);
+          gq.push(g); if (gq.length > 24) gq.shift();
+          window.NexusGestures = { last: g, recent: gq };
+          document.body.dataset.gesture = g.gesture || '';
+        } catch (e) {}
+      });
     } catch (e) {}
   });
 

@@ -20,7 +20,7 @@
   let pid = "", data = null;
   let work = { traits: {}, voice: {} };  // unsaved edits
   let dirty = false;
-  let voicePresets = [], voiceSel = "";
+  let voicePresets = [], voiceSel = "", vocalStyles = [];
 
   async function load() {
     const a = await api("/api/profiles/active");
@@ -33,6 +33,9 @@
         `/api/profiles/${encodeURIComponent(pid)}/voice`)).voice || {})
         .preset_id || "";
     } catch { voicePresets = []; voiceSel = ""; }
+    try {
+      vocalStyles = (await api("/api/voice/vocalizations")).styles || [];
+    } catch { vocalStyles = []; }
     const t = data.active || {};
     work = { traits: { ...(t.traits || {}) },
              voice: { ...(t.voice || {}) } };
@@ -126,6 +129,29 @@
     </details>`;
   }
 
+  function vocalSection() {
+    const levels = data.vocal_levels || ["off", "minimal", "natural", "expressive"];
+    const cur = data.vocalizations || "natural";
+    // A few representative samples — the catalog returns the full set.
+    const picks = ["mmm_pleased", "hmm", "mm_hmm", "sigh_relieved",
+                   "chuckle", "gasp", "aww"];
+    const samples = vocalStyles.filter((s) => picks.includes(s.style) && s.preview);
+    return `<details class="pst-sec">
+      <summary>Natural Vocalizations</summary>
+      <div class="sec-body">
+        <label class="pst-vsel">Vocalization level
+          <select id="vocalLevel">
+            ${levels.map((l) => `<option value="${esc(l)}" ${l === cur ? "selected" : ""}>${esc(l[0].toUpperCase() + l.slice(1))}</option>`).join("")}
+          </select></label>
+        <div class="mood-row" id="vocalSamples">
+          ${samples.map((s) => `<button class="mood-chip" type="button"
+            data-vsample="${esc(s.style)}" data-vtext="${esc(s.preview)}">${esc(s.style.replace(/_/g, " "))}</button>`).join("")}
+        </div>
+        <small class="hint">Hums, sighs, chuckles and reactions — resolved to natural sounds, never spelled out. Preview uses the voice controls above.</small>
+      </div>
+    </details>`;
+  }
+
   function presetCards() {
     const cats = {};
     for (const p of data.presets) (cats[p.category] ??= []).push(p);
@@ -182,6 +208,7 @@
         ${sliderSection("response_style", "Response Style")}
         ${data.is_adult ? sliderSection("adult", "Adult (18+)") : ""}
         ${voiceSection()}
+        ${vocalSection()}
       </section>
 
       <section class="pst-panel">
@@ -263,6 +290,39 @@
         data.mood = b.dataset.mood;
         render();
       }));
+
+    const vocalSel = $("vocalLevel");
+    if (vocalSel) vocalSel.addEventListener("change", async () => {
+      try {
+        const r = await act(pid, { action: "set_vocalizations",
+                                   level: vocalSel.value });
+        data.vocalizations = r.vocalizations || vocalSel.value;
+      } catch (e) { alert(e.message); }
+    });
+
+    // Sample buttons preview the resolved vocalization with the current
+    // voice-performance overlay so tuning hears the real delivery.
+    const playVocal = async (text) => {
+      const r = await act(pid, { action: "preview",
+                                 traits: work.traits, voice: work.voice })
+        .catch(() => null);
+      const v = (r && r.voice) || {};
+      const res = await fetch("/api/voice/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: String(text || "Mmm…").slice(0, 500),
+          overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
+                     output_gain_db: v.output_gain_db },
+          speed: v.speed }),
+      }).then((x) => x.json()).catch(() => null);
+      if (res && res.url) {
+        if (sampleAudio) { try { sampleAudio.pause(); } catch {} }
+        sampleAudio = new Audio(res.url);
+        sampleAudio.play().catch(() => {});
+      }
+    };
+    $("studioBody").querySelectorAll("[data-vsample]").forEach((b) =>
+      b.addEventListener("click", () => playVocal(b.dataset.vtext)));
 
     $("studioBody").querySelectorAll("[data-tkey]").forEach((sl) => {
       sl.addEventListener("input", () => {

@@ -19,11 +19,12 @@ from .presets import VoicePresetStore
 from .speech_filter import SpeechTextFilter
 from .streamer import SentenceStreamer, split_for_speech
 from .types import VoicePreset
+from .vocalizations import VocalizationEngine, adapter_for
 
 
 class SpeechJob:
     __slots__ = ("job_id", "task_id", "seq", "text", "preset_id", "speed",
-                 "cancelled", "created_at")
+                 "cancelled", "created_at", "events")
 
     def __init__(self, task_id: str, seq: int, text: str, preset_id: str,
                  speed: float) -> None:
@@ -35,6 +36,7 @@ class SpeechJob:
         self.speed = speed
         self.cancelled = False
         self.created_at = time.time()
+        self.events: list[dict] = []
 
 
 class VoiceManager:
@@ -44,12 +46,17 @@ class VoiceManager:
                  publish: Callable[[str, dict], None] | None = None,
                  asset_dir: Path | None = None,
                  persist: Callable[[], None] | None = None,
-                 personality_voice: Callable[[], dict] | None = None) -> None:
+                 personality_voice: Callable[[], dict] | None = None,
+                 persona_context: Callable[[], dict] | None = None) -> None:
         self.config = config
         # Zero-arg resolver returning the active profile's delivery map
         # ({preset_id?, speed?, pitch_semitones?, output_gain_db?});
         # failures/None mean "no personality delivery".
         self._personality_voice = personality_voice
+        # Zero-arg resolver returning the persona context the
+        # VocalizationEngine gates on: {profile_id, style, strength,
+        # mood, is_adult, level}.
+        self._persona_context = persona_context
         self.asset_dir = Path(asset_dir) if asset_dir else None
         self._persist = persist or (lambda: None)
         self.presets = VoicePresetStore(Path(preset_dir))
@@ -68,6 +75,9 @@ class VoiceManager:
         self._muted_at = 0.0
         self.segments: dict[str, Path] = {}  # seg_id -> wav path (recent)
         self._seg_order: deque[str] = deque(maxlen=200)
+        self.vocal = VocalizationEngine(
+            adapter_for(getattr(config, "voice_engine", "kokoro")),
+            publish=self._publish)
 
     # -- config helpers -----------------------------------------------------
     def enabled(self) -> bool:
@@ -130,8 +140,30 @@ class VoiceManager:
         self._publish("voice", {"event": "stop", "reason": reason})
         return {"ok": True, "stopped": True}
 
-    def begin_task(self, task_id: str) -> None:
+    def _persona_ctx(self) -> dict:
+        try:
+            return (self._persona_context() or {}
+                    if callable(self._persona_context) else {})
+        except Exception:
+            return {}
+
+    def resolve_speech(self, text: str, *, task_id: str = "") -> str:
+        """filter → vocalization resolution → final TTS input. The direct
+        paths (speak, preview, tools) share this so every spoken surface
+        gets the same non-verbal handling."""
+        spoken = self.filter.filter(text)
+        if not spoken:
+            return ""
+        return self.vocal.resolve(
+            spoken, task_id=task_id or "manual",
+            ctx=self._persona_ctx()).speech_text
+
+    def begin_task(self, task_id: str, user_text: str = "") -> None:
         """A new user request / response starts: drop stale speech."""
+        try:
+            self.vocal.begin_task(task_id, user_text=user_text)
+        except Exception:
+            pass
         with self._lock:
             stale = task_id != self._current_task
             self._current_task = task_id
@@ -180,19 +212,24 @@ class VoiceManager:
         """Flush the streamer tail; if nothing was emitted (non-streamed or
         fully skipped), fall back to a filtered one-shot of final_text."""
         streamer = self._streamers.pop(task_id, None)
-        if not self.enabled() or self.muted():
-            return
-        n_emitted = streamer.emitted_count if streamer else 0
-        if streamer:
-            for sent in streamer.flush():
-                self.enqueue(task_id, sent)
-        if n_emitted == 0 and final_text and self.mode() in {
-                "responses", "responses_activity"}:
-            spoken = self.filter.filter(final_text)
-            if spoken:
-                for sent in _split_sentences(spoken):
-                    for part in split_for_speech(sent):
-                        self.enqueue(task_id, part)
+        try:
+            if self.enabled() and not self.muted():
+                n_emitted = streamer.emitted_count if streamer else 0
+                if streamer:
+                    for sent in streamer.flush():
+                        self.enqueue(task_id, sent)
+                if n_emitted == 0 and final_text and self.mode() in {
+                        "responses", "responses_activity"}:
+                    spoken = self.filter.filter(final_text)
+                    if spoken:
+                        for sent in _split_sentences(spoken):
+                            for part in split_for_speech(sent):
+                                self.enqueue(task_id, part)
+        finally:
+            try:
+                self.vocal.end_task(task_id)
+            except Exception:
+                pass
 
     # -- queue --------------------------------------------------------------
     def enqueue(self, task_id: str, text: str, *,
@@ -203,6 +240,14 @@ class VoiceManager:
         text = text.strip()
         if not text:
             return None
+        try:
+            vres = self.vocal.resolve(text, task_id=task_id,
+                                      ctx=self._persona_ctx())
+            text, events = vres.speech_text, vres.events
+        except Exception:
+            events = []
+        if not text.strip():
+            return None
         with self._lock:
             seq = self._spoken_tasks.get(task_id, 0)
             self._spoken_tasks[task_id] = seq + 1
@@ -210,6 +255,7 @@ class VoiceManager:
                             preset_id or (self.current_preset().id
                                           if self.current_preset() else ""),
                             speed)
+            job.events = events
             if priority:
                 self._queue.appendleft(job)
             else:
@@ -229,7 +275,14 @@ class VoiceManager:
         preset = self.presets.get(preset_id) if preset_id else self.current_preset()
         if preset is None:
             raise VoiceEngineError("no voice preset configured")
-        spoken = self.filter.filter(text) if auto_filter else text.strip()
+        if auto_filter:
+            spoken = self.resolve_speech(text, task_id=task_id or "manual")
+        else:
+            # Raw text still gets vocalization resolution — a hand-typed
+            # "MMM" must never reach the synthesizer as spelled letters.
+            spoken = self.vocal.resolve(
+                text.strip(), task_id=task_id or "manual",
+                ctx=self._persona_ctx()).speech_text
         if not spoken:
             raise VoiceEngineError("nothing speakable in the provided text")
         pcm, sr, seg = self._synthesize(spoken, preset, speed)
@@ -273,11 +326,18 @@ class VoiceManager:
             if job.cancelled or self.muted():
                 continue
             seg_id = self._register_segment(seg_path, job.task_id)
-            self._publish("voice", {
+            payload = {
                 "event": "segment", "task_id": job.task_id, "seq": job.seq,
                 "segment_id": seg_id, "url": f"/api/voice/audio/{seg_id}",
                 "seconds": round(pcm.shape[0] / sr, 2),
-            })
+            }
+            if job.events:
+                # Gesture/vocalization metadata rides the segment event —
+                # the utterance id is segment_id so a future avatar can
+                # align gesture timing to playback (lip-sync).
+                payload["gestures"] = [{**e, "utterance_id": seg_id}
+                                       for e in job.events]
+            self._publish("voice", payload)
 
     def _apply_delivery(self, preset: VoicePreset, speed: float,
                         vmap: dict) -> tuple[VoicePreset, float]:

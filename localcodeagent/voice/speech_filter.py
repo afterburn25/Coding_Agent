@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from .vocalizations import canonicalize_vocals
+
 SPEAK = "speak"
 SUMMARIZE = "summarize"
 SKIP = "skip"
@@ -98,12 +100,10 @@ class SpeechTextFilter:
     TIME_UNITS = {
         "ms": "milliseconds", "ns": "nanoseconds", "µs": "microseconds",
     }
-    # Vowel-less vocalizations get letterized by the G2P ("Mmm" reads
-    # "em em em"). Respell them as the vowel-bearing interjection the
-    # engine actually voices — "Mmm" → "hmm". Two-letter "MM" stays
-    # literal (million, lens width); 3+ caps M's only occur as moans.
-    VOCAL_RE = re.compile(
-        r"\b(Mm{1,}|m{2,}|M{3,}|mhm|MHM|mmhmm|MMHMM|Mmhmm|mm-hmm|MM-HMM)\b")
+    # Raw vocalization spellings ("Mmm", "MMHMM", "HAHA") are normalized
+    # to canonical lowercase tokens by canonicalize_vocals(); the
+    # VocalizationEngine resolves them into TTS-safe renderings at speak
+    # time. Two-letter "MM" stays literal (million, lens width).
     # "12 GB" / "3.0GHz" — number-attached units get singular/plural.
     NUM_UNIT_RE = re.compile(
         r"\b(\d+(?:\.\d+)?)\s*("
@@ -263,19 +263,13 @@ class SpeechTextFilter:
             return f" — {phrase}"
         return repl
 
-    @staticmethod
-    def _vocal(m):
-        tok = m.group(0).lower().replace("-", "")
-        if tok in ("mhm", "mmhmm"):
-            return "hmm hmm"
-        return "hmm" if len(tok) <= 3 else "hmmm"
-
     def _pronounce(self, t: str) -> str:
         """Expand number-attached units, then word-acronyms, then bare
         units — order matters so '64 GB RAM' reads 'sixty-four gigabytes
-        ram', not '64 G B R A M'. Vocalization respelling runs first so
-        'Mmm' becomes a hum instead of spelled letters."""
-        t = self.VOCAL_RE.sub(self._vocal, t)
+        ram', not '64 G B R A M'. Vocalization canonicalization runs
+        first so 'MMM' becomes 'mmm' for the VocalizationEngine instead
+        of spelled letters."""
+        t = canonicalize_vocals(t)
         def num_unit(m):
             n, u = m.group(1), m.group(2)
             word = self.UNIT_WORDS.get(u, u)

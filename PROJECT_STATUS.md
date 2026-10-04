@@ -2,7 +2,7 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1183 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.12.1 — Installer update progress reporting
+## Active version: 0.13.0 — Natural Vocalization & Gesture Engine
 
 v0.12.1 fixes the update path reading as frozen: Inno Setup now reports
 live stage text for every blocking operation — closing Nexus Core
@@ -186,6 +186,13 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
   preset CRUD + import/export; user presets survive upgrades.
 - `voice_*` ToolRegistry entries under `audio.*` permissions; bounded WAV cache;
   failure can never break text chat.
+- Natural Vocalization & Gesture Engine (`voice/vocalizations.py`): semantic
+  detect → policy → adapter render so hums/sighs/laughs are voiced, never
+  letter-spelled; persona/mood/strength-aware with profile level (Off–
+  Expressive), caps + spacing + repeat suppression, adult render variants
+  gated 18+; paired gesture events with `utterance_id` ride voice segments
+  + a `gesture` SSE channel for the future avatar; Personality Studio has a
+  level select + per-style preview (`/api/voice/vocalizations`).
 
 #### Local images
 

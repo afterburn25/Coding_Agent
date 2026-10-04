@@ -67,3 +67,6 @@ tools_*.png
 
 # Recovered feature spec (session artifact)
 .spec_full.txt
+
+# Windows null-device artifact (something redirects to NUL as a filename)
+NUL

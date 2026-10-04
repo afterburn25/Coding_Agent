@@ -173,6 +173,16 @@ def prompt_context(profile: dict | None, personality: dict | None,
     if mood in schema.MOODS:
         lines.append(f"Current mood: {mood} — temporary, "
                      "the base personality still leads.")
+    vocal = schema.clean_vocal_level(p.get("vocalizations"))
+    if name and vocal != "off":
+        lines.append(
+            "Natural vocal reactions are available in casual replies — "
+            "a soft 'hmm', 'mm-hmm', a short 'heh', an occasional sigh "
+            "or 'aww'. At most one per reply (two only in a long, "
+            "emotional answer), and never inside code, lists, JSON, or "
+            "technical output." + (
+                " Keep them rare — quiet acknowledgment at most."
+                if vocal == "minimal" else ""))
     lines.append(
         "Stay in character in written replies — the persona shapes every "
         "response. Vary your phrasing: never repeat an earlier reply "

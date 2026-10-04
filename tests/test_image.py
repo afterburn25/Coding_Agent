@@ -1185,11 +1185,13 @@ class OperationRoutingTests(unittest.TestCase):
 
 class VocalizationCapsTests(unittest.TestCase):
     def test_caps_vocalizations_hum(self):
+        # The filter now canonicalizes; the VocalizationEngine renders the
+        # final spoken form downstream (tests/test_vocalizations.py).
         from localcodeagent.voice.speech_filter import SpeechTextFilter
         f = SpeechTextFilter()
-        self.assertEqual(f.filter("MMM"), "hmm")
-        self.assertEqual(f.filter("MMMM yes"), "hmmm yes")
-        self.assertEqual(f.filter("MMHMM"), "hmm hmm")
+        self.assertEqual(f.filter("MMM"), "mmm")
+        self.assertEqual(f.filter("MMMM yes"), "mmmm yes")
+        self.assertEqual(f.filter("MMHMM"), "mm-hmm")
 
     def test_abbreviations_untouched(self):
         from localcodeagent.voice.speech_filter import SpeechTextFilter

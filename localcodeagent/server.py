@@ -430,6 +430,7 @@ class AppState:
                     publish=lambda kind, payload: self._voice_publish(payload),
                     persist=_persist_voice,
                     personality_voice=self._voice_delivery_map,
+                    persona_context=self._vocalization_context,
                 )
                 register_voice_tools(self.tools, self.voice)
             except Exception as exc:
@@ -697,6 +698,37 @@ class AppState:
             return out
         except Exception:
             return {}
+
+    def _vocalization_context(self) -> dict:
+        """Persona context for the VocalizationEngine: profile id, persona
+        family, strength, mood, adult gate and the profile's vocalization
+        level. Cached ~10 s alongside the voice delivery map."""
+        try:
+            now = time.monotonic()
+            if now < getattr(self, "_voc_until", 0.0):
+                return self._voc_cache
+            out: dict = {"level": "natural", "style": "default",
+                         "strength": 70}
+            prof = self.profiles.active()
+            if prof:
+                pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+                act = PersonalityStore(pdir).resolve_active(
+                    is_adult=bool(prof.get("is_adult")))
+                out.update({
+                    "profile_id": str(prof["profile_id"]),
+                    "style": str(act.get("greeting_style") or "default"),
+                    "strength": int(act.get("strength") or 70),
+                    "mood": str(act.get("mood") or ""),
+                    "is_adult": bool(prof.get("is_adult"))
+                    and not act.get("adult_gated"),
+                    "level": str(act.get("vocalizations") or "natural"),
+                    "traits": act.get("traits") or {},
+                })
+            self._voc_cache, self._voc_until = out, now + 10.0
+            return out
+        except Exception:
+            return {"level": "natural", "style": "default",
+                    "strength": 70}
 
     # SQLite/subprocess-backed services are lazy — they hold OS handles
     # (file locks, child processes) only once actually used.
@@ -1013,7 +1045,8 @@ class AppState:
                     pass
 
         def executor(mission: dict, node: dict, emit_cb) -> dict:
-            voice_rid = self._voice_begin()
+            voice_rid = self._voice_begin(
+                str(node.get("instruction") or node.get("title") or ""))
             try:
                 result = self.agent.run(
                     str(node.get("instruction") or node.get("title") or ""),
@@ -2981,18 +3014,20 @@ class AppState:
         except Exception:
             pass
 
-    def _voice_begin(self) -> str:
+    def _voice_begin(self, user_text: str = "") -> str:
         """Open a speech context for a new assistant response.
 
         Starting at request time (rather than on the first streamed token)
         interrupts prior speech immediately and pre-warms the engine while
-        the model is still thinking.
+        the model is still thinking. ``user_text`` lets the Vocalization
+        Engine prime an optional leading reaction (e.g. a relieved sigh
+        when the user says something finally worked).
         """
         rid = f"chat-{secrets.token_hex(6)}"
         voice = self.voice
         if voice is not None:
             try:
-                voice.begin_task(rid)
+                voice.begin_task(rid, user_text=user_text)
             except Exception:
                 pass
         return rid
@@ -3065,7 +3100,7 @@ class AppState:
                 return
 
             def run_item(entry: dict) -> None:
-                voice_rid = self._voice_begin()
+                voice_rid = self._voice_begin(str(entry.get("prompt") or ""))
                 try:
                     self.events.publish("task", {"event": "dequeued", "queue_item": entry})
                     result = self.agent.run(
@@ -4462,7 +4497,7 @@ class Handler(BaseHTTPRequestHandler):
                     preset = VoicePreset.from_dict(preset_raw)
                     preset.id = preset.id or "_preview"
                     pcm, sr, seg = voice._synthesize(
-                        voice.filter.filter(text), preset,
+                        voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
                         apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
@@ -4502,7 +4537,7 @@ class Handler(BaseHTTPRequestHandler):
                     rawp["official"] = False
                     preset = VoicePreset.from_dict(rawp)
                     pcm, sr, seg = voice._synthesize(
-                        voice.filter.filter(text), preset,
+                        voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
                         apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
@@ -5057,6 +5092,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"voices": eng.voices() if eng else []})
             except Exception as exc:
                 self._json({"voices": [], "error": str(exc)})
+            return
+        if path == "/api/voice/vocalizations":
+            # Preview catalog for Personality Studio — style → sample
+            # input. Adult render variants only surface for 18+ profiles.
+            v = self.state.voice
+            is_adult = bool(self.state._vocalization_context()
+                            .get("is_adult"))
+            from .voice.vocalizations import LEVELS as _vlevels
+            self._json({"styles": v.vocal.styles(is_adult=is_adult)
+                        if v else [],
+                        "levels": list(_vlevels)})
             return
         if path.startswith("/api/voice/audio/"):
             seg_id = path[len("/api/voice/audio/"):].strip("/")
@@ -6027,7 +6073,7 @@ class Handler(BaseHTTPRequestHandler):
                 # speech stops immediately and the TTS engine pre-warms while
                 # the model thinks. Feeding/finishing is wrapped into the
                 # agent callback by _voice_tee / _voice_finish.
-                voice_rid = self.state._voice_begin()
+                voice_rid = self.state._voice_begin(message)
 
                 def emit(event: dict) -> None:
                     # Agent/model work may run for a while before the first token.
@@ -6204,7 +6250,7 @@ class Handler(BaseHTTPRequestHandler):
                             "readiness": readiness,
                         }, 409)
                         return
-                voice_rid = self.state._voice_begin()
+                voice_rid = self.state._voice_begin(message)
                 try:
                     result = self.state.agent.run(message, history=self.state.history, mode=mode,
                                                   event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit),

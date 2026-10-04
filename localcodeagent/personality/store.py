@@ -37,7 +37,7 @@ _MAX_CUSTOMS = 200
 def _blank() -> dict:
     return {"schema_version": SCHEMA_VERSION, "active": DEFAULT_ACTIVE,
             "strength": schema.DEFAULT_STRENGTH, "mood": "",
-            "customs": []}
+            "vocalizations": "natural", "customs": []}
 
 
 class PersonalityStore:
@@ -54,6 +54,8 @@ class PersonalityStore:
                 raw.setdefault("active", DEFAULT_ACTIVE)
                 raw["strength"] = schema.clean_strength(raw.get("strength"))
                 raw["mood"] = schema.clean_mood(raw.get("mood"))
+                raw["vocalizations"] = schema.clean_vocal_level(
+                    raw.get("vocalizations"))
                 raw.setdefault("customs", [])
                 return raw
         except Exception:
@@ -86,6 +88,8 @@ class PersonalityStore:
             "sliders": schema.SLIDERS,
             "voice_controls": schema.VOICE_CONTROLS,
             "moods": schema.MOODS,
+            "vocalizations": st["vocalizations"],
+            "vocal_levels": schema.VOCAL_LEVELS,
             "categories": schema.CATEGORY_LABELS,
             "is_adult": is_adult,
         }
@@ -141,6 +145,7 @@ class PersonalityStore:
     def _effective(self, *, is_adult: bool, **kw) -> dict:
         kw["strength"] = self._load()["strength"]
         kw["mood"] = self._load()["mood"]
+        kw["vocalizations"] = self._load()["vocalizations"]
         kw["adult_gated"] = not is_adult
         return kw
 
@@ -176,6 +181,12 @@ class PersonalityStore:
         st["mood"] = schema.clean_mood(raw)
         self._save(st)
         return st["mood"]
+
+    def set_vocalizations(self, raw: Any) -> str:
+        st = self._load()
+        st["vocalizations"] = schema.clean_vocal_level(raw)
+        self._save(st)
+        return st["vocalizations"]
 
     # -- custom personalities -------------------------------------------------
 

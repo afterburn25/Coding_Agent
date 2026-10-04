@@ -38,7 +38,8 @@ Module layout (`localcodeagent/voice/`):
 | `kokoro.py` | `KokoroEngine` — lazy load, CPU-first, metrics |
 | `assets.py` | verified model/voice download (SHA-256 pinned) |
 | `dsp.py` | numpy-only DSP: pitch/tempo phase vocoder, FFT EQ/bandpass, exciter, compressor, bitcrush, modulated delay, AM, stereo width, limiter, WAV encode |
-| `speech_filter.py` | block classifier — SPEAK/SUMMARIZE/SKIP + prose sanitizer |
+| `speech_filter.py` | block classifier — SPEAK/SUMMARIZE/SKIP + prose sanitizer + vocalization canonicalizer |
+| `vocalizations.py` | semantic vocalization/gesture engine — detect → policy → adapter render |
 | `streamer.py` | fence-aware incremental sentence segmentation |
 | `presets.py` | preset store: official seed, CRUD, import/export, quarantine |
 | `cache.py` | LRU WAV cache keyed by text+engine+voice+preset+speed |
@@ -93,6 +94,63 @@ Skipped content earns a short spoken substitution ("I've included the code
 in the response."). Inline cleanup strips markdown, expands paths to their
 basename words, shortens identifiers.
 
+## Vocalization Engine (`vocalizations.py`)
+
+Non-verbal reactions (hums, sighs, chuckles, laughs, gasps, scoffs, yawns,
+throat-clears…) as a semantic layer between prose filtering and synthesis —
+the model writes `Mmm…` or `*sighs*`, the engine decides whether/how it is
+voiced. Raw letter-spelling (`MMM` → "em em em") can never reach the
+synthesizer.
+
+```
+streamer / direct text
+   → SpeechTextFilter.canonicalize()   CAPS tokens → lowercase canon
+   → VocalizationEngine.resolve()      detect → policy → render
+   → speech_text (TTS input) + display_text (unchanged) + gesture events
+```
+
+- **Detection**: canonical token classes (agreement `mm-hmm`, thinking
+  `hmm`, pleasure `mmm`, realization `ahh`, surprise `ooh`, laughs
+  `haha/hehe/heh`, frustration `ugh`, sympathy `aww`, scoffs/tsk, yawns,
+  sighs, etc.) plus `*stage directions*` (`*laughs*`, `*sighs*` → semantic
+  acts, never spoken literally).
+- **Semantics**: each hit resolves to `{category, style, intensity,
+  duration}` — e.g. `ugh` → `frustration/exhale`.
+- **Policy**: profile-scoped level `off|minimal|natural|expressive`
+  (persisted in `<profile>/personality.json`, default `natural`), persona
+  frequency bias (professional ≈ restrained … playful ≈ generous), mood
+  allow-lists (concerned mutes amusement, focused drops most), personality
+  strength scaling (0 ≈ neutral), per-response caps (natural 2, expressive
+  3), ≥2-sentence spacing, same-style repeat suppression, minimal-mode
+  intensity ceiling, adult render variants gated on 18+ profiles.
+- **Priming**: `begin_task(user_text)` seeds a *possible* leading reaction
+  ("that finally worked" → satisfied exhale / relieved sigh) — applied only
+  if the model didn't already open with a reaction, so it can stack with
+  but never duplicates the model's own.
+- **Render**: engine adapters translate semantics to TTS-safe text
+  (`mmm`→`mmmm…`, `mmhmm`→`mm-hmm`, `haha`→`ha ha`, `heh`→`heh`,
+  `tsk`→`tsk`). Adapters are per-engine (`adapter_for(engine_id)`) — no
+  Kokoro-specific hacks in the semantic layer; a bad rendering falls back
+  to a milder form or silence, never breaks the response.
+- **display vs speech**: `resolve()` returns `display_text` untouched and
+  `speech_text` rewritten — chat shows `Mmm…`, Kokoro hears `mmmm…`.
+- **Gestures**: kept vocalizations emit paired semantic gestures
+  (`mm-hmm`→`small_nod`, `hmm`→`head_tilt`, chuckle→`small_smile`,
+  gasp→`eyebrow_raise`, sigh→`exhale`). They ride `voice` segment events
+  (`gestures[]` + `utterance_id` = segment id, for future lip-sync) and a
+  standalone `gesture` SSE channel; `voice_global.js` sets
+  `document.body.dataset.gesture` as the avatar hook. Gesture count is
+  capped per response — no constant bobbing.
+- **Telemetry**: `vocalization_resolved` stats deque (category/style/kept,
+  no text content) + `record_feedback(profile_id, "fewer sighs")`
+  suppresses a category per profile.
+- Code/JSON/structured output never enters this path — the fence-aware
+  streamer and filter drop it upstream.
+
+Personality Studio gains a *Natural Vocalizations* section: level select
+(profile-scoped) + per-style preview buttons hitting
+`GET /api/voice/vocalizations` (style catalog) and `POST /api/voice/preview`.
+
 ## Queue / cancellation
 
 - Per-task `SentenceStreamer` (fence-aware; never emits half words).
@@ -110,6 +168,7 @@ GET  /api/voice/presets           all presets
 GET  /api/voice/preset/<id>       one preset
 GET  /api/voice/preset/<id>/export
 GET  /api/voice/voices            installed base voices
+GET  /api/voice/vocalizations     style catalog + levels (Personality Studio)
 GET  /api/voice/audio/<seg_id>    WAV bytes
 POST /api/voice/speak             {text, preset_id?, speed?, auto_filter?}
 POST /api/voice/preview           {preset|preset_id, text?, raw?, base_voice?}

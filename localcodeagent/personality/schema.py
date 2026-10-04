@@ -115,6 +115,11 @@ VOICE_CONTROLS: dict[str, dict] = {
 MOODS = ("focused", "relaxed", "excited", "concerned",
          "celebratory", "curious", "serious")
 
+# Natural vocalization levels — how freely the voice layer may voice
+# non-verbal reactions (hums, sighs, chuckles). Profile-scoped like
+# strength/mood; the VocalizationEngine consumes this.
+VOCAL_LEVELS = ("off", "minimal", "natural", "expressive")
+
 DEFAULT_TRAIT = 50
 DEFAULT_STRENGTH = 70
 
@@ -163,3 +168,8 @@ def clean_strength(raw: object) -> int:
 def clean_mood(raw: object) -> str:
     m = str(raw or "").strip().lower()
     return m if m in MOODS else ""
+
+
+def clean_vocal_level(raw: object) -> str:
+    v = str(raw or "").strip().lower()
+    return v if v in VOCAL_LEVELS else "natural"

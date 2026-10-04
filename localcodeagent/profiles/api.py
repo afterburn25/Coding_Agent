@@ -400,6 +400,9 @@ class ProfileAPI:
                      "strength": store.set_strength(body.get("strength"))})
         elif action == "set_mood":
             h._json({"ok": True, "mood": store.set_mood(body.get("mood"))})
+        elif action == "set_vocalizations":
+            h._json({"ok": True, "vocalizations": store.set_vocalizations(
+                body.get("level"))})
         elif action == "create_custom":
             h._json({"ok": True, "custom": store.create_custom(
                 is_adult=adult, name=body.get("name"),
