@@ -776,7 +776,8 @@ body[data-gesture="look_away"] .nexus-presence > img {
   font-size:13px;
   line-height:1.5;
   min-height:38px;
-  max-height:180px;
+  /* 6 rows: 13px × 1.5 × 6 + 16px padding = 133px */
+  max-height:133px;
   padding:8px 2px;
 }
 

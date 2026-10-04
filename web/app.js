@@ -802,10 +802,15 @@ if(activityFilters)activityFilters.addEventListener('click',e=>{
 input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form.requestSubmit();}});
 // Auto-grow the composer with content (bounded by CSS max-height), and
 // collapse back to one line when emptied.
-function autosizeComposer(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
+function autosizeComposer(){
+  const cap=parseFloat(getComputedStyle(input).maxHeight)||133;
+  input.style.height='auto';
+  input.style.height=Math.min(input.scrollHeight,cap)+'px';
+  input.style.overflowY=input.scrollHeight>cap?'auto':'hidden';
+}
 input.addEventListener('input',autosizeComposer);
 input.addEventListener('keydown',e=>{requestAnimationFrame(autosizeComposer);});
-form.addEventListener('submit',()=>{setTimeout(()=>{input.style.height='';},0);});
+form.addEventListener('submit',()=>{setTimeout(()=>{input.style.height='';input.style.overflowY='';},0);});
 connectAgentEvents();
 // History paints on its own track — a busy backend (model inference,
 // repair missions) must not leave the chat blank while it waits on
