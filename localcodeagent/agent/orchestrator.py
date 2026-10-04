@@ -3453,6 +3453,18 @@ class AgentOrchestrator:
                     conversation_id=conversation_id) or {}
             except Exception:
                 brain_envelope = {}
+            if brain_envelope.get("answer"):
+                try:
+                    from ..answer_memory import validation as _amv
+                    if _amv.classify_cacheability(user_text) in {
+                            "task_specific", "live", "transformation"}:
+                        # An action/live/transform request is never
+                        # answered by a stored reply — not even as a
+                        # "hint" the small model would parrot.
+                        brain_envelope.pop("answer", None)
+                        brain_envelope.pop("fast_path", None)
+                except Exception:
+                    pass
             if (
                 persona_voice
                 and brain_envelope.get("fast_path") == "memory"

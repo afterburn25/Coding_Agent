@@ -753,6 +753,26 @@ class TestContextDependentUtterances(unittest.TestCase):
                              "task_specific", text)
             self.assertTrue(validation.is_noise(text), text)
 
+    def test_action_requests_not_cacheable(self):
+        """'Can you build me an app' is a request for work — a stored
+        answer (e.g. a capability self-intro) is never a valid reply and
+        must not surface as a lookup hit or injected hint."""
+        from localcodeagent.answer_memory import validation
+        for text in ("can you build me an app",
+                     "i need you to build me an app",
+                     "build me a website",
+                     "can you fix the bug in parser.py",
+                     "could you deploy the update",
+                     "please implement the retry logic",
+                     "create a new python script"):
+            self.assertEqual(validation.classify_cacheability(text),
+                             "task_specific", text)
+        # Real capability/information questions still reuse memory.
+        for text in ("what can you do", "can you explain decorators",
+                     "how do I center a div", "what is a monad"):
+            self.assertNotEqual(validation.classify_cacheability(text),
+                                "task_specific", text)
+
     def test_context_dependent_exchange_not_learned(self):
         from localcodeagent.answer_memory import AnswerMemory
         with tempfile.TemporaryDirectory() as tmp:

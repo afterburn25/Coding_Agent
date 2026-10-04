@@ -94,6 +94,18 @@ class SpeechTextFilter:
         "KB": "kilobytes", "MB": "megabytes", "GB": "gigabytes",
         "TB": "terabytes", "PB": "petabytes",
     }
+    # Symbol-bearing language/framework names TTS can't read literally —
+    # "C#" must be "C sharp", not "C hash"/"C pound". Longest-first so
+    # ASP.NET/VB.NET match before bare .NET.
+    TECH_TOKENS = {
+        "ASP.NET": "A S P dot net", "VB.NET": "V B dot net",
+        "Node.js": "node jay ess", "NodeJS": "node jay ess",
+        "C++": "C plus plus", "G++": "G plus plus",
+        "C#": "C sharp", "F#": "F sharp", ".NET": "dot net",
+    }
+    TECH_TOKEN_RE = re.compile(
+        r"ASP\.NET|VB\.NET|Node\.?js|NodeJS|"
+        r"\b[CcFf]#\d*\.?\d*|\bC\+\+|\bG\+\+|\.NET\b")
     FREQ_UNITS = {
         "kHz": "kilohertz", "MHz": "megahertz", "GHz": "gigahertz",
     }
@@ -270,6 +282,17 @@ class SpeechTextFilter:
         first so 'MMM' becomes 'mmm' for the VocalizationEngine instead
         of spelled letters."""
         t = canonicalize_vocals(t)
+        def tech(m):
+            tok = m.group(0)
+            # "c#" typed lowercase still means the language; a trailing
+            # version ("C#9") reattaches with a space — "C sharp 9".
+            ver = re.match(r"([CcFf]#)([\d.]+)", tok)
+            if ver:
+                return self.TECH_TOKENS[ver.group(1).capitalize()] \
+                    + " " + ver.group(2).rstrip(".")
+            return self.TECH_TOKENS.get(tok) or self.TECH_TOKENS.get(
+                tok.upper()) or tok
+        t = self.TECH_TOKEN_RE.sub(tech, t)
         def num_unit(m):
             n, u = m.group(1), m.group(2)
             word = self.UNIT_WORDS.get(u, u)
@@ -284,6 +307,11 @@ class SpeechTextFilter:
         s = snippet.strip()
         if not s:
             return ""
+        # A bare tech token ("`C#`", "`.NET`") names a language, not a
+        # command — expand it like prose does.
+        if self.TECH_TOKEN_RE.fullmatch(s):
+            return self.TECH_TOKENS.get(s) or self.TECH_TOKENS.get(
+                s.upper()) or s
         # Very short identifiers can be spoken naturally.
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", s) and len(s) <= 30:
             return s.replace("_", " ").replace(".", " ")

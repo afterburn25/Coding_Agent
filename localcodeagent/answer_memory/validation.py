@@ -76,6 +76,28 @@ _QUESTION_STARTERS = (
     "list", "define", "show me",
 )
 
+# "Can you build me an app?" looks like a question but is a request for
+# work — no stored answer is a valid reply, and a capability/self-intro
+# answer surfaced as a "hint" just gets parroted by small models. Action
+# verbs after a polite modal, an explicit "I need/want you to …" order,
+# or an imperative opener all mark the turn task-specific.
+_ACTION_VERBS = (
+    "build", "make", "create", "write", "code", "fix", "debug", "add",
+    "change", "update", "deploy", "run", "install", "setup", "set up",
+    "generate", "design", "implement", "refactor", "test", "do", "get",
+    "find", "open", "delete", "remove", "modify", "patch", "upgrade",
+    "migrate", "scaffold", "compile", "review", "edit", "rename",
+    "download", "configure", "program", "develop", "draw",
+)
+_ACTION_REQUEST = re.compile(
+    r"(?:^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:"
+    + "|".join(_ACTION_VERBS) + r")\b"
+    r"|^i\s+(?:need|want|would like|need you)\s+you\s+to\s+(?:"
+    + "|".join(_ACTION_VERBS) + r")\b"
+    r"|^(?:please\s+)?(?:" + "|".join(_ACTION_VERBS)
+    + r")\s+(?:me\s+|an?\s+|the\s+|my\s+|this\s+|that\s+))",
+    re.I)
+
 
 def is_noise(text: str) -> bool:
     norm = normalize_question(text)
@@ -118,6 +140,8 @@ def classify_cacheability(text: str) -> str:
         return "task_specific"
     if re.match(r"^(rewrite|translate|summari[sz]e|paraphrase|reformat|convert)\b", t):
         return "transformation"
+    if _ACTION_REQUEST.search(t):
+        return "task_specific"
     if re.search(r"\b(latest|newest|current|recent|today's|this week)\b", t):
         return "volatile"
     first = t.split(" ", 1)[0] if t else ""
