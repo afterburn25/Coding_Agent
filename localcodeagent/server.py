@@ -388,6 +388,10 @@ class AppState:
         register_deploy_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
+        from .tools.debugger import register_debug_tools
+        register_debug_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
         register_project_tools(self.tools, self.workspaces)
         register_codeintel_tools(self.tools, self.workspace)
         self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
