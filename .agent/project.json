@@ -168,7 +168,7 @@
   "dry_humor_when_appropriate": true,
   "lower_forced_followups": true,
   "feedback_exact_message_pairing": true,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "general_fact_commands": true,
   "brain_autobiographical_sync": true,
   "verified_test_count": 423,
@@ -198,7 +198,7 @@
   "negative_feedback_excluded_from_sft_targets": true,
   "brain_training_signal_sync": true,
   "portable_approved_skill_context": true,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -234,7 +234,7 @@
   "rejected_refusal_removed_from_context": true,
   "refusal_stream_buffering": true,
   "refusal_exhaustion_reports_model_blocker": true,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -259,7 +259,7 @@
   "coding_model_preflight_bypass": true,
   "natural_request_prefixes": true,
   "source_image_edit_exclusion": true,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "nexus_brain_adult_content_gate": true,
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
@@ -297,7 +297,7 @@
    "this afternoon",
    "tonight"
   ],
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -324,7 +324,7 @@
   ],
   "compacts_on_token_stream": true,
   "reduced_motion_support": true,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -396,7 +396,7 @@
    "biological_human_claim": false
   },
   "hard_tool_safety_bypass": false,
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
   "canonical_path_enforced": true,
   "config_redirect_or_disable_after_initialization": false,
@@ -424,7 +424,7 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "129727f",
+  "verified_code_checkpoint": "ae88cdb",
   "verified_test_count": 1413,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
@@ -537,7 +537,7 @@
   }
  },
  "verified_tests": 1413,
- "head": "129727f",
+ "head": "ae88cdb",
  "test_count": 1413,
  "branding": {
   "canonical_name": "Nexus Core",
