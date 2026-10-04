@@ -76,6 +76,46 @@ class SpeechTextFilter:
     ARROW_RE = re.compile(r"(?:→|⟶|->)")
     CMD_LINE_RE = re.compile(r"^\s*(\$ |>|PS C:|python3?\s+-\w|pip\s+install|npm\s+|git\s+\w|docker\s+|curl\s+|nvidia-smi|cd\s+\S)")
     PUNCT_RUN_RE = re.compile(r"[^\w\s]{4,}")
+    # Hard-coded pronunciation — tokens TTS would otherwise read
+    # letter-by-letter but that people say as words, and storage/frequency
+    # units that expand to their full spoken name.
+    WORD_ACRONYMS = {
+        "RAM": "ram", "VRAM": "vee ram", "ROM": "rom",
+        "GUI": "gooey", "JSON": "jason",
+        "YAML": "yamel", "GIF": "gif", "JPG": "jay peg",
+        "JPEG": "jay peg", "PNG": "ping", "WAV": "wave",
+        "CUDA": "koo duh", "NVME": "en vee me", "NVMe": "en vee me",
+        "LIDAR": "lie dar", "ASAP": "ay sap", "WiFi": "why fie",
+        "Wi-Fi": "why fie", "macOS": "mac oh ess", "BIOS": "bye oss",
+    }
+    STORAGE_UNITS = {
+        "KB": "kilobytes", "MB": "megabytes", "GB": "gigabytes",
+        "TB": "terabytes", "PB": "petabytes",
+    }
+    FREQ_UNITS = {
+        "kHz": "kilohertz", "MHz": "megahertz", "GHz": "gigahertz",
+    }
+    TIME_UNITS = {
+        "ms": "milliseconds", "ns": "nanoseconds", "µs": "microseconds",
+    }
+    # "12 GB" / "3.0GHz" — number-attached units get singular/plural.
+    NUM_UNIT_RE = re.compile(
+        r"\b(\d+(?:\.\d+)?)\s*("
+        r"KB|MB|GB|TB|PB|kHz|MHz|GHz|ms|ns|µs|fps|FPS"
+        r")\b")
+    ACRONYM_RE = re.compile(
+        r"\b(" + "|".join(
+            sorted((re.escape(k) for k in WORD_ACRONYMS), key=len, reverse=True))
+        + r")\b")
+    BARE_UNIT_RE = re.compile(
+        r"\b(" + "|".join(
+            sorted((re.escape(k)
+                    for k in list(STORAGE_UNITS) + list(FREQ_UNITS)),
+                   key=len, reverse=True))
+        + r")\b")
+    UNIT_WORDS = {**STORAGE_UNITS, **FREQ_UNITS,
+                  "fps": "frames per second", "FPS": "frames per second",
+                  **TIME_UNITS}
 
     def classify_line(self, line: str) -> str:
         s = line.strip()
@@ -184,6 +224,7 @@ class SpeechTextFilter:
         t = self.PATH_RE.sub(lambda m: self._speakable_path(m.group(0)), t)
         # Collapse markdown table pipes left inside SUMMARIZE leftovers.
         t = re.sub(r"\|+", ", ", t)
+        t = self._pronounce(t)
         # Numbers/units read better with spaces normalized.
         t = re.sub(r"[ \t]{2,}", " ", t)
         t = re.sub(r"\n{3,}", "\n\n", t)
@@ -215,6 +256,20 @@ class SpeechTextFilter:
                 return ""
             return f" — {phrase}"
         return repl
+
+    def _pronounce(self, t: str) -> str:
+        """Expand number-attached units, then word-acronyms, then bare
+        units — order matters so '64 GB RAM' reads 'sixty-four gigabytes
+        ram', not '64 G B R A M'."""
+        def num_unit(m):
+            n, u = m.group(1), m.group(2)
+            word = self.UNIT_WORDS.get(u, u)
+            if n in ("1", "1.0") and word.endswith("s"):
+                word = word[:-1]
+            return f"{n} {word}"
+        t = self.NUM_UNIT_RE.sub(num_unit, t)
+        t = self.ACRONYM_RE.sub(lambda m: self.WORD_ACRONYMS[m.group(1)], t)
+        return self.BARE_UNIT_RE.sub(lambda m: self.UNIT_WORDS[m.group(1)], t)
 
     def _speakable_code(self, snippet: str) -> str:
         s = snippet.strip()
