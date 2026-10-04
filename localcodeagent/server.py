@@ -5204,7 +5204,8 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
-                          "/api/lkg", "/api/update", "/api/rc",
+                          "/api/lkg", "/api/update", "/api/search",
+                          "/api/rc",
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
@@ -5300,11 +5301,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/lkg":
             self._json(self.state.lkg.status())
             return True
+        if path == "/api/search":
+            if self.state.search is None:
+                from .search import GlobalSearch
+                self.state.search = GlobalSearch(self.state)
+            self._json(self.state.search.query(
+                (q.get("q") or [""])[0],
+                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+            return True
         if path == "/api/update/status":
             # Status is a fast read — no network fetch; apply() plans fresh.
             self._json({"lkg": self.state.lkg.status(),
                         "plan": self.state.self_update(
                             (q.get("source") or [""])[0]).plan(fetch=False)})
+            return True
+        if path == "/api/search":
+            from .search import GlobalSearch
+            self._json(GlobalSearch(self.state).query(
+                (q.get("q") or [""])[0],
+                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
             return True
         if path.startswith("/api/lkg/verify/"):
             name = unquote(path[len("/api/lkg/verify/"):]).strip("/")
