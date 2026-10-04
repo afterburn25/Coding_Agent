@@ -384,6 +384,12 @@ class AppState:
         from .lineage import LineageStore
         self.lineage = LineageStore(runtime_root / "data" / "lineage.json")
         self.artifacts.lineage = self.lineage
+        from .dependencies import DependencyStore
+        from .environment import EnvironmentStore
+        self.dependencies = DependencyStore(
+            runtime_root / "data" / "dependencies.json")
+        self.environment = EnvironmentStore(
+            runtime_root / "data" / "environment.json")
         from .release import RCManager
         self.rc = RCManager(runtime_root / "data" / "rc.json")
         # Live scorecard checks fed by real subsystems — capability
@@ -4259,7 +4265,8 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
-                          "/api/rc")
+                          "/api/rc", "/api/dependencies",
+                          "/api/environment")
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -4290,6 +4297,31 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/rc":
             self._json(self.state.rc.status())
+            return True
+        if path == "/api/dependencies":
+            self._json({"dependencies": self.state.dependencies.list(
+                ecosystem=(q.get("ecosystem") or [""])[0],
+                outdated_only=(q.get("outdated") or [""])[0] == "1",
+                project_id=(q.get("project") or [""])[0]),
+                "summary": self.state.dependencies.summary()})
+            return True
+        if path == "/api/environment":
+            names = [n for n in (q.get("names") or [""])[0].split(",")
+                     if n.strip()]
+            self._json(self.state.environment.detect(
+                names or None))
+            return True
+        if path.startswith("/api/environment/verify/"):
+            pid = unquote(path[len("/api/environment/verify/"):]).strip("/")
+            self._json(self.state.environment.verify(pid))
+            return True
+        if path.startswith("/api/environment/manifest/"):
+            pid = unquote(path[len("/api/environment/manifest/"):]).strip("/")
+            m = self.state.environment.manifest(pid)
+            if m is None:
+                self._json({"error": "no manifest declared"}, 404)
+            else:
+                self._json(m)
             return True
         if path == "/api/golden":
             self._json({"snapshots": self.state.golden.list()})
@@ -4373,6 +4405,56 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/dependencies/track":
+            row = self.state.dependencies.track(
+                str(body.get("name") or ""),
+                ecosystem=str(body.get("ecosystem") or "pip"),
+                installed_version=str(body.get("installed_version") or ""),
+                available_version=str(body.get("available_version") or ""),
+                compatible=body.get("compatible"),
+                advisory=str(body.get("advisory") or ""),
+                impact=str(body.get("impact") or ""),
+                test_coverage=str(body.get("test_coverage") or ""),
+                project_id=str(body.get("project_id") or ""))
+            self._json({"ok": True, "dependency": row})
+            return True
+        if path == "/api/dependencies/upgrade":
+            row = self.state.dependencies.stage_upgrade(
+                str(body.get("dependency_id") or ""),
+                str(body.get("candidate_version") or ""))
+            if row is None:
+                self._json({"error": "unknown dependency"}, 404)
+                return True
+            self._json({"ok": True, "upgrade": row})
+            return True
+        if path == "/api/dependencies/upgrade/stage":
+            row = self.state.dependencies.record_upgrade_stage(
+                str(body.get("upgrade_id") or ""),
+                str(body.get("stage") or ""),
+                str(body.get("status") or ""),
+                detail=str(body.get("detail") or ""))
+            if row is None:
+                self._json({"error": "unknown upgrade/stage or "
+                            "terminal state"}, 400)
+                return True
+            self._json({"ok": True, "upgrade": row})
+            return True
+        if path == "/api/dependencies/upgrade/conclude":
+            row = self.state.dependencies.conclude_upgrade(
+                str(body.get("upgrade_id") or ""),
+                bool(body.get("promote")))
+            if row is None:
+                self._json({"error": "cannot conclude — not passed or "
+                            "already terminal"}, 400)
+                return True
+            self._json({"ok": True, "upgrade": row})
+            return True
+        if path == "/api/environment/manifest":
+            row = self.state.environment.declare(
+                str(body.get("project_id") or ""),
+                list(body.get("components") or []))
+            self._json({"ok": True, "manifest": row})
             return True
         if path == "/api/rc/enter":
             self._json(self.state.rc.enter(str(body.get("label") or "")))

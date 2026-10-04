@@ -4,7 +4,7 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1511,
+ "test_checkpoint": 1521,
  "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done — requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Next phases: data lineage/artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + environment manifests; predictive health + idle cleanup + benchmark lab + dynamic specialists. Still host-blocked: real ComfyUI workflow validation (no image weights).",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -425,7 +425,7 @@
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
   "verified_code_checkpoint": "4b92ab2",
-  "verified_test_count": 1511,
+  "verified_test_count": 1521,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
    "DEVIN_START_HERE.md",
@@ -536,9 +536,9 @@
    ]
   }
  },
- "verified_tests": 1511,
+ "verified_tests": 1521,
  "head": "4b92ab2",
- "test_count": 1511,
+ "test_count": 1521,
  "branding": {
   "canonical_name": "Nexus Core",
   "full_logo": "web/assets/nexus-core-logo.png",

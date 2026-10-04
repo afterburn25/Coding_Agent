@@ -183,8 +183,16 @@
   recorded evidence; `fail`/`unknown` in any blocking section yields
   `FAIL` — readiness is never claimed without evidence. API:
   `/api/rc`, `/api/rc/scorecard`, `/api/rc/section`. Docs:
-  `docs/RELEASE.md`. Next: dependency intelligence + env manifests,
-  predictive health, benchmark lab, dynamic specialists.
+  `docs/RELEASE.md`.
+- **Phase 11** — dependency intelligence + env manifests
+  (`dependencies.py`, `environment.py`): tracked deps with real
+  version comparison; staged upgrade records (isolated → install →
+  build → tests → review) where a failed stage locks promotion and
+  `promote` requires all stages passed. Per-project env manifests
+  verify the live host via real probes (missing/mismatched/satisfied).
+  API: `/api/dependencies`, `/api/environment`. Docs:
+  `docs/DEPENDENCIES.md`. Next: predictive health + idle cleanup +
+  benchmark lab + dynamic specialists (Phase 12).
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1066,7 +1074,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1511 tests` passing (2 environment skips).
+Expected at this checkpoint: `1521 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
