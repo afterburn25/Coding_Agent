@@ -96,8 +96,11 @@ Two companion settings bound autonomous runs:
 - `autonomous_max_continuations` (default 5) — how many times the agent may
   extend past `max_agent_steps` without finishing.
 - `autonomous_approval_timeout_seconds` (default 3600) — a task parked on a
-  hard-gated approval is failed after this wait instead of stalling an
-  unattended run (0 waits forever; ignored when autonomous mode is off).
+  hard-gated approval is failed after this wait, while a mission approval
+  is marked `timed_out` and replans around the suspended node; repeated
+  mission denials/timeouts are bounded by `max_approval_retries` so an
+  unattended run cannot stall or re-ask forever (0 waits forever; ignored
+  when autonomous mode is off).
 - `agent_tool_timeout_seconds` (default 1800) — hard cap per tool call; a
   hung tool returns a timeout error instead of blocking the run.
 - `model_idle_unload_seconds` (default 900) plus `memory_pressure_vram_gb` /

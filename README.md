@@ -170,7 +170,7 @@ The Model Growth Lab keeps the live base model intact. Learned behavior, correct
 - **Recovery** classifies failures (CUDA OOM, socket resets, tool crashes, permission-required…) and walks finite playbooks — bounded retries, replan, escalate — never infinite loops; repeated identical failures stop the mission.
 - **Policy** profiles (`supervised` / `local_autonomous` / `extended_autonomous` / `custom`) gate action classes on top of the existing PermissionManager; sensitive actions (`git_push`, `create_pr`, `packages`, credentials…) always require approval or a scoped, expirable standing grant.
 - **Schedules** (once/interval/daily/weekly) and **triggers** (file_changed, startup, CI events, custom…) persist across restarts and materialize missions; standing goals spawn recurring missions.
-- **Approvals** pause a mission into `waiting_approval` and resume the exact step after a decision; denials trigger replanning. `stop autonomy` (chat command or API) halts everything immediately.
+- **Approvals** pause a mission into `waiting_approval` and resume the exact step after a decision; denials/timeouts trigger bounded replanning (`max_approval_retries`) and autonomous waits honor `autonomous_approval_timeout_seconds`. `stop autonomy` (chat command or API) halts everything immediately.
 - **Evaluation** checks success criteria (`all_tasks_completed`, `verify_passed`, `artifact_exists`, metrics…) before a mission is called complete — tool success alone is never enough.
 - Chat commands `make this a mission` / `stop autonomy` / `resume autonomy` work in both streaming and non-streaming chat without needing a coding model.
 - Full reference: [docs/AUTONOMY.md](docs/AUTONOMY.md)
@@ -458,7 +458,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1390 tests passing** (2 environment-dependent skips).
+Current expected result: **1394 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 

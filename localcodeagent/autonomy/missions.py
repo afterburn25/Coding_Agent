@@ -61,6 +61,7 @@ DEFAULT_BUDGETS = {
     "max_tool_failures": 8,
     "max_network_bytes": 0,       # 0 = unbounded
     "max_research_loops": 3,
+    "max_approval_retries": 2,
 }
 
 DEFAULT_NOTIFICATION_POLICY = "important"  # all|important|failures|completion|silent
@@ -134,6 +135,7 @@ def new_mission(objective: str, *, title: str = "", user_request: str = "",
         "source_id": source_id,
         "stop_requested": False,
         "pending_approval": None,
+        "approval_retries": 0,
         "completion": None,
         "revision": 1,
         "history": [],          # mission-level state transition log

@@ -1262,6 +1262,147 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertGreater(len(final["graph"]["nodes"]), 3)
             sup.stop()
 
+    def test_mission_approval_timeout_replans(self):
+        # The autonomous approval bound applies to missions too — an
+        # unanswered hard gate must not leave the supervisor parked all
+        # night. Timeout behaves like denial: mark it, replan, continue.
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    return {"ok": False,
+                            "pending_approval": {"name": "x",
+                                                 "kind": "autonomy"}}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor,
+                           approval_timeout_seconds=0.01)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            final = drive(sup, m["id"], ticks=15)
+            self.assertEqual(final["status"], "waiting_approval")
+            self.assertEqual(len(sup.approvals(pending_only=True)), 1)
+            time.sleep(0.03)
+            sup.tick()
+            final = drive(sup, m["id"], ticks=30)
+            self.assertEqual(final["status"], "completed")
+            rows = sup.approvals()
+            self.assertEqual(rows[0]["state"], "timed_out")
+            sup.stop()
+
+    def test_mission_approval_timeouts_are_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] >= 2:
+                    return {"ok": False,
+                            "pending_approval": {"name": "x",
+                                                 "kind": "autonomy"}}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor,
+                           approval_timeout_seconds=0.01)
+            m = sup.create_mission(
+                objective="x",
+                budgets={"max_approval_retries": 2},
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            final = drive(sup, m["id"], ticks=15)
+            self.assertEqual(final["status"], "waiting_approval")
+            time.sleep(0.03)
+            sup.tick()
+            final = drive(sup, m["id"], ticks=15)
+            self.assertEqual(final["status"], "waiting_approval")
+            time.sleep(0.03)
+            sup.tick()
+            final = sup.missions.get(m["id"])
+            self.assertEqual(final["status"], "blocked")
+            self.assertEqual(final["approval_retries"], 2)
+            self.assertFalse(sup.approvals(pending_only=True))
+            sup.stop()
+
+    def test_missing_approval_record_recovers_by_replan(self):
+        # Durable `waiting_approval` must never be a dead end — if the
+        # pending row is missing, the supervisor replans around the
+        # suspended node instead of silently skipping the mission forever.
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    return {"ok": False,
+                            "pending_approval": {"name": "x",
+                                                 "kind": "autonomy"}}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            final = drive(sup, m["id"], ticks=15)
+            self.assertEqual(final["status"], "waiting_approval")
+            sup.store.approvals.data["approvals"].clear()
+            sup.store.approvals.save()
+            sup.tick()
+            final = drive(sup, m["id"], ticks=30)
+            self.assertEqual(final["status"], "completed")
+            self.assertEqual(final["approval_retries"], 1)
+            sup.stop()
+
+    def test_retention_preserves_live_missions_and_pending_approvals(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            live = sup.create_mission(objective="stay alive")
+            sup.missions.transition(live["id"], "ready")
+            rows = sup.store.missions.data.setdefault("missions", [])
+            for i, status in enumerate(("failed", "cancelled")):
+                old = new_mission(objective=f"old-{status}")
+                old["id"] = f"old-{status}"
+                old["status"] = status
+                rows.append(old)
+            for _ in range(210):
+                done = new_mission(objective="old")
+                done["status"] = "completed"
+                rows.append(done)
+            sup.store.missions.save()
+            self.assertIsNotNone(sup.missions.get(live["id"]))
+            self.assertIsNone(sup.missions.get("old-failed"))
+            self.assertIsNone(sup.missions.get("old-cancelled"))
+
+            pending = sup._create_approval(
+                live["id"], "", {"name": "gate", "detail": "needs user"})
+            approvals = sup.store.approvals.data.setdefault("approvals", [])
+            for _ in range(310):
+                approvals.append({"id": f"old-{_}", "mission_id": "old",
+                                  "state": "approved", "created_at": 1,
+                                  "resolved_at": 2})
+            sup.store.approvals.save()
+            kept = sup.store.approvals.rows()
+            self.assertTrue(any(r.get("id") == pending["id"] for r in kept))
+
+            repairs = sup.store.repairs.data.setdefault("repairs", [])
+            repairs.append({"id": "ri-live", "state": "testing"})
+            for i in range(210):
+                repairs.append({"id": f"ri-old-{i}", "state": "resolved"})
+            sup.store.repairs.save()
+            self.assertTrue(any(r.get("id") == "ri-live"
+                                for r in sup.store.repairs.rows()))
+
+            sup.cancel_mission(live["id"])
+            self.assertFalse(any(
+                r.get("mission_id") == live["id"]
+                and r.get("state") == "pending"
+                for r in sup.store.approvals.rows()))
+            sup.stop()
+
     def test_replan_skips_dead_end_nodes(self):
         # Regression: a replan appended a fresh DAG but left blocked /
         # dead-dep nodes from the aborted plan pending forever, so

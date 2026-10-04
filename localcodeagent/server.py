@@ -1222,6 +1222,9 @@ class AppState:
             worker_manager=self.workers,
             projects=self.projects,
             preferences=self.preferences,
+            approval_timeout_seconds=lambda: float(getattr(
+                self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
+            if getattr(self.config, "autonomous_mode", False) else 0.0,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         sup.repair = self._build_self_repair(config, sup, runtime_root,
@@ -1323,7 +1326,7 @@ class AppState:
             "startup_ms": _startup,
             "pending_approvals":
                 lambda: [r for r in sup.store.approvals.rows()
-                         if str(r.get("status") or "") == "pending"],
+                         if str(r.get("state") or "") == "pending"],
         })
 
     def _build_self_repair(self, config: AgentConfig, sup,
@@ -1594,7 +1597,7 @@ class AppState:
         def pending_approvals() -> float:
             return float(sum(
                 1 for r in sup.store.approvals.rows()
-                if str(r.get("status") or "") == "pending"))
+                if str(r.get("state") or "") == "pending"))
 
         registry.register("disk_free_gb",
             lambda: _shutil.disk_usage(self.workspace).free / (1024 ** 3),

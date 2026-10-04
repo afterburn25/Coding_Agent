@@ -25,12 +25,13 @@ class JsonStore:
     """One bounded JSON document with atomic writes + corrupt quarantine."""
 
     def __init__(self, path: Path, *, default: Any, limit: int | None = None,
-                 key: str | None = None) -> None:
+                 key: str | None = None, preserve=None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._default = default
         self._limit = limit          # max rows kept for list payloads
         self._key = key              # payload key wrapping the list
+        self._preserve = preserve    # row predicate retained past the tail
         self._lock = threading.RLock()
         self.data = self._load()
 
@@ -61,10 +62,23 @@ class JsonStore:
     def save(self) -> None:
         with self._lock:
             if self._key is not None and self._limit:
-                self.data[self._key] = self.data.get(self._key, [])[-self._limit:]
+                rows = self.data.get(self._key, [])
+                if len(rows) > self._limit:
+                    tail_ids = {id(row) for row in rows[-self._limit:]}
+                    self.data[self._key] = [
+                        row for row in rows
+                        if id(row) in tail_ids or self._kept(row)]
             atomic_write_text(
                 self.path,
                 json.dumps(self.data, indent=2, ensure_ascii=False, default=str))
+
+    def _kept(self, row: dict) -> bool:
+        if self._preserve is None:
+            return False
+        try:
+            return bool(self._preserve(row))
+        except Exception:
+            return False
 
     def rows(self) -> list[dict]:
         with self._lock:
@@ -123,8 +137,14 @@ class AutonomyStore:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
-        self.missions = JsonStore(self.root / "missions.json",
-                                  default=None, key="missions", limit=200)
+        # Completed history is bounded, but any user-actionable or live row
+        # survives retention — losing one would leave durable work unowned.
+        self.missions = JsonStore(
+            self.root / "missions.json", default=None, key="missions",
+            limit=200,
+            preserve=lambda row: str(row.get("status")) not in
+            {"completed", "completed_with_warnings", "failed",
+             "cancelled", "archived"})
         self.standing_goals = JsonStore(self.root / "standing_goals.json",
                                         default=None, key="goals", limit=100)
         # Durable evaluated goals (GoalManager) — distinct from
@@ -139,12 +159,17 @@ class AutonomyStore:
                                 default=None, key="grants", limit=200)
         self.notifications = JsonStore(self.root / "notifications.json",
                                        default=None, key="notifications", limit=300)
-        self.approvals = JsonStore(self.root / "approvals.json",
-                                   default=None, key="approvals", limit=300)
+        self.approvals = JsonStore(
+            self.root / "approvals.json", default=None, key="approvals",
+            limit=300,
+            preserve=lambda row: str(row.get("state")) == "pending")
         # Durable self-repair incidents (SelfRepairCoordinator) —
         # persisted so a crash mid-repair resumes instead of repeating.
-        self.repairs = JsonStore(self.root / "repairs.json",
-                                 default=None, key="repairs", limit=200)
+        self.repairs = JsonStore(
+            self.root / "repairs.json", default=None, key="repairs",
+            limit=200,
+            preserve=lambda row: str(row.get("state")) not in
+            {"resolved", "rolled_back", "needs_human", "abandoned"})
         # Detector findings — evidence-based problems/opportunities the
         # SignalScanner emits (deduped by signature, cooldown-bounded).
         self.findings = JsonStore(self.root / "findings.json",

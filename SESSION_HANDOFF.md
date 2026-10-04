@@ -908,6 +908,7 @@ No image weights are downloaded automatically yet.
 - Subject profiles now apply saved references, preferred model, generation defaults, and assigned LoRAs automatically.
 - Image workspace can filter/use/enable/disable discovered LoRAs.
 - Image job errors are classified into stable codes with user-facing messages and collapsed technical details instead of raw exception strings.
+- Long-duration autonomy hardening: mission approvals honor `autonomous_approval_timeout_seconds`, missing approval rows recover via bounded replan (`max_approval_retries`), and store retention preserves live missions/pending approvals/open repairs past history tails.
 - Local mask editor now paints/erases/fills/inverts and uploads masks through the existing local image-upload route for `mask_path`.
 - Before/after workbench can compare a finished edit and reuse generated outputs as the next source image.
 
@@ -927,7 +928,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1390 tests` passing (2 environment skips).
+Expected at this checkpoint: `1394 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

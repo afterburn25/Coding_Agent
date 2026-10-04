@@ -64,6 +64,7 @@ class AutonomousSupervisor:
         worker_manager: Any = None,
         projects: Any = None,                # ProjectStore — context + history
         preferences: Any = None,             # PreferenceStore — learned overlays
+        approval_timeout_seconds: float | Callable[[], float] = 0.0,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -155,6 +156,7 @@ class AutonomousSupervisor:
         self._heartbeat = {"ts": 0.0, "tick_ms": 0.0}
         self._started_once = False
         self._gate_lock = threading.RLock()
+        self._approval_timeout_seconds = approval_timeout_seconds
         # WorkQueue attribution hook set by the server wiring.
         self._lane_mission: str | None = None
 
@@ -333,6 +335,7 @@ class AutonomousSupervisor:
                                       "waiting_approval", "blocked"}:
                     n["state"] = "cancelled"
         self.missions.mutate(mission_id, _fn)
+        self._close_pending_approvals(mission_id, "cancelled")
         m = self.missions.transition(mission_id, "cancelled", detail="cancelled")
         self._audit("mission_cancelled", mission=mission_id)
         self.wake()
@@ -681,6 +684,10 @@ class AutonomousSupervisor:
         except Exception:
             pass
 
+        # 3c. approval housekeeping — expired/missing approval records must
+        # not leave a mission parked forever while nobody is watching.
+        self._reconcile_approvals(now)
+
         # 4. drive live missions
         if self.policy.is_stopped() or self.policy.is_paused():
             return
@@ -945,6 +952,11 @@ class AutonomousSupervisor:
             self._complete_mission(mission_id, warnings=False)
         elif verdict == EvalVerdict.NEEDS_USER.value:
             self.missions.transition(mission_id, "waiting_approval")
+            self._create_approval(
+                mission_id, "",
+                {"name": "mission_decision", "kind": "mission",
+                 "detail": "; ".join(result.get("reasons") or
+                                      ["mission needs user direction"])})
         elif verdict == EvalVerdict.NEEDS_REPLAN.value:
             reason = self.recovery.budgets_exceeded(m)
             if reason:
@@ -1557,6 +1569,7 @@ class AutonomousSupervisor:
 
     def _create_approval(self, mission_id: str, node_id: str,
                        pending: dict) -> dict:
+        now = time.time()
         row = {
             "id": f"ap-{uuid.uuid4().hex[:10]}",
             "mission_id": mission_id,
@@ -1564,11 +1577,19 @@ class AutonomousSupervisor:
             "action": str(pending.get("name") or pending.get("kind") or "action"),
             "detail": str(pending.get("detail") or "")[:800],
             "state": "pending",
-            "created_at": time.time(),
+            "created_at": now,
             "resolved_at": None,
         }
-        self.store.approvals.data.setdefault("approvals", []).append(row)
-        self.store.approvals.save()
+        # One actionable gate per mission — a newer request supersedes an
+        # orphaned prior row instead of leaving two divergent decisions.
+        with self.store.approvals._lock:
+            for old in self.store.approvals.data.setdefault("approvals", []):
+                if (old.get("mission_id") == mission_id
+                        and old.get("state") == "pending"):
+                    old["state"] = "superseded"
+                    old["resolved_at"] = now
+            self.store.approvals.data["approvals"].append(row)
+            self.store.approvals.save()
         self.notifications.notify(
             f"Approval needed — {row['action']}: {row['detail'][:200]}",
             level="approval", policy="all",
@@ -1584,6 +1605,147 @@ class AutonomousSupervisor:
         if pending_only:
             rows = [r for r in rows if r.get("state") == "pending"]
         return rows[::-1]
+
+    def _close_pending_approvals(self, mission_id: str,
+                                 state: str = "closed") -> None:
+        """Resolve stale gate rows when the owning mission ends/cancels."""
+        try:
+            now = time.time()
+            with self.store.approvals._lock:
+                changed = False
+                for row in self.store.approvals.data.setdefault(
+                        "approvals", []):
+                    if (row.get("mission_id") == mission_id
+                            and row.get("state") == "pending"):
+                        row["state"] = state
+                        row["resolved_at"] = now
+                        changed = True
+                if changed:
+                    self.store.approvals.save()
+        except Exception:
+            pass
+
+    def _approval_timeout(self) -> float:
+        raw = self._approval_timeout_seconds
+        if callable(raw):
+            try:
+                raw = raw()
+            except Exception:
+                raw = 0.0
+        try:
+            return max(0.0, float(raw or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _pending_approval_for(self, mission_id: str) -> dict | None:
+        def created(row: dict) -> float:
+            try:
+                return float(row.get("created_at") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        rows = [r for r in self.store.approvals.rows()
+                if r.get("mission_id") == mission_id
+                and r.get("state") == "pending"]
+        return max(rows, key=created, default=None)
+
+    def _approval_retry_limit(self, mission: dict) -> int:
+        try:
+            return max(0, int((mission.get("budgets") or {}).get(
+                "max_approval_retries", 2)))
+        except (TypeError, ValueError):
+            return 2
+
+    def _reconcile_approvals(self, now: float) -> None:
+        """Expire or unstick approval-parked missions.
+
+        ``waiting_approval`` is durable, but the approval row must exist and
+        unattended runs need a bound. A missing row (older retention,
+        corrupt store, interrupted write) is treated as an unresolvable gate
+        and replans around the suspended node rather than silently freezing
+        the mission.
+        """
+        try:
+            timeout = self._approval_timeout()
+            for m in self.missions.list():
+                if str(m.get("status")) != "waiting_approval":
+                    continue
+                pending = self._pending_approval_for(str(m.get("id") or ""))
+                if pending is None:
+                    node = next(
+                        (n for n in (m.get("graph") or {}).get("nodes", [])
+                         if n.get("state") == "waiting_approval"),
+                        None)
+                    self._approval_replan_or_block(
+                        str(m.get("id") or ""),
+                        str((node or {}).get("id") or ""),
+                        "approval record missing — resuming via replan",
+                        event="approval_missing")
+                    continue
+                try:
+                    created = float(pending.get("created_at") or now)
+                except (TypeError, ValueError):
+                    created = now
+                if timeout > 0 and now - created >= timeout:
+                    pending["state"] = "timed_out"
+                    pending["resolved_at"] = now
+                    self.store.approvals.save()
+                    self._approval_replan_or_block(
+                        str(m.get("id") or ""),
+                        str(pending.get("node_id") or ""),
+                        f"approval timed out after {int(timeout)}s",
+                        event="approval_timeout")
+        except Exception:
+            pass
+
+    def _approval_replan_or_block(self, mission_id: str, node_id: str,
+                                  reason: str, *, event: str) -> None:
+        """Resolve a denied/expired gate by replanning, bounded per mission."""
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        limit = self._approval_retry_limit(m)
+        exhausted = False
+
+        def _fn(row: dict) -> None:
+            nonlocal exhausted
+            row["approval_retries"] = int(row.get("approval_retries") or 0) + 1
+            row["pending_approval"] = None
+            row["waiting_for"] = ""
+            graph = TaskGraph(row)
+            node = graph.get(node_id) if node_id else next(
+                (n for n in graph.nodes
+                 if n.get("state") == "waiting_approval"), None)
+            exhausted = row["approval_retries"] >= max(1, limit)
+            if exhausted:
+                if node is not None:
+                    node["state"] = "blocked"
+                row["blocked_reason"] = (
+                    f"approval retry budget exhausted ({limit}) — {reason}")
+                graph.refresh()
+            else:
+                self._do_replan(row, reason, failed_node=node)
+
+        self.missions.mutate(mission_id, _fn)
+        self._audit(event, mission=mission_id, node=node_id, reason=reason)
+        if exhausted:
+            self.missions.transition(mission_id, "blocked",
+                                     detail=reason)
+            self.notifications.notify(
+                f"Mission '{m.get('title')}' blocked: {reason}",
+                level="failure",
+                policy=m.get("notification_policy", "important"),
+                mission_id=mission_id, title="Mission approval stalled",
+                actions=["replan", "resume"])
+        else:
+            self.missions.transition(mission_id, "executing",
+                                     detail=f"{reason} — replanning")
+            self.notifications.notify(
+                f"Mission '{m.get('title')}' needs another route: {reason}",
+                level="important",
+                policy=m.get("notification_policy", "important"),
+                mission_id=mission_id, title="Approval not granted")
+        self.wake()
 
     def resolve_approval(self, approval_id: str, approve: bool) -> dict | None:
         with self.store.approvals._lock:
@@ -1611,13 +1773,9 @@ class AutonomousSupervisor:
             self.missions.transition(mission_id, "executing",
                                      detail="approval granted")
         else:
-            self.missions.mutate(
-                mission_id,
-                lambda row: self._do_replan(
-                    row, "approval denied",
-                    failed_node=TaskGraph(row).get(node_id)))
-            self.missions.transition(mission_id, "executing",
-                                     detail="approval denied — replanning")
+            self._approval_replan_or_block(
+                str(mission_id or ""), str(node_id or ""),
+                "approval denied", event="approval_denied")
         self._audit("approval_resolved", approval=approval_id,
                     approved=approve, mission=mission_id)
         self.wake()

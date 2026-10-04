@@ -11,12 +11,12 @@ All autonomy state lives under `data/autonomy/` (schema version **1**):
 
 | File | Contents |
 |---|---|
-| `missions.json` | Mission records (bounded 200) — objective, status, task graph, budgets, criteria, history |
+| `missions.json` | Mission records (bounded history tail; live/actionable rows are never evicted) — objective, status, task graph, budgets, criteria, history |
 | `standing_goals.json` | Persistent goals that spawn missions on schedule/trigger |
 | `triggers.json` | Event triggers with conditions + debounce |
 | `schedules.json` | once/interval/daily/weekly schedules (missed runs fire on next tick) |
 | `grants.json` | Standing permission grants — scoped, expirable, revocable |
-| `approvals.json` | Approval ledger — pending approvals survive restart |
+| `approvals.json` | Approval ledger — pending rows are preserved past the history bound and survive restart |
 | `notifications.json` | Notification outbox (bounded 300) |
 | `control.json` | Global autonomy stop/pause flags + resource mode |
 | `receipts.jsonl` | Action receipts for idempotency/audit |
@@ -128,7 +128,8 @@ resets, tool crashes, permission-required, test failures, ...).
 repair, replan, escalate — with hard caps:
 
 - `max_task_retries`, `max_repair_loops`, `max_same_failure_retries`,
-  `max_tool_failures`, `max_runtime_s`, `max_budget_usd` (mission budgets)
+  `max_tool_failures`, `max_approval_retries`, `max_runtime_s`,
+  `max_budget_usd` (mission budgets)
 
 A repeated identical failure signature stops the mission instead of
 looping forever.
@@ -190,6 +191,18 @@ work: in `conservative` mode, `job` nodes whose op uses the GPU
 (`image`) stay `ready` while the interactive agent lane is busy —
 background missions never compete with the user's foreground request
 for VRAM. `balanced`/`performance` always allow them.
+
+### Approval persistence + timeout
+
+A gated node parks its mission in `waiting_approval` and writes a durable
+row in `approvals.json`; approving resumes the exact node, while denial
+replans around it. In autonomous mode the same
+`autonomous_approval_timeout_seconds` bound applies to mission approvals:
+an expired gate is recorded `timed_out` and the mission replans rather
+than parking forever. Denials/timeouts/missing approval rows count against
+`max_approval_retries` (default 2) so request → timeout → replan cannot
+loop unattended all night; exhausting the bound blocks the mission for a
+human.
 
 ## Restart hygiene
 

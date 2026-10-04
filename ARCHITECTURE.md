@@ -221,14 +221,18 @@ driver liveness: _drive_threads registry + watchdog
 - `PermissionManager.set_autonomous` auto-approves `ask`/`session` workspace
   actions; hard gates (spend/message/mic/camera, skill lifecycle, repair
   lifecycle, desktop observation/control) and `deny` are never touched.
-  `autonomous_approval_timeout_seconds` bounds hard-gate waits.
+  `autonomous_approval_timeout_seconds` bounds hard-gate waits for tasks
+  and missions; expired mission approvals replan and are bounded by
+  `max_approval_retries`.
 - `RuntimeManager.evict_idle` on the watchdog tick unloads models idle past
   `model_idle_unload_seconds` or under `memory_pressure_*` floors, while
   pinning models serving active tasks — `ensure_ready` restarts them
   transparently. Managed ComfyUI likewise stops after
   `comfyui_idle_unload_seconds` with no active image jobs (external installs
   are never touched); image-job events stream over `image_job` bus events.
-- Growth bounds for unattended runs: task ledger keeps 100 records; orphaned
+- Growth bounds for unattended runs: task ledger keeps 100 records; autonomy
+  history stores are bounded while live missions, pending approvals, and
+  open repair incidents are preserved past the tail; orphaned
   terminal logs and `.agent/checkpoints/` snapshots are pruned on startup;
   queue is capped at 200; `routing_telemetry.jsonl` compacts past 512 KiB
   (in-memory deque maxlen 500); JobManager trims at 300 records; request-local

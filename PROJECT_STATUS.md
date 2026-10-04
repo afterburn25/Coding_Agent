@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1390 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1394 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -51,8 +51,14 @@ v0.15.0 deepens the workstation core:
   manifests before touching the stable tree, and repair lifecycle API
   actions (`retry`/`process`/`rollback`/`abandon`) require the
   `repair.manage` hard gate.
+- **Long-duration approval/recovery bounds** — mission approval waits now
+  honor `autonomous_approval_timeout_seconds`, missing approval records
+  recover by replanning, repeated ungranted gates are bounded by
+  `max_approval_retries`, and autonomy stores preserve live missions,
+  pending approvals, and open repair incidents past history-retention
+  bounds instead of silently evicting durable work.
 
-Verified: **1390 tests** (2 environment skips).
+Verified: **1394 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -384,15 +390,15 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - `AutonomousSupervisor` runs bounded event-driven ticks (no uncontrolled loop): reclaim leases → fire schedules/triggers → plan → execute DAG nodes in worker threads → verify → evaluate → complete/replan/escalate.
 - `TaskGraph` gives dependency-aware DAG execution with node leases, parallel independent branches, blocked/failed propagation, and cycle rejection; `ResourceLocks` provides exclusive named lanes; interactive chat always wins the agent lane.
 - `MissionPlanner` decomposes objectives into plan/research/implement/verify steps; `MissionEvaluator` checks success criteria (`all_tasks_completed`, `verify_passed`, `artifact_exists`, metrics) before completion — tool success is never assumed equal to mission success.
-- `RecoveryManager` classifies failures (CUDA OOM, WinError 10054, tool crash, approval-required, test failure…) into bounded playbooks — wait/retry/repair/replan/escalate — with per-mission budgets (`max_task_retries`, `max_repair_loops`, `max_same_failure_retries`, `max_runtime_s`); repeated identical failure signatures halt instead of looping.
+- `RecoveryManager` classifies failures (CUDA OOM, WinError 10054, tool crash, approval-required, test failure…) into bounded playbooks — wait/retry/repair/replan/escalate — with per-mission budgets (`max_task_retries`, `max_repair_loops`, `max_same_failure_retries`, `max_approval_retries`, `max_runtime_s`); repeated identical failure signatures halt instead of looping.
 - `AutonomyPolicy` profiles (`supervised`/`local_autonomous`/`extended_autonomous`/`custom`) sit on top of the existing PermissionManager and can only narrow it; sensitive actions (`git_push`, `create_pr`, `packages`, `delete_data`, `credentials`, `outbound_message`) require a standing grant (scoped/expirable/revocable) or a mission approval.
-- Approvals pause a mission into `waiting_approval` and resume the exact suspended step; denial triggers replanning; pending approvals persist across restart.
+- Approvals pause a mission into `waiting_approval` and resume the exact suspended step; denial/timeout triggers replanning, pending approvals persist across restart, and `autonomous_approval_timeout_seconds` bounds unattended waits.
 - Durable scheduler (once/interval/daily/weekly — missed runs catch up after downtime) plus a trigger engine (file_changed, startup, ci_*, model_runtime_failed, custom, …) with conditions, debounce, and workspace-confined file watches; standing goals spawn recurring missions.
 - `stop autonomy` / `resume autonomy` (chat command, API, or UI) immediately pauses all live missions and denies new autonomous work.
 - Restart safety: `MissionStore._recover_orphans()` re-parks missions that were mid-execution when the process died — running nodes return to `ready`, completed work is never repeated.
 - Missions UI at `web/missions.html` (list/detail, status, task graph, approvals, controls); chat commands `make this a mission`, `stop autonomy`, `resume autonomy` answer locally in both streaming and non-streaming chat.
 - Autonomy status/mission/approval/goal/schedule/trigger/notification APIs under `/api/autonomy/*`; supervisor emits `mission`/`notification`/`autonomy` bus events; ActivityStore gained `autonomy`/`mission` categories.
-- `tests/test_autonomy.py` adds 49 tests: persistence, restart recovery, corrupt-store quarantine, DAG/leases/locks, failure playbooks, policy/grants/stop, notifications, schedules, triggers, evaluator, approvals, denial→replan, stop-autonomy, lane arbitration, budgets, standing goals.
+- `tests/test_autonomy.py` covers persistence, restart recovery, corrupt-store quarantine, DAG/leases/locks, failure playbooks, policy/grants/stop, notifications, schedules, triggers, evaluator, approvals, denial/timeout→replan, missing approval recovery, live-row retention, stop-autonomy, lane arbitration, budgets, and standing goals.
 - Reference: `docs/AUTONOMY.md`.
 
 ### Platform workstation expansion (v0.7.0 line)
@@ -415,7 +421,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1390 tests passing** (2 environment skips).
+- Current automated checkpoint: **1394 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
