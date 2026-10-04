@@ -148,6 +148,8 @@ class AppState:
         self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json")
         from .promotion import PromotionPipeline
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
+        from .evidence import EvidenceBoard
+        self.evidence = EvidenceBoard(runtime_root / "data" / "evidence.json")
         from .preferences import PreferenceStore
         self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
@@ -5241,6 +5243,26 @@ class Handler(BaseHTTPRequestHandler):
                 str((q.get("action") or [""])[0]),
                 target=str((q.get("target") or [""])[0])))
             return
+        if path == "/api/evidence":
+            q = parse_qs(urlparse(self.path).query)
+            query = str((q.get("q") or [""])[0])
+            kinds = [k for k in str((q.get("kinds") or [""])[0])
+                     .split(",") if k]
+            if query or kinds:
+                rows = self.state.evidence.search(
+                    query, kinds=kinds or None,
+                    mission_id=str((q.get("mission_id") or [""])[0]),
+                    status=str((q.get("status") or [""])[0]))
+            else:
+                rows = self.state.evidence.list(
+                    mission_id=str((q.get("mission_id") or [""])[0]),
+                    status=str((q.get("status") or [""])[0]))
+            self._json({"entries": rows,
+                        "contradictions":
+                            self.state.evidence.contradictions(),
+                        "questions": self.state.evidence.questions(),
+                        "summary": self.state.evidence.summary()})
+            return
         if path == "/api/nexus-brain":
             self._json(self.state.nexus_brain.summary())
             return
@@ -6608,6 +6630,48 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "unknown candidate"}, 404)
                     return
                 self._json({"ok": True, "candidate": cand})
+                return
+
+            if path == "/api/evidence":
+                claim = str(body.get("claim") or "").strip()
+                if not claim:
+                    self._json({"error": "claim is required"}, 400)
+                    return
+                ent = self.state.evidence.post(
+                    claim,
+                    kind=str(body.get("kind") or "note"),
+                    source=str(body.get("source") or "manual"),
+                    confidence=float(body.get("confidence") or 0.5),
+                    refs=body.get("refs")
+                    if isinstance(body.get("refs"), list) else None,
+                    mission_id=str(body.get("mission_id") or ""),
+                    tags=body.get("tags")
+                    if isinstance(body.get("tags"), list) else None,
+                    contradicts=str(body.get("contradicts") or ""))
+                self._json({"ok": True, "entry": ent})
+                return
+
+            if path == "/api/evidence/contradict":
+                ent = self.state.evidence.contradict(
+                    str(body.get("id") or ""),
+                    str(body.get("other") or ""),
+                    note=str(body.get("note") or ""))
+                if ent is None:
+                    self._json({"error": "unknown entry"}, 404)
+                    return
+                self._json({"ok": True, "entry": ent})
+                return
+
+            if path == "/api/evidence/resolve":
+                ent = self.state.evidence.resolve(
+                    str(body.get("id") or ""),
+                    resolution=str(body.get("resolution") or ""),
+                    winner_id=str(body.get("winner_id") or ""),
+                    resolver=str(body.get("resolver") or ""))
+                if ent is None:
+                    self._json({"error": "unknown entry"}, 404)
+                    return
+                self._json({"ok": True, "entry": ent})
                 return
 
             if path == "/api/conversation-memory/exchange":
