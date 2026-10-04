@@ -2975,3 +2975,26 @@ select option {
 .install-offer .bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden}
 .install-offer .bar span{display:block;height:100%;background:var(--blue);transition:width .3s}
 .install-offer.done{border-color:var(--good)}
+
+/* global task bar — pinned strip showing the live task/mission on every page */
+.task-bar{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9000;
+  display:flex;align-items:center;gap:10px;max-width:min(720px,90vw);
+  padding:7px 12px;border:1px solid var(--line2);border-radius:20px;
+  background:color-mix(in srgb,var(--panel2) 92%,transparent);
+  box-shadow:var(--shadow-card);backdrop-filter:blur(6px);
+  font-size:12px;color:var(--text)}
+.task-bar.hidden{display:none}
+.task-bar .tb-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
+  animation:tb-pulse 1.6s ease-in-out infinite;flex:0 0 auto}
+.task-bar.stale .tb-dot{background:var(--warn)}
+.task-bar.waiting .tb-dot{background:var(--warn)}
+.task-bar .tb-label{font-weight:600;white-space:nowrap;color:var(--accent)}
+.task-bar.stale .tb-label{color:var(--warn)}
+.task-bar .tb-meta{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0}
+.task-bar .tb-cancel{flex:0 0 auto;padding:3px 10px;border-radius:12px;
+  border:1px solid var(--line2);background:transparent;color:var(--danger);
+  font-size:11px;cursor:pointer}
+.task-bar .tb-cancel:hover{background:var(--danger-tint)}
+.task-bar .tb-cancel:disabled{opacity:.6;cursor:default}
+@keyframes tb-pulse{0%,100%{opacity:.4}50%{opacity:1}}

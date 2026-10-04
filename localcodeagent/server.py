@@ -3661,6 +3661,24 @@ def _queueable_message(message: str, attachments: list[dict]) -> str:
     return message + "\n\nAttached context:\n" + "\n\n".join(blocks)
 
 
+def _queued_notice(current, position: int) -> str:
+    """Describe what owns the lane so a queued user isn't left guessing —
+    self-repair/background work is named as such, user tasks by prompt."""
+    phase = getattr(current, "phase", "") or ""
+    if phase == "interrupted":
+        phase = "resuming"
+    doing = phase if phase not in {"running", ""} else "working"
+    prompt = " ".join(str(getattr(current, "prompt", "") or "").split())[:90]
+    mission = getattr(current, "mission_id", "")
+    if mission or str(getattr(current, "mode", "")) in {"autonomy", "self_repair"}:
+        label = f"Nexus is {doing} on an autonomous mission"
+    else:
+        label = f"Nexus is {doing}"
+    detail = f": {prompt}" if prompt else ""
+    return (f"{label}{detail}. Your request is queued (position {position}) "
+            "and starts automatically when it finishes.")
+
+
 class Handler(BaseHTTPRequestHandler):
     state: AppState
     web_root: Path
@@ -5800,10 +5818,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._sse_event("ready", {"mode": mode, "queued": True})
                     self._sse_event("task", {"event": "queued", "queue_item": item})
                     self._sse_event("result", {
-                        "content": (
-                            f"Queued behind the running task (position {len(self.state.queue)}). "
-                            "It starts automatically when the current task finishes."
-                        ),
+                        "content": _queued_notice(current, len(self.state.queue)),
                         "queued": True,
                         "queue_item": item,
                         "task": current.as_dict(),
@@ -6000,10 +6015,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     self.state.events.publish("task", {"event": "queued", "queue_item": item})
                     self._json({
-                        "content": (
-                            f"Queued behind the running task (position {len(self.state.queue)}). "
-                            "It starts automatically when the current task finishes."
-                        ),
+                        "content": _queued_notice(current, len(self.state.queue)),
                         "queued": True,
                         "queue_item": item,
                         "task": current.as_dict(),

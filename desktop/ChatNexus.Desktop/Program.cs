@@ -1318,9 +1318,27 @@ internal sealed class MainForm : Form
         {
             var marker = Path.Combine(userDataFolder, "nexus-core-webcache-stamp.txt");
             var backendExe = Path.Combine(_appDir, "backend", "ChatNexus.Backend.exe");
-            var stamp = File.Exists(backendExe)
+            var exeStamp = File.Exists(backendExe)
                 ? File.GetLastWriteTimeUtc(backendExe).Ticks.ToString()
                 : "unknown";
+            // Web assets can update independently of the exe (asset-only
+            // deploys). Fold the newest web file's timestamp into the stamp
+            // so a fresh personality.js/app.js is never masked by a stale
+            // WebView2 disk cache.
+            var webStamp = "none";
+            try
+            {
+                var webDir = Path.Combine(_appDir, "backend", "_internal", "web");
+                if (Directory.Exists(webDir))
+                {
+                    webStamp = Directory.EnumerateFiles(webDir, "*", SearchOption.AllDirectories)
+                        .Select(File.GetLastWriteTimeUtc)
+                        .DefaultIfEmpty(DateTime.MinValue)
+                        .Max().Ticks.ToString();
+                }
+            }
+            catch { }
+            var stamp = exeStamp + "|" + webStamp;
             if (File.Exists(marker) && string.Equals(File.ReadAllText(marker).Trim(), stamp, StringComparison.Ordinal))
             {
                 return;
