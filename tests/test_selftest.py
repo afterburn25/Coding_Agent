@@ -36,10 +36,29 @@ class SelfUpdateValidationTests(unittest.TestCase):
         self.assertTrue(result["ok"], msg=result.get("error") or result.get("log_tail"))
         checks = result["smoke"]["checks"]
         self.assertTrue(checks["status"]["ok"])
-        self.assertTrue(checks["main_ui"]["ok"])
-        self.assertTrue(checks["image_ui"]["ok"])
-        self.assertTrue(checks["research_ui"]["ok"])
-        self.assertTrue(checks["trainer_ui"]["ok"])
+        src = (ROOT / "localcodeagent" / "selftest.py").read_text(
+            encoding="utf-8")
+        server_src = (ROOT / "localcodeagent" / "server.py").read_text(
+            encoding="utf-8")
+        self.assertIn('encoding="utf-8"', src)
+        self.assertIn('errors="replace"', src)
+        self.assertIn('"gh", "run", "view", rid, "--log-failed"',
+                      server_src)
+        self.assertIn('text=True, errors="replace", timeout=25',
+                      server_src)
+        for name in (
+            "main_ui", "image_ui", "research_ui", "trainer_ui",
+            "missions_ui", "projects_ui", "tools_ui", "models_ui",
+            "system_ui", "answers_ui", "settings_ui", "voice_ui",
+            "personality_ui", "health_api", "skills_api", "knowledge_api",
+            "rag_api", "lsp_api", "missions_api", "autonomy_api",
+            "tools_api", "workflows_api", "mcp_api", "jobs_api",
+            "projects_api", "preferences_api", "library_api",
+            "processes_api", "resources_api", "readiness_api",
+            "tasks_api", "activity_api", "queue_api", "stt_api",
+            "nexus_state_api", "briefing_api", "events_bus",
+        ):
+            self.assertTrue(checks[name]["ok"], msg=f"{name}: {checks[name]}")
 
 
 if __name__ == "__main__":

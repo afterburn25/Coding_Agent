@@ -613,8 +613,11 @@ That validator:
 1. runs the full unit suite
 2. creates a resource-safe temporary configuration
 3. launches a **second Nexus Core process** from the edited working tree on a free loopback port
-4. probes `/api/status`, the main Chat UI, Image Studio, and Research Hub
-5. terminates the second process
+4. probes `/api/status`, every primary UI page, the shared SSE event bus,
+   and the workstation APIs for autonomy/missions, tools/plugins, MCP,
+   projects, knowledge/library/preferences, STT, operational state,
+   briefing, tasks/activity/queue, processes/resources, and readiness
+5. terminates the second process with UTF-8-safe log capture
 6. fails verification if any stage is unhealthy
 
 The currently running Nexus Core instance is never replaced during this validation.

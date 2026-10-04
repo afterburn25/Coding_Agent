@@ -1269,7 +1269,7 @@ class AppState:
                      "--limit", "5", "--json",
                      "databaseId,displayTitle,name,conclusion"],
                     cwd=str(self.workspace), capture_output=True,
-                    text=True, timeout=20)
+                    text=True, errors="replace", timeout=20)
                 rows = json.loads(r.stdout) if r.returncode == 0 else []
             except Exception:
                 rows = []
@@ -1283,7 +1283,7 @@ class AppState:
                     lg = _sp.run(
                         ["gh", "run", "view", rid, "--log-failed"],
                         cwd=str(self.workspace), capture_output=True,
-                        text=True, timeout=25)
+                        text=True, errors="replace", timeout=25)
                     if lg.returncode == 0 and lg.stdout:
                         row["log_tail"] = lg.stdout[-4000:]
                 except Exception:

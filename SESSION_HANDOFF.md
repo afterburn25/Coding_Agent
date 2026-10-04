@@ -28,6 +28,12 @@
   covered faster-whisper/PyAV transcription, tree-sitter extraction,
   pylsp round trips, and official MCP servers on both stdio and
   Streamable HTTP transports.
+- The isolated selftest now dogfoods the workstation surface, not just
+  boot: it checks every primary page plus health/skills/knowledge/RAG/LSP,
+  missions/autonomy, tools/workflows/MCP/jobs/projects/preferences/library,
+  processes/resources/readiness/tasks/activity/queue/STT/operational-state/
+  briefing APIs and the shared SSE bus. Its log capture is UTF-8 safe, and
+  CI log probes decode external `gh` output with replacement.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/

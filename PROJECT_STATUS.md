@@ -63,6 +63,11 @@ v0.15.0 deepens the workstation core:
   bounds instead of silently evicting durable work. Mission
   `model_install` jobs cover LLM catalog IDs and image profiles, while
   startup removes orphaned `.part` model downloads before work resumes.
+- **Release-depth dogfooding** — the isolated second-instance validator now
+  covers every primary page and the workstation API surface (autonomy,
+  tools/plugins, MCP, projects, library/preferences, STT, operational
+  state, tasks/activity/queue, readiness/resources), with UTF-8-safe
+  process-log capture and tolerant external CI log decoding.
 
 Verified: **1403 tests** (2 environment skips).
 
