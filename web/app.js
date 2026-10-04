@@ -643,6 +643,31 @@ attachMenu?.addEventListener('click',e=>{const b=e.target.closest('[data-attach]
 document.addEventListener('click',e=>{if(attachMenu&&!attachMenu.hidden&&!e.target.closest('#attachMenu,#attachBtn'))attachMenu.hidden=true;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&attachMenu)attachMenu.hidden=true;});
 attachInput?.addEventListener('change',async()=>{const files=[...attachInput.files||[]];attachInput.value='';for(const f of files){if(pendingAttachments.filter(a=>!a.bad).length>=8){pendingAttachments.push({name:f.name,kind:'file',bad:'limit 8'});continue;}if(f.type.startsWith('image/')){if(f.size>12*1024*1024){pendingAttachments.push({name:f.name,kind:'image',bad:'>12 MB'});continue;}pendingAttachments.push({name:f.name,kind:'image',data_url:await readFileAs(f,'dataURL')});}else{const textLike=f.type.startsWith('text/')||f.type==='application/json'||TEXT_EXT.test(f.name);if(!textLike){pendingAttachments.push({name:f.name,kind:'file',bad:'binary — not inlined'});continue;}if(f.size>400*1024){pendingAttachments.push({name:f.name,kind:'file',bad:'>400 KB'});continue;}pendingAttachments.push({name:f.name,kind:'file',content:await readFileAs(f,'text')});}}renderAttachChips();});
+// >20 lines of user input converts to an attachment automatically —
+// the composer stays compact and the full text arrives as a real
+// attachment on the same user turn. Extension is sniffed from content.
+function _pasteExt(t){
+  const s=t.trim();
+  if(!s)return '.txt';
+  try{JSON.parse(s);return '.json';}catch{}
+  if(/^\s*#\s*include|std::|int\s+main\s*\(/.test(s))return '.cpp';
+  if(/using\s+System|namespace\s+\w+|public\s+(static\s+)?(class|void|string)/.test(s))return '.cs';
+  if(/^\s*(def|class|import|from)\s+\w+|if\s+__name__\s*==|elif\s/.test(s))return '.py';
+  if(/\binterface\s+\w+\s*{|:\s*(string|number|boolean)\b/.test(s)&&/\b(import|export|const|let|type)\b/.test(s))return '.ts';
+  if(/\b(const|let|var|function|=>|console\.log|require\()/.test(s))return '.js';
+  if(/^\s*---|\n\s*[\w."'-]+:\s+\S/.test(s))return '.yaml';
+  if(/^\s*#{1,6}\s+\S|\[[^\]]*\]\([^)]*\)|^\s*[-*]\s+\[[ xX]?\]/m.test(s))return '.md';
+  if(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|\[(INFO|WARN|ERROR|DEBUG)\]|\b(INFO|WARNING|ERROR|DEBUG)\s*:/.test(s))return '.log';
+  return '.txt';
+}
+function _maybeAttachLongInput(){
+  const v=input.value;
+  if(!v||((v.match(/\n/g)||[]).length+1)<=20)return false;
+  const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  pendingAttachments.push({name:`pasted-${stamp}${_pasteExt(v)}`,kind:'file',content:v});
+  input.value='';input.dispatchEvent(new Event('input'));renderAttachChips();return true;
+}
+input?.addEventListener('paste',()=>setTimeout(_maybeAttachLongInput,0));
 async function streamAgent(message,attachments){
   agentStreamActive=true;
   const state=beginAssistantStream();state.requestMessage=message;armVoiceHold(state);
@@ -771,7 +796,7 @@ function nexusAgePhrase(){
   const parts=[y?u(y,'year'):'',m?u(m,'month'):'',d?u(d,'day'):''].filter(Boolean);
   return (parts.length===3?`${parts[0]}, ${parts[1]}, and ${parts[2]}`:parts.join(' and '))+' old';
 }
-form.addEventListener('submit',async e=>{e.preventDefault();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message,'','',atts);input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&!personaActive&&builtinClientReply(message);if(builtin){const nv=window.NexusVoice;let seg=null;if(nv&&nv.enabled&&!nv.muted){try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:builtin})});seg=await r.json();}catch{}}addMessage('assistant',builtin);if(seg&&seg.url){try{nv.enqueue(seg.url,{manual:true});}catch{}}recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+form.addEventListener('submit',async e=>{e.preventDefault();_maybeAttachLongInput();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message,'','',atts);input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&!personaActive&&builtinClientReply(message);if(builtin){const nv=window.NexusVoice;let seg=null;if(nv&&nv.enabled&&!nv.muted){try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:builtin})});seg=await r.json();}catch{}}addMessage('assistant',builtin);if(seg&&seg.url){try{nv.enqueue(seg.url,{manual:true});}catch{}}recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',async e=>{const speak=e.target.closest('[data-speak]');if(speak){const msg=speak.closest('.message');const bubble=msg?.querySelector('.bubble');const text=(bubble?.textContent||'').trim();if(text&&window.NexusVoice){speak.disabled=true;try{await NexusVoice.speak(text);}finally{speak.disabled=false;}}return;}const feedback=e.target.closest('[data-feedback]');if(feedback){feedback.disabled=true;try{await fetch('/api/conversations/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:feedback.dataset.feedback,message_id:feedback.dataset.messageId||''})});feedback.textContent=feedback.dataset.feedback==='up'?'✓':'✕';}catch{}return;}const learn=e.target.closest('[data-learn]');if(learn){learn.disabled=true;try{const res=await fetch('/api/answer-memory/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:learn.dataset.messageId||''})});const d=await res.json();learn.textContent=res.ok&&d.ok?'✓ Learned':'✕';}catch{learn.textContent='✕';}return;}const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
 $('#newChatSmall').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
