@@ -43,6 +43,8 @@ class ArtifactManager:
         self.files_dir.mkdir(exist_ok=True)
         self._lock = threading.RLock()
         self._rows: list[dict[str, Any]] = []
+        # Optional LineageStore — set by AppState after construction.
+        self.lineage = None
         self._load()
 
     def _load(self) -> None:
@@ -73,6 +75,8 @@ class ArtifactManager:
     def register(self, path: str | Path, *, kind: str = "",
                  creator: str = "", mission_id: str = "",
                  task_id: str = "", tool: str = "",
+                 project_id: str = "",
+                 requirement_ids: list[str] | None = None,
                  metadata: dict | None = None,
                  provenance: dict | None = None,
                  store: bool = False) -> dict[str, Any]:
@@ -102,6 +106,8 @@ class ArtifactManager:
             "mission_id": str(mission_id),
             "task_id": str(task_id),
             "tool": str(tool),
+            "project_id": str(project_id),
+            "requirement_ids": [str(r) for r in (requirement_ids or [])][:40],
             "version": ver,
             "created_at": time.time(),
             "metadata": dict(metadata or {}),
@@ -110,7 +116,39 @@ class ArtifactManager:
         with self._lock:
             self._rows.append(row)
             self._save()
+        # Provenance fields become a first-class lineage record when a
+        # LineageStore is attached (set by AppState).
+        if self.lineage is not None:
+            try:
+                contribs = []
+                prov = dict(provenance or {})
+                if tool:
+                    contribs.append({"kind": "tool_output", "ref": tool})
+                for src in list(prov.get("inputs") or [])[:40]:
+                    contribs.append({"kind": "file", "ref": str(src)})
+                for rq in row["requirement_ids"]:
+                    contribs.append({"kind": "requirement", "ref": rq})
+                if creator:
+                    contribs.append({"kind": "worker", "ref": creator})
+                self.lineage.record(
+                    rec_id, target_kind="artifact",
+                    contributors=contribs, project_id=project_id,
+                    mission_id=mission_id, task_id=task_id)
+            except Exception:
+                pass
         return dict(row)
+
+    def versions(self, name: str) -> list[dict]:
+        """All registered versions of a filename, oldest → newest."""
+        with self._lock:
+            rows = [dict(r) for r in self._rows
+                    if r.get("name") == name]
+        return sorted(rows, key=lambda r: (r.get("version") or 0,
+                                           r.get("created_at") or 0))
+
+    def latest(self, name: str) -> dict | None:
+        vs = self.versions(name)
+        return vs[-1] if vs else None
 
     def list(self, *, kind: str = "", mission_id: str = "",
              task_id: str = "", limit: int = 200) -> list[dict]:

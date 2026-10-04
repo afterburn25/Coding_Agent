@@ -380,6 +380,9 @@ class AppState:
         # Measured footprints calibrate resource_fit over static estimates.
         self.runtime.twin = self.twin
         self.artifacts = ArtifactManager(runtime_root / "data" / "artifacts")
+        from .lineage import LineageStore
+        self.lineage = LineageStore(runtime_root / "data" / "lineage.json")
+        self.artifacts.lineage = self.lineage
         self.backups = BackupService(runtime_root)
         self.health = HealthService(runtime_root / "data" / "health.json")
         self.profiles = ProfileManager(runtime_root / "data" / "profiles")
@@ -4219,7 +4222,8 @@ class Handler(BaseHTTPRequestHandler):
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
                           "/api/rag", "/api/eval", "/api/experiments",
-                          "/api/lsp", "/api/backups", "/api/simulate")
+                          "/api/lsp", "/api/backups", "/api/simulate",
+                          "/api/lineage")
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -4235,6 +4239,30 @@ class Handler(BaseHTTPRequestHandler):
                 kind=(q.get("kind") or [""])[0],
                 mission_id=(q.get("mission") or [""])[0],
                 task_id=(q.get("task") or [""])[0])})
+            return True
+        if path.startswith("/api/artifacts/versions/"):
+            name = unquote(path[len("/api/artifacts/versions/"):]).strip("/")
+            if not name:
+                self._json({"error": "artifact name required"}, 400)
+                return True
+            self._json({"name": name,
+                        "versions": self.state.artifacts.versions(name),
+                        "latest": self.state.artifacts.latest(name)})
+            return True
+        if path == "/api/lineage":
+            self._json({"records": self.state.lineage.list(
+                target_kind=(q.get("kind") or [""])[0],
+                project_id=(q.get("project") or [""])[0],
+                mission_id=(q.get("mission") or [""])[0]),
+                "summary": self.state.lineage.summary()})
+            return True
+        if path.startswith("/api/lineage/"):
+            tid = unquote(path[len("/api/lineage/"):]).strip("/")
+            if not tid:
+                self._json({"error": "target id required"}, 400)
+                return True
+            self._json({"target_id": tid,
+                        "records": self.state.lineage.for_target(tid)})
             return True
         if path == "/api/skills":
             self._json({"skills": self.state.skills.list(),
@@ -4296,6 +4324,17 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/lineage":
+            row = self.state.lineage.record(
+                str(body.get("target_id") or ""),
+                target_kind=str(body.get("target_kind") or ""),
+                contributors=list(body.get("contributors") or []),
+                project_id=str(body.get("project_id") or ""),
+                mission_id=str(body.get("mission_id") or ""),
+                task_id=str(body.get("task_id") or ""),
+                note=str(body.get("note") or ""))
+            self._json({"ok": True, "record": row})
             return True
         if path == "/api/simulate":
             from .simulate import simulate_plan

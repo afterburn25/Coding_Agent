@@ -160,8 +160,15 @@
   denies all network action classes inside `AutonomyPolicy.check`;
   per-project egress (`local_only`/`restricted`/...) inherits into
   scoped checks. API: `/api/policies` + mode/offline/request/override/
-  revoke/egress routes. Docs: `docs/POLICIES.md`. Next: lineage,
-  Safe Mode, golden config, RC scorecard, dependency intelligence.
+  revoke/egress routes. Docs: `docs/POLICIES.md`.
+- **Phase 8** — data lineage + artifact versioning (`lineage.py`):
+  bounded `LineageStore` records typed contributors per target;
+  `artifacts.register` emits lineage automatically and now links
+  `project_id`/`requirement_ids`; `versions()`/`latest()` expose full
+  deliverable history; `verify()` still catches silent modification.
+  API: `/api/lineage`, `/api/artifacts/versions/<name>`.
+  Docs: `docs/LINEAGE.md`. Next: Safe Mode, golden config,
+  RC scorecard, dependency intelligence.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1043,7 +1050,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1486 tests` passing (2 environment skips).
+Expected at this checkpoint: `1494 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
