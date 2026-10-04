@@ -244,17 +244,24 @@ class VoiceManager:
     # -- queue --------------------------------------------------------------
     def enqueue(self, task_id: str, text: str, *,
                 preset_id: str | None = None, speed: float = 1.0,
-                priority: bool = False) -> SpeechJob | None:
+                priority: bool = False,
+                vocalize: bool = True) -> SpeechJob | None:
+        """vocalize=False skips vocalization resolution — for
+        system-authored notices whose persona lead-ins are already
+        final text ("Oof — …" must not be re-detected and stripped)."""
         if not self.enabled() or self.muted():
             return None
         text = text.strip()
         if not text:
             return None
-        try:
-            vres = self.vocal.resolve(text, task_id=task_id,
-                                      ctx=self._persona_ctx())
-            text, events = vres.speech_text, vres.events
-        except Exception:
+        if vocalize:
+            try:
+                vres = self.vocal.resolve(text, task_id=task_id,
+                                          ctx=self._persona_ctx())
+                text, events = vres.speech_text, vres.events
+            except Exception:
+                events = []
+        else:
             events = []
         if not text.strip():
             return None

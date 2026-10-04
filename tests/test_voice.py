@@ -387,6 +387,13 @@ class TestVoiceManager(unittest.TestCase):
         self.assertIsNone(self.m.enqueue("t", "text"))
         self.m.set_muted(False)
 
+    def test_enqueue_vocalize_false_preserves_text(self):
+        # Persona notice lead-ins like "Oof — …" must survive verbatim:
+        # re-resolving them could strip the lead-in as a vocalization.
+        job = self.m.enqueue("n1", "Oof — that one fought back.",
+                             vocalize=False)
+        self.assertEqual(job.text, "Oof — that one fought back.")
+
     def test_repeat_last_requeues_spoken_text(self):
         self.assertFalse(self.m.repeat_last())  # nothing spoken yet
         published = []

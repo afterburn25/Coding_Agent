@@ -239,8 +239,9 @@ class _StubVoice:
         self.repeated = 0
         self._repeat_ok = True
 
-    def enqueue(self, task_id, text):
+    def enqueue(self, task_id, text, **kw):
         self.enqueued.append((task_id, text))
+        self.last_vocalize = kw.get("vocalize", True)
 
     def set_muted(self, muted):
         self._muted = bool(muted)
@@ -639,6 +640,15 @@ class SpokenNotices(unittest.TestCase):
         st.voice.set_muted(True)
         res = st._persona_command("say that again")
         self.assertIn("muted", res["ack"].lower())
+
+    def test_notices_bypass_vocalization(self):
+        st = _StubState()
+        st._speak_notice("n1", "completed", "the build")
+        self.assertFalse(st.voice.last_vocalize)
+        st._speak_queue_notice("q1")
+        self.assertFalse(st.voice.last_vocalize)
+        st.speak_greeting("p1", "Hey there.")
+        self.assertTrue(st.voice.last_vocalize)  # authored text still resolves
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

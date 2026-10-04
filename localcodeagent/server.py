@@ -918,7 +918,8 @@ class AppState:
                                   self._persona_notice(
                                       "status",
                                       "Going quiet — text only "
-                                      "from here."))
+                                      "from here."),
+                                  vocalize=False)
                     except Exception:
                         pass
                 v.set_muted(cmd["op"] == "voice_mute")
@@ -3564,7 +3565,7 @@ class AppState:
             line = (f"Sorry — the image didn't finish: {reason}. "
                     "The error card has the details if you want them.")
         try:
-            voice.enqueue(f"image-fail-{job_id}", line)
+            voice.enqueue(f"image-fail-{job_id}", line, vocalize=False)
         except Exception:
             pass
 
@@ -3730,7 +3731,7 @@ class AppState:
                 why = REASON_TEXT.get(reason)
                 if why:
                     line = f"{line} {why}."
-            voice.enqueue(f"queue-{item_id}", line)
+            voice.enqueue(f"queue-{item_id}", line, vocalize=False)
         except Exception:
             pass
 
@@ -3753,7 +3754,7 @@ class AppState:
         if not line:
             return
         try:
-            voice.enqueue(f"notice-{dedup_id}", line)
+            voice.enqueue(f"notice-{dedup_id}", line, vocalize=False)
         except Exception:
             pass
 
