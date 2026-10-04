@@ -59,6 +59,22 @@ class ExpandedVocabulary(unittest.TestCase):
                               ctx=_ctx()).speech_text
             self.assertIn(rendered, out.lower(), f"{tok!r} -> {out!r}")
 
+    def test_literal_phrases_are_not_tokens(self):
+        # Literal-word reactions ("no way", "fair enough") must NOT be
+        # detected as vocalizations — their render equals the words
+        # anyway, and a dropped token would eat real text.
+        eng = _engine()
+        for prose in ("No way! It actually worked.",
+                      "Heh, fair enough.",
+                      "Oh snap, it compiled.",
+                      "Oh well, moving on.",
+                      "Wait, what?"):
+            res = eng.resolve(prose, ctx=_ctx())
+            styles = {d.get("style") for d in res.decisions}
+            self.assertFalse(
+                {"no_way", "fair_enough", "oh_snap", "oh_well",
+                 "wait_what"} & styles, f"{prose!r} -> {styles}")
+
     def test_new_stage_directions(self):
         eng = _engine()
         for stage in ("*smirks*", "(nods slowly)", "*perks up*",

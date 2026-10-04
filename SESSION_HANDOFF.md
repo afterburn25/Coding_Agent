@@ -203,7 +203,7 @@
   carry task/criteria/context/capability allowlists (intersected with
   real tools) and TTL expiry. API: `/api/trends`, `/api/cleanup`,
   `/api/benchmarks`, `/api/specialists`. Docs: `docs/HEALTH_OPS.md`.
-  Milestone Phases 1–12 complete at 1531 tests. Persona-depth milestone (v0.16.0) complete at 1578 tests. Persona social-continuity milestone (v0.17.0) complete at 1637 tests. Voice/action-notice polish pass (v0.18.0) complete at 1694 tests.
+  Milestone Phases 1–12 complete at 1531 tests. Persona-depth milestone (v0.16.0) complete at 1578 tests. Persona social-continuity milestone (v0.17.0) complete at 1637 tests. Voice/action-notice polish pass (v0.18.0) complete at 1695 tests.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1085,7 +1085,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1694 tests` passing (2 environment skips).
+Expected at this checkpoint: `1695 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
