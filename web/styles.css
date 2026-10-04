@@ -2963,3 +2963,15 @@ select option {
     background:var(--panel);
   }
 }
+
+/* Inline "missing tool → install" offer cards in chat. */
+.install-offer{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin:8px 0;background:var(--panel2);max-width:560px}
+.install-offer .offer-title{font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px}
+.install-offer .offer-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0}
+.install-offer .offer-info{min-width:0}
+.install-offer .offer-info small{display:block;color:var(--text-dim);font-size:11px}
+.install-offer .offer-progress{margin-top:8px}
+.install-offer .offer-progress .offer-state{display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px}
+.install-offer .bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden}
+.install-offer .bar span{display:block;height:100%;background:var(--blue);transition:width .3s}
+.install-offer.done{border-color:var(--good)}

@@ -276,9 +276,28 @@
   }
 
   function wire() {
+    // Clicking a preset auditions its *saved* form — the working copy may
+    // carry unsaved edits, so samples always resolve by preset_id.
+    async function samplePreset(id) {
+      const status = $('#previewStatus');
+      status.textContent = 'Synthesizing sample…';
+      try {
+        const out = await api('/api/voice/preview', {
+          preset_id: id, text: $('#previewText').value,
+        });
+        if (out.url) {
+          lastSegment = out.segment_id;
+          NexusVoice.enqueue(out.url, { preview: true });
+          status.textContent = `${out.seconds}s`;
+        } else {
+          status.textContent = out.error || 'sample failed';
+        }
+      } catch (e) { status.textContent = 'sample failed: ' + e.message; }
+      loadStatus();
+    }
     $('#presetList').addEventListener('click', e => {
       const el = e.target.closest('.vp');
-      if (el) selectPreset(el.dataset.id);
+      if (el) { selectPreset(el.dataset.id); samplePreset(el.dataset.id); }
     });
     ['pitch', 'tempo', 'eqWarmth', 'eqPresence', 'eqAir', 'exciter', 'compRatio',
       'synthetic', 'neuralMix', 'glassMix', 'microMix', 'stereoWidth',

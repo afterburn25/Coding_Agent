@@ -20,6 +20,7 @@ class ComfyRuntimeStatus:
     pid: int | None = None
     managed: bool = False
     healthy: bool = False
+    installed: bool = True
     error: str = ""
     log_path: str = ""
     restarts: int = 0
@@ -31,6 +32,7 @@ class ComfyRuntimeStatus:
             "pid": self.pid,
             "managed": self.managed,
             "healthy": self.healthy,
+            "installed": self.installed,
             "error": self.error,
             "log_path": self.log_path,
             "restarts": self.restarts,
@@ -295,6 +297,8 @@ class ComfyUIRuntime:
     def probe(self) -> dict:
         healthy, detail = self.backend.health()
         self.status.healthy = healthy
+        directory, _python = self.discover()
+        self.status.installed = directory is not None
         if self._process and self._process.poll() is not None:
             self.status.state = "error"
             self.status.pid = None

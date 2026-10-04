@@ -115,6 +115,19 @@
     renderCategories();
     renderChips();
     renderGrid();
+    // Deep links — /tools.html?tool=<id|name> from install offers in chat
+    // or the Image workspace land on the matching card preselected.
+    const wanted = new URLSearchParams(location.search).get("tool");
+    if (wanted) {
+      const match = tools.find((t) => t.id === wanted || t.name === wanted);
+      if (match) {
+        selectedTool = match.name;
+        detailTab = "overview";
+        renderDetail();
+        history.replaceState(null, "", location.pathname);
+        document.querySelector(`.tcard[data-tool="${CSS.escape(match.name)}"]`)?.scrollIntoView({ block: "center" });
+      }
+    }
   }
 
   async function loadProcesses() {

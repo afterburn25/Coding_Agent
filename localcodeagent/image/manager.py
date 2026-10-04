@@ -29,7 +29,8 @@ def _atomic_json_write(path: Path, payload: Any) -> None:
 class ImageManager:
     """Coordinates image routing, queue/history, workflows, profiles and the local backend."""
 
-    def __init__(self, *, base_dir: Path, models: list[ImageModelProfile], runtime=None, config=None, workspace: Path | None = None) -> None:
+    def __init__(self, *, base_dir: Path, models: list[ImageModelProfile], runtime=None, config=None, workspace: Path | None = None,
+                 comfy_installer=None, job_lookup=None) -> None:
         self.base_dir = base_dir.resolve()
         self.config = config
         self.runtime = runtime
@@ -64,6 +65,19 @@ class ImageManager:
         self.on_change = None
         self.last_activity = time.time()
         self._resumable: list[str] = []
+        # Bundled "install everything" flow: ComfyUI runtime + every configured
+        # image model, driven by one persisted record so an app restart resumes
+        # instead of leaving the workspace half-provisioned.
+        self._comfy_installer = comfy_installer  # () -> {"ok","job_id","error"}
+        self._job_lookup = job_lookup            # (job_id) -> job dict | None
+        self.on_setup_change = None
+        # Fired when a generation request arrives with no ComfyUI anywhere —
+        # the server uses it to surface a one-click install offer.
+        self.on_missing_backend = None
+        self._setup_path = self.data_dir / "setup.json"
+        self._setup_lock = threading.RLock()
+        self._setup_thread: threading.Thread | None = None
+        self._setup = self._load_setup()
         self._load_jobs()
         self.resume_interrupted_jobs()
 
@@ -190,6 +204,173 @@ class ImageManager:
             except Exception:
                 pass
 
+    # -- bundled setup (ComfyUI + all image models) -------------------------
+
+    _SETUP_ACTIVE = {"installing_backend", "installing_models"}
+
+    def _load_setup(self) -> dict[str, Any]:
+        try:
+            row = json.loads(self._setup_path.read_text(encoding="utf-8"))
+            return row if isinstance(row, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_setup(self) -> None:
+        try:
+            _atomic_json_write(self._setup_path, self._setup)
+        except OSError:
+            pass
+
+    def _update_setup(self, **fields: Any) -> None:
+        with self._setup_lock:
+            base = dict(self._setup or {})
+            base.update(fields)
+            base["updated_at"] = time.time()
+            base.setdefault("model_ids", [m.id for m in self.router.models])
+            self._setup = base
+            self._save_setup()
+        if self.on_setup_change is not None:
+            try:
+                self.on_setup_change(self.setup_state())
+            except Exception:
+                pass
+
+    def _job_state(self, job_id: str | None) -> dict[str, Any] | None:
+        if not job_id or self._job_lookup is None:
+            return None
+        try:
+            return self._job_lookup(job_id)
+        except Exception:
+            return None
+
+    def setup_state(self) -> dict[str, Any]:
+        """Live view of the bundled install — persisted phase plus per-model
+        and ComfyUI-download progress for the progress bar."""
+        with self._setup_lock:
+            row = dict(self._setup or {})
+        row.setdefault("state", "idle")
+        backend_dir, _py = self.backend_runtime.discover()
+        comfy_job = self._job_state(row.get("comfy_job_id"))
+        wanted = set(row.get("model_ids") or [m.id for m in self.router.models])
+        live = {j["model_id"]: j for j in self.library.install_jobs()
+                if j.get("model_id") in wanted}
+        models = []
+        for profile in self.router.models:
+            installed = bool(self.library.verify_model(profile).get("installed"))
+            job = live.get(profile.id)
+            models.append({
+                "id": profile.id,
+                "display_name": profile.display_name or profile.id,
+                "installed": installed,
+                "state": (job or {}).get("state") or ("installed" if installed else "pending"),
+                "progress": (job or {}).get("progress", 0.0) if not installed else 1.0,
+                "current_file": (job or {}).get("current_file") or "",
+                "error": (job or {}).get("error") or "",
+            })
+        # Overall: backend phase 0–40%, model phase 40–100%.
+        backend_frac = 1.0 if backend_dir else float((comfy_job or {}).get("progress") or 0.0)
+        model_frac = (sum(m["progress"] for m in models) / len(models)) if models else 1.0
+        row["backend_installed"] = backend_dir is not None
+        row["comfy_job"] = comfy_job
+        row["models"] = models
+        row["progress"] = min(1.0, 0.4 * backend_frac + 0.6 * model_frac)
+        if row["state"] == "done" or (backend_dir and all(m["installed"] for m in models)):
+            row["progress"] = 1.0
+        return row
+
+    def start_setup(self) -> dict[str, Any]:
+        """Kick off (or re-attach to) the bundled ComfyUI + models install."""
+        with self._setup_lock:
+            alive = (self._setup or {}).get("state") in self._SETUP_ACTIVE \
+                and self._setup_thread is not None and self._setup_thread.is_alive()
+            if alive:
+                return self.setup_state()
+            self._setup = {"state": "installing_backend", "error": "",
+                           "started_at": time.time(), "updated_at": time.time(),
+                           "model_ids": [m.id for m in self.router.models]}
+            self._save_setup()
+            self._setup_thread = threading.Thread(target=self._run_setup, daemon=True)
+            self._setup_thread.start()
+            return self.setup_state()
+
+    def resume_setup(self) -> None:
+        """An interrupted setup re-enters the supervisor on boot — every phase
+        re-derives from disk state, so restarts converge instead of restart.
+        Deferred until the server has wired the installer/job callables."""
+        if (self._setup or {}).get("state") in self._SETUP_ACTIVE:
+            self._setup_thread = threading.Thread(target=self._run_setup, daemon=True)
+            self._setup_thread.start()
+
+    def _run_setup(self) -> None:
+        try:
+            directory, _python = self.backend_runtime.discover()
+            if not directory:
+                if self._comfy_installer is None:
+                    raise RuntimeError("ComfyUI is not installed and no installer is available.")
+                job_id = str((self._setup or {}).get("comfy_job_id") or "")
+                live = self._job_state(job_id)
+                if live is not None and live.get("state") in {"queued", "running", "preparing"}:
+                    outcome = {"ok": True, "job_id": job_id}
+                else:
+                    outcome = self._comfy_installer() or {}
+                if not outcome.get("ok"):
+                    raise RuntimeError(str(outcome.get("error") or "ComfyUI install could not be started"))
+                job_id = str(outcome.get("job_id") or job_id)
+                self._update_setup(state="installing_backend", comfy_job_id=job_id)
+                deadline = time.time() + 6 * 3600
+                while time.time() < deadline:
+                    live = self._job_state(job_id)
+                    if live is None:
+                        if self.backend_runtime.discover()[0]:
+                            break
+                        time.sleep(2)
+                        continue
+                    state = str(live.get("state") or "")
+                    if state == "completed":
+                        break
+                    if state in {"failed", "cancelled"}:
+                        raise RuntimeError(str(live.get("error") or "ComfyUI install was cancelled"))
+                    self._update_setup()
+                    time.sleep(2)
+                else:
+                    raise RuntimeError("ComfyUI install timed out")
+                if not self.backend_runtime.discover()[0]:
+                    raise RuntimeError("ComfyUI install finished but the runtime was not detected on disk")
+
+            self._update_setup(state="installing_models")
+            wanted = set((self._setup or {}).get("model_ids") or [m.id for m in self.router.models])
+            for profile in self.router.models:
+                if profile.id not in wanted:
+                    continue
+                if self.library.verify_model(profile).get("installed"):
+                    continue
+                self.library.start_install(profile)
+            deadline = time.time() + 12 * 3600
+            while time.time() < deadline:
+                live_jobs = {j["model_id"]: j for j in self.library.install_jobs()
+                             if j.get("model_id") in wanted}
+                if not any(j.get("state") in {"queued", "downloading"} for j in live_jobs.values()):
+                    break
+                self._update_setup()
+                time.sleep(2)
+            else:
+                raise RuntimeError("Image model downloads timed out")
+            live_jobs = {j["model_id"]: j for j in self.library.install_jobs()
+                         if j.get("model_id") in wanted}
+            failures = []
+            for profile in self.router.models:
+                if profile.id not in wanted:
+                    continue
+                if not self.library.verify_model(profile).get("installed"):
+                    job = live_jobs.get(profile.id) or {}
+                    failures.append(f"{profile.display_name or profile.id}: "
+                                    f"{job.get('error') or 'required components missing'}")
+            if failures:
+                raise RuntimeError("model installs incomplete — " + "; ".join(failures))
+            self._update_setup(state="done", error="")
+        except Exception as exc:
+            self._update_setup(state="failed", error=f"{type(exc).__name__}: {exc}")
+
     def summary(self) -> dict[str, Any]:
         backend_runtime = self.backend_runtime.probe()
         healthy = bool(backend_runtime.get("healthy"))
@@ -202,6 +383,7 @@ class ImageManager:
             "model_status": self.library.verify_all(self.router.models),
             "loras": self.library.list_loras(),
             "installs": self.library.install_jobs(),
+            "setup": self.setup_state(),
             "workflows": self.workflows.list(),
             "comfy_extra_model_paths": str(self.comfy_extra_paths),
             "jobs": [j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:25]],
@@ -311,6 +493,16 @@ class ImageManager:
         allowed, reason = self.policy.check(request.prompt, real_person=real_person, subject=request.subject_profile)
         if not allowed:
             raise PermissionError(reason)
+        if self.backend_runtime.discover()[0] is None and not self._backend_up():
+            if self.on_missing_backend is not None:
+                try:
+                    self.on_missing_backend()
+                except Exception:
+                    pass
+            raise RuntimeError(
+                "ComfyUI is not installed — image generation cannot run without it. "
+                "An install offer was shown to the user; tell them they can install "
+                "ComfyUI and all image models from it, or from the Tools page.")
         decision=self.router.choose(request)
         # Probe once up front so the UI/copy can distinguish "ComfyUI is
         # already up" from a cold start that may take minutes.

@@ -27,6 +27,8 @@ def describe_image_error(exc: BaseException) -> dict[str, Any]:
         return result("cuda_out_of_memory", "The GPU ran out of memory while processing this image. Try a lower resolution, fewer images, a smaller/quantized model, or a more aggressive VRAM cleanup mode.")
     if any(x in low for x in ("no space left on device", "disk full", "insufficient disk")):
         return result("insufficient_disk_space", "There is not enough free disk space to complete the image operation. Free some storage and try again.")
+    if any(x in low for x in ("comfyui is not installed", "comfyui was not found")):
+        return result("backend_not_installed", "ComfyUI — the local image engine — is not installed yet. Nexus can install it together with the image models.")
     if any(x in low for x in ("comfyui backend is offline", "connection refused", "failed to establish a new connection", "backend offline")):
         return result("backend_offline", "The local ComfyUI image backend is offline. Start it from the Image workspace and try again.")
     if "vae" in low and any(x in low for x in ("missing", "not found", "does not exist", "invalid")):

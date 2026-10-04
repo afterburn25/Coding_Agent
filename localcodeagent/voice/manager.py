@@ -290,7 +290,10 @@ class VoiceManager:
             p2 = self.presets.get(str(pid))
             if p2 is not None:
                 preset = p2
-        changes = {k: vmap[k] for k in ("pitch_semitones", "output_gain_db")
+        # Delivery map values are DELTAS — they ride on top of the preset's
+        # own pitch/gain so the chosen voice's signature is never wiped out.
+        changes = {k: getattr(preset, k) + float(vmap[k])
+                   for k in ("pitch_semitones", "output_gain_db")
                    if isinstance(vmap.get(k), (int, float)) and vmap[k]}
         if changes:
             raw = preset.as_dict()

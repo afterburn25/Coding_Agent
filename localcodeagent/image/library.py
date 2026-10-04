@@ -288,6 +288,12 @@ class ImageAssetLibrary:
         specs=[s for s in self._component_rows(profile) if s.get("url") and (bool(s.get("required", True)) or bool(s.get("install_default", False)))]
         if not specs:
             raise RuntimeError(f"Model '{profile.id}' has no downloadable components configured.")
+        with self._lock:
+            for existing in self._install_jobs.values():
+                if existing.get("model_id") == profile.id and existing.get("state") in {"queued", "downloading"}:
+                    # A live job for this model already owns the .part files —
+                    # a second downloader would corrupt the same targets.
+                    return dict(existing)
         job={
             "id":uuid.uuid4().hex,"model_id":profile.id,"state":"queued","progress":0.0,
             "current_file":"","created_at":time.time(),"finished_at":None,"error":"","results":[],

@@ -521,7 +521,8 @@ function handleAgentStreamEvent(name,data,state){
   }
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
-  if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';scrollChat();return;}
+  if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
+  if(name==='install_offer'){renderInstallOffer(data,state);return;}
   if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
   if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
 }
@@ -533,6 +534,40 @@ function attachRetry(state){
   btn.type='button';btn.className='mini-button retry-send';btn.textContent='↻ Retry';
   btn._retryMessage=state.requestMessage;
   state.wrap.appendChild(btn);
+}
+async function speakInstallLine(t){try{const out=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}).then(r=>r.json());if(out&&out.url)new Audio(out.url).play().catch(()=>{});}catch{}}
+async function renderInstallOffer(data,state){
+  const tools=(data&&data.tools)||[];if(!tools.length)return;
+  const card=document.createElement('div');card.className='install-offer';
+  card.innerHTML=`<div class="offer-title">Nexus needs a tool that isn't installed</div>`+tools.map((t,i)=>`<div class="offer-row"><div class="offer-info"><strong>${esc(t.name||t.tool)}</strong>${t.size_bytes?` <small>· ${(t.size_bytes/1e9).toFixed(1)} GB download</small>`:''}${t.description?`<small>${esc(t.description)}</small>`:''}</div><button class="mini-button" data-offer-idx="${i}">Install</button><a class="mini-button" href="/tools.html?tool=${encodeURIComponent(t.tool||'')}">Tools page</a></div>`).join('')+`<div class="offer-progress" hidden><small class="offer-state">Installing…</small><div class="bar"><span style="width:0%"></span></div></div>`;
+  card._tools=tools;
+  ((state&&state.wrap)||chat).appendChild(card);
+  scrollChat();
+  const names=tools.map(t=>t.name||t.tool).join(', ');
+  speakInstallLine(`This needs ${names}, which is not installed yet. Want me to install it?`);
+}
+async function pollOfferInstall(card,t,res,stateEl,bar){
+  const deadline=Date.now()+12*3600*1000;
+  while(Date.now()<deadline){
+    await new Promise(r=>setTimeout(r,2000));
+    try{
+      if(t.endpoint==='/api/image/setup'){
+        const d=await fetch('/api/image').then(r=>r.json());const s=d.setup||{};
+        bar.style.width=Math.round((s.progress||0)*100)+'%';
+        stateEl.textContent=s.state==='installing_backend'?`Downloading ComfyUI — ${Math.round(((s.comfy_job||{}).progress||0)*100)}%`:(s.state==='installing_models'?'Downloading image models…':String(s.state||'working'));
+        if(s.state==='done'){stateEl.textContent='Installed — ready to use.';card.classList.add('done');speakInstallLine(`${t.name||'The tool'} is installed and ready.`);return;}
+        if(s.state==='failed'){stateEl.textContent='Setup failed: '+(s.error||'unknown error');return;}
+      }else{
+        const d=await fetch('/api/jobs').then(r=>r.json());
+        const j=(((d&&d.jobs)||[])).find(x=>x.id===res.job_id);
+        if(!j)continue;
+        bar.style.width=Math.round((j.progress||0)*100)+'%';
+        stateEl.textContent=String((j.metadata&&j.metadata.phase)||j.detail||j.state);
+        if(j.state==='completed'){stateEl.textContent='Installed — ready to use.';card.classList.add('done');speakInstallLine(`${t.name||'The tool'} is installed and ready.`);return;}
+        if(j.state==='failed'||j.state==='cancelled'){stateEl.textContent='Install failed: '+(j.error||'');return;}
+      }
+    }catch{}
+  }
 }
 function parseSseBlock(block,state){
   const lines=block.split(/\r?\n/);let name='message';const data=[];
@@ -556,6 +591,7 @@ function connectAgentEvents(){
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
+    on('install_offer',d=>{renderInstallOffer(d,null);});
     on('activity',d=>{upsertActivityRow(d.activity||d);});
     on('job',d=>{
       const j=d.job||d;const jid=String(j.id||'');if(!jid)return;
@@ -660,6 +696,7 @@ async function undoTask(taskId){if(!confirm('Restore files to their state before
 async function cancelCommand(taskId){try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`command-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');}catch(e){addMessage('assistant',`Command stop error: ${e.message}`);}}
 async function cancelTask(taskId){if(!confirm('Stop this task? The agent will halt at the next checkpoint; file changes stay in place.'))return;try{const res=await fetch('/api/jobs/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:`task-${taskId}`})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Cancel failed');appendLiveActivity(`TASK · ${taskId} · cancelled`);}catch(e){addMessage('assistant',`Cancel error: ${e.message}`);}}
 $('#taskPanel').addEventListener('click',e=>{const a=e.target.closest('[data-approve]');if(a){resumeTask(a.dataset.approve==='1');return;}const r=e.target.closest('[data-recover]');if(r){recoverTask(r.dataset.recover);return;}const u=e.target.closest('[data-undo]');if(u){undoTask(u.dataset.undo);return;}const c=e.target.closest('[data-cancel-task]');if(c)cancelTask(c.dataset.cancelTask);});
+chat.addEventListener('click',async e=>{const b=e.target.closest('[data-offer-idx]');if(!b||b.disabled)return;const card=b.closest('.install-offer');const t=card?._tools?.[Number(b.dataset.offerIdx)];if(!t)return;b.disabled=true;b.textContent='Installing…';const prog=card.querySelector('.offer-progress');const stateEl=card.querySelector('.offer-state');const bar=card.querySelector('.bar span');if(prog)prog.hidden=false;try{const body=t.endpoint==='/api/image/setup'?{}:{tool:t.tool,approve:true};const res=await fetch(t.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());if(res.needs_approval){stateEl.textContent='Waiting for approval…';}else if(res.error&&!res.ok){stateEl.textContent='Install error: '+res.error;b.disabled=false;b.textContent='Install';return;}pollOfferInstall(card,t,res,stateEl,bar);}catch(err){stateEl.textContent='Install error: '+err.message;b.disabled=false;b.textContent='Install';}});
 chat.addEventListener('click',e=>{const b=e.target.closest('button.retry-send');if(!b||b.disabled)return;const msg=b._retryMessage;if(!msg)return;b.disabled=true;b.textContent='Retrying…';input.value=msg;form.requestSubmit();});
 chat.addEventListener('click',e=>{const t=e.target.closest('.gallery-thumb');if(!t)return;const gal=t.closest('.image-gallery');if(!gal)return;gal._selected={jid:t.dataset.jid,oidx:Number(t.dataset.oidx??-1)};gal._userPicked=true;syncGalleryMain(gal);});
 $('#recentTasks').addEventListener('click',async e=>{const row=e.target.closest('[data-task-id]');if(!row)return;const t=recentTaskCache[row.dataset.taskId];if(!t)return;lastTask=t;renderTask(t);renderDiff(t);try{const lr=await fetch('/api/task-log?task_id='+encodeURIComponent(t.id));if(!lr.ok)return;const lg=await lr.json();const log=String(lg.log||'');if(!log.trim())return;_activityInit();const blocks=connectAgentEvents.replayBlocks||(connectAgentEvents.replayBlocks={});for(const k in blocks)if(!blocks[k].isConnected)delete blocks[k];let block=blocks[t.id];if(!block){block=document.createElement('div');block.className='term-block';block.innerHTML='<div class="term-head"><span class="term-prompt">#</span><code class="term-cmd">task log '+esc(t.id)+'</code><span class="term-state">'+esc(t.status)+'</span></div><pre class="term-out"></pre>';blocks[t.id]=block;}if(!block.isConnected)activity.appendChild(block);block.querySelector('.term-out').textContent=log;setUtilityPanel('terminal');activity.scrollTop=activity.scrollHeight;restoreActivityTimeline(t.id);}catch{}});

@@ -24,7 +24,7 @@ from .config import AgentConfig, ModelProfile, load_config
 from .models.router import ModelRouter
 from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
-from .runtime.setup import suggest_model_profiles, write_suggested_models
+from .runtime.setup import apply_detected_models, suggest_model_profiles, write_suggested_models
 from .research import ResearchCoordinator
 from .permissions import PermissionManager
 from .jobs import JobManager
@@ -102,6 +102,11 @@ class AppState:
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
         self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
+        # Autodetect GGUFs on disk before the router exists — profiles are
+        # added for unconfigured files and dead ones disabled, so routing
+        # always targets models that are actually installed.
+        if self._autodetect_model_files(config):
+            self.runtime.reconfigure_models(config)
         hw = self.runtime.hardware
         gpu_label = ", ".join(g.name for g in getattr(hw, "gpus", []) or []) or "CPU only"
         self._boot(
@@ -121,7 +126,11 @@ class AppState:
             resource_advisor=self.runtime.resource_fit,
             performance_advisor=self.model_telemetry.score,
         )
-        self.images = ImageManager(base_dir=runtime_root, models=config.image_models, runtime=self.runtime, config=config, workspace=self.workspace)
+        self.images = ImageManager(
+            base_dir=runtime_root, models=config.image_models, runtime=self.runtime,
+            config=config, workspace=self.workspace,
+            comfy_installer=lambda: self.install_tool("comfyui", approve=True),
+            job_lookup=lambda jid: self.jobs.get(jid).as_dict())
         self._boot(30, "RESTORING · TASK QUEUE", "Recovering queued or interrupted work")
         self.tasks = TaskStore(self.workspace)
         from .workqueue import WorkQueue
@@ -247,6 +256,9 @@ class AppState:
         self._stream_sinks: list = []  # live chat SSE queues that also want voice events
         self.jobs.on_change = make_emitter(self.events, "job")
         self.images.on_change = make_emitter(self.events, "image_job")
+        self.images.on_setup_change = make_emitter(self.events, "image_setup")
+        self.images.on_missing_backend = lambda: self._publish_install_offer(
+            ["comfyui"], capability="image_generation")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
         _process_bus_emit = make_emitter(self.events, "process")
@@ -426,6 +438,9 @@ class AppState:
             manifests_dir, self.tools, workspace=self.workspace, install_root=runtime_root)
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
+        # tool_downloads/jobs exist now — safe to re-enter a setup that was
+        # mid-flight when the app last exited.
+        self.images.resume_setup()
         from .tools.updates import ToolUpdateChecker
         self.tool_updates = ToolUpdateChecker(runtime_root)
         self.tools.update_lookup = self.tool_updates.info
@@ -453,6 +468,10 @@ class AppState:
             arguments = args.get("arguments") if isinstance(args.get("arguments"), dict) else {}
             outcome = self.tool_router.execute(
                 capability, arguments, approved=bool(args.get("approved", False)))
+            if outcome.get("error") == "tools_not_installed":
+                self._publish_install_offer(
+                    [m.get("tool") for m in outcome.get("missing") or [] if m.get("installable")],
+                    capability=capability)
             return json.dumps(outcome, ensure_ascii=False, default=str)[:20000]
 
         def find_tools(args: dict[str, Any]) -> str:
@@ -2169,9 +2188,58 @@ class AppState:
 
         threading.Thread(target=_worker, name="runtime-auto-tune", daemon=True).start()
 
+    def _autodetect_model_files(self, config: AgentConfig) -> dict:
+        """Scan the models dir and merge discovered GGUFs into config.models.
+
+        Newly installed files (installer downloads, Tools page, manual drops)
+        get tier-matched profiles automatically; profiles whose file vanished
+        are disabled so the router never picks a dead endpoint. Changes are
+        persisted back to config.json.
+        """
+        try:
+            changes = apply_detected_models(
+                config.models, self.runtime.inventory(), self.runtime.base_dir)
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        if any(changes.values()):
+            self._persist_model_changes(config)
+            try:
+                self.events.publish(
+                    "model", {"event": {"type": "models_autodetected",
+                                        "changes": changes}})
+            except Exception:
+                pass
+        return changes
+
+    def _persist_model_changes(self, config: AgentConfig) -> None:
+        """Write the detected model list back to config.json while keeping
+        every other key and any unknown per-model fields intact."""
+        try:
+            raw: dict = {}
+            if self.config_path.exists():
+                raw = json.loads(
+                    self.config_path.read_text(encoding="utf-8") or "{}")
+                if not isinstance(raw, dict):
+                    raw = {}
+            existing = {
+                str(m.get("id")): m
+                for m in (raw.get("models") or []) if isinstance(m, dict)}
+            merged = []
+            for m in config.models:
+                row = dict(existing.get(m.id) or {})
+                row.update(asdict(m))
+                merged.append(row)
+            raw["models"] = merged
+            atomic_write_text(
+                self.config_path,
+                json.dumps(raw, indent=2, ensure_ascii=False))
+        except Exception:
+            pass
+
     def reload_model_configuration(self) -> dict:
         """Reload model profiles without allowing config.json to bypass a protected Brain."""
         config = load_config(self.config_path if self.config_path.exists() else None)
+        self._autodetect_model_files(config)
         if self.nexus_brain.initialized:
             # Once creator-protected state exists, mutable config cannot disable,
             # relocate, or shrink it. Signed Brain controls stay authoritative.
@@ -3224,6 +3292,43 @@ class AppState:
         raw.update(updates)
         atomic_write_text(self.config_path, json.dumps(raw, indent=2, ensure_ascii=False))
 
+    def _publish_install_offer(self, tool_ids: list, *, capability: str = "") -> None:
+        """Emit an install_offer bus event so chat renders a one-click
+        Install card with live progress instead of a plain-text refusal."""
+        offers = []
+        for tid in tool_ids:
+            tid = str(tid or "").strip()
+            if not tid:
+                continue
+            try:
+                man = self.tools.manifest(tid)
+            except Exception:
+                man = {}
+            install = man.get("install") or {}
+            offers.append({
+                "tool": tid,
+                "name": str(man.get("name") or tid),
+                "description": str(man.get("description") or "")[:240],
+                "size_bytes": int(install.get("size_bytes") or 0),
+                # ComfyUI is special-cased: installing it pulls the full image
+                # stack (all configured models) in one step.
+                "endpoint": "/api/image/setup" if tid == "comfyui" else "/api/tools/install",
+            })
+        if not offers:
+            return
+        payload = {"capability": capability, "tools": offers}
+        try:
+            self.events.publish("install_offer", payload)
+        except Exception:
+            pass
+        # Live chat streams have their own SSE queue — publish() alone only
+        # reaches the global /api/events feed, which chat ignores mid-turn.
+        for sink in list(getattr(self, "_stream_sinks", [])):
+            try:
+                sink.put({"type": "install_offer", **payload})
+            except Exception:
+                pass
+
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.
 
@@ -4236,8 +4341,19 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     rawp = base.as_dict()
                     allowed = VoicePreset.__dataclass_fields__
-                    rawp.update({k: v for k, v in overlay.items()
-                                 if k in allowed})
+                    # Overlay values are delivery DELTAS — pitch/gain add to
+                    # the preset, tempo multiplies it — so the preset's own
+                    # voice signature survives every overlay.
+                    for k, v in overlay.items():
+                        if k not in allowed:
+                            continue
+                        if k in ("pitch_semitones", "output_gain_db") \
+                                and isinstance(v, (int, float)):
+                            rawp[k] = rawp.get(k, 0) + v
+                        elif k == "tempo" and isinstance(v, (int, float)):
+                            rawp[k] = rawp.get(k, 1.0) * v
+                        else:
+                            rawp[k] = v
                     rawp["id"] = "_preview_overlay"
                     rawp["official"] = False
                     preset = VoicePreset.from_dict(rawp)
@@ -5365,6 +5481,15 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/image/models/verify":
                 self._json({"ok": True, "models": self.state.images.verify_models(deep_hash=bool(body.get("deep_hash", False)))})
+                return
+
+            if path == "/api/image/setup":
+                try:
+                    result = self.state.images.start_setup()
+                except Exception as exc:
+                    self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 500)
+                    return
+                self._json({"ok": True, "setup": result})
                 return
 
             if path == "/api/image/models/install":

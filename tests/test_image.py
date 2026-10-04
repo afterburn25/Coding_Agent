@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -21,6 +22,14 @@ from localcodeagent.image.workflow import WorkflowManager
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _stub_comfy(root: Path) -> None:
+    """A discoverable-but-not-running ComfyUI — satisfies the installed check
+    so create_job still exercises the offline/backend_starting paths."""
+    comfy = root / "ComfyUI"
+    comfy.mkdir(exist_ok=True)
+    (comfy / "main.py").write_text("# stub", encoding="utf-8")
 
 
 class ImageErrorTests(unittest.TestCase):
@@ -437,6 +446,7 @@ class ImageLibraryTests(unittest.TestCase):
                 comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
                 image_auto_run_jobs=False,
             )
+            _stub_comfy(root)
             manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
             manager.adult_content_allowed = lambda: False
             with self.assertRaisesRegex(PermissionError, "creator-locked Nexus Brain"):
@@ -457,6 +467,7 @@ class ImageLibraryTests(unittest.TestCase):
                 comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
                 image_auto_run_jobs=False,
             )
+            _stub_comfy(root)
             manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
             manager.profiles.save({
                 "id":"alice", "display_name":"Alice", "preferred_model":"qwen",
@@ -770,6 +781,7 @@ class BackendStartingFlagTests(unittest.TestCase):
             comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
             image_resource_mode="balanced", image_auto_run_jobs=False,
         )
+        _stub_comfy(root)
         return ImageManager(base_dir=root, models=[profile], config=config,
                             workspace=root / "workspace")
 
@@ -952,6 +964,148 @@ class SplitImagePromptTests(unittest.TestCase):
         }]
         self.assertEqual(
             AgentOrchestrator._image_job_ids_from_events(events), ["a", "b"])
+
+
+class ImageSetupTests(unittest.TestCase):
+    """The bundled 'install ComfyUI + all models' flow used by the chat offer
+    and the Image workspace setup card."""
+
+    def _config(self, **over):
+        base = dict(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            comfyui_dir="", comfyui_python="", comfyui_logs_dir=".agent/runtime",
+            comfyui_extra_args=[], image_resource_mode="balanced",
+            image_auto_run_jobs=True, image_max_resumes=1,
+        )
+        base.update(over)
+        return SimpleNamespace(**base)
+
+    def _manager(self, root: Path, models=None, **kw):
+        return ImageManager(base_dir=root, models=models or [],
+                            config=self._config(), workspace=root / "ws", **kw)
+
+    def _wait_state(self, mgr, timeout=15.0) -> str:
+        deadline = time.time() + timeout
+        state = ""
+        while time.time() < deadline:
+            state = mgr.setup_state()["state"]
+            if state in {"done", "failed"}:
+                return state
+            time.sleep(0.1)
+        return state
+
+    def _installed_model(self, root: Path) -> ImageModelProfile:
+        target = root / "models" / "image" / "sdxl" / "m.safetensors"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"weights")
+        return ImageModelProfile(
+            id="sdxl-m", family="stable-diffusion-xl", display_name="Test SDXL",
+            components=[{"key": "checkpoint", "path": "models/image/sdxl/m.safetensors", "required": True}],
+            capabilities=["text_to_image"])
+
+    def test_probe_reports_installed_flag(self):
+        class _B:
+            endpoint = "http://127.0.0.1:8188"
+            def health(self): return False, "connection refused"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rt = ComfyUIRuntime(base_dir=root, backend=_B(), config=self._config())
+            self.assertFalse(rt.probe()["installed"])
+            comfy = root / "tools" / "ComfyUI_windows_portable" / "ComfyUI"
+            comfy.mkdir(parents=True)
+            (comfy / "main.py").write_text("# stub", encoding="utf-8")
+            self.assertTrue(rt.probe()["installed"])
+
+    def test_create_job_raises_and_offers_when_backend_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fired = []
+            mgr = self._manager(root, models=[self._installed_model(root)],
+                                comfy_installer=lambda: {"ok": True, "job_id": "j1"})
+            mgr.on_missing_backend = lambda: fired.append(True)
+            with self.assertRaisesRegex(RuntimeError, "not installed"):
+                mgr.create_job(ImageRequest(prompt="a cat", operation="text_to_image"))
+            self.assertEqual(fired, [True])
+
+    def test_error_classifier_marks_missing_backend(self):
+        row = describe_image_error(RuntimeError("ComfyUI is not installed — install it"))
+        self.assertEqual(row["code"], "backend_not_installed")
+        self.assertIn("install", row["message"].lower())
+        row = describe_image_error(RuntimeError("ComfyUI was not found. Set comfyui_dir"))
+        self.assertEqual(row["code"], "backend_not_installed")
+
+    def test_setup_installs_backend_then_models(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            model = self._installed_model(root)
+
+            def install_comfy():
+                comfy = root / "tools" / "ComfyUI_windows_portable" / "ComfyUI"
+                comfy.mkdir(parents=True)
+                (comfy / "main.py").write_text("# stub", encoding="utf-8")
+                return {"ok": True, "job_id": "job-1"}
+
+            mgr = self._manager(root, models=[model], comfy_installer=install_comfy,
+                                job_lookup=lambda jid: {"state": "completed", "progress": 1.0})
+            state = mgr.start_setup()
+            self.assertIn(state["state"], {"installing_backend", "installing_models"})
+            self.assertEqual(self._wait_state(mgr), "done")
+            row = mgr.setup_state()
+            self.assertTrue(row["backend_installed"])
+            self.assertTrue(all(m["installed"] for m in row["models"]))
+            self.assertAlmostEqual(row["progress"], 1.0)
+
+    def test_setup_resumes_after_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            model = self._installed_model(root)
+            # Simulate a setup that was mid-backend-install when the app died.
+            setup_path = root / "data" / "image" / "setup.json"
+            setup_path.parent.mkdir(parents=True)
+            setup_path.write_text(json.dumps({
+                "state": "installing_backend", "model_ids": [model.id],
+                "started_at": time.time(), "updated_at": time.time()}), encoding="utf-8")
+
+            def install_comfy():
+                comfy = root / "tools" / "ComfyUI_windows_portable" / "ComfyUI"
+                comfy.mkdir(parents=True)
+                (comfy / "main.py").write_text("# stub", encoding="utf-8")
+                return {"ok": True, "job_id": "job-1"}
+
+            mgr = self._manager(root, models=[model], comfy_installer=install_comfy,
+                                job_lookup=lambda jid: {"state": "completed", "progress": 1.0})
+            mgr.resume_setup()
+            self.assertEqual(self._wait_state(mgr), "done")
+
+    def test_setup_fails_cleanly_without_installer(self):
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td), models=[self._installed_model(Path(td))])
+            mgr.start_setup()
+            self.assertEqual(self._wait_state(mgr), "failed")
+            self.assertIn("no installer", mgr.setup_state()["error"])
+
+    def test_model_install_dedupes_live_job(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            lib = ImageAssetLibrary(base_dir=root, models_dir=root / "models/image",
+                                    workflows_dir=root / "workflows/image")
+            profile = ImageModelProfile(
+                id="m", family="stable-diffusion",
+                components=[{"key": "ckpt", "path": "models/image/m.safetensors",
+                             "url": "https://example.invalid/m.safetensors", "required": True}])
+            gate = threading.Event()
+            try:
+                def slow_download(spec, *, repair, progress):
+                    gate.wait(5)
+                    return {"path": spec["path"], "status": "downloaded", "size_bytes": 0}
+                lib._download_component = slow_download
+                first = lib.start_install(profile)
+                second = lib.start_install(profile)
+                self.assertEqual(first["id"], second["id"])
+            finally:
+                gate.set()
 
 
 if __name__ == "__main__":

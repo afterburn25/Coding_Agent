@@ -487,19 +487,47 @@ class RuntimeManager:
             cmd.extend(extra_args)
         return cmd
 
+    @staticmethod
+    def _friendly_health_detail(body: str) -> str:
+        """Translate a runtime's raw health-probe body into display text.
+
+        llama.cpp answers 503 with a JSON envelope while a model loads —
+        showing that verbatim in the status row is unreadable, so map known
+        shapes to short phrases and otherwise prefer the error message over
+        raw markup.
+        """
+        text = (body or "").strip()
+        if not text:
+            return text
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return text
+        if not isinstance(payload, dict):
+            return text
+        if payload.get("status") == "ok":
+            return "ok"
+        err = payload.get("error")
+        if not isinstance(err, dict):
+            return text
+        message = str(err.get("message") or "").strip()
+        if "loading" in message.lower() or str(err.get("type") or "") == "unavailable_error":
+            return "model is loading"
+        return message or text
+
     def _health(self, endpoint: str, timeout: float = 1.5) -> tuple[bool, str]:
         req = urllib.request.Request(self._health_url(endpoint), method="GET")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
-                return resp.status == 200, body
+                return resp.status == 200, self._friendly_health_detail(body)
         except urllib.error.HTTPError as exc:
             # llama.cpp intentionally returns 503 while a model is loading.
             try:
                 body = exc.read().decode("utf-8", errors="replace")
             except Exception:
                 body = str(exc)
-            return False, body
+            return False, self._friendly_health_detail(body)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return False, str(exc)
 
