@@ -20,7 +20,12 @@
       <span class="tb-meta"></span>
       <button type="button" class="tb-cancel">Cancel</button>`;
     bar.querySelector(".tb-cancel").addEventListener("click", onCancel);
-    document.body.appendChild(bar);
+    // In-flow inside the page's main column, directly under its topbar —
+    // the strip pushes the column's content down instead of overlaying
+    // the app or shoving the whole shell off the viewport.
+    const topbar = document.querySelector(".topbar");
+    if (topbar) topbar.after(bar);
+    else document.body.prepend(bar);
     return bar;
   }
 
@@ -62,8 +67,6 @@
       if (lastTaskId !== null || !el.classList.contains("hidden")) {
         el.classList.add("hidden");
       }
-      document.body.classList.remove("task-bar-on");
-      document.body.style.removeProperty("--tb-h");
       lastTaskId = null;
       return;
     }
@@ -98,12 +101,6 @@
     btn.textContent = "Cancel";
     el.dataset.taskId = cur.id;
     el.classList.remove("hidden");
-    document.body.classList.add("task-bar-on");
-    // Reserve exactly the bar's rendered height plus its top offset — a
-    // fixed band leaves overlap when the pill wraps taller on small
-    // windows.
-    document.body.style.setProperty(
-      "--tb-h", `${Math.ceil(el.getBoundingClientRect().height + 16)}px`);
     lastTaskId = cur.id;
   }
 

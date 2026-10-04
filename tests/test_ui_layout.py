@@ -70,28 +70,29 @@ class ChatLayoutTests(unittest.TestCase):
         self.css = read("styles.css")
         self.html = read("index.html")
 
-    def test_main_grid_never_pins_composer_row(self):
-        # The original bug: `62px minmax(0,1fr) auto 28px` placed the composer
-        # on a fixed 28px track. Content-bearing rows after the flexible chat
-        # row must be `auto` (or left implicit), never a fixed pixel height.
-        m = re.search(r"\.main\s*{[^}]*grid-template-rows:\s*([^;]+);", self.css)
-        self.assertIsNotNone(m, ".main has no grid-template-rows")
-        rows = m.group(1).strip().split()
-        self.assertIn("1fr", " ".join(rows), "chat message area must flex")
-        for i, track in enumerate(rows):
-            if i == 0:
-                continue  # topbar may be fixed-height
-            self.assertNotRegex(
-                track, r"^\d+px$",
-                f"row {i} is fixed-height {track} — composer/chips/footer "
-                "would be crushed onto it",
-            )
+    def test_main_column_flexes_chat_and_never_pins_composer(self):
+        # .main is a column flex container: .chat must absorb the free
+        # space and the composer/chips/footer must stay content-sized.
+        # This replaced the old grid-rows layout so the in-flow task bar
+        # can sit under the topbar and push the column's content down.
+        m = re.search(r"\.main\s*{([^}]*)}", self.css)
+        self.assertIsNotNone(m, ".main rule missing")
+        block = m.group(1)
+        self.assertIn("display:flex", block)
+        self.assertIn("flex-direction:column", block)
+        chat = re.search(r"\.chat\s*{([^}]*)}", self.css)
+        self.assertIsNotNone(chat)
+        self.assertRegex(chat.group(1), r"flex\s*:\s*1", "chat must flex")
+        self.assertIn("min-height:0", chat.group(1),
+                      "chat must be allowed to shrink below content")
 
     def test_composer_row_is_auto_sized(self):
-        # Composer must reach an auto track even when #attachChips is visible.
-        m = re.search(r"\.main\s*{[^}]*grid-template-rows:\s*([^;]+);", self.css)
-        rows = m.group(1).strip().split()
-        self.assertEqual(rows[-1], "auto", "last .main track must be auto")
+        # No fixed-height constraint on the composer; flex items size to
+        # content by default. Guard against reintroducing a fixed track.
+        composer = re.search(r"\.composer\s*{([^}]*)}", self.css)
+        self.assertIsNotNone(composer)
+        self.assertNotRegex(composer.group(1), r"flex\s*:\s*0?\s*0\s+\d+px",
+                            "composer must not sit on a fixed flex basis")
 
     def test_composer_is_not_fixed_height(self):
         m = re.search(r"\.composer\s*{([^}]*)}", self.css)
@@ -215,15 +216,15 @@ class SharedComponentTests(unittest.TestCase):
 
 
 class AvatarFoundationTests(unittest.TestCase):
-    def test_presence_uses_canonical_avatar_and_script(self):
+    def test_topbar_has_no_duplicate_brand_or_presence(self):
+        # The presence avatar was removed from the topbar — it duplicated
+        # the sidebar brand lockup and broke the topbar grid when toggled.
         html = read("index.html")
-        self.assertIn('id="nexusPresence"', html)
-        self.assertIn('/api/nexus/avatar?size=72', html)
-        self.assertIn('<script src="/avatar.js"></script>', html)
+        self.assertNotIn('id="nexusPresence"', html)
+        self.assertNotIn("top-brand", html)
 
     def test_avatar_states_and_gesture_hooks_exist(self):
         css = read("styles.css")
-        self.assertIn('data-state="idle"', read("index.html"))
         for state in ("listening", "thinking", "speaking"):
             self.assertIn(f'[data-state="{state}"]', css)
         for gesture in ("small_nod", "small_head_shake", "head_tilt",

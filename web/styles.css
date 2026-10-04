@@ -302,8 +302,8 @@ body {
 }
 
 .main {
-  display:grid;
-  grid-template-rows:62px minmax(0,1fr) auto;
+  display:flex;
+  flex-direction:column;
   min-width:0;
   min-height:0;
   background:linear-gradient(180deg,rgba(6,14,28,.92),rgba(4,9,19,.94));
@@ -328,6 +328,19 @@ body {
   background:rgba(6,13,27,.94);
   position:relative;
   z-index:2;
+}
+
+.main .topbar {
+  flex:none;
+  height:62px;
+}
+
+.main .topbar .model-picker {
+  grid-column:2;
+}
+
+.main .topbar .runtime-pill {
+  grid-column:3;
 }
 
 .nexus-presence {
@@ -533,6 +546,8 @@ body[data-gesture="look_away"] .nexus-presence > img {
 }
 
 .chat {
+  flex:1;
+  min-height:0;
   overflow:auto;
   padding:26px max(28px,calc((100vw - 610px - 860px)/2));
   position:relative;
@@ -1464,10 +1479,9 @@ body[data-gesture="look_away"] .nexus-presence > img {
 
   .main {
     min-height:100vh;
-    grid-template-rows:auto minmax(0,1fr) auto;
   }
 
-  .topbar {
+  .main .topbar {
     position:sticky;
     top:0;
     z-index:4;
@@ -3157,19 +3171,13 @@ select option {
 .install-offer .bar span{display:block;height:100%;background:var(--blue);transition:width .3s}
 .install-offer.done{border-color:var(--good)}
 
-/* global task bar — pinned strip showing the live task/mission on every
-   page. When visible it reserves a band at the top instead of overlaying
-   the topbar: page shells shift down and shrink by the same amount. */
-body.task-bar-on > [class*="-shell"]{
-  margin-top:var(--tb-h, 46px);
-  height:calc(100vh - var(--tb-h, 46px));
-}
-.task-bar{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9000;
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  max-width:min(720px,90vw);
-  padding:7px 12px;border:1px solid var(--line2);border-radius:20px;
-  background:color-mix(in srgb,var(--panel2) 92%,transparent);
-  box-shadow:var(--shadow-card);backdrop-filter:blur(6px);
+/* global task bar — in-flow strip inside each page's main column, right
+   under the topbar. It pushes the column's content down instead of
+   overlaying it; hidden entirely while idle. */
+.task-bar{
+  display:flex;align-items:center;gap:10px;flex:none;
+  padding:5px 18px;border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--panel2) 88%,transparent);
   font-size:12px;color:var(--text)}
 .task-bar.hidden{display:none}
 .task-bar .tb-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
@@ -3179,8 +3187,8 @@ body.task-bar-on > [class*="-shell"]{
 .task-bar .tb-label{font-weight:600;white-space:nowrap;color:var(--accent)}
 .task-bar.stale .tb-label{color:var(--warn)}
 .task-bar .tb-meta{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap;min-width:0}
-.task-bar .tb-cancel{flex:0 0 auto;padding:3px 10px;border-radius:12px;
+  white-space:nowrap;min-width:0;flex:1}
+.task-bar .tb-cancel{flex:0 0 auto;margin-left:auto;padding:3px 10px;border-radius:12px;
   border:1px solid var(--line2);background:transparent;color:var(--danger);
   font-size:11px;cursor:pointer}
 .task-bar .tb-cancel:hover{background:var(--danger-tint)}
