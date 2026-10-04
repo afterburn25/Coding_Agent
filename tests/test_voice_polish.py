@@ -102,6 +102,33 @@ class FeedbackCoverage(unittest.TestCase):
         out = eng.resolve("*gasps* wow.", ctx=_ctx()).speech_text
         self.assertNotIn("ah!", out.lower())
 
+    def test_multiword_feedback_phrasing(self):
+        eng = _engine()
+        eng.record_feedback("p1", "stop making that sighing sound")
+        out = eng.resolve("*sighs* alright.", ctx=_ctx()).speech_text
+        self.assertNotIn("ahh", out.lower())
+
+    def test_sounded_weird_feedback(self):
+        eng = _engine()
+        eng.record_feedback("p1", "that laugh sounded weird")
+        out = eng.resolve("*laughs* right?", ctx=_ctx()).speech_text
+        self.assertNotIn("ha ha", out.lower())
+
+    def test_unrelated_words_do_not_suppress(self):
+        eng = _engine()
+        # "humans"/"humor" must not trip the hum stem
+        eng.record_feedback("p1", "fewer humans would be weird honestly")
+        out = eng.resolve("*hums* nice.", ctx=_ctx()).speech_text
+        self.assertIn("hmm", out.lower())
+
+    def test_third_person_stage_forms(self):
+        eng = _engine()
+        for stage in ("*she sighs*", "(he nods)", "*she chuckles*"):
+            res = eng.resolve(f"{stage} Sure.", ctx=_ctx())
+            self.assertNotIn("*", res.speech_text)
+            self.assertNotIn("she", res.speech_text.lower())
+            self.assertNotIn("he ", res.speech_text.lower())
+
     def test_reenable_clears_suppression(self):
         eng = _engine()
         eng.record_feedback("p1", "fewer giggles please")
@@ -258,6 +285,18 @@ class SpokenNotices(unittest.TestCase):
                        "title": "long scan"},
             "outcome": "cancelled"})
         self.assertIn("cancelled:", st.voice.enqueued[0][1])
+
+    def test_briefing_speaks_once_per_away_window(self):
+        st = _StubState()
+        st._speak_notice("brief-1000", "briefing",
+                         "While you were away: 2 tasks completed.")
+        st._speak_notice("brief-1000", "briefing",
+                         "While you were away: 2 tasks completed.")
+        self.assertEqual(len(st.voice.enqueued), 1)
+        # a different away-window (different `since`) speaks again
+        st._speak_notice("brief-2000", "briefing",
+                         "While you were away: 1 task completed.")
+        self.assertEqual(len(st.voice.enqueued), 2)
 
 
 class NoticeKinds(unittest.TestCase):

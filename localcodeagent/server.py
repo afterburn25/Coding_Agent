@@ -3749,6 +3749,11 @@ class AppState:
         brief["text"] = briefing_text(brief)
         brief["idle_seconds"] = round(_t.time() - since, 1)
         brief["away"] = brief["idle_seconds"] >= AWAY_THRESHOLD_S
+        if brief["away"] and brief.get("text"):
+            # Speak the digest once per away-window — the dedup id pins
+            # to `since` so repeated UI polls can't re-announce it.
+            self._speak_notice(f"brief-{int(since)}", "briefing",
+                               str(brief["text"]))
         return brief
 
     def _voice_begin(self, user_text: str = "") -> str:

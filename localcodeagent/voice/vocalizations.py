@@ -240,6 +240,27 @@ _STAGE: dict[str, tuple[str, str, float]] = {
     "stretches": ("stretch", "fatigue", 0.4),
     "perks up": ("perk_up", "excitement", 0.45),
     "sits up": ("perk_up", "excitement", 0.4),
+    # third-person forms — models occasionally narrate "she sighs"
+    "she sighs": ("sigh", "sigh", 0.45),
+    "he sighs": ("sigh", "sigh", 0.45),
+    "she laughs": ("laugh", "amusement", 0.55),
+    "he laughs": ("laugh", "amusement", 0.55),
+    "she smiles": ("smile", "warmth", 0.35),
+    "he smiles": ("smile", "warmth", 0.35),
+    "she nods": ("nod", "agreement", 0.3),
+    "he nods": ("nod", "agreement", 0.3),
+    "she pauses": ("pause", "thinking", 0.25),
+    "he pauses": ("pause", "thinking", 0.25),
+    "she chuckles": ("chuckle", "amusement", 0.5),
+    "he chuckles": ("chuckle", "amusement", 0.5),
+    "she whispers": ("whisper", "warmth", 0.35),
+    "he whispers": ("whisper", "warmth", 0.35),
+    "she smirks": ("smirk", "dismissive", 0.4),
+    "he smirks": ("smirk", "dismissive", 0.4),
+    "she groans": ("groan", "frustration", 0.55),
+    "he groans": ("groan", "frustration", 0.55),
+    "she gasps": ("gasp", "surprise", 0.55),
+    "he gasps": ("gasp", "surprise", 0.55),
 }
 
 # Gesture paired with each category — semantic events only; the avatar
@@ -653,23 +674,38 @@ class VocalizationEngine:
         now = time.time()
         sup = self._suppress.setdefault(profile_id or "_", {})
         targets = []
-        if re.search(r"(fewer|less|stop|no more|too many)\s+\w*\s*sigh", t):
+        # "fewer sighs", "stop making that sighing sound", "no more of
+        # the laughing" — bounded multi-word gap between verb and target.
+        def _fewer(word: str) -> bool:
+            return bool(re.search(
+                r"(fewer|less|stop|no more|too many)"
+                r"\s+[\w\s]{0,20}?" + word + r"(?:e?s|ed|ing|y)?\b", t))
+
+        def _off(word: str) -> bool:
+            # "that laugh sounded weird" / "the giggling is annoying" —
+            # word-bounded stem + inflection so "human"/"exhume" can't
+            # match the "hum" stem.
+            return bool(re.search(
+                r"\b" + word + r"(?:e?s|ed|ing|y)?\b\s+[\w\s]{0,15}?"
+                r"(?:weird|creepy|annoying|off\b|too much)", t))
+
+        if _fewer(r"sigh") or _off(r"sigh"):
             targets.append("sigh")
-        if re.search(r"(fewer|less|stop|weird|no more)\s+\w*\s*laugh", t):
+        if _fewer(r"laugh") or _off(r"laugh"):
             targets.append("amusement")
-        if re.search(r"(fewer|less|stop)\s+\w*\s*hum", t):
+        if _fewer(r"hum") or _off(r"hum"):
             targets.extend(("pleasure", "humming", "thinking"))
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*giggl", t):
+        if _fewer(r"giggl") or _off(r"giggl"):
             targets.extend(("playfulness", "amusement"))
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*gas?p", t):
+        if _fewer(r"gas?p") or _off(r"gas?p"):
             targets.append("surprise")
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*moan", t):
+        if _fewer(r"moan") or _off(r"moan"):
             targets.append("pleasure")
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*yawn", t):
+        if _fewer(r"yawn") or _off(r"yawn"):
             targets.append("fatigue")
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*whisper", t):
+        if _fewer(r"whisper") or _off(r"whisper"):
             targets.append("warmth")
-        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*groan", t):
+        if _fewer(r"groan") or _off(r"groan"):
             targets.append("frustration")
         if "vocalization" in t and re.search(r"(off|stop|fewer|less)", t):
             targets.extend(_GESTURE)
