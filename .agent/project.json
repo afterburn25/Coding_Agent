@@ -4,8 +4,8 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1397,
- "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, and mission-owned verified model installs. Next: remaining workstation-depth dogfooding and release hardening.",
+ "test_checkpoint": 1400,
+ "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, and a dedicated verified Real-ESRGAN post-process upscaler. Next: real ComfyUI/MCP/tree-sitter validation, workstation-depth dogfooding, and release hardening.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -267,6 +267,7 @@
   "default_text_to_image_model": "juggernaut-x-v10",
   "editing_model": "qwen-image-2.1",
   "fast_preview_model": "flux2-klein-4b",
+  "dedicated_upscaler_model": "realesrgan-x4plus",
   "default_t2i_source": "RunDiffusion/Juggernaut-X-v10 @ e53841ec (sha256 d91d3573\u20260c45, OpenRAIL-M)"
  },
  "live_clock": {
@@ -423,8 +424,8 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "e63a4b1",
-  "verified_test_count": 1380,
+  "verified_code_checkpoint": "e506960",
+  "verified_test_count": 1400,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
    "DEVIN_START_HERE.md",
@@ -535,9 +536,9 @@
    ]
   }
  },
- "verified_tests": 1380,
- "head": "e63a4b1",
- "test_count": 1380,
+ "verified_tests": 1400,
+ "head": "e506960",
+ "test_count": 1400,
  "branding": {
   "canonical_name": "Nexus Core",
   "full_logo": "web/assets/nexus-core-logo.png",

@@ -121,7 +121,7 @@ The orchestrator keeps the live model/tool continuation state in memory while `T
 
 Conversation-policy posture is prompt-layer configuration (`permissive`, `balanced`, `strict`). It changes refusal sensitivity/tone but does not replace the narrow hard policies enforced by specific tool/action modules.
 
-Text-to-image generation is a deterministic intent route in Auto mode: recognized generation requests bypass the chat model and execute the registered `generate_image` tool directly. This keeps the image subsystem's router, permissions, queue/history, and `ImageSafetyPolicy` authoritative. Edit/inpaint/outpaint/upscale operations remain on specialized image-tool selection paths.
+Text-to-image generation is a deterministic intent route in Auto mode: recognized generation requests bypass the chat model and execute the registered `generate_image` tool directly. This keeps the image subsystem's router, permissions, queue/history, and `ImageSafetyPolicy` authoritative. Edit/inpaint/outpaint/background-removal operations route to Qwen workflows; explicit and post-generation upscaling routes to the dedicated verified Real-ESRGAN adapter.
 
 ## Transactional mutation model
 

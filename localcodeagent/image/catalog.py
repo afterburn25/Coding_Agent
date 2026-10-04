@@ -21,6 +21,8 @@ def discover_image_models(root: Path) -> list[dict]:
             family = "stable-diffusion-xl"
         elif "stable" in name or "sd" in name:
             family = "stable-diffusion"
+        elif "esrgan" in name or "upscal" in name or "upscaler" in str(path.parent).lower():
+            family = "upscaler"
         try:
             size = path.stat().st_size
         except OSError:

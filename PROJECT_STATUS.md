@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1397 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1400 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -60,7 +60,7 @@ v0.15.0 deepens the workstation core:
   `model_install` jobs cover LLM catalog IDs and image profiles, while
   startup removes orphaned `.part` model downloads before work resumes.
 
-Verified: **1397 tests** (2 environment skips).
+Verified: **1400 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -280,8 +280,9 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - Image model profiles and local weight discovery.
 - Automatic image operation/model router.
 - Juggernaut X v10 (RunDiffusion SDXL, pinned rev e53841ec) default text-to-image profile.
-- Qwen-Image-2.1 quality/editing default profile.
+- Qwen-Image-2.1 quality/editing default profile, including a dedicated background-removal workflow.
 - FLUX.2 Klein 4B fast-preview default profile.
+- Real-ESRGAN x4+ dedicated verified upscaler profile/workflow; `upscale` jobs route there and generation can post-process through it without discarding the primary output on optional-stage failure.
 - JSON workflow manager with typed variable substitution.
 - Image jobs/history metadata persistence.
 - Reference image storage.
@@ -423,7 +424,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1397 tests passing** (2 environment skips).
+- Current automated checkpoint: **1400 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
@@ -527,7 +528,7 @@ regression.
 - Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
 - Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
 - Image progress refines the coarse /history poll with a dependency-free ComfyUI `/ws` listener (`image/ws.py`) that reports real per-node/step progress.
-- LoRA file import and richer version/compatibility metadata editing, dedicated upscaler/background-removal adapters, and richer comparison controls remain upcoming.
+- LoRA file import and richer version/compatibility metadata editing plus richer comparison controls remain upcoming; dedicated Qwen background-removal and Real-ESRGAN upscaler workflows are now configured.
 - Browser automation is optional and requires Playwright + Chromium.
 
 ## v0.6 UI checkpoint

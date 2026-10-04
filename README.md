@@ -359,6 +359,7 @@ The model profiles are:
 - **Juggernaut X v10** (RunDiffusion SDXL checkpoint, pinned revision `e53841ec`) — default normal/photorealistic text-to-image route, including adult-only synthetic generation when permitted by policy.
 - **Qwen-Image-2.1** — preferred editing route (edit/inpaint/outpaint/background removal/multi-reference).
 - **FLUX.2 Klein 4B** — preferred fast preview/draft route.
+- **Real-ESRGAN x4+** — dedicated post-process upscaler for explicit `upscale_image` requests and the workspace “Upscale after generation” option.
 
 Weights are not bundled or silently downloaded. The Image Model Manager can explicitly verify/install/repair/remove configured components; already-valid large files are reused. Configure or import API-format ComfyUI workflows separately.
 
@@ -458,7 +459,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1397 tests passing** (2 environment-dependent skips).
+Current expected result: **1400 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 

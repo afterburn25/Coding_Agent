@@ -278,6 +278,7 @@ class WorkflowTests(unittest.TestCase):
             "qwen/qwen-image-2.1-background-removal-api.json",
             "flux/flux2-klein-4b-t2i-api.json",
             "flux/flux2-klein-4b-edit-api.json",
+            "upscalers/realesrgan-x4plus-api.json",
         )
         for name in expected:
             with self.subTest(name=name):
@@ -289,9 +290,15 @@ class WorkflowTests(unittest.TestCase):
     def test_default_image_component_catalog_has_sizes_and_hashes(self):
         config = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
         models = {row["id"]: row for row in config["image_models"]}
-        for model_id in ("qwen-image-2.1", "flux2-klein-4b"):
+        expected_components = {
+            "juggernaut-x-v10": 1,
+            "qwen-image-2.1": 3,
+            "flux2-klein-4b": 3,
+            "realesrgan-x4plus": 1,
+        }
+        for model_id, component_count in expected_components.items():
             required = [row for row in models[model_id]["components"] if row.get("required", True)]
-            self.assertEqual(len(required), 3)
+            self.assertEqual(len(required), component_count)
             for component in required:
                 self.assertGreater(int(component.get("size_bytes", 0)), 0)
                 self.assertEqual(len(str(component.get("sha256", ""))), 64)
@@ -686,6 +693,16 @@ class JuggernautDefaultTests(unittest.TestCase):
                 self.assertEqual(decision.operation, op)
                 self.assertEqual(decision.model_id, "qwen-image-2.1")
 
+    def test_dedicated_upscaler_profile_and_routing(self):
+        upscaler = self.models["realesrgan-x4plus"]
+        self.assertEqual(upscaler.capabilities, ["upscale"])
+        self.assertEqual(upscaler.workflow_for("upscale"), "upscalers/realesrgan-x4plus-api.json")
+        self.assertEqual(upscaler.components[0]["size_bytes"], 67040989)
+        self.assertEqual(len(upscaler.components[0]["sha256"]), 64)
+        decision = self.router.choose(ImageRequest(prompt="upscale this image", source_image="a.png"))
+        self.assertEqual(decision.operation, "upscale")
+        self.assertEqual(decision.model_id, "realesrgan-x4plus")
+
     def test_fast_draft_routes_flux(self):
         for quality in ("preview", "fast", "draft"):
             with self.subTest(quality=quality):
@@ -693,7 +710,7 @@ class JuggernautDefaultTests(unittest.TestCase):
                 self.assertEqual(decision.model_id, "flux2-klein-4b")
 
     def test_manual_model_overrides(self):
-        for model_id in ("qwen-image-2.1", "flux2-klein-4b", "juggernaut-x-v10"):
+        for model_id in ("qwen-image-2.1", "flux2-klein-4b", "juggernaut-x-v10", "realesrgan-x4plus"):
             with self.subTest(model_id=model_id):
                 decision = self.router.choose(ImageRequest(prompt="test", model_override=model_id))
                 self.assertEqual(decision.model_id, model_id)
@@ -759,6 +776,7 @@ class JuggernautDefaultTests(unittest.TestCase):
             self.assertIn("juggernaut-x-v10", ids)
             self.assertIn("qwen-image-2.1", ids)
             self.assertIn("flux2-klein-4b", ids)
+            self.assertIn("realesrgan-x4plus", ids)
             # User's own entry wins over the merged default.
             qwen = next(m for m in config.image_models if m.id == "qwen-image-2.1")
             self.assertEqual(qwen.components, [])
@@ -821,6 +839,120 @@ class BackendStartingFlagTests(unittest.TestCase):
             manager.backend = SimpleNamespace(health=boom)
             job = manager.create_job(ImageRequest(prompt="a cat"))
             self.assertTrue(job.backend_starting)
+
+
+class DedicatedUpscalerTests(unittest.TestCase):
+    class _Backend:
+        endpoint = "http://127.0.0.1:8188"
+
+        def __init__(self):
+            self.uploads = []
+            self.submissions = []
+
+        def health(self):
+            return True, "ok"
+
+        def inspect(self):
+            return {"object_info": {
+                "LoadImage": {}, "UpscaleModelLoader": {},
+                "ImageUpscaleWithModel": {}, "SaveImage": {},
+            }}
+
+        def upload_image(self, path):
+            self.uploads.append(Path(path))
+            return {"name": Path(path).name, "subfolder": ""}
+
+        def submit(self, workflow):
+            self.submissions.append(workflow)
+            return f"prompt-{len(self.submissions)}"
+
+        def status(self, backend_job_id):
+            return {"state": "finished", "progress": 1.0}
+
+        def fetch_outputs(self, backend_job_id, destination):
+            destination.mkdir(parents=True, exist_ok=True)
+            target = destination / f"{backend_job_id}.png"
+            target.write_bytes(backend_job_id.encode())
+            return [target]
+
+        def cancel(self, backend_job_id):
+            pass
+
+    def test_source_dependent_operations_fail_before_queueing(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            profile = ImageModelProfile(
+                id="up", family="test", capabilities=["upscale", "inpaint"],
+                workflows={"upscale": "up.json", "inpaint": "in.json"},
+            )
+            config = SimpleNamespace(
+                image_models_dir="models/image", image_data_dir="data/image",
+                image_workflows_dir="workflows/image",
+                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+                image_resource_mode="balanced", image_auto_run_jobs=False,
+            )
+            manager = ImageManager(base_dir=root, models=[profile], config=config,
+                                   workspace=root / "workspace")
+            with self.assertRaisesRegex(ValueError, "source or reference image"):
+                manager.create_job(ImageRequest(prompt="upscale", operation="upscale"))
+            request = ImageRequest(
+                prompt="upscale", operation="upscale", reference_images=["missing.png"])
+            manager._validate_request_inputs(request)
+            self.assertEqual(request.source_image, "missing.png")
+            with self.assertRaisesRegex(ValueError, "saved mask"):
+                manager.create_job(ImageRequest(
+                    prompt="fill the mask", operation="inpaint", source_image="missing.png"))
+
+    def test_upscale_after_generation_uses_dedicated_adapter(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models/image/gen").mkdir(parents=True)
+            (root / "models/image/upscalers").mkdir(parents=True)
+            (root / "models/image/gen/model.bin").write_bytes(b"model")
+            (root / "models/image/upscalers/up.pth").write_bytes(b"upscale")
+            workflows = root / "workflows/image"
+            workflows.mkdir(parents=True)
+            (workflows / "gen.json").write_text(json.dumps({
+                "1": {"class_type": "ExampleGenerate", "inputs": {"prompt": "${prompt}"}},
+                "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}},
+            }), encoding="utf-8")
+            (workflows / "upscalers").mkdir()
+            (workflows / "upscalers/up.json").write_text(
+                (ROOT / "workflows/image/upscalers/realesrgan-x4plus-api.json").read_text(encoding="utf-8"),
+                encoding="utf-8")
+            primary = ImageModelProfile(
+                id="primary", family="test", model_path="models/image/gen/model.bin",
+                capabilities=["text_to_image"], workflows={"text_to_image": "gen.json"},
+            )
+            upscaler = ImageModelProfile(
+                id="up", family="real-esrgan", model_path="models/image/upscalers/up.pth",
+                capabilities=["upscale"], workflows={"upscale": "upscalers/up.json"},
+                components=[{"key": "upscale_model", "path": "models/image/upscalers/up.pth", "required": True}],
+                required_nodes=["LoadImage", "UpscaleModelLoader", "ImageUpscaleWithModel", "SaveImage"],
+            )
+            config = SimpleNamespace(
+                image_models_dir="models/image", image_data_dir="data/image",
+                image_workflows_dir="workflows/image",
+                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+                image_resource_mode="balanced", image_auto_run_jobs=False,
+            )
+            _stub_comfy(root)
+            manager = ImageManager(base_dir=root, models=[primary, upscaler], config=config,
+                                   workspace=root / "workspace")
+            backend = self._Backend()
+            manager.backend = backend
+            manager.backend_runtime.ensure_ready = lambda: None
+            job = manager.create_job(ImageRequest(prompt="a cat", upscale=True))
+            manager._run_job(job.id)
+            finished = manager.get_job(job.id)
+            self.assertEqual(finished.state, "finished")
+            self.assertEqual(len(backend.submissions), 2)
+            self.assertEqual(backend.submissions[1]["2"]["class_type"], "UpscaleModelLoader")
+            self.assertEqual(backend.submissions[1]["2"]["inputs"]["model_name"], "up.pth")
+            self.assertEqual(len(backend.uploads), 1)
+            self.assertEqual(len(finished.outputs), 2)
+            self.assertIn("upscaled", finished.outputs[0].replace("\\", "/"))
+            self.assertIn("post-process upscaler: up", finished.routing_reasons)
 
 
 class MultiPromptToolTests(unittest.TestCase):

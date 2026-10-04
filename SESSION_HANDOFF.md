@@ -20,8 +20,9 @@
   checkpoints, Knowledge Library, structured correction learning, granular
   desktop-control hardening, the avatar animation/lip-sync foundation,
   managed skill/plugin lifecycle depth, self-repair rollback gating,
-  bounded long-duration approval recovery, and catalog LLM/image model
-  installs as mission jobs with restart-safe `.part` cleanup.
+  bounded long-duration approval recovery, catalog LLM/image model
+  installs as mission jobs with restart-safe `.part` cleanup, and a
+  dedicated verified Real-ESRGAN post-process upscaler.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/
@@ -917,7 +918,7 @@ No image weights are downloaded automatically yet.
 ## Known gaps / next executable steps
 
 1. Use the Image workspace workflow manager to import and test real ComfyUI API-format workflows for the selected Qwen-Image-2.1 and FLUX.2 Klein local node stacks.
-2. Add dedicated background-removal and upscaler adapters/workflows.
+2. ~~Add dedicated background-removal and upscaler adapters/workflows~~ — done: Qwen keeps the dedicated background-removal API workflow; Real-ESRGAN x4+ is now a verified `upscale` profile with a standard ComfyUI adapter workflow and powers the workspace “Upscale after generation” post-process stage.
 3. ~~WebSocket/SSE streaming~~ — done: `/api/chat/stream` tokens + `/api/events` bus mirror all non-token events with task attribution.
 4. ~~Persistent browser sessions~~ — done: `browser_run` accepts `session` + `save_session` (`storage_state` JSON under `.agent/browser/`).
 5. Voice STT session scaffold exists (`voice/stt.py`) but needs `sounddevice` + a model (Vosk/faster-whisper) installed on the host.
@@ -930,7 +931,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1397 tests` passing (2 environment skips).
+Expected at this checkpoint: `1400 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

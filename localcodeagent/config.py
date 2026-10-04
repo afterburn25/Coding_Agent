@@ -476,6 +476,27 @@ def default_config() -> AgentConfig:
                 tagline="Fast preview",
                 notes="Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing.",
             ),
+            ImageModelProfile(
+                id="realesrgan-x4plus",
+                family="real-esrgan",
+                model_path="models/image/upscalers/RealESRGAN_x4plus.pth",
+                workflows={
+                    "upscale":"upscalers/realesrgan-x4plus-api.json",
+                },
+                components=[
+                    {"key":"upscale_model","path":"models/image/upscalers/RealESRGAN_x4plus.pth","url":"https://huggingface.co/nateraw/real-esrgan/resolve/main/RealESRGAN_x4plus.pth","sha256":"4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1","size_bytes":67040989,"required":True},
+                ],
+                required_nodes=["LoadImage","UpscaleModelLoader","ImageUpscaleWithModel","SaveImage"],
+                capabilities=["upscale"],
+                priority=120, quality_tier="high", speed_tier="fast",
+                quantization="RealESRGAN_x4plus (67 MB)",
+                estimated_vram_gb=2.0, estimated_ram_gb=4.0, max_loras=0,
+                homepage="https://github.com/xinntao/Real-ESRGAN",
+                license_name="BSD-3-Clause",
+                display_name="Real-ESRGAN x4+",
+                tagline="Dedicated 4x image upscaler",
+                notes="Dedicated post-process upscaler used by explicit upscale requests and the 'upscale after generation' option.",
+            ),
         ],
     )
 

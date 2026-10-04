@@ -26,6 +26,10 @@ def _atomic_json_write(path: Path, payload: Any) -> None:
     atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+class _ImageJobCancelled(Exception):
+    pass
+
+
 class ImageManager:
     """Coordinates image routing, queue/history, workflows, profiles and the local backend."""
 
@@ -488,8 +492,19 @@ class ImageManager:
         self._backend_up_ts = now
         return self._backend_up_val
 
+    def _validate_request_inputs(self, request: ImageRequest) -> None:
+        operation, _ = self.router.infer_operation(request)
+        source_ops = {"edit_image", "inpaint", "outpaint", "remove_background", "upscale"}
+        if operation in source_ops and not request.source_image and request.reference_images:
+            request.source_image = request.reference_images[0]
+        if operation in source_ops and not request.source_image:
+            raise ValueError(f"{operation.replace('_', ' ')} requires a source or reference image")
+        if operation == "inpaint" and not request.mask_path:
+            raise ValueError("inpaint requires a saved mask")
+
     def create_job(self, request: ImageRequest, *, real_person: bool = False) -> ImageJob:
         self._apply_subject_profile(request)
+        self._validate_request_inputs(request)
         if (
             self.adult_content_allowed is not None
             and self.policy.is_explicit(request.prompt)
@@ -654,6 +669,90 @@ class ImageManager:
                     "or remove that LoRA selection."
                 )
 
+    def _submit_and_wait(self, job: ImageJob, workflow: dict[str, Any], *, stage: str,
+                         progress_start: float, progress_end: float) -> str:
+        job.state = stage
+        job.stage = stage
+        job.progress = max(job.progress, progress_start)
+        job.backend_job_id = self.backend.submit(workflow)
+        self._save_jobs(job)
+        listener = self._ws_progress_listener()
+        started = time.monotonic()
+        deadline = started + max(30, int(getattr(self.config, "image_job_timeout", 900)))
+        while time.monotonic() < deadline:
+            if job.state == "cancelled":
+                raise _ImageJobCancelled()
+            state = self.backend.status(job.backend_job_id)
+            if state.get("state") == "finished":
+                return job.backend_job_id
+            if state.get("state") == "failed":
+                raise RuntimeError(str(state.get("error") or "ComfyUI generation failed"))
+            job.progress = max(job.progress, float(state.get("progress", progress_start)))
+            ws_node = None
+            if listener is not None:
+                ws_progress, ws_node = listener.progress_for(job.backend_job_id)
+                if ws_progress:
+                    job.progress = max(job.progress, progress_start + (progress_end - progress_start) * ws_progress)
+            if ws_node:
+                job.stage = stage + (f" · node {ws_node}" if ws_node else "")
+            # ComfyUI only emits step fractions inside the sampler; model
+            # loads/encodes report nothing, which left the bar frozen. Ramp
+            # toward the stage end over ~4 min so the UI stays honest.
+            elapsed = time.monotonic() - started
+            job.progress = max(job.progress, min(progress_end - 0.05,
+                progress_start + (progress_end - progress_start - 0.05) * (elapsed / 240.0)))
+            self._save_jobs(job)
+            time.sleep(0.75)
+        raise TimeoutError("Timed out waiting for ComfyUI image generation")
+
+    def _profile_ready(self, profile: ImageModelProfile, operation: str) -> str:
+        workflow_name = profile.workflow_for(operation)
+        if not workflow_name:
+            raise RuntimeError(f"Image model '{profile.id}' has no ComfyUI API workflow configured for {operation}.")
+        workflow_status = self.workflows.inspect(workflow_name)
+        if not workflow_status.get("exists"):
+            raise RuntimeError(f"ComfyUI workflow is missing: {workflow_name}")
+        if not workflow_status.get("valid"):
+            detail = "; ".join(str(x) for x in workflow_status.get("errors", [])[:4]) or "invalid API workflow"
+            raise RuntimeError(f"ComfyUI workflow '{workflow_name}' is not executable: {detail}")
+        verification = self.library.verify_model(profile)
+        if not verification.get("installed"):
+            missing = [c["key"] for c in verification.get("components", []) if c.get("required") and not c.get("ok")]
+            raise RuntimeError(f"Image model '{profile.id}' is not fully installed. Missing/invalid: {', '.join(missing) or 'required components'}")
+        if profile.required_nodes:
+            info = self.backend.inspect().get("object_info", {})
+            available = set(info) if isinstance(info, dict) else set()
+            missing_nodes = [name for name in profile.required_nodes if name not in available]
+            if missing_nodes:
+                raise RuntimeError("ComfyUI is missing required node(s): " + ", ".join(missing_nodes) + ". Update ComfyUI or install the required node implementation.")
+        return workflow_name
+
+    def _run_upscale_stage(self, job: ImageJob, request: ImageRequest, source_path: str) -> list[str]:
+        up_request = ImageRequest(
+            prompt=f"Upscale image from job {job.id}",
+            operation="upscale",
+            source_image=source_path,
+            metadata={**request.metadata, "parent_job": job.id},
+        )
+        decision = self.router.choose(up_request)
+        profile = self.router.get_profile(decision.model_id)
+        workflow_name = self._profile_ready(profile, "upscale")
+        workflow = self.workflows.render(
+            self.workflows.load(workflow_name),
+            self._workflow_variables(up_request, profile),
+        )
+        rendered_status = self.workflows.validate_api(workflow)
+        if not rendered_status.get("valid"):
+            raise RuntimeError("Rendered upscaler workflow failed validation: " + "; ".join(rendered_status.get("errors", [])[:4]))
+        unresolved = rendered_status.get("unresolved_tokens", [])
+        if unresolved:
+            raise RuntimeError("Rendered upscaler workflow still contains unresolved variable(s): " + ", ".join(unresolved))
+        backend_job_id = self._submit_and_wait(
+            job, workflow, stage="upscaling", progress_start=0.93, progress_end=0.98)
+        job.routing_reasons.append(f"post-process upscaler: {profile.id}")
+        return [str(p) for p in self.backend.fetch_outputs(
+            backend_job_id, self.generations_dir / job.id / "upscaled")]
+
     def _run_job(self, job_id: str) -> None:
         job=self._jobs[job_id]
         request=ImageRequest(**job.request)
@@ -717,37 +816,23 @@ class ImageManager:
             unresolved=rendered_status.get("unresolved_tokens",[])
             if unresolved:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
-            job.state="generating"; job.stage="generating"; job.progress=0.20
-            job.backend_job_id=self.backend.submit(workflow); self._save_jobs(job)
-            listener=self._ws_progress_listener()
-            gen_started=time.monotonic()
-            deadline=gen_started+max(30, int(getattr(self.config,"image_job_timeout",900)))
-            while time.monotonic()<deadline:
-                state=self.backend.status(job.backend_job_id)
-                if state.get("state")=="finished":
-                    break
-                if state.get("state")=="failed":
-                    raise RuntimeError(str(state.get("error") or "ComfyUI generation failed"))
-                job.progress=max(job.progress, float(state.get("progress",0.25)))
-                ws_node=None
-                if listener is not None:
-                    ws_progress, ws_node = listener.progress_for(job.backend_job_id)
-                    if ws_progress:
-                        # Map ComfyUI's 0..1 step fraction into the generating band.
-                        job.progress=max(job.progress, 0.20 + 0.70 * ws_progress)
-                if ws_node:
-                    job.stage="generating" + (f" · node {ws_node}" if ws_node else "")
-                # ComfyUI only emits step fractions inside the sampler; model
-                # loads/encodes report nothing, which left the bar frozen at
-                # 20%. Ramp toward 0.85 over ~4 min so the UI stays honest.
-                elapsed=time.monotonic()-gen_started
-                job.progress=max(job.progress, min(0.85, 0.20 + 0.65 * (elapsed / 240.0)))
-                self._save_jobs(job); time.sleep(0.75)
-            else:
-                raise TimeoutError("Timed out waiting for ComfyUI image generation")
+            self._submit_and_wait(
+                job, workflow, stage="generating", progress_start=0.20, progress_end=0.90)
             job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs(job)
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]
+            if request.upscale and job.operation != "upscale" and job.outputs:
+                try:
+                    upscaled=self._run_upscale_stage(job, request, job.outputs[0])
+                    if upscaled:
+                        job.outputs=upscaled + job.outputs
+                except _ImageJobCancelled:
+                    raise
+                except Exception as exc:
+                    # Optional post-processing must not discard a successful
+                    # generation; surface the failure while preserving output.
+                    job.routing_reasons.append(
+                        f"post-process upscaler failed: {type(exc).__name__}: {exc}")
             # Mirror finished outputs into the user-facing output folder so
             # generated images are easy to find outside the app.
             try:
@@ -769,6 +854,8 @@ class ImageManager:
             if self.runtime is not None:
                 self.runtime.refresh_hardware(); job.vram_after_gb=self.runtime.hardware.free_vram_gb
             self._append_history(job, profile)
+        except _ImageJobCancelled:
+            pass
         except Exception as exc:
             error=describe_image_error(exc)
             job.state="failed"; job.stage="failed"

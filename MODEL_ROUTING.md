@@ -101,9 +101,11 @@ Default policy templates:
 
 ```text
 Fast preview/draft       → FLUX.2 Klein 4B
-High-quality generation  → Qwen-Image-2.1
+General/photorealistic   → Juggernaut X v10
 General image edit       → Qwen-Image-2.1
 Inpaint/outpaint         → capability-matched Qwen workflow
+Background removal       → dedicated Qwen API workflow
+Upscale                  → verified Real-ESRGAN x4+ adapter
 5+ references            → model configured for the required reference count
 ```
 

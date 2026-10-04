@@ -69,6 +69,16 @@ Use FLUX.2 Klein 4B as a fast secondary model for:
 - draft generations
 - workflows where speed matters more than maximum quality
 
+### Real-ESRGAN x4+
+
+Use the verified Real-ESRGAN x4+ component as the dedicated post-process
+upscaler. Explicit `upscale` operations route to a standard ComfyUI
+`LoadImage → UpscaleModelLoader → ImageUpscaleWithModel → SaveImage` API
+workflow. When the workspace's **Upscale after generation** option is set,
+the primary generation completes first, then the first output is submitted
+through this adapter; an optional upscaler failure preserves the primary
+image and records the post-process failure in routing reasons.
+
 Design the backend so additional Stable Diffusion, FLUX, Qwen, or future image models can be added later as plugins.
 
 ## Automatic image model routing

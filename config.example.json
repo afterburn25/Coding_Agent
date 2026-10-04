@@ -337,6 +337,50 @@
       "speed_tier": "fast",
       "quality_tier": "balanced",
       "notes": "Fast preview/draft model. Official 4B distilled path is designed for low-latency generation and editing."
+    },
+    {
+      "id": "realesrgan-x4plus",
+      "family": "real-esrgan",
+      "backend": "comfyui",
+      "model_path": "models/image/upscalers/RealESRGAN_x4plus.pth",
+      "workflow": "",
+      "workflows": {
+        "upscale": "upscalers/realesrgan-x4plus-api.json"
+      },
+      "components": [
+        {
+          "key": "upscale_model",
+          "path": "models/image/upscalers/RealESRGAN_x4plus.pth",
+          "url": "https://huggingface.co/nateraw/real-esrgan/resolve/main/RealESRGAN_x4plus.pth",
+          "required": true,
+          "size_bytes": 67040989,
+          "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1"
+        }
+      ],
+      "required_nodes": [
+        "LoadImage",
+        "UpscaleModelLoader",
+        "ImageUpscaleWithModel",
+        "SaveImage"
+      ],
+      "homepage": "https://github.com/xinntao/Real-ESRGAN",
+      "license_name": "BSD-3-Clause",
+      "display_name": "Real-ESRGAN x4+",
+      "tagline": "Dedicated 4x image upscaler",
+      "capabilities": [
+        "upscale"
+      ],
+      "priority": 120,
+      "enabled": true,
+      "quantization": "RealESRGAN_x4plus (67 MB)",
+      "estimated_vram_gb": 2,
+      "estimated_ram_gb": 4,
+      "max_reference_images": 0,
+      "max_loras": 0,
+      "supports_transparency": false,
+      "speed_tier": "fast",
+      "quality_tier": "high",
+      "notes": "Dedicated post-process upscaler used by explicit upscale requests and the 'upscale after generation' option."
     }
   ],
   "research_enabled": true,
