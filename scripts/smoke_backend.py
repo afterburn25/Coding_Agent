@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -32,11 +33,18 @@ PORT_WAIT_S = float(os.environ.get("NEXUS_SMOKE_PORT_WAIT_S", "60"))
 
 
 def _poll_state(port: int) -> dict | None:
+    """Any HTTP response — even an error like onboarding_required — means
+    the server loop is alive; only transport-level failures return None."""
     try:
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{port}/api/nexus/state",
                 timeout=3) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read()) or {"_http_status": exc.code}
+        except Exception:
+            return {"_http_status": exc.code}
     except Exception:
         return None
 
