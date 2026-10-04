@@ -146,6 +146,8 @@ class AppState:
         self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json")
         self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json")
         self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json")
+        from .promotion import PromotionPipeline
+        self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .preferences import PreferenceStore
         self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
@@ -5225,6 +5227,20 @@ class Handler(BaseHTTPRequestHandler):
                 actor=str((q.get("actor") or [""])[0])),
                 "summary": self.state.decisions.summary()})
             return
+        if path == "/api/promotions":
+            q = parse_qs(urlparse(self.path).query)
+            self._json({"candidates": self.state.promotions.list(
+                status=str((q.get("status") or [""])[0]),
+                mission_id=str((q.get("mission_id") or [""])[0])),
+                "summary": self.state.promotions.summary()})
+            return
+        if path == "/api/risk":
+            q = parse_qs(urlparse(self.path).query)
+            from .risk import classify_action
+            self._json(classify_action(
+                str((q.get("action") or [""])[0]),
+                target=str((q.get("target") or [""])[0])))
+            return
         if path == "/api/nexus-brain":
             self._json(self.state.nexus_brain.summary())
             return
@@ -6537,6 +6553,61 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "unknown decision"}, 404)
                     return
                 self._json({"ok": True, "decision": row})
+                return
+
+            if path == "/api/promotions":
+                desc = str(body.get("description") or "").strip()
+                if not desc:
+                    self._json({"error": "description is required"}, 400)
+                    return
+                cand = self.state.promotions.create(
+                    desc,
+                    action=str(body.get("action") or ""),
+                    risk=str(body.get("risk") or ""),
+                    target=str(body.get("target") or ""),
+                    source=str(body.get("source") or "manual"),
+                    mission_id=str(body.get("mission_id") or ""),
+                    context=body.get("context")
+                    if isinstance(body.get("context"), dict) else None)
+                self._json({"ok": True, "candidate": cand})
+                return
+
+            if path == "/api/promotions/stage":
+                cand = self.state.promotions.record_stage(
+                    str(body.get("id") or ""),
+                    str(body.get("stage") or ""),
+                    ok=bool(body.get("ok")),
+                    detail=str(body.get("detail") or ""),
+                    evidence=str(body.get("evidence") or ""))
+                if cand is None:
+                    self._json({"error": "stage refused — unknown "
+                                "candidate, out-of-order stage, or "
+                                "candidate already terminal"}, 409)
+                    return
+                self._json({"ok": True, "candidate": cand})
+                return
+
+            if path == "/api/promotions/promote":
+                cand = self.state.promotions.promote(
+                    str(body.get("id") or ""),
+                    actor=str(body.get("actor") or "api"),
+                    evidence=str(body.get("evidence") or ""))
+                if cand is None:
+                    self._json({"error": "promotion refused — required "
+                                "stages unpassed"}, 409)
+                    return
+                self._json({"ok": True, "candidate": cand})
+                return
+
+            if path == "/api/promotions/reject":
+                cand = self.state.promotions.reject(
+                    str(body.get("id") or ""),
+                    reason=str(body.get("reason") or ""),
+                    actor=str(body.get("actor") or "api"))
+                if cand is None:
+                    self._json({"error": "unknown candidate"}, 404)
+                    return
+                self._json({"ok": True, "candidate": cand})
                 return
 
             if path == "/api/conversation-memory/exchange":
