@@ -328,6 +328,13 @@ pip install -e '.[browser]'
 playwright install chromium
 ```
 
+Optional local speech and code-intelligence host stacks install with:
+
+```bash
+pip install -e '.[voice-stt]'
+pip install -e '.[code-intel]'
+```
+
 See `docs/WEB_RESEARCH.md`.
 
 ## Deterministic chat image routing
@@ -459,7 +466,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1402 tests passing** (2 environment-dependent skips).
+Current expected result: **1403 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 

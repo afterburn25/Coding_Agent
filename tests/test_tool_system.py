@@ -1019,6 +1019,17 @@ class CodeIntelTests(unittest.TestCase):
             out = find_references(Path(td), "")
             self.assertFalse(out["ok"])
 
+    def test_code_intel_optional_extra_is_pinned(self):
+        import tomllib
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))[
+            "project"]["optional-dependencies"]
+        self.assertIn("tree-sitter==0.26.0", extras["code-intel"])
+        self.assertIn("tree-sitter-python==0.25.0", extras["code-intel"])
+        self.assertIn("tree-sitter-javascript==0.25.0", extras["code-intel"])
+        self.assertIn("tree-sitter-typescript==0.23.2", extras["code-intel"])
+        self.assertIn("python-lsp-server==1.15.0", extras["code-intel"])
+
 
 class KnowledgeLibraryTests(unittest.TestCase):
     def _lib(self, td):

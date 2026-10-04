@@ -151,7 +151,7 @@ v0.3 ships a dependency-free index containing:
 - basic class/function symbols
 - compact beginning-of-file preview
 
-Search scoring prioritizes path matches, then symbols, then preview text. Future versions can replace or augment this with language servers, tree-sitter, embeddings, and reference graphs without changing the agent tool interface.
+Search scoring prioritizes path matches, then symbols, then preview text. `code_references`/`code_impact` layer lexical dependency and blast-radius queries on top; Python uses `ast`, non-Python files use the optional tree-sitter packs when installed, and `LspPool` can delegate deeper definition/reference/hover work to language servers. The tool interface stays stable if additional parsers or embeddings are added later.
 
 ## Runtime lifecycle
 

@@ -84,3 +84,12 @@ tools.
   (`localcodeagent/secrets.py`) so the raw value never appears in config.
 - Downloaded/community MCP servers are third-party executables — only run
   servers from sources you trust.
+
+## Validation status
+
+The client has been exercised against official MCP reference packages:
+
+- `@modelcontextprotocol/server-filesystem@2026.8.31` over **stdio** —
+  initialize, `tools/list` (14 tools), and `read_file` succeeded.
+- `@modelcontextprotocol/server-everything@2026.8.31` over **Streamable
+  HTTP** — initialize, `tools/list` (13 tools), and `echo` succeeded.

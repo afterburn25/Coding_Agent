@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1402 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1403 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -15,7 +15,9 @@ v0.15.0 deepens the workstation core:
   history; `/projects.html` manages projects, goals, memory, status.
 - **Code intelligence** — `code_references` / `code_impact` answer
   "who calls this" and "what breaks if I change it" with honest
-  backend reporting (AST/tree-sitter/lexical).
+  backend reporting (AST/tree-sitter/lexical); the pinned `code-intel`
+  extra provisions tree-sitter grammars plus `python-lsp-server` for
+  real LSP definition/reference/hover calls.
 - **Speech-to-text** — push-to-talk mic in the composer
   (`MediaRecorder` → `/api/stt/transcribe`), `/api/stt/session`
   hands-free loop with barge-in, `stt_utterance`/`stt_partial` SSE
@@ -62,7 +64,7 @@ v0.15.0 deepens the workstation core:
   `model_install` jobs cover LLM catalog IDs and image profiles, while
   startup removes orphaned `.part` model downloads before work resumes.
 
-Verified: **1402 tests** (2 environment skips).
+Verified: **1403 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -426,7 +428,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1402 tests passing** (2 environment skips).
+- Current automated checkpoint: **1403 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
@@ -732,8 +734,8 @@ Unit checkpoint: **362 tests passing**.
 **Modular workstation core + Answer Memory are in place** (643 tests). Priorities:
 1. run real 14B/30B dogfood tasks against the Nexus Core repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
-3. validate MCP Streamable HTTP against real MCP servers (local fake-server tests pass)
+3. ~~validate MCP Streamable HTTP against real MCP servers~~ — done: official filesystem server over stdio and official everything server over Streamable HTTP both completed handshake/tool-call round trips
 4. richer resource-manager extraction and runtime controls
-5. tree-sitter/LSP indexing upgrade for code intelligence
+5. ~~tree-sitter/LSP indexing upgrade for code intelligence~~ — done: pinned tree-sitter grammars and pylsp installed; JS/TS use the tree-sitter backend and pylsp completed real definition/reference/hover calls
 
 Done since this list was written: measured generation telemetry (TPS/TTFT in `ModelPerformanceTelemetry.record_generation`, surfaced via `/api/model-telemetry` and the Models page Performance card — `17895b7`), learned routing statistics in the Tools UI and Models UI, SSE event bus for tool/job updates, MCP Streamable HTTP transport (`9a2d793`), vault `secret:` env references for MCP (`c1bd188`), cooperative workflow cancellation (`e05f7a4`), durable work queue with agent-scheduled follow-ups (`queue_task`), busy-chat auto-queueing, per-task live-output routing, and reconnect-safe agent-event mirroring onto `/api/events` so page reloads keep live terminal/task visibility (`12fbfbe`).

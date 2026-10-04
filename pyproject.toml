@@ -13,6 +13,13 @@ voice-stt = [
     "faster-whisper==1.2.1",
     "av==18.1.0",
 ]
+code-intel = [
+    "tree-sitter==0.26.0",
+    "tree-sitter-python==0.25.0",
+    "tree-sitter-javascript==0.25.0",
+    "tree-sitter-typescript==0.23.2",
+    "python-lsp-server==1.15.0",
+]
 
 [project.scripts]
 chat-nexus = "localcodeagent.__main__:main"

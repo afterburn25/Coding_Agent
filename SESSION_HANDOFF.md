@@ -23,6 +23,11 @@
   bounded long-duration approval recovery, catalog LLM/image model
   installs as mission jobs with restart-safe `.part` cleanup, and a
   dedicated verified Real-ESRGAN post-process upscaler.
+- Optional host stacks are now provisioned and pinned for local STT
+  (`voice-stt`) and code intelligence (`code-intel`); real validation
+  covered faster-whisper/PyAV transcription, tree-sitter extraction,
+  pylsp round trips, and official MCP servers on both stdio and
+  Streamable HTTP transports.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/
@@ -924,6 +929,8 @@ No image weights are downloaded automatically yet.
 5. ~~Voice STT host dependency setup~~ — done on this host: `sounddevice==0.5.6`, `faster-whisper==1.2.1`, and compatible `av==18.1.0` are installed; the `base` CPU/int8 model initialized and passed a real WAV transcription smoke test. `stt_backend`, `stt_model`, `vosk_model_path`, and `stt_auto_submit` are now first-class config fields.
 6. Runtime tuner produces real numbers only when probes run on hardware — idle auto-tuner covers this; `data/runtime_tuning.json` accumulates results.
 7. ~~LLM model downloads as a mission `job` op~~ — done: `model_install` accepts coding-model catalog IDs as well as image profiles; manager startup removes orphaned `.part` downloads before resuming work.
+8. ~~Real MCP interoperability~~ — validated against official MCP packages: `@modelcontextprotocol/server-filesystem@2026.8.31` over stdio completed initialize → `tools/list` (14 tools) → `read_file`, and `@modelcontextprotocol/server-everything@2026.8.31` over Streamable HTTP completed initialize → `tools/list` (13 tools) → `echo`; both shut down cleanly.
+9. ~~Tree-sitter/LSP indexing upgrade~~ — installed pinned host packages (`tree-sitter==0.26.0`, JS/TS/Python grammars, `python-lsp-server==1.15.0`); JS/TS extraction now reports `backend: tree-sitter`, and a real pylsp session returned document symbols, definitions, references, hover, and diagnostics.
 
 ## Testing command
 
@@ -931,7 +938,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1402 tests` passing (2 environment skips).
+Expected at this checkpoint: `1403 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
