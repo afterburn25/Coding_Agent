@@ -422,8 +422,9 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
     def tearDownClass(cls):
         cls._td.cleanup()
 
-    def _get(self, path):
-        with urllib.request.urlopen(self.base + path, timeout=15) as r:
+    def _get(self, path, base=None):
+        with urllib.request.urlopen((base or self.base) + path,
+                                    timeout=15) as r:
             return json.loads(r.read())
 
     def _post(self, path, body, base=None):
@@ -636,6 +637,70 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
         self.assertEqual(code, 403)
         # A locked-but-verified Brain still answers prompt_context reads.
         self.assertIn("oat milk", s.nexus_brain.prompt_context())
+
+    def test_memory_survives_model_replacement_over_http(self):
+        """Restart with a different model set on the same runtime root —
+        Brain, facts, rules, and conversations are model-independent and
+        reload intact over the live API."""
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import create_server, stop_state
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name)
+
+        def launch(model_id: str):
+            cfg = AgentConfig(
+                profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id=model_id, endpoint="http://127.0.0.1:1/v1",
+                    model=model_id, roles=["utility"], runtime="external")],
+                process_watchdog=False, research_enabled=False)
+            server, state = create_server(
+                cfg, ws, "127.0.0.1", 0, ws / "web", ws / ".runtime")
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            return server, state, f"http://127.0.0.1:{server.server_address[1]}"
+
+        server1, state1, base1 = launch("model-alpha")
+        try:
+            self.assertEqual(state1.config.models[0].id, "model-alpha")
+            code, out = self._post("/api/chat", {
+                "message": "remember that my deploy window is Sunday night",
+                "mode": "auto"}, base=base1)
+            self.assertEqual(code, 200, out)
+            code, out = self._post("/api/nexus-brain/initialize", {
+                "creator_name": "Dogfood Creator",
+                "passcode": "dogfood-pass-2"}, base=base1)
+            self.assertEqual(code, 200, out)
+            code, synced = self._post("/api/nexus-brain/sync",
+                                      {"creator_token": out["creator_token"]},
+                                      base=base1)
+            self.assertEqual(code, 200, synced)
+        finally:
+            server1.shutdown()
+            server1.server_close()
+            stop_state(state1)
+
+        server2, state2, base2 = launch("model-beta")
+        try:
+            self.assertEqual(state2.config.models[0].id, "model-beta")
+            # Conversation memory persisted independently of the model.
+            mem = self._get("/api/conversation-memory", base=base2)
+            self.assertTrue(any(
+                "Sunday night" in str(f.get("text", ""))
+                for f in mem.get("facts", [])), mem)
+            # The signed Brain reloaded verified with its records intact.
+            brain = self._get("/api/nexus-brain", base=base2)
+            self.assertTrue(brain["initialized"])
+            self.assertTrue(brain["verified_for_session"])
+            self.assertEqual(brain["integrity"], "verified")
+            self.assertIn("Sunday night",
+                          state2.nexus_brain.prompt_context())
+            # The active conversation history also survived the swap.
+            self.assertTrue(state2.conversation_manager.active())
+        finally:
+            server2.shutdown()
+            server2.server_close()
+            stop_state(state2)
 
 
 if __name__ == "__main__":

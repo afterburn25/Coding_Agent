@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1412 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1413 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -87,8 +87,11 @@ v0.15.0 deepens the workstation core:
   second live server (verified read-only install, tampered payload 403,
   disk reload still verified). `PermissionError` from creator-session
   gates now maps to a proper 403 instead of an opaque 500.
+- **Model-replacement continuity** — memory staged under one model
+  profile survives a full AppState restart under a different profile:
+  Brain verified, facts/rules/conversations reloaded intact over HTTP.
 
-Verified: **1412 tests** (2 environment skips).
+Verified: **1413 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -452,7 +455,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1412 tests passing** (2 environment skips).
+- Current automated checkpoint: **1413 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
