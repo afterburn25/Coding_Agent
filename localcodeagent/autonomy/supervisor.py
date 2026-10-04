@@ -67,6 +67,7 @@ class AutonomousSupervisor:
         requirements: Any = None,            # RequirementStore — derived criteria entities
         policies: Any = None,                # ResourcePolicies — modes/offline/egress
         safemode: Any = None,                # SafeModeStore — denies autonomous work
+        rc: Any = None,                      # RCManager — freezes self-dev/packages
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
     ) -> None:
         self.workspace = Path(workspace)
@@ -104,7 +105,8 @@ class AutonomousSupervisor:
         self.budgets = BudgetManager(self.workspace, resources=resources)
         self.policies = policies
         self.policy = AutonomyPolicy(self.store, permission_manager,
-                                     policies=policies, safemode=safemode)
+                                     policies=policies, safemode=safemode,
+                                     rc=rc)
         self.notifications = NotificationCenter(
             self.store,
             publish=self._publish_notification,

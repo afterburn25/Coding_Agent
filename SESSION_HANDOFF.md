@@ -175,8 +175,16 @@
   repair reachable (nothing erased). `GoldenConfigStore` snapshots a
   whitelisted config set with sha256 manifests and refuses tampered
   restores. API: `/api/safemode`, `/api/golden`. Docs:
-  `docs/SAFE_MODE.md`. Next: RC scorecard, dependency intelligence,
-  predictive health.
+  `docs/SAFE_MODE.md`.
+- **Phase 10** — Release Candidate mode + scorecard (`release.py`):
+  `rc.enter` freezes `self_development`/`packages` at the policy gate;
+  `run_scorecard` evaluates ten sections from live subsystem checks
+  (capability health, open regressions, brain presence) + manually
+  recorded evidence; `fail`/`unknown` in any blocking section yields
+  `FAIL` — readiness is never claimed without evidence. API:
+  `/api/rc`, `/api/rc/scorecard`, `/api/rc/section`. Docs:
+  `docs/RELEASE.md`. Next: dependency intelligence + env manifests,
+  predictive health, benchmark lab, dynamic specialists.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1058,7 +1066,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1502 tests` passing (2 environment skips).
+Expected at this checkpoint: `1511 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

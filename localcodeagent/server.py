@@ -19,6 +19,7 @@ from typing import Any, Callable
 from .fsutil import atomic_write_text
 from . import netdiag
 from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
+from .release import SECTIONS as SECTIONS_RC
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -383,6 +384,24 @@ class AppState:
         from .lineage import LineageStore
         self.lineage = LineageStore(runtime_root / "data" / "lineage.json")
         self.artifacts.lineage = self.lineage
+        from .release import RCManager
+        self.rc = RCManager(runtime_root / "data" / "rc.json")
+        # Live scorecard checks fed by real subsystems — capability
+        # health and the regression ledger, not self-reported claims.
+        self.rc.register_check("workers", lambda: {
+            "status": "fail" if any(
+                c.get("status") == "broken"
+                for c in self.health.summary().get(
+                    "capabilities", {}).values()) else "pass",
+            "detail": "capability health sweep"})
+        self.rc.register_check("performance", lambda: {
+            "status": "fail" if self.regressions.open_regressions()
+            else "pass",
+            "detail": "open regressions block release"})
+        self.rc.register_check("memory", lambda: {
+            "status": "pass" if getattr(self, "nexus_brain", None)
+            is not None else "skip",
+            "detail": "brain store attached"})
         self.backups = BackupService(runtime_root)
         self.health = HealthService(runtime_root / "data" / "health.json")
         self.profiles = ProfileManager(runtime_root / "data" / "profiles")
@@ -1259,6 +1278,7 @@ class AppState:
             requirements=self.requirements,
             policies=self.policies,
             safemode=self.safemode,
+            rc=self.rc,
             approval_timeout_seconds=lambda: float(getattr(
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
@@ -4238,7 +4258,8 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/skills", "/api/connectors", "/api/knowledge",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
-                          "/api/lineage", "/api/safemode", "/api/golden")
+                          "/api/lineage", "/api/safemode", "/api/golden",
+                          "/api/rc")
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -4266,6 +4287,9 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/safemode":
             self._json(self.state.safemode.status())
+            return True
+        if path == "/api/rc":
+            self._json(self.state.rc.status())
             return True
         if path == "/api/golden":
             self._json({"snapshots": self.state.golden.list()})
@@ -4349,6 +4373,28 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/rc/enter":
+            self._json(self.state.rc.enter(str(body.get("label") or "")))
+            return True
+        if path == "/api/rc/exit":
+            self._json(self.state.rc.exit())
+            return True
+        if path == "/api/rc/scorecard":
+            self._json(self.state.rc.run_scorecard())
+            return True
+        if path == "/api/rc/section":
+            row = self.state.rc.record_section(
+                str(body.get("section") or ""),
+                str(body.get("status") or ""),
+                detail=str(body.get("detail") or ""),
+                blocking=bool(body.get("blocking", True)),
+                evidence=str(body.get("evidence") or ""))
+            if row is None:
+                self._json({"error": "unknown section or status",
+                            "sections": SECTIONS_RC}, 400)
+                return True
+            self._json({"ok": True, "section": row})
             return True
         if path == "/api/safemode/enter":
             self._json(self.state.safemode.enter(

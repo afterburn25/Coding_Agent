@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from ..policies import NETWORK_ACTIONS
+from ..release import RC_FROZEN_ACTIONS
 
 AUTONOMY_PROFILES = ("supervised", "local_autonomous", "extended_autonomous", "custom")
 
@@ -66,7 +67,7 @@ PROFILE_ALLOW = {
 
 class AutonomyPolicy:
     def __init__(self, store, permission_manager=None,
-                 policies=None, safemode=None) -> None:
+                 policies=None, safemode=None, rc=None) -> None:
         self._store = store
         self._pm = permission_manager
         # ResourcePolicies — offline mode and per-project egress deny
@@ -74,6 +75,9 @@ class AutonomyPolicy:
         self._policies = policies
         # SafeModeStore — while active, autonomous work denies outright.
         self._safemode = safemode
+        # RCManager — while a release candidate is active, non-essential
+        # change classes (self_development, packages) are frozen.
+        self._rc = rc
 
     # -- global control ---------------------------------------------------
 
@@ -137,6 +141,12 @@ class AutonomyPolicy:
                 allowed, _why = self._policies.network_allowed(
                     project_id=scope, action=action)
                 if not allowed:
+                    return "deny"
+            except Exception:
+                pass
+        if self._rc is not None:
+            try:
+                if self._rc.is_active() and action in RC_FROZEN_ACTIONS:
                     return "deny"
             except Exception:
                 pass
