@@ -165,7 +165,7 @@ def register_filesystem_tools(
         diff_lines: list[str] = []
         for path, new_text, old_text in staged:
             track_mutation(path)
-            rel = display_path(path).as_posix()
+            rel = display_path(path)
             if new_text is None:
                 path.unlink()
                 new_lines: list[str] = []
