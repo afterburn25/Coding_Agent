@@ -4716,6 +4716,9 @@ class Handler(BaseHTTPRequestHandler):
                 "research": self.state.research.summary(),
                 "model_telemetry": self.state.model_telemetry.summary(),
                 "image": self.state.images.summary(),
+                # Lets the UI skip flat canned replies when a named persona
+                # is driving delivery — the model answers in character.
+                "persona_active": self.state.agent._persona_active(),
             })
             return
         if path == "/api/models":
@@ -5753,6 +5756,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
+                # Image jobs attached to the rated message feed the
+                # sampling advisor — she learns which params worked.
+                try:
+                    _msg = self.state.conversation_manager.find_message(
+                        str(body.get("message_id", "")),
+                        str(body.get("conversation_id", "")) or None)
+                    for _jid in ((_msg or {}).get("image_job_ids") or []):
+                        self.state.images.record_feedback(
+                            str(_jid), str(body.get("rating", "")))
+                except Exception:
+                    pass
                 # Feed the same signal into Answer Memory trust scoring.
                 try:
                     am = self.state.answer_memory

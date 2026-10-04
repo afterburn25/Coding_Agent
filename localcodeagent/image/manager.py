@@ -55,6 +55,8 @@ class ImageManager:
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
         self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
+        from .sampling import SamplingAdvisor
+        self.sampling_advisor = SamplingAdvisor(self.data_dir / "sampling_stats.json")
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
         self._ws_listener = None
@@ -509,6 +511,16 @@ class ImageManager:
                 "ComfyUI is not installed — image generation cannot run without it. "
                 "Nothing is generating right now. An install offer was shown to you.")
         decision=self.router.choose(request)
+        # Best-guess sampling params (and anything learned from prior
+        # feedback) fill whatever the caller left unset — explicit user
+        # controls like "cfg 4" or "denoise 0.6" always win.
+        try:
+            guess_notes = self.sampling_advisor.apply(
+                request, self.router.get_profile(decision.model_id),
+                decision.operation)
+            decision.reasons.extend(guess_notes)
+        except Exception:
+            pass
         # Probe once up front so the UI/copy can distinguish "ComfyUI is
         # already up" from a cold start that may take minutes.
         backend_up = self._backend_up()
@@ -534,6 +546,20 @@ class ImageManager:
                 job.error = job.error_message
                 self._save_jobs(job)
         return job
+
+    def record_feedback(self, job_id: str, rating: str) -> bool:
+        """Thumbs on an image-bearing message -> sampling outcome."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return False
+        try:
+            profile = self.router.get_profile(job.model_id)
+        except KeyError:
+            return False
+        self.sampling_advisor.record_outcome(
+            profile, str(job.operation or "auto"),
+            dict(job.request or {}), rating)
+        return True
 
     def _safe_input_path(self, value: str) -> Path:
         path=Path(value).expanduser().resolve()

@@ -1197,3 +1197,105 @@ class VocalizationCapsTests(unittest.TestCase):
         self.assertEqual(f.filter("50MM lens"), "50MM lens")
         self.assertEqual(f.filter("recommend"), "recommend")
         self.assertEqual(f.filter("the MM format"), "the MM format")
+
+
+class SamplingAdvisorTests(unittest.TestCase):
+    def _adv(self):
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.image.sampling import SamplingAdvisor
+        return SamplingAdvisor(Path(tempfile.mkdtemp()) / "s.json")
+
+    def _profile(self, family):
+        from localcodeagent.image.types import ImageModelProfile
+        return ImageModelProfile(id="m", family=family, backend="c",
+                                 model_path="", capabilities=[])
+
+    def test_qwen_gets_real_cfg(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a castle", operation="text_to_image")
+        self._adv().apply(r, self._profile("qwen-image-2.1"), "text_to_image")
+        self.assertEqual(r.guidance, 4.0)
+        self.assertEqual(r.sampler_name, "euler")
+        self.assertEqual(r.scheduler, "simple")
+        self.assertEqual(r.steps, 25)
+
+    def test_sdxl_defaults_and_high_quality_steps(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a castle", operation="text_to_image",
+                         quality="high")
+        self._adv().apply(r, self._profile("stable-diffusion-xl"), "text_to_image")
+        self.assertEqual(r.guidance, 6.5)
+        self.assertEqual(r.sampler_name, "dpmpp_2m")
+        self.assertEqual(r.steps, 35)
+
+    def test_distilled_keeps_cfg_one(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a castle", operation="text_to_image")
+        self._adv().apply(r, self._profile("flux.2-klein"), "text_to_image")
+        self.assertEqual(r.guidance, 1.0)
+        self.assertEqual(r.steps, 8)
+
+    def test_subtle_edit_lowers_denoise(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a subtle color tweak",
+                         operation="edit_image", source_image="x.png")
+        self._adv().apply(r, self._profile("qwen-image-2.1"), "edit_image")
+        self.assertEqual(r.denoise_strength, 0.6)
+
+    def test_detail_cue_raises_steps(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a portrait, sharper and more detailed",
+                         operation="text_to_image")
+        self._adv().apply(r, self._profile("stable-diffusion-xl"), "text_to_image")
+        self.assertEqual(r.steps, 35)
+
+    def test_explicit_controls_never_overwritten(self):
+        from localcodeagent.image.types import ImageRequest
+        r = ImageRequest(prompt="a castle", operation="text_to_image",
+                         steps=12, guidance=2.5, sampler_name="lcm",
+                         scheduler="beta", denoise_strength=0.4)
+        self._adv().apply(r, self._profile("qwen-image-2.1"), "text_to_image")
+        self.assertEqual((r.steps, r.guidance, r.sampler_name,
+                          r.scheduler, r.denoise_strength),
+                         (12, 2.5, "lcm", "beta", 0.4))
+
+    def test_learning_biases_toward_wins(self):
+        from localcodeagent.image.types import ImageRequest
+        adv = self._adv()
+        prof = self._profile("qwen-image-2.1")
+        win_params = {"steps": 40, "guidance": 5.0,
+                      "sampler_name": "dpmpp_2m", "scheduler": "karras"}
+        adv.record_outcome(prof, "text_to_image", win_params, "up")
+        r = ImageRequest(prompt="x", operation="text_to_image")
+        adv.apply(r, prof, "text_to_image")
+        self.assertEqual(r.steps, 40)
+        self.assertEqual(r.guidance, 5.0)
+        self.assertEqual(r.sampler_name, "dpmpp_2m")
+        self.assertEqual(r.scheduler, "karras")
+
+    def test_learning_persists_across_instances(self):
+        import tempfile, json
+        from pathlib import Path
+        from localcodeagent.image.sampling import SamplingAdvisor
+        from localcodeagent.image.types import ImageRequest
+        p = Path(tempfile.mkdtemp()) / "s.json"
+        adv = SamplingAdvisor(p)
+        prof = self._profile("qwen-image-2.1")
+        adv.record_outcome(prof, "edit_image", {"steps": 33}, "up")
+        adv2 = SamplingAdvisor(p)
+        r = ImageRequest(prompt="x", operation="edit_image")
+        adv2.apply(r, prof, "edit_image")
+        self.assertEqual(r.steps, 33)
+
+    def test_repeated_losses_trigger_exploration(self):
+        from localcodeagent.image.types import ImageRequest
+        adv = self._adv()
+        prof = self._profile("qwen-image-2.1")
+        bad = {"steps": 25, "guidance": 4.0}
+        adv.record_outcome(prof, "text_to_image", bad, "down")
+        adv.record_outcome(prof, "text_to_image", bad, "down")
+        r = ImageRequest(prompt="x", operation="text_to_image")
+        adv.apply(r, prof, "text_to_image")
+        self.assertEqual(r.steps, 35)   # 25 + 10 exploration
+        self.assertEqual(r.guidance, 3.5)  # 4.0 - 0.5

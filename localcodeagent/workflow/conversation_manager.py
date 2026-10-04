@@ -612,6 +612,24 @@ class ConversationManager:
             self._save()
             return dict(row)
 
+    def find_message(self, message_id: str,
+                     conversation_id: str | None = None) -> dict[str, Any] | None:
+        """Locate a persisted message by id — used to attach feedback
+        side-effects (image job ratings) to the right message."""
+        with self._lock:
+            conv_id = conversation_id or str(self._data.get("active_conversation_id") or "")
+            conversation = self._get(conv_id)
+            messages = conversation.get("messages", [])
+            for message in messages:
+                if str(message.get("id") or "") == str(message_id):
+                    return dict(message)
+            # Same fallback as add_feedback: rating lands on the latest
+            # assistant message when no explicit id matched.
+            for message in reversed(messages):
+                if message.get("role") == "assistant":
+                    return dict(message)
+        return None
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
