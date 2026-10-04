@@ -1,0 +1,74 @@
+{
+  "initializationMs": 483.3607,
+  "hostCpuSeconds": 0.125,
+  "elapsedSeconds": 16.556967,
+  "hostWorkingSetMb": 63.609375,
+  "browserCpuSeconds": 3.3125,
+  "browserWorkingSetMb": 470.79296875,
+  "browserProcesses": [
+    {
+      "Kind": "Browser",
+      "CpuSeconds": 0.9375,
+      "WorkingSetMb": 137.27734375
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.046875,
+      "WorkingSetMb": 26.9140625
+    },
+    {
+      "Kind": "Renderer",
+      "CpuSeconds": 1.015625,
+      "WorkingSetMb": 154.421875
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.109375,
+      "WorkingSetMb": 37.234375
+    },
+    {
+      "Kind": "Gpu",
+      "CpuSeconds": 2.578125,
+      "WorkingSetMb": 95.109375
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.03125,
+      "WorkingSetMb": 19.8359375
+    }
+  ],
+  "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
+  "renderer": {
+    "checks": {
+      "pauseFreezesTime": true,
+      "realProgressIndependent": true,
+      "muteSilencesOutput": true,
+      "speedControl": true,
+      "readinessGateHolds": true,
+      "chargedHumSustains": true,
+      "chargedVisualSustains": true,
+      "releaseContinues": true,
+      "replayResets": true,
+      "reachedOnline": true,
+      "audioOutput": true,
+      "allStemsDecoded": true,
+      "noAudioWarnings": true,
+      "reducedMotion": true
+    },
+    "passed": true,
+    "decodedStems": 16,
+    "audioPeak": 0.29915565252304077,
+    "audioState": "running",
+    "warnings": [],
+    "frames": 600,
+    "frameMedianMs": 16.700000000000728,
+    "frameP95Ms": 16.80000000000109,
+    "drawMedianMs": 0.20000004768371582,
+    "drawP95Ms": 0.30000007152557373,
+    "dimensions": [
+      1024,
+      576
+    ],
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0"
+  }
+}

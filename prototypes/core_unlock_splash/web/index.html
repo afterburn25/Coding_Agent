@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>Nexus Core · Containment Preview</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header><div><span class="eyebrow">NEXUS CORE / MOTION STUDY 01</span><h1>Containment protocol</h1></div><span class="badge">STANDALONE PROTOTYPE</span></header>
+    <section id="stage" aria-label="Animated Nexus Core containment mechanism">
+      <img id="chamber" src="../assets/nexus-core-splash.png" alt="Nexus Core shield in the original blue chamber">
+      <div id="shade"></div>
+      <canvas id="scene" width="1024" height="576" aria-label="Locked shield; press Play to begin"></canvas>
+      <div id="missing-art" hidden>NEXUS CORE<span>INTELLIGENCE PROTECTED</span></div>
+      <div id="readout"><div id="track"><div id="fill"></div></div><p id="status" role="status">INITIALIZING NEXUS CORE</p><p id="detail">CONTAINMENT SEALED · PREVIEW READY</p></div>
+      <noscript><p class="no-script">NEXUS CORE · STATIC PREVIEW · Animation unavailable</p></noscript>
+    </section>
+    <nav class="transport" aria-label="Preview controls">
+      <button id="play" class="primary">Play sequence</button><button id="replay">Replay</button>
+      <button id="mute" aria-pressed="false">Mute</button>
+      <label>Volume <input id="volume" type="range" min="0" max="100" value="45"></label>
+      <label>Speed <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+      <label class="check"><input id="reduced" type="checkbox"> Reduced motion</label>
+    </nav>
+    <div class="timeline"><output id="time">0.00 / 12.60 s</output><input id="scrub" aria-label="Seek timeline" type="range" min="0" max="12.6" step="0.01" value="0"><select id="phase" aria-label="Jump to phase"></select></div>
+    <footer><label>Hold before <select id="gate"><option value="">No hold · ideal start</option><option value="unlock">Unlock</option><option value="open">Iris opening</option><option value="charge">Core charge</option><option value="ready">Online pulse</option></select></label><button id="release" disabled>Release hold</button><span id="health">Loading local assets…</span><span id="metrics"></span></footer>
+    <p class="note">Preview timing only. Real startup readiness will remain authoritative during integration.</p>
+  </main>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>
