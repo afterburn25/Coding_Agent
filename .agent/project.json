@@ -5,7 +5,7 @@
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
  "test_checkpoint": 1410,
- "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, and workstation-depth isolated selftest coverage. Next: real ComfyUI workflow validation and release hardening.",
+ "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, and permission-gated runtime/process controls with live resource usage. Next: real ComfyUI workflow validation (host-blocked without image weights), Creator Brain dogfooding, and model-replacement continuity verification.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -424,7 +424,7 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "2f4d874",
+  "verified_code_checkpoint": "91f9ccf",
   "verified_test_count": 1410,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
@@ -537,7 +537,7 @@
   }
  },
  "verified_tests": 1410,
- "head": "2f4d874",
+ "head": "91f9ccf",
  "test_count": 1410,
  "branding": {
   "canonical_name": "Nexus Core",
