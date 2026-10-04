@@ -4,7 +4,7 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1436,
+ "test_checkpoint": 1445,
  "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone Phase 1 done: first-class requirements with inferred provenance, pre-work acceptance-criteria derivation for repair asks (chat + mission creation), evaluator->requirement status sync, API + mission-UI checklist. Next phases: hypothesis lifecycle + causal memory + decision journal; risk-classified promotion pipeline; evidence board; reliability scoring; regression memory/bisect; resource modes; offline/egress policy; lineage; Safe Mode; golden config; RC scorecard. Still host-blocked: real ComfyUI workflow validation (no image weights).",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -168,7 +168,7 @@
   "dry_humor_when_appropriate": true,
   "lower_forced_followups": true,
   "feedback_exact_message_pairing": true,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "general_fact_commands": true,
   "brain_autobiographical_sync": true,
   "verified_test_count": 423,
@@ -198,7 +198,7 @@
   "negative_feedback_excluded_from_sft_targets": true,
   "brain_training_signal_sync": true,
   "portable_approved_skill_context": true,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -234,7 +234,7 @@
   "rejected_refusal_removed_from_context": true,
   "refusal_stream_buffering": true,
   "refusal_exhaustion_reports_model_blocker": true,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -259,7 +259,7 @@
   "coding_model_preflight_bypass": true,
   "natural_request_prefixes": true,
   "source_image_edit_exclusion": true,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "nexus_brain_adult_content_gate": true,
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
@@ -297,7 +297,7 @@
    "this afternoon",
    "tonight"
   ],
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -324,7 +324,7 @@
   ],
   "compacts_on_token_stream": true,
   "reduced_motion_support": true,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "verified_test_count": 423,
   "verified_ci_run_id": 36917101388,
   "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
@@ -396,7 +396,7 @@
    "biological_human_claim": false
   },
   "hard_tool_safety_bypass": false,
-  "verified_code_checkpoint": "edc6f14",
+  "verified_code_checkpoint": "3dbc7e8",
   "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
   "canonical_path_enforced": true,
   "config_redirect_or_disable_after_initialization": false,
@@ -424,8 +424,8 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "edc6f14",
-  "verified_test_count": 1436,
+  "verified_code_checkpoint": "3dbc7e8",
+  "verified_test_count": 1445,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
    "DEVIN_START_HERE.md",
@@ -536,9 +536,9 @@
    ]
   }
  },
- "verified_tests": 1436,
- "head": "edc6f14",
- "test_count": 1436,
+ "verified_tests": 1445,
+ "head": "3dbc7e8",
+ "test_count": 1445,
  "branding": {
   "canonical_name": "Nexus Core",
   "full_logo": "web/assets/nexus-core-logo.png",
