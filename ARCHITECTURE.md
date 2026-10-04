@@ -329,3 +329,31 @@ hints for unsupported acoustics); facts, code correctness, tool
 permissions, and safety state are untouched. Personal memory is isolated
 per profile; chats/models/Brain stay device-global. See
 `docs/PROFILES.md` for the full model.
+
+## Adaptive worker layer (v0.14)
+
+```text
+task/mission node → classify_role() → ResourceEstimate
+  → AdaptiveWorkerManager (localcodeagent/workers/)
+    schedulable = free − reserved − OS reserve − interactive reserve
+    ├─ fits    → reservation + WorkerRecord → thread/process
+    └─ no fit  → durable worker_queue.json + reason code
+release → re-evaluate queue (fit-aware, priority-aged) → next worker
+```
+
+- Mission DAG nodes admit through the same manager inside
+  `AutonomousSupervisor._step_executing`; reservations release on
+  completion/failure/cancel/lease-expiry. Coding workers can run on
+  isolated `.nexus/worktrees/<id>` checkouts (`workers/worktree.py`)
+  on `nexus/<id>/<slug>` branches; `SHARED_HOTSPOTS` flags
+  integration-owned files (VERSION, CHANGELOG, lockfiles, router).
+- Cost learning converges role estimates toward measured usage per
+  hardware fingerprint; resource failures lower the safe ceiling, clean
+  completions earn it back.
+- `projects.ProjectStore` holds durable profile-scoped projects with
+  goals, structured memory and worker history.
+- `nexus_avatar.NexusAvatar` resolves the canonical Nexus portrait
+  (`web/assets/nexus-portrait.*`), serves circle-cropped derivatives via
+  `/api/nexus/avatar`, and exposes semantic expression states for future
+  animation — the attached portrait is the identity source of truth.
+- See `docs/WORKERS.md` for the full contract.
