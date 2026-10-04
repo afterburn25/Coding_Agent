@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workspace · Nexus Core</title>
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/workspace.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>Build smarter locally.</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/projects.html"><span class="nav-icon">▣</span><span>Projects</span></a>
+        <a class="nav-item active" href="/workspace.html"><span class="nav-icon">⌬</span><span>Workspace</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Your code stays on this machine.</small></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar ws-topbar">
+        <div class="ws-picker">
+          <label for="wsSelect">Workspace</label>
+          <select id="wsSelect"></select>
+        </div>
+        <div class="ws-actions">
+          <button id="wsOpenBtn" class="mini-button" type="button" title="Open a folder as workspace">Open Folder</button>
+          <button id="wsNewBtn" class="mini-button" type="button" title="Create a new workspace folder">New Workspace</button>
+          <button id="wsRevealBtn" class="mini-button" type="button" title="Reveal in file explorer">Reveal</button>
+          <button id="wsRefreshBtn" class="mini-button" type="button" title="Reload tree and git state">↻</button>
+        </div>
+        <nav class="mobile-nav" aria-label="Navigation">
+          <a class="mobile-nav-item" href="/">Chat</a>
+          <a class="mobile-nav-item active" href="/workspace.html">Workspace</a>
+          <a class="mobile-nav-item" href="/missions.html">Missions</a>
+          <a class="mobile-nav-item" href="/tools.html">Tools</a>
+          <a class="mobile-nav-item" href="/system.html">System</a>
+        </nav>
+      </header>
+
+      <div class="ws-body">
+        <aside class="ws-tree" id="wsTree">
+          <div class="ws-tree-head">
+            <span id="wsTreeTitle">Files</span>
+            <span class="ws-tree-tools">
+              <button id="fsNewFile" class="tree-btn" type="button" title="New file">+f</button>
+              <button id="fsNewDir" class="tree-btn" type="button" title="New folder">+d</button>
+            </span>
+          </div>
+          <div id="treeList" class="tree-list"><span class="muted">No workspace open.</span></div>
+        </aside>
+
+        <section class="ws-editor">
+          <div id="tabsBar" class="tabs-bar"></div>
+          <div class="editor-wrap">
+            <div id="editorEmpty" class="editor-empty">Open a file from the tree — edits save to disk with Ctrl+S. Changed-on-disk files refuse to overwrite silently.</div>
+            <div id="editorPane" class="editor-pane" hidden>
+              <div id="gutter" class="gutter"></div>
+              <div class="code-scroll">
+                <pre id="hlLayer" class="hl-layer" aria-hidden="true"></pre>
+                <textarea id="editor" class="editor" spellcheck="false" wrap="off"></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-panel">
+            <div class="bp-tabs">
+              <button class="bp-tab active" data-bp="terminal" type="button">Terminal</button>
+              <button class="bp-tab" data-bp="problems" type="button">Problems <span id="problemCount" class="bp-badge" hidden></span></button>
+              <button class="bp-tab" data-bp="git" type="button">Git</button>
+            </div>
+            <div id="bpTerminal" class="bp-page">
+              <div id="termOut" class="term-out"></div>
+              <div class="term-input-row">
+                <span id="termCwd" class="term-cwd"></span>
+                <input id="termInput" class="term-input" placeholder="run a command in the workspace…" />
+                <button id="termRun" class="mini-button" type="button">Run</button>
+              </div>
+            </div>
+            <div id="bpProblems" class="bp-page" hidden>
+              <div id="problemList" class="problem-list"><span class="muted">No diagnostics yet — problems are extracted from real command output.</span></div>
+            </div>
+            <div id="bpGit" class="bp-page" hidden>
+              <div id="gitSummary" class="git-summary"></div>
+              <div class="git-actions">
+                <button id="gitRefresh" class="mini-button" type="button">Refresh</button>
+                <button id="gitDiff" class="mini-button" type="button">Diff</button>
+              </div>
+              <pre id="gitDiffOut" class="git-diff" hidden></pre>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/task_bar.js"></script>
+  <script src="/workspace.js"></script>
+</body>
+</html>

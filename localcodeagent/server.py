@@ -6850,6 +6850,125 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(self.state.workspaces.inspect(target))
             return
+        # -- Coding workbench: bounded filesystem/git/terminal surfaces ----
+        if path.startswith("/api/fs/") or path.startswith("/api/git/"):
+            q = parse_qs(urlparse(self.path).query)
+
+            def _wb_root(raw: str) -> Path:
+                cand = Path(raw).expanduser()
+                try:
+                    cand = cand.resolve()
+                except OSError:
+                    pass
+                if not self.state.workspaces.contains(cand):
+                    raise ValueError(
+                        "path is outside all registered workspaces")
+                return cand
+
+            if path == "/api/fs/tree":
+                raw = q.get("path", [""])[0]
+                depth = max(1, min(int(q.get("depth", ["2"])[0] or 2), 8))
+                try:
+                    root = _wb_root(raw or str(self.state.workspace))
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 403)
+                    return
+                if not root.is_dir():
+                    self._json({"error": "not a directory"}, 404)
+                    return
+                ignore = {".git", ".agent", "node_modules", "__pycache__",
+                          ".venv", "venv", "dist", "build", "target"}
+                entries: list[dict] = []
+
+                def _walk(d: Path, level: int) -> None:
+                    if len(entries) >= 3000:
+                        return
+                    try:
+                        children = sorted(
+                            d.iterdir(),
+                            key=lambda p: (not p.is_dir(), p.name.lower()))
+                    except OSError:
+                        return
+                    for c in children:
+                        if c.name in ignore or c.name.startswith("."):
+                            continue
+                        try:
+                            st = c.stat()
+                            entries.append({
+                                "path": str(c),
+                                "name": c.name,
+                                "dir": c.is_dir(),
+                                "size": st.st_size if c.is_file() else 0,
+                                "mtime": st.st_mtime,
+                                "depth": level,
+                            })
+                        except OSError:
+                            continue
+                        if c.is_dir() and level < depth:
+                            _walk(c, level + 1)
+
+                _walk(root, 0)
+                self._json({"root": str(root), "entries": entries,
+                            "truncated": len(entries) >= 3000})
+                return
+            if path == "/api/fs/file":
+                raw = q.get("path", [""])[0]
+                try:
+                    p = _wb_root(raw)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 403)
+                    return
+                if not p.is_file():
+                    self._json({"error": "not a file"}, 404)
+                    return
+                try:
+                    raw_bytes = p.read_bytes()
+                    truncated = len(raw_bytes) > 800_000
+                    text = raw_bytes[:800_000].decode(
+                        "utf-8", errors="replace")
+                except OSError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                import hashlib as _hl
+                self._json({
+                    "path": str(p), "content": text,
+                    "sha": _hl.sha1(text.encode("utf-8")).hexdigest(),
+                    "size": len(raw_bytes), "truncated": truncated,
+                })
+                return
+            if path == "/api/git/status":
+                root_raw = q.get("root", [""])[0] \
+                    or str(self.state.workspace)
+                try:
+                    root = _wb_root(root_raw)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 403)
+                    return
+                self._json(self.state.workspaces.inspect(root).get("git", {})
+                           | {"root": str(root)})
+                return
+            if path == "/api/git/diff":
+                import subprocess as _sp
+                root_raw = q.get("root", [""])[0] \
+                    or str(self.state.workspace)
+                rel = q.get("path", [""])[0]
+                try:
+                    root = _wb_root(root_raw)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 403)
+                    return
+                argv = ["git", "-C", str(root), "diff", "--"]
+                if rel:
+                    argv.append(rel)
+                try:
+                    proc = _sp.run(argv, capture_output=True, text=True,
+                                   timeout=30)
+                    self._json({"diff": (proc.stdout or "")[-60000:],
+                                "error": (proc.stderr or "")[-2000:],
+                                "exit_code": proc.returncode})
+                except Exception as exc:
+                    self._json({"error": str(exc)}, 400)
+                return
         if path == "/api/tasks":
             self._json(self.state.task_payload())
             return
@@ -8608,6 +8727,157 @@ class Handler(BaseHTTPRequestHandler):
                 ok = bool(wid) and self.state.workspaces.remove(wid)
                 self._json({"ok": ok}, 200 if ok else 404)
                 return
+            # -- Coding workbench file/terminal operations ------------------
+            if path.startswith("/api/fs/") or path == "/api/terminal/run":
+                import hashlib as _hl
+
+                def _wb_root(raw: str) -> Path:
+                    cand = Path(raw).expanduser()
+                    try:
+                        cand = cand.resolve()
+                    except OSError:
+                        pass
+                    if not self.state.workspaces.contains(cand):
+                        raise ValueError(
+                            "path is outside all registered workspaces")
+                    return cand
+
+                if path == "/api/fs/file":
+                    try:
+                        p = _wb_root(str(body.get("path") or ""))
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    content = str(body.get("content") or "")
+                    base_sha = str(body.get("base_sha") or "")
+                    # Stale-write protection: when the client sends the
+                    # hash it loaded, a changed-on-disk file is a conflict
+                    # — never silently overwrite a user's external edits.
+                    if base_sha and p.is_file():
+                        try:
+                            cur = _hl.sha1(p.read_text(
+                                encoding="utf-8", errors="replace")
+                                .encode("utf-8")).hexdigest()
+                            if cur != base_sha:
+                                self._json({
+                                    "ok": False, "conflict": True,
+                                    "detail": "file changed on disk since "
+                                              "it was opened",
+                                    "current_sha": cur}, 409)
+                                return
+                        except OSError:
+                            pass
+                    try:
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_text(content, encoding="utf-8")
+                    except OSError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json({
+                        "ok": True, "path": str(p),
+                        "sha": _hl.sha1(content.encode("utf-8"))
+                        .hexdigest()})
+                    return
+                if path == "/api/fs/mkdir":
+                    try:
+                        p = _wb_root(str(body.get("path") or ""))
+                        p.mkdir(parents=True, exist_ok=True)
+                        self._json({"ok": True, "path": str(p)})
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                    except OSError as exc:
+                        self._json({"error": str(exc)}, 400)
+                    return
+                if path == "/api/fs/delete":
+                    try:
+                        p = _wb_root(str(body.get("path") or ""))
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    import shutil as _sh
+                    try:
+                        if p.is_dir():
+                            if bool(body.get("recursive")):
+                                _sh.rmtree(p)
+                            else:
+                                p.rmdir()  # empty dirs only unless asked
+                        elif p.exists():
+                            p.unlink()
+                        else:
+                            self._json({"error": "not found"}, 404)
+                            return
+                    except OSError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json({"ok": True})
+                    return
+                if path == "/api/fs/rename":
+                    try:
+                        src = _wb_root(str(body.get("src") or ""))
+                        dst = _wb_root(str(body.get("dst") or ""))
+                        src.rename(dst)
+                        self._json({"ok": True, "src": str(src),
+                                    "dst": str(dst)})
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                    except OSError as exc:
+                        self._json({"error": str(exc)}, 400)
+                    return
+                if path == "/api/fs/reveal":
+                    try:
+                        p = _wb_root(str(body.get("path") or ""))
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    import subprocess as _sp
+                    try:
+                        if sys.platform.startswith("win"):
+                            _sp.Popen(["explorer", "/select,", str(p)]
+                                      if p.is_file() else
+                                      ["explorer", str(p)])
+                        else:
+                            _sp.Popen(["xdg-open",
+                                       str(p if p.is_dir() else p.parent)])
+                        self._json({"ok": True})
+                    except Exception as exc:
+                        self._json({"error": str(exc)}, 400)
+                    return
+                if path == "/api/terminal/run":
+                    import subprocess as _sp
+                    cmd = str(body.get("command") or "").strip()
+                    if not cmd:
+                        self._json({"error": "command is required"}, 400)
+                        return
+                    try:
+                        cwd = _wb_root(str(
+                            body.get("cwd")
+                            or self.state.workspace))
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    if not cwd.is_dir():
+                        self._json({"error": "cwd is not a directory"}, 400)
+                        return
+                    timeout = max(1, min(int(body.get("timeout", 120)), 600))
+                    import time as _t
+                    started = _t.time()
+                    flags = _sp.CREATE_NO_WINDOW if sys.platform.startswith(
+                        "win") and hasattr(_sp, "CREATE_NO_WINDOW") else 0
+                    try:
+                        proc = _sp.run(cmd, cwd=str(cwd), shell=True,
+                                       capture_output=True, text=True,
+                                       timeout=timeout, creationflags=flags)
+                        self._json({
+                            "exit_code": proc.returncode,
+                            "stdout": (proc.stdout or "")[-60000:],
+                            "stderr": (proc.stderr or "")[-20000:],
+                            "elapsed": round(_t.time() - started, 2),
+                            "cwd": str(cwd)})
+                    except _sp.TimeoutExpired:
+                        self._json({"exit_code": None, "timed_out": True,
+                                    "elapsed": round(_t.time() - started, 2),
+                                    "cwd": str(cwd)})
+                    return
             if path == "/api/projects":
                 name = str(body.get("name", "")).strip()
                 if not name:
