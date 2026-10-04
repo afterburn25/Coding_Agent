@@ -5388,11 +5388,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"available": False})
                 return True
             name = (q.get("q") or [""])[0]
+            entity_id = (q.get("id") or [""])[0]
             payload: dict = {"stats": self.state.knowledge.stats()}
+            if entity_id:
+                ent = self.state.knowledge.get_entity(entity_id)
+                payload["entity"] = ent
+                if ent:
+                    try:
+                        depth = int((q.get("depth") or ["1"])[0])
+                    except ValueError:
+                        depth = 1
+                    payload["graph"] = self.state.knowledge.neighbors(
+                        entity_id, depth=max(1, min(3, depth)))
             if name:
                 payload["entities"] = self.state.knowledge.find_entities(
                     name_like=name)
                 payload["context"] = self.state.knowledge.context_for(name)
+            if not entity_id and not name:
+                payload["entities"] = self.state.knowledge.find_entities(
+                    limit=50)
             self._json(payload)
             return True
         if path == "/api/rag":

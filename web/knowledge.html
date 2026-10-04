@@ -1,21 +1,20 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
-  <title>Nexus Core — Settings</title>
-  <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/tools.css">
-  <link rel="stylesheet" href="/settings.css">
+  <title>Nexus Core · Knowledge</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/missions.css" />
   <link rel="stylesheet" href="/profile.css" />
 </head>
 <body>
-  <div class="tools-shell">
-        <aside class="sidebar">
+<div class="missions-shell">
+      <aside class="sidebar">
       <div class="brand-lockup">
         <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
-        <div class="brand-wordmark">Nexus <strong>Core</strong><small>CONTROL CENTER</small></div>
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>KNOWLEDGE</small></div>
       </div>
       <nav class="primary-nav" aria-label="Primary">
         <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
@@ -24,7 +23,7 @@
         <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
         <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
         <a class="nav-item" href="/projects.html"><span class="nav-icon">▣</span><span>Projects</span></a>
-        <a class="nav-item" href="/knowledge.html"><span class="nav-icon">✦</span><span>Knowledge</span></a>
+        <a class="nav-item active" href="/knowledge.html"><span class="nav-icon">✦</span><span>Knowledge</span></a>
         <a class="nav-item" href="/workspace.html"><span class="nav-icon">⌬</span><span>Workspace</span></a>
         <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
         <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
@@ -33,7 +32,7 @@
         <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
         <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
         <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
-        <a class="nav-item active" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
       </nav>
       <div class="sidebar-spacer"></div>
       <div class="local-card">
@@ -42,23 +41,37 @@
       </div>
     </aside>
 
-    <main class="tools-main">
-      <a class="mobile-back" href="/">← Chat</a>
-      <header class="tools-header">
-        <div>
-          <h1>Settings</h1>
-          <p class="subtitle">Application preferences, safety boundaries, and system configuration.</p>
-        </div>
-      </header>
+  <main class="missions-main">
+    <a class="mobile-back" href="/">← Chat</a>
+    <header class="topbar">
+      <div><strong>Knowledge</strong><span id="knowledgeStats">loading…</span></div>
+      <input id="knowledgeFilter" placeholder="Search entities…" />
+    </header>
+    <div class="missions-body">
+      <section id="entityList" class="mission-list"></section>
+      <section id="entityDetail" class="mission-detail">
+        <div class="empty">Select an entity</div>
+      </section>
+    </div>
+  </main>
 
-      <div id="settingsNav" class="settings-nav muted">Loading…</div>
-      <section id="settingsBody" class="settings-body muted">Loading…</section>
-    </main>
-  </div>
-  <script src="/settings.js"></script>
-  <script src="/voice_global.js"></script>
+  <aside class="missions-right">
+    <div class="section-title">About</div>
+    <p class="dim-text">The knowledge graph holds entities and relations Nexus
+      learns across projects, research and conversations — durable memory
+      independent of any model.</p>
+    <div class="section-title">Depth</div>
+    <select id="graphDepth">
+      <option value="1">1 hop</option>
+      <option value="2">2 hops</option>
+      <option value="3">3 hops</option>
+    </select>
+  </aside>
+</div>
+<script src="/voice_global.js"></script>
   <script src="/palette.js"></script>
-  <script src="/task_bar.js"></script>
-  <script src="/profile.js"></script>
+<script src="/task_bar.js"></script>
+<script src="/knowledge.js"></script>
+<script src="/profile.js"></script>
 </body>
 </html>

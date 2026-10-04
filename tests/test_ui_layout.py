@@ -18,7 +18,7 @@ WEB = ROOT / "web"
 PAGES = [
     "index", "tools", "research", "image", "missions",
     "trainer", "system", "answers", "voice", "settings", "models",
-    "workspace", "command",
+    "workspace", "command", "knowledge",
 ]
 
 # Canonical secondary-page destinations — every workspace page links all of them.
@@ -26,6 +26,7 @@ CANONICAL_LINKS = [
     "/", "/command.html", "/models.html", "/research.html", "/missions.html",
     "/image.html", "/tools.html", "/trainer.html", "/voice.html",
     "/answers.html", "/system.html", "/settings.html", "/workspace.html",
+    "/knowledge.html",
 ]
 
 
