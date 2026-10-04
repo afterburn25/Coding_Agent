@@ -97,6 +97,23 @@
   read-only install, tampered payload 403, disk reload still verified).
   Dogfood found one real fix: creator-session `PermissionError`s answered
   500; they now map to 403.
+- **Phase 1 of the intelligence/reliability milestone** — first-class
+  requirements (`localcodeagent/requirements.py`): durable rows with
+  lifecycle (`not_started…verified/failed/blocked`), evidence entries,
+  and `inferred` provenance so derived criteria are never mistaken for
+  explicit asks. Repair-intent chat ("fix this", "make it work") derives
+  acceptance criteria BEFORE work runs — `/api/chat` returns
+  `acceptance_criteria`, SSE emits a `requirements` event, and rows
+  persist scoped task→conversation→global. Mission creation derives +
+  links `requirement_id` onto each `success_criteria` entry; the
+  evaluator carries that ID through `criteria_results` so
+  `sync_mission` flips rows verified/failed from real evidence.
+  API: `GET /api/requirements` + `POST /api/requirements{/status,/evidence}`;
+  missions page renders a requirements checklist with inferred badges.
+  Next phases (audit-backed): hypothesis lifecycle + causal memory +
+  decision journal, then risk-classified promotion, evidence board,
+  reliability scoring, regression memory/bisect, resource modes,
+  offline/egress policy, lineage, Safe Mode, golden config, RC scorecard.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -978,7 +995,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1413 tests` passing (2 environment skips).
+Expected at this checkpoint: `1424 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

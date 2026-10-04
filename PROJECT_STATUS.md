@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1413 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1424 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -90,8 +90,16 @@ v0.15.0 deepens the workstation core:
 - **Model-replacement continuity** — memory staged under one model
   profile survives a full AppState restart under a different profile:
   Brain verified, facts/rules/conversations reloaded intact over HTTP.
+- **First-class requirements** (`localcodeagent/requirements.py`) —
+  durable requirement rows with lifecycle, evidence, and `inferred`
+  provenance. Vague repair asks ("fix startup", "make this work")
+  deterministically derive acceptance criteria *before* work begins —
+  in chat (`/api/chat` + SSE `requirements` event) and at mission
+  creation (criteria link `requirement_id` back to rows). Evaluator
+  results sync requirement status from persisted evidence; the mission
+  UI renders a live checklist. Docs: `docs/REQUIREMENTS.md`.
 
-Verified: **1413 tests** (2 environment skips).
+Verified: **1424 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -454,8 +462,8 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Digital Twin**: `localcodeagent/twin.py` — measured hardware samples + model measures; predicts RAM/VRAM fit, load/TTFT/TPS; hardware-fingerprint invalidation.
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
-- Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1413 tests passing** (2 environment skips).
+- Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate` `/api/requirements` (+ status/evidence writes).
+- Current automated checkpoint: **1424 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
