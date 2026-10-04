@@ -3488,6 +3488,17 @@ class AgentOrchestrator:
         attachments: list[dict[str, Any]] | None = None,
         mission_id: str | None = None,
     ) -> AgentResult:
+        # Resolve "option 1" / "the first option" style replies against the
+        # assistant's most recent numbered proposal before anything else
+        # sees the fragment — otherwise the model can't tell which option.
+        if self.conversation_memory is not None:
+            try:
+                resolved = self.conversation_memory.resolve_option_selection(
+                    user_text)
+                if resolved:
+                    user_text = resolved
+            except Exception:
+                pass
         task = self.tasks.create(user_text, mode)
         if mission_id:
             self._mission_by_task[task.id] = mission_id

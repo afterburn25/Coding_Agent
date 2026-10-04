@@ -11,6 +11,39 @@ from ..fsutil import atomic_write_text
 from typing import Any
 
 
+_OPTION_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
+
+# A user reply that is nothing more than a reference to an option the
+# assistant just proposed — "option 1", "the second option", "go with 3",
+# "pick the first one", bare "2". Kept deliberately tight: anything longer
+# or content-bearing stays a normal message.
+_OPTION_SELECTION_RES = (
+    re.compile(
+        r"^\s*(?:go with|let'?s do|do|pick|choose|take|i'?ll take|use|run|"
+        r"yes[ ,]*)?\s*(?:the\s+)?option\s*#?\s*(\d{1,2})\s*[.!?\s]*$",
+        re.IGNORECASE),
+    re.compile(
+        r"^\s*(?:go with|let'?s do|do|pick|choose|take|i'?ll take|use|run)?"
+        r"\s*(?:the\s+)?option\s+(one|two|three|four|five|six|seven|eight|"
+        r"nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|"
+        r"ninth|tenth)\s*[.!?\s]*$", re.IGNORECASE),
+    re.compile(
+        r"^\s*(?:go with|let'?s do|do|pick|choose|take|i'?ll take|use|run)?"
+        r"\s*(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|"
+        r"eighth|ninth|tenth)\s*(?:option|one)\s*[.!?\s]*$",
+        re.IGNORECASE),
+    re.compile(r"^\s*(\d{1,2})\s*[.!?\s]*$"),
+    re.compile(
+        r"^\s*(one|two|three|four|five|six|seven|eight|nine|ten)"
+        r"\s*[.!?\s]*$", re.IGNORECASE),
+)
+
+
 RECALL_EXPRESSION_STYLES = (
     "Integrate the remembered fact naturally into the answer; avoid leading with 'you told me' unless that framing is useful.",
     "Use a concise paraphrase with a different sentence opening and sentence structure from recent replies.",
@@ -55,6 +88,7 @@ class ConversationMemory:
             "facts": [],
             "behavior_rules": [],
             "training_examples": [],
+            "pending_options": [],
         }
         self._load()
 
@@ -165,7 +199,65 @@ class ConversationMemory:
                 {"role": "assistant", "content": assistant, "timestamp": now},
             ])
             self._data["messages"] = messages[-self.history_limit:]
+            # Track option lists from the latest assistant reply so a short
+            # follow-up like "option 1" can be resolved instead of falling
+            # through to the model as an ambiguous fragment.
+            self._data["pending_options"] = self.extract_options(assistant)
             self._save()
+
+    @staticmethod
+    def extract_options(assistant_text: str) -> list[str]:
+        """Numbered options from an assistant proposal — "Option 1: …",
+        "**Option 2** — …", or bare "1. …" lists. Only counts as an option
+        list when numbering starts at 1 and runs consecutively; lines
+        inside code fences are ignored."""
+        options: list[tuple[int, str]] = []
+        in_fence = False
+        for line in str(assistant_text or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence or len(stripped) > 400:
+                continue
+            m = re.match(
+                r"^(?:[-*•]\s*)?(?:\*\*)?(?:option\s*)?(\d{1,2})\s*"
+                r"[\.\)\:]?\s*(?:\*\*)?\s*[:\-–—]?\s*(?:\*\*)?\s*(.+?)\s*$",
+                stripped, flags=re.IGNORECASE)
+            if not m:
+                continue
+            text = re.sub(r"\*\*([^*]+)\*\*", r"\1", m.group(2)).strip()
+            text = text.strip("*_ ").strip()
+            if text:
+                options.append((int(m.group(1)), text[:300]))
+        # Only a genuine numbered list: starts at 1, consecutive, ≥2 items.
+        if len(options) < 2:
+            return []
+        if [n for n, _ in options] != list(range(1, len(options) + 1)):
+            return []
+        return [t for _, t in options]
+
+    def resolve_option_selection(self, user_text: str) -> str | None:
+        """Expand a bare selection ("option 1", "the second option",
+        "go with 2") into the option text from the most recent assistant
+        proposal, so downstream routing sees the real intent."""
+        options = self._data.get("pending_options") or []
+        if len(options) < 2:
+            return None
+        text = self._clean(user_text, 200)
+        if not text:
+            return None
+        number = None
+        for pattern in _OPTION_SELECTION_RES:
+            match = pattern.match(text)
+            if match:
+                token = match.group(1).lower()
+                number = (int(token) if token.isdigit()
+                          else _OPTION_NUMBER_WORDS.get(token))
+                break
+        if number is None or not 1 <= number <= len(options):
+            return None
+        return f"Option {number} — {options[number - 1]}"
 
     def _previous_exchange(self) -> tuple[str, str]:
         messages = self._data.get("messages", [])

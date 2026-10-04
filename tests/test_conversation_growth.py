@@ -243,6 +243,56 @@ class ScopedConversationMemoryTests(unittest.TestCase):
             after = memory.prompt_context(project_id="project-a", conversation_id="chat-a")
             self.assertNotIn("project formatter", after)
 
+    def test_option_selection_resolves_against_pending_proposal(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.record_exchange(
+                "fix it",
+                "What do you want to do?\n"
+                "- **Option 1**: Run a deeper diagnostic to find the root cause.\n"
+                "- **Option 2**: Full rebuild — wipe and start over.\n"
+                "- **Option 3**: Manual patch — risky.")
+            resolved = memory.resolve_option_selection("option 1")
+            self.assertIsNotNone(resolved)
+            self.assertIn("Option 1", resolved)
+            self.assertIn("deeper diagnostic", resolved)
+            self.assertIn("Option 2",
+                          memory.resolve_option_selection("the second option"))
+            self.assertIn("Option 3",
+                          memory.resolve_option_selection("go with option 3"))
+            self.assertIn("Option 2", memory.resolve_option_selection("2"))
+            self.assertIn("Option 1",
+                          memory.resolve_option_selection("first one"))
+            # Out of range and non-selections are left alone
+            self.assertIsNone(memory.resolve_option_selection("option 9"))
+            self.assertIsNone(
+                memory.resolve_option_selection("what do you mean?"))
+            self.assertIsNone(memory.resolve_option_selection(
+                "tell me more about option 1 first"))
+
+    def test_option_selection_empty_without_pending_proposal(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.record_exchange("hi", "hello — how can I help?")
+            self.assertIsNone(memory.resolve_option_selection("option 1"))
+            self.assertIsNone(memory.resolve_option_selection("1"))
+
+    def test_pending_options_refresh_and_persist(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "memory.json"
+            memory = ConversationMemory(path)
+            memory.record_exchange(
+                "pick one", "1. alpha path\n2. beta path")
+            # A reply without options clears the stale proposal
+            memory.record_exchange("ok", "sounds good")
+            self.assertIsNone(memory.resolve_option_selection("option 1"))
+            # New proposal persists across a memory reload (restart)
+            memory.record_exchange(
+                "which", "Option 1: redo it\nOption 2: keep it")
+            reloaded = ConversationMemory(path)
+            self.assertIn("redo it",
+                          reloaded.resolve_option_selection("option 1"))
+
     def test_conversation_manager_intent_classification(self):
         self.assertEqual(ConversationManager.classify_intent("write an email to the team"), "writing")
         self.assertEqual(ConversationManager.classify_intent("teach me how recursion works"), "tutoring")
