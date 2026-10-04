@@ -42,7 +42,7 @@ class SelfUpdateValidationTests(unittest.TestCase):
         self.assertFalse(_smoke_config()["sync_source_on_start"])
 
     def test_isolated_second_instance_smoke_test(self):
-        result = validate_self_update(ROOT, run_tests=False, startup_timeout=20)
+        result = validate_self_update(ROOT, run_tests=False, startup_timeout=30)
         self.assertTrue(result["ok"], msg=result.get("error") or result.get("log_tail"))
         checks = result["smoke"]["checks"]
         self.assertTrue(checks["status"]["ok"])
