@@ -8,7 +8,7 @@ independent of cosmetic timing; immediate controls and Safe Mode bypass it.
 
 ## Results
 
-- **46 Node tests and 6 Python tests passed.** Coverage includes unchanged normal
+- **46 Node tests and 7 Python tests passed.** Coverage includes UTF-8 assets, unchanged normal
   transforms/audio, every startup phase as a fault origin, exact snapshot
   continuity, monotonic half-open iris closure, sequence/pin order, final lock,
   supplied attempt counts, duplicate errors, recovery success with closed

@@ -170,7 +170,7 @@ def build():
     pulse = (.7 * sweep(t, 72, 40, .9) * np.exp(-t / .19) + .19 * tone(t, 528) * np.exp(-t / .26) + .09 * tone(t, 792) * np.exp(-t / .2)) * envelope(t, .025, .12)
     stems['core_online'] = normalize(stereo(pulse, tone(t, 1056) * np.exp(-t / .18) * envelope(t), .035), .48)
 
-    manifest = json.loads((ROOT / 'animation_manifest.json').read_text())
+    manifest = json.loads((ROOT / 'animation_manifest.json').read_text(encoding='utf-8'))
     preview_seconds = 17
     mix = np.zeros((preview_seconds * RATE, 2), dtype=np.float64)
     for event in manifest['events']:

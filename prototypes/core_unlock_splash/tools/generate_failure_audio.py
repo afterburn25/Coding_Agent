@@ -86,7 +86,7 @@ def build():
     idle = .7 * tone(t, 36) + .21 * tone(t, 72) + .055 * tone(t, 144)
     stems['emergency_idle_hum'] = normalize(stereo(idle, tone(t, 108), .045), .13)
 
-    manifest = json.loads((ROOT / 'animation_manifest.json').read_text())
+    manifest = json.loads((ROOT / 'animation_manifest.json').read_text(encoding='utf-8'))
     audio_dir = ROOT / 'audio'
     report = json.loads((audio_dir / 'mix_report.json').read_text())
     for name, data in stems.items():

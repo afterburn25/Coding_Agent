@@ -7,10 +7,16 @@ import unittest
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = json.loads((ROOT / 'animation_manifest.json').read_text())
+MANIFEST = json.loads((ROOT / 'animation_manifest.json').read_text(encoding='utf-8'))
 
 
 class AssetTests(unittest.TestCase):
+    def test_browser_assets_use_valid_utf8(self):
+        for path in [ROOT / 'animation_manifest.json', *ROOT.glob('web/*')]:
+            if path.is_file():
+                text = path.read_bytes().decode('utf-8', errors='strict')
+                self.assertNotIn('\ufffd', text, path.name)
+
     def test_every_sound_is_valid_stereo_pcm_with_headroom(self):
         for filename in MANIFEST['sounds'].values():
             with self.subTest(file=filename), wave.open(str(ROOT / filename)) as wav:
