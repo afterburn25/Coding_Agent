@@ -5311,10 +5311,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.lkg.status())
             return True
         if path == "/api/search":
-            if self.state.search is None:
+            gs = getattr(self.state, "_global_search", None)
+            if gs is None:
                 from .search import GlobalSearch
-                self.state.search = GlobalSearch(self.state)
-            self._json(self.state.search.query(
+                gs = self.state._global_search = GlobalSearch(self.state)
+            self._json(gs.query(
                 (q.get("q") or [""])[0],
                 limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
             return True
