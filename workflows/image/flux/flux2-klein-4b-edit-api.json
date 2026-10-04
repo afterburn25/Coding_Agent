@@ -88,7 +88,7 @@
   "10": {
     "class_type": "KSamplerSelect",
     "inputs": {
-      "sampler_name": "euler"
+      "sampler_name": "${sampler_name}"
     }
   },
   "11": {

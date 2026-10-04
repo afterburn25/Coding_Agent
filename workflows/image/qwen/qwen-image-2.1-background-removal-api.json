@@ -79,9 +79,9 @@
       "seed": "${seed}",
       "steps": "${steps}",
       "cfg": "${guidance}",
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1
+      "sampler_name": "${sampler_name}",
+      "scheduler": "${scheduler}",
+      "denoise": "${denoise_strength}"
     }
   },
   "8": {

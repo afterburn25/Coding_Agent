@@ -663,6 +663,15 @@ class AgentOrchestrator:
             )
         return None
 
+    def _persona_active(self) -> bool:
+        """True when a named persona preset is driving delivery style."""
+        try:
+            resolver = self.profile_context
+            ctx = str(resolver() or "") if callable(resolver) else ""
+        except Exception:
+            return False
+        return "Active persona:" in ctx
+
     @staticmethod
     def looks_like_training_command(user_text: str) -> bool:
         text = user_text.strip().lower()
@@ -811,12 +820,22 @@ class AgentOrchestrator:
     _VISUAL_REFERENCE_RE = re.compile(
         r"\b(?:(?:the|this|that)\s+(?:photo|picture|image|pic|selfie)\b|"
         r"in\s+(?:the|this|that)\s+(?:photo|picture|image|pic)\b|"
-        r"what\s+(?:is|are|does|did|was)\s+(?:she|he|it|they)\b|"
-        r"what'?s\s+(?:she|he|it|wrong\s+with|on|in)\b|"
+        r"(?:photo|picture|image|pic)\s+of\b|"
+        r"what\s+(?:is|are|does|did|was)\s+(?:she|he|it|they|this|that)\b|"
+        r"what'?s\s+(?:she|he|it|this|that|in|wrong\s+with|on)\b|"
+        r"who\s+(?:is|are)\s+(?:this|that|she|he|they)\b|"
         r"describe\s+(?:it|her|him|them|this|that|the)\b|"
+        r"tell\s+me\s+about\s+(?:it|her|him|them|this|that|the)\b|"
         r"look\s+at\s+(?:it|her|him|the|this|that)\b|"
         r"she\s+(?:wearing|holding|doing)|(?:her|his|their)\s+"
         r"(?:outfit|pose|face|expression|clothes?|dress|suit))\b", re.I)
+
+    # Short interrogatives — "what is this", "what's that" — only count as
+    # visual follow-ups when a recent image exists to refer back to.
+    _QUESTIONISH_RE = re.compile(
+        r"^\s*(?:what|who|where|when|why|how|which|whose|"
+        r"is|are|was|were|do(?:es|id)?\s+you|can\s+you|could\s+you|"
+        r"tell\s+me|describe|show\s+me|look)\b", re.I)
 
     _VISION_IMAGE_MIME = {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -834,25 +853,51 @@ class AgentOrchestrator:
             pass
         return None
 
-    def _latest_stored_image_paths(self) -> list[str]:
-        """Image paths from the most recent attachment-bearing user message.
+    def _latest_visual_sources(
+        self, *, max_user_turns: int | None = None
+    ) -> list[str]:
+        """Most recent image the conversation can still reference.
 
-        Persisted attachments survive restarts on disk, so a later visual
-        follow-up can re-send the same pixels to the vision model."""
+        Covers BOTH directions: user-uploaded attachments (persisted in the
+        message record) and images Nexus generated herself (assistant
+        image_job_ids → output files) — 'what is this a picture of' means
+        whichever came latest. Returns on the first hit so the newest
+        visual context wins.
+
+        max_user_turns bounds how far back the search reaches (counted in
+        user messages) — an attachment from yesterday shouldn't make every
+        later question a vision turn."""
         if self.conversation_manager is None:
             return []
         messages = (self.conversation_manager.active() or {}).get("messages") or []
+        user_turns = 0
         for msg in reversed(messages[-24:]):
-            if msg.get("role") != "user":
-                continue
-            paths = [
-                str((a or {}).get("path") or "")
-                for a in (msg.get("attachments") or [])
-                if str((a or {}).get("kind") or "") == "image"
-            ]
-            found = [p for p in paths if p and Path(p).is_file()]
-            if found:
-                return found
+            if max_user_turns is not None and user_turns > max_user_turns:
+                break
+            role = msg.get("role")
+            if role == "user":
+                user_turns += 1
+                paths = [
+                    str((a or {}).get("path") or "")
+                    for a in (msg.get("attachments") or [])
+                    if str((a or {}).get("kind") or "") == "image"
+                ]
+                found = [p for p in paths if p and Path(p).is_file()]
+                if found:
+                    return found
+            elif role == "assistant":
+                for jid in (msg.get("image_job_ids") or []):
+                    if self._image_outputs is None:
+                        break
+                    try:
+                        outs = [
+                            str(p) for p in (self._image_outputs(jid) or [])
+                            if p and Path(str(p)).is_file()
+                        ]
+                    except Exception:
+                        outs = []
+                    if outs:
+                        return outs
         return []
 
     def _vision_user_content(
@@ -1775,11 +1820,19 @@ class AgentOrchestrator:
                 recovery_count=task.recovery_count + 1,
                 error="",
             )
+            # Resume with the originally captured source/reference images —
+            # otherwise the re-inferred operation collapses to text_to_image.
+            p_args = pending.get("arguments") or {}
+            resume_sources = [s for s in [
+                str(p_args.get("source_image") or ""),
+                *(str(r) for r in (p_args.get("reference_images") or [])),
+            ] if s]
             return self._direct_image_result(
                 task_id=task_id,
                 user_text=task.prompt,
                 event_callback=self._logging_callback(task_id, event_callback),
                 approved=approved,
+                source_images=resume_sources or None,
             )
 
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
@@ -3016,15 +3069,43 @@ class AgentOrchestrator:
             "role": "image",
             "reason": "chat model bypassed for image generation intent",
         }
-        permission, permission_mode = self.tools.permission_for("generate_image")
-        prompt_list = self._split_image_prompts(user_text)
+        # Pick the real operation from the user's words — "remove the
+        # background" must reach remove_background/qwen, not become a
+        # text_to_image on a generation-only model.
+        from ..image.router import ImageRouter, parse_sampling_controls
+        from ..image.types import ImageRequest
+        probe = ImageRequest(
+            prompt=user_text,
+            source_image=(source_images or [""])[0],
+            reference_images=list(source_images[1:]) if source_images else [],
+        )
+        operation, _ = ImageRouter.infer_operation(probe)
+        # Ops needing arguments the direct path can't supply fall back to
+        # the closest prompt-driven tool (qwen edit handles them via text).
+        tool_name = {
+            "remove_background": "remove_background",
+            "upscale": "upscale_image",
+            "edit_image": "edit_image",
+            "inpaint": "edit_image",
+            "outpaint": "edit_image",
+            "variation": "create_image_variations",
+        }.get(operation, "generate_image")
+        if tool_name in {"remove_background", "upscale_image", "edit_image"} and not source_images:
+            # Specialized tools hard-require a source; nothing to edit.
+            tool_name = "generate_image"
+        # ComfyUI controls spoken in plain language: "cfg 4, 30 steps,
+        # denoise 0.6, sampler euler a, karras scheduler, seed 42".
+        prompt_text, sampler_controls = parse_sampling_controls(user_text)
+        permission, permission_mode = self.tools.permission_for(tool_name)
+        prompt_list = self._split_image_prompts(prompt_text)
         # Send image models clean descriptive phrases: scaffold-stripped
         # positive prompt, exclusion clauses routed to negative_prompt.
         positive, negative = ConversationManager.split_negative_prompt(
-            ConversationManager.refine_image_prompt(user_text))
+            ConversationManager.refine_image_prompt(prompt_text))
         arguments = {"prompt": positive}
         if negative:
             arguments["negative_prompt"] = negative
+        arguments.update(sampler_controls)
         if len(prompt_list) > 1:
             # Per-prompt exclusions union into the shared negative_prompt —
             # "3 images, no text" means no text on any of them.
@@ -3063,7 +3144,7 @@ class AgentOrchestrator:
         if permission_mode == "ask" and approved is None:
             pending = {
                 "kind": "direct_image",
-                "name": "generate_image",
+                "name": tool_name,
                 "permission": permission,
                 "arguments": arguments,
                 "detail": user_text,
@@ -3126,16 +3207,16 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "task", "task": denied.as_dict()})
             return AgentResult(content=content, routing=decision, model_events=[model_event], task=denied.as_dict())
 
-        result = self.tools.execute("generate_image", arguments, approved=bool(approved))
+        result = self.tools.execute(tool_name, arguments, approved=bool(approved))
         tool_event = {
-            "name": "generate_image",
+            "name": tool_name,
             "arguments": arguments,
             "result": result,
             "phase": "direct_image",
         }
         self._safe_emit(event_callback, {"type": "model", "event": model_event})
         self._safe_emit(event_callback, {"type": "tool", "tool": tool_event})
-        self._emit_image_job_from_tool_result(event_callback, "generate_image", result)
+        self._emit_image_job_from_tool_result(event_callback, tool_name, result)
 
         if result.startswith(("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
             content = result.split(":", 1)[-1].strip()
@@ -3454,6 +3535,11 @@ class AgentOrchestrator:
         # Tier 0: deterministic/local handlers — before any hardware probe or
         # model routing so cheap answers stay cheap.
         builtin_response = self.builtin_utility_response(user_text) if mode == "auto" else None
+        if builtin_response is not None and self._persona_active():
+            # A named persona is in play — canned small talk ("what can you
+            # do", "hi") would reply flat and break character. Let the model
+            # lane answer; the utility prompt already lists real capabilities.
+            builtin_response = None
         brain_blocked_response = (
             "Image generation is disabled by the creator-locked Nexus Brain."
             if (
@@ -3597,8 +3683,15 @@ class AgentOrchestrator:
         # follow-up resolver and direct path claimed them already).
         vision_image_paths = [str(p) for p in attach["image_paths"]]
         if not vision_image_paths:
-            stored = self._latest_stored_image_paths()
-            if stored and self._VISUAL_REFERENCE_RE.search(user_text or ""):
+            stored = self._latest_visual_sources()
+            text = user_text or ""
+            if stored and (
+                self._VISUAL_REFERENCE_RE.search(text)
+                # Bare short questions ("what is this?") only refer to a
+                # visual source that's still fresh in the exchange.
+                or (self._QUESTIONISH_RE.match(text) and len(text) < 200
+                    and self._latest_visual_sources(max_user_turns=2))
+            ):
                 vision_image_paths = stored
         vision_override = mode
         if (vision_image_paths and str(mode or "auto") in {"", "auto"}

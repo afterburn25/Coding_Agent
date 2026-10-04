@@ -564,9 +564,14 @@ class ImageManager:
             "width": request.width, "height": request.height, "count": request.count,
             "seed": request.seed if request.seed is not None else random.randint(0, 2**31-1),
             "steps": request.steps if request.steps is not None else (4 if profile.speed_tier == "fast" else 25),
-            # CFG 1.0 is correct for distilled models (FLUX Klein); full
-            # checkpoints like SDXL need real guidance.
-            "guidance": request.guidance if request.guidance is not None else (6.5 if "stable-diffusion" in profile.family else 1.0),
+            # CFG is family-specific: distilled models (FLUX Klein) run at 1.0,
+            # full checkpoints need real guidance — SDXL ~6.5, Qwen Image ~4.
+            # At cfg 1.0 a full model ignores conditioning and emits noise.
+            "guidance": request.guidance if request.guidance is not None else self._default_guidance(profile),
+            # Sampler/scheduler also follow the model family's verified
+            # defaults; explicit request values always win.
+            "sampler_name": request.sampler_name or self._default_sampler(profile)[0],
+            "scheduler": request.scheduler or self._default_sampler(profile)[1],
             "model_path": Path(profile.model_path).name if profile.model_path else "",
             "source_image": source, "mask_path": mask, "references": refs,
             "image_strength": request.image_strength if request.image_strength is not None else 1.0,
@@ -584,6 +589,27 @@ class ImageManager:
             variables[f"lora_{idx}_name"]=str(lora.get("name") or "")
             variables[f"lora_{idx}_strength"]=float(lora.get("strength",1.0))
         return variables
+
+    @staticmethod
+    def _default_guidance(profile: ImageModelProfile) -> float:
+        family = (profile.family or "").lower()
+        if "stable-diffusion" in family:
+            return 6.5
+        if "qwen" in family:
+            return 4.0
+        if "flux" in family and "klein" in family:
+            return 1.0
+        if "z-image" in family or "turbo" in family:
+            return 1.0
+        return 4.0
+
+    @staticmethod
+    def _default_sampler(profile: ImageModelProfile) -> tuple[str, str]:
+        family = (profile.family or "").lower()
+        if "stable-diffusion" in family:
+            return "dpmpp_2m", "karras"
+        # Qwen Image and FLUX official workflows use euler/simple.
+        return "euler", "simple"
 
     @staticmethod
     def _validate_lora_slots(workflow_name: str, workflow_status: dict[str, Any], resolved_loras: list[dict[str, Any]]) -> None:

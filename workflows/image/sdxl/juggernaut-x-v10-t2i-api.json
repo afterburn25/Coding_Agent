@@ -9,14 +9,20 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "${prompt}",
-      "clip": ["1", 1]
+      "clip": [
+        "1",
+        1
+      ]
     }
   },
   "3": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "low quality, worst quality, bad anatomy, extra fingers, missing fingers, deformed hands, duplicate limbs, poorly drawn face, blurry, watermark, text, logo, ${negative_prompt}",
-      "clip": ["1", 1]
+      "clip": [
+        "1",
+        1
+      ]
     }
   },
   "4": {
@@ -33,26 +39,47 @@
       "seed": "${seed}",
       "steps": "${steps}",
       "cfg": "${guidance}",
-      "sampler_name": "dpmpp_2m",
-      "scheduler": "karras",
-      "denoise": 1.0,
-      "model": ["1", 0],
-      "positive": ["2", 0],
-      "negative": ["3", 0],
-      "latent_image": ["4", 0]
+      "sampler_name": "${sampler_name}",
+      "scheduler": "${scheduler}",
+      "denoise": "${denoise_strength}",
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "latent_image": [
+        "4",
+        0
+      ]
     }
   },
   "6": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["5", 0],
-      "vae": ["1", 2]
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
     }
   },
   "7": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": ["6", 0],
+      "images": [
+        "6",
+        0
+      ],
       "filename_prefix": "ChatNexus/Juggernaut-X-v10"
     }
   }

@@ -131,7 +131,7 @@ class StoredAttachmentTests(unittest.TestCase):
                     {"role": "assistant", "content": "nice"},
                     {"role": "user", "content": "and this?"},
                 ]})
-            self.assertEqual(orch._latest_stored_image_paths(), [str(img)])
+            self.assertEqual(orch._latest_visual_sources(), [str(img)])
 
     def test_no_attachments_returns_empty(self):
         orch = AgentOrchestrator.__new__(AgentOrchestrator)
@@ -139,7 +139,7 @@ class StoredAttachmentTests(unittest.TestCase):
             active=lambda: {"messages": [
                 {"role": "user", "content": "hello"},
             ]})
-        self.assertEqual(orch._latest_stored_image_paths(), [])
+        self.assertEqual(orch._latest_visual_sources(), [])
 
     def test_missing_files_are_skipped(self):
         orch = AgentOrchestrator.__new__(AgentOrchestrator)
@@ -149,7 +149,7 @@ class StoredAttachmentTests(unittest.TestCase):
                  "attachments": [{"kind": "image", "name": "gone.png",
                                   "path": "C:/does/not/exist.png"}]},
             ]})
-        self.assertEqual(orch._latest_stored_image_paths(), [])
+        self.assertEqual(orch._latest_visual_sources(), [])
 
 
 class VisionContentTests(unittest.TestCase):
@@ -201,3 +201,69 @@ class ShrinkGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VisualSourceTests(unittest.TestCase):
+    def test_generated_outputs_are_visual_sources(self):
+        import types as _t
+        with tempfile.TemporaryDirectory() as td:
+            img = Path(td) / "gen.png"
+            img.write_bytes(b"PNG")
+            orch = AgentOrchestrator.__new__(AgentOrchestrator)
+            orch.conversation_manager = _t.SimpleNamespace(
+                active=lambda: {"messages": [
+                    {"role": "user", "content": "draw a woman"},
+                    {"role": "assistant", "content": "here",
+                     "image_job_ids": ["j1"]},
+                    {"role": "user", "content": "thanks"},
+                ]})
+            orch._image_outputs = lambda jid: [str(img)]
+            self.assertEqual(orch._latest_visual_sources(), [str(img)])
+
+    def test_recency_bound_excludes_old_attachments(self):
+        import types as _t
+        with tempfile.TemporaryDirectory() as td:
+            img = Path(td) / "old.png"
+            img.write_bytes(b"PNG")
+            orch = AgentOrchestrator.__new__(AgentOrchestrator)
+            orch._image_outputs = lambda jid: []
+            orch.conversation_manager = _t.SimpleNamespace(
+                active=lambda: {"messages": [
+                    {"role": "user", "content": "see",
+                     "attachments": [{"kind": "image", "name": "o.png",
+                                      "path": str(img)}]},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": "u1"},
+                    {"role": "assistant", "content": "a"},
+                    {"role": "user", "content": "u2"},
+                    {"role": "assistant", "content": "a"},
+                    {"role": "user", "content": "u3"},
+                ]})
+            self.assertEqual(orch._latest_visual_sources(), [str(img)])
+            self.assertEqual(
+                orch._latest_visual_sources(max_user_turns=2), [])
+
+    def test_what_is_this_matches_visual_reference(self):
+        for t in ("what is this a picture of", "who is this",
+                  "what's this", "what is in this picture"):
+            self.assertTrue(
+                AgentOrchestrator._VISUAL_REFERENCE_RE.search(t), t)
+
+    def test_questionish_detects_bare_questions(self):
+        self.assertTrue(
+            AgentOrchestrator._QUESTIONISH_RE.match("what is this?"))
+        self.assertTrue(
+            AgentOrchestrator._QUESTIONISH_RE.match("tell me about it"))
+        self.assertFalse(
+            AgentOrchestrator._QUESTIONISH_RE.match("do it now"))
+
+
+class PersonaBypassTests(unittest.TestCase):
+    def test_persona_active_detects_named_preset(self):
+        orch = AgentOrchestrator.__new__(AgentOrchestrator)
+        orch.profile_context = lambda: "Active persona: Raunchy (strength 70/100) — x"
+        self.assertTrue(orch._persona_active())
+        orch.profile_context = lambda: "When addressing the user, call them: Father."
+        self.assertFalse(orch._persona_active())
+        orch.profile_context = lambda: ""
+        self.assertFalse(orch._persona_active())

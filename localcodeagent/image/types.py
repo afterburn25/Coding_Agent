@@ -60,6 +60,8 @@ class ImageRequest:
     loras: list[dict[str, Any]] = field(default_factory=list)
     image_strength: float | None = None
     denoise_strength: float | None = None
+    sampler_name: str = ""
+    scheduler: str = ""
     outpaint: dict[str, int] = field(default_factory=dict)
     transparent_background: bool = False
     upscale: bool = False

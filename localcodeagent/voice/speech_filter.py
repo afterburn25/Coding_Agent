@@ -100,9 +100,10 @@ class SpeechTextFilter:
     }
     # Vowel-less vocalizations get letterized by the G2P ("Mmm" reads
     # "em em em"). Respell them as the vowel-bearing interjection the
-    # engine actually voices — "Mmm" → "hmm". All-caps runs like "MM"
-    # (million, lens width) are excluded on purpose.
-    VOCAL_RE = re.compile(r"\b(Mm{1,}|m{2,}|mhm|mmhmm|Mmhmm|mm-hmm)\b")
+    # engine actually voices — "Mmm" → "hmm". Two-letter "MM" stays
+    # literal (million, lens width); 3+ caps M's only occur as moans.
+    VOCAL_RE = re.compile(
+        r"\b(Mm{1,}|m{2,}|M{3,}|mhm|MHM|mmhmm|MMHMM|Mmhmm|mm-hmm|MM-HMM)\b")
     # "12 GB" / "3.0GHz" — number-attached units get singular/plural.
     NUM_UNIT_RE = re.compile(
         r"\b(\d+(?:\.\d+)?)\s*("

@@ -23,7 +23,13 @@ def _schema(extra: dict[str, Any] | None = None, required: list[str] | None = No
         "count":{"type":"integer","minimum":1,"maximum":8}, "seed":{"type":"integer"},
         "steps":{"type":"integer","minimum":1,"maximum":200}, "guidance":{"type":"number","minimum":0,"maximum":30},
         "loras":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"version":{"type":"string"},"strength":{"type":"number","minimum":-4,"maximum":4}}}},
-        "image_strength":{"type":"number","minimum":0,"maximum":1}, "denoise_strength":{"type":"number","minimum":0,"maximum":1},
+        "image_strength":{"type":"number","minimum":0,"maximum":1},
+        "denoise_strength":{"type":"number","minimum":0,"maximum":1,
+                            "description":"KSampler denoise 0–1. 1 = full edit/regenerate; lower preserves the source image more."},
+        "sampler_name":{"type":"string",
+                        "description":"ComfyUI sampler: euler, euler_ancestral, dpmpp_2m, dpmpp_2m_sde, heun, ddim, lcm, uni_pc… Leave unset for the model family's default."},
+        "scheduler":{"type":"string",
+                     "description":"ComfyUI scheduler: simple, karras, exponential, normal, beta, sgm_uniform… Leave unset for the model family's default."},
         "transparent_background":{"type":"boolean"}, "upscale":{"type":"boolean"}, "refine_details":{"type":"boolean"},
         "real_person":{"type":"boolean","description":"True only when source/reference depicts an identifiable real person."},
     }
@@ -36,6 +42,13 @@ def register_image_tools(registry: ToolRegistry, manager: ImageManager) -> None:
         def handler(args: dict[str, Any]) -> str:
             fields={k:v for k,v in args.items() if k in ImageRequest.__dataclass_fields__}
             fields["operation"]=operation
+            # A t2i call carrying a source/reference image is really an
+            # edit — let the router infer the correct operation instead of
+            # blindly generating on a t2i-only model.
+            if (operation == "text_to_image"
+                    and (fields.get("source_image") or fields.get("reference_images")
+                         or fields.get("mask_path"))):
+                fields["operation"] = "auto"
             # Distinct prompts → one job each so images stream into the chat
             # gallery as they finish instead of waiting on a batch.
             prompts=[str(p).strip() for p in (args.get("prompts") or [])

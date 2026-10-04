@@ -4402,7 +4402,8 @@ class Handler(BaseHTTPRequestHandler):
                     preset = VoicePreset.from_dict(preset_raw)
                     preset.id = preset.id or "_preview"
                     pcm, sr, seg = voice._synthesize(
-                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        voice.filter.filter(text), preset,
+                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
                         apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
@@ -4441,7 +4442,8 @@ class Handler(BaseHTTPRequestHandler):
                     rawp["official"] = False
                     preset = VoicePreset.from_dict(rawp)
                     pcm, sr, seg = voice._synthesize(
-                        text, preset, max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        voice.filter.filter(text), preset,
+                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
                         apply_personality=False)
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
@@ -4450,7 +4452,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 out = voice.speak_text(
                     text, preset_id=body.get("preset_id") or None,
-                    auto_filter=False)
+                    auto_filter=True)
                 self._json(out)
                 return
             if path == "/api/voice/config":

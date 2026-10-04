@@ -1111,3 +1111,89 @@ class ImageSetupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SamplingControlsTests(unittest.TestCase):
+    def test_cfg_steps_seed_extracted(self):
+        from localcodeagent.image.router import parse_sampling_controls
+        clean, c = parse_sampling_controls(
+            "a girl in a suit, cfg 4, 30 steps, seed 42")
+        self.assertEqual(clean, "a girl in a suit")
+        self.assertEqual(c["guidance"], 4.0)
+        self.assertEqual(c["steps"], 30)
+        self.assertEqual(c["seed"], 42)
+
+    def test_sampler_and_scheduler_named(self):
+        from localcodeagent.image.router import parse_sampling_controls
+        clean, c = parse_sampling_controls(
+            "a cat, euler a sampler, karras scheduler")
+        self.assertEqual(c["sampler_name"], "euler_ancestral")
+        self.assertEqual(c["scheduler"], "karras")
+        clean2, c2 = parse_sampling_controls("a cat, sampler dpmpp 2m sde")
+        self.assertEqual(c2["sampler_name"], "dpmpp_2m_sde")
+
+    def test_denoise_absolute_and_percent(self):
+        from localcodeagent.image.router import parse_sampling_controls
+        self.assertEqual(
+            parse_sampling_controls("make transparent, denoise 0.6")[1]["denoise_strength"], 0.6)
+        self.assertEqual(
+            parse_sampling_controls("make transparent, denoise 60%")[1]["denoise_strength"], 0.6)
+
+    def test_dangling_connectors_trimmed(self):
+        from localcodeagent.image.router import parse_sampling_controls
+        clean, _ = parse_sampling_controls("make this transparent with denoise 0.6")
+        self.assertEqual(clean, "make this transparent")
+
+    def test_plain_prompt_untouched(self):
+        from localcodeagent.image.router import parse_sampling_controls
+        clean, c = parse_sampling_controls("a woman standing in a field")
+        self.assertEqual(clean, "a woman standing in a field")
+        self.assertEqual(c, {})
+
+
+class OperationRoutingTests(unittest.TestCase):
+    def test_remove_background_phrasings(self):
+        from localcodeagent.image.router import ImageRouter
+        from localcodeagent.image.types import ImageRequest
+        for text in ("can you remove background from this image?",
+                     "make this image transparent", "cut her out",
+                     "erase the background", "isolate the subject"):
+            op, _ = ImageRouter.infer_operation(
+                ImageRequest(prompt=text, source_image="x.png"))
+            self.assertEqual(op, "remove_background", text)
+
+    def test_transparent_requires_source(self):
+        from localcodeagent.image.router import ImageRouter
+        from localcodeagent.image.types import ImageRequest
+        op, _ = ImageRouter.infer_operation(
+            ImageRequest(prompt="a transparent crystal", source_image=""))
+        self.assertEqual(op, "text_to_image")
+
+    def test_qwen_guidance_default(self):
+        from localcodeagent.image.manager import ImageManager
+        from localcodeagent.image.types import ImageModelProfile
+        p = ImageModelProfile(id="q", family="qwen-image-2.1", backend="comfyui",
+                              model_path="", capabilities=[])
+        self.assertEqual(ImageManager._default_guidance(p), 4.0)
+        p2 = ImageModelProfile(id="j", family="stable-diffusion-xl", backend="c",
+                               model_path="", capabilities=[])
+        self.assertEqual(ImageManager._default_guidance(p2), 6.5)
+        p3 = ImageModelProfile(id="f", family="flux.2-klein", backend="c",
+                               model_path="", capabilities=[])
+        self.assertEqual(ImageManager._default_guidance(p3), 1.0)
+
+
+class VocalizationCapsTests(unittest.TestCase):
+    def test_caps_vocalizations_hum(self):
+        from localcodeagent.voice.speech_filter import SpeechTextFilter
+        f = SpeechTextFilter()
+        self.assertEqual(f.filter("MMM"), "hmm")
+        self.assertEqual(f.filter("MMMM yes"), "hmmm yes")
+        self.assertEqual(f.filter("MMHMM"), "hmm hmm")
+
+    def test_abbreviations_untouched(self):
+        from localcodeagent.voice.speech_filter import SpeechTextFilter
+        f = SpeechTextFilter()
+        self.assertEqual(f.filter("50MM lens"), "50MM lens")
+        self.assertEqual(f.filter("recommend"), "recommend")
+        self.assertEqual(f.filter("the MM format"), "the MM format")
