@@ -91,5 +91,76 @@ class DeployToolTests(unittest.TestCase):
         self.assertIn("error", out)
 
 
+class DeployReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp())
+        _git(self.ws, "init")
+        _git(self.ws, "config", "user.email", "t@t.t")
+        _git(self.ws, "config", "user.name", "T")
+        (self.ws / "README.md").write_text("x")
+        _git(self.ws, "add", "-A")
+        _git(self.ws, "commit", "-m", "init")
+        self.reg = ToolRegistry({"github.write": "allow"})
+        register_deploy_tools(self.reg, self.ws)
+
+    def _run(self, **args):
+        return json.loads(self.reg.get("deploy_release").handler(args))
+
+    def test_missing_tag_refused(self):
+        out = self._run()
+        self.assertIn("tag", out["error"])
+
+    def test_artifact_outside_workspace_refused(self):
+        with tempfile.TemporaryDirectory() as other:
+            f = Path(other) / "a.zip"
+            f.write_bytes(b"x")
+            out = self._run(tag="v1.0.0", files=[str(f)])
+            self.assertIn("outside", out["error"])
+
+    def test_missing_artifact_refused(self):
+        out = self._run(tag="v1.0.0", files=["nope.zip"])
+        self.assertIn("not found", out["error"])
+
+    def test_no_origin_remote_errors(self):
+        (self.ws / "a.zip").write_bytes(b"x")
+        out = self._run(tag="v1.0.0", files=["a.zip"])
+        if out.get("error") == "gh_cli_unavailable":
+            self.skipTest("gh not installed")
+        self.assertIn("origin", out["error"])
+
+    def test_release_created_via_gh(self):
+        """Stub gh on PATH — records argv so we verify the real call."""
+        import os
+        import stat
+        bindir = self.ws / "bin"
+        bindir.mkdir()
+        log = self.ws / "gh.log"
+        script = bindir / ("gh.cmd" if os.name == "nt" else "gh")
+        if os.name == "nt":
+            script.write_text(
+                f"@echo off\r\necho %* >> {log}\r\n"
+                f"echo https://example.test/r/v9\r\n")
+        else:
+            script.write_text(
+                f"#!/bin/sh\necho \"$@\" >> {log}\n"
+                "echo https://example.test/r/v9\n")
+            script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bindir) + os.pathsep + old_path
+        self.addCleanup(
+            lambda: os.environ.__setitem__("PATH", old_path))
+        (self.ws / "a.zip").write_bytes(b"x")
+        remote = self.ws.parent / f"bare-{self.ws.name}"
+        remote.mkdir(exist_ok=True)
+        _git(remote, "init", "--bare")
+        _git(self.ws, "remote", "add", "origin", str(remote))
+        out = self._run(tag="v1.0.0", files=["a.zip"], name="Rel")
+        if out.get("error") == "gh_cli_unavailable":
+            self.skipTest("gh not installed and stubbing failed")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["tag"], "v1.0.0")
+        self.assertIn("/r/v9", out["release"])
+
+
 if __name__ == "__main__":
     unittest.main()

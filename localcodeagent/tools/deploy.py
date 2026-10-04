@@ -174,3 +174,88 @@ def register_deploy_tools(registry: ToolRegistry, workspace: Path, *,
         category="deploy",
         capabilities=["deploy_static", "git_push"],
     ))
+
+    def deploy_release(args: dict[str, Any]) -> str:
+        """Publish artifacts as a GitHub Release via the gh CLI."""
+        gh_exe = shutil.which("gh")
+        if gh_exe is None:
+            return json.dumps({
+                "error": "gh_cli_unavailable",
+                "detail": "install GitHub CLI and run 'gh auth login'"})
+        tag = str(args.get("tag") or "").strip()
+        if not tag:
+            return json.dumps({"error": "tag is required"})
+        files: list[Path] = []
+        for raw in args.get("files") or []:
+            p = Path(str(raw))
+            rp = (workspace / p).resolve() if not p.is_absolute() \
+                else p.resolve()
+            if not any(rp == b or b in rp.parents for b in _roots()):
+                return json.dumps(
+                    {"error": f"artifact {raw!r} is outside a registered "
+                              "workspace"})
+            if not rp.is_file():
+                return json.dumps({"error": f"artifact not found: {raw!r}"})
+            files.append(rp)
+        repo_root = workspace.resolve()
+        probe = repo_root
+        while not (probe / ".git").exists() and probe != probe.parent:
+            probe = probe.parent
+        if not (probe / ".git").exists():
+            return json.dumps({"error": "workspace is not inside a git repo"})
+        rc, remote = _git(probe, "remote", "get-url", "origin")
+        if rc or not remote:
+            return json.dumps({"error": "repo has no 'origin' remote",
+                               "detail": remote})
+        # Resolve once — PATHEXT handles gh.exe/gh.cmd/.bat uniformly.
+        cmd = [gh_exe, "release", "create", tag]
+        cmd += [str(f) for f in files]
+        name = str(args.get("name") or "").strip()
+        if name:
+            cmd += ["--title", name]
+        notes = str(args.get("notes") or "").strip()
+        if notes:
+            cmd += ["--notes", notes]
+        else:
+            cmd += ["--generate-notes"]
+        if args.get("draft"):
+            cmd.append("--draft")
+        if args.get("prerelease"):
+            cmd.append("--prerelease")
+        try:
+            proc = subprocess.run(cmd, cwd=str(probe), capture_output=True,
+                                  text=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            return json.dumps({"error": "gh release create timed out"})
+        if proc.returncode:
+            return json.dumps({"error": "release create failed",
+                               "detail": (proc.stderr or
+                                          proc.stdout).strip()[:4000]})
+        url = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+        return json.dumps({"ok": True, "tag": tag, "release": url,
+                           "files": len(files), "remote": remote},
+                          ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "deploy_release",
+        "Create a GitHub Release on the workspace repo's origin via the gh CLI and attach workspace artifact files. Reports the real release URL or the real gh error — never claims a release that didn't happen.",
+        {
+            "type": "object",
+            "properties": {
+                "tag": {"type": "string",
+                        "description": "release tag, e.g. v0.20.0"},
+                "files": {"type": "array", "items": {"type": "string"},
+                          "description": "artifact paths inside a workspace"},
+                "name": {"type": "string"},
+                "notes": {"type": "string",
+                          "description": "release notes (default: generated)"},
+                "draft": {"type": "boolean"},
+                "prerelease": {"type": "boolean"},
+            },
+            "required": ["tag"],
+        },
+        "github.write",
+        deploy_release,
+        category="deploy",
+        capabilities=["deploy_release", "git_push"],
+    ))
