@@ -167,8 +167,16 @@
   `project_id`/`requirement_ids`; `versions()`/`latest()` expose full
   deliverable history; `verify()` still catches silent modification.
   API: `/api/lineage`, `/api/artifacts/versions/<name>`.
-  Docs: `docs/LINEAGE.md`. Next: Safe Mode, golden config,
-  RC scorecard, dependency intelligence.
+  Docs: `docs/LINEAGE.md`.
+- **Phase 9** — Safe Mode + golden config (`safemode.py`): dirty
+  session markers count consecutive boot failures; ≥3 offers Safe
+  Mode, which suppresses model autostart and denies all autonomous
+  work via `AutonomyPolicy.is_stopped` while keeping diagnostics/logs/
+  repair reachable (nothing erased). `GoldenConfigStore` snapshots a
+  whitelisted config set with sha256 manifests and refuses tampered
+  restores. API: `/api/safemode`, `/api/golden`. Docs:
+  `docs/SAFE_MODE.md`. Next: RC scorecard, dependency intelligence,
+  predictive health.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1050,7 +1058,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1494 tests` passing (2 environment skips).
+Expected at this checkpoint: `1502 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -395,6 +395,15 @@ class AppState:
         self._session_started = time.time()
         self.prior_session_abnormal = self._read_prior_session()
         self._write_session_marker(clean=False)
+        # Safe Mode + golden config — a dirty prior session bumps the
+        # consecutive-failure counter; repeated failures surface a
+        # Safe Mode offer (never automatic data loss).
+        from .safemode import GoldenConfigStore, SafeModeStore
+        self.safemode = SafeModeStore(runtime_root / "data" / "safe_mode.json")
+        self.safemode.record_boot(
+            previous_clean=not bool(self.prior_session_abnormal))
+        self.golden = GoldenConfigStore(
+            runtime_root / "data" / "golden", workspace)
         # Durable crash/recovery history — patterns feed diagnostics, the
         # tuner and Digital Twin calibration across restarts.
         netdiag.configure_history(runtime_root / "data" / "crash_history.jsonl")
@@ -1249,6 +1258,7 @@ class AppState:
             preferences=self.preferences,
             requirements=self.requirements,
             policies=self.policies,
+            safemode=self.safemode,
             approval_timeout_seconds=lambda: float(getattr(
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
@@ -2279,6 +2289,11 @@ class AppState:
 
     def _start_primary_prewarm(self) -> None:
         if not self.config.runtime_auto_start:
+            return
+        if getattr(self, "safemode", None) is not None and \
+                self.safemode.is_active():
+            # Safe Mode: never auto-load heavy models. Diagnostics and
+            # repair tooling stay reachable; nothing is deleted.
             return
         # Warm the fast-lane utility model first: it is small, cheap, and the
         # model ordinary conversation hits before anything else.
@@ -4223,7 +4238,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/skills", "/api/connectors", "/api/knowledge",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
-                          "/api/lineage")
+                          "/api/lineage", "/api/safemode", "/api/golden")
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -4248,6 +4263,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"name": name,
                         "versions": self.state.artifacts.versions(name),
                         "latest": self.state.artifacts.latest(name)})
+            return True
+        if path == "/api/safemode":
+            self._json(self.state.safemode.status())
+            return True
+        if path == "/api/golden":
+            self._json({"snapshots": self.state.golden.list()})
+            return True
+        if path.startswith("/api/golden/verify/"):
+            name = unquote(path[len("/api/golden/verify/"):]).strip("/")
+            self._json(self.state.golden.verify(name))
             return True
         if path == "/api/lineage":
             self._json({"records": self.state.lineage.list(
@@ -4323,6 +4348,22 @@ class Handler(BaseHTTPRequestHandler):
             out = self.state.backups.restore(
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/safemode/enter":
+            self._json(self.state.safemode.enter(
+                reason=str(body.get("reason") or "")))
+            return True
+        if path == "/api/safemode/exit":
+            self._json(self.state.safemode.exit())
+            return True
+        if path == "/api/golden/snapshot":
+            self._json(self.state.golden.snapshot(
+                label=str(body.get("label") or ""),
+                extra_paths=list(body.get("extra_paths") or [])))
+            return True
+        if path == "/api/golden/restore":
+            out = self.state.golden.restore(str(body.get("name") or ""))
             self._json(out, 400 if not out.get("ok") else 200)
             return True
         if path == "/api/lineage":

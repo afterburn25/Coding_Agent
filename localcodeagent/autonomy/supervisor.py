@@ -66,6 +66,7 @@ class AutonomousSupervisor:
         preferences: Any = None,             # PreferenceStore — learned overlays
         requirements: Any = None,            # RequirementStore — derived criteria entities
         policies: Any = None,                # ResourcePolicies — modes/offline/egress
+        safemode: Any = None,                # SafeModeStore — denies autonomous work
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
     ) -> None:
         self.workspace = Path(workspace)
@@ -103,7 +104,7 @@ class AutonomousSupervisor:
         self.budgets = BudgetManager(self.workspace, resources=resources)
         self.policies = policies
         self.policy = AutonomyPolicy(self.store, permission_manager,
-                                     policies=policies)
+                                     policies=policies, safemode=safemode)
         self.notifications = NotificationCenter(
             self.store,
             publish=self._publish_notification,

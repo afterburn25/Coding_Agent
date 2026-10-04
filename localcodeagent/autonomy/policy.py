@@ -66,17 +66,26 @@ PROFILE_ALLOW = {
 
 class AutonomyPolicy:
     def __init__(self, store, permission_manager=None,
-                 policies=None) -> None:
+                 policies=None, safemode=None) -> None:
         self._store = store
         self._pm = permission_manager
         # ResourcePolicies — offline mode and per-project egress deny
         # network action classes regardless of profile allowances.
         self._policies = policies
+        # SafeModeStore — while active, autonomous work denies outright.
+        self._safemode = safemode
 
     # -- global control ---------------------------------------------------
 
     def is_stopped(self) -> bool:
-        return bool(self._store.control.data.get("stop"))
+        if bool(self._store.control.data.get("stop")):
+            return True
+        try:
+            if self._safemode is not None and self._safemode.is_active():
+                return True
+        except Exception:
+            pass
+        return False
 
     def is_paused(self) -> bool:
         return bool(self._store.control.data.get("paused"))
