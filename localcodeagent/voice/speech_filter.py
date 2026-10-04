@@ -98,6 +98,11 @@ class SpeechTextFilter:
     TIME_UNITS = {
         "ms": "milliseconds", "ns": "nanoseconds", "µs": "microseconds",
     }
+    # Vowel-less vocalizations get letterized by the G2P ("Mmm" reads
+    # "em em em"). Respell them as the vowel-bearing interjection the
+    # engine actually voices — "Mmm" → "hmm". All-caps runs like "MM"
+    # (million, lens width) are excluded on purpose.
+    VOCAL_RE = re.compile(r"\b(Mm{1,}|m{2,}|mhm|mmhmm|Mmhmm|mm-hmm)\b")
     # "12 GB" / "3.0GHz" — number-attached units get singular/plural.
     NUM_UNIT_RE = re.compile(
         r"\b(\d+(?:\.\d+)?)\s*("
@@ -257,10 +262,19 @@ class SpeechTextFilter:
             return f" — {phrase}"
         return repl
 
+    @staticmethod
+    def _vocal(m):
+        tok = m.group(0).lower().replace("-", "")
+        if tok in ("mhm", "mmhmm"):
+            return "hmm hmm"
+        return "hmm" if len(tok) <= 3 else "hmmm"
+
     def _pronounce(self, t: str) -> str:
         """Expand number-attached units, then word-acronyms, then bare
         units — order matters so '64 GB RAM' reads 'sixty-four gigabytes
-        ram', not '64 G B R A M'."""
+        ram', not '64 G B R A M'. Vocalization respelling runs first so
+        'Mmm' becomes a hum instead of spelled letters."""
+        t = self.VOCAL_RE.sub(self._vocal, t)
         def num_unit(m):
             n, u = m.group(1), m.group(2)
             word = self.UNIT_WORDS.get(u, u)
