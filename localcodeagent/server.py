@@ -720,6 +720,7 @@ class AppState:
         self.activities = ActivityStore(runtime_root / "data" / "activity.jsonl")
         self.activities.on_row = lambda row: self.events.publish("activity", row)
         self.runtime.on_residency_event = self._residency_activity
+        self.capabilities = self._build_capability_registry(config)
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -746,6 +747,7 @@ class AppState:
             health=lambda: self.health,
             profile_context=self._profile_prompt_context,
             image_outputs=self._image_job_outputs,
+            capability_registry=self.capabilities,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -774,6 +776,88 @@ class AppState:
         self._start_source_sync()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def _build_capability_registry(self, config) -> "CapabilityRegistry":
+        """First-class Capability Registry — probed real states for what
+        this installation can actually do. All env callables are lazy and
+        exception-safe: a probe failing must never break boot, and the
+        30s TTL cache keeps evaluation cheap."""
+        from .capabilities import CapabilityRegistry
+        import shutil
+
+        def _tool_manifest(name: str):
+            try:
+                if self.tools.get(name) is None:
+                    return None
+                return self.tools.manifest(name)
+            except Exception:
+                return None
+
+        def _github_authorized() -> bool:
+            try:
+                from .tools.github import GitHubCodingClient
+                if getattr(GitHubCodingClient(config), "token", ""):
+                    return True
+            except Exception:
+                pass
+            try:
+                return bool(self.secrets.get("github_token"))
+            except Exception:
+                return False
+
+        def _image_state() -> str:
+            rt = getattr(getattr(self, "images", None),
+                         "backend_runtime", None)
+            if rt is None:
+                return ""
+            return str(getattr(getattr(rt, "status", None), "state", "")
+                       or "")
+
+        def _stt_state() -> str:
+            if getattr(self, "_stt_engine", None) is not None:
+                return "ready"
+            if getattr(self, "_stt_tried", False):
+                return "error"
+            return ""
+
+        def _llm_ready():
+            try:
+                return bool(self.runtime.readiness(
+                    probe_external=False).get("ready_to_code"))
+            except Exception:
+                return None
+
+        def _voice_ready() -> bool:
+            v = getattr(self, "voice", None)
+            try:
+                return bool(v is not None and v.enabled())
+            except Exception:
+                return False
+
+        env = {
+            "tool_manifest": _tool_manifest,
+            "command": shutil.which,
+            "workspace": lambda: self.workspace,
+            "workspace_writable":
+                lambda: os.access(str(self.workspace), os.W_OK),
+            "github_enabled":
+                lambda: bool(getattr(config, "github_enabled", False)),
+            "github_authorized": _github_authorized,
+            "image_enabled":
+                lambda: bool(getattr(config, "image_enabled", False)),
+            "image_backend_state": _image_state,
+            "stt_enabled":
+                lambda: str(getattr(config, "stt_backend", "off"))
+                .lower() != "off",
+            "stt_engine_state": _stt_state,
+            "voice_enabled":
+                lambda: bool(getattr(config, "voice_enabled", False)),
+            "voice_present":
+                lambda: getattr(self, "voice", None) is not None,
+            "voice_ready": _voice_ready,
+            "llm_ready": _llm_ready,
+        }
+        return CapabilityRegistry(env)
 
     def _image_job_outputs(self, job_id: str) -> list[str]:
         """Output file paths for an image job — used by the orchestrator to
@@ -6714,6 +6798,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/readiness":
             self._json(self.state.readiness_payload(probe_external=True))
+            return
+        if path.startswith("/api/capabilities"):
+            # First-class capability honesty surface — real probed states
+            # (verified/available/degraded/setup_required/unauthorized/
+            # unavailable/broken) plus claim dispositions. ?refresh=1
+            # forces re-probing after a setup/auth change.
+            params = parse_qs(urlparse(self.path).query)
+            force = params.get("refresh", [""])[0] in ("1", "true", "yes")
+            cap_id = path.split("/api/capabilities/", 1)[-1] \
+                if "/api/capabilities/" in path else ""
+            if cap_id:
+                self._json(self.state.capabilities.evaluate_one(
+                    cap_id, force=force).as_dict())
+            else:
+                self._json(self.state.capabilities.summary(force=force))
             return
         if path == "/api/tasks":
             self._json(self.state.task_payload())

@@ -186,6 +186,7 @@ class AgentOrchestrator:
         health=None,
         profile_context=None,
         image_outputs=None,
+        capability_registry=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -220,6 +221,11 @@ class AgentOrchestrator:
         # job_id -> output file paths — lets image follow-ups reuse the
         # last generated image as edit source without holding ImageManager.
         self._image_outputs = image_outputs
+        # CapabilityRegistry — real probed states for what the install can
+        # do. Feeds the system prompt (don't promise dead paths) and the
+        # truth gate (claims contradicting a hard-negative capability are
+        # fabrication even when unrelated tools ran).
+        self.capabilities = capability_registry
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -859,6 +865,31 @@ class AgentOrchestrator:
         r"(?:haven['’]t|have not|didn['’]t|did not|can['’]t|cannot|"
         r"couldn['’]t|could not|won['’]t|will not|wouldn['’]t|would not|"
         r"unable|never|no way|failed to|can only)\s*$", re.I)
+
+    def _capability_prompt_message(self) -> dict[str, Any] | None:
+        """System note naming capabilities that cannot run right now — the
+        model should explain the missing requirement rather than promise a
+        dead execution path."""
+        reg = getattr(self, "capabilities", None)
+        if reg is None:
+            return None
+        try:
+            note = reg.prompt_note()
+        except Exception:
+            return None
+        return {"role": "system", "content": note} if note else None
+
+    def _capability_contradictions(self, text: str) -> list[dict[str, str]]:
+        """Claims in `text` asserting a capability whose execution path is
+        in a hard-negative state (unavailable/broken/unauthorized)."""
+        reg = getattr(self, "capabilities", None)
+        if reg is None:
+            return []
+        try:
+            return [{"capability": r.id, "name": r.name, "state": r.state}
+                    for r in reg.contradicted(text)]
+        except Exception:
+            return []
 
     def _unverified_action_claims(self, text: str) -> list[str]:
         """Sentences in `text` asserting executed actions — fabrication
@@ -1960,6 +1991,9 @@ class AgentOrchestrator:
                 ),
             },
         ]
+        _cap_msg = self._capability_prompt_message()
+        if _cap_msg:
+            messages.append(_cap_msg)
         if recovered_timing_context:
             messages.append({"role": "system", "content": recovered_timing_context})
         if recovered_quality_context:
@@ -3263,6 +3297,12 @@ class AgentOrchestrator:
                 # unverified-claims annotation and records a model event —
                 # never silently let a fake "✅ applied" stand.
                 claims = self._unverified_action_claims(session.main_content)
+                # Capability contradiction: tools may have run, but a claim
+                # about a capability whose execution path is hard-negative
+                # (e.g. "I pushed to GitHub" while GitHub is unauthorized)
+                # is still fabrication — annotate it the same way.
+                cap_contra = self._capability_contradictions(
+                    session.main_content)
                 if claims and not session.tool_events \
                         and not session.research_context.get("sources"):
                     # Never learn a fabricated reply — Answer Memory would
@@ -3284,6 +3324,33 @@ class AgentOrchestrator:
                     # Emit as tokens too — the reply may already have
                     # streamed, and the annotation must render inline in
                     # the live bubble, not only in the stored transcript.
+                    self._emit(session, "token", text=notice,
+                               model_id=session.profile.id)
+                elif cap_contra:
+                    # A real tool ran, yet the reply still claims a
+                    # capability the registry knows is dead — annotate the
+                    # specific contradiction instead of the generic
+                    # "no tools ran" notice.
+                    session.unverified_claims = True
+                    names = ", ".join(
+                        f"{c['name']} ({c['state']})"
+                        for c in cap_contra[:3])
+                    notice = (
+                        "\n\n⚠ **Unverified action claims** — statements "
+                        "above assert use of capabilities that are not "
+                        f"available right now: {names}. They are narrative, "
+                        "not confirmed execution.")
+                    session.main_content += notice
+                    claims_event = {
+                        "type": "unverified_action_claims",
+                        "model_id": session.profile.id,
+                        "claims": [c[:120] for c in claims[:3]] or
+                                  [f"capability:{c['id']}"
+                                   for c in cap_contra[:3]],
+                        "capability_contradiction": cap_contra[:3],
+                    }
+                    session.model_events.append(claims_event)
+                    self._emit(session, "model", event=claims_event)
                     self._emit(session, "token", text=notice,
                                model_id=session.profile.id)
                 final = self._finalize(session)
@@ -4488,6 +4555,9 @@ class AgentOrchestrator:
                     "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
                 },
             ]
+            _cap_msg = self._capability_prompt_message()
+            if _cap_msg:
+                messages.append(_cap_msg)
             # Optional injected blocks share one budget — uncapped blocks +
             # 24 history turns can exceed the context window outright, and
             # the repair retry then pays a second full prompt eval.
