@@ -191,8 +191,17 @@
   `promote` requires all stages passed. Per-project env manifests
   verify the live host via real probes (missing/mismatched/satisfied).
   API: `/api/dependencies`, `/api/environment`. Docs:
-  `docs/DEPENDENCIES.md`. Next: predictive health + idle cleanup +
-  benchmark lab + dynamic specialists (Phase 12).
+  `docs/DEPENDENCIES.md`.
+- **Phase 12** — predictive health + idle cleanup + benchmark lab +
+  temp specialists (`trends.py`, `cleanup.py`, `benchmarks.py`,
+  `temp_specialists.py`): least-squares trend detection with hedged
+  projections only when drift beats noise; bounded runtime-only
+  cleanup (dry-run default, per-run caps); benchmark results feed
+  `BaselineStore` regression detection; mission-scoped specialists
+  carry task/criteria/context/capability allowlists (intersected with
+  real tools) and TTL expiry. API: `/api/trends`, `/api/cleanup`,
+  `/api/benchmarks`, `/api/specialists`. Docs: `docs/HEALTH_OPS.md`.
+  Milestone Phases 1–12 complete at 1531 tests.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1074,7 +1083,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1521 tests` passing (2 environment skips).
+Expected at this checkpoint: `1531 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

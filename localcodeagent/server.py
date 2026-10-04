@@ -20,6 +20,7 @@ from .fsutil import atomic_write_text
 from . import netdiag
 from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
 from .release import SECTIONS as SECTIONS_RC
+from .temp_specialists import DEFAULT_TTL as DEFAULT_SPECIALIST_TTL
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -390,6 +391,17 @@ class AppState:
             runtime_root / "data" / "dependencies.json")
         self.environment = EnvironmentStore(
             runtime_root / "data" / "environment.json")
+        from .trends import TrendAnalyzer
+        from .cleanup import IdleCleaner
+        from .benchmarks import BenchmarkLab
+        from .temp_specialists import TempSpecialistStore
+        self.trends = TrendAnalyzer(runtime_root / "data" / "trends.json")
+        self.idle_cleaner = IdleCleaner(runtime_root)
+        self.benchmarks = BenchmarkLab(
+            runtime_root / "data" / "benchmarks.json",
+            baselines=self.baselines)
+        self.temp_specialists = TempSpecialistStore(
+            runtime_root / "data" / "temp_specialists.json")
         from .release import RCManager
         self.rc = RCManager(runtime_root / "data" / "rc.json")
         # Live scorecard checks fed by real subsystems — capability
@@ -4266,7 +4278,9 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
                           "/api/rc", "/api/dependencies",
-                          "/api/environment")
+                          "/api/environment", "/api/trends",
+                          "/api/cleanup", "/api/benchmarks",
+                          "/api/specialists")
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -4322,6 +4336,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "no manifest declared"}, 404)
             else:
                 self._json(m)
+            return True
+        if path == "/api/trends":
+            self._json(self.state.trends.report())
+            return True
+        if path.startswith("/api/trends/"):
+            metric = unquote(path[len("/api/trends/"):]).strip("/")
+            limit = (q.get("limit") or [""])[0]
+            self._json(self.state.trends.analyze(
+                metric, limit=float(limit) if limit else None))
+            return True
+        if path == "/api/cleanup":
+            self._json({"candidates": self.state.idle_cleaner.scan()})
+            return True
+        if path == "/api/benchmarks":
+            self._json(self.state.benchmarks.summary())
+            return True
+        if path.startswith("/api/benchmarks/"):
+            name = unquote(path[len("/api/benchmarks/"):]).strip("/")
+            self._json({"name": name,
+                        "results": self.state.benchmarks.results(name)})
+            return True
+        if path == "/api/specialists":
+            self._json({"specialists": self.state.temp_specialists.list(
+                active_only=(q.get("active") or [""])[0] == "1",
+                mission_id=(q.get("mission") or [""])[0])})
             return True
         if path == "/api/golden":
             self._json({"snapshots": self.state.golden.list()})
@@ -4455,6 +4494,63 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("project_id") or ""),
                 list(body.get("components") or []))
             self._json({"ok": True, "manifest": row})
+            return True
+        if path == "/api/trends/record":
+            self.state.trends.record(
+                str(body.get("metric") or ""),
+                float(body.get("value") or 0))
+            self._json({"ok": True})
+            return True
+        if path == "/api/cleanup/run":
+            self._json(self.state.idle_cleaner.run(
+                dry_run=not bool(body.get("execute"))))
+            return True
+        if path == "/api/benchmarks/record":
+            row = self.state.benchmarks.record_result(
+                str(body.get("name") or ""),
+                latency_ms=float(body.get("latency_ms") or 0),
+                throughput=float(body.get("throughput") or 0),
+                memory_mb=float(body.get("memory_mb") or 0),
+                vram_mb=float(body.get("vram_mb") or 0),
+                success=bool(body.get("success", True)),
+                quality=body.get("quality"),
+                detail=str(body.get("detail") or ""))
+            self._json({"ok": True, "result": row})
+            return True
+        if path == "/api/specialists/spawn":
+            caps = {t.name for t in self.state.tools._tools.values()}
+            row = self.state.temp_specialists.spawn(
+                str(body.get("name") or ""),
+                task=str(body.get("task") or ""),
+                domain=str(body.get("domain") or "custom"),
+                capabilities=list(body.get("capabilities") or []),
+                context_refs=list(body.get("context_refs") or []),
+                acceptance_criteria=list(
+                    body.get("acceptance_criteria") or []),
+                mission_id=str(body.get("mission_id") or ""),
+                ttl_seconds=(float(body["ttl_seconds"])
+                             if body.get("ttl_seconds")
+                             else DEFAULT_SPECIALIST_TTL),
+                valid_capabilities=caps)
+            self._json({"ok": True, "specialist": row})
+            return True
+        if path == "/api/specialists/complete":
+            row = self.state.temp_specialists.complete(
+                str(body.get("id") or ""),
+                result=str(body.get("result") or ""),
+                met_criteria=body.get("met_criteria"))
+            if row is None:
+                self._json({"error": "unknown or inactive"}, 404)
+                return True
+            self._json({"ok": True, "specialist": row})
+            return True
+        if path == "/api/specialists/retire":
+            row = self.state.temp_specialists.retire(
+                str(body.get("id") or ""))
+            if row is None:
+                self._json({"error": "unknown or inactive"}, 404)
+                return True
+            self._json({"ok": True, "specialist": row})
             return True
         if path == "/api/rc/enter":
             self._json(self.state.rc.enter(str(body.get("label") or "")))
