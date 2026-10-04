@@ -811,7 +811,8 @@ connectAgentEvents();
 // repair missions) must not leave the chat blank while it waits on
 // status/readiness probes. Profile status resolves first so user-message
 // avatars don't paint before NexusProfile knows who's active.
-Promise.resolve(window.NexusProfile?.refresh?.()).catch(()=>{}).finally(()=>{
+const _npWait=window.NexusProfile?Promise.resolve(window.NexusProfile.refresh?.()):new Promise(r=>{const t=()=>r(window.NexusProfile?window.NexusProfile.refresh():null);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',t,{once:true});else t();});
+_npWait.catch(()=>{}).finally(()=>{
 loadConversations().then(convos=>{const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});});
 loadStatus().then(async()=>{await Promise.all([loadReadiness(),loadConversationMemory()]);}).finally(()=>{
   // Readiness handshake: the desktop host holds the splash screen until the
