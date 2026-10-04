@@ -437,6 +437,51 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
             raw = e.read() or b"{}"
             return e.code, json.loads(raw)
 
+    def test_conversation_learning_and_recall_over_http(self):
+        """Real /api/chat turns feed learn_from_user and persist — training
+        commands need no model, so the whole loop runs over plain HTTP."""
+        s = self.state
+        code, out = self._post("/api/chat", {
+            "message": "remember that my editor font is Cascadia Code",
+            "mode": "auto"})
+        self.assertEqual(code, 200, out)
+        snap = s.conversation_memory.snapshot()
+        self.assertTrue(any("Cascadia" in str(f.get("text", ""))
+                            for f in snap.get("facts", [])), snap)
+
+        code, out = self._post("/api/chat", {
+            "message": "always answer in lowercase", "mode": "auto"})
+        self.assertEqual(code, 200, out)
+        snap = s.conversation_memory.snapshot()
+        self.assertTrue(any("lowercase" in str(r.get("text", ""))
+                            for r in snap.get("behavior_rules", [])), snap)
+
+        # A correction after real turns produces a training example.
+        code, out = self._post("/api/chat", {
+            "message": "no, you should keep replies under three sentences",
+            "mode": "auto"})
+        self.assertEqual(code, 200, out)
+        snap = s.conversation_memory.snapshot()
+        self.assertTrue(snap.get("training_examples"), snap)
+
+        # Recall: learned facts/rules reach the prompt overlay and are
+        # visible through the HTTP memory surface.
+        ctx = s.conversation_memory.prompt_context(
+            project_id=str(s.workspace))
+        self.assertIn("Cascadia", ctx)
+        self.assertIn("lowercase", ctx)
+        mem = self._get("/api/conversation-memory")
+        self.assertTrue(any("Cascadia" in str(f.get("text", ""))
+                            for f in mem.get("facts", [])), mem)
+
+        # Restart: a fresh store on the same file reloads the learning.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        reloaded = ConversationMemory(s.conversation_memory.path)
+        snap2 = reloaded.snapshot()
+        self.assertTrue(any("Cascadia" in str(f.get("text", ""))
+                            for f in snap2.get("facts", [])), snap2)
+
     def test_creator_lifecycle_over_http(self):
         s = self.state
         # Pre-init: summary reports uninitialized; session-gated sync is
@@ -504,7 +549,8 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
         ctx = s.nexus_brain.prompt_context()
         self.assertIn("oat milk", ctx)
         self.assertIn("cite sources", ctx)
-        self.assertIn("test suite", ctx)  # autobiographical continuity
+        self.assertIn("Autobiographical continuity:", ctx)
+        self.assertIn("Messages:", ctx)  # a synced conversation summary
         self.assertIn("flux-o-matic", s.nexus_brain.knowledge_context(
             "What is a flux-o-matic?"))
         self.assertIn("three sentences", s.nexus_brain.training_context(
