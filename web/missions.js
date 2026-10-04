@@ -109,6 +109,14 @@ function renderDetail(){
     return`<div class="criterion"><span class="dot ${'unknown'}"></span><span>${esc(c.description||c.kind)}</span></div>`;
   }).join('')||'<div class="criterion"><span class="dot unknown"></span><span>no explicit criteria — completion = all tasks finished</span></div>';
   const nodes=(m.graph&&m.graph.nodes)||[];
+  // Coding-pipeline missions carry pipeline_stage metadata — render an
+  // ordered stage strip so spec→implement→verify→review→serve→commit
+  // progress reads at a glance instead of digging through the DAG.
+  const stages=nodes.filter(n=>(n.metadata||{}).pipeline_stage)
+    .map((n,i)=>`<div class="stage-chip" data-state="${esc(n.state||'')}"`+
+      ` title="${esc(n.title||'')}${n.result&&n.result.ok===false?' — failed':''}">`+
+      `<span class="snum">${i+1}</span><span class="sname">`+
+      `${esc(n.metadata.pipeline_stage)}</span></div>`).join('');
   const dag=nodes.map(n=>
     `<div class="dag-node" data-state="${n.state}"><span class="nstate">${n.state}</span>`+
     `<b>${esc(n.title)}</b> <span style="color:#4d5f7c">· ${esc(n.kind)}</span>`+
@@ -129,6 +137,7 @@ function renderDetail(){
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
     `<div class="detail-section"><h3>Requirements</h3><div id="missionReqs"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
+    (stages?`<div class="detail-section"><h3>Pipeline</h3><div class="stage-strip">${stages}</div></div>`:'')+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
     (m.blocked_reason?`<div class="detail-section"><h3>Blocked</h3><div class="objective">${esc(m.blocked_reason)}</div></div>`:'')+

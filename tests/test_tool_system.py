@@ -583,6 +583,20 @@ class BuildSystemToolTests(unittest.TestCase):
         register_build_tools(reg, tmp)
         self.assertTrue(reg.execute("build_project", {}).startswith("ERROR"))
 
+    def test_coverage_report_registered_and_honest(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "Makefile").write_text("all:\n\ttrue\n", encoding="utf-8")
+        reg = ToolRegistry({"filesystem.read": "allow", "shell.execute": "allow"})
+        register_build_tools(reg, tmp)
+        # Make has no coverage command — must error, not fabricate.
+        self.assertTrue(reg.execute("coverage_report", {}).startswith("ERROR"))
+        (tmp / "pyproject.toml").write_text("[project]\nname='x'\n")
+        out = json.loads(reg.execute("coverage_report", {"system": "python"}))
+        # python coverage command ran for real; honest exit code either way
+        self.assertEqual(out["system"], "python")
+        self.assertIn("coverage", out["command"])
+        self.assertIn("exit_code", out)
+
 
 class ToolRouterTests(unittest.TestCase):
     def _reg(self):
