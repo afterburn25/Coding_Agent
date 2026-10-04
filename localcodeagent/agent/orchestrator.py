@@ -3942,7 +3942,12 @@ class AgentOrchestrator:
         )
         try:
             resolver = self.profile_context
-            profile_ctx = str(resolver() or "") if callable(resolver) else ""
+            profile_ctx = ""
+            if callable(resolver):
+                try:
+                    profile_ctx = str(resolver(user_text) or "")
+                except TypeError:
+                    profile_ctx = str(resolver() or "")
         except Exception:
             profile_ctx = ""
         if profile_ctx:

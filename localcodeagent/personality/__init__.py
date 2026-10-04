@@ -17,10 +17,19 @@ from .presets import PRESETS, get_preset, list_presets
 from .store import PersonalityStore
 from .greetings import GreetingService, preferred_address
 from .voice_map import map_voice
+from .behavior import behavior_for_personality, guidance_lines
+from .dynamics import PersonaDynamics
+from .effective import compile_effective, card_guidance, debug_view
+from .seriousness import (SERIOUSNESS, classify_seriousness,
+                          classify_topic)
 
 __all__ = [
-    "ADULT_SLIDERS", "CATEGORY_LABELS", "MOODS", "SLIDERS",
-    "VOICE_CONTROLS", "PRESETS", "PersonalityStore", "GreetingService",
-    "clean_mood", "clean_strength", "clean_traits", "clean_voice",
-    "get_preset", "list_presets", "map_voice", "preferred_address",
+    "ADULT_SLIDERS", "CATEGORY_LABELS", "MOODS", "SERIOUSNESS",
+    "SLIDERS", "VOICE_CONTROLS", "PRESETS", "PersonaDynamics",
+    "PersonalityStore", "GreetingService",
+    "behavior_for_personality", "card_guidance",
+    "classify_seriousness", "classify_topic", "clean_mood",
+    "clean_strength", "clean_traits", "clean_voice",
+    "compile_effective", "debug_view", "get_preset", "guidance_lines",
+    "list_presets", "map_voice", "preferred_address",
 ]

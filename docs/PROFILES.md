@@ -17,6 +17,8 @@ data/profiles/
         profile.json            identity record
         avatar.webp             512×512 normalized, circle in alpha
         personality.json        active preset/custom, strength, mood
+        persona_state.json      relationship, mood dynamics, overlays,
+                                modifiers, mode, recent phrasing
         voice.json              profile-scoped voice selection
         settings                inside profile.json ("settings")
         memory/personal.json    isolated personal memories

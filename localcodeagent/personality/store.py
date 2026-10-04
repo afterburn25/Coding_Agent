@@ -26,12 +26,24 @@ from typing import Any
 from ..fsutil import atomic_write_text
 from ..profiles.model import ProfileError
 from . import schema
-from .presets import get_preset, list_presets
+from .presets import BEHAVIOR_VERSION, get_preset, list_presets
 
 SCHEMA_VERSION = 1
 DEFAULT_ACTIVE = "preset:default-nexus"
 _MAX_NAME = 60
 _MAX_CUSTOMS = 200
+
+
+def _coherence(custom: dict) -> str:
+    """Coarse coherence label for a custom persona (computed lazily,
+    cached on the record at edit time would drift — compute live)."""
+    try:
+        from .customize import coherence_check
+        return str(coherence_check(
+            custom.get("traits"), custom.get("voice")).get(
+                "coherence") or "high")
+    except Exception:
+        return "high"
 
 
 def _blank() -> dict:
@@ -84,7 +96,11 @@ class PersonalityStore:
             "strength": st["strength"],
             "mood": st["mood"],
             "presets": list_presets(include_adult=is_adult),
-            "customs": [self._public_custom(c) for c in st["customs"]],
+            "customs": [self._public_custom(c)
+                        for c in st["customs"]],
+            "coherence": {c["personality_id"]: _coherence(c)
+                          for c in st["customs"]
+                          if c.get("personality_id")},
             "sliders": schema.SLIDERS,
             "voice_controls": schema.VOICE_CONTROLS,
             "moods": schema.MOODS,
@@ -97,7 +113,8 @@ class PersonalityStore:
     def _public_custom(self, c: dict) -> dict:
         return {k: c[k] for k in
                 ("personality_id", "name", "base_preset", "traits",
-                 "voice") if k in c}
+                 "voice", "blend", "behavior_version", "imported")
+                if k in c}
 
     def resolve_active(self, *, is_adult: bool) -> dict:
         """The effective personality — preset or custom — with
@@ -220,6 +237,9 @@ class PersonalityStore:
             "name": self._clean_name(name),
             "base_preset": base["id"] if base else "",
             "created_at": time.time(),
+            "behavior_version": int(
+                (base or {}).get("behavior_version")
+                or BEHAVIOR_VERSION),
             "traits": schema.clean_traits(merged_traits,
                                           is_adult=is_adult),
             "voice": schema.clean_voice(merged_voice),

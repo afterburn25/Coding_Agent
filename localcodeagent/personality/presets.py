@@ -61,6 +61,13 @@ _STYLE_ADDRESS: dict[str, str] = {
 }
 
 
+# Behavior-profile schema version. v1 = trait sliders + voice only;
+# v2 = behavior profiles (motivations/aversions/signatures) exist and
+# the effective-persona compiler reads them. Bump when the profile
+# shape changes so customs/imported personas can declare compat.
+BEHAVIOR_VERSION = 2
+
+
 def _P(id_: str, name: str, category: str, style: str,
        traits: dict, voice: dict | None = None,
        adult_only: bool = False, address: str | None = None,
@@ -73,6 +80,7 @@ def _P(id_: str, name: str, category: str, style: str,
             "pitch_bias": float(pitch_bias) if pitch_bias is not None
                           else _STYLE_PITCH_BIAS.get(style, 0.0),
             "adult_only": adult_only,
+            "behavior_version": BEHAVIOR_VERSION,
             "builtin": True}
 
 

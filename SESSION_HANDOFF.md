@@ -11,7 +11,9 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.15.0 autonomous workstation layers
+## Current milestone — v0.16.0 persona depth
+
+(Previous: v0.15.0 autonomous workstation layers)
 
 - `main` now carries the decomposed mission planner (parallel lanes →
   integrate → review → verify), plan versioning, project-linked mission
@@ -201,7 +203,7 @@
   carry task/criteria/context/capability allowlists (intersected with
   real tools) and TTL expiry. API: `/api/trends`, `/api/cleanup`,
   `/api/benchmarks`, `/api/specialists`. Docs: `docs/HEALTH_OPS.md`.
-  Milestone Phases 1–12 complete at 1531 tests.
+  Milestone Phases 1–12 complete at 1531 tests. Persona-depth milestone (v0.16.0) complete at 1578 tests.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1083,7 +1085,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1531 tests` passing (2 environment skips).
+Expected at this checkpoint: `1578 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

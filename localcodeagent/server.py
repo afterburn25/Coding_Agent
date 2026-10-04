@@ -77,6 +77,8 @@ from .profiles.api import ProfileAPI
 from .profiles.personal import PersonalMemory
 from .personality.store import PersonalityStore
 from .personality.prompt import prompt_context as _profile_prompt_text
+from .personality.dynamics import PersonaDynamics
+from .personality.effective import compile_effective
 from .version import version as _canonical_version
 
 
@@ -776,11 +778,13 @@ class AppState:
         except Exception:
             return []
 
-    def _profile_prompt_context(self) -> str:
+    def _profile_prompt_context(self, user_text: str = "") -> str:
         """Active profile's personality + personal memory for prompts.
 
         Presentation-only context; failures degrade to "" so a profile
-        problem can never break a user turn."""
+        problem can never break a user turn. The user message feeds the
+        seriousness/topic classifiers so persona color scales to the
+        situation."""
         try:
             prof = self.profiles.active()
             if not prof:
@@ -788,14 +792,117 @@ class AppState:
             pdir = self.profiles.profile_dir(str(prof["profile_id"]))
             active = PersonalityStore(pdir).resolve_active(
                 is_adult=bool(prof.get("is_adult")))
+            dyn = PersonaDynamics(pdir)
+            effective = compile_effective(
+                active,
+                user_text=user_text,
+                relationship=dyn.relationship(),
+                mood=dyn.effective_mood(
+                    manual_mood=str(active.get("mood") or "")),
+                overlay=dyn.overlay(),
+                modifiers=dyn.modifiers(),
+                mode=dyn.mode(),
+                is_adult=bool(prof.get("is_adult")))
             mems = PersonalMemory(pdir).list(limit=20)
-            text = _profile_prompt_text(prof, active, mems)
+            text = _profile_prompt_text(prof, active, mems,
+                                        effective=effective)
+            try:
+                from .personality.consistency import feedforward_hints
+                hints = feedforward_hints(dyn.recent_phrases())
+                if hints:
+                    text += "\n" + "\n".join(hints)
+            except Exception:
+                pass
             overlay = self.preferences.overlay_text(
                 profile_id=str(prof.get("profile_id") or ""),
                 project_id=str(self.workspace))
             return (text + "\n\n" + overlay).strip() if overlay else text
         except Exception:
             return ""
+
+    def _persona_notice(self, kind: str, fact_text: str) -> str:
+        """Persona-flavored lead-in for system notices — facts pass
+        through verbatim; only the wrapper shifts. Best-effort: falls
+        back to the bare fact text on any failure."""
+        fact = str(fact_text or "")
+        try:
+            prof = self.profiles.active()
+            if not prof:
+                return fact
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            active = PersonalityStore(pdir).resolve_active(
+                is_adult=bool(prof.get("is_adult")))
+            dyn = PersonaDynamics(pdir)
+            card = compile_effective(
+                active, relationship=dyn.relationship(),
+                mood=dyn.effective_mood(
+                    manual_mood=str(active.get("mood") or "")),
+                overlay=dyn.overlay(), modifiers=dyn.modifiers(),
+                mode=dyn.mode(), is_adult=bool(prof.get("is_adult")))
+            from .personality.notices import persona_notice
+            return persona_notice(kind, fact, card)
+        except Exception:
+            return fact
+
+    def _persona_command(self, message: str) -> dict | None:
+        """Deterministic persona style commands ("be less sarcastic",
+        "serious mode for an hour", "reset personality"). Returns the
+        applied summary + a short ack line, or None when the message is
+        not a persona command."""
+        try:
+            from .personality.commands import (
+                apply_command, parse_persona_command)
+            cmd = parse_persona_command(message)
+            if cmd is None:
+                return None
+            prof = self.profiles.active()
+            if not prof:
+                return None
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            dyn = PersonaDynamics(pdir)
+            result = apply_command(dyn, cmd)
+            applied = str(result.get("applied") or "none")
+            if applied == "none":
+                return None
+            acks = {
+                "overlay": "Done — I'll keep that for this profile "
+                           "going forward.",
+                "modifier": "Done — applied temporarily; it'll lift on "
+                            "its own.",
+                "mode": "Done — mode set until you change it.",
+                "reset_temp": "Done — temporary adjustments cleared.",
+                "reset_all": "Done — persona adjustments reset; the "
+                             "built-in persona is back.",
+            }
+            return {"applied": applied, "detail": result,
+                    "ack": acks.get(applied, "Done.")}
+        except Exception:
+            return None
+
+    def _persona_note_turn(self, user_text: str, reply_text: str) -> None:
+        """Feed one completed exchange into the persona dynamics engine
+        (familiarity, mood transitions/decay, modifier pruning, phrasing
+        history). Best-effort — dynamics problems never affect a reply."""
+        try:
+            prof = self.profiles.active()
+            if not prof:
+                return
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            active = PersonalityStore(pdir).resolve_active(
+                is_adult=bool(prof.get("is_adult")))
+            from .personality.behavior import (
+                behavior_for_personality)
+            beh = behavior_for_personality(active)
+            dyn = PersonaDynamics(pdir)
+            dyn.note_turn(
+                user_text,
+                warmup_rate=float(beh.get("warmup_rate") or 1.0),
+                baseline_affect=str(beh.get("baseline_affect")
+                                    or "relaxed"),
+                manual_mood=str(active.get("mood") or ""))
+            dyn.note_reply(reply_text)
+        except Exception:
+            pass
 
     def _preference_scopes(self) -> set[str]:
         """Preference scopes the active profile may inspect or edit."""
@@ -878,6 +985,17 @@ class AppState:
                     "level": str(act.get("vocalizations") or "natural"),
                     "traits": act.get("traits") or {},
                 })
+                try:
+                    from .personality.behavior import (
+                        behavior_for_personality)
+                    beh = behavior_for_personality(act)
+                    out["vocal_bias"] = float(beh.get("vocal_bias") or 1.0)
+                    out["vocal_prefer"] = list(
+                        beh.get("vocal_prefer") or [])
+                    out["gesture_prefer"] = list(
+                        beh.get("gesture_prefer") or [])
+                except Exception:
+                    pass
             self._voc_cache, self._voc_until = out, now + 10.0
             return out
         except Exception:
@@ -7404,7 +7522,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._sse_event("ready", {"mode": mode, "queued": True})
                     self._sse_event("task", {"event": "queued", "queue_item": item})
                     self._sse_event("result", {
-                        "content": _queued_notice(current, len(self.state.queue)),
+                        "content": self.state._persona_notice(
+                            "queued",
+                            _queued_notice(current,
+                                           len(self.state.queue))),
                         "queued": True,
                         "queue_item": item,
                         "task": current.as_dict(),
@@ -7421,6 +7542,18 @@ class Handler(BaseHTTPRequestHandler):
                 mission_cmd = self.state._mission_command(message)
                 if mission_cmd is not None:
                     payload = self.state._mission_reply_result(mission_cmd["content"])
+                    self._sse_begin()
+                    self._sse_event("ready", {"mode": mode})
+                    self._sse_event("task", {"task": payload["task"]})
+                    self._sse_event("result", payload)
+                    return
+                # Persona style commands ("be less sarcastic", "serious
+                # mode for an hour") apply to persona state directly —
+                # no model call needed for an ack.
+                persona_cmd = self.state._persona_command(message)
+                if persona_cmd is not None:
+                    payload = self.state._mission_reply_result(
+                        persona_cmd["ack"])
                     self._sse_begin()
                     self._sse_event("ready", {"mode": mode})
                     self._sse_event("task", {"task": payload["task"]})
@@ -7501,6 +7634,7 @@ class Handler(BaseHTTPRequestHandler):
                             attachments=chat_attachments,
                         )
                         self.state._voice_finish(voice_rid, result.content)
+                        self.state._persona_note_turn(message, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
                         payload = self._agent_payload(result)
                         if chat_req_specs:
@@ -7520,7 +7654,9 @@ class Handler(BaseHTTPRequestHandler):
                         friendly = getattr(exc, "friendly", "")
                         diag_fn = getattr(exc, "diagnostic", None)
                         if friendly:
-                            err_event["error"] = str(friendly)
+                            err_event["error"] = (
+                                self.state._persona_notice(
+                                    "failed", str(friendly)))
                             err_event["technical"] = err
                         if callable(diag_fn):
                             err_event["diagnostic"] = diag_fn()
@@ -7635,6 +7771,11 @@ class Handler(BaseHTTPRequestHandler):
                 if mission_cmd is not None:
                     self._json(self.state._mission_reply_result(mission_cmd["content"]))
                     return
+                persona_cmd = self.state._persona_command(message)
+                if persona_cmd is not None:
+                    self._json(self.state._mission_reply_result(
+                        persona_cmd["ack"]))
+                    return
                 coding_model_optional = (
                     mode == "auto"
                     and (
@@ -7667,6 +7808,7 @@ class Handler(BaseHTTPRequestHandler):
                                                   event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit),
                                                   attachments=chat_attachments)
                     self.state._voice_finish(voice_rid, result.content)
+                    self.state._persona_note_turn(message, result.content)
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise

@@ -1,0 +1,220 @@
+"""Natural-language persona commands — deterministic parser.
+
+Recognizes explicit style commands like::
+
+    "be less sarcastic"                 → persistent overlay offset
+    "be more playful tonight"           → temp modifier (time)
+    "use serious mode for the next hour"→ mode modifier
+    "be more concise for this task"     → temp modifier (task scope)
+    "reset personality"                 → clear modifiers + overlay
+    "stop being so formal"              → overlay offset
+
+Deliberately strict patterns — a loose match could swallow a real chat
+message. Ambiguous mid-conversation phrasing falls through to the agent.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from . import schema
+
+# Words users say → slider keys (aliases kept tight on purpose).
+_TRAIT_ALIASES: dict[str, str] = {
+    "sarcastic": "sarcasm", "sarcasm": "sarcasm",
+    "sassy": "sass", "sass": "sass",
+    "funny": "humor", "humorous": "humor", "humor": "humor",
+    "playful": "playfulness", "silly": "silliness",
+    "goofy": "goofiness", "serious": "humor",   # "more serious" → -humor
+    "formal": "formality", "casual": "formality",
+    "warm": "warmth", "friendly": "friendliness",
+    "nice": "friendliness", "mean": "rudeness",
+    "rude": "rudeness", "polite": "rudeness",
+    "talkative": "verbosity", "verbose": "verbosity",
+    "concise": "verbosity", "brief": "verbosity", "short": "verbosity",
+    "chatty": "verbosity", "quiet": "verbosity",
+    "curious": "curiosity", "nerdy": "nerdiness",
+    "technical": "technical_depth", "detailed": "detail_orientation",
+    "enthusiastic": "enthusiasm", "energetic": "energy",
+    "calm": "calmness", "dramatic": "dramatic_flair",
+    "emotional": "emotional_expressiveness",
+    "direct": "directness", "blunt": "directness",
+    "flirty": "flirtiness", "teasing": "playfulness",
+}
+# Trait direction: word → whether "more" raises or lowers the slider.
+_NEGATIVE_TRAITS = {"serious": -1, "casual": -1, "concise": -1,
+                    "brief": -1, "short": -1, "quiet": -1,
+                    "polite": -1, "nice": -1}
+
+_STEP = 20
+
+_TTL = [
+    (re.compile(r"\b(?:for\s+)?(?:the\s+)?(?:next\s+)?"
+                r"(?:(an?|one|two|three|four|five|six|few|\d+)\s*)?"
+                r"(?:hours?|hrs?)\b", re.I), 3600),
+    (re.compile(r"\b(?:for\s+)?(?:the\s+)?(?:next\s+)?"
+                r"(?:(an?|one|two|three|four|five|six|few|\d+)\s*)?"
+                r"(?:minutes?|mins?)\b", re.I), 60),
+    (re.compile(r"\btonight\b|\bthis\s+evening\b", re.I), 4 * 3600),
+    (re.compile(r"\btoday\b|\bfor\s+the\s+day\b", re.I), 12 * 3600),
+]
+_WORD_NUM = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3,
+             "four": 4, "five": 5, "six": 6, "few": 3}
+_SCOPE = [
+    (re.compile(r"\bthis\s+task\b|\bfor\s+this\s+task\b|"
+                r"\bwhile\s+(?:you'?re|you\s+are)\s+(?:working|fixing)\b",
+                re.I), "task"),
+    (re.compile(r"\bthis\s+conversation\b|\bthis\s+chat\b|"
+                r"\bfor\s+now\b|\bright\s+now\b", re.I), "conversation"),
+]
+_MODES = {
+    "serious": "serious_mode", "coding": "coding_mode",
+    "code": "coding_mode", "debugging": "debugging_mode",
+    "debug": "debugging_mode", "teaching": "teaching_mode",
+    "teach": "teaching_mode", "brainstorm": "brainstorming_mode",
+    "brainstorming": "brainstorming_mode", "casual": "casual_mode",
+    "review": "reviewer_mode", "reviewer": "reviewer_mode",
+    "research": "research_mode",
+}
+
+_TRAIT_CMD = re.compile(
+    r"^\s*(?:please\s+)?(?:be|act|talk|sound|respond|answer)\s+"
+    r"(?:a\s+(?:little|bit|lot)\s+)?(more|less)\s+"
+    r"(\w+(?:\s+\w+)?)\s*(.*?)\s*$", re.I)
+_TONE_DOWN = re.compile(
+    r"^\s*(?:please\s+)?(?:tone\s+down|dial\s+(?:it\s+)?(?:down|back)|"
+    r"ease\s+up\s+on|cut\s+(?:back\s+on|out)|stop\s+being\s+so)\s+"
+    r"(?:the\s+|your\s+)?(\w+(?:\s+\w+)?)\s*(.*?)\s*$", re.I)
+_USE_MODE = re.compile(
+    r"^\s*(?:please\s+)?(?:use|switch\s+to|go\s+into|enter)\s+"
+    r"(\w+)\s+mode\s*(.*?)\s*$", re.I)
+_BE_MODE = re.compile(
+    r"^\s*(?:please\s+)?be\s+(?:in\s+)?(serious|coding|debugging|"
+    r"teaching|casual|review|research|brainstorming)\s+mode"
+    r"\s*(.*?)\s*$", re.I)
+_RESET = re.compile(
+    r"^\s*(?:please\s+)?(?:reset|restore)\s+(?:your\s+|the\s+)?"
+    r"(?:personality|persona|normal\s+self)\b", re.I)
+_RESET_TEMP = re.compile(
+    r"^\s*(?:please\s+)?(?:back\s+to\s+normal|be\s+yourself\s+again|"
+    r"drop\s+the\s+(?:modifier|act|mode))\b", re.I)
+
+
+def _duration(text: str) -> tuple[float, str]:
+    """Returns (ttl_seconds, scope)."""
+    for rx, mult in _TTL:
+        m = rx.search(text)
+        if m:
+            raw = (m.group(1) or "1").lower() if m.lastindex else "1"
+            n = int(raw) if raw.isdigit() else _WORD_NUM.get(raw, 1)
+            return float(n * mult), "time"
+    for rx, scope in _SCOPE:
+        if rx.search(text):
+            return 0.0, scope
+    return 0.0, "conversation"
+
+
+def parse_persona_command(text: str) -> dict | None:
+    """Parse a style command → operation dict, or None.
+
+    Operations:
+      {"op": "overlay", "trait_offsets": {..}, "note": str}
+      {"op": "modifier", "trait_offsets": {..}, "note": str,
+       "ttl_seconds": float, "scope": str, "mode": str}
+      {"op": "mode", "mode": str, "ttl_seconds": float}
+      {"op": "reset_all"} | {"op": "reset_temp"}
+    """
+    t = str(text or "").strip()
+    if not t or len(t) > 200:
+        return None
+    if _RESET.match(t):
+        return {"op": "reset_all"}
+    if _RESET_TEMP.match(t):
+        return {"op": "reset_temp"}
+
+    m = _USE_MODE.match(t) or _BE_MODE.match(t)
+    if m:
+        mode = _MODES.get(m.group(1).lower())
+        if mode:
+            ttl, scope = _duration(m.group(2) or "")
+            if ttl or scope == "task":
+                return {"op": "modifier", "mode": mode,
+                        "trait_offsets": {}, "note": m.group(0).strip(),
+                        "ttl_seconds": ttl, "scope": scope}
+            return {"op": "mode", "mode": mode, "ttl_seconds": ttl}
+
+    m = _TONE_DOWN.match(t)
+    if m:
+        words1 = m.group(1).strip().lower()
+        word = words1.split()[0]
+        trait = _TRAIT_ALIASES.get(word)
+        if trait:
+            # Tail for duration/scope = leftover of group(1) + group(2).
+            tail = (words1[len(word):] + " " + (m.group(2) or "")
+                    ).strip()
+            ttl, scope = _duration(tail)
+            off = {trait: -_STEP}
+            note = f"less {word}"
+            if ttl or scope == "task":
+                return {"op": "modifier", "trait_offsets": off,
+                        "note": note, "ttl_seconds": ttl, "scope": scope}
+            return {"op": "overlay", "trait_offsets": off,
+                    "note": note}
+
+    m = _TRAIT_CMD.match(t)
+    if m:
+        direction, words, rest = (m.group(1).lower(),
+                                  m.group(2).strip().lower(),
+                                  m.group(3) or "")
+        # Longest alias first so "more serious tone" parses right.
+        trait = None
+        word = ""
+        for w in sorted(_TRAIT_ALIASES, key=len, reverse=True):
+            if words.split()[0] == w or words.startswith(w + " "):
+                trait, word = _TRAIT_ALIASES[w], w
+                break
+        if trait and trait in schema.SLIDERS:
+            sign = 1 if direction == "more" else -1
+            sign *= _NEGATIVE_TRAITS.get(word, 1)
+            off = {trait: sign * _STEP}
+            note = f"{direction} {word}"
+            tail = (words[len(word):] + " " + rest).strip()
+            ttl, scope = _duration(tail)
+            if ttl or scope == "task":
+                return {"op": "modifier", "trait_offsets": off,
+                        "note": note, "ttl_seconds": ttl,
+                        "scope": scope}
+            return {"op": "overlay", "trait_offsets": off,
+                    "note": note}
+    return None
+
+
+def apply_command(dyn: Any, cmd: dict) -> dict:
+    """Apply a parsed command to PersonaDynamics. Returns a summary for
+    the chat ack."""
+    op = cmd.get("op")
+    if op == "overlay":
+        ov = dyn.adjust_overlay(cmd.get("trait_offsets"),
+                                note=str(cmd.get("note") or ""))
+        return {"applied": "overlay", "trait_offsets":
+                ov["trait_offsets"], "note": cmd.get("note")}
+    if op == "modifier":
+        mod = dyn.add_modifier(
+            trait_offsets=cmd.get("trait_offsets"),
+            note=str(cmd.get("note") or ""),
+            ttl_seconds=float(cmd.get("ttl_seconds") or 0.0),
+            scope=str(cmd.get("scope") or "conversation"),
+            mode=str(cmd.get("mode") or ""))
+        return {"applied": "modifier", "modifier": mod}
+    if op == "mode":
+        dyn.set_mode(str(cmd.get("mode") or ""))
+        return {"applied": "mode", "mode": dyn.mode()}
+    if op == "reset_temp":
+        n = dyn.clear_modifiers()
+        return {"applied": "reset_temp", "cleared": n}
+    if op == "reset_all":
+        dyn.clear_modifiers()
+        dyn.reset_overlay()
+        dyn.set_mode("")
+        return {"applied": "reset_all"}
+    return {"applied": "none"}

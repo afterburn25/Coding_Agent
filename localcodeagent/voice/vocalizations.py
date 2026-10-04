@@ -554,6 +554,7 @@ class VocalizationEngine:
     @staticmethod
     def _ctx(ctx: dict | None) -> dict:
         ctx = ctx or {}
+        prefer = ctx.get("vocal_prefer")
         return {
             "style": str(ctx.get("style") or "default"),
             "strength": max(0, min(100, int(ctx.get("strength") or 0))),
@@ -561,6 +562,17 @@ class VocalizationEngine:
             "is_adult": bool(ctx.get("is_adult")),
             "level": clean_level(ctx.get("level")),
             "profile_id": str(ctx.get("profile_id") or ""),
+            # Behavior-layer overrides (personality/behavior.py) — merged
+            # over the family policy in _keep_prob.
+            "vocal_bias": max(0.0, min(2.0, float(
+                ctx.get("vocal_bias") or 1.0))),
+            "vocal_prefer": (set(prefer)
+                             if isinstance(prefer, (list, tuple, set))
+                             else None),
+            "gesture_prefer": (set(ctx.get("gesture_prefer"))
+                               if isinstance(ctx.get("gesture_prefer"),
+                                             (list, tuple, set))
+                               else None),
         }
 
     def _keep_prob(self, voc: Vocalization, c: dict, hist: deque) -> float:
@@ -577,6 +589,7 @@ class VocalizationEngine:
         if voc.adult and not (c["is_adult"] and policy.get("adult_ok")):
             return 0.0
         prob = (policy.get("bias", 1.0)
+                * c["vocal_bias"]
                 * _LEVEL_BIAS[c["level"]]
                 * _MOOD_BIAS.get(c["mood"], 1.0)
                 * (c["strength"] / 70.0))
@@ -587,9 +600,12 @@ class VocalizationEngine:
             prob *= 0.1
         elif any(h.get("category") == voc.category for h in recent[-2:]):
             prob *= 0.4
-        if policy.get("prefer") and voc.style not in policy["prefer"] \
+        prefer = c["vocal_prefer"] or policy.get("prefer")
+        if prefer and voc.style not in prefer \
                 and voc.category in ("amusement", "playfulness"):
             prob *= 0.7   # off-signature laugh is rarer for typed personas
+        elif c["vocal_prefer"] and voc.style in c["vocal_prefer"]:
+            prob = min(1.0, prob * 1.25)   # persona's signature sounds
         return max(0.0, min(1.0, prob))
 
     # -- detection -----------------------------------------------------------
@@ -683,7 +699,7 @@ class VocalizationEngine:
                 out = out[:start] + form + out[end:]
                 decision["tts_form"] = form
                 res.decisions.append(decision)
-                self._emit_gesture(voc, res, budget)
+                self._emit_gesture(voc, res, budget, c)
                 self._emit_telemetry(task_id, c, decision, kept=True)
             else:
                 # Dropped vocalizations leave the surrounding prose
@@ -731,7 +747,7 @@ class VocalizationEngine:
                                           "semantic": style,
                                           "category": cat,
                                           "tts_form": form})
-                    self._emit_gesture(voc, res, budget)
+                    self._emit_gesture(voc, res, budget, c)
                     self._emit_telemetry(task_id, c, {
                         "input": voc.token, "semantic": style,
                         "category": cat, "tts_form": form}, kept=True)
@@ -741,13 +757,19 @@ class VocalizationEngine:
         return res
 
     def _emit_gesture(self, voc: Vocalization, res: ResolveResult,
-                      budget: _TaskBudget) -> None:
+                      budget: _TaskBudget, c: dict | None = None) -> None:
         gesture = _GESTURE.get(voc.category)
         if not gesture or budget.gestures_used >= 2:
             return
+        # Persona gesture tendencies — non-signature gestures soften
+        # (intensity dampened) rather than vanish entirely.
+        prefer = (c or {}).get("gesture_prefer")
+        intensity = voc.intensity
+        if prefer and gesture not in prefer:
+            intensity = round(intensity * 0.6, 2)
         budget.gestures_used += 1
         ev = {"type": "gesture", "gesture": gesture,
-              "intensity": round(voc.intensity, 2),
+              "intensity": round(intensity, 2),
               "source": voc.style, "ts": time.time()}
         res.events.append(ev)
         try:

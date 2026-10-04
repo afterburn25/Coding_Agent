@@ -86,6 +86,33 @@ class ProfileAPI:
     def _greetings(self, profile_id: str) -> GreetingService:
         return GreetingService(self.mgr.profile_dir(profile_id))
 
+    def _dynamics(self, profile_id: str) -> "PersonaDynamics":
+        from ..personality.dynamics import PersonaDynamics
+        return PersonaDynamics(self.mgr.profile_dir(profile_id))
+
+    def _persona_effective(self, pid: str, p: dict,
+                           user_text: str = "") -> dict:
+        """Advanced/debug view of the compiled effective persona —
+        presentation metadata only, never private memory."""
+        from ..personality.dynamics import PersonaDynamics
+        from ..personality.effective import (
+            compile_effective, debug_view)
+        adult = _is_adult(p)
+        store = self._personality(pid)
+        active = store.resolve_active(is_adult=adult)
+        dyn = PersonaDynamics(self.mgr.profile_dir(pid))
+        card = compile_effective(
+            active, user_text=user_text,
+            relationship=dyn.relationship(),
+            mood=dyn.effective_mood(
+                manual_mood=str(active.get("mood") or "")),
+            overlay=dyn.overlay(), modifiers=dyn.modifiers(),
+            mode=dyn.mode(), is_adult=adult)
+        view = debug_view(card)
+        view["recent_openers"] = dyn.recent_phrases()["openers"][-4:]
+        view["recent_closers"] = dyn.recent_phrases()["closers"][-4:]
+        return {"ok": True, "effective": view}
+
     def _err(self, h, exc: Exception) -> bool:
         if isinstance(exc, ProfileError):
             h._json({"ok": False, "error": str(exc)}, 400)
@@ -148,6 +175,16 @@ class ProfileAPI:
             if path.endswith("/avatar"):
                 pid = self._pid(path, "/api/profiles/", "/avatar")
                 return self._serve_avatar(h, pid)
+            if path.endswith("/personality/effective"):
+                pid = self._pid(path, "/api/profiles/",
+                                "/personality/effective")
+                p = self.mgr.get(pid)
+                if p is None:
+                    h._json({"error": "no such profile"}, 404)
+                    return True
+                h._json(self._persona_effective(
+                    pid, p, str((query.get("text") or [""])[0])))
+                return True
             if path.endswith("/personality"):
                 pid = self._pid(path, "/api/profiles/", "/personality")
                 p = self.mgr.get(pid)
@@ -419,8 +456,56 @@ class ProfileAPI:
         elif action == "reset":
             store.set_active("preset:default-nexus", is_adult=adult)
             store.set_strength(70)
+            dyn = self._dynamics(pid)
+            dyn.clear_modifiers()
+            dyn.reset_overlay()
+            dyn.set_mode("")
             h._json({"ok": True,
                      "active": store.resolve_active(is_adult=adult)})
+        elif action == "adjust_overlay":
+            ov = self._dynamics(pid).adjust_overlay(
+                body.get("trait_offsets"),
+                note=str(body.get("note") or ""))
+            h._json({"ok": True, "overlay": ov})
+        elif action == "reset_overlay":
+            self._dynamics(pid).reset_overlay()
+            h._json({"ok": True})
+        elif action == "add_modifier":
+            mod = self._dynamics(pid).add_modifier(
+                trait_offsets=body.get("trait_offsets"),
+                note=str(body.get("note") or ""),
+                ttl_seconds=float(body.get("ttl_seconds") or 0.0),
+                scope=str(body.get("scope") or "conversation"),
+                mode=str(body.get("mode") or ""))
+            h._json({"ok": True, "modifier": mod})
+        elif action == "clear_modifiers":
+            n = self._dynamics(pid).clear_modifiers(
+                scope=str(body.get("scope") or ""))
+            h._json({"ok": True, "cleared": n})
+        elif action == "set_mode":
+            mode = self._dynamics(pid).set_mode(str(body.get("mode") or ""))
+            h._json({"ok": True, "mode": mode})
+        elif action == "coherence":
+            from ..personality.customize import coherence_check
+            h._json({"ok": True, **coherence_check(
+                body.get("traits"), body.get("voice"))})
+        elif action == "blend":
+            from ..personality.customize import create_blend
+            specs = body.get("blend")
+            if not isinstance(specs, list):
+                raise ProfileError("blend must be a list of "
+                                   "{preset, weight}")
+            custom = create_blend(
+                store, specs, name=body.get("name"), is_adult=adult)
+            h._json({"ok": True, "custom": custom})
+        elif action == "export":
+            from ..personality.customize import export_custom
+            h._json({"ok": True, "package": export_custom(
+                store, str(body.get("personality_id") or ""))})
+        elif action == "import":
+            from ..personality.customize import import_custom
+            h._json({"ok": True, "custom": import_custom(
+                store, body.get("package"), is_adult=adult)})
         elif action == "preview":
             # Personality-aware sample text + voice params — no TTS call.
             active = store.resolve_active(is_adult=adult)

@@ -8,6 +8,7 @@ math/permissions/safety never do. Deterministic, no LLM call.
 from __future__ import annotations
 
 from . import schema
+from .effective import card_guidance
 
 _BOUNDARY = ("Personality steers delivery style only — factual accuracy, "
              "code correctness, calculations, tool permissions, and safety "
@@ -138,8 +139,16 @@ def _style_cues(traits: dict | None, strength: int,
 
 def prompt_context(profile: dict | None, personality: dict | None,
                    memories: list | None = None,
-                   *, max_memories: int = 20) -> str:
-    """Compact context block; "" when there is no active profile."""
+                   *, max_memories: int = 20,
+                   effective: dict | None = None) -> str:
+    """Compact context block; "" when there is no active profile.
+
+    ``effective`` is the compiled persona card (effective.py). When
+    present it supplies the behavior-layer guidance — motivations,
+    rhythm, humor type, question/teaching/challenge styles, seriousness
+    scaling, relationship shape — while raw trait cues still translate
+    any adjusted sliders.
+    """
     if not isinstance(profile, dict):
         return ""
     p = personality or {}
@@ -155,34 +164,47 @@ def prompt_context(profile: dict | None, personality: dict | None,
             "for short or casual answers.")
     if address:
         lines.append(f"When addressing the user, call them: {address}.")
-    cues = _style_cues(p.get("traits"), strength)
+    if effective:
+        lines.extend(card_guidance(effective))
+        traits_for_cues = effective.get("traits") or p.get("traits")
+    else:
+        traits_for_cues = p.get("traits")
+    cues = _style_cues(traits_for_cues, strength)
     if cues:
         lines.append("How you speak: "
                      + "; ".join(cues) + ".")
-    standouts = _standout_traits(p.get("traits"), strength)
+    standouts = _standout_traits(traits_for_cues, strength)
     if standouts:
         lines.append("Style sliders (0-100, 50 = neutral): "
                      + ", ".join(standouts) + ".")
-    traits = p.get("traits") or {}
+    traits = traits_for_cues or {}
     if any(k in schema.ADULT_SLIDERS for k in traits):
         lines.append("This is an adult persona — react like a real, "
                      "unfiltered person, not a polite assistant: "
                      "spontaneous, emotional, blunt, with natural "
                      "reactions and adult vocabulary when it fits.")
-    mood = str(p.get("mood") or "")
+    mood = str((effective or {}).get("mood") or p.get("mood") or "")
     if mood in schema.MOODS:
         lines.append(f"Current mood: {mood} — temporary, "
                      "the base personality still leads.")
-    vocal = schema.clean_vocal_level(p.get("vocalizations"))
+    vocal = schema.clean_vocal_level(
+        (effective or {}).get("vocalizations") or p.get("vocalizations"))
     if name and vocal != "off":
-        lines.append(
-            "Natural vocal reactions are available in casual replies — "
-            "a soft 'hmm', 'mm-hmm', a short 'heh', an occasional sigh "
-            "or 'aww'. At most one per reply (two only in a long, "
-            "emotional answer), and never inside code, lists, JSON, or "
-            "technical output." + (
-                " Keep them rare — quiet acknowledgment at most."
-                if vocal == "minimal" else ""))
+        serious = (effective or {}).get("seriousness") in (
+            "serious", "critical")
+        if not serious:
+            lines.append(
+                "Natural vocal reactions are available in casual replies — "
+                "a soft 'hmm', 'mm-hmm', a short 'heh', an occasional sigh "
+                "or 'aww'. At most one per reply (two only in a long, "
+                "emotional answer), and never inside code, lists, JSON, or "
+                "technical output." + (
+                    " Keep them rare — quiet acknowledgment at most."
+                    if vocal == "minimal" else ""))
+        else:
+            lines.append(
+                "No vocal reactions this turn — the situation is "
+                "serious; keep the reply plain.")
     lines.append(
         "Stay in character in written replies — the persona shapes every "
         "response. Vary your phrasing: never repeat an earlier reply "
