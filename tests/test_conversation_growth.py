@@ -219,8 +219,12 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertTrue(AgentOrchestrator.direct_image_generation_intent("can you generate a picture of a woman"))
         self.assertTrue(AgentOrchestrator.direct_image_generation_intent("could you please draw a dragon"))
         self.assertFalse(AgentOrchestrator.direct_image_generation_intent("edit image C:/tmp/source.png"))
-        self.assertFalse(AgentOrchestrator.direct_image_generation_intent("upscale this picture"))
-        self.assertFalse(AgentOrchestrator.direct_image_generation_intent("can you make this photo brighter"))
+        # Source-image ops route directly now — the attachment becomes
+        # source_image and the image lane infers upscale/edit, so the job
+        # can never be stranded on a model that just promises it.
+        self.assertTrue(AgentOrchestrator.direct_image_generation_intent("upscale this picture"))
+        self.assertTrue(AgentOrchestrator.direct_image_generation_intent("can you make this photo brighter"))
+        self.assertTrue(AgentOrchestrator.direct_image_generation_intent("recreate this image with a wider shot"))
         self.assertFalse(AgentOrchestrator.direct_image_generation_intent("please make a cup of tea"))
         self.assertFalse(AgentOrchestrator.direct_image_generation_intent("please create a website with a logo"))
         self.assertEqual(ConversationManager.classify_intent("how was your day?"), "conversation")
@@ -232,7 +236,9 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertTrue(AgentOrchestrator.can_run_without_coding_model("can you generate a picture of a woman"))
         self.assertTrue(AgentOrchestrator.can_run_without_coding_model("please draw a dragon"))
         self.assertFalse(AgentOrchestrator.can_run_without_coding_model("make a cup of tea"))
-        self.assertFalse(AgentOrchestrator.can_run_without_coding_model("can you make this photo brighter"))
+        # Source-image ops bypass the model too — the attachment is routed
+        # as source_image and the image lane infers the edit op.
+        self.assertTrue(AgentOrchestrator.can_run_without_coding_model("can you make this photo brighter"))
         self.assertFalse(AgentOrchestrator.can_run_without_coding_model("edit image C:/tmp/source.png"))
         self.assertFalse(AgentOrchestrator.can_run_without_coding_model("fix this Python bug"))
 

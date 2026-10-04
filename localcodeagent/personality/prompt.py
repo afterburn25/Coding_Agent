@@ -144,15 +144,20 @@ def prompt_context(profile: dict | None, personality: dict | None,
         return ""
     p = personality or {}
     address = _personality_address(profile, p)
-    lines = [f"Active user profile: {address}."]
     name = str(p.get("name") or "")
     strength = schema.clean_strength(p.get("strength"))
+    lines = []
     if name:
-        lines.append(f"Nexus personality: {name} "
-                     f"(strength {strength}/100).")
+        lines.append(
+            f"Active persona: {name} (strength {strength}/100) — this is "
+            "how you talk in EVERY reply, not just greetings: phrasing, "
+            "tone, humor, attitude, and word choice all follow it, even "
+            "for short or casual answers.")
+    if address:
+        lines.append(f"When addressing the user, call them: {address}.")
     cues = _style_cues(p.get("traits"), strength)
     if cues:
-        lines.append("Delivery style — speak this way: "
+        lines.append("How you speak: "
                      + "; ".join(cues) + ".")
     standouts = _standout_traits(p.get("traits"), strength)
     if standouts:
@@ -168,7 +173,9 @@ def prompt_context(profile: dict | None, personality: dict | None,
     if mood in schema.MOODS:
         lines.append(f"Current mood: {mood} — temporary, "
                      "the base personality still leads.")
-    lines.append(_BOUNDARY)
+    lines.append(
+        "Stay in character in written replies — the persona shapes every "
+        "response. " + _BOUNDARY)
     mems = [m for m in (memories or [])
             if isinstance(m, dict) and m.get("text")][-max_memories:]
     if mems:

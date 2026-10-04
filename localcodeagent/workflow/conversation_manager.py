@@ -343,14 +343,30 @@ class ConversationManager:
         if not t:
             return False
 
-        # Keep edits and other source-image operations on their specialized tool path.
+        # Inpainting/outpainting need arguments only the model+tools can
+        # assemble (mask, canvas geometry) — keep those on the tool path.
+        # "edit image" style commands stay model-routed too; the op regex
+        # below still catches verb forms like "edit this image".
         if any(term in t for term in (
             "edit image", "edit photo", "edit picture", "inpaint", "outpaint",
-            "upscale", "remove background", "replace background", "variation of",
         )):
             return False
-        if re.search(r"\b(?:this|my|attached|uploaded|existing|source)\s+(?:image|photo|picture)\b", t):
-            return False
+        # Source-image operations ARE generation intent: the orchestrator
+        # passes the attachment as source_image and the image lane runs
+        # edit_image/upscale/etc. deterministically — no model call where
+        # the model could promise a job it never queues.
+        if re.search(
+            r"\b(?:recreate|re-?create|remake|redraw|re-?draw|reimagine|"
+            r"rework|redo|regenerate|retry|edit|change|modify|alter|"
+            r"enhance|fix|retouch|touch\s*up|transform|improve|restore|"
+            r"upscale|clean\s*up)\b[^.?!]{0,80}"
+            r"\b(?:this|that|the|my|attached|uploaded|existing|source)?\s*"
+            r"(?:images?|pictures?|photos?|pics?)\b", t):
+            return True
+        if any(term in t for term in (
+            "remove background", "replace background", "variation of",
+        )):
+            return True
 
         # Natural requests often put politeness before the actual generation verb.
         request_prefix = re.compile(
@@ -404,7 +420,13 @@ class ConversationManager:
                 "upscale image", "upscale photo", "remove background", "replace background",
                 "variation of",
             )
-        )
+        ) or bool(re.search(
+            r"\b(?:recreate|re-?create|remake|redraw|re-?draw|reimagine|"
+            r"rework|redo|regenerate|edit|change|modify|alter|enhance|"
+            r"retouch|touch\s*up|transform|improve|restore|upscale|"
+            r"clean\s*up)\b[^.?!]{0,80}"
+            r"\b(?:this|that|the|my|attached|uploaded|existing|source)?\s*"
+            r"(?:images?|pictures?|photos?|pics?)\b", t))
         if ConversationManager.image_generation_intent(t) or image_operation:
             return "image"
         if any(x in t for x in ("search the web", "look up", "research", "latest", "current version", "today's news", "source this")):

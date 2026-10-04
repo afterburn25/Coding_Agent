@@ -106,6 +106,21 @@ class ModelRouter:
         )
         if any(signal in t for signal in tool_signals):
             return "light_coder", 1, ["tool-using request needs a tool-capable lane"]
+        # Source-image/specialized image ops also need tools — without this
+        # they'd hit the utility lane and the model would promise a job it
+        # can't queue.
+        if (
+            any(term in t for term in (
+                "inpaint", "outpaint", "remove background",
+                "replace background", "upscale",
+            ))
+            or re.search(
+                r"\b(?:recreate|re-?create|remake|redraw|re-?draw|reimagine|"
+                r"rework|redo|regenerate|edit|change|modify|alter|enhance|"
+                r"retouch|touch\s*up|transform|improve|restore)\b[^.?!]{0,80}"
+                r"\b(?:images?|pictures?|photos?|pics?)\b", t)
+        ):
+            return "light_coder", 1, ["image operation needs a tool-capable lane"]
 
         if (
             len(t) <= 320

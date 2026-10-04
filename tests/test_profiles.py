@@ -625,7 +625,7 @@ class TestPromptContext(unittest.TestCase):
                              {"name": "Sassy", "strength": 100,
                               "traits": {"sass": 95, "formality": 10,
                                          "confidence": 70}})
-        self.assertIn("Delivery style", out)
+        self.assertIn("How you speak", out)
         self.assertIn("sass", out.lower())
         self.assertIn("casual", out.lower())
 
@@ -641,7 +641,7 @@ class TestPromptContext(unittest.TestCase):
         out = prompt_context({"first_name": "Sam"},
                              {"name": "x", "strength": 0,
                               "traits": {"sass": 100}})
-        self.assertNotIn("Delivery style", out)
+        self.assertNotIn("How you speak", out)
 
     def test_memories_bounded(self):
         from localcodeagent.personality.prompt import prompt_context

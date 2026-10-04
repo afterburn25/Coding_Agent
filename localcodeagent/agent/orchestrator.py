@@ -3572,8 +3572,10 @@ class AgentOrchestrator:
                 timing_context if self._brain_subroutine_enabled("temporal_context", True) else "",
                 conversation_quality_context,
                 policy_context,
-                persistent_context,
+                # Persona identity outranks memory recall — memory blocks can
+                # otherwise consume the shared budget and truncate it.
                 personality_context,
+                persistent_context,
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,
@@ -3682,8 +3684,8 @@ class AgentOrchestrator:
                 timing_context if self._brain_subroutine_enabled("temporal_context", True) else "",
                 conversation_quality_context,
                 policy_context,
-                persistent_context,
                 personality_context,
+                persistent_context,
                 intent_context,
                 brain_skill_context,
                 brain_behavior_context,
