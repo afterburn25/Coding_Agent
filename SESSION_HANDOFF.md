@@ -96,11 +96,38 @@ Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
   left it returning early (no `agent`/`autonomy`); the full e2e suite
   caught it, method moved to class level, 34/34 green.
 
+### P2 progress — search, quality tools, ops UI depth
+
+- **Global search** — `localcodeagent/search.py` + `GET /api/search`;
+  `web/palette.js` Ctrl+K palette on every page (7 tests).
+- **Dependency audit** — `tools/audit.py`: `dep_list` (offline manifest
+  parse) + `project_audit` (real pip-audit/npm audit/cargo audit,
+  honest `auditor_unavailable`) (5 tests).
+- **Coverage** — `coverage_report` runs the real coverage step per
+  build system; errors honestly when none exists.
+- **Release packaging** — `tools/release.py`: `package_release` zips a
+  workspace dir to `.agent/releases/` with sha256 + artifact registry;
+  `release_verify` re-hashes (4 tests).
+- **Command Center depth** — Recent activity feed via
+  `ActivityStore.recent()` + `/api/activity?recent=N`; mission detail
+  renders a Pipeline stage strip for coding-pipeline missions.
+- **Palette deep-links** — file hits navigate to
+  `/workspace.html?file=<path>` which opens the file in a tab.
+- **Live-install verified** — backend rebuilt and deployed to
+  `D:\Nexus_Core`; `/api/lkg`, `/api/update/status` (source head
+  `b905d8d`, clean), `/api/search` all answer; `Source` synced.
+  The smoke caught a real bug (`self.state.search` never initialized →
+  lazy `_global_search` fix, `276917d`).
+
 ### Workstation program — what remains
 
-- **P1** — dev-server, pipeline, chat priority, LKG, self-update, and
-  Command Center are all landed. Remaining loose ends: preview/runtime
-  polish on the coding-pipeline stage view, then P2.
+- **P2** — search, audit, coverage, release packaging, activity feed,
+  stage strip landed. Remaining: deploy adapters (need a target policy
+  from the user — gh-pages push is the natural first), browser E2E
+  (needs Playwright bundled into the exe — a packaging decision),
+  debugger adapter, richer projects/knowledge UI.
+- Identity manager is already richer than listed —
+  `nexus_avatar.py` has expression states, gestures, activity.
 - **P2** — canonical identity manager (expression sets/gesture mapping),
   global search/command (Ctrl+K), richer project/knowledge/activity UI,
   remaining workstation capabilities (deploy adapters, coverage,
