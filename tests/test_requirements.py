@@ -126,7 +126,7 @@ class RequirementHttpTests(unittest.TestCase):
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import create_server, stop_state
         from tests.test_end_to_end import _FakeModelServer
-        cls._td = tempfile.TemporaryDirectory()
+        cls._td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls._llm = _FakeModelServer()
         ws = Path(cls._td.name)
         cfg = AgentConfig(
@@ -144,14 +144,14 @@ class RequirementHttpTests(unittest.TestCase):
                                       daemon=True)
         cls.thread.start()
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        # Registered first so it runs LAST (class cleanups are LIFO):
+        # the server must be fully stopped before the temp dir is removed,
+        # otherwise in-flight writes race rmtree -> "Directory not empty".
+        cls.addClassCleanup(cls._td.cleanup)
         cls.addClassCleanup(lambda: (cls.server.shutdown(),
                                      cls.server.server_close(),
                                      cls._llm.close(),
                                      stop_state(cls.state)))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._td.cleanup()
 
     def _get(self, path):
         with urllib.request.urlopen(self.base + path, timeout=15) as r:
