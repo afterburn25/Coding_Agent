@@ -68,8 +68,9 @@ v0.15.0 deepens the workstation core:
   tools/plugins, MCP, projects, library/preferences, STT, operational
   state, tasks/activity/queue, readiness/resources), with UTF-8-safe
   process-log capture and tolerant external CI log decoding. Windows
-  packaging also requires the verified Real-ESRGAN workflow, and direct
-  build/test dependencies are pinned for reproducible artifacts.
+  packaging and installer smoke require every bundled workflow, including
+  the verified Real-ESRGAN post-process path; direct Python, .NET SDK, and
+  Inno Setup build/test inputs are pinned for reproducible artifacts.
 
 Verified: **1403 tests** (2 environment skips).
 

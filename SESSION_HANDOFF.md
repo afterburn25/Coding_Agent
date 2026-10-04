@@ -34,12 +34,13 @@
   processes/resources/readiness/tasks/activity/queue/STT/operational-state/
   briefing APIs and the shared SSE bus. Its log capture is UTF-8 safe, and
   CI log probes decode external `gh` output with replacement.
-- Release packaging now asserts the dedicated
-  `image/upscalers/realesrgan-x4plus-api.json` workflow is bundled, so the
-  verified post-process path cannot disappear silently from Windows builds.
-  Build/test dependencies are pinned (`pyinstaller`, `pillow`,
-  `cryptography`, `py7zr`, Kokoro/onnx/numpy stack) and CI no longer floats
-  `pip` or resolver ranges for direct packages.
+- Release packaging now asserts every bundled workflow is present —
+  including `ask_workspace`, `clip_transcribe`, and the dedicated
+  `image/upscalers/realesrgan-x4plus-api.json` post-process path — in both
+  the Windows build contract and installer smoke test. Build/test
+  dependencies are pinned (`pyinstaller`, `pillow`, `cryptography`, `py7zr`,
+  Kokoro/onnx/numpy stack), and CI also pins the .NET SDK and Inno Setup
+  instead of floating `pip`, SDK, installer, or resolver inputs.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/

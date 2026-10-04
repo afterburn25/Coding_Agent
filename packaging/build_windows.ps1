@@ -199,7 +199,9 @@ Write-Host "Bundling default ComfyUI API workflows..."
 $WorkflowTarget = Join-Path $PackageRoot "workflows"
 New-Item -ItemType Directory -Force -Path $WorkflowTarget | Out-Null
 Copy-Item -Path (Join-Path $Root "workflows\*") -Destination $WorkflowTarget -Recurse -Force
-$ExpectedImageWorkflows = @(
+$ExpectedWorkflows = @(
+    "ask_workspace.json",
+    "clip_transcribe.json",
     "image\qwen\qwen-image-2.1-t2i-api.json",
     "image\qwen\qwen-image-2.1-edit-api.json",
     "image\qwen\qwen-image-2.1-inpaint-api.json",
@@ -209,7 +211,7 @@ $ExpectedImageWorkflows = @(
     "image\sdxl\juggernaut-x-v10-t2i-api.json",
     "image\upscalers\realesrgan-x4plus-api.json"
 )
-foreach ($RelativeWorkflow in $ExpectedImageWorkflows) {
+foreach ($RelativeWorkflow in $ExpectedWorkflows) {
     if (-not (Test-Path (Join-Path $WorkflowTarget $RelativeWorkflow))) {
         throw "Required bundled image workflow is missing: $RelativeWorkflow"
     }

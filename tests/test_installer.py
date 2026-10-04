@@ -318,6 +318,8 @@ class InstallerContractTests(unittest.TestCase):
     def test_windows_build_bundles_default_image_api_workflows(self):
         self.assertIn("Bundling default ComfyUI API workflows", self.build)
         for workflow in (
+            "ask_workspace.json",
+            "clip_transcribe.json",
             "qwen-image-2.1-t2i-api.json",
             "qwen-image-2.1-edit-api.json",
             "qwen-image-2.1-inpaint-api.json",
@@ -372,8 +374,17 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("second run intentionally omits /DIR", self.workflow)
         self.assertIn("Update installer run failed", self.workflow)
         self.assertIn("Update removed imported workflows", self.workflow)
+        self.assertIn('dotnet-version: "8.0.424"', self.workflow)
+        self.assertIn(
+            "choco install innosetup --version=6.6.1", self.workflow)
         self.assertIn("Build native Nexus Core desktop app", self.workflow)
         self.assertIn("Installed Source workspace is incomplete", self.workflow)
+        for workflow in (
+            "workflows\\ask_workspace.json",
+            "workflows\\clip_transcribe.json",
+            "workflows\\image\\upscalers\\realesrgan-x4plus-api.json",
+        ):
+            self.assertIn(workflow, self.workflow)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.workflow)
         for dep in (
             "pyinstaller==6.22.3", "pillow==12.3.0",

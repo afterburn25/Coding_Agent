@@ -60,7 +60,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "8.0.424"
 
       - name: Run splash progress model tests
         shell: pwsh
@@ -83,7 +83,7 @@ jobs:
 
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup --version=6.6.1 --yes --no-progress
 
       - name: Build native Nexus Core desktop app
         shell: pwsh
@@ -226,15 +226,18 @@ jobs:
           if (-not (Test-Path (Join-Path $InstallDir "Source\.git\HEAD"))) { throw "Installed Source Git workspace is missing" }
           if (-not (Test-Path (Join-Path $InstallDir "Source\localcodeagent\server.py"))) { throw "Installed Source workspace is incomplete" }
           if (-not (Test-Path (Join-Path $InstallDir "config.json"))) { throw "Installer did not seed config.json" }
-          $BundledImageWorkflows = @(
+          $BundledWorkflows = @(
+            "workflows\ask_workspace.json",
+            "workflows\clip_transcribe.json",
             "workflows\image\qwen\qwen-image-2.1-t2i-api.json",
             "workflows\image\qwen\qwen-image-2.1-edit-api.json",
             "workflows\image\qwen\qwen-image-2.1-inpaint-api.json",
             "workflows\image\qwen\qwen-image-2.1-background-removal-api.json",
             "workflows\image\flux\flux2-klein-4b-t2i-api.json",
-            "workflows\image\flux\flux2-klein-4b-edit-api.json"
+            "workflows\image\flux\flux2-klein-4b-edit-api.json",
+            "workflows\image\upscalers\realesrgan-x4plus-api.json"
           )
-          foreach ($RelativeWorkflow in $BundledImageWorkflows) {
+          foreach ($RelativeWorkflow in $BundledWorkflows) {
             if (-not (Test-Path (Join-Path $InstallDir $RelativeWorkflow))) {
               throw "Installer did not seed bundled image workflow: $RelativeWorkflow"
             }
