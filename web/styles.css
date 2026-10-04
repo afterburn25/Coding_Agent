@@ -3161,11 +3161,12 @@ select option {
    page. When visible it reserves a band at the top instead of overlaying
    the topbar: page shells shift down and shrink by the same amount. */
 body.task-bar-on > [class*="-shell"]{
-  margin-top:46px;
-  height:calc(100vh - 46px);
+  margin-top:var(--tb-h, 46px);
+  height:calc(100vh - var(--tb-h, 46px));
 }
 .task-bar{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9000;
-  display:flex;align-items:center;gap:10px;max-width:min(720px,90vw);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  max-width:min(720px,90vw);
   padding:7px 12px;border:1px solid var(--line2);border-radius:20px;
   background:color-mix(in srgb,var(--panel2) 92%,transparent);
   box-shadow:var(--shadow-card);backdrop-filter:blur(6px);

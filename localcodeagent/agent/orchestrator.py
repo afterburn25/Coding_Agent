@@ -154,6 +154,7 @@ class _AgentSession:
     max_tokens: int | None = None
     tool_activities: dict[str, str] = field(default_factory=dict)
     attachments_meta: list[dict[str, Any]] = field(default_factory=list)
+    unverified_claims: bool = False
     started_at: float = field(default_factory=time.time)
 
 
@@ -2761,7 +2762,7 @@ class AgentOrchestrator:
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
-        if self.answer_memory is not None:
+        if self.answer_memory is not None and not session.unverified_claims:
             try:
                 tool_names = [
                     str(e.get("name") or "")
@@ -3264,6 +3265,9 @@ class AgentOrchestrator:
                 claims = self._unverified_action_claims(session.main_content)
                 if claims and not session.tool_events \
                         and not session.research_context.get("sources"):
+                    # Never learn a fabricated reply — Answer Memory would
+                    # replay the lie verbatim to similar future questions.
+                    session.unverified_claims = True
                     notice = (
                         "\n\n⚠ **Unverified action claims** — no tools or "
                         "commands ran in this reply. Statements asserting "
@@ -4049,11 +4053,35 @@ class AgentOrchestrator:
                     "Checking learned answers for a trusted match",
                     callback=event_callback,
                 )
+                # Stored answers carrying unverified action claims are
+                # fabrications — "I synced the repo" learned from a reply
+                # that ran zero tools. They must never replay verbatim or
+                # be injected as hint context; invalidate them in place so
+                # they can't resurface.
+                def _drop_fabricated(row: dict) -> bool:
+                    if not isinstance(row, dict):
+                        return False
+                    if not self._unverified_action_claims(
+                            str(row.get("answer_text") or "")):
+                        return False
+                    try:
+                        from ..answer_memory import learning as _am_learning
+                        _am_learning.invalidate_answer(
+                            self.answer_memory.store,
+                            str(row.get("id") or ""),
+                            "unverified action claims")
+                    except Exception:
+                        pass
+                    return True
+
+                mem_hit_bad = bool(
+                    memory_match.hit and _drop_fabricated(memory_match.answer))
                 # A trusted learned answer can't account for a photo the
                 # user just attached — only context hints survive. With a
                 # persona driving, it also can't replay stored text — the
                 # model rephrases the same facts in her voice.
-                if memory_match.hit and not attach["image_paths"] and not persona_voice:
+                if (memory_match.hit and not mem_hit_bad
+                        and not attach["image_paths"] and not persona_voice):
                     return self._answer_memory_result(
                         task, user_text, memory_match,
                         event_callback=event_callback,
@@ -4061,8 +4089,12 @@ class AgentOrchestrator:
                         project_id=project_id,
                         memory_activity=mem_act,
                     )
-                hint_rows = list(memory_match.context_answers or [])
-                if persona_voice and memory_match.hit and memory_match.answer:
+                hint_rows = [
+                    r for r in (memory_match.context_answers or [])
+                    if not _drop_fabricated(r)
+                ]
+                if (persona_voice and memory_match.hit and not mem_hit_bad
+                        and memory_match.answer):
                     hint_rows.insert(0, memory_match.answer)
                 seen_answers = {
                     s.split("\nA: ", 1)[-1] for s in memory_snippets

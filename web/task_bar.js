@@ -63,6 +63,7 @@
         el.classList.add("hidden");
       }
       document.body.classList.remove("task-bar-on");
+      document.body.style.removeProperty("--tb-h");
       lastTaskId = null;
       return;
     }
@@ -98,6 +99,11 @@
     el.dataset.taskId = cur.id;
     el.classList.remove("hidden");
     document.body.classList.add("task-bar-on");
+    // Reserve exactly the bar's rendered height plus its top offset — a
+    // fixed band leaves overlap when the pill wraps taller on small
+    // windows.
+    document.body.style.setProperty(
+      "--tb-h", `${Math.ceil(el.getBoundingClientRect().height + 16)}px`);
     lastTaskId = cur.id;
   }
 
