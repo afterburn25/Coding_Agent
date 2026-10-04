@@ -114,6 +114,16 @@
   decision journal, then risk-classified promotion, evidence board,
   reliability scoring, regression memory/bisect, resource modes,
   offline/egress policy, lineage, Safe Mode, golden config, RC scorecard.
+- **Phase 2** — hypothesis engine (`hypotheses.py`, lifecycle
+  proposed→confirmed/rejected, discriminating-test picker), causal
+  memory (`causal.py`, mechanism-level chains seeded into the next
+  diagnosis as ranked priors — candidates to test, never assumed), and
+  decision journal (`decisions.py`). `SelfRepairCoordinator` persists
+  hypothesis rows at diagnosis, journals the repair-kind choice with
+  alternatives, and on resolution confirms the winner, rejects losers,
+  and writes the causal record. API: `/api/hypotheses`
+  (+status/evidence/test), `/api/causal-memory`, `/api/decisions`
+  (+outcome). Docs: `docs/REASONING.md`.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -995,7 +1005,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1424 tests` passing (2 environment skips).
+Expected at this checkpoint: `1436 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

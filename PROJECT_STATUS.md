@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1424 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1436 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -98,8 +98,16 @@ v0.15.0 deepens the workstation core:
   creation (criteria link `requirement_id` back to rows). Evaluator
   results sync requirement status from persisted evidence; the mission
   UI renders a live checklist. Docs: `docs/REQUIREMENTS.md`.
+- **Hypothesis engine, causal memory, decision journal**
+  (`hypotheses.py`, `causal.py`, `decisions.py`) — self-repair diagnosis
+  now persists first-class hypothesis rows with a tested lifecycle,
+  seeds the next incident with ranked causal priors (never assumed
+  causes), and journals the repair decision with its alternatives;
+  resolution confirms the winning hypothesis and records the mechanism.
+  API: `/api/hypotheses`, `/api/causal-memory`, `/api/decisions`. Docs:
+  `docs/REASONING.md`.
 
-Verified: **1424 tests** (2 environment skips).
+Verified: **1436 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -463,7 +471,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate` `/api/requirements` (+ status/evidence writes).
-- Current automated checkpoint: **1424 tests passing** (2 environment skips).
+- Current automated checkpoint: **1436 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
