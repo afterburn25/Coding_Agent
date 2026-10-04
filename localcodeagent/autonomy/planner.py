@@ -11,10 +11,76 @@ descendants of the authorized mission only, never new top-level goals.
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
 from .task_graph import new_task
+
+# Bounded domain vocabulary for deterministic decomposition. When an
+# objective mentions two or more of these areas the planner fans out into
+# parallel scoped lanes instead of one serial inspect→work chain. Each
+# lane carries scope globs so downstream worktree isolation knows which
+# parts of the tree the worker owns.
+_DOMAIN_LANES: tuple[tuple[re.Pattern, str, list[str], str], ...] = tuple(
+    (re.compile(p, re.I), t, list(g), r) for p, t, g, r in (
+        (r"\b(backend|server|apis?|runtime|orchestrat\w*|models?\s+routing|router)\b",
+         "Backend / runtime", ["localcodeagent/"], "coding"),
+        (r"\b(frontend|ui|web|css|page|layout|interface)\b",
+         "Frontend / UI", ["web/"], "coding"),
+        (r"\b(installer|packag\w*|inno|setup|uninstall|desktop host|\.net|csharp|c#)\b",
+         "Installer / packaging", ["installer/", "desktop/", "packaging/"], "coding"),
+        (r"\b(tests?|coverage|regressions?|test suite)\b",
+         "Tests", ["tests/"], "build_test"),
+        (r"\b(docs?|documentation|readme|handbook|guide)\b",
+         "Documentation", ["docs/", "*.md"], "coding"),
+        (r"\b(security|permission|secrets?|vulnerabilit\w*|auth)\b",
+         "Security", [], "reviewer"),
+        (r"\b(performance|latency|throughput|benchmark|startup time)\b",
+         "Performance", [], "diagnostics"),
+        (r"\b(voice|tts|speech|kokoro|vocali[sz]ation)\b",
+         "Voice", ["localcodeagent/voice/", "web/voice*"], "coding"),
+        (r"\b(image|comfyui|diffusion|avatar|portrait)\b",
+         "Image / ComfyUI", ["localcodeagent/image/", "web/image*"], "coding"),
+        (r"\b(memory|answer memory|knowledge|recall)\b",
+         "Memory", ["localcodeagent/answer_memory/", "localcodeagent/knowledge/"],
+         "coding"),
+    ))
+
+MAX_LANES = 6
+
+
+def _detect_domains(objective: str) -> list[dict]:
+    """Match the objective against the bounded domain vocabulary."""
+    lanes: list[dict] = []
+    seen: set[str] = set()
+    for pattern, title, globs, role in _DOMAIN_LANES:
+        if title in seen:
+            continue
+        if pattern.search(objective):
+            seen.add(title)
+            lanes.append({"title": title, "scope": globs, "role": role})
+    return lanes[:MAX_LANES]
+
+
+def _explicit_lanes(mission: dict) -> list[dict]:
+    """A caller (API, LLM planner assist, or the user) may attach explicit
+    lanes — they win over keyword decomposition. Each lane needs at least
+    a title or instruction."""
+    lanes = []
+    for raw in mission.get("decomposition") or []:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or raw.get("instruction") or "")[:90]
+        if not title:
+            continue
+        lanes.append({
+            "title": title,
+            "instruction": str(raw.get("instruction") or "")[:2000],
+            "scope": [str(s)[:200] for s in (raw.get("scope") or [])][:12],
+            "role": str(raw.get("role") or "coding"),
+        })
+    return lanes[:MAX_LANES]
 
 
 class MissionPlanner:
@@ -27,7 +93,19 @@ class MissionPlanner:
         tasks: list[dict] = []
 
         if scope == "maintenance":
-            return self._maintenance_plan(mission)
+            return self._record_plan(mission, self._maintenance_plan(mission),
+                                     "maintenance")
+
+        # Multi-domain decomposition — explicit lanes first, then the
+        # bounded keyword vocabulary. A single-domain objective keeps the
+        # serial inspect→work→verify skeleton.
+        lanes = _explicit_lanes(mission) or (
+            _detect_domains(objective)
+            if scope in {"repository", "workspace", "one_shot"} else [])
+        if len(lanes) >= 2:
+            return self._record_plan(
+                mission, self._decomposed_plan(mission, lanes),
+                f"decomposed into {len(lanes)} lanes")
 
         # Repository/workspace work should see a fresh code index before the
         # agent inspects anything — refresh it as an async job node first.
@@ -51,7 +129,8 @@ class MissionPlanner:
             f"Execute: {str(mission.get('title') or objective)[:100]}",
             ("Accomplish the authorized objective. Work only inside the "
              "mission's constraints. Objective: " + objective +
-             self._constraints_text(mission)),
+             self._constraints_text(mission) +
+             self._project_context(mission)),
             kind="agent", deps=[inspect["id"]], priority=20,
             verify="none",
             max_retries=int((mission.get("budgets") or {}).get(
@@ -90,6 +169,119 @@ class MissionPlanner:
             priority=40, verify="auto", max_retries=1,
         )
         tasks.append(verify)
+        return self._record_plan(mission, tasks, "serial skeleton")
+
+    # -- multi-lane decomposition ---------------------------------------
+
+    def _decomposed_plan(self, mission: dict, lanes: list[dict]) -> list[dict]:
+        """Fan a multi-domain objective into parallel scoped lanes that
+        converge on Integrator → Reviewer → Verify.
+
+            lane A ─┐
+            lane B ─┼→ integrate → review → verify
+            lane C ─┘
+
+        Lanes are admitted independently by the worker manager — the
+        hardware decides how many actually run at once; the rest queue on
+        the DAG and drain automatically.
+        """
+        objective = str(mission.get("objective") or "")
+        scope = str(mission.get("scope") or "one_shot")
+        tasks: list[dict] = []
+
+        index_node = None
+        if scope in {"repository", "workspace"}:
+            index_node = new_task(
+                "Refresh repository index",
+                "Incrementally update the code index before inspection.",
+                kind="job", priority=5, verify="none", max_retries=0,
+                metadata={"job": "rag_update"})
+            tasks.append(index_node)
+        index_dep = [index_node["id"]] if index_node else []
+
+        lane_ids: list[str] = []
+        retries = int((mission.get("budgets") or {}).get(
+            "max_task_retries", 2))
+        for i, lane in enumerate(lanes):
+            globs = " ".join(lane.get("scope") or [])
+            node = new_task(
+                f"[{lane['title']}] {str(mission.get('title') or objective)[:80]}",
+                ("Work the scoped lane of this mission. Stay inside your "
+                 "scope; leave shared files (VERSION, CHANGELOG, lockfiles, "
+                 "schemas, central routers) for the Integrator unless your "
+                 "scope explicitly includes them.\n"
+                 f"Lane: {lane['title']}\nScope: {globs or 'unscoped'}\n"
+                 + str(lane.get("instruction") or "")
+                 + "\nObjective: " + objective
+                 + self._constraints_text(mission)
+                 + self._project_context(mission)
+                 + "\nReturn: summary, files changed, tests run + results, "
+                   "unresolved issues, risks."),
+                kind="agent", deps=index_dep, priority=20 + i,
+                verify="none", max_retries=retries,
+                metadata={"worker_role": lane.get("role") or "coding",
+                          "lane": lane["title"],
+                          "scope": list(lane.get("scope") or [])})
+            tasks.append(node)
+            lane_ids.append(node["id"])
+
+        integrate = new_task(
+            "Integrate lane outputs",
+            ("Collect every lane's result. Reconcile overlapping changes, "
+             "detect conflicts, apply compatible work, and leave shared/"
+             "integration-owned files consistent. Do NOT blindly merge — "
+             "record conflicts you could not resolve in the output.\n"
+             "Objective: " + objective),
+            kind="integrate", deps=lane_ids, priority=38,
+            verify="none", max_retries=1,
+            metadata={"worker_role": "integrator"})
+        review = new_task(
+            "Independent review",
+            ("Independently review the integrated result against the "
+             "original objective — do not echo the workers' reasoning. "
+             "Check correctness, regressions, architecture consistency, "
+             "unhandled edge cases, security/permission boundaries, state "
+             "preservation and test quality. Return verdict + findings.\n"
+             "Objective: " + objective),
+            kind="review", deps=[integrate["id"]], priority=39,
+            verify="none", max_retries=1,
+            model_role="deep",
+            metadata={"worker_role": "reviewer"})
+        tasks += [integrate, review]
+
+        verif_deps = [review["id"]]
+        for crit in mission.get("success_criteria") or []:
+            kind = str(crit.get("kind") or "")
+            if kind in {"verify_passed", "all_tasks_completed"} or not kind:
+                continue
+            if kind in {"artifact_exists", "file_exists"}:
+                tasks.append(new_task(
+                    f"Check artifact: {crit.get('target', '')}",
+                    f"internal:artifact_exists:{crit.get('target', '')}",
+                    kind="internal", deps=verif_deps, priority=30,
+                    verify="none", max_retries=0))
+        verify = new_task(
+            "Verify integrated work",
+            ("Run the project's verification (tests/build as appropriate) "
+             "on the integrated result and report pass/fail with the exact "
+             "failing signal if any."),
+            kind="verify", deps=verif_deps, priority=40,
+            verify="auto", max_retries=1)
+        tasks.append(verify)
+        return tasks
+
+    def _record_plan(self, mission: dict, tasks: list[dict],
+                     reason: str) -> list[dict]:
+        """Plan versioning — every plan build/rebuild records why it
+        changed so 'why does the plan look like this' is answerable."""
+        version = int(mission.get("plan_version") or 0) + 1
+        mission["plan_version"] = version
+        mission.setdefault("plan_history", []).append({
+            "ts": time.time(), "version": version, "reason": reason[:300],
+            "nodes": len(tasks),
+            "lanes": [str((n.get("metadata") or {}).get("lane") or "")
+                      for n in tasks
+                      if (n.get("metadata") or {}).get("lane")]})
         return tasks
 
     def _constraints_text(self, mission: dict) -> str:
@@ -97,6 +289,12 @@ class MissionPlanner:
         if not cons:
             return ""
         return "\nConstraints (must obey): " + "; ".join(cons[:10])
+
+    @staticmethod
+    def _project_context(mission: dict) -> str:
+        ctx = str(mission.get("project_context") or "").strip()
+        return ("\nProject context (durable project memory — respect its "
+                "decisions and constraints):\n" + ctx) if ctx else ""
 
     def _maintenance_plan(self, mission: dict) -> list[dict]:
         return [new_task(
@@ -148,9 +346,15 @@ class MissionPlanner:
             verify="auto", max_retries=1, created_by="replan",
         )
         tasks += [diagnose, fix, verify]
+        version = int(mission.get("plan_version") or 0) + 1
+        mission["plan_version"] = version
+        mission.setdefault("plan_history", []).append({
+            "ts": time.time(), "version": version,
+            "reason": f"replan: {reason[:240]}",
+            "nodes": len(tasks), "lanes": []})
         mission.setdefault("history", []).append({
             "ts": time.time(), "event": "replan",
-            "detail": f"+{len(tasks)} tasks after: {reason[:200]}",
+            "detail": f"plan v{version}: +{len(tasks)} tasks after: {reason[:200]}",
         })
         return tasks
 

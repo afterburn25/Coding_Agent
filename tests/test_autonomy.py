@@ -274,6 +274,190 @@ class JobNodeTests(unittest.TestCase):
             {"objective": "x", "scope": "one_shot"})
         self.assertFalse([t for t in plan2 if t["kind"] == "job"])
 
+    def test_multi_domain_objective_decomposes_to_lanes(self):
+        # "Audit backend, UI and tests" → parallel scoped lanes converging
+        # on integrate → review → verify (the spec's canonical shape).
+        from localcodeagent.autonomy.planner import MissionPlanner
+        mission = {"objective":
+                   "Audit the backend, the UI, and the tests then fix "
+                   "independent problems.",
+                   "scope": "repository", "title": "audit"}
+        plan = MissionPlanner().initial_plan(mission)
+        lanes = [t for t in plan
+                 if (t.get("metadata") or {}).get("lane")]
+        self.assertGreaterEqual(len(lanes), 3)
+        lane_titles = " ".join(t["metadata"]["lane"] for t in lanes)
+        self.assertIn("Backend", lane_titles)
+        self.assertIn("Frontend", lane_titles)
+        self.assertIn("Tests", lane_titles)
+        integ = next(t for t in plan if t["kind"] == "integrate")
+        review = next(t for t in plan if t["kind"] == "review")
+        verify = next(t for t in plan if t["kind"] == "verify")
+        self.assertEqual(sorted(integ["deps"]),
+                         sorted(t["id"] for t in lanes))
+        self.assertEqual(review["deps"], [integ["id"]])
+        self.assertIn(review["id"], verify["deps"])
+        # Roles flow to the worker manager via node metadata.
+        self.assertEqual(integ["metadata"]["worker_role"], "integrator")
+        self.assertEqual(review["metadata"]["worker_role"], "reviewer")
+        # Plan versioning records the decomposition.
+        self.assertEqual(mission["plan_version"], 1)
+        self.assertEqual(len(mission["plan_history"]), 1)
+        self.assertIn("lanes", mission["plan_history"][0]["reason"])
+
+    def test_explicit_decomposition_lanes_win(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        mission = {"objective": "make it ready for release",
+                   "scope": "repository",
+                   "decomposition": [
+                       {"title": "API hardening", "role": "coding",
+                        "scope": ["localcodeagent/server.py"]},
+                       {"title": "Visual pass", "role": "coding",
+                        "scope": ["web/"]}]}
+        plan = MissionPlanner().initial_plan(mission)
+        lanes = [t for t in plan if (t.get("metadata") or {}).get("lane")]
+        self.assertEqual(len(lanes), 2)
+        self.assertIn("API hardening", lanes[0]["title"])
+        self.assertEqual(lanes[0]["metadata"]["scope"],
+                         ["localcodeagent/server.py"])
+
+    def test_single_domain_objective_stays_serial(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        mission = {"objective": "fix the crash in the parser", "scope": "one_shot"}
+        plan = MissionPlanner().initial_plan(mission)
+        self.assertFalse([t for t in plan if t["kind"] in
+                          {"integrate", "review"}])
+        titles = [t["title"] for t in plan]
+        self.assertIn("Inspect current state", titles)
+        self.assertEqual(mission["plan_version"], 1)
+
+    def test_replan_bumps_plan_version_with_reason(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        p = MissionPlanner()
+        mission = {"objective": "fix the parser crash", "scope": "one_shot",
+                   "budgets": {"max_task_retries": 2}}
+        p.initial_plan(mission)
+        self.assertEqual(mission["plan_version"], 1)
+        failed = {"title": "Execute", "deps": [],
+                  "result": {"output": "boom"}}
+        tasks = p.replan(mission, failed, "verify failed: exit 1")
+        self.assertEqual(mission["plan_version"], 2)
+        last = mission["plan_history"][-1]
+        self.assertEqual(last["version"], 2)
+        self.assertIn("verify failed", last["reason"])
+        self.assertEqual(len(tasks), 3)  # diagnose → fix → re-verify
+
+    def test_project_context_flows_into_plan(self):
+        # A project-linked mission embeds the bounded digest — goals,
+        # decisions — in work instructions, not the whole project history.
+        from localcodeagent.autonomy.planner import MissionPlanner
+        from localcodeagent.projects import ProjectStore
+        with tempfile.TemporaryDirectory() as td:
+            store = ProjectStore(td)
+            proj = store.create("Nexus UI")
+            store.add_goal(proj["id"], "visual consistency green")
+            store.remember(proj["id"], "decision", "no glassmorphism")
+            digest = store.context_digest(proj["id"])
+            self.assertIn("visual consistency green", digest)
+            self.assertIn("no glassmorphism", digest)
+            mission = {"objective": "polish the layout",
+                       "scope": "one_shot", "project_context": digest}
+            plan = MissionPlanner().initial_plan(mission)
+            work = next(t for t in plan if t["title"].startswith("Execute:"))
+            self.assertIn("visual consistency green", work["instruction"])
+
+    def test_integrate_review_nodes_execute_via_executor(self):
+        # Convergence kinds run through the same executor as agent nodes —
+        # the graph + admission treat them as first-class work.
+        with tempfile.TemporaryDirectory() as td:
+            seen: list[str] = []
+            sup = make_sup(td, executor=lambda m, n, cb: (
+                seen.append(n.get("kind")),
+                {"ok": True, "output": "done"})[1])
+            mission = sup.missions.create(
+                objective="Audit backend and UI and fix issues",
+                title="audit", scope="repository", workspace=td)
+            sup.missions.transition(mission["id"], "ready")
+            sup._build_plan(mission["id"])
+            m = sup.missions.get(mission["id"])
+            kinds = {n["kind"] for n in m["graph"]["nodes"]}
+            self.assertIn("integrate", kinds)
+            self.assertIn("review", kinds)
+            sup.stop()
+
+    def test_node_completion_writes_checkpoint(self):
+        # Every finished node appends a bounded checkpoint — forensic
+        # state for restart reconciliation.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            mission = sup.missions.create(
+                objective="fix the parser crash", title="fix",
+                scope="one_shot", workspace=td)
+            sup.missions.transition(mission["id"], "ready")
+            sup._build_plan(mission["id"])
+            sup.tick()
+            for _ in range(12):
+                sup.tick()
+                time.sleep(0.05)
+                if all(n.get("state") in {"completed", "failed", "skipped"}
+                       for n in (sup.missions.get(mission["id"])
+                                 .get("graph") or {}).get("nodes", [])):
+                    break
+            m = sup.missions.get(mission["id"])
+            cps = m.get("checkpoints") or []
+            self.assertTrue(cps)
+            self.assertIn("node", cps[-1])
+            self.assertIn("plan_version", cps[-1])
+            sup.stop()
+
+
+class OperationalStateTests(unittest.TestCase):
+    def test_build_state_idle(self):
+        from localcodeagent.nexus_state import build_state
+        s = build_state()
+        self.assertEqual(s["state"], "idle")
+        self.assertEqual(s["queue_depth"], 0)
+
+    def test_build_state_pressured_on_deep_queue(self):
+        from localcodeagent.nexus_state import build_state
+        w = type("W", (), {"status": lambda self: {
+            "workers": [], "capacity": {},
+            "queue": [{"id": f"q{i}", "title": f"t{i}"}
+                      for i in range(7)],
+            "recent": []}})()
+        s = build_state(workers=w)
+        self.assertEqual(s["queue_depth"], 7)
+        self.assertEqual(s["resource_pressure"], "high")
+        self.assertEqual(s["state"], "pressured")
+        self.assertEqual(s["next_action"], "t0")
+
+    def test_briefing_counts_completed_and_queued(self):
+        from localcodeagent.nexus_state import (
+            AWAY_THRESHOLD_S, briefing_text, build_briefing)
+        import time as _t
+        now = _t.time()
+        jobs = type("J", (), {"list_jobs": lambda self: [
+            {"id": "1", "title": "fix", "state": "completed",
+             "updated_at": now},
+            {"id": "2", "title": "old", "state": "completed",
+             "updated_at": now - 9999}]})()
+        w = type("W", (), {"status": lambda self: {
+            "queue": [{"id": "q", "title": "queued job",
+                       "reason": "waiting_for_vram"}],
+            "recent": [], "workers": [], "capacity": {}}})()
+        brief = build_briefing(since=now - 100, jobs=jobs, workers=w)
+        self.assertTrue(brief["meaningful"])
+        self.assertEqual(brief["counts"]["completed"], 1)
+        self.assertEqual(brief["counts"]["queued"], 1)
+        self.assertIn("completed", briefing_text(brief))
+
+    def test_briefing_empty_is_not_meaningful(self):
+        from localcodeagent.nexus_state import (
+            briefing_text, build_briefing)
+        brief = build_briefing(since=0)
+        self.assertFalse(brief["meaningful"])
+        self.assertEqual(briefing_text(brief), "")
+
     def test_mission_job_sandbox_runs_in_workspace(self):
         import sys
         from localcodeagent.config import AgentConfig, ModelProfile

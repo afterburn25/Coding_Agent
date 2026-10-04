@@ -27,6 +27,10 @@ RESOURCE_LOCKS = {
 # workspace_write (they mutate build/test state); reads/research run free.
 KIND_DEFAULT_LOCK = {
     "agent": "agent_lane",
+    # Integration/review converge parallel lanes and run through the same
+    # executor — lane-exclusive until per-worker worktree lanes land.
+    "integrate": "agent_lane",
+    "review": "agent_lane",
     "verify": "workspace_write",
     "research": "network_heavy",
     "internal": "",
@@ -47,7 +51,8 @@ def new_task(title: str, instruction: str, *, kind: str = "agent",
         "id": f"t-{uuid.uuid4().hex[:10]}",
         "title": str(title or instruction)[:140],
         "instruction": str(instruction)[:8000],
-        "kind": kind if kind in {"agent", "verify", "research", "internal", "wait", "job"} else "agent",
+        "kind": kind if kind in {"agent", "verify", "research", "internal",
+                                 "wait", "job", "integrate", "review"} else "agent",
         "state": "planned",
         "deps": list(deps or []),
         "priority": int(priority),

@@ -245,6 +245,39 @@ class ProjectStore:
         out["next_steps"] = [str(a) for a in p.get("next_actions", [])][:20]
         return {k: v[-20:] for k, v in out.items()}
 
+    def context_digest(self, project_id: str, *,
+                       max_chars: int = 2400) -> str:
+        """Bounded prompt-ready digest — goals, decisions, blockers, next
+        steps. Retrieval-shaped, never the whole project history."""
+        p = self._read(project_id)
+        if p is None:
+            return ""
+        lines = [f"Project: {p.get('name')} [{p.get('status')}]"]
+        if p.get("description"):
+            lines.append(str(p["description"])[:300])
+        goals = [g for g in p.get("goals", [])
+                 if g.get("status") == "active"]
+        if goals:
+            lines.append("Active goals:")
+            lines += [f"  - {g.get('objective')}" for g in goals[:6]]
+        summ = self.memory_summary(project_id)
+        for label, key in (("Architecture", "architecture"),
+                           ("Decisions", "decisions"),
+                           ("Known issues", "known_issues"),
+                           ("Completed work", "completed_work")):
+            vals = summ.get(key) or []
+            if vals:
+                lines.append(f"{label}:")
+                lines += [f"  - {v[:180]}" for v in vals[-6:]]
+        if summ["blockers"]:
+            lines.append("Blockers:")
+            lines += [f"  - {b[:180]}" for b in summ["blockers"][-5:]]
+        if summ["next_steps"]:
+            lines.append("Next steps:")
+            lines += [f"  - {a[:180]}" for a in summ["next_steps"][-5:]]
+        text = "\n".join(lines)
+        return text[:max_chars]
+
     # -- activity / worker history ----------------------------------------------
 
     def log_activity(self, project_id: str, event: str, *,

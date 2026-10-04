@@ -13,7 +13,7 @@ let missions=[],selected=null;
 
 async function refresh(){
   try{
-    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings,ops]=await Promise.all([
+    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings,ops,nstate]=await Promise.all([
       api('/api/autonomy/status'),
       api('/api/missions'),
       api('/api/autonomy/approvals?pending=1'),
@@ -26,8 +26,10 @@ async function refresh(){
       api('/api/self-repair'),
       api('/api/findings'),
       api('/api/workers'),
+      api('/api/nexus/state'),
     ]);
     renderStatus(st);
+    renderNexusState(nstate||{});
     missions=ms.missions||[];
     renderList();
     renderDetail();
@@ -144,6 +146,19 @@ function renderApprovals(rows){
     `<div class="side-actions"><button class="mini-button" data-appr="${a.id}:approve">Approve</button>`+
     `<button class="mini-button danger" data-appr="${a.id}:deny">Deny</button></div></div>`
   ).join('')||'<div class="hist-row">none pending</div>';
+}
+function renderNexusState(ns){
+  const el=$('#autonomyStatus');
+  if(!el||!ns||!ns.state)return;
+  // Operational-state line under the supervisor card — what Nexus is
+  // doing right now, in one glance.
+  const div=document.createElement('div');
+  div.className='hist-row';
+  div.innerHTML=`State: <b>${esc(ns.state)}</b>`+
+    (ns.focus?` — ${esc(ns.focus)}`:'')+
+    (ns.next_action?`<br>Next: ${esc(ns.next_action)}`:'')+
+    ` <span class="pill">${esc(ns.resource_pressure||'')}</span>`;
+  el.appendChild(div);
 }
 function renderOps(ops){
   const cap=ops.capacity||{},hw=ops.hardware||{},sch=ops.schedulable||{};

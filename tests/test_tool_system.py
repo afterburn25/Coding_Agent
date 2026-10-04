@@ -970,6 +970,51 @@ class CodeIntelTests(unittest.TestCase):
             self.assertIn("a.py", out["symbols"])
             self.assertTrue(reg.execute("code_symbols", {"path": "../outside.py"}).startswith("ERROR"))
 
+    def test_code_references_finds_defs_and_callers(self):
+        from localcodeagent.tools.codeintel import find_references
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            ws = Path(td)
+            (ws / "mod.py").write_text(
+                "def helper():\n    pass\n", encoding="utf-8")
+            (ws / "caller.py").write_text(
+                "from mod import helper\n\nhelper()\n", encoding="utf-8")
+            (ws / "tests").mkdir()
+            (ws / "tests" / "test_mod.py").write_text(
+                "from mod import helper\n", encoding="utf-8")
+            out = find_references(ws, "helper")
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["definitions"][0]["file"], "mod.py")
+            ref_files = {r["file"] for r in out["references"]}
+            self.assertIn("caller.py", ref_files)
+            self.assertIn("caller.py", out["importers"])
+            self.assertIn("tests/test_mod.py", out["importers"])
+
+    def test_code_impact_reports_dependents_and_tests(self):
+        from localcodeagent.tools.codeintel import impact_of
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            ws = Path(td)
+            (ws / "core.py").write_text(
+                "def ensure_ready():\n    pass\n", encoding="utf-8")
+            (ws / "server.py").write_text(
+                "from core import ensure_ready\nensure_ready()\n",
+                encoding="utf-8")
+            (ws / "tests").mkdir()
+            (ws / "tests" / "test_core.py").write_text(
+                "import core\n", encoding="utf-8")
+            out = impact_of(ws, "ensure_ready")
+            self.assertTrue(out["ok"])
+            self.assertIn("server.py", out["direct_dependents"])
+            by_file = impact_of(ws, path="core.py")
+            self.assertTrue(by_file["ok"])
+            self.assertIn("server.py", by_file["dependent_files"])
+            self.assertIn("tests/test_core.py", by_file["covering_tests"])
+
+    def test_code_references_requires_symbol(self):
+        from localcodeagent.tools.codeintel import find_references
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            out = find_references(Path(td), "")
+            self.assertFalse(out["ok"])
+
 
 class ApiToolTests(unittest.TestCase):
     def test_method_and_url_validation(self):

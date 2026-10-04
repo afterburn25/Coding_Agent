@@ -98,6 +98,7 @@ class AppState:
         self.config = config
         self.workspace = workspace.resolve()
         self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
+        self.runtime_root = runtime_root
         self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
         self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
@@ -485,6 +486,14 @@ class AppState:
                 except Exception:
                     pass
                 self.voice = None
+        # Speech-to-text — lazy: engines are built on first use so a heavy
+        # whisper model never loads at boot.
+        self._stt_engine = None
+        self._stt_tried = False
+        self._voice_session = None
+        # Operational state — last user interaction drives the "away"
+        # briefing and the idle/away signal in /api/nexus/state.
+        self._last_interaction_at = time.time()
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
@@ -1181,6 +1190,7 @@ class AppState:
             enabled=bool(getattr(config, "autonomy_enabled", True)),
             metrics=registry,
             worker_manager=self.workers,
+            projects=self.projects,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         sup.repair = self._build_self_repair(config, sup, runtime_root,
@@ -3126,6 +3136,113 @@ class AppState:
         except Exception:
             pass
 
+    # -- speech-to-text ----------------------------------------------------
+
+    def stt_engine(self):
+        """Lazy STT backend — faster-whisper (file transcription) is the
+        primary engine; a configured vosk model adds streaming partials.
+        Neither installed → None; callers report ``available: false``
+        instead of pretending."""
+        if self._stt_tried:
+            return self._stt_engine
+        self._stt_tried = True
+        from .voice.stt import FasterWhisperEngine, VoskEngine
+        backend = str(getattr(self.config, "stt_backend", "auto") or "auto")
+        vosk_path = str(getattr(self.config, "vosk_model_path", "") or "")
+        if backend in {"auto", "vosk"} and vosk_path:
+            eng = VoskEngine(vosk_path)
+            if eng.available():
+                self._stt_engine = eng
+                return eng
+        if backend in {"auto", "faster-whisper", "whisper"}:
+            size = str(getattr(self.config, "stt_model", "base") or "base")
+            eng = FasterWhisperEngine(size)
+            if eng.available():
+                self._stt_engine = eng
+        return self._stt_engine
+
+    def stt_status(self) -> dict:
+        from .voice.stt import list_input_devices
+        eng = self.stt_engine()
+        vosk_path = str(getattr(self.config, "vosk_model_path", "") or "")
+        engines = {
+            "faster_whisper": {"configured": True,
+                               "available": eng is not None and
+                               eng.name == "faster-whisper" and eng.available()},
+            "vosk": {"configured": bool(vosk_path),
+                     "available": eng is not None and
+                     eng.name == "vosk" and eng.available()},
+        }
+        devices = list_input_devices()
+        session = self._voice_session.status() if self._voice_session else {
+            "running": False}
+        return {"ok": True,
+                "available": eng is not None and eng.available(),
+                "backend": getattr(eng, "name", ""),
+                "streaming": bool(getattr(eng, "streaming", False)),
+                "engines": engines, "input_devices": devices,
+                "auto_submit": bool(getattr(self.config, "stt_auto_submit",
+                                            False)),
+                "session": session}
+
+    def voice_session(self, *, on_utterance=None, on_partial=None,
+                      device: int | None = None):
+        """Hands-free conversational session — mic → STT → utterance event
+        → (UI submits) → TTS replies; barge-in lives in VoiceSession."""
+        from .voice.stt import VoiceSession
+        eng = self.stt_engine()
+        if eng is None or not eng.available():
+            return None
+        if self._voice_session is None:
+            self._voice_session = VoiceSession(
+                eng, self.voice, device=device,
+                on_utterance=on_utterance, on_partial=on_partial)
+        return self._voice_session
+
+    def note_interaction(self) -> None:
+        self._last_interaction_at = time.time()
+
+    def operational_state(self) -> dict:
+        """Structured snapshot of what Nexus is doing — focus, load,
+        pressure, next action. Presentation reads this; it is not a
+        consciousness claim."""
+        from .nexus_state import build_state
+        try:
+            res = (self.runtime.summary() or {}).get("hardware") or {}
+        except Exception:
+            res = {}
+        try:
+            prof = self.profiles.active() or {}
+        except Exception:
+            prof = {}
+        sup = getattr(self, "autonomy", None)
+        return build_state(
+            workers=getattr(self, "workers", None),
+            queue=getattr(self, "queue", None),
+            missions=getattr(sup, "missions", None) if sup else None,
+            resources=res, last_interaction_at=self._last_interaction_at,
+            profile=prof)
+
+    def return_briefing(self) -> dict:
+        """"While you were away" — deduped, evidence-only digest since the
+        last user interaction. Empty result means nothing to report."""
+        from .nexus_state import AWAY_THRESHOLD_S, build_briefing
+        import time as _t
+        since = self._last_interaction_at or (_t.time() - 3600)
+        sup = getattr(self, "autonomy", None)
+        brief = build_briefing(
+            since=since, jobs=getattr(self, "jobs", None),
+            workers=getattr(self, "workers", None),
+            queue=getattr(self, "queue", None),
+            notifications=getattr(sup, "notifications", None)
+            if sup else None,
+            missions=getattr(sup, "missions", None) if sup else None)
+        from .nexus_state import briefing_text
+        brief["text"] = briefing_text(brief)
+        brief["idle_seconds"] = round(_t.time() - since, 1)
+        brief["away"] = brief["idle_seconds"] >= AWAY_THRESHOLD_S
+        return brief
+
     def _voice_begin(self, user_text: str = "") -> str:
         """Open a speech context for a new assistant response.
 
@@ -4294,6 +4411,9 @@ class Handler(BaseHTTPRequestHandler):
                 notification_policy=str(body.get("notification_policy") or "important"),
                 source=str(body.get("source") or "api"),
                 source_id=str(body.get("source_id") or ""),
+                project_id=str(body.get("project_id") or ""),
+                decomposition=body.get("decomposition")
+                    if isinstance(body.get("decomposition"), list) else None,
                 workspace=str(self.state.workspace))
             if body.get("start", True):
                 m = sup.start_mission(m["id"]) or m
@@ -4754,6 +4874,81 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "started": True})
                 return
             self._json({"error": f"unknown voice endpoint {path}"}, 404)
+        except Exception as exc:
+            self._json({"ok": False, "error": str(exc)[:300]}, 500)
+
+    def _handle_stt_post(self, path: str, body: dict) -> None:
+        """Speech-to-text endpoints: blob transcription (push-to-talk) and
+        the server-side hands-free session. Failures are concise JSON —
+        never a bare traceback into chat."""
+        state = self.state
+        try:
+            if path == "/api/stt/transcribe":
+                eng = state.stt_engine()
+                if eng is None or not hasattr(eng, "transcribe_file"):
+                    self._json({"ok": False,
+                                "error": "no STT backend available"}, 503)
+                    return
+                import base64 as _b64
+                audio = str(body.get("audio") or "")
+                if audio.startswith("data:"):
+                    audio = audio.split(",", 1)[-1]
+                try:
+                    raw = _b64.b64decode(audio, validate=False)
+                except Exception:
+                    self._json({"ok": False, "error": "bad audio data"}, 400)
+                    return
+                if not raw or len(raw) > 64 * 1024 * 1024:
+                    self._json({"ok": False,
+                                "error": "audio empty or too large"}, 400)
+                    return
+                fmt = str(body.get("format") or "webm").lower()
+                fmt = "".join(c for c in fmt if c.isalnum())[:8] or "webm"
+                up = (state.runtime_root / "data" / "stt_uploads")
+                up.mkdir(parents=True, exist_ok=True)
+                tmp = up / f"ptt-{secrets.token_hex(6)}.{fmt}"
+                try:
+                    tmp.write_bytes(raw)
+                    out = eng.transcribe_file(tmp)
+                finally:
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+                self._json(out)
+                return
+            if path == "/api/stt/session":
+                action = str(body.get("action") or "status")
+                if action == "stop":
+                    if state._voice_session is not None:
+                        state._voice_session.stop()
+                        state._voice_session = None
+                    self._json({"ok": True, "session": {"running": False}})
+                    return
+                if action == "start":
+                    def _utter(text: str) -> None:
+                        state.events.publish(
+                            "voice", {"event": "stt_utterance",
+                                      "text": text})
+                    def _part(text: str) -> None:
+                        state.events.publish(
+                            "voice", {"event": "stt_partial",
+                                      "text": text})
+                    sess = state.voice_session(
+                        on_utterance=_utter, on_partial=_part,
+                        device=(int(body["device"])
+                                if body.get("device") is not None else None))
+                    if sess is None:
+                        self._json({"ok": False,
+                                    "error": "no STT backend available"},
+                                   503)
+                        return
+                    self._json(sess.start())
+                    return
+                self._json(state.stt_status().get("session") or
+                           {"running": False})
+                return
+            self._json({"error": f"unknown stt endpoint {path}"}, 404)
         except Exception as exc:
             self._json({"ok": False, "error": str(exc)[:300]}, 500)
 
@@ -5275,6 +5470,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/api/stt":
+            self._json(self.state.stt_status())
+            return
+        if path == "/api/nexus/state":
+            self._json(self.state.operational_state())
+            return
+        if path == "/api/briefing":
+            self._json(self.state.return_briefing())
+            return
         if path.startswith("/api/voice/audio/"):
             seg_id = path[len("/api/voice/audio/"):].strip("/")
             seg = self.state.voice.segment_path(seg_id) if self.state.voice else None
@@ -5511,6 +5715,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "voice subsystem is disabled"}, 503)
                     return
                 self._handle_voice_post(path, body)
+                return
+            if path.startswith("/api/stt"):
+                self._handle_stt_post(path, body)
                 return
             if path.startswith(self._AUTONOMY_PREFIXES):
                 if self._autonomy_post(path, body):
@@ -6161,6 +6368,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat/stream":
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
+                self.state.note_interaction()
                 chat_attachments = _clean_attachments(body)
                 if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
@@ -6495,6 +6703,23 @@ class Handler(BaseHTTPRequestHandler):
                         pid, str(body.get("kind") or "note"),
                         str(body.get("text") or ""))
                     self._json({"ok": bool(row), "memory": row})
+                    return
+                if action == "status":
+                    status = str(body.get("status") or "")
+                    if status not in {"active", "paused", "completed",
+                                      "archived"}:
+                        self._json({"error": "bad status"}, 400)
+                        return
+                    proj = self.state.projects.update(pid, status=status)
+                    self.state.projects.log_activity(
+                        pid, f"status:{status}",
+                        detail=str(body.get("reason") or ""))
+                    self._json({"ok": True, "project": proj})
+                    return
+                if action == "goal-complete":
+                    ok = self.state.projects.complete_goal(
+                        pid, str(body.get("goal_id") or ""))
+                    self._json({"ok": ok})
                     return
                 self._json({"error": "unsupported project action"}, 400)
                 return

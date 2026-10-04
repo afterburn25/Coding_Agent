@@ -3027,3 +3027,15 @@ select option {
 .task-bar .tb-cancel:hover{background:var(--danger-tint)}
 .task-bar .tb-cancel:disabled{opacity:.6;cursor:default}
 @keyframes tb-pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* Push-to-talk mic button states */
+.mic-btn.listening {
+  background: rgba(255, 80, 100, 0.18);
+  border-color: rgba(255, 80, 100, 0.55);
+  animation: micPulse 1.2s ease-in-out infinite;
+}
+.mic-btn.processing { opacity: 0.7; }
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 80, 100, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 80, 100, 0.08); }
+}

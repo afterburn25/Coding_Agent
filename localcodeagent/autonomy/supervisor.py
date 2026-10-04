@@ -62,6 +62,7 @@ class AutonomousSupervisor:
         repair: Any = None,
         signal_sources: dict | None = None,
         worker_manager: Any = None,
+        projects: Any = None,                # ProjectStore — context + history
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -79,6 +80,7 @@ class AutonomousSupervisor:
                                                      {"event": t, **p}))
         self._emit_bus = emit or (lambda t, p: None)
         self.enabled = enabled
+        self.projects = projects
 
         self.missions = MissionStore(
             self.store,
@@ -759,6 +761,14 @@ class AutonomousSupervisor:
         def _fn(row: dict) -> None:
             if (row.get("graph") or {}).get("nodes"):
                 return
+            # Project-linked missions get a bounded context digest — goals,
+            # decisions, blockers — before the planner builds the DAG.
+            pid = str(row.get("project_id") or "")
+            if pid and self.projects is not None:
+                try:
+                    row["project_context"] = self.projects.context_digest(pid)
+                except Exception:
+                    row["project_context"] = ""
             tasks = self.planner.initial_plan(row)
             graph = TaskGraph(row)
             for t in tasks:
@@ -825,7 +835,7 @@ class AutonomousSupervisor:
             meta = node.get("metadata") or {}
             # Cheap structural gates first — lane/locks/GPU-yield — so a
             # node that can't start never takes a reservation.
-            if kind == "agent":
+            if kind in {"agent", "integrate", "review"}:
                 # The agent lane is exclusive and interactive work outranks
                 # background missions — except urgent (critical recovery)
                 # work, which may interleave between user turns.
@@ -869,20 +879,18 @@ class AutonomousSupervisor:
             if worker is None:
                 node["queue_reason"] = w_reason
                 node["queue_detail"] = w_detail
-                if kind == "agent":
-                    self.locks.release("agent_lane", node["id"])
-                elif node.get("lock"):
-                    self.locks.release(node["lock"], node["id"])
+                if node.get("lock") or kind in {"agent", "integrate", "review"}:
+                    self.locks.release(
+                        node.get("lock") or "agent_lane", node["id"])
                 continue
             node.pop("queue_reason", None)
             node.pop("queue_detail", None)
             meta["worker_id"] = worker.id
             node["metadata"] = meta
             if not graph.claim(node["id"], owner=f"supervisor"):
-                if kind == "agent":
-                    self.locks.release("agent_lane", node["id"])
-                elif node.get("lock"):
-                    self.locks.release(node["lock"], node["id"])
+                if node.get("lock") or kind in {"agent", "integrate", "review"}:
+                    self.locks.release(
+                        node.get("lock") or "agent_lane", node["id"])
                 self.workers.release(worker.id, outcome="cancelled")
                 continue
             started += 1
@@ -1032,6 +1040,15 @@ class AutonomousSupervisor:
                       {"ok": True, "output": "criteria satisfied"})
         self._audit("mission_completed", mission=mission_id,
                     warnings=warnings)
+        pid = str(m.get("project_id") or "")
+        if pid and self.projects is not None:
+            try:
+                self.projects.log_activity(
+                    pid, "mission_completed",
+                    detail=(f"{m.get('title')} — "
+                            + ("with warnings" if warnings else "clean")))
+            except Exception:
+                pass
         self.notifications.notify(
             f"Mission complete: {m.get('title')}",
             level="completion",
@@ -1115,7 +1132,7 @@ class AutonomousSupervisor:
 
         self._node_activity_open(m, node)
         try:
-            if kind == "agent":
+            if kind in {"agent", "integrate", "review"}:
                 if self._executor is None:
                     self._finish_node(mission_id, node_id,
                                       {"ok": False, "output": "no executor configured"})
@@ -1212,6 +1229,20 @@ class AutonomousSupervisor:
                 observed=obs)
         ok = bool(result.get("ok"))
         pending_approval = result.get("pending_approval")
+        # Project-linked missions record each finished node on the
+        # project's worker history — "what did Nexus do on this project".
+        pid = str(m.get("project_id") or "")
+        if pid and self.projects is not None and not pending_approval:
+            try:
+                meta = node.get("metadata") or {}
+                self.projects.record_task(pid, {
+                    "task_id": node.get("id"), "worker_id": wid,
+                    "title": node.get("title"),
+                    "status": "completed" if ok else "failed",
+                    "branch": str(meta.get("branch") or ""),
+                    "files": list(meta.get("files") or [])})
+            except Exception:
+                pass
 
         def _fn(row: dict) -> None:
             graph = TaskGraph(row)
@@ -1256,6 +1287,15 @@ class AutonomousSupervisor:
                         "ts": time.time(), "ok": False,
                         "task": node.get("title"),
                         "output": str(result.get("output") or "")[:800]})
+            # Checkpoint — a bounded progress trail so a restart mid-mission
+            # leaves forensic state: which node finished, when, and how.
+            cps = row.setdefault("checkpoints", [])
+            cps.append({"ts": time.time(), "node": node.get("id"),
+                        "kind": node.get("kind"),
+                        "state": node.get("state"),
+                        "title": str(node.get("title") or "")[:120],
+                        "plan_version": row.get("plan_version")})
+            del cps[:-80]
             graph.refresh()
 
         self.missions.mutate(mission_id, _fn)

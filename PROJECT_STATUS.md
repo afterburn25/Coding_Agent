@@ -1,8 +1,35 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1342 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1357 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.14.0 — Adaptive Worker Manager
+## Active version: 0.15.0 — Decomposed planning + STT + operational state
+
+v0.15.0 deepens the workstation core:
+
+- **Planner decomposition** — multi-domain objectives fan into parallel
+  scoped lanes → `integrate` → `review` → `verify` converge nodes;
+  explicit `decomposition` lanes via API; `plan_version`/`plan_history`
+  record every plan change with its reason.
+- **Projects wired in** — project missions get bounded context digests
+  (goals/decisions/blockers); node outcomes land on project worker
+  history; `/projects.html` manages projects, goals, memory, status.
+- **Code intelligence** — `code_references` / `code_impact` answer
+  "who calls this" and "what breaks if I change it" with honest
+  backend reporting (AST/tree-sitter/lexical).
+- **Speech-to-text** — push-to-talk mic in the composer
+  (`MediaRecorder` → `/api/stt/transcribe`), `/api/stt/session`
+  hands-free loop with barge-in, `stt_utterance`/`stt_partial` SSE
+  events; degrades cleanly when no local STT backend is installed.
+- **Operational state + return briefing** — `/api/nexus/state` exposes
+  focus/load/pressure/next-action (a measured operational model, not
+  consciousness); `/api/briefing` produces a deduped "while you were
+  away" digest shown once per chat load after ≥20 min idle.
+- **Mission checkpoints** — bounded per-node progress trail for
+  restart forensics.
+
+Verified: **1357 tests** (2 environment skips).
+
+## Previous: 0.14.0 — Adaptive Worker Manager
 
 v0.14.0 makes worker concurrency measured, not configured: the new
 `AdaptiveWorkerManager` (`localcodeagent/workers/`) reserves live-measured

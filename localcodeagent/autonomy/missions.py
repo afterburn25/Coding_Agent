@@ -76,7 +76,8 @@ def new_mission(objective: str, *, title: str = "", user_request: str = "",
                 source: str = "api", source_id: str = "",
                 workspace: str = "", project_id: str = "",
                 repository: str = "", branch: str = "",
-                created_by: str = "user", max_runtime_s: float = 0.0) -> dict[str, Any]:
+                created_by: str = "user", max_runtime_s: float = 0.0,
+                decomposition: list[dict] | None = None) -> dict[str, Any]:
     now = time.time()
     merged_budgets = dict(DEFAULT_BUDGETS)
     if budgets:
@@ -109,6 +110,10 @@ def new_mission(objective: str, *, title: str = "", user_request: str = "",
         "constraints": [str(c)[:500] for c in (constraints or [])][:40],
         "autonomy_profile": autonomy_profile,
         "graph": {"nodes": []},
+        "plan_version": 0,
+        "plan_history": [],
+        "decomposition": [d for d in (decomposition or [])
+                          if isinstance(d, dict)][:8],
         "attempts": 0,
         "repair_loops": 0,
         "failure_history": [],

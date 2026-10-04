@@ -819,3 +819,83 @@ loadStatus().then(async()=>{await Promise.all([loadReadiness(),loadConversationM
   // main shell has actually initialized, so the user never sees a blank window.
   try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
 });input.focus();
+
+// Push-to-talk STT — hold the mic button (or click to toggle), speak, and
+// the transcript lands in the composer. Hidden entirely when the backend
+// reports no local STT engine — graceful degradation, not a dead button.
+(function(){
+  const mic=document.getElementById('micBtn');if(!mic)return;
+  let stt={available:false,auto_submit:false},rec=null,stream=null,
+      recording=false,chunks=[],holdStarted=0;
+  fetch('/api/stt').then(r=>r.json()).then(d=>{
+    stt=d||{};if(stt.available){mic.hidden=false;
+      mic.title='Hold to talk — release to transcribe';}
+  }).catch(()=>{});
+  function setState(s){
+    mic.classList.toggle('listening',s==='listening');
+    mic.classList.toggle('processing',s==='processing');
+    mic.textContent=s==='processing'?'⏳':'🎙';
+    mic.title=s==='listening'?'Listening… release to transcribe':
+      s==='processing'?'Transcribing…':'Hold to talk — release to transcribe';}
+  async function startRec(){
+    if(recording)return;
+    try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}
+    catch{mic.title='Microphone unavailable';return;}
+    chunks=[];rec=new MediaRecorder(stream);
+    rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+    rec.onstop=()=>{stream.getTracks().forEach(t=>t.stop());stream=null;};
+    rec.start();recording=true;setState('listening');
+  }
+  async function stopRec(submit){
+    if(!recording)return;recording=false;
+    setState('processing');
+    await new Promise(r=>{rec.onstop=()=>{
+      stream.getTracks().forEach(t=>t.stop());stream=null;r();};rec.stop();});
+    const blob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});
+    chunks=[];if(blob.size<500){setState('idle');return;}
+    const b64=await new Promise(r=>{const fr=new FileReader();
+      fr.onload=()=>r(String(fr.result).split(',',2)[1]||'');
+      fr.readAsDataURL(blob);});
+    try{const res=await fetch('/api/stt/transcribe',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({audio:b64,format:'webm'})});
+      const d=await res.json();
+      if(d&&d.ok&&d.text){
+        input.value=(input.value?input.value.trimEnd()+' ':'')+d.text;
+        autosizeComposer();input.focus();
+        if(stt.auto_submit||submit)form.requestSubmit();
+      }else{mic.title='Transcription failed: '+(d&&d.error||'no text');}
+    }catch{mic.title='Transcription request failed';}
+    setState('idle');
+  }
+  mic.addEventListener('mousedown',e=>{e.preventDefault();holdStarted=Date.now();startRec();});
+  mic.addEventListener('mouseup',()=>{stopRec(false);});
+  mic.addEventListener('mouseleave',()=>{if(recording)stopRec(false);});
+  // Keyboard parity: hold Space on the focused button; a quick tap toggles.
+  mic.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();if(!recording)startRec();}});
+  mic.addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='Enter'){e.preventDefault();
+    // Tap (<300ms) toggles: treat as stop; hold releases already handled.
+    stopRec(false);}});
+})();
+
+// Return briefing — after a meaningful absence (server decides), surface a
+// single "while you were away" card. Once per page load, never on polling.
+(function(){
+  let done=false;
+  function check(){
+    if(done)return;done=true;
+    fetch('/api/briefing').then(r=>r.json()).then(b=>{
+      if(!b||!b.away||!b.meaningful||!b.text)return;
+      const card=document.createElement('div');
+      card.className='msg assistant briefing-card';
+      const lines=[b.text];
+      for(const a of (b.approvals||[]).slice(0,4))lines.push('⚠ '+a);
+      for(const f of (b.failed||[]).slice(0,4))lines.push('✗ '+(f.title||'task failed'));
+      card.textContent=lines.join('\n');
+      card.style.whiteSpace='pre-wrap';
+      chat.appendChild(card);chat.scrollTop=chat.scrollHeight;
+    }).catch(()=>{});
+  }
+  // Fire once the shell has painted — after status resolves.
+  setTimeout(check,1500);
+})();

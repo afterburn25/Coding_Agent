@@ -238,6 +238,141 @@ def extract_symbols(path: Path) -> dict[str, Any]:
             "backend": "regex"}
 
 
+def _iter_source_files(sub: Path, limit: int = MAX_FILES):
+    """Yield indexable source files under `sub`, bounded."""
+    count = 0
+    for root, dirs, names in os.walk(sub):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in sorted(names):
+            if count >= limit:
+                return
+            p = Path(root) / name
+            if p.suffix.lower() in _COMPILED:
+                count += 1
+                yield p
+
+
+def _read_source(p: Path) -> str:
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    if len(text.encode("utf-8", errors="ignore")) > MAX_FILE_BYTES:
+        return ""
+    return text
+
+
+def find_references(workspace: Path, symbol: str, *,
+                    limit: int = MAX_FILES) -> dict[str, Any]:
+    """Word-boundary lexical reference scan across the tree.
+
+    Definitions come from the structural extractors (AST/tree-sitter/
+    regex); every other occurrence is a reference site. This is a lexical
+    analysis — accurate for call sites and imports, blind to aliasing.
+    ``backend`` says which extractor produced the definitions.
+    """
+    name = str(symbol or "").strip()
+    if not name:
+        return {"ok": False, "error": "symbol is required"}
+    pat = re.compile(rf"\b{re.escape(name)}\b")
+    defs: list[dict] = []
+    refs: list[dict] = []
+    importers: set[str] = set()
+    backend = "lexical"
+    for p in _iter_source_files(workspace, limit):
+        text = _read_source(p)
+        if not text or not pat.search(text):
+            continue
+        rel = p.relative_to(workspace).as_posix()
+        info = extract_symbols(p)
+        backend = info.get("backend") or backend
+        def_lines = {s["line"] for s in info.get("symbols", [])
+                     if s.get("name") == name
+                     and s.get("kind") in {"class", "function", "method"}}
+        for s in info.get("symbols", []):
+            if s.get("name") == name and s.get("kind") in {
+                    "class", "function", "method"}:
+                defs.append({"file": rel, "line": s["line"],
+                             "kind": s["kind"]})
+            if s.get("kind") == "import" and pat.search(str(s.get("name"))):
+                importers.add(rel)
+        for i, line in enumerate(text.splitlines(), 1):
+            if i in def_lines or not pat.search(line):
+                continue
+            if len(refs) < 300:
+                refs.append({"file": rel, "line": i,
+                             "snippet": line.strip()[:160]})
+    return {"ok": True, "symbol": name, "backend": backend,
+            "definitions": defs[:40],
+            "references": refs,
+            "importers": sorted(importers)[:100],
+            "reference_count": len(refs)}
+
+
+def impact_of(workspace: Path, symbol: str = "", *,
+              path: str = "", limit: int = MAX_FILES) -> dict[str, Any]:
+    """Blast-radius estimate for changing a symbol or file.
+
+    For a symbol: dependents = files referencing it outside its defining
+    file; covering tests = test files referencing it. For a path: the
+    module's own public symbols are sampled (cap 12) and each is checked
+    for external references; importers of the module name count too.
+    """
+    tests_hint = re.compile(r"(^|[/\\])tests?[/\\]|^test_|_test\.|_spec\.")
+
+    def _is_test(rel: str) -> bool:
+        return bool(tests_hint.search(rel))
+
+    if symbol:
+        ref = find_references(workspace, symbol, limit=limit)
+        def_files = {d["file"] for d in ref["definitions"]}
+        dep_files = {r["file"] for r in ref["references"]} - def_files
+        return {"ok": True, "symbol": symbol,
+                "definitions": ref["definitions"],
+                "direct_dependents": sorted(dep_files)[:80],
+                "dependent_count": len(dep_files),
+                "covering_tests": sorted(f for f in dep_files | set(
+                    ref["importers"]) if _is_test(f))[:40],
+                "backend": ref["backend"]}
+
+    p = (workspace / str(path or "")).resolve()
+    if not p.is_relative_to(workspace) or not p.is_file():
+        return {"ok": False, "error": "path must be a file inside the workspace"}
+    rel = p.relative_to(workspace).as_posix()
+    info = extract_symbols(p)
+    public = [s["name"] for s in info.get("symbols", [])
+              if s.get("kind") in {"class", "function"}
+              and not str(s.get("name", "")).startswith("_")][:12]
+    dependents: set[str] = set()
+    tested: set[str] = set()
+    stem = p.stem
+    import_pat = re.compile(
+        rf"\b(?:import|from)\s+[\w.]*{re.escape(stem)}\b")
+    for f in _iter_source_files(workspace, limit):
+        if f == p:
+            continue
+        text = _read_source(f)
+        if not text:
+            continue
+        frel = f.relative_to(workspace).as_posix()
+        hit = bool(import_pat.search(text))
+        if not hit:
+            for s in public:
+                if re.search(rf"\b{re.escape(s)}\b", text):
+                    hit = True
+                    break
+        if hit:
+            dependents.add(frel)
+            if _is_test(frel):
+                tested.add(frel)
+    dependents.discard(rel)
+    return {"ok": True, "file": rel, "public_symbols": public,
+            "dependent_files": sorted(dependents)[:80],
+            "dependent_count": len(dependents),
+            "covering_tests": sorted(tested)[:40],
+            "backend": info.get("backend", "lexical")}
+
+
 def register_codeintel_tools(registry: ToolRegistry, workspace: Path) -> None:
     workspace = workspace.resolve()
 
@@ -304,4 +439,50 @@ def register_codeintel_tools(registry: ToolRegistry, workspace: Path) -> None:
         code_map,
         category="coding",
         capabilities=["code_map", "repository_search"],
+    ))
+
+    def code_references_tool(args: dict[str, Any]) -> str:
+        return json.dumps(find_references(
+            workspace, str(args.get("symbol", "")),
+            limit=max(1, min(int(args.get("max_files", MAX_FILES)), 2000))),
+            ensure_ascii=False)
+
+    def code_impact_tool(args: dict[str, Any]) -> str:
+        return json.dumps(impact_of(
+            workspace, str(args.get("symbol", "")),
+            path=str(args.get("path", "")),
+            limit=max(1, min(int(args.get("max_files", MAX_FILES)), 2000))),
+            ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "code_references",
+        "Find where a symbol (function/class/method name) is defined and referenced across the workspace — call sites, imports, usages. Use before refactoring or renaming.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "max_files": {"type": "integer", "default": 400},
+            },
+            "required": ["symbol"],
+        },
+        "filesystem.read",
+        code_references_tool,
+        category="coding",
+        capabilities=["code_references", "repository_search"],
+    ))
+    registry.register(ToolSpec(
+        "code_impact",
+        "Estimate the blast radius of changing a symbol or file: dependent files, importers, and which tests cover it. Use to choose regression tests before editing.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "path": {"type": "string"},
+                "max_files": {"type": "integer", "default": 400},
+            },
+        },
+        "filesystem.read",
+        code_impact_tool,
+        category="coding",
+        capabilities=["code_impact", "repository_search"],
     ))

@@ -87,7 +87,38 @@ carrying `mission_id`/`node_id`) so `/api/jobs` and the Jobs UI show
 mission work alongside other platform jobs. Unknown node kinds fail
 loudly rather than completing silently. Repository/workspace missions
 automatically prepend a `rag_update` job node so inspection sees a
-fresh index.
+fresh index. `integrate` and `review` are convergence kinds —
+`integrator`/`reviewer` worker roles executed through the agent lane.
+
+### Decomposition + plan versioning
+
+When an objective spans multiple domains (backend/UI/installer/tests/
+docs/security/performance/voice/image/memory) — or the caller attaches
+explicit `decomposition` lanes — the planner fans out into parallel
+scoped lane nodes that converge:
+
+```
+lane A ─┐
+lane B ─┼→ integrate → review → verify
+lane C ─┘
+```
+
+Each lane carries `metadata.lane` + `metadata.scope` globs (used by
+worktree isolation) and `worker_role` for resource admission. Lanes are
+independently admitted by the Adaptive Worker Manager — hardware decides
+how many actually run concurrently. Shared files (VERSION, CHANGELOG,
+lockfiles, central routers) are integration-owned by convention.
+
+Every plan build and replan bumps `mission.plan_version` and appends a
+`plan_history` entry (version, reason, node count, lanes) — "why does the
+plan look like this" is always answerable. Replanning still appends the
+bounded diagnose→recover→re-verify path.
+
+Project-linked missions (`project_id`) receive a bounded
+`project_context` digest — active goals, decisions, known issues,
+blockers, next steps from `ProjectStore.context_digest` — injected into
+work instructions. Finished nodes record themselves on the project's
+worker history; mission completion logs to project activity.
 
 ## Recovery
 

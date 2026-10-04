@@ -103,6 +103,8 @@ KIND_ROLE = {
     "internal": "tool",
     "job": "tool",
     "wait": "tool",
+    "integrate": "integrator",
+    "review": "reviewer",
 }
 
 # Keywords that steer classification toward a role — the LLM may assist with
