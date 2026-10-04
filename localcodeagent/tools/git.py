@@ -270,6 +270,37 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
             "staged": staged,
         }, indent=2)
 
+    def git_commit(args: dict) -> str:
+        message = str(args.get("message") or "").strip()
+        if not message:
+            return "ERROR: 'message' is required"
+        root = _root_for(args)
+        code, out = _run(root, ["rev-parse", "--git-dir"])
+        if code != 0:
+            return f"ERROR: not a git repository: {out}"
+        paths = args.get("paths")
+        if paths:
+            stage = ["add", "--"] + [str(p) for p in paths]
+        elif args.get("add_all", True):
+            stage = ["add", "-A"]
+        else:
+            stage = []
+        if stage:
+            code, out = _run(root, stage)
+            if code != 0:
+                return f"ERROR: git add failed: {out}"
+        _, staged = _run(root, ["diff", "--staged", "--name-only"])
+        if not staged.strip():
+            return json.dumps({"committed": False,
+                               "detail": "nothing staged to commit"})
+        code, out = _run(root, ["commit", "-m", message], timeout=120)
+        if code != 0:
+            return f"ERROR: git commit failed: {out}"
+        _, sha = _run(root, ["rev-parse", "HEAD"])
+        return json.dumps({"committed": True, "sha": sha.strip(),
+                           "files": staged.splitlines(),
+                           "output": out}, indent=2)
+
     registry.register(ToolSpec("git_status", "Show repository branch and changed files.", {
         "type": "object", "properties": {"path": {"type": "string"}}
     }, "filesystem.read", git_status))
@@ -334,6 +365,15 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
     registry.register(ToolSpec("git_conflicts", "List files with unresolved merge conflicts.", {
         "type": "object", "properties": dict(_path_schema)
     }, "filesystem.read", git_conflicts, category="git"))
+    registry.register(ToolSpec("git_commit", "Stage paths (or all changes with add_all) and create a commit. Report the real commit SHA from git — never narrate one.", {
+        "type": "object",
+        "properties": {"message": {"type": "string"},
+                       "paths": {"type": "array",
+                                 "items": {"type": "string"}},
+                       "add_all": {"type": "boolean", "default": False},
+                       **_path_schema},
+        "required": ["message"],
+    }, "git.execute", git_commit, category="git"))
     registry.register(ToolSpec("git_user_changes", "Detect modified/untracked/staged files — run before large autonomous work so agent edits never silently overwrite uncommitted user work.", {
         "type": "object", "properties": dict(_path_schema)
     }, "filesystem.read", git_user_changes, category="git"))

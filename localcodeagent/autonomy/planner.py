@@ -96,6 +96,11 @@ class MissionPlanner:
             return self._record_plan(mission, self._maintenance_plan(mission),
                                      "maintenance")
 
+        if str(mission.get("pipeline") or "") == "coding":
+            from ..coding_pipeline import build_coding_tasks
+            tasks = build_coding_tasks(mission)
+            return self._record_plan(mission, tasks, "coding pipeline")
+
         # Multi-domain decomposition — explicit lanes first, then the
         # bounded keyword vocabulary. A single-domain objective keeps the
         # serial inspect→work→verify skeleton.
