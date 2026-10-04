@@ -65,8 +65,37 @@ evidence — nothing claims an action that did not run.
 - **Long-paste attachments** — user input over 20 lines auto-converts
   to a `.txt`/language-sniffed attachment on the same turn, keeping the
   composer compact.
+- **Dev-server manager** (`localcodeagent/devserver.py`) — workspace-
+  bound dev servers with command/process tracking, URL detection,
+  health probes, persistence, and duplicate detection; agent tools
+  `dev_server_start/list/wait/stop`, REST `/api/devservers*`, and
+  workspace.html Servers + Preview panels.
+- **Coding pipeline** (`localcodeagent/coding_pipeline.py`) — mission
+  DAG planner (spec → implement → verify → review → serve-check →
+  commit) with `stage_view()`; `tool` and `serve_check` mission job
+  ops; `git_commit` keeps autonomous commits inside the workspace-
+  bound, permission-checked git surface.
+- **Interactive chat outranks missions** — a pending user queue item
+  counts as lane demand so mission nodes stop dispatching behind it;
+  `_dequeue_next` prefers non-mission items; and `_preempt_for_chat`
+  cooperatively cancels a mission node holding the lane so the user's
+  message starts at the next drive boundary (the supervisor retries
+  the node through its bounded path).
+- **Queued-response replacement** — `queue_item_completed` /
+  `queue_item_failed` bus events carry the real response content, and
+  the chat UI swaps the "Queued … position N" placeholder for the
+  actual answer in place — the same text voice already played.
+- **Voice lane isolation** — mission executor, task recovery, and
+  auto-retry no longer open a voice lane; every `begin_task` was
+  `stop_all()`ing in-flight user speech, which silenced the app
+  whenever background work ran.
+- **Named worker pool** — workers are named Molly, Nikki, Kate, then
+  from a female-name pool with counter-suffix recycling; names surface
+  in `/api/workers` and the missions ops panel.
 - Tests: `test_capabilities.py` (25), `test_workspace.py` (15),
-  `test_scaffold.py` (13), `test_git_github.py` (10); layout contract
+  `test_scaffold.py` (13), `test_git_github.py` (10),
+  `test_devserver.py` (6), `test_coding_pipeline.py` (7), plus 5 new
+  queue/lane/voice regressions in `test_end_to_end.py`; layout contract
   extended for the new page (24/24).
 
 ## [0.18.9] — 2026-10

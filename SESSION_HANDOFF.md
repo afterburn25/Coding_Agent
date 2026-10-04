@@ -48,12 +48,37 @@ workspace UI → `f33b173` paste-attachments):
   canonical face) now feeds `/api/nexus/avatar`.
 - **Composer** — >20-line input auto-becomes an attachment.
 
+### P1 progress — dev-server, pipeline, interactive priority
+
+**Last verified: `a45c24c` — GitHub Actions `Nexus Core Tests` green
+on main.** Commits `b2d2ea8` → `5c2710b` → `a45c24c`:
+
+- **Dev-server manager** — `localcodeagent/devserver.py` +
+  `tools/devserver.py`: workspace-bound start/list/wait/stop, URL
+  detection, health probes, persistence, duplicate detection;
+  workspace.html Servers + Preview panels (6 tests).
+- **Coding pipeline** — `localcodeagent/coding_pipeline.py`: DAG
+  planner (spec→implement→verify→review→serve-check→commit),
+  `stage_view()`, `tool`/`serve_check` mission job ops, `git_commit`
+  tool, pipeline options on mission records (7 tests).
+- **Interactive chat outranks missions** — pending user queue items
+  count as lane demand; `_dequeue_next` prefers non-mission items;
+  `_preempt_for_chat` cooperatively cancels a mission node holding the
+  lane (supervisor retries it). Mission/recovery/auto-retry no longer
+  open a voice lane — every `begin_task` `stop_all()`ed user speech
+  (the reported "no voice at all").
+- **Queued-response replacement** — `queue_item_completed`/
+  `queue_item_failed` bus events carry content; app.js swaps the
+  "Queued…position N" placeholder for the real response in place.
+- **Worker pool naming** — Molly, Nikki, Kate first, then a female-name
+  pool with counter-suffix recycling; surfaced via /api/workers and
+  the missions panel.
+
 ### Workstation program — what remains
 
-- **P1** — integrated test/build/runtime/preview, coding-agent
-  orchestration (worker pipeline Understand→…→Git), self-modification/
-  update bootstrapper, full LKG rollback/recovery, unified Command
-  Center.
+- **P1** — integrated test/build/runtime/preview (dev-server manager
+  + pipeline landed), self-modification/update bootstrapper, full LKG
+  rollback/recovery, unified Command Center.
 - **P2** — canonical identity manager (expression sets/gesture mapping),
   global search/command (Ctrl+K), richer project/knowledge/activity UI,
   remaining workstation capabilities (deploy adapters, coverage,
