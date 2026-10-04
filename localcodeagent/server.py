@@ -5238,6 +5238,21 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/cleanup", "/api/benchmarks",
                           "/api/specialists")
 
+    _AUDIT_MANIFESTS = ("requirements.txt", "pyproject.toml",
+                        "package.json", "Cargo.toml")
+
+    def _audit_root(self) -> Path:
+        """Where dependency audits should look: the workspace, or its
+        bundled ``Source/`` checkout when the install root has no
+        manifests (installed layout: workspace=app dir, code in Source)."""
+        ws = self.state.workspace
+        if any((ws / m).is_file() for m in self._AUDIT_MANIFESTS):
+            return ws
+        src = ws / "Source"
+        if any((src / m).is_file() for m in self._AUDIT_MANIFESTS):
+            return src
+        return ws
+
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
         if path == "/api/health":
@@ -5425,7 +5440,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "dep_list unavailable"}, 503)
                 return True
             self._json(json.loads(tool.handler(
-                {"path": str(self.state.workspace)})))
+                {"path": str(self._audit_root())})))
             return True
         if path == "/api/eval/history":
             self._json({"runs": self.state.eval_lab.history(
@@ -5447,7 +5462,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "project_audit unavailable"}, 503)
                 return True
             self._json(json.loads(tool.handler(
-                {"path": str(self.state.workspace)})))
+                {"path": str(self._audit_root())})))
             return True
         if path == "/api/backups/create":
             self._json(self.state.backups.create(
