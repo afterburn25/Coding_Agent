@@ -717,7 +717,7 @@ body[data-gesture="look_away"] .nexus-presence > img {
 
 .composer {
   display:grid;
-  grid-template-columns:36px minmax(0,1fr) auto 36px 46px;
+  grid-template-columns:36px minmax(0,1fr) auto 36px 36px 46px;
   align-items:end;
   gap:8px;
   width:calc(100% - 42px);

@@ -11,6 +11,23 @@ async function api(path,method='GET',body){
 }
 let missions=[],selected=null;
 
+// The 3s poll rebuilt every panel via innerHTML, destroying DOM nodes —
+// which flickered and cleared any in-progress text selection. Write only
+// when markup actually changed, and defer while the user is selecting.
+function selectionWithin(el){
+  const s=window.getSelection();
+  if(!s||s.isCollapsed||!s.rangeCount)return false;
+  const n=s.anchorNode;
+  return !!(n&&el.contains(n.nodeType===1?n:n.parentNode));
+}
+function setHtml(el,html){
+  if(!el)return;
+  if(el._nxHtml===html)return;          // identical — leave DOM untouched
+  if(selectionWithin(el))return;        // user is selecting — try next tick
+  el._nxHtml=html;
+  el.innerHTML=html;
+}
+
 async function refresh(){
   try{
     const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings,ops,nstate]=await Promise.all([
@@ -48,30 +65,31 @@ async function refresh(){
       $('#newTrigEvent').innerHTML=trigs.signals.map(s=>
         `<option value="${esc(s)}">${esc(s)}</option>`).join('');
   }catch(e){
-    $('#autonomyStatus').innerHTML='<span class="off">API unavailable</span>';
+    setHtml($('#autonomyStatus'),'<span class="off">API unavailable</span>');
   }
 }
 
 function renderStatus(st){
   const on=st.running&&!st.stopped;
-  $('#autonomyStatus').innerHTML=
+  setHtml($('#autonomyStatus'),
     `<div>Supervisor: <b class="${on?'on':'off'}">${st.stopped?'STOPPED':st.running?'ON':'OFF'}</b></div>`+
     `<div>Active missions: ${st.active_missions}</div>`+
     `<div>Pending approvals: ${st.pending_approvals}</div>`+
     `<div>Workers: ${st.workers} · Tick: ${st.tick_ms??'—'}ms</div>`+
-    `<div>Resource mode: ${esc(st.resource_mode||'balanced')}</div>`;
+    `<div>Resource mode: ${esc(st.resource_mode||'balanced')}</div>`+
+    `<div id="nexusState"></div>`);
   $('#missionCount').textContent=`${missions.length} mission${missions.length===1?'':'s'}`;
 }
 
 function renderList(){
   const q=($('#missionFilter').value||'').toLowerCase();
   const rows=missions.filter(m=>!q||(m.title+m.objective+m.status).toLowerCase().includes(q));
-  $('#missionList').innerHTML=rows.map(m=>
+  setHtml($('#missionList'),rows.map(m=>
     `<div class="mission-card${selected===m.id?' selected':''}" data-mid="${m.id}">`+
     `<div class="title">${esc(m.title)}</div>`+
     `<div class="meta"><span class="mstatus ${m.status}">${m.status}</span>`+
     `<span>${esc(m.scope)}</span><span>${esc(m.priority)}</span></div></div>`
-  ).join('')||'<div class="empty" style="color:#4d5f7c;padding:30px;text-align:center">No missions yet</div>';
+  ).join('')||'<div class="empty" style="color:#4d5f7c;padding:30px;text-align:center">No missions yet</div>');
 }
 
 function critDot(c,ev){
@@ -83,7 +101,7 @@ function critDot(c,ev){
 function renderDetail(){
   const el=$('#missionDetail');
   const m=missions.find(x=>x.id===selected);
-  if(!m){el.innerHTML='<div class="empty">Select a mission</div>';return;}
+  if(!m){setHtml(el,'<div class="empty">Select a mission</div>');return;}
   const evals=m.evaluator_history||[];
   const lastEval=evals.length?null:null;
   const critHtml=(m.success_criteria||[]).map(c=>{
@@ -99,7 +117,7 @@ function renderDetail(){
   const hist=(m.history||[]).slice(-25).reverse().map(h=>
     `<div class="hist-row"><b>${esc(h.event)}</b> ${esc(h.detail||'')} <span style="float:right">${new Date((h.ts||0)*1000).toLocaleTimeString()}</span></div>`).join('');
   const actionable=['draft','ready','active','executing','paused','blocked','waiting_approval','waiting_dependency','replanning'].includes(m.status);
-  el.innerHTML=
+  setHtml(el,
     `<div class="detail-head"><div><h2>${esc(m.title)}</h2>`+
     `<span class="mstatus ${m.status}">${m.status}</span> <span style="color:#7f91ad;font-size:11px">${esc(m.phase||'')}</span></div>`+
     `<div class="detail-actions">`+
@@ -115,7 +133,7 @@ function renderDetail(){
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
     (m.blocked_reason?`<div class="detail-section"><h3>Blocked</h3><div class="objective">${esc(m.blocked_reason)}</div></div>`:'')+
     (m.completion?`<div class="detail-section"><h3>Completion</h3><div class="objective">Elapsed: ${m.completion.elapsed_s}s · ${m.completion.state}</div></div>`:'')+
-    `<div class="detail-section"><h3>History</h3>${hist||'<div class="hist-row">empty</div>'}</div>`;
+    `<div class="detail-section"><h3>History</h3>${hist||'<div class="hist-row">empty</div>'}</div>`);
   loadMissionActivity(m.id);
   loadMissionRequirements(m.id);
 }
@@ -130,16 +148,16 @@ async function loadMissionRequirements(mid){
     const el=$('#missionReqs');
     if(!el||selected!==mid)return;
     const rows=(r.requirements||[]);
-    el.innerHTML=rows.map(q=>
+    setHtml(el,rows.map(q=>
       `<div class="criterion" title="${esc(q.source)}${q.inferred?' (inferred)':''}">`+
       `<span class="dot ${q.status==='verified'?'met':['failed','blocked'].includes(q.status)?'unmet':'unknown'}"></span>`+
       `<span>${esc(REQ_MARKS[q.status]||'·')} ${esc(q.description)}`+
       (q.inferred?` <span style="color:#4d5f7c;font-size:10px">· inferred</span>`:'')+
       `</span></div>`
-    ).join('')||'<div class="criterion"><span class="dot unknown"></span><span>no requirements derived</span></div>';
+    ).join('')||'<div class="criterion"><span class="dot unknown"></span><span>no requirements derived</span></div>');
   }catch(e){
     const el=$('#missionReqs');
-    if(el)el.innerHTML='<div class="hist-row">requirements unavailable</div>';
+    setHtml(el,'<div class="hist-row">requirements unavailable</div>');
   }
 }
 
@@ -151,83 +169,78 @@ async function loadMissionActivity(mid){
     const el=$('#missionActivity');
     if(!el||selected!==mid)return;  // selection changed mid-fetch
     const rows=(r.activities||[]);
-    el.innerHTML=rows.slice(-40).reverse().map(a=>{
+    setHtml(el,rows.slice(-40).reverse().map(a=>{
       const timing=a.elapsed!=null?` · ${Number(a.elapsed).toFixed(1)}s`:'';
       const prog=a.progress!=null&&a.state==='running'?` ${Math.round(a.progress*100)}%`:'';
       return `<div class="hist-row"><b>${esc(a.category)}</b> ${esc(a.title)}`+
         ` <span class="mstatus ${a.state==='failed'?'failed':a.state==='running'?'executing':'done'}">${esc(a.state)}${prog}</span>`+
         `<span style="float:right">${esc((a.summary||'').slice(0,80))}${timing}</span></div>`;
-    }).join('')||'<div class="hist-row">no activity recorded</div>';
+    }).join('')||'<div class="hist-row">no activity recorded</div>');
   }catch(e){
     const el=$('#missionActivity');
-    if(el&&selected===mid)el.innerHTML='<div class="hist-row">activity unavailable</div>';
+    if(el&&selected===mid)setHtml(el,'<div class="hist-row">activity unavailable</div>');
   }
 }
 
 function renderApprovals(rows){
-  $('#approvals').innerHTML=rows.map(a=>
+  setHtml($('#approvals'),rows.map(a=>
     `<div class="mission-card"><div class="title">${esc(a.action)}</div>`+
     `<div class="meta">${esc(a.detail||'')}</div>`+
     `<div class="side-actions"><button class="mini-button" data-appr="${a.id}:approve">Approve</button>`+
     `<button class="mini-button danger" data-appr="${a.id}:deny">Deny</button></div></div>`
-  ).join('')||'<div class="hist-row">none pending</div>';
+  ).join('')||'<div class="hist-row">none pending</div>');
 }
 function renderNexusState(ns){
-  const el=$('#autonomyStatus');
+  const el=$('#nexusState');
   if(!el||!ns||!ns.state)return;
   // Operational-state line under the supervisor card — what Nexus is
-  // doing right now, in one glance.
-  const div=document.createElement('div');
-  div.className='hist-row';
-  div.innerHTML=`State: <b>${esc(ns.state)}</b>`+
+  // doing right now, in one glance. Lives in its own placeholder inside
+  // #autonomyStatus so it no longer re-appends a node every tick.
+  setHtml(el,`<div class="hist-row">State: <b>${esc(ns.state)}</b>`+
     (ns.focus?` — ${esc(ns.focus)}`:'')+
     (ns.next_action?`<br>Next: ${esc(ns.next_action)}`:'')+
-    ` <span class="pill">${esc(ns.resource_pressure||'')}</span>`;
-  el.appendChild(div);
+    ` <span class="pill">${esc(ns.resource_pressure||'')}</span></div>`);
 }
 function renderOps(ops){
   const cap=ops.capacity||{},hw=ops.hardware||{},sch=ops.schedulable||{};
-  const capEl=$('#opsCapacity');
-  if(capEl)capEl.innerHTML=
+  setHtml($('#opsCapacity'),
     `<div class="hist-row">Workers: <b>${cap.active||0} active</b> / ${cap.ceiling||'—'} currently safe</div>`+
     `<div class="hist-row">CPU ${hw.cpu_util!=null?Math.round(hw.cpu_util*100)+'%':'—'} · `+
     `RAM ${((hw.ram_free_mb||0)/1024).toFixed(1)}/${((hw.ram_total_mb||0)/1024).toFixed(0)} GB free · `+
     `VRAM ${((hw.vram_free_mb||0)/1024).toFixed(1)}/${((hw.vram_total_mb||0)/1024).toFixed(1)} GB free</div>`+
     `<div class="hist-row">schedulable: ${(sch.cpu_cores||0).toFixed(1)} cores · `+
-    `${((sch.ram_mb||0)/1024).toFixed(1)} GB RAM · ${((sch.vram_mb||0)/1024).toFixed(1)} GB VRAM</div>`;
-  const wEl=$('#opsWorkers');
-  if(wEl)wEl.innerHTML=(ops.workers||[]).map(w=>
+    `${((sch.ram_mb||0)/1024).toFixed(1)} GB RAM · ${((sch.vram_mb||0)/1024).toFixed(1)} GB VRAM</div>`);
+  setHtml($('#opsWorkers'),(ops.workers||[]).map(w=>
     `<div class="mission-card"><div class="title">${esc(w.role||'worker')} · ${esc(w.model_tier||'tool')}</div>`+
     `<div class="meta">${esc(w.title||'')} — ${esc(w.status)}`+
     (w.elapsed_s?` · ${Math.round(w.elapsed_s)}s`:'')+
     (w.branch?` · <code>${esc(w.branch)}</code>`:'')+`</div></div>`
-  ).join('')||'<div class="hist-row">no active workers</div>';
-  const qEl=$('#opsQueue');
-  if(qEl)qEl.innerHTML=(ops.queue||[]).map(q=>
+  ).join('')||'<div class="hist-row">no active workers</div>');
+  setHtml($('#opsQueue'),(ops.queue||[]).map(q=>
     `<div class="mission-card"><div class="title">#${q.position} ${esc(q.title||'')}</div>`+
     `<div class="meta">${esc(q.message||q.reason||'queued')}`+
     (q.reason_detail?` — ${esc(q.reason_detail)}`:'')+`</div>`+
     `<div class="side-actions"><button class="mini-button danger" data-wcancel="${esc(q.id)}">Cancel</button></div></div>`
-  ).join('')||'<div class="hist-row">queue empty</div>';
+  ).join('')||'<div class="hist-row">queue empty</div>');
 }
 
 function renderNotes(rows){
-  $('#notifications').innerHTML=rows.slice(0,15).map(n=>
+  setHtml($('#notifications'),rows.slice(0,15).map(n=>
     `<div class="hist-row"><b>${esc(n.level)}</b> ${esc(n.title||n.message).slice(0,120)}</div>`
-  ).join('')||'<div class="hist-row">none</div>';
+  ).join('')||'<div class="hist-row">none</div>');
 }
 function renderDailySummary(s){
   const el=$('#dailySummary');
   if(!el)return;
-  el.innerHTML=
+  setHtml(el,
     `<div class="hist-row">completed <b>${s.missions_completed||0}</b> · failed <b>${s.missions_failed||0}</b> · tasks <b>${s.tasks_completed||0}</b></div>`+
     ((s.missions_blocked||[]).map(t=>`<div class="hist-row"><b>blocked</b> ${esc(t).slice(0,80)}</div>`).join(''))+
     ((s.pending_approvals||[]).map(t=>`<div class="hist-row"><b>approval</b> ${esc(t).slice(0,80)}</div>`).join(''))+
-    `<div class="hist-row">${s.notifications||0} unread · next run ${s.next_scheduled?new Date(s.next_scheduled*1000).toLocaleTimeString():'—'}</div>`;
+    `<div class="hist-row">${s.notifications||0} unread · next run ${s.next_scheduled?new Date(s.next_scheduled*1000).toLocaleTimeString():'—'}</div>`);
 }
 const HEALTH_CLASS={healthy:'ok',satisfied:'ok',degrading:'warn',violated:'bad',blocked:'bad',unknown:'unknown'};
 function renderEvalGoals(rows,metricSpecs){
-  $('#evalGoals').innerHTML=rows.map(g=>{
+  setHtml($('#evalGoals'),rows.map(g=>{
     const live=(g.linked_missions||[]).filter(l=>!l.resolved&&l.status!=='missing'&&l.status!=='failed'&&l.status!=='completed'&&l.status!=='completed_with_warnings'&&l.status!=='cancelled').length;
     const last=g.last_evaluated_at?new Date(g.last_evaluated_at*1000).toLocaleTimeString():'never';
     const metrics=(g.metrics||[]).map(s=>`${s.key} ${s.op} ${s.target}`).join(' · ');
@@ -241,7 +254,7 @@ function renderEvalGoals(rows,metricSpecs){
     (g.status!=='archived'&&g.status!=='completed'?`<button class="mini-button" data-goalact="${g.id}:${g.status==='active'?'disable':'enable'}">${g.status==='active'?'Pause':'Enable'}</button>`:'')+
     (g.status!=='archived'?`<button class="mini-button danger" data-goalact="${g.id}:archive">Archive</button>`:'')+
     `</div></div>`;
-  }).join('')||'<div class="hist-row">none</div>';
+  }).join('')||'<div class="hist-row">none</div>');
   // Populate the metric picker once with measurable keys.
   const sel=$('#newEvalGoalMetric');
   if(sel&&!sel.options.length)
@@ -250,7 +263,7 @@ function renderEvalGoals(rows,metricSpecs){
 }
 const REPAIR_STATE_CLASS={resolved:'ok',detected:'unknown',collecting:'unknown',localizing:'warn',diagnosing:'warn',planning:'warn',patching:'warn',testing:'warn',reviewing:'warn',canary:'warn',promoting:'warn',rolled_back:'warn',needs_human:'bad',abandoned:'unknown'};
 function renderRepairs(rows){
-  $('#repairPanel').innerHTML=rows.slice(0,12).map(r=>{
+  setHtml($('#repairPanel'),rows.slice(0,12).map(r=>{
     const top=(r.hypotheses||[])[0];
     return `<div class="mission-card"><div class="title">${esc(r.error_class)} · ${esc(r.subsystem)}</div>`+
     `<div class="goal-evidence">${esc(top?top.detail:'')}${r.needs_human_reason?' — '+esc(r.needs_human_reason):''}</div>`+
@@ -261,11 +274,11 @@ function renderRepairs(rows){
     (r.state==='needs_human'?`<button class="mini-button" data-rep="${r.id}:retry">Retry</button>`+
     `<button class="mini-button" data-rep="${r.id}:abandon">Dismiss</button>`:'')+
     `</div></div>`;
-  }).join('')||'<div class="hist-row">no incidents</div>';
+  }).join('')||'<div class="hist-row">no incidents</div>');
 }
 const FINDING_SEV_CLASS={critical:'bad',high:'warn',normal:'unknown',low:'unknown'};
 function renderFindings(rows){
-  $('#findingsPanel').innerHTML=rows.slice(0,10).map(f=>{
+  setHtml($('#findingsPanel'),rows.slice(0,10).map(f=>{
     const ev=Object.entries(f.evidence||{}).filter(([k,v])=>typeof v!=='object')
       .map(([k,v])=>`${esc(k)}=${esc(String(v))}`).join(' ');
     return `<div class="mission-card"><div class="title">${esc(f.title)}</div>`+
@@ -274,29 +287,29 @@ function renderFindings(rows){
     `<span>${esc(f.route)}</span><span>conf ${Math.round((f.confidence||0)*100)}%</span>`+
     `${f.sightings>1?`<span>×${f.sightings}</span>`:''}`+
     `<button class="mini-button" data-find="${f.id}:dismiss">Dismiss</button></div></div>`;
-  }).join('')||'<div class="hist-row">no signals</div>';
+  }).join('')||'<div class="hist-row">no signals</div>');
 }
 function renderGoals(rows){
-  $('#standingGoals').innerHTML=rows.map(g=>
+  setHtml($('#standingGoals'),rows.map(g=>
     `<div class="mission-card"><div class="title">${esc(g.objective).slice(0,80)}</div>`+
     `<div class="meta"><span class="mstatus ${g.enabled?'executing':'paused'}">${g.enabled?'enabled':'disabled'}</span>`+
     `<button class="mini-button" data-goalrun="${g.id}">Run now</button>`+
     `<button class="mini-button" data-goaltoggle="${g.id}:${g.enabled?'disable':'enable'}">${g.enabled?'Disable':'Enable'}</button></div></div>`
-  ).join('')||'<div class="hist-row">none</div>';
+  ).join('')||'<div class="hist-row">none</div>');
 }
 function renderSchedules(rows){
-  $('#schedules').innerHTML=rows.map(s=>
+  setHtml($('#schedules'),rows.map(s=>
     `<div class="hist-row"><b>${esc(s.name)}</b> ${esc(s.kind)}${s.next_run?' · next '+new Date(s.next_run*1000).toLocaleString():''}`+
     ` <button class="mini-button" data-sched="${s.id}:${s.enabled===false?'enable':'disable'}">${s.enabled===false?'Enable':'Disable'}</button>`+
     ` <button class="mini-button danger" data-scheddel="${s.id}">×</button></div>`
-  ).join('')||'<div class="hist-row">none</div>';
+  ).join('')||'<div class="hist-row">none</div>');
 }
 function renderTriggers(rows){
-  $('#triggers').innerHTML=rows.map(t=>
+  setHtml($('#triggers'),rows.map(t=>
     `<div class="hist-row"><b>${esc(t.name)}</b> ${esc(t.event)} · fired ${t.fire_count||0}×${t.enabled===false?' · off':''}`+
     ` <button class="mini-button" data-trig="${t.id}:${t.enabled===false?'enable':'disable'}">${t.enabled===false?'Enable':'Disable'}</button>`+
     ` <button class="mini-button danger" data-trigdel="${t.id}">×</button></div>`
-  ).join('')||'<div class="hist-row">none</div>';
+  ).join('')||'<div class="hist-row">none</div>');
 }
 
 document.addEventListener('click',async e=>{
