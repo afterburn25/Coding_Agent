@@ -74,11 +74,33 @@ on main.** Commits `b2d2ea8` → `5c2710b` → `a45c24c`:
   pool with counter-suffix recycling; surfaced via /api/workers and
   the missions panel.
 
+### P1 progress — LKG, self-update, Command Center
+
+Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
+
+- **LKG** — `localcodeagent/lkg.py`: hashed snapshots of the live
+  backend + config, verify/restore, single-consumption rollback flag,
+  auto-request after repeated unclean boots; `/api/lkg{,/verify/*,
+  /snapshot,/rollback}` (8 tests).
+- **Self-update bootstrapper** — `localcodeagent/selfupdate.py`:
+  plan (fetch, behind-count, dirty refusal), apply (pull → tests →
+  build → LKG snapshot → stage → flag); `/api/update/{status,plan,
+  apply}`, apply confirm-gated. The desktop host consumes rollback/
+  update flags before backend launch — a frozen exe can't replace
+  itself mid-run.
+- **Command Center** — `web/command.{html,js}`: unified ops surface
+  (status, named workers, missions, queue, dev servers, capability
+  states, safe mode, LKG, self-update). Nav added to every shell page;
+  canonical-link contract updated (24/24).
+- **Fix during this work** — a method splice inside `AppState.__init__`
+  left it returning early (no `agent`/`autonomy`); the full e2e suite
+  caught it, method moved to class level, 34/34 green.
+
 ### Workstation program — what remains
 
-- **P1** — integrated test/build/runtime/preview (dev-server manager
-  + pipeline landed), self-modification/update bootstrapper, full LKG
-  rollback/recovery, unified Command Center.
+- **P1** — dev-server, pipeline, chat priority, LKG, self-update, and
+  Command Center are all landed. Remaining loose ends: preview/runtime
+  polish on the coding-pipeline stage view, then P2.
 - **P2** — canonical identity manager (expression sets/gesture mapping),
   global search/command (Ctrl+K), richer project/knowledge/activity UI,
   remaining workstation capabilities (deploy adapters, coverage,

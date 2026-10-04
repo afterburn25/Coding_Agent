@@ -92,11 +92,27 @@ evidence — nothing claims an action that did not run.
 - **Named worker pool** — workers are named Molly, Nikki, Kate, then
   from a female-name pool with counter-suffix recycling; names surface
   in `/api/workers` and the missions ops panel.
+- **Last-Known-Good snapshots** (`localcodeagent/lkg.py`) — hashed
+  snapshots of the live backend binaries + config, verify/restore,
+  single-consumption rollback flag executed by the desktop host before
+  backend launch (a running frozen exe cannot replace itself), and an
+  auto-rollback request after repeated unclean boots.
+- **Self-update bootstrapper** (`localcodeagent/selfupdate.py`) —
+  staged update: fetch/plan (behind-count, dirty-checkout refusal),
+  apply runs tests → build → LKG snapshot → stage → flag; the host
+  swaps on the next boot so the running install is never mutated
+  mid-flight. `/api/update/{status,plan,apply}` (apply confirm-gated).
+- **Command Center** (`/command.html`) — unified operational surface:
+  system status, named workers, missions, queue, dev servers,
+  capability states, safe mode, LKG snapshots/rollback, and
+  self-update plan/apply. Linked from every shell page; the canonical
+  nav contract covers it.
 - Tests: `test_capabilities.py` (25), `test_workspace.py` (15),
   `test_scaffold.py` (13), `test_git_github.py` (10),
-  `test_devserver.py` (6), `test_coding_pipeline.py` (7), plus 5 new
-  queue/lane/voice regressions in `test_end_to_end.py`; layout contract
-  extended for the new page (24/24).
+  `test_devserver.py` (6), `test_coding_pipeline.py` (7),
+  `test_lkg.py` (8), plus 5 new queue/lane/voice regressions in
+  `test_end_to_end.py`; layout contract extended for the new pages
+  (24/24).
 
 ## [0.18.9] — 2026-10
 
