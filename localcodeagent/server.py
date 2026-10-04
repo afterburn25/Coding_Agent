@@ -150,6 +150,9 @@ class AppState:
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .evidence import EvidenceBoard
         self.evidence = EvidenceBoard(runtime_root / "data" / "evidence.json")
+        from .regressions import BaselineStore, RegressionStore
+        self.regressions = RegressionStore(runtime_root / "data" / "regressions.json")
+        self.baselines = BaselineStore(runtime_root / "data" / "baselines.json")
         from .reliability import CapabilityHealth, ReliabilityTracker
         self.reliability = ReliabilityTracker(runtime_root / "data" / "reliability.json")
         self.capabilities = CapabilityHealth(self.reliability)
@@ -5265,6 +5268,25 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(self.state.capabilities.summary())
             return
+        if path == "/api/regressions":
+            q = parse_qs(urlparse(self.path).query)
+            behavior = str((q.get("behavior") or [""])[0])
+            if behavior:
+                self._json(self.state.regressions.check(behavior))
+            else:
+                self._json({"open": self.state.regressions
+                            .open_regressions(),
+                            "summary": self.state.regressions.summary()})
+            return
+        if path == "/api/baselines":
+            q = parse_qs(urlparse(self.path).query)
+            metric = str((q.get("metric") or [""])[0])
+            if metric:
+                self._json({"baseline": self.state.baselines
+                            .baseline(metric)})
+            else:
+                self._json({"summary": self.state.baselines.summary()})
+            return
         if path == "/api/evidence":
             q = parse_qs(urlparse(self.path).query)
             query = str((q.get("q") or [""])[0])
@@ -6720,6 +6742,59 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": res["ok"], "probe": res,
                             "status": self.state.capabilities.status(
                                 name)})
+                return
+
+            if path == "/api/regressions/record":
+                b = self.state.regressions.record(
+                    str(body.get("behavior") or ""),
+                    ok=bool(body.get("ok")),
+                    head=str(body.get("head") or ""),
+                    detail=str(body.get("detail") or ""),
+                    context=body.get("context")
+                    if isinstance(body.get("context"), dict) else None)
+                self._json({"ok": True, "behavior": b})
+                return
+
+            if path == "/api/baselines/record":
+                metric = str(body.get("metric") or "").strip()
+                if not metric:
+                    self._json({"error": "metric is required"}, 400)
+                    return
+                row = self.state.baselines.record(
+                    metric, float(body.get("value") or 0.0),
+                    context=body.get("context")
+                    if isinstance(body.get("context"), dict) else None)
+                self._json({"ok": True, "metric": row})
+                return
+
+            if path == "/api/baselines/check":
+                self._json(self.state.baselines.check(
+                    str(body.get("metric") or ""),
+                    float(body.get("value") or 0.0)))
+                return
+
+            if path == "/api/bisect":
+                # Bounded, isolated — runs in a throwaway worktree,
+                # never the user's checkout.
+                good = str(body.get("good") or "")
+                bad = str(body.get("bad") or "")
+                test_cmd = str(body.get("test") or "")
+                if not (good and bad and test_cmd):
+                    self._json({"error": "good, bad and test are "
+                                "required"}, 400)
+                    return
+                from .bisect import GitBisector
+                try:
+                    res = GitBisector(self.state.workspace).run(
+                        good=good, bad=bad, test_command=test_cmd,
+                        timeout_s=float(body.get("timeout_s") or 600.0),
+                        step_timeout_s=float(
+                            body.get("step_timeout_s") or 120.0))
+                except Exception as exc:
+                    self._json({"error": f"{type(exc).__name__}: {exc}"},
+                               500)
+                    return
+                self._json(res)
                 return
 
             if path == "/api/conversation-memory/exchange":
