@@ -127,8 +127,9 @@ class GitCommitToolTests(unittest.TestCase):
             reg = ToolRegistry({"git.execute": True})
             register_git_tools(reg, root)
             with self.assertRaises(ValueError):
+                # td's parent exists on every platform and is outside root.
                 reg.get("git_commit").handler(
-                    {"path": "D:/Windows", "message": "x"})
+                    {"path": str(root.parent), "message": "x"})
 
 
 if __name__ == "__main__":

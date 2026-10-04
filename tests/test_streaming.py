@@ -210,20 +210,25 @@ class ModelStreamingTests(unittest.TestCase):
         self.assertNotIn("and self.state.agent.can_answer_locally(message)", server)
 
     def test_all_agent_entry_points_feed_voice(self):
-        """Every agent.run/resume/recover call must tee speech, otherwise a
+        """Interactive agent runs (chat stream, /api/chat, queued user
+        prompts, resume/recover handlers) must tee speech, otherwise a
         response renders in chat but is never spoken. The final text must
         also reach finish_task so token-less responses (memory hits, local
-        answers) are still spoken."""
+        answers) are still spoken.
+
+        Background runs (mission executor, auto-resume, auto-retry) must
+        NOT open a voice lane: every begin_task stop_all()s in-flight user
+        speech — the old "tee everything" rule is what silenced the user."""
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")
-        self.assertNotIn("event_callback=self._bus_emit", server)
-        self.assertNotIn("event_callback=self.state._bus_emit", server)
         self.assertIn("def _voice_begin", server)
         self.assertIn("def _voice_tee", server)
         self.assertIn("def _voice_finish", server)
-        # stream + /api/chat + queue worker + auto-resume + auto-retry +
-        # resume + recover handlers
-        self.assertGreaterEqual(server.count("_voice_tee(voice_rid"), 7)
-        self.assertGreaterEqual(server.count("_voice_finish(voice_rid"), 7)
+        # stream + /api/chat + queue worker + resume + recover handlers
+        self.assertGreaterEqual(server.count("_voice_tee(voice_rid"), 4)
+        self.assertGreaterEqual(server.count("_voice_finish(voice_rid"), 5)
+        # Background recovery/retry rides the bus with NO voice lane —
+        # the assertion is now the reverse of the old contract.
+        self.assertIn("event_callback=self._bus_emit", server)
         voice_js = (ROOT / "web" / "voice_global.js").read_text(encoding="utf-8")
         self.assertIn("NotAllowedError", voice_js)
 
