@@ -88,6 +88,7 @@
               <button class="bp-tab active" data-bp="terminal" type="button">Terminal</button>
               <button class="bp-tab" data-bp="problems" type="button">Problems <span id="problemCount" class="bp-badge" hidden></span></button>
               <button class="bp-tab" data-bp="git" type="button">Git</button>
+              <button class="bp-tab" data-bp="servers" type="button">Servers <span id="serverCount" class="bp-badge" hidden></span></button>
             </div>
             <div id="bpTerminal" class="bp-page">
               <div id="termOut" class="term-out"></div>
@@ -107,6 +108,22 @@
                 <button id="gitDiff" class="mini-button" type="button">Diff</button>
               </div>
               <pre id="gitDiffOut" class="git-diff" hidden></pre>
+            </div>
+            <div id="bpServers" class="bp-page" hidden>
+              <div class="srv-start-row">
+                <input id="srvCmd" class="term-input" placeholder="dev server command, e.g. npm run dev" />
+                <button id="srvStart" class="mini-button" type="button">Start</button>
+              </div>
+              <div id="srvList" class="srv-list"><span class="muted">No dev servers running.</span></div>
+              <div id="srvPreview" class="srv-preview" hidden>
+                <div class="srv-preview-bar">
+                  <span id="srvPreviewUrl" class="srv-url"></span>
+                  <button id="srvRefresh" class="mini-button" type="button">↻</button>
+                  <button id="srvExternal" class="mini-button" type="button">Open External</button>
+                  <button id="srvClose" class="mini-button" type="button">✕</button>
+                </div>
+                <iframe id="srvFrame" class="srv-frame" title="app preview"></iframe>
+              </div>
             </div>
           </div>
         </section>

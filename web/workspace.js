@@ -412,6 +412,64 @@ async function showDiff() {
   pre.textContent = d.diff || d.error || '(no diff)';
 }
 
+/* -------------------------------------------------------------- dev servers */
+
+async function refreshServers() {
+  const list = $('srvList');
+  const data = await api.get('/api/devservers');
+  const servers = (data && data.servers) || [];
+  const live = servers.filter((s) => s.alive).length;
+  const badge = $('serverCount');
+  badge.hidden = !live;
+  badge.textContent = live || '';
+  if (!servers.length) {
+    list.innerHTML = '<span class="muted">No dev servers running.</span>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const s of servers) {
+    const row = document.createElement('div');
+    row.className = 'srv-row';
+    const url = s.url || '';
+    row.innerHTML =
+      `<span class="srv-state ${esc(s.state)}">${esc(s.state)}</span>` +
+      `<span class="srv-name">${esc(s.name)}</span>` +
+      (url
+        ? `<span class="srv-url" data-url="${esc(url)}">${esc(url)}</span>`
+        : `<span class="srv-cmd">${esc(s.command)}</span>`) +
+      (s.alive
+        ? `<button class="mini-button srv-restart" type="button">↻</button>` +
+          `<button class="mini-button srv-stop" type="button">Stop</button>`
+        : '');
+    const urlEl = row.querySelector('.srv-url');
+    if (urlEl) {
+      urlEl.addEventListener('click', () => openPreview(url));
+    }
+    const stopBtn = row.querySelector('.srv-stop');
+    if (stopBtn) {
+      stopBtn.addEventListener('click', async () => {
+        await api.post('/api/devservers/stop', { id: s.id });
+        refreshServers();
+      });
+    }
+    const rsBtn = row.querySelector('.srv-restart');
+    if (rsBtn) {
+      rsBtn.addEventListener('click', async () => {
+        rsBtn.disabled = true;
+        await api.post('/api/devservers/restart', { id: s.id });
+        setTimeout(refreshServers, 1500);
+      });
+    }
+    list.appendChild(row);
+  }
+}
+
+function openPreview(url) {
+  $('srvPreview').hidden = false;
+  $('srvPreviewUrl').textContent = url;
+  $('srvFrame').src = url;
+}
+
 /* ------------------------------------------------------------------ wiring */
 
 function wire() {
@@ -477,10 +535,11 @@ function wire() {
     t.addEventListener('click', () => {
       document.querySelectorAll('.bp-tab')
         .forEach((x) => x.classList.toggle('active', x === t));
-      for (const page of ['Terminal', 'Problems', 'Git']) {
+      for (const page of ['Terminal', 'Problems', 'Git', 'Servers']) {
         $(`bp${page}`).hidden =
           t.dataset.bp !== page.toLowerCase();
       }
+      if (t.dataset.bp === 'servers') refreshServers();
     });
   });
 
@@ -507,6 +566,34 @@ function wire() {
   $('termCwd').textContent = state.root || '';
   $('gitRefresh').addEventListener('click', refreshGit);
   $('gitDiff').addEventListener('click', showDiff);
+  $('srvStart').addEventListener('click', async () => {
+    const cmd = $('srvCmd').value.trim();
+    if (!cmd || !state.root) return;
+    $('srvStart').disabled = true;
+    try {
+      await api.post('/api/devservers/start', {
+        path: state.root, command: cmd, wait: true, timeout: 30,
+      });
+    } finally {
+      $('srvStart').disabled = false;
+      refreshServers();
+    }
+  });
+  $('srvCmd').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('srvStart').click();
+  });
+  $('srvRefresh').addEventListener('click', () => {
+    const f = $('srvFrame');
+    if (f.src) f.src = f.src;
+  });
+  $('srvExternal').addEventListener('click', () => {
+    const u = $('srvPreviewUrl').textContent;
+    if (u) window.open(u, '_blank');
+  });
+  $('srvClose').addEventListener('click', () => {
+    $('srvPreview').hidden = true;
+    $('srvFrame').src = 'about:blank';
+  });
 
   if (window.NexusTaskBar && window.NexusTaskBar.init) {
     window.NexusTaskBar.init();

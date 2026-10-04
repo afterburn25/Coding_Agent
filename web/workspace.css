@@ -161,3 +161,21 @@
   .ws-tree { width: 180px; }
   .bottom-panel { height: 160px; }
 }
+
+/* ---- Dev servers + preview ---- */
+.srv-start-row { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border, #2a2a33); }
+.srv-start-row .term-input { flex: 1; }
+.srv-list { padding: 4px 0; }
+.srv-row { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px; }
+.srv-row .srv-state { min-width: 62px; }
+.srv-row .srv-state.serving { color: #4ade80; }
+.srv-row .srv-state.starting { color: #fbbf24; }
+.srv-row .srv-state.stopped { color: var(--muted, #888); }
+.srv-row .srv-name { font-weight: 600; }
+.srv-row .srv-url { color: #7dd3fc; cursor: pointer; text-decoration: underline; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-row .srv-cmd { color: var(--muted, #888); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-row button { flex-shrink: 0; }
+.srv-preview { display: flex; flex-direction: column; flex: 1; min-height: 180px; border-top: 1px solid var(--border, #2a2a33); }
+.srv-preview-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.srv-preview-bar .srv-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-frame { flex: 1; border: 0; background: #fff; min-height: 160px; }

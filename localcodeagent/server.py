@@ -61,6 +61,8 @@ from .tools.shell import register_shell_tools
 from .tools.terminal import register_terminal_tools
 from .tools.workspace import register_workspace_tools
 from .tools.project import register_project_tools
+from .tools.devserver import register_devserver_tools
+from .devserver import DevServerManager
 from .workspace import WorkspaceManager
 from .tool_router import ToolRouter
 from .mcp import MCPManager, load_mcp_configs
@@ -369,6 +371,11 @@ class AppState:
             log_dir=runtime_root / ".agent" / "runtime",
             extra_roots=self.workspaces.allowed_roots,
         )
+        self.devservers = DevServerManager(
+            self.terminal_tracker,
+            runtime_root / ".agent" / "devservers.json",
+            roots_fn=self.workspaces.allowed_roots)
+        register_devserver_tools(self.tools, self.devservers)
         register_search_tools(self.tools, self.workspace)
         register_build_tools(
             self.tools, self.workspace,
@@ -6837,6 +6844,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     self.state.capability_registry.summary(force=force))
             return
+        if path == "/api/devservers":
+            self._json({"servers": self.state.devservers.list()})
+            return
+        if path == "/api/devservers/logs":
+            q = parse_qs(urlparse(self.path).query)
+            sid = str((q.get("id") or [""])[0])
+            limit = int((q.get("limit") or ["80"])[0])
+            if not sid:
+                self._json({"error": "id is required"}, 400)
+                return
+            self._json(self.state.devservers.logs(sid, limit))
+            return
         if path == "/api/workspaces":
             self._json({
                 "primary": str(self.state.workspace),
@@ -8729,6 +8748,32 @@ class Handler(BaseHTTPRequestHandler):
                 ok = bool(wid) and self.state.workspaces.remove(wid)
                 self._json({"ok": ok}, 200 if ok else 404)
                 return
+            # -- Dev-server lifecycle -------------------------------------
+            if path == "/api/devservers/start":
+                res = self.state.devservers.start(
+                    str(body.get("path") or ""),
+                    str(body.get("command") or ""),
+                    name=str(body.get("name") or ""))
+                if res.get("error"):
+                    self._json(res, 400)
+                    return
+                if body.get("wait", True):
+                    res["wait"] = self.state.devservers.wait_for_url(
+                        res["server"]["id"],
+                        timeout=max(1.0, min(
+                            float(body.get("timeout", 45)), 180)))
+                self._json(res)
+                return
+            if path == "/api/devservers/stop":
+                res = self.state.devservers.stop(
+                    str(body.get("id") or ""))
+                self._json(res, 404 if res.get("error") else 200)
+                return
+            if path == "/api/devservers/restart":
+                res = self.state.devservers.restart(
+                    str(body.get("id") or ""))
+                self._json(res, 404 if res.get("error") else 200)
+                return
             # -- Coding workbench file/terminal operations ------------------
             if path.startswith("/api/fs/") or path == "/api/terminal/run":
                 import hashlib as _hl
@@ -9530,6 +9575,8 @@ def stop_state(state: AppState) -> None:
         pass
     try:
         state.terminal_tracker.shutdown()
+        if getattr(state, "devservers", None):
+            state.devservers.shutdown()
     except Exception:
         pass
     try:
