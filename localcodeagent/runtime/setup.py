@@ -65,8 +65,12 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
         path = str(item.get("path") or "").strip()
         if not path:
             continue
-        size = max(0.0, float(item.get("size_gb") or 0.0))
         name = str(item.get("name") or Path(path).name)
+        # Multimodal projector files are vision encoders, not standalone
+        # chat models — suggesting them produces a runtime that can't load.
+        if "mmproj" in name.lower():
+            continue
+        size = max(0.0, float(item.get("size_gb") or 0.0))
         rows.append({"path": path, "name": name, "size_gb": size})
     rows.sort(key=lambda x: (x["size_gb"], x["name"].lower()))
     if not rows:
@@ -99,7 +103,7 @@ def suggest_model_profiles(inventory: list[dict[str, Any]]) -> list[dict[str, An
             continue
         seen_paths.add(item["path"])
         name_lower = item["name"].lower()
-        if any(token in name_lower for token in ("vision", "-vl", "_vl", "qwen2-vl", "qwen3-vl")):
+        if any(token in name_lower for token in ("vision", "-vl", "_vl", "qwen2-vl", "qwen2vl", "qwen3-vl", "qwen3vl")):
             roles = sorted(set(roles + ["vision"]))
         size = item["size_gb"]
         item_port = fixed_ports.get(profile_id)

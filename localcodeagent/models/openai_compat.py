@@ -76,11 +76,26 @@ def _shrink_messages_for_context(messages: list[dict[str, Any]], overage_tokens:
     head = 0
     while head < len(shrunk) and shrunk[head].get("role") == "system":
         head += 1
+    def content_len(m: dict[str, Any]) -> int:
+        # Multimodal parts lists carry base64 image data — measuring them as
+        # text wildly overestimates and str() would serialize megabytes.
+        c = m.get("content")
+        if isinstance(c, list):
+            return sum(
+                len(str(p.get("text") or "")) for p in c
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        return len(str(c or ""))
+
     stub = "[elided to fit context window]"
     removed = 0
     for m in shrunk[head:]:
         if removed >= chars_to_remove:
             break
+        # Never stub a parts list — slicing would destroy the image payload;
+        # it can still be dropped whole in the pass below.
+        if isinstance(m.get("content"), list):
+            continue
         content = str(m.get("content") or "")
         if len(content) > 400:
             removed += len(content) - len(stub)
@@ -91,7 +106,7 @@ def _shrink_messages_for_context(messages: list[dict[str, Any]], overage_tokens:
         tail = shrunk[head:]
         while tail and removed < chars_to_remove:
             dropped = tail.pop(0)
-            removed += len(str(dropped.get("content") or "")) + 40
+            removed += content_len(dropped) + 40
         shrunk = keep + tail
     return shrunk
 

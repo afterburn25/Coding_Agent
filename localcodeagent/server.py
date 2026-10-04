@@ -5040,6 +5040,22 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(query).get("q", [""])[0]
             self._json({"history": self.state.images.history(query=q)})
             return
+        if path.startswith("/api/attachment/"):
+            # User-attached files saved under data/attachments — lets chat
+            # history re-render images after restart.
+            rel = unquote(path[len("/api/attachment/"):].strip("/"))
+            root = (self.state.workspace / "data" / "attachments").resolve()
+            target = (root / rel).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            data = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path.startswith("/api/image/output/"):
             rel = unquote(path[len("/api/image/output/"):].strip("/"))
             target = (self.state.images.generations_dir / rel).resolve()

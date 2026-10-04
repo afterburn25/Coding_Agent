@@ -142,6 +142,7 @@ class _AgentSession:
     event_callback: Callable[[dict[str, Any]], None] | None = None
     max_tokens: int | None = None
     tool_activities: dict[str, str] = field(default_factory=dict)
+    attachments_meta: list[dict[str, Any]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
 
 
@@ -707,7 +708,7 @@ class AgentOrchestrator:
         r"scene|outfit|suit|dress|nude|naked|her|him|she|he|they)\b", re.I)
 
     def _resolve_image_followup(
-        self, user_text: str, attached: list[str] | None
+        self, user_text: str, attach: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         """Turn a context-dependent follow-up into a concrete image request.
 
@@ -733,26 +734,41 @@ class AgentOrchestrator:
         messages = (self.conversation_manager.active() or {}).get("messages") or []
         job_ids: list[str] = []
         last_user_img = ""
+        sources: list[str] = []
+        for p in ((attach or {}).get("image_paths") or []):
+            if p and Path(str(p)).is_file():
+                sources.append(str(p))
+        history_sources = 0
         for msg in reversed(messages[-12:]):
             role = msg.get("role")
             if role == "assistant" and not job_ids:
                 ids = [str(j) for j in (msg.get("image_job_ids") or [])]
                 if ids:
                     job_ids = ids
-            elif role == "user" and not last_user_img:
-                content = str(msg.get("content") or "").strip()
-                if content and content != t and (
-                        self.direct_image_generation_intent(content)
-                        or self._IMAGEISH_RE.search(content.lower())):
-                    last_user_img = content
-            if job_ids and last_user_img:
+            elif role == "user":
+                # Persisted attachment paths survive restarts — the file is
+                # still on disk even though the UI forgot it before. Only the
+                # most recent attachment-bearing turn counts.
+                if not history_sources:
+                    for a in (msg.get("attachments") or []):
+                        p = str((a or {}).get("path") or "")
+                        if p and p not in sources and Path(p).is_file():
+                            sources.append(p)
+                            history_sources += 1
+                if not last_user_img:
+                    content = str(msg.get("content") or "").strip()
+                    has_imgs = any(
+                        str((a or {}).get("kind") or "") == "image"
+                        for a in (msg.get("attachments") or []))
+                    if (content and content != t and (
+                            self.direct_image_generation_intent(content)
+                            or self._IMAGEISH_RE.search(content.lower()))) \
+                            or has_imgs:
+                        last_user_img = content or "use the attached image"
+            if job_ids and last_user_img and sources:
                 break
         if not job_ids and not last_user_img:
             return None
-        sources: list[str] = []
-        for p in (attached or []):
-            if p and Path(str(p)).is_file():
-                sources.append(str(p))
         if self._image_outputs is not None and job_ids:
             for jid in job_ids[:2]:
                 try:
@@ -767,7 +783,85 @@ class AgentOrchestrator:
         # Detailed follow-up text is the instruction itself; bare "do it"
         # reuses the last image-ish request as the effective prompt.
         prompt = t if (has_imagery or len(low.split()) > 8) else (last_user_img or t)
-        return {"prompt": prompt, "source_images": sources}
+        return {"prompt": prompt, "source_images": sources,
+                "meta": list((attach or {}).get("meta") or [])}
+
+    # Follow-ups that *refer* to an already-attached image for questions or
+    # discussion — routed to the vision lane (the edit path above claims the
+    # correction/imperative phrasings first).
+    _VISUAL_REFERENCE_RE = re.compile(
+        r"\b(?:(?:the|this|that)\s+(?:photo|picture|image|pic|selfie)\b|"
+        r"in\s+(?:the|this|that)\s+(?:photo|picture|image|pic)\b|"
+        r"what\s+(?:is|are|does|did|was)\s+(?:she|he|it|they)\b|"
+        r"what'?s\s+(?:she|he|it|wrong\s+with|on|in)\b|"
+        r"describe\s+(?:it|her|him|them|this|that|the)\b|"
+        r"look\s+at\s+(?:it|her|him|the|this|that)\b|"
+        r"she\s+(?:wearing|holding|doing)|(?:her|his|their)\s+"
+        r"(?:outfit|pose|face|expression|clothes?|dress|suit))\b", re.I)
+
+    _VISION_IMAGE_MIME = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+    }
+    _VISION_MAX_IMAGES = 4
+
+    def _vision_profile(self) -> ModelProfile | None:
+        """First enabled profile able to consume image input."""
+        try:
+            for m in self.router.enabled_models:
+                if getattr(m, "vision", False):
+                    return m
+        except Exception:
+            pass
+        return None
+
+    def _latest_stored_image_paths(self) -> list[str]:
+        """Image paths from the most recent attachment-bearing user message.
+
+        Persisted attachments survive restarts on disk, so a later visual
+        follow-up can re-send the same pixels to the vision model."""
+        if self.conversation_manager is None:
+            return []
+        messages = (self.conversation_manager.active() or {}).get("messages") or []
+        for msg in reversed(messages[-24:]):
+            if msg.get("role") != "user":
+                continue
+            paths = [
+                str((a or {}).get("path") or "")
+                for a in (msg.get("attachments") or [])
+                if str((a or {}).get("kind") or "") == "image"
+            ]
+            found = [p for p in paths if p and Path(p).is_file()]
+            if found:
+                return found
+        return []
+
+    def _vision_user_content(
+        self,
+        text: str,
+        image_paths: list[str],
+        profile: ModelProfile,
+    ) -> Any:
+        """User-turn content: plain text, or OpenAI-style multimodal parts
+        when the routed model can see the attached/stored images."""
+        if not getattr(profile, "vision", False) or not image_paths:
+            return text
+        parts: list[dict[str, Any]] = []
+        for raw in image_paths[: self._VISION_MAX_IMAGES]:
+            p = Path(str(raw))
+            mime = self._VISION_IMAGE_MIME.get(p.suffix.lower(), "image/png")
+            try:
+                data = base64.b64encode(p.read_bytes()).decode("ascii")
+            except Exception:
+                continue
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{data}"},
+            })
+        if not parts:
+            return text
+        parts.append({"type": "text", "text": text or "What is in this image?"})
+        return parts
 
     @staticmethod
     def _split_image_prompts(user_text: str) -> list[str]:
@@ -2383,6 +2477,7 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
+                attachments=session.attachments_meta,
             )
         if self.answer_memory is not None:
             try:
@@ -2875,6 +2970,7 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
+                attachments=session.attachments_meta,
             )
         self._close_session(session.task_id)
         return self._result(session)
@@ -2887,6 +2983,7 @@ class AgentOrchestrator:
         event_callback: Callable[[dict[str, Any]], None] | None,
         approved: bool | None = None,
         source_images: list[str] | None = None,
+        attachments_meta: list[dict[str, Any]] | None = None,
     ) -> AgentResult:
         decision = RoutingDecision(
             role="image",
@@ -3072,6 +3169,7 @@ class AgentOrchestrator:
                 intent="image",
                 model_id=model_id,
                 image_job_ids=self._image_job_ids_from_events([tool_event]),
+                attachments=attachments_meta,
             )
         return AgentResult(
             content=content,
@@ -3121,7 +3219,8 @@ class AgentOrchestrator:
         data/attachments and returned as local paths for the image lane or
         file tools. Everything is bounded so an attachment can't blow up the
         prompt or disk."""
-        out: dict[str, Any] = {"blocks": [], "image_paths": [], "notes": []}
+        out: dict[str, Any] = {"blocks": [], "image_paths": [], "notes": [],
+                               "meta": []}
         if not attachments:
             return out
         dest_dir = self.checkpoints.workspace / "data" / "attachments"
@@ -3135,6 +3234,11 @@ class AgentOrchestrator:
                 saved = self._save_attachment(name, str(item["data_url"]), dest_dir)
                 if saved is not None:
                     out["image_paths"].append(str(saved))
+                    # meta rides the stored message so the UI can re-render
+                    # the image and follow-ups can reuse it after restart.
+                    out["meta"].append({
+                        "kind": "image", "name": name,
+                        "path": str(saved)})
                 else:
                     out["notes"].append(f"attached image '{name}' could not be decoded")
                 continue
@@ -3145,10 +3249,12 @@ class AgentOrchestrator:
                 budget -= len(text)
                 suffix = "\n… [truncated]" if len(content) > take else ""
                 out["blocks"].append(f"--- {name} ---\n{text}{suffix}")
+                out["meta"].append({"kind": "file", "name": name})
             else:
                 out["notes"].append(
                     f"user attached '{name}' (binary or empty — contents not inlined)"
                 )
+                out["meta"].append({"kind": "file", "name": name})
         return out
 
     def run(
@@ -3225,7 +3331,8 @@ class AgentOrchestrator:
                         user_text, str(brain_envelope["answer"]),
                         intent=conversation_intent,
                         model_id="nexus-brain",
-                        response_source="brain_fast_path")
+                        response_source="brain_fast_path",
+                        attachments=attach["meta"])
                 return AgentResult(
                     content=str(brain_envelope["answer"]),
                     routing=RoutingDecision(
@@ -3285,6 +3392,7 @@ class AgentOrchestrator:
                 user_text=user_text,
                 event_callback=event_callback,
                 source_images=attach["image_paths"],
+                attachments_meta=attach["meta"],
             )
 
         # Context-dependent image follow-ups — "do it now", "that's not
@@ -3296,13 +3404,14 @@ class AgentOrchestrator:
             and self._brain_subroutine_enabled("image_generation", True)
         ):
             followup = self._resolve_image_followup(
-                user_text, attach["image_paths"])
+                user_text, attach)
             if followup is not None:
                 return self._direct_image_result(
                     task_id=task.id,
                     user_text=followup["prompt"],
                     event_callback=event_callback,
                     source_images=followup["source_images"],
+                    attachments_meta=followup["meta"],
                 )
 
         # Tier 0: deterministic/local handlers — before any hardware probe or
@@ -3327,7 +3436,9 @@ class AgentOrchestrator:
         local_response = (
             training_response or brain_blocked_response or builtin_response or memory_command
         )
-        if local_response is not None:
+        # A turn carrying an image must reach a model lane — a canned local
+        # answer can't acknowledge or analyze the photo at all.
+        if local_response is not None and not attach["image_paths"]:
             builtin_decision = RoutingDecision(
                 role="utility",
                 model_id="builtin-local",
@@ -3361,6 +3472,7 @@ class AgentOrchestrator:
                     local_response,
                     intent=conversation_intent,
                     model_id="builtin-local",
+                    attachments=attach["meta"],
                 )
             if (
                 self.model_growth is not None
@@ -3406,7 +3518,9 @@ class AgentOrchestrator:
                     "Checking learned answers for a trusted match",
                     callback=event_callback,
                 )
-                if memory_match.hit:
+                # A trusted learned answer can't account for a photo the
+                # user just attached — only context hints survive.
+                if memory_match.hit and not attach["image_paths"]:
                     return self._answer_memory_result(
                         task, user_text, memory_match,
                         event_callback=event_callback,
@@ -3439,9 +3553,24 @@ class AgentOrchestrator:
                     callback=event_callback,
                 )
 
+        # Vision lane: newly attached images — or an image still persisted
+        # from earlier in the conversation that this turn refers to — get
+        # routed to a multimodal model that sees the actual pixels instead
+        # of a bare path string. Image *edits* never reach here (the
+        # follow-up resolver and direct path claimed them already).
+        vision_image_paths = [str(p) for p in attach["image_paths"]]
+        if not vision_image_paths:
+            stored = self._latest_stored_image_paths()
+            if stored and self._VISUAL_REFERENCE_RE.search(user_text or ""):
+                vision_image_paths = stored
+        vision_override = mode
+        if (vision_image_paths and str(mode or "auto") in {"", "auto"}
+                and self._vision_profile() is not None):
+            vision_override = "vision"
+
         # Fast lanes exhausted — probe hardware and route to a model.
         self.runtime.refresh_hardware()
-        decision = self.router.choose(user_text, override=mode)
+        decision = self.router.choose(user_text, override=vision_override)
 
         model_events = [{
             "type": "selected",
@@ -3641,7 +3770,7 @@ class AgentOrchestrator:
         if attach["blocks"] or attach["notes"] or attach["image_paths"]:
             parts = list(attach["blocks"])
             parts.extend(attach["notes"])
-            if attach["image_paths"]:
+            if attach["image_paths"] and not getattr(profile, "vision", False):
                 parts.append(
                     "Attached image file(s) saved locally — usable as "
                     "source/reference paths by image tools:\n"
@@ -3712,7 +3841,8 @@ class AgentOrchestrator:
                     entry["content"] = content
                     kept.append(entry)
                 messages.extend(reversed(kept))
-            messages.append({"role": "user", "content": user_content})
+            messages.append({"role": "user", "content": self._vision_user_content(
+                user_content, vision_image_paths, profile)})
         else:
             project_memory = self.memory.context()
             index_act = self._act(
@@ -3821,7 +3951,8 @@ class AgentOrchestrator:
                     entry["content"] = content
                     kept.append(entry)
                 messages.extend(reversed(kept))
-            messages.append({"role": "user", "content": user_content})
+            messages.append({"role": "user", "content": self._vision_user_content(
+                user_content, vision_image_paths, profile)})
         session = _AgentSession(
             task_id=task.id,
             user_text=user_text,
@@ -3833,6 +3964,7 @@ class AgentOrchestrator:
             model_events=model_events,
             research_context=research_context,
             event_callback=event_callback,
+            attachments_meta=list(attach["meta"]),
             max_tokens=(
                 int(getattr(self.config, "fast_general_long_output_tokens", 2048))
                 if lightweight and wants_long_form(user_text)

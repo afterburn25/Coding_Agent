@@ -2564,6 +2564,35 @@ body {
   padding:0 2px;
 }
 
+/* Attachments rendered inside a stored message bubble — images on top. */
+.msg-attach {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:0 0 10px;
+}
+
+.msg-attach-img {
+  max-width:280px;
+  max-height:220px;
+  border-radius:8px;
+  border:1px solid #274a78;
+  object-fit:cover;
+  display:block;
+}
+
+.msg-attach-file {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 10px;
+  background:#0c1728;
+  border:1px solid #274a78;
+  border-radius:8px;
+  color:#c9d5e7;
+  font-size:11px;
+}
+
 .attach-chip button:hover {
   color:#ff7b8f;
 }

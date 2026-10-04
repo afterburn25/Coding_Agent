@@ -437,6 +437,11 @@ class RuntimeManager:
             "--port", str(port),
             "--ctx-size", str(ctx),
         ])
+        if profile.mmproj_path:
+            mmproj = self._resolve(profile.mmproj_path)
+            if not mmproj.is_file():
+                raise RuntimeError(f"mmproj projector file not found: {mmproj}")
+            cmd.extend(["--mmproj", str(mmproj)])
         if profile.gpu_layers:
             cmd.extend(["--gpu-layers", str(profile.gpu_layers)])
         if profile.threads > 0:

@@ -30,6 +30,7 @@ class ModelProfile:
     # v0.2 runtime lifecycle fields.
     runtime: str = "external"  # external | llama_cpp
     model_path: str = ""
+    mmproj_path: str = ""  # multimodal projector (GGUF) for vision models
     executable: str = ""
     host: str = "127.0.0.1"
     port: int = 0

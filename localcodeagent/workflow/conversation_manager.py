@@ -272,10 +272,12 @@ class ConversationManager:
         model_id: str = "",
         image_job_ids: list[str] | None = None,
         response_source: str = "",
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         user = self._clean(user)
         assistant = self._clean(assistant)
-        if not user or not assistant:
+        # Attachment-only turns (photo, no text) still belong in history.
+        if not (user or attachments) or not assistant:
             return self.active()
         with self._lock:
             row = self._get()
@@ -294,10 +296,13 @@ class ConversationManager:
                 assistant_message["image_job_ids"] = [str(j) for j in image_job_ids if str(j)]
             if response_source:
                 assistant_message["response_source"] = response_source
-            row.setdefault("messages", []).extend([
-                {"id": uuid.uuid4().hex[:12], "role": "user", "content": user, "timestamp": now},
-                assistant_message,
-            ])
+            user_message = {"id": uuid.uuid4().hex[:12], "role": "user",
+                            "content": user, "timestamp": now}
+            if attachments:
+                # Persisted with the message so attached images re-render
+                # on reload and image follow-ups can reuse the file path.
+                user_message["attachments"] = attachments
+            row.setdefault("messages", []).extend([user_message, assistant_message])
             row["messages"] = row["messages"][-400:]
             row["updated_at"] = now
             self._summarize(row)
