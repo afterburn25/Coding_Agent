@@ -135,7 +135,14 @@
   with provenance/confidence, scoped retrieval, contradiction linking
   (both sides marked, never silently preferred), resolution with
   winner confirmation, open-question tracking. API: `/api/evidence`
-  (+contradict/resolve). Next: reliability scoring, regression
+  (+contradict/resolve).
+- **Phase 5** — persisted reliability scoring (`reliability.py`):
+  per-subject calls/ok/latency/retries/error-classes + rolling window,
+  self-healing status tiers (verified/available/degraded/broken/
+  untested/disabled/unavailable), `CapabilityHealth` with self-test
+  probes, and `ToolRouter` now records every outcome into the durable
+  tracker. API: `/api/reliability` (+record), `/api/capabilities`
+  (+probe). Docs: `docs/RELIABILITY.md`. Next: regression
   memory/bisect, resource modes,
   offline/egress, lineage, Safe Mode, golden config, RC scorecard.
 
@@ -1019,7 +1026,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1451 tests` passing (2 environment skips).
+Expected at this checkpoint: `1460 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
