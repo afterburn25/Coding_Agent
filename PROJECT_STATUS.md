@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1357 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1367 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Decomposed planning + STT + operational state
 
@@ -26,8 +26,12 @@ v0.15.0 deepens the workstation core:
   away" digest shown once per chat load after ≥20 min idle.
 - **Mission checkpoints** — bounded per-node progress trail for
   restart forensics.
+- **Knowledge Library + correction learning** — managed document
+  ingestion with project/provenance metadata; explicit corrections become
+  inspectable scoped preference candidates with activation, edit, forget,
+  and protected-identity/permission guardrails.
 
-Verified: **1357 tests** (2 environment skips).
+Verified: **1367 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 

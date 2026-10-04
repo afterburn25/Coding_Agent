@@ -392,6 +392,9 @@
 
   async function renderProfile(host) {
     const ob = await api("/api/onboarding/status");
+    if (!status) status = await api("/api/status").catch(() => null);
+    const prefProjects = await api("/api/projects")
+      .then((r) => r.projects || []).catch(() => []);
     const p = (ob.profiles || []).find((x) => x.profile_id === ob.active) || null;
     if (!p) {
       host.innerHTML = `<div class="settings-title"><div><h2>Profile</h2><p>No profile exists yet.</p></div></div>
@@ -400,6 +403,22 @@
     }
     const avUrl = p.avatar_path
       ? `/api/profiles/${encodeURIComponent(p.profile_id)}/avatar` : "";
+    const workspaceScope = `project:${(status && status.workspace) || ""}`;
+    const scopeOptions = [
+      [`profile:${p.profile_id}`, "This profile"],
+      ["global", "Global"],
+      ...((status && status.workspace)
+          ? [[workspaceScope, "This workspace"]] : []),
+      ...(prefProjects || []).map((proj) =>
+        [`project:${proj.id || proj.project_id}`, `Project: ${proj.name || proj.id || proj.project_id}`]),
+    ];
+    const scopeLabel = (scope) => {
+      const hit = scopeOptions.find(([value]) => value === scope);
+      if (hit) return hit[1];
+      if (String(scope).startsWith("profile:")) return "Another profile";
+      if (String(scope).startsWith("project:")) return "Project scope";
+      return scope || "global";
+    };
     host.innerHTML = `
       <div class="settings-title"><div><h2>Profile</h2>
         <p>Identity is locked at creation. Contact and location stay editable.</p></div></div>
@@ -445,6 +464,20 @@
           <input id="pmText" placeholder="Remember something about you…"
                  style="flex:1" maxlength="4000" />
           <button id="pmAdd" class="mini-button" type="button">Remember</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Learned Preferences</h3>
+        <p class="muted small">Explicit corrections become candidates first;
+        repeated or user-activated rules become active. They never override
+        identity, permissions, safety, or factual correctness.</p>
+        <div id="prefList" class="pm-list"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <input id="prefText" placeholder="Add a behavior rule…"
+                 style="flex:1" maxlength="300" />
+          <select id="prefScope">${scopeOptions.map(([value, label]) =>
+            `<option value="${esc(value)}">${esc(label)}</option>`).join("")}</select>
+          <button id="prefAdd" class="mini-button" type="button">Add</button>
         </div>
       </div>
       <div class="settings-section">
@@ -507,6 +540,73 @@
       catch (e2) { alert(e2.message); }
     });
     loadMem();
+
+    // --- learned preferences (inspect / activate / edit / forget) ---
+    const prefList = host.querySelector("#prefList");
+    const renderPrefs = (rules) => {
+      prefList.innerHTML = (rules || []).map((r) => `
+        <div class="pm-item" data-pref="${esc(r.id)}" data-scope="${esc(r.scope)}">
+          <div class="pm-text">
+            <div>${esc(r.rule)}</div>
+            <div class="muted small">${esc(scopeLabel(r.scope))} ·
+              ${r.active ? "active" : "candidate"} · confidence
+              ${Math.round((r.confidence || 0) * 100)}% · seen
+              ${r.count || 1}×</div>
+          </div>
+          <button class="mini-button" data-pref-toggle type="button">${r.active ? "Pause" : "Activate"}</button>
+          <button class="mini-button" data-pref-edit type="button">Edit</button>
+          <button class="mini-button danger pm-forget" data-pref-forget type="button">Forget</button>
+        </div>`).join("")
+        || '<span class="muted small">No learned preferences yet.</span>';
+    };
+    const loadPrefs = async () => {
+      try {
+        const r = await api("/api/preferences");
+        renderPrefs(r.rules || []);
+      } catch {
+        prefList.innerHTML = '<span class="muted small">Unavailable.</span>';
+      }
+    };
+    host.querySelector("#prefAdd").addEventListener("click", async () => {
+      const text = $("prefText").value.trim();
+      if (!text) return;
+      try {
+        await post("/api/preferences/add", {
+          rule: text, scope: $("prefScope").value, active: true });
+        $("prefText").value = ""; loadPrefs();
+      } catch (e) { alert(e.message); }
+    });
+    prefList.addEventListener("click", async (e) => {
+      const row = e.target.closest(".pm-item");
+      const id = row && row.dataset.pref;
+      if (!id) return;
+      try {
+        if (e.target.closest("[data-pref-toggle]")) {
+          const active = !e.target.closest("[data-pref-toggle]")
+            .textContent.includes("Pause");
+          await post("/api/preferences/toggle", { id, active });
+          loadPrefs(); return;
+        }
+        if (e.target.closest("[data-pref-edit]")) {
+          const cur = row.querySelector(".pm-text div").textContent;
+          const next = prompt("Edit learned preference", cur);
+          if (next === null) return;
+          const nextScope = prompt(
+            "Scope: global, profile:<id>, or project:<id>",
+            row.dataset.scope || "global");
+          if (nextScope === null) return;
+          await post("/api/preferences/update", {
+            id, rule: next, scope: nextScope });
+          loadPrefs(); return;
+        }
+        if (e.target.closest("[data-pref-forget]")) {
+          if (!confirm("Forget this learned preference?")) return;
+          await post("/api/preferences/forget", { id });
+          loadPrefs();
+        }
+      } catch (e2) { alert(e2.message); }
+    });
+    loadPrefs();
 
     // --- avatar change (same circular-crop model as onboarding) ---
     const cvs = host.querySelector("#profAvatarCanvas");

@@ -63,6 +63,7 @@ class AutonomousSupervisor:
         signal_sources: dict | None = None,
         worker_manager: Any = None,
         projects: Any = None,                # ProjectStore — context + history
+        preferences: Any = None,             # PreferenceStore — learned overlays
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -81,6 +82,7 @@ class AutonomousSupervisor:
         self._emit_bus = emit or (lambda t, p: None)
         self.enabled = enabled
         self.projects = projects
+        self.preferences = preferences
 
         self.missions = MissionStore(
             self.store,
@@ -766,7 +768,13 @@ class AutonomousSupervisor:
             pid = str(row.get("project_id") or "")
             if pid and self.projects is not None:
                 try:
-                    row["project_context"] = self.projects.context_digest(pid)
+                    ctx = self.projects.context_digest(pid)
+                    if self.preferences is not None:
+                        overlay = self.preferences.overlay_text(
+                            project_id=pid)
+                        if overlay:
+                            ctx = (ctx + "\n\n" + overlay).strip()
+                    row["project_context"] = ctx
                 except Exception:
                     row["project_context"] = ""
             tasks = self.planner.initial_plan(row)

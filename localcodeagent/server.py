@@ -138,6 +138,8 @@ class AppState:
         self.queue = WorkQueue(self.workspace)
         from .projects import ProjectStore
         self.projects = ProjectStore(runtime_root / "data")
+        from .preferences import PreferenceStore
+        self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
         # Drop snapshots whose task aged out of the ledger — checkpoints
         # hold per-file copies and would otherwise grow without bound.
@@ -716,9 +718,35 @@ class AppState:
             active = PersonalityStore(pdir).resolve_active(
                 is_adult=bool(prof.get("is_adult")))
             mems = PersonalMemory(pdir).list(limit=20)
-            return _profile_prompt_text(prof, active, mems)
+            text = _profile_prompt_text(prof, active, mems)
+            overlay = self.preferences.overlay_text(
+                profile_id=str(prof.get("profile_id") or ""),
+                project_id=str(self.workspace))
+            return (text + "\n\n" + overlay).strip() if overlay else text
         except Exception:
             return ""
+
+    def _preference_scopes(self) -> set[str]:
+        """Preference scopes the active profile may inspect or edit."""
+        scopes = {"global", f"project:{self.workspace}"}
+        try:
+            prof = self.profiles.active() or {}
+            pid = str(prof.get("profile_id") or "")
+            if pid:
+                scopes.add(f"profile:{pid}")
+                for proj in self.projects.list(profile_id=pid):
+                    scopes.add(f"project:{proj.get('id')}")
+        except Exception:
+            pass
+        return scopes
+
+    def visible_preferences(self) -> list[dict]:
+        scopes = self._preference_scopes()
+        return [r for r in self.preferences.list()
+                if str(r.get("scope") or "global") in scopes]
+
+    def preference_scope_allowed(self, scope: str) -> bool:
+        return str(scope or "global") in self._preference_scopes()
 
     def _voice_delivery_map(self) -> dict:
         """Active profile's voice delivery for the TTS pipeline.
@@ -1193,6 +1221,7 @@ class AppState:
             metrics=registry,
             worker_manager=self.workers,
             projects=self.projects,
+            preferences=self.preferences,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         sup.repair = self._build_self_repair(config, sup, runtime_root,
@@ -5249,6 +5278,9 @@ class Handler(BaseHTTPRequestHandler):
                 proj["memory_summary"] = self.state.projects.memory_summary(pid)
             self._json(proj)
             return
+        if path == "/api/preferences":
+            self._json({"rules": self.state.visible_preferences()})
+            return
         # Knowledge Library — managed document catalog.
         if path == "/api/library":
             self._json({"documents": self.state.library.list(),
@@ -6384,6 +6416,26 @@ class Handler(BaseHTTPRequestHandler):
                 message = str(body.get("message", "")).strip()
                 mode = str(body.get("mode", "auto"))
                 self.state.note_interaction()
+                # Explicit behavior corrections ("stop asking…", "always …")
+                # become candidate preferences — never silent mutations.
+                try:
+                    _prof = self.state.profiles.active() or {}
+                    rule = self.state.preferences.observe(
+                        message,
+                        profile_id=str(_prof.get("profile_id") or ""),
+                        project_id=str(self.state.workspace))
+                    if rule and rule.get("blocked"):
+                        self.state.events.publish("task", {
+                            "event": "preference_blocked",
+                            "rule": rule.get("rule"),
+                            "reason": rule.get("blocked")})
+                    elif rule and rule.get("active") and rule.get("count") == 2:
+                        self.state.events.publish("task", {
+                            "event": "preference_learned",
+                            "rule": rule.get("rule"),
+                            "scope": rule.get("scope")})
+                except Exception:
+                    pass
                 chat_attachments = _clean_attachments(body)
                 if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
@@ -6739,6 +6791,72 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unsupported project action"}, 400)
                 return
 
+            if path == "/api/preferences/add":
+                rule = str(body.get("rule") or "").strip()
+                scope = str(body.get("scope") or "global")
+                if not rule:
+                    self._json({"error": "rule is required"}, 400)
+                    return
+                if not self.state.preference_scope_allowed(scope):
+                    self._json({"error": "scope is not visible to the active profile"}, 403)
+                    return
+                try:
+                    out = self.state.preferences.add(
+                        rule, scope=scope,
+                        active=bool(body.get("active", True)))
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self._json({"ok": True, "rule": out})
+                return
+            if path == "/api/preferences/update":
+                rid = str(body.get("id") or "")
+                target = next((r for r in self.state.visible_preferences()
+                               if r.get("id") == rid), None)
+                if target is None:
+                    self._json({"error": "preference not found"}, 404)
+                    return
+                if (body.get("scope") is not None and
+                        not self.state.preference_scope_allowed(
+                            str(body.get("scope") or ""))):
+                    self._json({"error": "scope is not visible to the active profile"}, 403)
+                    return
+                try:
+                    out = self.state.preferences.update(
+                        rid,
+                        rule=body.get("rule")
+                        if body.get("rule") is not None else None,
+                        scope=body.get("scope")
+                        if body.get("scope") is not None else None,
+                        active=body.get("active")
+                        if body.get("active") is not None else None)
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self._json({"ok": out is not None, "rule": out},
+                           200 if out is not None else 404)
+                return
+            if path == "/api/preferences/toggle":
+                rid = str(body.get("id") or "")
+                target = next((r for r in self.state.visible_preferences()
+                               if r.get("id") == rid), None)
+                if target is None:
+                    self._json({"ok": False}, 404)
+                    return
+                ok = self.state.preferences.set_active(
+                    rid, bool(body.get("active")))
+                self._json({"ok": ok}, 200 if ok else 404)
+                return
+            if path == "/api/preferences/forget":
+                rid = str(body.get("id") or "")
+                target = next((r for r in self.state.visible_preferences()
+                               if r.get("id") == rid), None)
+                if target is None:
+                    self._json({"ok": False}, 404)
+                    return
+                ok = self.state.preferences.forget(rid)
+                self._json({"ok": ok}, 200 if ok else 404)
+                return
             if path == "/api/library/import":
                 src = str(body.get("path") or "").strip()
                 if not src:

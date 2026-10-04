@@ -11,6 +11,21 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## Current milestone — v0.15.0 autonomous workstation layers
+
+- `main` now carries the decomposed mission planner (parallel lanes →
+  integrate → review → verify), plan versioning, project-linked mission
+  context, code-reference/impact tools, STT/push-to-talk + hands-free
+  session control, operational state + return briefing, mission
+  checkpoints, Knowledge Library, and structured correction learning.
+- Correction-learning invariant: `PreferenceStore` learns only explicit
+  behavioral directives as candidates; repeated evidence or user action
+  activates them, prompt overlays are bounded, and permissions/safety/
+  secrets/creator-locked identity can never be overridden. See
+  `docs/LEARNING.md`.
+- Canonical portrait hook remains `web/assets/nexus-portrait.*`; do not
+  substitute another face or character for Nexus.
+
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
 - **Uninstall actually removes {app}**: Inno only deletes tracked files;

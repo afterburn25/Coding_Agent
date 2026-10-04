@@ -103,7 +103,7 @@ The orchestrator keeps the live model/tool continuation state in memory while `T
 
 `ConversationMemory` is app-wide and stored under the preserved `data/` area. It keeps bounded recent chat plus explicit preferences/rules and correction examples. Prompt-time rules affect behavior immediately; model-weight training remains a separate explicit offline workflow.
 
-`ConversationManager` owns durable conversation sessions, search/restore, summaries, personality, and feedback. `KnowledgeMemory` stores sourced learned answers with provenance and expiration/freshness metadata. `ModelGrowthLab` turns reviewed behavior/correction/knowledge candidates into versioned offline training datasets/jobs and only promotes evaluated artifacts explicitly.
+`ConversationManager` owns durable conversation sessions, search/restore, summaries, personality, and feedback. `KnowledgeMemory` stores sourced learned answers with provenance and expiration/freshness metadata. `PreferenceStore` (`localcodeagent/preferences.py`) turns explicit behavioral corrections into scoped, inspectable overlays for prompt/project context — never silent permanent rules. `ModelGrowthLab` turns reviewed behavior/correction/knowledge candidates into versioned offline training datasets/jobs and only promotes evaluated artifacts explicitly.
 
 Conversation-policy posture is prompt-layer configuration (`permissive`, `balanced`, `strict`). It changes refusal sensitivity/tone but does not replace the narrow hard policies enforced by specific tool/action modules.
 

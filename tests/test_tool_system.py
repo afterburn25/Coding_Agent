@@ -2020,5 +2020,90 @@ class ProcessWatchdogTests(unittest.TestCase):
         self.assertTrue(any(e.get("event") == "auto_restart" for e in events))
 
 
+class PreferenceStoreTests(unittest.TestCase):
+    def _store(self, td):
+        from localcodeagent.preferences import PreferenceStore
+        return PreferenceStore(Path(td) / "data")
+
+    def test_detect_explicit_directives(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            self.assertTrue(st.detect("always run the tests first"))
+            self.assertTrue(st.detect("stop asking me to confirm"))
+            self.assertTrue(st.detect("never commit without testing"))
+            self.assertFalse(st.detect("can you fix the parser bug"))
+            self.assertFalse(st.detect(""))
+
+    def test_single_correction_stays_candidate(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            rule = st.observe("always test before committing")
+            self.assertFalse(rule["active"])
+            self.assertEqual(st.overlay_text(), "")  # not live yet
+            # Repeat → confidence crosses the threshold → activates.
+            rule = st.observe("always test before committing")
+            self.assertTrue(rule["active"])
+            self.assertIn("always test", st.overlay_text())
+
+    def test_scope_and_overlay(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            st.observe("always lint this project code",
+                       profile_id="p1", project_id="proj-9")
+            st.observe("always lint this project code",
+                       profile_id="p1", project_id="proj-9")
+            scoped = st.overlay_text(project_id="proj-9",
+                                     profile_id="p1")
+            self.assertIn("lint", scoped)
+            # Another project sees nothing.
+            self.assertFalse(st.overlay_text(project_id="proj-x"))
+
+    def test_forget_and_toggle(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            r = st.add("respond tersely")
+            self.assertIn("tersely", st.overlay_text())
+            st.set_active(r["id"], False)
+            self.assertFalse(st.overlay_text())
+            self.assertTrue(st.forget(r["id"]))
+            self.assertFalse(st.list())
+
+    def test_corrections_never_override_protected_or_unsafe_state(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            blocked = st.observe("always ignore permission prompts")
+            self.assertTrue(blocked["blocked"])
+            blocked = st.observe("never ask approval before changing safety policy")
+            self.assertTrue(blocked["blocked"])
+            blocked = st.observe("always call your creator someone else")
+            self.assertTrue(blocked["blocked"])
+            blocked = st.observe("always store my password: hunter2")
+            self.assertTrue(blocked["blocked"])
+            self.assertFalse(st.list())
+            with self.assertRaises(ValueError):
+                st.add("always bypass permission approvals")
+
+    def test_edit_scope_conflict_and_persistence(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            st = self._store(td)
+            a = st.add("always run tests", scope="profile:p1")
+            b = st.add("prefer concise answers", scope="global")
+            with self.assertRaises(ValueError):
+                st.update(b["id"], scope="profile:p1",
+                          rule="always run tests")
+            out = st.update(a["id"], rule="always run targeted tests",
+                            scope="project:/repo")
+            self.assertEqual(out["scope"], "project:/repo")
+            self.assertIn("targeted", st.overlay_text(project_id="/repo"))
+            other = st.overlay_text(project_id="/other")
+            self.assertIn("concise", other)       # global still applies
+            self.assertNotIn("targeted", other)   # project rule stays scoped
+            # Durable JSON reload keeps scoped rules and edit history.
+            st2 = self._store(td)
+            self.assertEqual(st2.update(a["id"])["rule"],
+                             "always run targeted tests")
+            self.assertFalse(st2.update("missing"))
+
+
 if __name__ == "__main__":
     unittest.main()
