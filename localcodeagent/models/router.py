@@ -94,6 +94,19 @@ class ModelRouter:
             "database", "api", "github", "git", "function", "class", "script",
             "website", "webpage", "button", "chat nexus",
         )
+        # Tool-requiring intents must never land on the utility lane — utility
+        # sessions carry no tool schemas. Route them to the lightest
+        # tool-capable tier instead.
+        tool_signals = (
+            "generate an image", "generate a picture", "generate a photo",
+            "make an image", "make a picture", "make a photo", "create an image",
+            "create a picture", "draw ", "paint ", "sketch ", "render ",
+            "image of", "picture of", "photo of", "pic of", "wallpaper",
+            "generate a pic", "make a pic", "image generation", "image of a",
+        )
+        if any(signal in t for signal in tool_signals):
+            return "light_coder", 1, ["tool-using request needs a tool-capable lane"]
+
         if (
             len(t) <= 320
             and not any(signal in t for signal in current_info_signals)
@@ -138,7 +151,10 @@ class ModelRouter:
         if any(term in t for term in ("screenshot", "analyze this image", "look at this image", "attached image", "vision task")):
             return "vision", score, reasons + ["visual-input understanding requested"]
         if score <= 1:
-            return "fast_coder", score, reasons or ["low-complexity coding task"]
+            # Lightest tool-capable model first — the utility lane carries no
+            # tools, so simple-but-real work lands on light_coder (8B); the
+            # heavier tiers only engage when complexity or failures demand it.
+            return "light_coder", score, reasons or ["low-complexity request"]
         if score >= 6:
             return "deep_reasoner", score, reasons or ["high-complexity task"]
         return "primary_coder", score, reasons or ["general coding task"]

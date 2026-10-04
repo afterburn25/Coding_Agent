@@ -34,9 +34,11 @@ class RouterTests(unittest.TestCase):
         d = self.router.choose("Help me debug this backend error")
         self.assertNotEqual(d.role, "utility")
 
-    def test_simple_task_uses_fast(self):
+    def test_simple_task_uses_lightest_tool_lane(self):
+        # score<=1 requests take the lightest tool-capable lane
+        # (light_coder) — the utility lane carries no tools.
         d = self.router.choose("Rename the Save button to Apply")
-        self.assertEqual(d.role, "fast_coder")
+        self.assertEqual(d.role, "light_coder")
         self.assertEqual(d.model_id, "fast")
 
     def test_complex_task_uses_deep(self):
@@ -59,10 +61,9 @@ class RouterTests(unittest.TestCase):
                          roles=["primary_coder"], priority=10),
         ])
         d = router.choose("Rename the Save button to Apply")
-        # light_coder canonicalizes to lightweight_reasoner; fast_coder →
-        # primary_coder, so the light model should not match a fast_coder
-        # request — the primary model serves it.
-        self.assertEqual(d.model_id, "big")
+        # Simple tasks classify light_coder, which the tier-2 "lite" model
+        # serves directly — no need for the primary model.
+        self.assertEqual(d.model_id, "lite")
         d2 = router.choose("x", override="lightweight_reasoner")
         self.assertEqual(d2.model_id, "lite")
 
@@ -76,8 +77,8 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(d.model_id, "aliased")
 
     def test_fallback_prefers_nearest_tier(self):
-        """No primary-tier model: a fast_coder request degrades to the
-        tier-2 light reasoner, never to the tier-1 utility model."""
+        """A light_coder request lands on the tier-2 model directly, never
+        on the tier-1 utility model (which carries no tools)."""
         router = ModelRouter([
             ModelProfile(id="tiny", endpoint="http://x", model="tiny",
                          roles=["utility"], priority=10),
@@ -85,7 +86,7 @@ class RouterTests(unittest.TestCase):
                          roles=["light_coder"], priority=10),
         ])
         d = router.choose("Rename the Save button to Apply")
-        self.assertEqual(d.role, "fast_coder")
+        self.assertEqual(d.role, "light_coder")
         self.assertEqual(d.model_id, "lite")
 
 
