@@ -633,6 +633,11 @@ internal sealed class BackendProcess : IDisposable
         try { Directory.CreateDirectory(logDir); } catch { }
         AppendHostLog(logPath, "backend start requested");
 
+        // Staged update / LKG rollback — the running frozen exe cannot
+        // replace itself, so the backend writes flags under data/lkg/ and
+        // the host executes them here, before the new process launches.
+        ApplyLkgFlags(appDir, logPath);
+
         // Right after an update the freshly-written backend exe can be
         // briefly invisible/inaccessible while Defender scans it — the
         // installer's post-install launch hits this window. Wait for the
@@ -776,6 +781,113 @@ internal sealed class BackendProcess : IDisposable
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         return backend;
+    }
+
+    /// <summary>
+    /// Execute pending LKG coordination flags the backend left under
+    /// data/lkg/ — a rollback request restores a verified snapshot over
+    /// backend/ + config.json + VERSION; an update request swaps the
+    /// staged backend-new/ tree into place. The flag is always consumed
+    /// first so a failed apply can never loop forever. Rollback wins
+    /// when both are pending — it is the recovery action.
+    /// </summary>
+    private static void ApplyLkgFlags(string appDir, string logPath)
+    {
+        var lkgDir = Path.Combine(appDir, "data", "lkg");
+        try
+        {
+            var rbFlag = Path.Combine(lkgDir, "rollback.flag");
+            if (File.Exists(rbFlag))
+            {
+                string name;
+                string reason;
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(rbFlag));
+                    name = doc.RootElement.TryGetProperty("name", out var n)
+                        ? n.GetString() ?? "" : "";
+                    reason = doc.RootElement.TryGetProperty("reason", out var r)
+                        ? r.GetString() ?? "" : "";
+                }
+                catch { name = ""; reason = "unreadable flag"; }
+                File.Delete(rbFlag);
+                var snap = Path.Combine(lkgDir, name);
+                if (name.Length > 0 && Directory.Exists(snap))
+                {
+                    var snapBackend = Path.Combine(snap, "backend");
+                    var liveBackend = Path.Combine(appDir, "backend");
+                    if (Directory.Exists(snapBackend))
+                    {
+                        var spare = Path.Combine(appDir, "backend-replaced");
+                        if (Directory.Exists(spare)) Directory.Delete(spare, true);
+                        if (Directory.Exists(liveBackend))
+                            Directory.Move(liveBackend, spare);
+                        CopyTree(snapBackend, liveBackend);
+                    }
+                    foreach (var f in new[] { "config.json", "VERSION" })
+                    {
+                        var src = Path.Combine(snap, f);
+                        if (File.Exists(src)) File.Copy(src, Path.Combine(appDir, f), true);
+                    }
+                    AppendHostLog(logPath, $"LKG rollback applied from {name} ({reason})");
+                }
+                else
+                {
+                    AppendHostLog(logPath, $"rollback flag named missing snapshot '{name}' — ignored");
+                }
+            }
+            var upFlag = Path.Combine(lkgDir, "update.flag");
+            if (File.Exists(upFlag))
+            {
+                string stagedDir;
+                string version;
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(upFlag));
+                    stagedDir = doc.RootElement.TryGetProperty("staged_dir", out var s)
+                        ? s.GetString() ?? "" : "";
+                    version = doc.RootElement.TryGetProperty("version", out var v)
+                        ? v.GetString() ?? "" : "";
+                }
+                catch { stagedDir = ""; version = ""; }
+                File.Delete(upFlag);
+                // Only allow a flat directory name — never a path escape.
+                if (stagedDir.Length > 0
+                    && stagedDir == Path.GetFileName(stagedDir))
+                {
+                    var staged = Path.Combine(appDir, stagedDir);
+                    var liveBackend = Path.Combine(appDir, "backend");
+                    if (Directory.Exists(staged)
+                        && File.Exists(Path.Combine(staged, "ChatNexus.Backend.exe")))
+                    {
+                        var old = Path.Combine(appDir, "backend-old");
+                        if (Directory.Exists(old)) Directory.Delete(old, true);
+                        if (Directory.Exists(liveBackend))
+                            Directory.Move(liveBackend, old);
+                        Directory.Move(staged, liveBackend);
+                        AppendHostLog(logPath, $"staged update applied ({version})");
+                    }
+                    else
+                    {
+                        AppendHostLog(logPath, $"update flag named incomplete staging '{stagedDir}' — ignored");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // LKG handling must never block the normal launch path.
+            AppendHostLog(logPath, $"LKG flag handling failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void CopyTree(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.GetFiles(src))
+            File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), true);
+        foreach (var d in Directory.GetDirectories(src))
+            CopyTree(d, Path.Combine(dst, Path.GetFileName(d)));
     }
 
     public async Task WaitUntilHealthyAsync(TimeSpan timeout)

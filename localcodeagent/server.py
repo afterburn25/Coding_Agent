@@ -471,6 +471,22 @@ class AppState:
             previous_clean=not bool(self.prior_session_abnormal))
         self.golden = GoldenConfigStore(
             runtime_root / "data" / "golden", workspace)
+        # Last-known-good application snapshots (backend + config). When
+        # repeated unclean boots accumulate, stage a rollback request the
+        # desktop host executes before the next backend launch — a running
+        # frozen exe cannot replace itself.
+        from .lkg import AUTO_ROLLBACK_THRESHOLD, LkgStore
+        self.lkg = LkgStore(runtime_root, runtime_root / "data" / "lkg")
+        try:
+            if (self.safemode.consecutive_failures >= AUTO_ROLLBACK_THRESHOLD
+                    and not self.lkg.rollback_flag.exists()
+                    and self.lkg.latest()):
+                self.lkg.request_rollback(
+                    reason=(f"{self.safemode.consecutive_failures} "
+                            "consecutive unclean boots"))
+        except Exception:
+            pass
+
         # Durable crash/recovery history — patterns feed diagnostics, the
         # tuner and Digital Twin calibration across restarts.
         netdiag.configure_history(runtime_root / "data" / "crash_history.jsonl")
@@ -804,6 +820,23 @@ class AppState:
         self._start_source_sync()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def self_update(self, source_dir: str = "") -> "object":
+        """Lazily build the update bootstrapper. Source defaults to the
+        install's Source/ checkout (installed layout) or the workspace
+        (dev layout); callers may override with an explicit path."""
+        from .selfupdate import SelfUpdate
+        src = Path(source_dir) if source_dir else None
+        if src is None:
+            for cand in (Path(self.workspace) / "Source",
+                         Path(self.workspace)):
+                if (cand / ".git").exists():
+                    src = cand
+                    break
+        if src is None:
+            src = Path(self.workspace)
+        return SelfUpdate(Path(self.config_path).parent.resolve(),
+                          src, self.lkg)
 
     def _build_capability_registry(self, config) -> "CapabilityRegistry":
         """First-class Capability Registry — probed real states for what
@@ -5171,7 +5204,8 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
-                          "/api/rc", "/api/dependencies",
+                          "/api/lkg", "/api/update", "/api/rc",
+                          "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
                           "/api/specialists")
@@ -5262,6 +5296,19 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/golden/verify/"):
             name = unquote(path[len("/api/golden/verify/"):]).strip("/")
             self._json(self.state.golden.verify(name))
+            return True
+        if path == "/api/lkg":
+            self._json(self.state.lkg.status())
+            return True
+        if path == "/api/update/status":
+            # Status is a fast read — no network fetch; apply() plans fresh.
+            self._json({"lkg": self.state.lkg.status(),
+                        "plan": self.state.self_update(
+                            (q.get("source") or [""])[0]).plan(fetch=False)})
+            return True
+        if path.startswith("/api/lkg/verify/"):
+            name = unquote(path[len("/api/lkg/verify/"):]).strip("/")
+            self._json(self.state.lkg.verify(name))
             return True
         if path == "/api/lineage":
             self._json({"records": self.state.lineage.list(
@@ -5483,6 +5530,32 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/golden/restore":
             out = self.state.golden.restore(str(body.get("name") or ""))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/lkg/snapshot":
+            self._json(self.state.lkg.snapshot(
+                label=str(body.get("label") or "")))
+            return True
+        if path == "/api/lkg/rollback":
+            out = self.state.lkg.request_rollback(
+                str(body.get("name") or ""),
+                reason=str(body.get("reason") or "user requested"))
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/update/plan":
+            self._json(self.state.self_update(
+                str(body.get("source") or "")).plan())
+            return True
+        if path == "/api/update/apply":
+            # Self-modification stays behind an explicit confirmation —
+            # it stages build output over the live install on next boot.
+            if not body.get("confirm"):
+                self._json({"error": "pass confirm: true to stage an update"},
+                           400)
+                return True
+            self._json(self.state.self_update(
+                str(body.get("source") or "")).apply(
+                    run_tests=bool(body.get("run_tests", True)),
+                    build=bool(body.get("build", True))))
             return True
         if path == "/api/lineage":
             row = self.state.lineage.record(
