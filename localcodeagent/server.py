@@ -2793,7 +2793,7 @@ class AppState:
         if now - getattr(self, "_disk_warn_at", 0.0) < 3600:
             return
         try:
-            usage = shutil.disk_usage(self.state.workspace)
+            usage = shutil.disk_usage(self.workspace)
             free_gb = usage.free / (1024 ** 3)
         except OSError:
             return
@@ -2802,7 +2802,7 @@ class AppState:
             self._bus_emit({"type": "model", "event": {
                 "type": "disk_low",
                 "free_gb": round(free_gb, 2),
-                "path": str(self.state.workspace),
+                "path": str(self.workspace),
             }})
 
     def _bus_emit(self, event: dict) -> None:
