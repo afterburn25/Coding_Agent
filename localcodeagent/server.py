@@ -419,6 +419,11 @@ class AppState:
         from .lineage import LineageStore
         self.lineage = LineageStore(runtime_root / "data" / "lineage.json")
         self.artifacts.lineage = self.lineage
+        from .tools.release import register_release_tools
+        register_release_tools(
+            self.tools, self.workspace,
+            artifacts=lambda: self.artifacts,
+            extra_roots=self.workspaces.allowed_roots)
         from .dependencies import DependencyStore
         from .environment import EnvironmentStore
         self.dependencies = DependencyStore(

@@ -109,6 +109,9 @@ evidence — nothing claims an action that did not run.
 - **Pipeline stage strip** — coding-pipeline missions render an
   ordered spec→implement→verify→review→serve→commit chip strip with
   live node states in the mission detail panel.
+- **Release packaging** — `package_release` zips a workspace directory
+  into `.agent/releases/` and registers a sha256-hashed archive
+  artifact with provenance; `release_verify` re-hashes on demand.
 - **Dependency audit tools** — `dep_list` parses declared deps from
   requirements.txt/pyproject.toml/package.json/Cargo.toml with no
   network; `project_audit` runs the real auditor per ecosystem
