@@ -137,23 +137,51 @@ def _command_for(entry: dict[str, Any], action: str) -> str | None:
     return None
 
 
-def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_timeout: int = 600) -> None:
+def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_timeout: int = 600, extra_roots=None) -> None:
+
+    def _roots() -> list[Path]:
+        roots = [workspace.resolve()]
+        if extra_roots:
+            try:
+                for r in extra_roots() or []:
+                    p = Path(r).resolve()
+                    if p not in roots:
+                        roots.append(p)
+            except Exception:
+                pass
+        return roots
+
+    def _resolve_root(raw: str) -> Path | None:
+        if raw:
+            cand = Path(raw)
+            root = (workspace / cand).resolve() if not cand.is_absolute() \
+                else cand.resolve()
+        else:
+            root = workspace.resolve()
+        if not any(root == b or b in root.parents for b in _roots()):
+            return None
+        return root if root.is_dir() else None
 
     def detect(args: dict[str, Any]) -> str:
         raw = str(args.get("path", "") or "")
-        root = (workspace / raw).resolve() if raw else workspace.resolve()
-        if not root.is_relative_to(workspace.resolve()) or not root.is_dir():
-            return json.dumps({"error": "path must be a directory inside the workspace"})
+        root = _resolve_root(raw)
+        if root is None:
+            return json.dumps({"error": "path must be a directory inside a registered workspace"})
         systems = detect_build_systems(root)
-        return json.dumps({"root": str(root.relative_to(workspace)) if root != workspace else ".",
+        try:
+            disp = str(root.relative_to(workspace)) \
+                if root != workspace else "."
+        except ValueError:
+            disp = str(root)
+        return json.dumps({"root": disp,
                            "count": len(systems), "systems": systems,
                            "primary": systems[0]["id"] if systems else None}, ensure_ascii=False)
 
     def _run_action(args: dict[str, Any], action: str) -> str:
         raw = str(args.get("path", "") or "")
-        root = (workspace / raw).resolve() if raw else workspace.resolve()
-        if not root.is_relative_to(workspace.resolve()) or not root.is_dir():
-            return f"ERROR: path must be a directory inside the workspace"
+        root = _resolve_root(raw)
+        if root is None:
+            return f"ERROR: path must be a directory inside a registered workspace"
         requested = str(args.get("system", "auto") or "auto").lower()
         systems = detect_build_systems(root)
         if not systems:

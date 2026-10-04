@@ -374,10 +374,24 @@ def run_process_streaming(
     return proc.returncode, "".join(out_parts), "".join(err_parts), timed_out
 
 
-def _resolve_cwd(workspace: Path, raw: str) -> Path:
-    cwd = (workspace / raw).resolve() if raw else workspace
-    if not cwd.is_relative_to(workspace.resolve()):
-        raise ValueError("cwd must stay inside the workspace")
+def _resolve_cwd(workspace: Path, raw: str, extra_roots=None) -> Path:
+    if raw:
+        cand = Path(raw)
+        cwd = (workspace / cand).resolve() if not cand.is_absolute() \
+            else cand.resolve()
+    else:
+        cwd = workspace.resolve()
+    roots = [workspace.resolve()]
+    if extra_roots:
+        try:
+            for r in extra_roots() or []:
+                p = Path(r).resolve()
+                if p not in roots:
+                    roots.append(p)
+        except Exception:
+            pass
+    if not any(cwd == base or base in cwd.parents for base in roots):
+        raise ValueError("cwd must stay inside a registered workspace")
     if not cwd.is_dir():
         raise FileNotFoundError(f"directory does not exist: {cwd}")
     return cwd
@@ -390,6 +404,7 @@ def register_terminal_tools(
     jobs=None,
     log_dir: Path | None = None,
     default_timeout: int = 120,
+    extra_roots=None,
 ) -> TerminalTracker:
     tracker = TerminalTracker(log_dir or (workspace / ".agent" / "runtime"))
 
@@ -400,7 +415,8 @@ def register_terminal_tools(
         except (ValueError, FileNotFoundError) as exc:
             return f"ERROR: {exc}"
         try:
-            cwd = _resolve_cwd(workspace, str(args.get("cwd", "") or ""))
+            cwd = _resolve_cwd(workspace, str(args.get("cwd", "") or ""),
+                               extra_roots)
         except (ValueError, FileNotFoundError) as exc:
             return f"ERROR: {exc}"
         env = args.get("env")

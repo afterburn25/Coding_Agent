@@ -85,6 +85,7 @@ Use research_topic/search_documentation/search_github/search_errors when externa
 Use native Git/GitHub coding tools for delivery workflows when requested: inspect the current branch, create a feature branch, commit explicit changed paths, push, create issues or pull requests, and check CI. Remote GitHub writes must pass the normal github.write approval gate; never bypass it. Never stage .agent metadata in an agent-created commit.
 When a request needs a tool or capability that is not installed (TOOL_NOT_INSTALLED, tools_not_installed, or find_tools showing install=missing), stop and tell the user exactly which tools must be installed before the request can run, then offer to install them via install_tool or point to the Tools page. Never fake the missing capability or improvise around it silently.
 If build/tests fail after a change, diagnose the exact failure, research it when needed, patch, and retest instead of stopping at the first failed verification.
+When asked to create or build an application, drive the real pipeline: workspace_open to adopt the directory (or project_scaffold to create and register it), project_setup for dependencies, build_project and run_tests, terminal_run with background=true for dev servers, then app_health to verify it actually serves. "Done" requires evidence — files exist, dependencies resolved, build and tests exited 0, and the health check returned the expected status. If a step fails, diagnose and repair before reporting; never narrate a successful pipeline you did not run.
 """ + TRUTH_RULE
 
 IMAGE_TOOL_NAMES = {

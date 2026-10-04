@@ -60,6 +60,7 @@ from .tools.search import find_ripgrep, register_search_tools
 from .tools.shell import register_shell_tools
 from .tools.terminal import register_terminal_tools
 from .tools.workspace import register_workspace_tools
+from .tools.project import register_project_tools
 from .workspace import WorkspaceManager
 from .tool_router import ToolRouter
 from .mcp import MCPManager, load_mcp_configs
@@ -364,10 +365,15 @@ class AppState:
             extra_roots=self.workspaces.allowed_roots)
         register_workspace_tools(self.tools, self.workspaces)
         self.terminal_tracker = register_terminal_tools(
-            self.tools, self.workspace, jobs=self.jobs, log_dir=runtime_root / ".agent" / "runtime"
+            self.tools, self.workspace, jobs=self.jobs,
+            log_dir=runtime_root / ".agent" / "runtime",
+            extra_roots=self.workspaces.allowed_roots,
         )
         register_search_tools(self.tools, self.workspace)
-        register_build_tools(self.tools, self.workspace)
+        register_build_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        register_project_tools(self.tools, self.workspaces)
         register_codeintel_tools(self.tools, self.workspace)
         self.secrets = SecretVault(runtime_root / "data" / "secrets.vault")
         # Mask vaulted values in live tool-output chunks and logs.
