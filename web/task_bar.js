@@ -20,11 +20,11 @@
       <span class="tb-meta"></span>
       <button type="button" class="tb-cancel">Cancel</button>`;
     bar.querySelector(".tb-cancel").addEventListener("click", onCancel);
-    // In-flow inside the page's main column, directly under its topbar —
-    // the strip pushes the column's content down instead of overlaying
-    // the app or shoving the whole shell off the viewport.
+    // In-flow as the FIRST child of the page's main column — above the
+    // topbar, spanning only the middle area. The sidebar and right rail
+    // keep their full height; only this column's content shifts.
     const topbar = document.querySelector(".topbar");
-    if (topbar) topbar.after(bar);
+    if (topbar) topbar.before(bar);
     else document.body.prepend(bar);
     return bar;
   }

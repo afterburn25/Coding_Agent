@@ -73,6 +73,15 @@
     } catch {}
     if (!g || !g.text) return;
     const playGreeting = async () => {
+      // HARD RULE: all speech goes through the NexusVoice queue — a bare
+      // Audio element talks over queued segments and the server-side
+      // greeting hold can't see it.
+      try {
+        if (window.NexusVoice && NexusVoice.speak) {
+          await NexusVoice.speak(String(g.text).slice(0, 2000));
+          return;
+        }
+      } catch {}
       const v = g.voice || {};
       try {
         const r = await post("/api/voice/preview", {
@@ -84,7 +93,9 @@
       } catch {}
     };
     // First-entry introduction is voice-only — never rendered as text.
-    if (g.kind === "intro") { playGreeting(); return; }
+    // server_spoken means the /greeting endpoint already enqueued it
+    // via speak_greeting — don't speak it a second time.
+    if (g.kind === "intro") { if (!g.server_spoken) playGreeting(); return; }
     const t = document.createElement("div");
     t.className = "greeting-toast";
     t.innerHTML = `
@@ -98,11 +109,11 @@
     setTimeout(() => t.classList.add("show"), 20);
     setTimeout(() => { t.classList.remove("show");
       setTimeout(() => t.remove(), 400); }, 12000);
-    // Voice greeting on every app open — not just a toast. The chat mute
-    // switch governs response playback, not the startup greeting, so this
-    // plays regardless; autoplay restrictions are already disabled in the
-    // desktop shell.
-    playGreeting();
+    // Voice greeting on every app open — not just a toast. Greetings the
+    // /greeting endpoint returned were already enqueued server-side
+    // (server_spoken); stashed switch/onboarding greetings were not, so
+    // they play here — through the voice queue, never a bare Audio.
+    if (!g.server_spoken) playGreeting();
   }
 
   function injectSwitcher(s) {
@@ -157,15 +168,25 @@
       // Bypasses NexusVoice.speak on purpose: mute silences chat replies,
       // not the onboarding welcome.
       if (ON_START) {
-        post("/api/voice/speak", {
-          text: "Welcome to Nexus Core. To unlock your workstation, fill " +
-                "out your profile below — every field on this page is required."
-        }).then((out) => {
-          if (out && out.url) {
-            new Audio(out.url).play().catch(() => {});
-            post("/api/onboarding/welcome-played", {});
-          }
-        }).catch(() => {});
+        const welcome = "Welcome to Nexus Core. To unlock your workstation, " +
+          "fill out your profile below — every field on this page is required.";
+        const markPlayed = () =>
+          post("/api/onboarding/welcome-played", {}).catch(() => {});
+        const playBare = () => {
+          post("/api/voice/speak", { text: welcome }).then((out) => {
+            if (out && out.url) {
+              new Audio(out.url).play().catch(() => {});
+              markPlayed();
+            }
+          }).catch(() => {});
+        };
+        // Through the queue when voice is live; if mute/disabled drops it,
+        // the bare fallback still delivers the onboarding instructions.
+        if (window.NexusVoice && NexusVoice.speak) {
+          NexusVoice.speak(welcome).then((out) => {
+            if (out && out.url) markPlayed(); else playBare();
+          }).catch(playBare);
+        } else playBare();
       }
       return;
     }
@@ -186,6 +207,9 @@
         api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`)
           .then((g) => {
             if (g && g.text) {
+              // The /greeting handler also enqueued this text via
+              // speak_greeting — mark it so the toast never double-speaks.
+              g.server_spoken = true;
               try {
                 sessionStorage.setItem("nexus-greeting",
                   JSON.stringify(g));
