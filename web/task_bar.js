@@ -62,6 +62,7 @@
       if (lastTaskId !== null || !el.classList.contains("hidden")) {
         el.classList.add("hidden");
       }
+      document.body.classList.remove("task-bar-on");
       lastTaskId = null;
       return;
     }
@@ -96,6 +97,7 @@
     btn.textContent = "Cancel";
     el.dataset.taskId = cur.id;
     el.classList.remove("hidden");
+    document.body.classList.add("task-bar-on");
     lastTaskId = cur.id;
   }
 
