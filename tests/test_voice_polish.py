@@ -575,6 +575,28 @@ class SpokenNotices(unittest.TestCase):
         self.assertIn("once more", res["ack"].lower())
         self.assertEqual(st.voice.repeated, 1)
 
+    def test_persona_notice_caches_card(self):
+        st = _StubState()
+        tmp = Path(tempfile.mkdtemp())
+        st.profiles = SimpleNamespace(
+            active=lambda: {"profile_id": "p1"},
+            profile_dir=lambda pid, create=False: tmp)
+        real = lambda kind, fact, seq=None: AppState._persona_notice(
+            st, kind, fact, seq=seq)
+        self.assertIn("the build", real("completed", "the build"))
+        self.assertTrue(getattr(st, "_pnc_cache", None))
+        # Rotation still flows through the cached card.
+        self.assertNotEqual(real("completed", "x", seq=0),
+                            real("completed", "x", seq=1))
+
+    def test_empty_notification_still_speaks(self):
+        st = _StubState()
+        ev = {"type": "notification", "notification": {
+            "id": "n-empty", "level": "important", "title": "",
+            "message": ""}}
+        self.assertTrue(st._spoken_notice_line(ev))
+        self.assertIn("needs a look", st.voice.enqueued[-1][1])
+
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")
         lines = {st._queue_notice_line() for _ in range(3)}

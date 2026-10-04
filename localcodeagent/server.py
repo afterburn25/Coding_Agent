@@ -839,15 +839,27 @@ class AppState:
             if not prof:
                 return fact
             pdir = self.profiles.profile_dir(str(prof["profile_id"]))
-            active = PersonalityStore(pdir).resolve_active(
-                is_adult=bool(prof.get("is_adult")))
-            dyn = PersonaDynamics(pdir)
-            card = compile_effective(
-                active, relationship=dyn.relationship(),
-                mood=dyn.effective_mood(
-                    manual_mood=str(active.get("mood") or "")),
-                overlay=dyn.overlay(), modifiers=dyn.modifiers(),
-                mode=dyn.mode(), is_adult=bool(prof.get("is_adult")))
+            # The card is persona-presentation state — safe to reuse for
+            # a few seconds so a burst of notices doesn't re-read
+            # persona_state.json per event. Keyed on profile so a switch
+            # never wears the previous profile's wrapper.
+            ident = str(prof["profile_id"])
+            now = time.monotonic()
+            cache = getattr(self, "_pnc_cache", None)
+            if cache and cache[0] == ident and now < cache[1]:
+                card = cache[2]
+            else:
+                active = PersonalityStore(pdir).resolve_active(
+                    is_adult=bool(prof.get("is_adult")))
+                dyn = PersonaDynamics(pdir)
+                card = compile_effective(
+                    active, relationship=dyn.relationship(),
+                    mood=dyn.effective_mood(
+                        manual_mood=str(active.get("mood") or "")),
+                    overlay=dyn.overlay(), modifiers=dyn.modifiers(),
+                    mode=dyn.mode(),
+                    is_adult=bool(prof.get("is_adult")))
+                self._pnc_cache = (ident, now + 5.0, card)
             from .personality.notices import persona_notice
             return persona_notice(kind, fact, card, seq=seq)
         except Exception:
@@ -3804,7 +3816,8 @@ class AppState:
                     r"report|briefing|summary", title or
                     str(row.get("message") or ""), re.I):
                 return False
-        fact = title or str(row.get("message") or "")[:90].strip()
+        fact = (title or str(row.get("message") or "")[:90].strip()
+                or "A notification needs a look.")
         kind = self._LEVEL_KIND.get(level, "status")
         # Kind-specific persona phrasing when the content warrants it —
         # a self-repair completion shouldn't read as generic "status".
