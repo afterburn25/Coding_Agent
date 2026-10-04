@@ -86,7 +86,11 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertIn("generic_refusal_retry", source)
         self.assertIn("refusal_retry_enabled = (", source)
         self.assertIn("ethical_temperature >= 0.8", source)
-        self.assertIn('self._brain_subroutine_enabled("adult_content", True)', source)
+        # Refusal retry is intentionally NOT gated on the adult_content
+        # subroutine — a generic refusal of an ordinary request must be
+        # retried too; hard_specific exemptions still guard real safety
+        # refusals from being retried.
+        self.assertIn("hard_specific", source)
         self.assertIn("generic_refusal_retry_limit", source)
         self.assertIn("session.refusal_retries < refusal_retry_limit", source)
         self.assertIn("generic_refusal_exhausted", source)
