@@ -1,41 +1,42 @@
 {
-  "initializationMs": 527.9571,
-  "hostCpuSeconds": 0.421875,
-  "elapsedSeconds": 16.4809503,
-  "hostWorkingSetMb": 72.046875,
-  "browserCpuSeconds": 6.640625,
-  "browserWorkingSetMb": 422.8125,
+  "initializationMs": 2470.9912,
+  "hostCpuSeconds": 0.0625,
+  "elapsedSeconds": 16.4995399,
+  "hostWorkingSetMb": 60.4453125,
+  "browserCpuSeconds": 4,
+  "browserWorkingSetMb": 417.890625,
   "browserProcesses": [
     {
+      "Kind": "Browser",
+      "CpuSeconds": 0.71875,
+      "WorkingSetMb": 132.8671875
+    },
+    {
       "Kind": "Renderer",
-      "CpuSeconds": 2.328125,
-      "WorkingSetMb": 135.296875
-    },
-    {
-      "Kind": "Utility",
-      "CpuSeconds": 0.09375,
-      "WorkingSetMb": 37.14453125
-    },
-    {
-      "Kind": "Gpu",
-      "CpuSeconds": 3.671875,
-      "WorkingSetMb": 94.90625
+      "CpuSeconds": 1.171875,
+      "WorkingSetMb": 124.1484375
     },
     {
       "Kind": "Utility",
       "CpuSeconds": 0.03125,
-      "WorkingSetMb": 19.8828125
+      "WorkingSetMb": 19.86328125
     },
     {
-      "Kind": "Browser",
-      "CpuSeconds": 1.390625,
-      "WorkingSetMb": 135.58203125
+      "Kind": "Gpu",
+      "CpuSeconds": 3.125,
+      "WorkingSetMb": 103.69140625
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.109375,
+      "WorkingSetMb": 37.3203125
     }
   ],
   "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
   "renderer": {
     "checks": {
       "pauseFreezesTime": true,
+      "realProgressIndependent": true,
       "muteSilencesOutput": true,
       "speedControl": true,
       "readinessGateHolds": true,
@@ -57,11 +58,11 @@
     "frames": 600,
     "frameMedianMs": 16.700000000000728,
     "frameP95Ms": 16.80000000000109,
-    "drawMedianMs": 0.3999999761581421,
+    "drawMedianMs": 0.2999999523162842,
     "drawP95Ms": 0.5,
     "dimensions": [
-      1536,
-      864
+      1024,
+      576
     ],
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0"
   }

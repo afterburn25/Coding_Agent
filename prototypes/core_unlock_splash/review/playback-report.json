@@ -1,40 +1,40 @@
 {
-  "initializationMs": 483.3607,
-  "hostCpuSeconds": 0.125,
-  "elapsedSeconds": 16.556967,
-  "hostWorkingSetMb": 63.609375,
-  "browserCpuSeconds": 3.3125,
-  "browserWorkingSetMb": 470.79296875,
+  "initializationMs": 565.4062,
+  "hostCpuSeconds": 0.09375,
+  "elapsedSeconds": 16.5677048,
+  "hostWorkingSetMb": 63.00390625,
+  "browserCpuSeconds": 3.640625,
+  "browserWorkingSetMb": 459.7578125,
   "browserProcesses": [
     {
-      "Kind": "Browser",
-      "CpuSeconds": 0.9375,
-      "WorkingSetMb": 137.27734375
+      "Kind": "Gpu",
+      "CpuSeconds": 2.578125,
+      "WorkingSetMb": 101.078125
     },
     {
       "Kind": "Utility",
       "CpuSeconds": 0.046875,
-      "WorkingSetMb": 26.9140625
-    },
-    {
-      "Kind": "Renderer",
-      "CpuSeconds": 1.015625,
-      "WorkingSetMb": 154.421875
+      "WorkingSetMb": 19.8359375
     },
     {
       "Kind": "Utility",
-      "CpuSeconds": 0.109375,
-      "WorkingSetMb": 37.234375
-    },
-    {
-      "Kind": "Gpu",
-      "CpuSeconds": 2.578125,
-      "WorkingSetMb": 95.109375
+      "CpuSeconds": 0.078125,
+      "WorkingSetMb": 37.16796875
     },
     {
       "Kind": "Utility",
       "CpuSeconds": 0.03125,
-      "WorkingSetMb": 19.8359375
+      "WorkingSetMb": 26.91015625
+    },
+    {
+      "Kind": "Browser",
+      "CpuSeconds": 0.59375,
+      "WorkingSetMb": 134.69921875
+    },
+    {
+      "Kind": "Renderer",
+      "CpuSeconds": 1.34375,
+      "WorkingSetMb": 140.06640625
     }
   ],
   "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
@@ -57,14 +57,14 @@
     },
     "passed": true,
     "decodedStems": 16,
-    "audioPeak": 0.29915565252304077,
+    "audioPeak": 0.2771196961402893,
     "audioState": "running",
     "warnings": [],
     "frames": 600,
     "frameMedianMs": 16.700000000000728,
     "frameP95Ms": 16.80000000000109,
-    "drawMedianMs": 0.20000004768371582,
-    "drawP95Ms": 0.30000007152557373,
+    "drawMedianMs": 0.2999999523162842,
+    "drawP95Ms": 0.40000009536743164,
     "dimensions": [
       1024,
       576

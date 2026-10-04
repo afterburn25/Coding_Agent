@@ -23,7 +23,7 @@ function fail(error) {
 function paint() {
   const started = performance.now();
   const state = sample(manifest, clock.time, reduced, clock.ambientTime); renderer.render(state);
-  $('shade').style.opacity = (.75 - .48 * state.charge).toFixed(2);
+  $('shade').style.opacity = (.75 - .75 * state.charge).toFixed(2);
   const label = state.phase.label.toLowerCase();
   if ($('scene').getAttribute('aria-label') !== label) $('scene').setAttribute('aria-label', label);
   setText('status', externalProgress?.primary ?? state.phase.label);

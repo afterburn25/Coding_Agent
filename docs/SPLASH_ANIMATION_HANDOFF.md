@@ -26,6 +26,12 @@ bounded backing resolution, and time-based transforms. Audio uses separate
 stems scheduled on the Web Audio clock. There is no game engine, remote resource,
 video, image-sequence animation, or morphing typography.
 
+The online lighting now follows the brighter supplied reference: a white-hot
+core, luminous orbital trails, cached blue haze, platform emission and floor
+reflection, with deeper recessed shadows and metal bevels. These runtime layers
+follow `charge` and remain at full intensity during a delayed readiness hold.
+The original chamber, shield placement and wordmark remain the primary artwork.
+
 ## Exact integration surface
 
 Integrate later with `desktop/ChatNexus.Desktop/Program.cs`, specifically

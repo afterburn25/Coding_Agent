@@ -8,13 +8,18 @@ SHA-256: `46e5f31dbe656cf85b3052c05015138e828b43a5b06127f8ebc8814d81bced0c`.
 Its existing repository ownership/permissions remain unchanged.
 
 The supplied larger original and locked/online reference images informed the
-mechanism design only. They are not animation frames and are not runtime assets.
+mechanism and lighting design only. They are not animation frames or runtime assets.
 No image generation or image crossfading is used.
 
 All new mechanical art is editable deterministic vector geometry in
 `web/renderer.mjs`: three ring layers, six rigid iris leaves, four clamps, one
 key cylinder/carriage, a sphere, orbital structures and cached glow sprites.
-These layers are rasterized once in memory at 2× resolution. No fonts, textures,
+Mechanical and light sprites are rasterized once in memory at 2× resolution.
+The plasma and blue chamber haze are original deterministic noise fields,
+cached at 256×256 and 384×384 respectively. Platform emission, floor reflection,
+orbital glow, metal bevels and recessed shadows are editable in the same renderer.
+The stronger lighting follows charge intensity and stays active during readiness
+holds. No source image is edited or replaced. No fonts, textures,
 CDNs or remote assets are downloaded. Production lettering stays in the original
 image, so it cannot change shape during animation.
 

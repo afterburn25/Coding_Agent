@@ -51,7 +51,12 @@ The original production image is immutable. A six-leaf iris, four solenoid
 clamps, three concentric rings and a key cylinder form a layered mechanism
 inside the existing shield. Geometry is fixed; only rigid transforms and
 opacity change. The cylinder withdraws on the top carriage. The core has
-procedural plasma, orbitals, local bloom, particles and a restrained halo.
+procedural plasma, a white-hot center, luminous cyan/violet orbitals, particles
+and a restrained halo. Cached blue nebula haze, light on the housing, a bright
+platform ring and a vertical floor reflection bring the fully powered state
+closer to the supplied online reference. Recessed ring shadows, dark plate
+seams and bright metal bevels keep the mechanism readable inside the glow.
+This full lighting state persists while the charged core waits for readiness.
 The surrounding chamber and lettering remain in their original positions.
 
 The renderer uses cached Canvas 2D layers hosted by the desktop's existing

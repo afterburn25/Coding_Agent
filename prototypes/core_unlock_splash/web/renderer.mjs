@@ -1,7 +1,7 @@
 import { clamp, smooth } from './timeline.mjs';
 
 const TAU = Math.PI * 2;
-const metal = ['#101a29', '#718197', '#d0d9e3', '#4f6076', '#192435', '#8c9eb4', '#202d40'];
+const metal = ['#07101c', '#31445e', '#a2b8d0', '#e1edf9', '#34465d', '#091321', '#637c9c', '#142136'];
 function circle(c, r) { c.beginPath(); c.arc(0, 0, r, 0, TAU); }
 function gradient(c, extent, colors = metal) {
   const g = c.createLinearGradient(-extent, -extent, extent, extent);
@@ -13,6 +13,48 @@ function sprite(size, draw) {
   return el;
 }
 function blit(c, asset, size) { c.drawImage(asset, -size / 2, -size / 2, size, size); }
+function lightSprite(stops) {
+  return sprite(256, c => {
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, 128);
+    for (const [at, color] of stops) g.addColorStop(at, color);
+    c.fillStyle = g; c.fillRect(-128, -128, 256, 256);
+  });
+}
+function nebulaSprite() {
+  // A fixed procedural density field, cached once. Runtime moves light layers,
+  // never the shield, wordmark, or mechanical geometry.
+  const el = document.createElement('canvas'); el.width = el.height = 384;
+  const c = el.getContext('2d'), data = c.createImageData(384, 384);
+  const hash = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const mix = (a, b, t) => a + (b - a) * t;
+  const noise = (x, y) => {
+    const ix = Math.floor(x), iy = Math.floor(y), u = smooth(x - ix), v = smooth(y - iy);
+    return mix(mix(hash(ix, iy), hash(ix + 1, iy), u), mix(hash(ix, iy + 1), hash(ix + 1, iy + 1), u), v);
+  };
+  for (let y = 0; y < 384; y++) for (let x = 0; x < 384; x++) {
+    const nx = (x - 192) / 192, ny = (y - 192) / 192, r = Math.hypot(nx, ny);
+    if (r >= 1) continue;
+    let n = 0, frequency = 4, weight = .55;
+    for (let i = 0; i < 5; i++) { n += noise(nx * frequency + 13, ny * frequency + 19) * weight; frequency *= 2; weight *= .5; }
+    const cloud = clamp((n - .27) * 2.6);
+    const rim = Math.exp(-(((r - .56) / .29) ** 2)) * clamp((1 - r) * 6);
+    const filament = Math.exp(-Math.abs(Math.sin(n * 23 + nx * 2 - ny * 3)) * 17);
+    const i = (y * 384 + x) * 4;
+    data.data[i] = 17 + 76 * filament;
+    data.data[i + 1] = 81 + 118 * cloud + 36 * filament;
+    data.data[i + 2] = 240;
+    data.data[i + 3] = 160 * rim * (cloud * cloud + filament * .25);
+  }
+  c.putImageData(data, 0, 0); return el;
+}
+function orbitSprite(color) {
+  return sprite(184, c => {
+    c.beginPath(); c.ellipse(0, 0, 72, 25, 0, 0, TAU);
+    c.strokeStyle = color; c.shadowColor = color; c.shadowBlur = 9;
+    c.lineWidth = 2.1; c.stroke(); c.shadowBlur = 3; c.stroke();
+    c.shadowBlur = 0; c.strokeStyle = '#e6ffff'; c.lineWidth = .65; c.stroke();
+  });
+}
 function plasmaSprite() {
   const el = document.createElement('canvas'); el.width = el.height = 256;
   const c = el.getContext('2d'), data = c.createImageData(256, 256);
@@ -47,9 +89,12 @@ function ringSprite(outer, inner, teeth, label) {
   return sprite(220, c => {
     c.beginPath(); c.arc(0, 0, outer, 0, TAU); c.arc(0, 0, inner, 0, TAU, true);
     c.fillStyle = gradient(c, outer); c.fill('evenodd');
-    for (const [r, color, width] of [[outer, '#c1d4ea', .65], [outer - 1.4, '#0d1522', 1.5], [inner + 1.5, '#c4d3e899', .75], [inner, '#020810', 2]]) {
+    for (const [r, color, width] of [[outer, '#d0e9ff', .8], [outer - 1.7, '#050b15', 2.6], [inner + 1.8, '#d4eaff99', .75], [inner, '#01050d', 3]]) {
       circle(c, r); c.strokeStyle = color; c.lineWidth = width; c.stroke();
     }
+    // Recessed groove shadows and a machined bevel separate adjacent rings.
+    c.beginPath(); c.arc(0, 0, outer - 2.5, .2, 2.85); c.strokeStyle = '#00050baa'; c.lineWidth = 2.2; c.stroke();
+    c.beginPath(); c.arc(0, 0, outer - .55, -2.9, -.35); c.strokeStyle = '#e5f4ffbb'; c.lineWidth = .7; c.stroke();
     // Fine concentric tool marks; cached, never regenerated per frame.
     for (let r = inner + 3; r < outer - 3; r += .72) {
       circle(c, r); c.strokeStyle = r % 2 < 1 ? '#ffffff0e' : '#00000024'; c.lineWidth = .3; c.stroke();
@@ -74,7 +119,7 @@ export class Renderer {
     this.plate = sprite(220, c => {
       const p = new Path2D('M -9 -8 C 6 -25 25 -47 62 -56 L 91 -32 Q 101 3 76 55 L 47 48 C 35 22 13 4 -9 -8 Z');
       c.fillStyle = gradient(c, 72, ['#afbac9', '#596c83', '#192636', '#62758c', '#111d2b']); c.fill(p);
-      c.strokeStyle = '#03080e'; c.lineWidth = 1.6; c.stroke(p);
+      c.strokeStyle = '#010309'; c.lineWidth = 2.8; c.stroke(p);
       c.save(); c.clip(p);
       for (let y = -56; y < 58; y += 1.3) {
         c.strokeStyle = '#dfeaff0a'; c.lineWidth = .4; c.beginPath(); c.moveTo(-20, y); c.lineTo(100, y - 18); c.stroke();
@@ -113,19 +158,37 @@ export class Renderer {
       circle(c, 44); c.fillStyle = g; c.fill(); c.lineWidth = .6; c.strokeStyle = '#b9fbff'; c.stroke();
     });
     this.plasma = plasmaSprite();
+    this.nebula = nebulaSprite();
+    this.bloom = lightSprite([[0, '#dbffffed'], [.08, '#8cffffd4'], [.2, '#38d5ffad'], [.4, '#1387ff70'], [.7, '#1255fa28'], [1, '#0938ef00']]);
+    this.hotspot = lightSprite([[0, '#ffffffff'], [.09, '#f5fffff5'], [.22, '#baffffdb'], [.42, '#42cfff7a'], [.7, '#126eff20'], [1, '#0654ff00']]);
+    this.housingShadow = lightSprite([[0, '#00020aff'], [.64, '#00020afa'], [.77, '#00020ab0'], [.9, '#00020a28'], [1, '#00020a00']]);
+    this.orbits = [orbitSprite('#55dbff'), orbitSprite('#a284ff'), orbitSprite('#5eeeff')];
+    this.ringEmission = sprite(240, c => {
+      c.shadowBlur = 5;
+      for (const r of [85, 75, 65]) for (let j = 0; j < 6; j++) {
+        c.beginPath(); c.arc(0, 0, r, j * TAU / 6 + .13, j * TAU / 6 + .7);
+        c.strokeStyle = c.shadowColor = j === 2 ? '#9a6dff' : '#17bfff'; c.lineWidth = 2.2; c.stroke();
+        c.shadowBlur = 0; c.strokeStyle = '#b9f5ff'; c.lineWidth = .6; c.stroke(); c.shadowBlur = 5;
+      }
+    });
+    this.platform = sprite(640, c => {
+      for (const [width, alpha, blur] of [[7, .2, 16], [3, .65, 7], [1.2, 1, 2]]) {
+        c.beginPath(); c.ellipse(0, 0, 213, 11, 0, 0, TAU);
+        c.strokeStyle = `rgba(157,238,255,${alpha})`; c.lineWidth = width;
+        c.shadowColor = '#098fff'; c.shadowBlur = blur; c.stroke();
+      }
+      c.shadowBlur = 0;
+      const g = c.createRadialGradient(0, 0, 1, 0, 0, 82);
+      g.addColorStop(0, '#e4ffffd0'); g.addColorStop(.2, '#64dcffa0'); g.addColorStop(1, '#167bff00');
+      c.save(); c.scale(2.8, .26); c.fillStyle = g; c.fillRect(-82, -82, 164, 164); c.restore();
+    });
   }
 
   render(s) {
     const c = this.c; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 1024, 576);
-    // Only light is composited over the immutable production chamber/lettering.
-    if (s.reveal > 0) {
-      c.save(); c.globalCompositeOperation = 'screen';
-      c.globalAlpha = .34 * s.charge + .1 * s.pulse;
-      c.translate(512, 444); c.scale(2.6 + s.pulse * .25, .24); blit(c, this.glow, 256); c.restore();
-      c.save(); c.translate(512, 204); c.globalCompositeOperation = 'screen';
-      c.globalAlpha = .16 * s.reveal + .42 * s.charge + .09 * s.pulse; blit(c, this.glow, 390); c.restore();
-    }
+    this.drawEnvironment(c, s);
     c.save(); c.translate(512, 204);
+    c.save(); c.translate(2, 5); c.globalAlpha = .8; blit(c, this.housingShadow, 243); c.restore();
     // Permanent opaque reactor cavity masks the original painted core in every state.
     circle(c, 94); c.fillStyle = '#020813'; c.fill();
     c.save(); circle(c, 64); c.clip();
@@ -155,6 +218,8 @@ export class Renderer {
       }
       c.restore();
     }
+    c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = .18 * s.security + .82 * s.charge;
+    blit(c, this.ringEmission, 240); c.restore();
     if (s.security > 0 && s.authorization < 1 && !s.reduced) {
       c.strokeStyle = '#a0ebff'; c.lineWidth = 1; c.beginPath();
       c.arc(0, 0, 92, s.t * 2.6, s.t * 2.6 + .19); c.stroke();
@@ -165,12 +230,17 @@ export class Renderer {
       blit(c, this.clamp, 60);
       c.fillStyle = s.pins[i] > .9 ? '#8bf4ed' : (s.security > i / 4 ? '#46acdc' : '#203950');
       c.fillRect(-2, -7, 4, 5); c.restore();
+      if (s.charge > 0) {
+        c.save(); c.rotate(i * Math.PI / 2); c.translate(0, -87 - s.pins[i] * (s.reduced ? 3 : 13));
+        c.globalCompositeOperation = 'screen'; c.globalAlpha = s.charge * .85; blit(c, this.hotspot, 26); c.restore();
+      }
     }
     // Energy spills onto the metal housing, without concealing its stable geometry.
     if (s.reveal > 0) {
-      c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = s.reveal * (.06 + .23 * s.charge);
-      blit(c, this.glow, 218); c.restore();
+      c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = s.reveal * (.05 + .5 * s.charge);
+      blit(c, this.bloom, 235); c.restore();
     }
+    this.drawOrbitals(c, s);
     // Restrained activation halo, localized to the shield (never a screen flash).
     if (s.pulse > 0) {
       circle(c, 97 + 25 * smooth(s.pulsePhase));
@@ -180,14 +250,34 @@ export class Renderer {
     this.drawParticles(c, s);
   }
 
+  drawEnvironment(c, s) {
+    if (s.reveal <= 0) return;
+    const energy = s.reveal * (.12 + .88 * s.charge);
+    c.save(); c.globalCompositeOperation = 'screen';
+    c.save(); c.translate(512, 204); c.globalAlpha = energy * .88;
+    blit(c, this.bloom, 435 + s.pulse * 25);
+    c.globalAlpha = energy * .82; c.rotate(s.orbit * .025); blit(c, this.nebula, 385); c.restore();
+    // Lit chamber haze on either side of the shield; leaves the lettering legible.
+    for (const [x, y, scaleX, scaleY, alpha] of [[386, 348, 1.45, .58, .3], [644, 348, 1.45, .58, .3], [512, 430, 1.5, .34, .55]]) {
+      c.save(); c.translate(x, y); c.scale(scaleX, scaleY); c.globalAlpha = energy * alpha; blit(c, this.bloom, 230); c.restore();
+    }
+    // A narrow volumetric column and floor reflection connect reactor and platform.
+    c.save(); c.translate(512, 366); c.scale(.19, 1.7); c.globalAlpha = energy * .45; blit(c, this.bloom, 150); c.restore();
+    c.save(); c.translate(512, 492); c.scale(.48, 1.2); c.globalAlpha = energy * .48; blit(c, this.bloom, 178); c.restore();
+    c.save(); c.translate(512, 442); c.globalAlpha = energy * (.83 + .12 * s.pulse); blit(c, this.platform, 640);
+    c.globalAlpha = energy * .75; c.scale(1.3, .34); blit(c, this.hotspot, 124); c.restore();
+    c.restore();
+  }
+
   drawCore(c, s) {
     c.fillStyle = '#020a20'; c.fillRect(-64, -64, 128, 128);
     c.save(); c.globalAlpha = .35 + .5 * s.brightness; blit(c, this.glow, 186); c.restore();
-    c.save(); c.scale(.96 + .04 * s.charge, .96 + .04 * s.charge);
+    c.save(); c.scale(1.12, 1.12);
     c.globalAlpha = .45 + .55 * s.brightness; blit(c, this.sphere, 128); c.restore();
-    c.save(); c.rotate(s.orbit * .23); c.globalAlpha = .78; blit(c, this.plasma, 128); c.restore();
+    c.save(); c.rotate(s.orbit * .23); c.globalAlpha = .68; blit(c, this.plasma, 144); c.restore();
     c.save(); c.globalCompositeOperation = 'screen';
-    c.globalAlpha = .12 + .32 * s.charge; blit(c, this.glow, 116); c.restore();
+    c.globalAlpha = .18 + .65 * s.charge; blit(c, this.bloom, 132);
+    c.globalAlpha = .2 + .74 * s.charge; blit(c, this.hotspot, 67); c.restore();
     // Internal current: deterministic ellipses, clipped to the sphere surface.
     c.save(); circle(c, 43); c.clip();
     for (let i = 0; i < 7; i++) {
@@ -202,15 +292,24 @@ export class Renderer {
       c.fillRect(Math.cos(angle) * r, Math.sin(angle) * r, .65, .65);
     }
     c.restore();
+    // Cavity occlusion darkens its outside edge while the inner core emits light.
+    const occlusion = c.createRadialGradient(0, 0, 48, 0, 0, 65);
+    occlusion.addColorStop(0, '#00030a00'); occlusion.addColorStop(1, '#00030abb');
+    circle(c, 65); c.fillStyle = occlusion; c.fill();
+    if (s.pulse > 0) { c.save(); c.globalAlpha = s.pulse * .23; blit(c, this.bloom, 126); c.restore(); }
+  }
+
+  drawOrbitals(c, s) {
+    // Foreground orbital light can cross the housing, as in the supplied reference.
+    // Cached bloom creates a luminous tube instead of a thin diagram-like line.
     for (let i = 0; i < 3; i++) {
       c.save(); c.rotate(i * Math.PI / 3 + s.orbit * (i % 2 ? -1 : 1));
-      c.globalAlpha = s.charge;
-      c.beginPath(); c.ellipse(0, 0, 59, 19, 0, 0, TAU);
-      c.strokeStyle = i === 1 ? '#c4adff' : '#a0f7ff'; c.lineWidth = 1.45; c.stroke();
-      const p = s.orbit * 2 + i * 2; c.beginPath(); c.arc(Math.cos(p) * 59, Math.sin(p) * 19, 1.4, 0, TAU); c.fillStyle = '#d9ffff'; c.fill();
+      c.globalCompositeOperation = 'screen'; c.globalAlpha = s.charge * .88;
+      blit(c, this.orbits[i], 184);
+      const p = s.orbit * 2 + i * 2;
+      c.translate(Math.cos(p) * 72, Math.sin(p) * 25); blit(c, this.hotspot, 14);
       c.restore();
     }
-    if (s.pulse > 0) { c.save(); c.globalAlpha = s.pulse * .23; blit(c, this.glow, 126); c.restore(); }
   }
 
   drawParticles(c, s) {
