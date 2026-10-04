@@ -130,8 +130,13 @@
   candidates gated through simulate→targeted→regression→review→canary;
   out-of-order stage writes and unpassed-stage promotions refused).
   API: `/api/promotions` (+stage/promote/reject), `/api/risk`.
-  Docs: `docs/PROMOTION.md`. Next: evidence board + contradictions,
-  reliability scoring, regression memory/bisect, resource modes,
+  Docs: `docs/PROMOTION.md`.
+- **Phase 4** — shared evidence board (`evidence.py`): typed entries
+  with provenance/confidence, scoped retrieval, contradiction linking
+  (both sides marked, never silently preferred), resolution with
+  winner confirmation, open-question tracking. API: `/api/evidence`
+  (+contradict/resolve). Next: reliability scoring, regression
+  memory/bisect, resource modes,
   offline/egress, lineage, Safe Mode, golden config, RC scorecard.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
@@ -1014,7 +1019,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1445 tests` passing (2 environment skips).
+Expected at this checkpoint: `1451 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
