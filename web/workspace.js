@@ -599,6 +599,10 @@ function wire() {
     window.NexusTaskBar.init();
   }
   loadWorkspaces();
+
+  // Deep link — the Ctrl+K palette navigates here with ?file=<path>.
+  const deepFile = new URLSearchParams(location.search).get('file');
+  if (deepFile) openFile(deepFile);
 }
 
 document.addEventListener('DOMContentLoaded', wire);

@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote as _quote
 
 _FILE_SKIP_DIRS = {
     ".git", ".agent", "node_modules", "__pycache__", ".venv", "venv",
@@ -200,7 +201,8 @@ class GlobalSearch:
                 if ql in fn.lower():
                     rel = (Path(dirpath) / fn).relative_to(root).as_posix()
                     out.append(self._item(
-                        "file", rel, "", "/workspace.html",
+                        "file", rel, "",
+                        "/workspace.html?file=" + _quote(rel),
                         self._score(q, fn) or 20))
                     if len(out) >= n:
                         return out
