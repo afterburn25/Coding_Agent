@@ -18,7 +18,8 @@
   context, code-reference/impact tools, STT/push-to-talk + hands-free
   session control, operational state + return briefing, mission
   checkpoints, Knowledge Library, structured correction learning, granular
-  desktop-control hardening, and the avatar animation/lip-sync foundation.
+  desktop-control hardening, the avatar animation/lip-sync foundation, and
+  managed skill/plugin lifecycle depth.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/
@@ -36,6 +37,13 @@
   STT/agent state, gesture SSE, and `/api/nexus/state` for subtle CSS-only
   motion without delaying speech or shipping conversation/audio content to
   the renderer. See `docs/AVATAR.md`.
+- Skill packages now carry a richer manifest surface (author/provider,
+  capabilities, tools, permissions, dependencies, OS support, update/UI/health
+  metadata) and support verified install/update, enable/disable, bounded
+  rollback snapshots, removal, and explicit health execution. Mutating
+  lifecycle actions are `skills.manage`-gated and disclose requested
+  permissions/capabilities in approval responses; executable health checks
+  use the separate `shell.execute` gate. See `TOOLS.md`.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -914,7 +922,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1380 tests` passing (2 environment skips).
+Expected at this checkpoint: `1385 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
@@ -939,7 +947,7 @@ Expected at this checkpoint: `1380 tests` passing (2 environment skips).
 - Latest: learned routing (telemetry persistence + success-rate ranking + UI panel `fd45099`), ast backend for Python code intel (`6b5327c`), find_tools/system_resources/install_tool (`feb9f49`, `1a94565`), AppState wiring contract tests (`b6bd8c1`), git worktrees (`0a130db`), GET /api/workflows + Workflows panel (`cef5132`).
 - Newest batch: managed-service watchdog restart (`d770522`), MCP Streamable HTTP transport (`9a2d793`), vault `secret:` env references for MCP servers + `ask_workspace` workflow (`c1bd188`), cooperative workflow cancellation between steps (`e05f7a4`), measured generation telemetry — TPS/TTFT recorded per generation, aggregated per model, surfaced on `/api/model-telemetry` and the Models page Performance card (`17895b7`).
 - Latest batch: workflow resume checkpoints at `.agent/workflow_runs/<id>.resume.json` with `resume=true` re-entry (`38b7df8`) and `resumable` surfacing in `list_workflows`/API/UI (`a22516f`); Nexus Brain unlock brute-force backoff (`aedc3b9`); MCP HTTP `headers` end-to-end incl. `secret:` vault refs (`7b4c55f`); `/api/readiness` tools summary (`c645ea7`); dependency-free ComfyUI `/ws` progress listener with reconnect backoff (`bbe528e`, `a863af4`); `perf` SSE event with measured TPS/TTFT in the chat rail (`873f2bc`); research provider outcome stats persisted to `provider_stats.json` (`e7e7571`); optional tree-sitter backend for non-Python code intel (`5187e2f`).
-- Autonomous operation + live command visibility: `tool_start`/`tool_output` SSE events, Devin-style terminal blocks in the chat activity rail with live stdout/stderr streaming (`run_process_streaming` in terminal.py; `run_shell`/`terminal_run` emit through a per-session `stream_sink` in `registry.context`), and parallel read-only tool batching; `autonomous_mode` auto-approves ask/session workspace actions (hard gates: spend/message/mic/camera always ask; deny stays deny) via `PermissionManager.set_autonomous`, `POST /api/permissions/autonomous`, and a Tools-page toggle; `autonomous_max_continuations` bounds step-limit extensions; `RuntimeManager.evict_idle()` unloads stale/pressured managed models on the process-watchdog tick while pinning models serving active tasks; cooperative task cancellation (`task-<id>` via `/api/jobs/cancel`, chat Stop button, mid-batch skip, resume of cancelled tasks refused); `config`: `model_idle_unload_seconds` (default 900), `memory_pressure_vram_gb`/`ram_gb`.
+- Autonomous operation + live command visibility: `tool_start`/`tool_output` SSE events, Devin-style terminal blocks in the chat activity rail with live stdout/stderr streaming (`run_process_streaming` in terminal.py; `run_shell`/`terminal_run` emit through a per-session `stream_sink` in `registry.context`), and parallel read-only tool batching; `autonomous_mode` auto-approves ask/session workspace actions (hard gates: spend/message/mic/camera, skills.manage, and desktop observation/control always ask; deny stays deny) via `PermissionManager.set_autonomous`, `POST /api/permissions/autonomous`, and a Tools-page toggle; `autonomous_max_continuations` bounds step-limit extensions; `RuntimeManager.evict_idle()` unloads stale/pressured managed models on the process-watchdog tick while pinning models serving active tasks; cooperative task cancellation (`task-<id>` via `/api/jobs/cancel`, chat Stop button, mid-batch skip, resume of cancelled tasks refused); `config`: `model_idle_unload_seconds` (default 900), `memory_pressure_vram_gb`/`ram_gb`.
 - Resilience batch: startup auto-resume of interrupted tasks when autonomous (`auto_resume_interrupted_tasks`, `cc3e8b5`), bounded transient retries on external endpoints (`cc3e8b5`), `SecretVault.redact()` filtering vaulted values from live output chunks, job cancel kills tracked background terminal processes (`c292721`), llama.cpp post-health warmup for first-token latency (`model_prewarm_*`, `dd68787`), and `agent_tool_timeout_seconds` (default 1800) so a hung tool returns a timeout instead of stalling the run (`0c8e32f`).
 - Reconnect-safe live visibility (`12fbfbe`): `/api/chat/stream` `emit()` mirrors non-token events (`task`, `tool_start`, `tool_output`, `tool`, `model`, `approval`, `perf`, `context_trim`, `cancel`, `image_job`, queue transitions, `waiting_approval`, `approval_timeout`) onto the shared `/api/events` bus with `task_id` attribution, so a reloaded page follows the run live via `connectAgentEvents()` in `web/app.js`; `agentStreamActive` suppresses bus rendering while the direct request stream is connected, clearing on result/error/disconnect. Queue dequeue history bug (`self.state.history` inside AppState) fixed in the same commit.
 - Latest resilience batch: `_trim_context` stubs older tool/assistant bodies once the prompt exceeds ~3 chars/token of the profile's context window (`781faf0`); `autonomous_approval_timeout_seconds` (default 3600) fails approval-parked tasks on the watchdog tick so hard gates can't stall an unattended run (`eec7cf2`); `autonomous_error_retry_seconds` (default 120) re-drives stale error tasks via `recover()` bounded by `autonomous_max_recoveries` (`21dbdde`); all resume paths now go through `_execute_tool`/`_drive_or_error` with `tool_start`/`tool` events (`89837cd`, `da9b82f`); vaulted values are scrubbed from emitted tool args and completion results (`6b9d816`, `4868345`).

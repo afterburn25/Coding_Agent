@@ -160,11 +160,13 @@ class PermissionManagerTests(unittest.TestCase):
                 "message.send": "session",
                 "microphone.use": "allow",
                 "filesystem.delete": "deny",
+                "skills.manage": "ask",
             },
             autonomous=True,
         )
         self.assertEqual(mgr.effective("spend.money"), "ask")
         self.assertEqual(mgr.effective("message.send"), "ask")
+        self.assertEqual(mgr.effective("skills.manage"), "ask")
         self.assertEqual(mgr.effective("microphone.use"), "allow")
         self.assertEqual(mgr.effective("filesystem.delete"), "deny")
 

@@ -14,7 +14,7 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 v0.8 gives Nexus Core a modular **cognitive architecture** — the *Nexus Brain* coordinates seven functional regions (Prefrontal Cortex, Hippocampus, Thalamus, Basal Ganglia, Motor Cortex, Cerebellum, Brain Stem) over a typed cognitive event bus, the *Corpus Callosum*. The LLM is not the brain: models are interchangeable inference resources routed by capability, while memory, plans, learned procedures, health, and action history persist in Nexus itself. See [`docs/architecture/NEXUS_BRAIN.md`](docs/architecture/NEXUS_BRAIN.md).
 
-v0.7 turns Nexus Core into a modular local-first AI workstation: measured runtime auto-tuning, a durable Devin-style activity timeline, persistent autonomy, computer use, sandboxes, LSP, repository RAG, skills, multi-agent worktrees, an evaluation lab, artifacts, backups, DPAPI-wrapped secrets, connectors, a knowledge graph, simulation, and a hardware Digital Twin. The canonical version lives in `VERSION`; `scripts/sync_version.py` derives every downstream artifact (pyproject, installer defaults, .NET project, PyInstaller resource, `.agent/project.json`).
+v0.7 turns Nexus Core into a modular local-first AI workstation: measured runtime auto-tuning, a durable Devin-style activity timeline, persistent autonomy, computer use, sandboxes, LSP, repository RAG, managed skill/plugin packages, multi-agent worktrees, an evaluation lab, artifacts, backups, DPAPI-wrapped secrets, connectors, a knowledge graph, simulation, and a hardware Digital Twin. The canonical version lives in `VERSION`; `scripts/sync_version.py` derives every downstream artifact (pyproject, installer defaults, .NET project, PyInstaller resource, `.agent/project.json`).
 
 ## Nexus Core identity and v0.6 UI
 
@@ -458,7 +458,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1380 tests passing** (2 environment-dependent skips).
+Current expected result: **1385 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 
@@ -473,6 +473,10 @@ GET  /api/research
 GET  /api/image
 GET  /api/image/history
 GET  /api/image/job/<id>
+GET  /api/skills
+GET  /api/skills/<name>
+POST /api/skills/verify
+POST /api/skills/install|update|rollback|remove
 POST /api/chat
 POST /api/tasks/resume
 POST /api/tasks/recover
@@ -513,7 +517,7 @@ Non-token agent events are also mirrored onto the shared `/api/events` bus with 
 
 **Work queue.** `POST /api/queue` enqueues prompts that run FIFO on the agent whenever it is idle; messages sent while a task is running auto-enqueue (`chat_queue_when_busy`, default on). Queue state lives in `.agent/queue.json`, shows in the chat task card and the Tools page Work queue card, and items can be cancelled via `POST /api/queue/cancel`.
 
-**Autonomous mode.** `POST /api/permissions/autonomous` (or the Tools-page toggle) auto-approves `ask`/`session` workspace actions for unattended runs — hard gates (`spend.money`, `message.send`, `microphone.use`, `camera.use`) always wait, and `deny` stays denied. Idle managed models are evicted on a timer to free VRAM/RAM, interrupted tasks auto-resume after a restart, stale errors retry with backoff, and tool calls have a hard timeout — all bounded by `autonomous_*` config keys documented in `config.example.json`.
+**Autonomous mode.** `POST /api/permissions/autonomous` (or the Tools-page toggle) auto-approves `ask`/`session` workspace actions for unattended runs — hard gates (`spend.money`, `message.send`, `microphone.use`, `camera.use`, `skills.manage`, and the granular desktop-control keys) always wait, and `deny` stays denied. Idle managed models are evicted on a timer to free VRAM/RAM, interrupted tasks auto-resume after a restart, stale errors retry with backoff, and tool calls have a hard timeout — all bounded by `autonomous_*` config keys documented in `config.example.json`.
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat/events drive the animated NEXUS activity HUD with phase/model/elapsed seconds and real high-level operations instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 

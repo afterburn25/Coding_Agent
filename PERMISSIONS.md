@@ -10,7 +10,7 @@ Core keys plus risk-sensitive keys shared across profiles:
 
 `filesystem.read` · `filesystem.write` · `filesystem.delete` ·
 `shell.execute` · `git.execute` · `git.push` · `packages.install` ·
-`docker.access` · `credentials.use` · `network.read` · `browser.control` ·
+`skills.manage` · `docker.access` · `credentials.use` · `network.read` · `browser.control` ·
 `browser.submit` · `external_api.call` · `image.read` · `image.generate` ·
 `image.manage` · `github.read` · `github.write` · `message.send` ·
 `microphone.use` · `camera.use` · `spend.money` · `tasks.queue` ·
@@ -39,9 +39,15 @@ keys default to `ask`.
 
 ## Known permission keys
 
-`filesystem.read`, `filesystem.write`, `shell.execute`, `git.execute`,
-`image.read`, `image.generate`, `image.manage`, `network.read`,
-`browser.control`, `github.read`, `github.write`.
+`filesystem.read`, `filesystem.write`, `filesystem.delete`,
+`shell.execute`, `git.execute`, `git.push`, `packages.install`,
+`skills.manage`, `image.read`, `image.generate`, `image.manage`,
+`network.read`, `browser.control`, `browser.submit`, `external_api.call`,
+`docker.access`, `credentials.use`, `github.read`, `github.write`,
+`tasks.queue`, `desktop.view`, `screen.capture`, `desktop.control`,
+`mouse.control`, `keyboard.control`, `clipboard.read`, `clipboard.write`,
+`application.launch`, `microphone.use`, `camera.use`, `message.send`,
+`spend.money`.
 
 Tools may introduce additional keys; any key not configured defaults to `ask`.
 
@@ -80,8 +86,8 @@ It never bypasses:
 
 - `deny` levels — denied stays denied.
 - Hard gates (`AUTONOMY_NEVER_AUTO` in `permissions.py`): `spend.money`,
-  `message.send`, `microphone.use`, `camera.use`, and every desktop
-  observation/control key always require an explicit human approval
+  `message.send`, `microphone.use`, `camera.use`, `skills.manage`, and every
+  desktop observation/control key always require an explicit human approval
   regardless of mode.
 
 Two companion settings bound autonomous runs:

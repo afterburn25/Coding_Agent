@@ -158,6 +158,59 @@ Drop JSON files into `tools/manifests/` (configurable via
   under the same `packages.install` permission gate. Package-manager tools
   report manual removal (their package manager owns the files).
 
+## Skill packages
+
+Reusable instruction/tool bundles live in `skills/` (bundled) and
+`data/skills/` (managed user packages). A package is a directory containing
+`skill.json` (preferred) or `SKILL.md` frontmatter:
+
+```json
+{
+  "name": "review-helper",
+  "version": "1.0.0",
+  "description": "Review changes before integration",
+  "author": "Nexus Team",
+  "capabilities": ["code_review"],
+  "tools": ["read_file", "run_tests"],
+  "permissions": ["filesystem.read"],
+  "dependencies": [],
+  "supported_os": ["windows"],
+  "instructions": "Review the diff, identify regressions, then verify.",
+  "health_check": {"command": ["python", "--version"]},
+  "update": {"source": "local-directory"},
+  "ui": {"panel": "system"}
+}
+```
+
+Lifecycle behavior:
+
+- `GET /api/skills` discovers bundled and managed skills; `GET
+  /api/skills/<name>` returns the full manifest surface and verification.
+- `POST /api/skills/verify` is read-only. It validates schema shape, safe
+  names, declared tools/capabilities/dependencies, OS support, permission
+  specificity, and computes a bounded package digest.
+- `POST /api/skills/install` and `/api/skills/update` copy a verified source
+  directory into `data/skills/`. Install/update is permission-gated by
+  `skills.manage`; the approval response includes requested permissions and
+  capabilities so they are visible before approval.
+- Updating a managed skill snapshots the previous package under
+  `data/skills/_backups/<name>/` (bounded to the three newest snapshots).
+  `POST /api/skills/rollback` restores the newest previous snapshot.
+- `POST /api/skills/remove` removes a managed package and its snapshots.
+  Bundled skills can be disabled but cannot be deleted through the manager.
+- `POST /api/skills/enable` and `/api/skills/disable` are also gated by
+  `skills.manage` because enabled skills alter future instruction context and
+  exposed tool affordances.
+- `POST /api/skills/health` reports manifest health without executing by
+  default. `{"run": true}` executes a declared health command through the
+  separate `shell.execute` gate.
+
+Unknown permission keys are surfaced as verification warnings and still
+default to `ask`; wildcard/broad pseudo-permissions (`*`, `filesystem.*`,
+`desktop.*`, etc.) are rejected. The System page's Skills panel shows provider,
+capabilities, requested permissions, dependencies, verification, update,
+rollback, and remove controls.
+
 ## API
 
 ```text
@@ -168,6 +221,15 @@ GET  /api/tools/telemetry          recent routing decisions
 POST /api/tools/state              {"tool": "read_file", "enabled": false}
 POST /api/tools/install            {"tool": "comfyui"} — package-manager or archive install job
 POST /api/tools/uninstall          {"tool": "comfyui"} — archive tools: delete dest + .part
+GET  /api/skills                   discovered bundled + managed skill packages
+GET  /api/skills/<name>            skill detail + verification
+POST /api/skills/verify            {"path": "..."} or {"name": "..."} — read-only manifest/package checks
+POST /api/skills/install           {"path": "...", "approve": true} — gated managed install
+POST /api/skills/update            {"path": "...", "approve": true} — gated managed update
+POST /api/skills/enable|disable    {"name": "...", "approve": true} — gated lifecycle toggle
+POST /api/skills/rollback          {"name": "...", "approve": true} — restore latest snapshot
+POST /api/skills/remove            {"name": "...", "approve": true} — remove managed package
+POST /api/skills/health            {"name": "...", "run": false} — declared or executed health check
 GET  /api/permissions              profile + levels + session grants
 POST /api/permissions/level        {"permission": "shell.execute", "level": "session"}
 POST /api/permissions/profile      {"profile": "offline"}

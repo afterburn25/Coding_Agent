@@ -79,7 +79,11 @@ The agent receives OpenAI schemas only for enabled, callable tools; catalog-only
 manifests stay visible in the Tool Manager without entering model context.
 `interfaces.py` defines the structural tool-family contracts (executable,
 model, image, browser, research, media, data, document, sandbox, VCS) so
-providers are interchangeable. See `TOOLS.md` and `PERMISSIONS.md`.
+providers are interchangeable. Reusable skill packages live in
+`localcodeagent/skills/`; verified local-directory packages can be installed,
+updated, enabled/disabled, rolled back, or removed under the dedicated
+`skills.manage` gate, with bounded snapshots in `data/skills/_backups/`. See
+`TOOLS.md` and `PERMISSIONS.md`.
 
 Desktop control follows the same registry boundary. `computer_use` exposes
 Windows observation/input primitives, but all policy stays in
@@ -215,7 +219,8 @@ driver liveness: _drive_threads registry + watchdog
   `## result` block (4 KiB preview) on terminal status — plus crash lines
   for failures before the session loop begins.
 - `PermissionManager.set_autonomous` auto-approves `ask`/`session` workspace
-  actions; hard gates (spend/message/mic/camera) and `deny` are never touched.
+  actions; hard gates (spend/message/mic/camera, skill lifecycle, desktop
+  observation/control) and `deny` are never touched.
   `autonomous_approval_timeout_seconds` bounds hard-gate waits.
 - `RuntimeManager.evict_idle` on the watchdog tick unloads models idle past
   `model_idle_unload_seconds` or under `memory_pressure_*` floors, while

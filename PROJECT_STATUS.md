@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1380 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1385 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -40,8 +40,13 @@ v0.15.0 deepens the workstation core:
   agent thinking, and operational mood to a subtle canonical-portrait
   presence in chat; animation is CSS-only, non-blocking, and degrades to
   the static portrait. See `docs/AVATAR.md`.
+- **Managed skill/plugin lifecycle** — verified `skill.json`/`SKILL.md`
+  packages now support detail, install, update, gated enable/disable,
+  bounded rollback snapshots, removal, and declared-or-executed health
+  checks. `skills.manage` approvals disclose requested permissions and
+  capabilities; the System page exposes the lifecycle controls.
 
-Verified: **1380 tests** (2 environment skips).
+Verified: **1385 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -390,7 +395,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Sandbox**: `localcodeagent/sandbox/` — temp-workspace python/JS/shell exec with timeout, Windows Job Object memory+kill limits, network-deny, artifact extraction; `sandbox_run` tool.
 - **LSP**: `localcodeagent/lsp/` stdio JSON-RPC client (definitions/references/document+workspace symbols/hover/diagnostics), pooled per server, graceful without installed servers.
 - **Repo RAG**: `localcodeagent/rag/` incremental SQLite index (files/symbols/chunks, mtime+sha incremental) — `search()` for coding workflows.
-- **Skills**: `localcodeagent/skills/` — skill.json/SKILL.md packages with capabilities/tools/permissions/instructions; install/enable/disable persisted under `data/skills/`.
+- **Skills**: `localcodeagent/skills/` — skill.json/SKILL.md packages with author/provider, capabilities, tools, permissions, dependencies, OS support, instructions, update metadata, UI hints, and optional health checks. Managed lifecycle supports detail/verify/install/update/enable/disable/rollback/remove; `skills.manage` gates mutating actions and bounded snapshots live under `data/skills/_backups/`.
 - **Multi-agent worktrees**: `localcodeagent/multiagent.py` — role-scoped agents (planner/coder/reviewer/tester/debugger/security) in isolated git worktrees; controlled merge-back aborts cleanly on conflict.
 - **Eval Lab + Experiments**: `localcodeagent/eval/` — suite runs with history/compare; experiment records (hypothesis→arms→metrics→conclusion).
 - **Artifacts**: `localcodeagent/artifacts.py` — provenance registry (creator/mission/task, sha256, versioning, managed store).
@@ -402,8 +407,8 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Digital Twin**: `localcodeagent/twin.py` — measured hardware samples + model measures; predicts RAM/VRAM fit, load/TTFT/TPS; hardware-fingerprint invalidation.
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
-- Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1380 tests passing** (2 environment skips).
+- Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
+- Current automated checkpoint: **1385 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 

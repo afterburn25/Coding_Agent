@@ -151,6 +151,7 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("creator", s["levels"])
         info = s["info"]["browser.control"]
         self.assertEqual(info["category"], "Browser Automation")
+        self.assertEqual(s["info"]["skills.manage"]["category"], "Tool Installation")
         cats = {c["category"] for c in s["categories"]}
         self.assertIn("Filesystem", cats)
         self.assertIn("Tool Installation", cats)
@@ -298,6 +299,29 @@ class PermissionApiTests(unittest.TestCase):
         # installable is derived from install_command — "build" yields no argv.
         from localcodeagent.tools.plugins import install_command
         self.assertIsNone(install_command({"method": "build"}))
+
+    def test_skill_install_requires_approval_and_discloses_permissions(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "incoming" / "review-helper"
+            src.mkdir(parents=True)
+            (src / "skill.json").write_text(json.dumps({
+                "name": "review-helper",
+                "version": "1.0.0",
+                "description": "review assistance",
+                "capabilities": ["code_review"],
+                "tools": ["read_file"],
+                "permissions": ["filesystem.read"],
+            }), encoding="utf-8")
+            out = self._post("/api/skills/install", {"path": str(src)})
+            self.assertTrue(out.get("needs_approval"))
+            self.assertEqual(out.get("permission"), "skills.manage")
+            self.assertEqual(out.get("requested_permissions"), ["filesystem.read"])
+            self.assertEqual(out.get("capabilities"), ["code_review"])
+            out = self._post("/api/skills/install", {"path": str(src), "approve": True})
+            self.assertTrue(out.get("ok"), out)
+            detail = self._get("/api/skills/review-helper")
+            self.assertEqual(detail["permissions"], ["filesystem.read"])
+            self.assertTrue(detail["verification"]["ok"])
 
     def test_creator_level_via_api_gates_install(self):
         self._post("/api/permissions/level", {"permission": "packages.install", "level": "creator"})

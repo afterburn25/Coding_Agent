@@ -24,6 +24,7 @@ LEVELS = ("allow", "session", "ask", "creator", "deny")
 _RISK_DEFAULTS = {
     "filesystem.delete": "ask",
     "packages.install": "ask",
+    "skills.manage": "ask",
     "docker.access": "ask",
     "credentials.use": "ask",
     "git.push": "ask",
@@ -179,6 +180,9 @@ KNOWN_PERMISSIONS = sorted({key for profile in PROFILES.values() for key in prof
 AUTONOMY_NEVER_AUTO = frozenset({
     "spend.money",
     "message.send",
+    # Skill/plugin lifecycle changes can alter future agent instructions and
+    # available tools; autonomous missions must not silently widen themselves.
+    "skills.manage",
     "microphone.use",
     "camera.use",
     # Desktop observation/control can expose the user's live screen or inject
@@ -221,6 +225,8 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
                           "blurb": "Create/edit issues, pull requests, and comments on GitHub.", "tools": ["github"]},
     "packages.install":  {"label": "Install tools & packages", "category": "Tool Installation", "scope": "App tool directories", "risk": "high",
                           "blurb": "Download, install, update, or remove tools and packages (ComfyUI, Blender, pip packages).", "tools": ["tool_installer", "package_installer"]},
+    "skills.manage":     {"label": "Manage skills & plugins", "category": "Tool Installation", "scope": "App skill directories", "risk": "high",
+                          "blurb": "Install, update, enable, disable, roll back, or remove reusable skill/plugin packages.", "tools": ["skill_registry"]},
     "docker.access":     {"label": "Docker / sandbox", "category": "Docker / Sandbox", "scope": "Local daemon", "risk": "high",
                           "blurb": "Start containers and run code inside the local Docker sandbox.", "tools": ["docker", "sandbox"]},
     "credentials.use":   {"label": "Use credentials", "category": "Credentials", "scope": "Secret vault", "risk": "high",
@@ -281,6 +287,7 @@ _PREFIX_CATEGORY = [
     ("knowledge", "Research"), ("mcp", "MCP / External Tools"),
     ("docker", "Docker / Sandbox"), ("sandbox", "Docker / Sandbox"),
     ("packages", "Tool Installation"), ("tools", "Tool Installation"),
+    ("skills", "Tool Installation"), ("plugins", "Tool Installation"),
     ("credentials", "Credentials"), ("secrets", "Credentials"),
     ("message", "Communication"), ("spend", "Communication"),
     ("desktop", "Desktop"), ("screen", "Desktop"), ("mouse", "Desktop"),

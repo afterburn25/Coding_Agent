@@ -9,10 +9,10 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
 - Current development version: `0.15.0` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
-- Verified unit checkpoint: **1380 passing** (2 environment skips)
-- v0.15.0 adds decomposed mission planning, project context/history, code-impact queries, STT/push-to-talk, operational state + return briefing, mission checkpoints, Knowledge Library, structured correction learning, hardened granular desktop control, and the avatar animation/lip-sync foundation (see PROJECT_STATUS.md)
+- Verified unit checkpoint: **1385 passing** (2 environment skips)
+- v0.15.0 adds decomposed mission planning, project context/history, code-impact queries, STT/push-to-talk, operational state + return briefing, mission checkpoints, Knowledge Library, structured correction learning, hardened granular desktop control, the avatar animation/lip-sync foundation, and managed skill/plugin lifecycle depth (see PROJECT_STATUS.md)
 - 2026-10-03 overnight dogfood (`docs/reports/OVERNIGHT_REPORT_2026-10-03.md`): fixed a real queue-wedge — `resume()` leaked `_finalize()`'s internal repair-round `None`, stranding tasks `running` forever with no driver; now a driver registry + watchdog reaper fails driverless active tasks after `stalled_task_grace_seconds`. Also: Answer Memory profile scoping (privacy), personality delivery cues, preset voice defaults, canary `PYTHONPATH` isolation, v2-schema self-heal.
-- Latest local milestone commits: `e63a4b1` (permission-gated desktop control), `fb947d1` (structured correction learning), `8fec84b` (Knowledge Library), `1332ef6` (decomposed planning, projects UI/context, STT, operational state); the avatar foundation is the next local checkpoint. Earlier dogfood/hardening: `f0a46f5`/`16acf05` (mission-loop dogfood), `e3d68ff` (replan dead-end sweep), `5e74928` (real ledger node status), `6c684c1` (mission park lane release), `c4050e5` (queue-wedge fix)
+- Latest local milestone commits: `f580a9e` (avatar animation/lip-sync foundation), `e63a4b1` (permission-gated desktop control), `fb947d1` (structured correction learning), `8fec84b` (Knowledge Library), `1332ef6` (decomposed planning, projects UI/context, STT, operational state); this tree adds managed skill/plugin lifecycle depth on top. Earlier dogfood/hardening: `f0a46f5`/`16acf05` (mission-loop dogfood), `e3d68ff` (replan dead-end sweep), `5e74928` (real ledger node status), `6c684c1` (mission park lane release), `c4050e5` (queue-wedge fix)
 - GitHub Actions: all-green on the last several pushes; windows-desktop job compiles the real Inno installer and smokes install→update-twice including a fake-process kill check
 
 The `main` branch includes the verified code plus documentation/checkpoint metadata. **Clone/pull `main`; do not reset the project to the code checkpoint or takeover anchor.**
@@ -37,6 +37,7 @@ Read in this order:
 13. `docs/AUTONOMY.md` for the persistent-mission autonomy subsystem (missions, DAG, supervisor, policy, scheduler, triggers, recovery).
 14. `docs/DESKTOP_CONTROL.md` for permission-gated local desktop control, audit boundaries, and validation rules.
 15. `docs/AVATAR.md` for the canonical portrait, avatar state channels, gesture bridge, and lip-sync boundaries.
+16. `TOOLS.md` for plugin manifests and managed skill-package lifecycle.
 
 ## Product direction that must be preserved
 

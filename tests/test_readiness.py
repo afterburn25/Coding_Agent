@@ -149,9 +149,14 @@ class CodingReadinessTests(unittest.TestCase):
         js = (ROOT / "web" / "system.js").read_text(encoding="utf-8")
         self.assertIn('href="/system.html"', html)
         for endpoint in ("/api/health", "/api/twin", "/api/rag", "/api/lsp",
-                         "/api/skills", "/api/artifacts", "/api/backups",
+                         "/api/skills", "/api/skills/verify",
+                         "/api/skills/install", "/api/skills/update",
+                         "/api/skills/rollback", "/api/skills/remove",
+                         "/api/artifacts", "/api/backups",
                          "/api/eval/history", "/api/experiments"):
             self.assertIn(endpoint, js, f"system.js missing {endpoint}")
+        for control in ("skillPath", "skillVerify", "skillInstall", "skillUpdate"):
+            self.assertIn(control, page)
         self.assertIn("system.js", page)
 
 

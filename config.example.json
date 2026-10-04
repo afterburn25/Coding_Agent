@@ -98,6 +98,8 @@
     "network.read": "allow",
     "browser.control": "ask",
     "image.manage": "ask",
+    "packages.install": "ask",
+    "skills.manage": "ask",
     "github.read": "allow",
     "github.write": "ask"
   },

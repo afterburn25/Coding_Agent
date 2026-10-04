@@ -4166,7 +4166,16 @@ class Handler(BaseHTTPRequestHandler):
                 task_id=(q.get("task") or [""])[0])})
             return True
         if path == "/api/skills":
-            self._json({"skills": self.state.skills.list()})
+            self._json({"skills": self.state.skills.list(),
+                        "scan_errors": getattr(self.state.skills, "scan_errors", [])})
+            return True
+        if path.startswith("/api/skills/"):
+            name = unquote(path[len("/api/skills/"):].strip("/"))
+            detail = self.state.skills.detail(name)
+            if detail is None:
+                self._json({"error": "skill not found"}, 404)
+            else:
+                self._json(detail)
             return True
         if path == "/api/connectors":
             self._json({"connectors": self.state.connectors.status()})
@@ -4231,10 +4240,74 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.rag_index.update(
                 force=bool(body.get("force", False))))
             return True
-        if path == "/api/skills/enable" or path == "/api/skills/disable":
-            ok = self.state.skills.set_enabled(
-                str(body.get("name", "")), path.endswith("enable"))
-            self._json({"ok": ok}, 404 if not ok else 200)
+        if path == "/api/skills/verify":
+            target = str(body.get("path") or body.get("name") or "")
+            out = self.state.skills.verify(target)
+            self._json(out, 404 if out.get("errors") == ["unknown skill"] else
+                       (400 if not out.get("ok") else 200))
+            return True
+        if path == "/api/skills/health":
+            name = str(body.get("name", ""))
+            run = bool(body.get("run", False))
+            if run:
+                gate = self.state._permission_gate(
+                    "shell.execute", bool(body.get("approve", False)),
+                    f"skill health:{name}")
+                if gate is not None:
+                    gate["skill"] = name
+                    self._json(gate)
+                    return True
+            out = self.state.skills.health(name, run=run)
+            self._json(out, 404 if out.get("status") == "missing" else 200)
+            return True
+        if path in ("/api/skills/install", "/api/skills/update"):
+            source = str(body.get("path") or body.get("source") or "")
+            verification = self.state.skills.verify(source)
+            if not verification.get("ok"):
+                self._json(verification, 400)
+                return True
+            action = "update" if path.endswith("/update") else "install"
+            gate = self.state._permission_gate(
+                "skills.manage", bool(body.get("approve", False)),
+                f"skill {action}:{verification.get('target', '')}")
+            if gate is not None:
+                gate["action"] = action
+                gate["requested_permissions"] = verification.get("requested_permissions", [])
+                gate["capabilities"] = verification.get("capabilities", [])
+                gate["skill"] = verification.get("target", "")
+                self._json(gate)
+                return True
+            out = (self.state.skills.update(source) if action == "update"
+                   else self.state.skills.install(source))
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path in ("/api/skills/enable", "/api/skills/disable",
+                    "/api/skills/rollback", "/api/skills/remove"):
+            name = str(body.get("name", ""))
+            action = path.rsplit("/", 1)[-1]
+            detail = self.state.skills.detail(name)
+            if detail is None:
+                self._json({"ok": False, "error": "skill not found"}, 404)
+                return True
+            gate = self.state._permission_gate(
+                "skills.manage", bool(body.get("approve", False)),
+                f"skill {action}:{name}")
+            if gate is not None:
+                gate["action"] = action
+                gate["skill"] = name
+                gate["requested_permissions"] = detail.get("permissions", [])
+                gate["capabilities"] = detail.get("capabilities", [])
+                self._json(gate)
+                return True
+            if action == "enable" or action == "disable":
+                ok = self.state.skills.set_enabled(name, action == "enable")
+                self._json({"ok": ok}, 404 if not ok else 200)
+            elif action == "rollback":
+                out = self.state.skills.rollback(name)
+                self._json(out, 400 if not out.get("ok") else 200)
+            else:
+                ok = self.state.skills.remove(name)
+                self._json({"ok": ok}, 404 if not ok else 200)
             return True
         if path == "/api/knowledge/entity" and self.state.knowledge:
             self._json(self.state.knowledge.add_entity(

@@ -139,10 +139,45 @@ function renderSkills(list){
     `<div class="list-row"><b>${esc(s.name)}</b> <span class="pill">v${esc(s.version)}</span>
      ${s.bundled?'<span class="pill">bundled</span>':''}
      <span class="pill">${s.enabled?'enabled':'disabled'}</span>
-     <div class="meta">${esc(s.description||'')}</div>
-     <div class="meta">${(s.capabilities||[]).map(c=>`<span class="pill">${esc(c)}</span>`).join('')}</div>
-     <div class="actions"><button class="mini-button" data-skill="${esc(s.name)}" data-en="${s.enabled?0:1}">${s.enabled?'Disable':'Enable'}</button></div>
+     <div class="meta">${esc(s.description||'')}${s.author?' · '+esc(s.author):''}</div>
+     <div class="meta">${(s.capabilities||[]).map(c=>`<span class="pill">${esc(c)}</span>`).join('')}
+     ${(s.permissions||[]).map(p=>`<span class="pill">perm ${esc(p)}</span>`).join('')}</div>
+     ${(s.dependencies||[]).length?`<div class="meta">deps: ${(s.dependencies||[]).map(d=>esc(d)).join(', ')}</div>`:''}
+     <div class="actions">
+       <button class="mini-button" data-skill-toggle="${esc(s.name)}" data-en="${s.enabled?0:1}">${s.enabled?'Disable':'Enable'}</button>
+       <button class="mini-button" data-skill-verify="${esc(s.name)}">Verify</button>
+       ${s.rollback_count?`<button class="mini-button" data-skill-rollback="${esc(s.name)}">Rollback</button>`:''}
+       ${s.bundled?'':`<button class="mini-button danger" data-skill-remove="${esc(s.name)}">Remove</button>`}
+     </div>
     </div>`).join('')||'<div class="off">No skills installed.</div>';
+}
+
+function renderSkillResult(r){
+  $('#skillResult').innerHTML=r?`<div><b>${esc(r.target||r.name||r.skill||'skill')}</b>
+    <span class="pill">${r.needs_approval?'approval needed':(r.ok===false?'failed':'ok')}</span>
+    ${(r.errors||[]).map(x=>`<div class="meta">${esc(x)}</div>`).join('')}
+    ${(r.warnings||[]).map(x=>`<div class="meta">warning: ${esc(x)}</div>`).join('')}
+    ${(r.requested_permissions||[]).length?`<div class="meta">permissions: ${r.requested_permissions.map(x=>esc(x)).join(', ')}</div>`:''}
+    </div>`:'';
+}
+
+const SKILL_API={
+  verify:'/api/skills/verify',install:'/api/skills/install',
+  update:'/api/skills/update',enable:'/api/skills/enable',
+  disable:'/api/skills/disable',rollback:'/api/skills/rollback',
+  remove:'/api/skills/remove',health:'/api/skills/health'
+};
+async function skillApi(action,body){
+  const endpoint=SKILL_API[action]||('/api/skills/'+action);
+  let r=await api(endpoint,'POST',body);
+  if(r&&r.needs_approval){
+    const label=`${action} ${r.skill||body.name||body.path||''}`;
+    const perms=(r.requested_permissions||[]).join(', ')||'none declared';
+    if(!confirm(`${label} requires approval.\nRequested permissions: ${perms}\nContinue?`))return r;
+    r=await api(endpoint,'POST',{...body,approve:true});
+  }
+  renderSkillResult(r);
+  return r;
 }
 
 /* ---------- Connectors ---------- */
@@ -251,11 +286,33 @@ $('#backupCreate').onclick=async()=>{
   const r=await api('/api/backups/create','POST',{label:$('#backupLabel').value.trim()});
   if(r.ok){$('#backupLabel').value='';refresh();}else alert('Backup failed: '+(r.error||'unknown'));
 };
+$('#skillVerify').onclick=async()=>{
+  const path=$('#skillPath').value.trim();if(!path)return;
+  const r=await api('/api/skills/verify','POST',{path});renderSkillResult(r);
+};
+$('#skillInstall').onclick=async()=>{
+  const path=$('#skillPath').value.trim();if(!path)return;
+  const r=await skillApi('install',{path});if(r.ok)refresh();
+};
+$('#skillUpdate').onclick=async()=>{
+  const path=$('#skillPath').value.trim();if(!path)return;
+  const r=await skillApi('update',{path});if(r.ok)refresh();
+};
 document.addEventListener('click',async e=>{
   const t=e.target;if(!(t instanceof HTMLElement))return;
-  if(t.dataset.skill!==undefined){
+  if(t.dataset.skillToggle!==undefined){
     const en=t.dataset.en==='1';
-    await api('/api/skills/'+(en?'enable':'disable'),'POST',{name:t.dataset.skill});refresh();
+    const r=await skillApi(en?'enable':'disable',{name:t.dataset.skillToggle});
+    if(r.ok)refresh();
+  }else if(t.dataset.skillVerify!==undefined){
+    const r=await api('/api/skills/verify','POST',{name:t.dataset.skillVerify});
+    renderSkillResult(r);
+  }else if(t.dataset.skillRollback!==undefined){
+    if(!confirm(`Roll back skill ${t.dataset.skillRollback}?`))return;
+    const r=await skillApi('rollback',{name:t.dataset.skillRollback});if(r.ok)refresh();
+  }else if(t.dataset.skillRemove!==undefined){
+    if(!confirm(`Remove skill ${t.dataset.skillRemove}? This deletes its managed package and rollback snapshots.`))return;
+    const r=await skillApi('remove',{name:t.dataset.skillRemove});if(r.ok)refresh();
   }else if(t.dataset.verify){
     const r=await api('/api/backups/restore','POST',{backup:t.dataset.verify,dry_run:true});
     alert(r.ok?`Verified — would restore ${r.would_restore} files.`:`Verification failed: ${r.error||'hash mismatch'}`);

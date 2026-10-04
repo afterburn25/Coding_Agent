@@ -307,6 +307,67 @@ class SkillTests(unittest.TestCase):
             reg2 = SkillRegistry(ws)
             self.assertFalse(reg2.list()[0]["enabled"])
 
+    def test_verify_reports_manifest_surface(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            src = Path(td) / "incoming" / "research-pack"
+            _mk_skill(src, "research-pack", author="Nexus Team",
+                      permissions=["network.read", "custom.skill"],
+                      dependencies=["retrieval-helper"],
+                      supported_os=["windows", "linux", "macos"])
+            reg = SkillRegistry(ws)
+            out = reg.verify(src)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["requested_permissions"],
+                             ["network.read", "custom.skill"])
+            self.assertIn("custom.skill", " ".join(out["warnings"]))
+            self.assertIn("retrieval-helper", " ".join(out["warnings"]))
+            self.assertTrue(out["sha256"])
+
+    def test_broad_permission_and_bad_name_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            broad = Path(td) / "broad"
+            _mk_skill(broad, "broad", permissions=["filesystem.*"])
+            reg = SkillRegistry(ws)
+            out = reg.install(broad)
+            self.assertFalse(out["ok"])
+            self.assertTrue(any("too broad" in e for e in out["errors"]))
+            bad = Path(td) / "bad-name"
+            _mk_skill(bad, "../escape")
+            out = reg.install(bad)
+            self.assertFalse(out["ok"])
+
+    def test_update_rollback_and_snapshot_bound(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            reg = SkillRegistry(ws)
+            for version in ("1.0.0", "2.0.0", "3.0.0", "4.0.0"):
+                src = Path(td) / f"incoming-{version}" / "demo"
+                _mk_skill(src, "demo", version=version,
+                          instructions=f"instructions {version}")
+                out = reg.install(src) if version == "1.0.0" else reg.update(src)
+                self.assertTrue(out["ok"], out)
+            detail = reg.detail("demo")
+            self.assertEqual(detail["version"], "4.0.0")
+            self.assertLessEqual(detail["rollback_count"], 3)
+            out = reg.rollback("demo")
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(reg.detail("demo")["version"], "3.0.0")
+            out = reg.rollback("demo")
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(reg.detail("demo")["version"], "2.0.0")
+
+    def test_health_check_is_declared_not_executed_by_default(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            _mk_skill(ws / "skills" / "demo",
+                      health_check={"command": ["python", "--version"]})
+            reg = SkillRegistry(ws)
+            out = reg.health("demo")
+            self.assertEqual(out["status"], "declared")
+            self.assertEqual(out["command"], ["python", "--version"])
+
 
 class SimulationTests(unittest.TestCase):
     def test_simulation_does_not_execute(self):
