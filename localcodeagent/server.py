@@ -38,6 +38,7 @@ from .tools.plugins import load_plugin_manifests
 from .tools.downloads import ToolDownloadManager
 from .secrets import SecretVault
 from .tools.api import register_api_tools
+from .tools.audit import register_audit_tools
 from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
 from .tools.data import register_data_tools
@@ -378,6 +379,9 @@ class AppState:
         register_devserver_tools(self.tools, self.devservers)
         register_search_tools(self.tools, self.workspace)
         register_build_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        register_audit_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
         register_project_tools(self.tools, self.workspaces)

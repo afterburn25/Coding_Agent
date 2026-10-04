@@ -102,6 +102,17 @@ evidence — nothing claims an action that did not run.
   apply runs tests → build → LKG snapshot → stage → flag; the host
   swaps on the next boot so the running install is never mutated
   mid-flight. `/api/update/{status,plan,apply}` (apply confirm-gated).
+- **Dependency audit tools** — `dep_list` parses declared deps from
+  requirements.txt/pyproject.toml/package.json/Cargo.toml with no
+  network; `project_audit` runs the real auditor per ecosystem
+  (pip-audit/npm audit/cargo audit) and reports `auditor_unavailable`
+  when the tool isn't installed — never fabricated findings.
+- **Global search palette** — Ctrl+K/Cmd+K on every page opens a
+  command palette backed by `GET /api/search`, which fans the query
+  across tasks, missions, projects, skills, saved answers, knowledge
+  entities, queued work, dev servers and workspace file names with
+  per-source failure isolation and exact/prefix/substring ranking
+  (`localcodeagent/search.py`, `web/palette.js`).
 - **Command Center** (`/command.html`) — unified operational surface:
   system status, named workers, missions, queue, dev servers,
   capability states, safe mode, LKG snapshots/rollback, and
