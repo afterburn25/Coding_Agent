@@ -303,6 +303,7 @@ class AppState:
         # the (once-per-item, mute-respecting) voice notice.
         from .workers import AdaptiveWorkerManager
         self._queue_announced: set[str] = set()
+        self._queue_line_cursor: dict[str, int] = {}
         self.workers = AdaptiveWorkerManager(
             self.workspace,
             max_workers=int(getattr(config, "worker_ceiling", 8)),
@@ -3452,25 +3453,48 @@ class AppState:
     # Persona-styled voice notice when USER work lands in a queue — spoken
     # once per item, mute-respecting (voice.enqueue drops when muted).
     _QUEUED_LINES = {
-        "default":      "I've placed that task in the queue. It will start "
-                        "as soon as a worker is available.",
-        "professional": "The task has been queued and will begin when "
-                        "sufficient resources become available.",
-        "playful":      "My workers are busy right now, so I've put that "
-                        "one next in line.",
-        "warm":         "I've got that queued up for you — it'll start as "
-                        "soon as a worker frees up.",
-        "calm":         "That task is queued. I'll begin it as soon as "
-                        "there's room.",
-        "sassy":        "Queued. My hands are full — it goes next as soon "
-                        "as something finishes.",
-        "nerdy":        "Task queued. The scheduler will admit it once "
-                        "sufficient resources free up.",
-        "flirty":       "That one's in my queue, love — I'll get to it the "
-                        "moment a worker frees up.",
-        "raunchy":      "That one's in my queue — I'll get to it the moment "
-                        "a worker frees up.",
-        "rude":         "Queued. It'll start when something finishes.",
+        "default": [
+            "I've placed that task in the queue. It will start as soon "
+            "as a worker is available.",
+            "That one's queued — it'll start the moment a worker frees "
+            "up."],
+        "professional": [
+            "The task has been queued and will begin when sufficient "
+            "resources become available.",
+            "Queued — it will commence as soon as capacity allows."],
+        "playful": [
+            "My workers are busy right now, so I've put that one next "
+            "in line.",
+            "All hands busy — that one's up next!"],
+        "warm": [
+            "I've got that queued up for you — it'll start as soon as "
+            "a worker frees up.",
+            "In the queue, love — the moment a worker's free, it's "
+            "yours."],
+        "calm": [
+            "That task is queued. I'll begin it as soon as there's "
+            "room.",
+            "Queued — it'll start quietly when a worker is free."],
+        "sassy": [
+            "Queued. My hands are full — it goes next as soon as "
+            "something finishes.",
+            "In line. It'll get its turn the second something wraps."],
+        "nerdy": [
+            "Task queued. The scheduler will admit it once sufficient "
+            "resources free up.",
+            "Enqueued — admission pending resource availability."],
+        "flirty": [
+            "That one's in my queue, love — I'll get to it the moment "
+            "a worker frees up.",
+            "Queued for you, darling — I'll start it the second I "
+            "can."],
+        "raunchy": [
+            "That one's in my queue — I'll get to it the moment a "
+            "worker frees up.",
+            "Queued — I'll jump on it the second a worker's free."],
+        "rude": [
+            "Queued. It'll start when something finishes.",
+            "In the queue. Wait your turn with it."],
     }
 
     def _queue_notice_line(self) -> str:
@@ -3480,7 +3504,10 @@ class AppState:
                         or "default")
         except Exception:
             pass
-        return self._QUEUED_LINES.get(style, self._QUEUED_LINES["default"])
+        lines = self._QUEUED_LINES.get(style, self._QUEUED_LINES["default"])
+        i = self._queue_line_cursor.get(style, 0)
+        self._queue_line_cursor[style] = i + 1
+        return lines[i % len(lines)]
 
     def _on_worker_queue_event(self, event_type: str, payload: dict) -> None:
         """Worker-manager semantic events → SSE + voice for user work."""
@@ -3500,6 +3527,13 @@ class AppState:
             fact = title if kind != "failed" \
                 else f"{title} — {outcome or 'failed'}"
             self._speak_notice(f"worker-{w.get('id') or ''}", kind, fact)
+            return
+        if event_type == "worker_capacity_reduced":
+            # Resource pressure explains slowdowns — speak once per
+            # distinct ceiling so repeated failures don't nag.
+            self._speak_notice(
+                f"cap-{payload.get('ceiling')}", "status",
+                "Worker capacity reduced — heavy jobs may run slower.")
             return
         if event_type == "queued_task_started":
             w = payload.get("worker") or {}
@@ -3620,6 +3654,15 @@ class AppState:
                 return False
         fact = title or str(row.get("message") or "")[:90].strip()
         kind = self._LEVEL_KIND.get(level, "status")
+        # Kind-specific persona phrasing when the content warrants it —
+        # a self-repair completion shouldn't read as generic "status".
+        low = (title + " " + str(row.get("message") or "")).lower()
+        if re.search(r"self[- ]repair|repaired|rollback", low):
+            kind = "self_repair"
+        elif "update" in low and "available" in low:
+            kind = "update"
+        elif re.search(r"report|briefing|summary", low):
+            kind = "briefing"
         nid = str(row.get("id") or "")
         if not nid or nid in self._queue_announced:
             return False

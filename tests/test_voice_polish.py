@@ -192,8 +192,10 @@ class _StubVoice:
 class _StubState:
     """Bare-bones AppState surface for the spoken-notice helpers."""
 
-    def __init__(self):
+    def __init__(self, style: str = "playful"):
         self._queue_announced = set()
+        self._queue_line_cursor = {}
+        self._style = style
         self.voice = _StubVoice()
         self.events = SimpleNamespace(published=[],
                                       publish=lambda t, p:
@@ -201,10 +203,16 @@ class _StubState:
         self._persona_notice = lambda kind, fact: f"{kind}:{fact}"
 
     _speak_notice = AppState._speak_notice
+    _speak_queue_notice = AppState._speak_queue_notice
+    _queue_notice_line = AppState._queue_notice_line
     _on_worker_queue_event = AppState._on_worker_queue_event
     _spoken_notice_line = AppState._spoken_notice_line
     _SPOKEN_LEVELS = AppState._SPOKEN_LEVELS
     _LEVEL_KIND = AppState._LEVEL_KIND
+    _QUEUED_LINES = AppState._QUEUED_LINES
+
+    def _vocalization_context(self):
+        return {"style": self._style}
 
 
 class SpokenNotices(unittest.TestCase):
@@ -285,6 +293,40 @@ class SpokenNotices(unittest.TestCase):
                        "title": "long scan"},
             "outcome": "cancelled"})
         self.assertIn("cancelled:", st.voice.enqueued[0][1])
+
+    def test_capacity_reduction_speaks_once_per_level(self):
+        st = _StubState()
+        for _ in range(3):
+            st._on_worker_queue_event("worker_capacity_reduced",
+                                      {"ceiling": 3})
+        self.assertEqual(len(st.voice.enqueued), 1)
+        self.assertIn("slower", st.voice.enqueued[0][1])
+        st._on_worker_queue_event("worker_capacity_reduced",
+                                  {"ceiling": 2})
+        self.assertEqual(len(st.voice.enqueued), 2)
+
+    def test_notification_kind_detection(self):
+        st = _StubState()
+        cases = [
+            ("Self-repair completed on watchdog", "important",
+             "self_repair:"),
+            ("Update available: v0.18.0", "important", "update:"),
+            ("Weekly report ready", "important", "briefing:"),
+            ("Approval needed for deploy", "approval", "approval:"),
+        ]
+        for i, (title, level, want) in enumerate(cases):
+            ev = {"type": "notification", "notification": {
+                "id": f"n-k{i}", "level": level, "title": title,
+                "message": ""}}
+            self.assertTrue(st._spoken_notice_line(ev), title)
+            self.assertIn(want, st.voice.enqueued[-1][1], title)
+
+    def test_queue_lines_rotate(self):
+        st = _StubState(style="playful")
+        lines = {st._queue_notice_line() for _ in range(3)}
+        self.assertEqual(len(lines), 2)  # two variants alternate
+        again = _StubState(style="nerdy")
+        self.assertIn("scheduler", again._queue_notice_line().lower())
 
     def test_briefing_speaks_once_per_away_window(self):
         st = _StubState()
