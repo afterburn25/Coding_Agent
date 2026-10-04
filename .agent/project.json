@@ -1,6 +1,6 @@
 {
   "name": "Nexus Core",
-  "version": "0.18.7",
+  "version": "0.18.8",
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
