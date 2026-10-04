@@ -335,7 +335,9 @@ class AppState:
         register_data_tools(self.tools, self.workspace, artifacts_dir=runtime_root / "data" / "charts")
         register_media_tools(self.tools, self.workspace, jobs=self.jobs)
         register_document_tools(self.tools, self.workspace, jobs=self.jobs)
-        register_knowledge_tools(self.tools, self.workspace)
+        self.knowledge_index = register_knowledge_tools(self.tools, self.workspace)
+        from .library import KnowledgeLibrary
+        self.library = KnowledgeLibrary(runtime_root / "data", self.knowledge_index)
         register_sandbox_tools(self.tools, self.workspace)
         # activities store is created later in __init__ — resolve lazily.
         self.computer_use = register_computer_use_tools(
@@ -5247,6 +5249,19 @@ class Handler(BaseHTTPRequestHandler):
                 proj["memory_summary"] = self.state.projects.memory_summary(pid)
             self._json(proj)
             return
+        # Knowledge Library — managed document catalog.
+        if path == "/api/library":
+            self._json({"documents": self.state.library.list(),
+                        "stats": self.state.library.stats()})
+            return
+        if path.startswith("/api/library/"):
+            doc = self.state.library.get(
+                path[len("/api/library/"):].strip("/"))
+            if doc is None:
+                self._json({"error": "document not found"}, 404)
+                return
+            self._json({"document": doc})
+            return
         # Adaptive Worker Manager — live capacity, reservations, queue.
         if path == "/api/workers":
             self._json(self.state.workers.status())
@@ -6724,6 +6739,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unsupported project action"}, 400)
                 return
 
+            if path == "/api/library/import":
+                src = str(body.get("path") or "").strip()
+                if not src:
+                    self._json({"error": "path is required"}, 400)
+                    return
+                out = self.state.library.import_document(
+                    src, project_id=str(body.get("project_id") or ""),
+                    shared_with=body.get("shared_with")
+                    if isinstance(body.get("shared_with"), list) else None,
+                    title=str(body.get("title") or ""))
+                self._json(out, 200 if out.get("ok") else 400)
+                return
+            if path == "/api/library/refresh":
+                self._json({"ok": True,
+                            **self.state.library.refresh()})
+                return
+            if path == "/api/library/remove":
+                ok = self.state.library.remove(str(body.get("id") or ""))
+                self._json({"ok": ok}, 200 if ok else 404)
+                return
+            if path == "/api/library/project":
+                ok = self.state.library.set_project(
+                    str(body.get("id") or ""),
+                    str(body.get("project_id") or ""),
+                    shared_with=body.get("shared_with")
+                    if isinstance(body.get("shared_with"), list) else None)
+                self._json({"ok": ok}, 200 if ok else 404)
+                return
             if path == "/api/workers/submit":
                 prompt = str(body.get("prompt", "")).strip()
                 if not prompt:

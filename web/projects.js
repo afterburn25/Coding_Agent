@@ -43,8 +43,8 @@
   async function select(id) {
     selected = id;
     renderList();
-    const d = await api(`/api/projects/${id}`);
-    renderDetail(d.project || {});
+    const d = await api(`/api/projects/${id}?summary`);
+    renderDetail(d.id ? d : {});
   }
 
   function bucket(label, rows) {

@@ -1016,6 +1016,80 @@ class CodeIntelTests(unittest.TestCase):
             self.assertFalse(out["ok"])
 
 
+class KnowledgeLibraryTests(unittest.TestCase):
+    def _lib(self, td):
+        from localcodeagent.library import KnowledgeLibrary
+        from localcodeagent.tools.knowledge import KnowledgeIndex
+        idx = KnowledgeIndex(Path(td) / "idx.json")
+        return KnowledgeLibrary(Path(td) / "data", idx), idx
+
+    def test_import_indexes_document(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            lib, idx = self._lib(td)
+            src = Path(td) / "manual.md"
+            src.write_text("# Widgets\nThe frobnicate lever actuates the "
+                           "widget flange.", encoding="utf-8")
+            out = lib.import_document(src, title="Widget Manual")
+            self.assertTrue(out["ok"])
+            hits = idx.search("frobnicate lever")
+            self.assertTrue(hits)
+            self.assertEqual(hits[0]["doc"], out["doc"]["id"])
+            self.assertEqual(hits[0]["title"], "Widget Manual")
+
+    def test_project_scoping_isolates_docs(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            lib, idx = self._lib(td)
+            a = Path(td) / "a.md"
+            a.write_text("alpha project secrets: flux capacitor tuning",
+                         encoding="utf-8")
+            g = Path(td) / "g.md"
+            g.write_text("shared global notes about flux capacitors",
+                         encoding="utf-8")
+            lib.import_document(a, project_id="proj-a")
+            lib.import_document(g)  # global
+            # Project B sees only global.
+            hits_b = idx.search("flux capacitor", project="proj-b")
+            self.assertTrue(all(h.get("project") in (None, "")
+                                for h in hits_b))
+            # Project A sees its own + global.
+            hits_a = idx.search("flux capacitor", project="proj-a")
+            self.assertEqual(len(hits_a), 2)
+
+    def test_refresh_detects_change_and_stale(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            lib, idx = self._lib(td)
+            src = Path(td) / "doc.txt"
+            src.write_text("version one content", encoding="utf-8")
+            out = lib.import_document(src)
+            doc_id = out["doc"]["id"]
+            # Change the source → refresh reindexes.
+            import time as _t
+            _t.sleep(0.02)
+            src.write_text("version two replaces the old wording",
+                           encoding="utf-8")
+            stats = lib.refresh()
+            self.assertEqual(stats["reindexed"], 1)
+            hits = idx.search("replaces old wording")
+            self.assertTrue(hits)
+            self.assertIn("version two", hits[0]["excerpt"])
+            # Delete the source → stale; chunks stop matching.
+            src.unlink()
+            stats = lib.refresh()
+            self.assertEqual(stats["stale"], 1)
+            self.assertFalse(idx.search("replaces old wording"))
+            self.assertTrue(lib.get(doc_id)["stale"])
+
+    def test_remove_forgets_index(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            lib, idx = self._lib(td)
+            src = Path(td) / "d.txt"
+            src.write_text("removable knowledge", encoding="utf-8")
+            doc_id = lib.import_document(src)["doc"]["id"]
+            self.assertTrue(idx.search("removable"))
+            self.assertTrue(lib.remove(doc_id))
+            self.assertFalse(idx.search("removable"))
+
+
 class ApiToolTests(unittest.TestCase):
     def test_method_and_url_validation(self):
         reg = ToolRegistry({"external_api.call": "allow"})

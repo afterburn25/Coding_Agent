@@ -110,29 +110,78 @@ class KnowledgeIndex:
         return {"files_scanned": scanned, "files_indexed": indexed, "files_skipped": skipped,
                 "total_indexed": len(self.entries), "index_file": str(self.path)}
 
+    def index_document(self, doc_id: str, text: str, *, title: str = "",
+                       project: str = "", shared_with: list[str] | None = None,
+                       origin: str = "", checksum: str = "") -> dict[str, Any]:
+        """Index a managed library document under ``lib:<doc_id>``.
+
+        Unlike workspace entries these carry project ownership, an origin
+        path, and a checksum so the library can detect source drift.
+        """
+        key = f"lib:{doc_id}"
+        chunks = [{"index": i, "text": c, "tokens": dict(Counter(_tokens(c)))}
+                  for i, c in enumerate(_chunk_text(text))]
+        self.entries[key] = {
+            "kind": "library", "doc_id": doc_id,
+            "title": str(title or doc_id)[:160],
+            "project": str(project or ""),
+            "shared_with": [str(s) for s in (shared_with or [])][:20],
+            "origin": str(origin or "")[:500],
+            "checksum": checksum,
+            "indexed_at": time.time(),
+            "chunks": chunks}
+        self.save()
+        return {"doc_id": doc_id, "chunks": len(chunks)}
+
+    def mark_stale(self, doc_id: str, *, stale: bool = True) -> None:
+        """A stale library doc keeps its record (provenance) but its chunks
+        stop matching searches — stale knowledge is never silently served."""
+        key = f"lib:{doc_id}"
+        entry = self.entries.get(key)
+        if entry is None:
+            return
+        entry["stale"] = bool(stale)
+        if stale:
+            entry["chunks"] = []
+        self.save()
+
     def forget(self, rel: str) -> int:
         removed = 1 if self.entries.pop(rel, None) is not None else 0
         if removed:
             self.save()
         return removed
 
-    def search(self, query: str, *, limit: int = 8) -> list[dict[str, Any]]:
+    def search(self, query: str, *, limit: int = 8,
+               project: str | None = None) -> list[dict[str, Any]]:
+        """Ranked excerpt search. ``project`` scopes library docs to the
+        project + global; workspace (repo) chunks are always in scope.
+        Stale library docs are skipped."""
         q_tokens = _tokens(query)
         if not q_tokens:
             return []
         q_counts = Counter(q_tokens)
-        n_docs = max(len(self.entries), 1)
+        entries = {k: v for k, v in self.entries.items()
+                   if not v.get("stale")}
+        if project is not None:
+            entries = {
+                k: v for k, v in entries.items()
+                if v.get("kind") != "library"
+                or not v.get("project")
+                or v.get("project") == project
+                or project in (v.get("shared_with") or [])}
+        n_docs = max(len(entries), 1)
         # document frequency per term (file-level)
         df: Counter[str] = Counter()
-        for entry in self.entries.values():
+        for entry in entries.values():
             seen = set()
             for chunk in entry.get("chunks", []):
                 seen.update(chunk.get("tokens", {}))
             df.update(seen)
 
         scored: list[tuple[float, str, dict[str, Any]]] = []
-        for rel, entry in self.entries.items():
-            name_tokens = set(_tokens(rel))
+        for rel, entry in entries.items():
+            name_tokens = set(_tokens(rel)) | set(
+                _tokens(str(entry.get("title", ""))))
             name_bonus = sum(2.0 for t in q_tokens if t in name_tokens)
             for chunk in entry.get("chunks", []):
                 tf: dict[str, int] = chunk.get("tokens", {})
@@ -146,10 +195,16 @@ class KnowledgeIndex:
                     text = chunk.get("text", "")
                     if query.lower() in text.lower():
                         score += 5.0  # exact phrase bonus
-                    scored.append((score, rel, chunk))
+                    scored.append((score, rel, chunk, entry))
         scored.sort(key=lambda item: item[0], reverse=True)
-        return [{"file": rel, "chunk": chunk["index"], "score": round(score, 3),
-                 "excerpt": chunk["text"][:600]} for score, rel, chunk in scored[:limit]]
+        return [{"file": rel, "chunk": chunk["index"],
+                 "score": round(score, 3),
+                 "doc": entry.get("doc_id"), "title": entry.get("title"),
+                 "origin": entry.get("origin"),
+                 "project": entry.get("project"),
+                 "indexed_at": entry.get("indexed_at"),
+                 "excerpt": chunk["text"][:600]}
+                for score, rel, chunk, entry in scored[:limit]]
 
     def stats(self) -> dict[str, Any]:
         chunks = sum(len(e.get("chunks", [])) for e in self.entries.values())
@@ -170,7 +225,9 @@ def register_knowledge_tools(registry: ToolRegistry, workspace: Path, *, index_p
         if not query:
             return "ERROR: 'query' is required"
         limit = max(1, min(int(args.get("limit", 8)), 20))
-        results = index.search(query, limit=limit)
+        project = str(args.get("project", ""))
+        results = index.search(query, limit=limit,
+                               project=project or None)
         if not results:
             return "ERROR: no matches — run knowledge_index first to build the index"
         return json.dumps({"query": query, "results": results, "index": index.stats()}, ensure_ascii=False)
@@ -200,6 +257,8 @@ def register_knowledge_tools(registry: ToolRegistry, workspace: Path, *, index_p
             "properties": {
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "default": 8},
+                "project": {"type": "string",
+                            "description": "scope library docs to this project + global"},
             },
             "required": ["query"],
         },
