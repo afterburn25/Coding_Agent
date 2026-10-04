@@ -206,6 +206,10 @@ User-visible system activity speaks through the same persona layer:
   (±6 dB, additive with the persona gain delta).
 - **Burst collapse** — 3+ user tasks queued inside a 30 s window speak
   one "More tasks joined the queue." line per window.
+- **Greetings** — the profile greeting speaks once per process per
+  profile via `speak_greeting` (mute-aware, vocalization-safe).
+- **Reason-aware queue notices** — dependency/approval/model waits
+  append the real reason rather than blaming worker availability.
 
 Personality Studio gains a *Natural Vocalizations* section: level select
 (profile-scoped) + per-style preview buttons hitting

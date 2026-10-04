@@ -244,6 +244,7 @@ class _StubState:
 
     _speak_notice = AppState._speak_notice
     _speak_queue_notice = AppState._speak_queue_notice
+    speak_greeting = AppState.speak_greeting
     _persona_command = AppState._persona_command
     _voice_json_adjust = AppState._voice_json_adjust
     _queue_notice_line = AppState._queue_notice_line
@@ -503,6 +504,29 @@ class SpokenNotices(unittest.TestCase):
         line = st.voice.enqueued[-1][1]
         self.assertIn("OOM while loading model", line)
         self.assertNotIn("Traceback", line)
+
+    def test_greeting_speaks_once_per_profile(self):
+        st = _StubState()
+        st.speak_greeting("p1", "Hey — welcome back.")
+        st.speak_greeting("p1", "Hey — welcome back.")
+        st.speak_greeting("p2", "Hi, I'm ready.")
+        self.assertEqual(len(st.voice.enqueued), 2)
+        self.assertEqual(st.voice.enqueued[0][0], "greet-p1")
+        self.assertEqual(st.voice.enqueued[1][0], "greet-p2")
+
+    def test_queue_reason_explains_wait(self):
+        st = _StubState()
+        st._on_worker_queue_event("task_queued", {
+            "user_initiated": True,
+            "reason": "waiting_for_dependency",
+            "entry": {"id": "e-dep", "title": "build"}})
+        self.assertIn("another task", st.voice.enqueued[-1][1])
+        st2 = _StubState()
+        st2._on_worker_queue_event("task_queued", {
+            "user_initiated": True,
+            "reason": "waiting_for_worker",
+            "entry": {"id": "e-w", "title": "scan"}})
+        self.assertNotIn("Waiting for", st2.voice.enqueued[-1][1])
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

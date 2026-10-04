@@ -3669,9 +3669,10 @@ class AppState:
         if event_type != "task_queued" or not payload.get("user_initiated"):
             return
         entry = payload.get("entry") or {}
-        self._speak_queue_notice(str(entry.get("id") or ""))
+        self._speak_queue_notice(str(entry.get("id") or ""),
+                                 reason=str(payload.get("reason") or ""))
 
-    def _speak_queue_notice(self, item_id: str) -> None:
+    def _speak_queue_notice(self, item_id: str, reason: str = "") -> None:
         if not item_id or item_id in self._queue_announced:
             return
         if len(self._queue_announced) > 512:
@@ -3692,7 +3693,15 @@ class AppState:
                                    "status",
                                    "More tasks joined the queue.")
                 return
-            voice.enqueue(f"queue-{item_id}", self._queue_notice_line())
+            line = self._queue_notice_line()
+            # Non-generic waits explain themselves ("waiting for
+            # approval" reads better than the default worker line).
+            if reason and reason != "waiting_for_worker":
+                from .workers.manager import REASON_TEXT
+                why = REASON_TEXT.get(reason)
+                if why:
+                    line = f"{line} {why}."
+            voice.enqueue(f"queue-{item_id}", line)
         except Exception:
             pass
 
@@ -3810,6 +3819,21 @@ class AppState:
         """Chat-busy /api/queue paths — same once-per-item guarantee."""
         try:
             self._speak_queue_notice(str((queue_item or {}).get("id") or ""))
+        except Exception:
+            pass
+
+    def speak_greeting(self, profile_id: str, text: str) -> None:
+        """Voice-side greeting — once per process per profile;
+        mute/disabled drop silently in the speech queue."""
+        try:
+            v = getattr(self, "voice", None)
+            if v is None:
+                return
+            gid = f"greet-{profile_id}"
+            if gid in self._queue_announced:
+                return
+            self._queue_announced.add(gid)
+            v.enqueue(gid, str(text or ""))
         except Exception:
             pass
 

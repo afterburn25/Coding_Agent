@@ -282,6 +282,12 @@ class ProfileAPI:
                 "want the details.)")
         if g["kind"] == "intro":
             self.mgr.mark_intro_completed(pid)
+        # Speak the greeting once per process per profile — mute and
+        # voice-disabled states drop it silently via enqueue().
+        try:
+            self.state.speak_greeting(pid, str(g.get("text") or ""))
+        except Exception:
+            pass
         h._json(g)
         return True
 
