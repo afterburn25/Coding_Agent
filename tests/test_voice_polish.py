@@ -181,6 +181,21 @@ class WorkerFinishedEvent(unittest.TestCase):
         m.release("w-nope", outcome="completed")
         self.assertFalse([e for e in events if e[0] == "worker_finished"])
 
+    def test_queued_entry_cancel_emits(self):
+        events = []
+        mon = ResourceMonitor(self.tmp, sampler=_snap, sample_ttl=0)
+        m = AdaptiveWorkerManager(self.tmp, monitor=mon, max_workers=1,
+                                  on_queue_event=lambda et, p:
+                                  events.append((et, p)))
+        m.submit("first job", role="tool", user_initiated=True)
+        out = m.submit("queued job", role="tool", user_initiated=True)
+        self.assertEqual(out["status"], "queued")
+        eid = out["entry"]["id"]
+        self.assertTrue(m.cancel(eid))
+        canc = [p for et, p in events if et == "worker_cancelled"]
+        self.assertEqual(len(canc), 1)
+        self.assertEqual(canc[0]["entry"]["id"], eid)
+
     def test_clean_streak_emits_capacity_restored(self):
         events = []
         mon = ResourceMonitor(self.tmp, sampler=_snap, sample_ttl=0)
@@ -461,6 +476,33 @@ class SpokenNotices(unittest.TestCase):
         enq = st.voice.enqueued
         self.assertEqual(len(enq), 3)
         self.assertIn("More tasks", enq[-1][1])
+
+    def test_worker_cancelled_entry_speaks(self):
+        st = _StubState()
+        st._on_worker_queue_event("worker_cancelled", {
+            "entry": {"id": "e1", "title": "big render",
+                      "user_initiated": True}})
+        self.assertTrue(st.voice.enqueued)
+        self.assertIn("cancelled:", st.voice.enqueued[-1][1])
+        # Background churn stays silent.
+        st2 = _StubState()
+        st2._on_worker_queue_event("worker_cancelled", {
+            "entry": {"id": "e2", "title": "bg sweep",
+                      "user_initiated": False}})
+        self.assertFalse(st2.voice.enqueued)
+
+    def test_failed_notice_names_error(self):
+        st = _StubState()
+        st._on_worker_queue_event("worker_finished", {
+            "worker": {"id": "w-f", "user_initiated": True,
+                       "title": "deploy",
+                       "status": "failed",
+                       "result": {"error": "OOM while loading model\n"
+                                           "Traceback line two"}},
+            "outcome": "failed"})
+        line = st.voice.enqueued[-1][1]
+        self.assertIn("OOM while loading model", line)
+        self.assertNotIn("Traceback", line)
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

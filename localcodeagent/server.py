@@ -3616,9 +3616,28 @@ class AppState:
                     ("cancelled", "killed", "interrupted")
                     else "failed")
             title = str(w.get("title") or "").strip() or "the queued task"
-            fact = title if kind != "failed" \
-                else f"{title} — {outcome or 'failed'}"
+            if kind == "failed":
+                # Name the cause when the row carries one — first line
+                # only, capped: speech must never dump a stack trace.
+                res = w.get("result")
+                err = ""
+                if isinstance(res, dict):
+                    e = str(res.get("error") or "").strip()
+                    err = e.splitlines()[0][:90] if e else ""
+                fact = (f"{title} — {err}" if err
+                        else f"{title} — {outcome or 'failed'}")
+            else:
+                fact = title
             self._speak_notice(f"worker-{w.get('id') or ''}", kind, fact)
+            return
+        if event_type == "worker_cancelled":
+            # A queued item cancelled before it ever started — the
+            # only lifecycle signal it gets. User-initiated only.
+            entry = payload.get("entry") or {}
+            if entry.get("user_initiated"):
+                self._speak_notice(
+                    f"qcancel-{entry.get('id') or ''}", "cancelled",
+                    str(entry.get("title") or "the queued task"))
             return
         if event_type == "worker_capacity_reduced":
             # Resource pressure explains slowdowns — speak once per
@@ -8460,6 +8479,12 @@ class Handler(BaseHTTPRequestHandler):
                 removed = self.state.queue.remove(item_id)
                 if removed:
                     self.state.events.publish("task", {"event": "queue_item_cancelled", "queue_item": {"id": item_id}})
+                    try:
+                        self.state._speak_notice(
+                            f"qcancel-{item_id}", "cancelled",
+                            "Removed from the queue.")
+                    except Exception:
+                        pass
                 self._json({"ok": removed})
                 return
 

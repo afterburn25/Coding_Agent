@@ -56,7 +56,7 @@ class CheckpointConsistencyTests(unittest.TestCase):
     Update the actual count after any test-count change (same commit).
     """
 
-    EXPECTED = 1686
+    EXPECTED = 1689
 
     def _counts(self):
         checks = {

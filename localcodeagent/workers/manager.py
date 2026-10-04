@@ -628,6 +628,7 @@ class AdaptiveWorkerManager:
                    {"ceiling": self._ceiling})
 
     def cancel(self, worker_id: str) -> bool:
+        removed_entry: dict | None = None
         with self._lock:
             w = self._workers.get(worker_id)
             if w is None:
@@ -635,15 +636,18 @@ class AdaptiveWorkerManager:
                     if e.id == worker_id:
                         self._queue.remove(e)
                         self._save_queue()
-                        return True
-                return False
-            if w.started_at is None:
-                # Reserved but never launched — release the reservation now
-                # so a cancelled worker can't hold capacity forever.
-                pass
-            else:
+                        removed_entry = e.as_dict()
+                        break
+            elif w.started_at is not None:
                 w.status = "cancelling"
                 return True
+        if removed_entry is not None:
+            self._emit("worker_cancelled", {"entry": removed_entry})
+            return True
+        if w is None:
+            return False
+        # Reserved but never launched — release the reservation now so
+        # a cancelled worker can't hold capacity forever.
         self.release(worker_id, outcome="cancelled")
         return True
 
