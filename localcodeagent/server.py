@@ -7407,6 +7407,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
         except KeyError as exc:
             self._json({"error": f"Not found: {exc}"}, 404)
+        except PermissionError as exc:
+            # Creator-session gates (e.g. Nexus Brain sync/lock) raise
+            # PermissionError — report 403, not an opaque 500.
+            self._json({"error": str(exc) or "permission denied"}, 403)
         except Exception as exc:
             # Transport-classified failures carry a friendly message and a
             # structured diagnostic — keep the raw exception off the chat

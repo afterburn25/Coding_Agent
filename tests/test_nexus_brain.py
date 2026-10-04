@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from localcodeagent.workflow.nexus_brain import NexusBrain
@@ -383,6 +386,157 @@ class NexusBrainTests(unittest.TestCase):
             for i in range(15):
                 brain.set_subroutines({"humor": bool(i % 2)})
             self.assertEqual(len(brain.settings_history()), NexusBrain._SETTINGS_HISTORY_LIMIT)
+
+
+class NexusBrainHttpLifecycleTests(unittest.TestCase):
+    """Live HTTP dogfood of the creator-Brain lifecycle.
+
+    The store-level tests above cover cryptography and record logic; this
+    class exercises the real server path that was previously only
+    string-asserted: initialize → stage memory/knowledge/corrections/
+    conversations → creator-session sync → prompt injection → subroutine
+    gating → session teardown.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import create_server, stop_state
+        cls._td = tempfile.TemporaryDirectory()
+        td = Path(cls._td.name)
+        cfg = AgentConfig(
+            profiles_onboarding_gate=False,
+            models=[ModelProfile(id="fake", endpoint="http://127.0.0.1:1/v1",
+                                 model="m", roles=["utility"], runtime="external")],
+            process_watchdog=False, research_enabled=False)
+        cls.server, cls.state = create_server(
+            cfg, td, "127.0.0.1", 0, td / "web", td / ".runtime")
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        cls.addClassCleanup(
+            lambda: (cls.server.shutdown(), cls.server.server_close(),
+                     stop_state(cls.state)))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def _get(self, path):
+        with urllib.request.urlopen(self.base + path, timeout=15) as r:
+            return json.loads(r.read())
+
+    def _post(self, path, body):
+        req = urllib.request.Request(
+            self.base + path, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            raw = e.read() or b"{}"
+            return e.code, json.loads(raw)
+
+    def test_creator_lifecycle_over_http(self):
+        s = self.state
+        # Pre-init: summary reports uninitialized; session-gated sync is
+        # refused with 403 (not an opaque 500).
+        self.assertFalse(self._get("/api/nexus-brain").get("initialized"))
+        code, out = self._post("/api/nexus-brain/sync", {})
+        self.assertEqual(code, 403)
+
+        # Stage facts, a behavior rule, a correction, sourced knowledge, a
+        # conversation, and feedback through the real stores the sync pulls.
+        s.conversation_manager.record_exchange(
+            "how do I run the test suite?",
+            "Use python -m unittest discover -s tests.",
+            intent="conversation")
+        # conversation_memory keeps its own message log — the correction
+        # path needs a prior assistant turn from THIS store.
+        s.conversation_memory.record_exchange(
+            "how do I run the test suite?",
+            "Use python -m unittest discover -s tests.")
+        learned = s.conversation_memory.learn_from_user(
+            "remember that I prefer oat milk in coffee")
+        self.assertTrue(learned["facts"])
+        s.conversation_memory.learn_from_user(
+            "always cite sources when answering research questions")
+        corrected = s.conversation_memory.learn_from_user(
+            "no, you should keep answers under three sentences")
+        self.assertTrue(corrected["training_examples"])
+        s.knowledge_memory.remember_research(
+            "What is flux-o-matic?",
+            "A flux-o-matic is a fictional test device.",
+            [{"title": "Example docs", "url": "https://example.test/flux"}],
+            current_sensitive=False)
+        self.assertGreaterEqual(
+            s.model_growth.import_conversation_memory(
+                s.conversation_memory.snapshot()), 1)
+        # Corrections only reach training_context once reviewed/approved —
+        # exercise the real review path before sync.
+        for cand in s.model_growth.candidates():
+            if cand.get("kind") == "correction":
+                s.model_growth.review(cand["id"], status="approved")
+
+        # Initialize through the API — returns a live creator session.
+        code, out = self._post("/api/nexus-brain/initialize", {
+            "creator_name": "Dogfood Creator", "passcode": "dogfood-pass-1"})
+        self.assertEqual(code, 200, out)
+        token = out["creator_token"]
+        self.assertTrue(token)
+        self.assertTrue(out["brain"]["initialized"])
+
+        # Creator sync banks every staged kind.
+        code, synced = self._post("/api/nexus-brain/sync",
+                                  {"creator_token": token})
+        self.assertEqual(code, 200, synced)
+        self.assertGreaterEqual(synced["conversation_records"], 2)
+        self.assertGreaterEqual(synced["autobiographical_records"], 1)
+        self.assertGreaterEqual(synced["knowledge_records"], 1)
+        self.assertGreaterEqual(synced["training_records"], 1)
+        counts = synced["brain"]["counts"]
+        self.assertGreaterEqual(counts["fact"], 1)
+        self.assertGreaterEqual(counts["rule"], 1)
+        self.assertGreaterEqual(counts["autobiographical"], 1)
+        self.assertGreaterEqual(counts["training_signal"], 1)
+
+        # Prompt behavior: banked facts/rules/knowledge reach the prompt.
+        ctx = s.nexus_brain.prompt_context()
+        self.assertIn("oat milk", ctx)
+        self.assertIn("cite sources", ctx)
+        self.assertIn("test suite", ctx)  # autobiographical continuity
+        self.assertIn("flux-o-matic", s.nexus_brain.knowledge_context(
+            "What is a flux-o-matic?"))
+        self.assertIn("three sentences", s.nexus_brain.training_context(
+            "how do I run the suite"))
+
+        # Subroutine gating is enforced at the HTTP layer.
+        code, out = self._post("/api/nexus-brain/subroutines", {
+            "creator_token": token, "subroutines": {"web_research": False}})
+        self.assertEqual(code, 200, out)
+        code, out = self._post("/api/research/plan", {"query": "x"})
+        self.assertEqual(code, 403)
+        self.assertEqual(out.get("code"), "brain_subroutine_disabled")
+
+        # Export works while the session lives; wrong/absent tokens are 403.
+        code, out = self._post("/api/nexus-brain/export",
+                               {"creator_token": token})
+        self.assertEqual(code, 200)
+        self.assertIn("PUBLIC KEY",
+                      out["brain"]["creator_lock"]["public_key_pem"])
+        code, _ = self._post("/api/nexus-brain/sync",
+                             {"creator_token": "bogus"})
+        self.assertEqual(code, 403)
+
+        # Lock retires the session — even the once-valid token is refused.
+        code, out = self._post("/api/nexus-brain/lock",
+                               {"creator_token": token})
+        self.assertEqual(code, 200, out)
+        code, _ = self._post("/api/nexus-brain/sync",
+                             {"creator_token": token})
+        self.assertEqual(code, 403)
+        # A locked-but-verified Brain still answers prompt_context reads.
+        self.assertIn("oat milk", s.nexus_brain.prompt_context())
 
 
 if __name__ == "__main__":
