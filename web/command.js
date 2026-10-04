@@ -106,6 +106,42 @@ $('#ccSnaps').addEventListener('click',async e=>{
   await api('/api/lkg/rollback',{name:b.dataset.rb,reason:'manual command-center rollback'});
   refresh();
 });
+$('#ccDeps').addEventListener('click',async()=>{
+  const out=$('#ccAuditOut');
+  out.innerHTML='<span class="muted">Listing dependencies…</span>';
+  const d=await api('/api/audit/deps').catch(()=>({}));
+  const mans=(d.manifests||[]);
+  out.innerHTML=mans.length
+    ?mans.map(m=>`<div class="hist-row"><code>${esc(m.manifest)}</code> — ${m.count} deps</div>`+
+      (m.dependencies||[]).slice(0,40).map(x=>
+        `<div class="hist-row" style="padding-left:14px">${esc(x.name)} <small>${esc(x.spec||'')}${x.dev?' · dev':''}</small></div>`).join('')
+    ).join('')
+    :`<div class="hist-row">${esc(d.error||'no manifests found')}</div>`;
+});
+$('#ccAudit').addEventListener('click',async()=>{
+  const out=$('#ccAuditOut');
+  out.innerHTML='<span class="muted">Running security audit (may take a minute)…</span>';
+  const d=await api('/api/audit/run',{}).catch(()=>({}));
+  const audits=d.audits||[];
+  const summarize=(r)=>{
+    if(r==null)return'';
+    if(typeof r!=='object')return String(r).slice(0,200);
+    const v=r.metadata&&r.metadata.vulnerabilities;        // npm audit
+    if(v)return` vulns:${JSON.stringify(v)}`;
+    const cv=r.vulnerabilities&&r.vulnerabilities.count;   // cargo audit
+    if(cv!=null)return` vulns:${cv}`;
+    if(Array.isArray(r))return` ${r.reduce((n,p)=>n+((p.vulns||[]).length),0)} vulns (pip-audit)`;
+    return'';
+  };
+  out.innerHTML=audits.length?audits.map(a=>{
+    const hdr=`<strong>${esc(a.ecosystem)}</strong>`;
+    if(a.status==='auditor_unavailable')
+      return`<div class="hist-row">${hdr}: auditor not installed${a.install?` — <code>${esc(a.install)}</code>`:''}</div>`;
+    if(a.status==='timeout')
+      return`<div class="hist-row">${hdr}: auditor timed out</div>`;
+    return`<div class="hist-row">${hdr}: ran, exit ${a.exit_code}${esc(summarize(a.result))}</div>`;
+  }).join(''):`<div class="hist-row">${esc(d.error||d.note||'no auditable manifests found')}</div>`;
+});
 
 refresh();
 setInterval(refresh,15000);

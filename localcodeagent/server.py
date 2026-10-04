@@ -5232,7 +5232,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
                           "/api/lkg", "/api/update", "/api/search",
-                          "/api/rc",
+                          "/api/rc", "/api/audit",
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
@@ -5419,6 +5419,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/lsp":
             self._json(self.state.lsp_pool.status())
             return True
+        if path == "/api/audit/deps":
+            tool = self.state.tools.get("dep_list")
+            if tool is None:
+                self._json({"error": "dep_list unavailable"}, 503)
+                return True
+            self._json(json.loads(tool.handler(
+                {"path": str(self.state.workspace)})))
+            return True
         if path == "/api/eval/history":
             self._json({"runs": self.state.eval_lab.history(
                 suite=(q.get("suite") or [""])[0],
@@ -5433,6 +5441,14 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _platform_post(self, path: str, body: dict) -> bool:
+        if path == "/api/audit/run":
+            tool = self.state.tools.get("project_audit")
+            if tool is None:
+                self._json({"error": "project_audit unavailable"}, 503)
+                return True
+            self._json(json.loads(tool.handler(
+                {"path": str(self.state.workspace)})))
+            return True
         if path == "/api/backups/create":
             self._json(self.state.backups.create(
                 label=str(body.get("label", ""))))
