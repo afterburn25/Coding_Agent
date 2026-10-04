@@ -50,6 +50,15 @@ class ImageAssetLibrary:
         self.lora_dir.mkdir(parents=True, exist_ok=True)
         self._install_jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        self._clean_orphan_parts()
+
+    def _clean_orphan_parts(self) -> None:
+        for part in self.models_dir.rglob("*.part"):
+            try:
+                if part.is_file():
+                    part.unlink()
+            except OSError:
+                pass
 
     def resolve(self, value: str) -> Path:
         p = Path(value).expanduser()

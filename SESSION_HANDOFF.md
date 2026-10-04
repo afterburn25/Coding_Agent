@@ -18,8 +18,10 @@
   context, code-reference/impact tools, STT/push-to-talk + hands-free
   session control, operational state + return briefing, mission
   checkpoints, Knowledge Library, structured correction learning, granular
-  desktop-control hardening, the avatar animation/lip-sync foundation, and
-  managed skill/plugin lifecycle depth.
+  desktop-control hardening, the avatar animation/lip-sync foundation,
+  managed skill/plugin lifecycle depth, self-repair rollback gating,
+  bounded long-duration approval recovery, and catalog LLM/image model
+  installs as mission jobs with restart-safe `.part` cleanup.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/
@@ -920,7 +922,7 @@ No image weights are downloaded automatically yet.
 4. ~~Persistent browser sessions~~ — done: `browser_run` accepts `session` + `save_session` (`storage_state` JSON under `.agent/browser/`).
 5. Voice STT session scaffold exists (`voice/stt.py`) but needs `sounddevice` + a model (Vosk/faster-whisper) installed on the host.
 6. Runtime tuner produces real numbers only when probes run on hardware — idle auto-tuner covers this; `data/runtime_tuning.json` accumulates results.
-7. LLM model downloads are not yet a mission `job` op (image-model installs are, via `model_install`).
+7. ~~LLM model downloads as a mission `job` op~~ — done: `model_install` accepts coding-model catalog IDs as well as image profiles; manager startup removes orphaned `.part` downloads before resuming work.
 
 ## Testing command
 
@@ -928,7 +930,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1394 tests` passing (2 environment skips).
+Expected at this checkpoint: `1397 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

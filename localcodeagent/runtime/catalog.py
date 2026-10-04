@@ -148,6 +148,16 @@ class CodingModelCatalogManager:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._cancel: dict[str, threading.Event] = {}
         self._lock = threading.RLock()
+        self._clean_orphan_parts()
+
+    def _clean_orphan_parts(self) -> None:
+        for asset in CODING_MODEL_CATALOG:
+            for part in self.models_dir.glob(f"{asset.filename}.*.part"):
+                try:
+                    if part.is_file():
+                        part.unlink()
+                except OSError:
+                    pass
 
     def asset(self, catalog_id: str) -> CodingModelAsset:
         item = catalog_by_id().get(str(catalog_id))

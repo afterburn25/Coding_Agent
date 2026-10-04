@@ -208,8 +208,11 @@ human.
 
 Boot recovery re-parks missions mid-flight (``MissionStore._recover_orphans``)
 and sweeps orphaned ``.agent/worktrees`` dirs left by a killed process.
-``nexus-agent/*`` branches are never deleted — a merge conflict preserves
-work on them — and kept branches surface as a notification.
+Catalog/image model managers likewise remove their stale ``*.part``
+downloads on startup so a killed install resumes cleanly instead of
+leaking large partial files. ``nexus-agent/*`` branches are never
+deleted — a merge conflict preserves work on them — and kept branches
+surface as a notification.
 
 ## Notifications
 

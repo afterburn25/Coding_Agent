@@ -122,6 +122,17 @@ class CodingModelCatalogTests(unittest.TestCase):
                 with self.assertRaises(FileExistsError):
                     manager.start_install(asset.id, repair=False)
 
+    def test_restart_cleans_orphaned_catalog_partials(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            orphan = root / f"{CODING_MODEL_CATALOG[0].filename}.dead.part"
+            orphan.write_bytes(b"partial")
+            unrelated = root / "notes.part"
+            unrelated.write_bytes(b"keep")
+            CodingModelCatalogManager(root)
+            self.assertFalse(orphan.exists())
+            self.assertTrue(unrelated.exists())
+
     def test_new_install_rejects_insufficient_disk_before_download(self):
         asset = tiny_asset(b"x" * 1024)
         with tempfile.TemporaryDirectory() as td:

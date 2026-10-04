@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1394 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1397 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -56,9 +56,11 @@ v0.15.0 deepens the workstation core:
   recover by replanning, repeated ungranted gates are bounded by
   `max_approval_retries`, and autonomy stores preserve live missions,
   pending approvals, and open repair incidents past history-retention
-  bounds instead of silently evicting durable work.
+  bounds instead of silently evicting durable work. Mission
+  `model_install` jobs cover LLM catalog IDs and image profiles, while
+  startup removes orphaned `.part` model downloads before work resumes.
 
-Verified: **1394 tests** (2 environment skips).
+Verified: **1397 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -421,7 +423,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1394 tests passing** (2 environment skips).
+- Current automated checkpoint: **1397 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 

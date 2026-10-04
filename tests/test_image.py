@@ -1087,6 +1087,16 @@ class ImageSetupTests(unittest.TestCase):
             self.assertEqual(self._wait_state(mgr), "failed")
             self.assertIn("no installer", mgr.setup_state()["error"])
 
+    def test_library_init_cleans_orphaned_download_partials(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            orphan = root / "models" / "image" / "flux" / "model.safetensors.part"
+            orphan.parent.mkdir(parents=True)
+            orphan.write_bytes(b"partial")
+            ImageAssetLibrary(base_dir=root, models_dir=root / "models/image",
+                              workflows_dir=root / "workflows/image")
+            self.assertFalse(orphan.exists())
+
     def test_model_install_dedupes_live_job(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

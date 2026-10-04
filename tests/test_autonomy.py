@@ -700,6 +700,44 @@ class OperationalStateTests(unittest.TestCase):
             finally:
                 stop_state(state)
 
+    def test_mission_job_model_install_accepts_llm_catalog(self):
+        from types import SimpleNamespace
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import AppState, stop_state
+        with tempfile.TemporaryDirectory() as td:
+            cfg = AgentConfig(models=[ModelProfile(
+                id="ext", endpoint="http://x/v1", model="m",
+                roles=["primary_coder"], runtime="external")])
+            state = AppState(cfg, Path(td), Path(td) / ".runtime")
+            try:
+                job = {"id": "llm-inst", "catalog_id": "qwen3-14b-q4-k-m",
+                       "state": "finished", "progress": 1.0,
+                       "error": ""}
+                calls = []
+
+                def asset(mid):
+                    if mid != "qwen3-14b-q4-k-m":
+                        raise KeyError(mid)
+                    return object()
+
+                state.runtime.model_catalog = SimpleNamespace(
+                    asset=asset,
+                    start_install=lambda mid, repair=False: (
+                        calls.append((mid, repair)) or dict(job)),
+                    get_job=lambda jid: dict(job))
+                res = state._mission_job(
+                    {"id": "m4"},
+                    {"id": "n11",
+                     "metadata": {"job": "model_install",
+                                  "model": "qwen3-14b-q4-k-m",
+                                  "repair": True}})
+                self.assertTrue(res["ok"], res.get("output"))
+                self.assertEqual(calls, [("qwen3-14b-q4-k-m", True)])
+                self.assertEqual(res["job"]["catalog_id"],
+                                 "qwen3-14b-q4-k-m")
+            finally:
+                stop_state(state)
+
 
     def test_mission_research_records_sources_in_kg(self):
         from localcodeagent.config import AgentConfig, ModelProfile
