@@ -938,6 +938,12 @@ class AppState:
                     ack = (f"Volume adjusted by {val:+.1f} dB."
                            if val else "Back to normal volume.")
                 return {"applied": cmd["op"], "ack": ack}
+            if cmd.get("op") == "voice_repeat":
+                v = getattr(self, "voice", None)
+                ok = bool(v and v.repeat_last())
+                return {"applied": "voice_repeat",
+                        "ack": ("Sure — once more."
+                                if ok else "Nothing to repeat yet.")}
             prof = self.profiles.active()
             if not prof:
                 return None

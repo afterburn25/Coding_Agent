@@ -116,6 +116,16 @@ class VoiceManager:
         return self._engines[name]
 
     # -- mute / playback control ------------------------------------------
+    def repeat_last(self) -> bool:
+        """Re-queue the most recently spoken utterance. Returns False
+        when nothing has been spoken yet (or voice is muted/off —
+        enqueue drops those anyway)."""
+        text = getattr(self, "_last_spoken", (None, ""))[1]
+        if not text:
+            return False
+        return self.enqueue(f"repeat-{uuid.uuid4().hex[:8]}",
+                            text, priority=True) is not None
+
     def set_muted(self, muted: bool) -> dict[str, Any]:
         self.config.voice_muted = bool(muted)
         try:
@@ -338,6 +348,10 @@ class VoiceManager:
                 payload["gestures"] = [{**e, "utterance_id": seg_id}
                                        for e in job.events]
             self._publish("voice", payload)
+            with self._lock:
+                # Track the last actually-spoken utterance so
+                # "say that again" can replay it on demand.
+                self._last_spoken = (job.task_id, job.text)
 
     def _apply_delivery(self, preset: VoicePreset, speed: float,
                         vmap: dict) -> tuple[VoicePreset, float]:

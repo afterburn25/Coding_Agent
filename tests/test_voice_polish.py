@@ -218,12 +218,20 @@ class _StubVoice:
     def __init__(self):
         self.enqueued = []
         self.muted = False
+        self.repeated = 0
+        self._repeat_ok = True
 
     def enqueue(self, task_id, text):
         self.enqueued.append((task_id, text))
 
     def set_muted(self, muted):
         self.muted = bool(muted)
+
+    def repeat_last(self):
+        if not self._repeat_ok:
+            return False
+        self.repeated += 1
+        return True
 
 
 class _StubState:
@@ -527,6 +535,29 @@ class SpokenNotices(unittest.TestCase):
             "reason": "waiting_for_worker",
             "entry": {"id": "e-w", "title": "scan"}})
         self.assertNotIn("Waiting for", st2.voice.enqueued[-1][1])
+
+    def test_voice_repeat_commands(self):
+        from localcodeagent.personality.commands import (
+            parse_persona_command)
+        self.assertEqual(parse_persona_command("say that again"),
+                         {"op": "voice_repeat"})
+        self.assertEqual(parse_persona_command("repeat it"),
+                         {"op": "voice_repeat"})
+        self.assertEqual(parse_persona_command("what did you say?"),
+                         {"op": "voice_repeat"})
+        self.assertIsNone(parse_persona_command(
+            "what did you say about the deploy"))
+
+    def test_voice_repeat_handler(self):
+        st = _StubState()
+        st.voice._repeat_ok = False
+        res = st._persona_command("say it again")
+        self.assertEqual(res["applied"], "voice_repeat")
+        self.assertIn("nothing", res["ack"].lower())
+        st.voice._repeat_ok = True
+        res = st._persona_command("repeat that")
+        self.assertIn("once more", res["ack"].lower())
+        self.assertEqual(st.voice.repeated, 1)
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

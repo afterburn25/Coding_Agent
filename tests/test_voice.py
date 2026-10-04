@@ -387,6 +387,28 @@ class TestVoiceManager(unittest.TestCase):
         self.assertIsNone(self.m.enqueue("t", "text"))
         self.m.set_muted(False)
 
+    def test_repeat_last_requeues_spoken_text(self):
+        self.assertFalse(self.m.repeat_last())  # nothing spoken yet
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-rep")
+        self.m.finish_task("t-rep", "The thing I said.")
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if any(p.get("event") == "segment" for p in published):
+                break
+            time.sleep(0.05)
+        self.assertTrue(self.m.repeat_last())
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            segs = [p for p in published if p.get("event") == "segment"]
+            if len(segs) >= 2:
+                break
+            time.sleep(0.05)
+        self.assertGreaterEqual(
+            len([p for p in published if p.get("event") == "segment"]),
+            2)
+
     def test_queue_synthesizes_and_publishes(self):
         published = []
         self.m._publish = lambda kind, payload: published.append(payload)

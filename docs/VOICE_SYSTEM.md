@@ -203,7 +203,9 @@ User-visible system activity speaks through the same persona layer:
   down"/"normal speed" adjust the profile's `voice.json` speed bias
   (0.6–1.5×, persisted, applied on top of the persona delivery map);
   "speak louder"/"talk softer"/"normal volume" adjust a `gain_db` bias
-  (±6 dB, additive with the persona gain delta).
+  (±6 dB, additive with the persona gain delta);
+  "say that again"/"repeat it"/"what did you say" replay the last
+  spoken utterance (`repeat_last`).
 - **Burst collapse** — 3+ user tasks queued inside a 30 s window speak
   one "More tasks joined the queue." line per window.
 - **Greetings** — the profile greeting speaks once per process per

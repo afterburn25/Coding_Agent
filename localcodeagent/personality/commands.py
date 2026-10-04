@@ -165,6 +165,10 @@ _VOICE_GAIN_DOWN = re.compile(
 _VOICE_GAIN_RESET = re.compile(
     r"^\s*(?:please\s+)?(?:normal\s+volume|default\s+volume|"
     r"reset\s+your\s+(?:voice\s+)?volume)\s*[.!]?\s*$", re.I)
+_VOICE_REPEAT = re.compile(
+    r"^\s*(?:please\s+)?(?:say\s+(?:that|it)\s+again|repeat\s+"
+    r"(?:that|it)|what\s+did\s+you\s+say|one\s+more\s+time|"
+    r"say\s+that\s+one\s+more\s+time)\s*[.!?]?\s*$", re.I)
 _SELF_DESCRIBE = re.compile(
     r"^\s*(?:what\s+are\s+you\s+like|describe\s+your\s+(?:personality|"
     r"persona|style)|who\s+are\s+you\s+right\s+now|"
@@ -218,6 +222,8 @@ def parse_persona_command(text: str) -> dict | None:
         return {"op": "voice_gain", "delta": 2.0}
     if _VOICE_GAIN_DOWN.match(t):
         return {"op": "voice_gain", "delta": -2.0}
+    if _VOICE_REPEAT.match(t):
+        return {"op": "voice_repeat"}
     if _SELF_DESCRIBE.match(t):
         return {"op": "describe"}
     if _RESET_ADAPT.match(t):
