@@ -424,7 +424,7 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "aaffcf9",
+  "verified_code_checkpoint": "e9e6bf2",
   "verified_test_count": 1411,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
@@ -537,7 +537,7 @@
   }
  },
  "verified_tests": 1411,
- "head": "aaffcf9",
+ "head": "e9e6bf2",
  "test_count": 1411,
  "branding": {
   "canonical_name": "Nexus Core",
