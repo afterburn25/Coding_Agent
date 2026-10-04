@@ -30,11 +30,24 @@ def make_scanner(td: str, sources=None, detectors=None, route=None,
 
 def make_sup(td: str, **kw) -> AutonomousSupervisor:
     root = Path(td)
+    # Deterministic capacity: admission is hardware-measured, so a real
+    # monitor makes lane/scheduling assertions flaky on small CI hosts.
+    # Worker-fit behavior itself is covered in test_workers.py.
+    from localcodeagent.workers import AdaptiveWorkerManager, ResourceMonitor
+    from localcodeagent.workers.capacity import CapacitySnapshot
+    mon = ResourceMonitor(
+        root, sample_ttl=0,
+        sampler=lambda: CapacitySnapshot(
+            ts=0, cpu_logical=16, cpu_util=0.1, ram_total_mb=65536,
+            ram_free_mb=48000, vram_total_mb=12288, vram_free_mb=11000,
+            gpu_util=0.0, disk_free_gb=400, hardware_id="testhw"))
     defaults = dict(
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
         lane_free=lambda: True,
+        worker_manager=AdaptiveWorkerManager(
+            root, monitor=mon, on_queue_event=lambda t, p: None),
     )
     defaults.update(kw)
     return AutonomousSupervisor(**defaults)
