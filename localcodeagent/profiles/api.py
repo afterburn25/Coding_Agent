@@ -219,15 +219,15 @@ class ProfileAPI:
         health = "ok"
         try:
             # Probe fresh — at greeting time the periodic tick may not have
-            # run yet, leaving every component reading "starting". And treat
-            # "stopped" as fine: models and ComfyUI sit idle by design until
-            # first use, so idle is not a failure worth announcing.
+            # run yet, leaving every component reading "starting". Treat
+            # "stopped" and "starting" as fine: models and ComfyUI idle or
+            # warm up lazily by design, so neither is worth announcing.
             states = {
                 name: self.state.health.check(name)
                 for name in list(self.state.health.components)
             }
             if any(s in {"degraded", "overloaded", "hung", "crashed",
-                         "restarting", "starting"} for s in states.values()):
+                         "restarting"} for s in states.values()):
                 health = "degraded"
         except Exception:
             pass
