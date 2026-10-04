@@ -305,6 +305,7 @@ class AppState:
         self._queue_announced: set[str] = set()
         self._queue_line_cursor: dict[str, int] = {}
         self._notice_cursor: dict[str, int] = {}
+        self._queue_burst: list[float] = []
         self.workers = AdaptiveWorkerManager(
             self.workspace,
             max_workers=int(getattr(config, "worker_ceiling", 8)),
@@ -852,6 +853,35 @@ class AppState:
         except Exception:
             return fact
 
+    def _voice_json_adjust(self, prof: dict, key: str, cmd: dict,
+                           lo: float, hi: float,
+                           default: float) -> float | None:
+        """Adjust one user voice bias (speed / gain_db) in the profile's
+        voice.json. Returns the new value, or None when the write
+        failed."""
+        pdir = self.profiles.profile_dir(str(prof["profile_id"]),
+                                         create=True)
+        vpath = pdir / "voice.json"
+        try:
+            cur = json.loads(vpath.read_text(encoding="utf-8"))
+            if not isinstance(cur, dict):
+                cur = {}
+        except Exception:
+            cur = {}
+        old = cur.get(key)
+        val = float(old) if isinstance(old, (int, float)) else default
+        if "set" in cmd:
+            val = float(cmd["set"])
+        else:
+            val = min(hi, max(lo, val + float(cmd["delta"])))
+        cur[key] = round(val, 2)
+        try:
+            atomic_write_text(vpath, json.dumps(cur, indent=2))
+        except Exception:
+            return None
+        self._vdm_until = 0.0  # bust the delivery cache
+        return val
+
     def _persona_command(self, message: str) -> dict | None:
         """Deterministic persona style commands ("be less sarcastic",
         "serious mode for an hour", "reset personality"). Returns the
@@ -884,42 +914,30 @@ class AppState:
                         "ack": ("Muted — I'll keep it text-only."
                                 if cmd["op"] == "voice_mute"
                                 else "Voice is back on.")}
-            if cmd.get("op") == "voice_rate":
+            if cmd.get("op") in ("voice_rate", "voice_gain"):
                 prof = self.profiles.active()
                 if not prof:
-                    return {"applied": "voice_rate",
-                            "ack": "Voice speed needs an active "
+                    return {"applied": cmd["op"],
+                            "ack": "Voice controls need an active "
                                    "profile."}
-                pdir = self.profiles.profile_dir(
-                    str(prof["profile_id"]), create=True)
-                vpath = pdir / "voice.json"
-                try:
-                    cur = json.loads(vpath.read_text(encoding="utf-8"))
-                    if not isinstance(cur, dict):
-                        cur = {}
-                except Exception:
-                    cur = {}
-                old = cur.get("speed")
-                speed = float(old) if isinstance(old, (int, float)) \
-                    else 1.0
-                if "set" in cmd:
-                    speed = float(cmd["set"])
+                if cmd["op"] == "voice_rate":
+                    val = self._voice_json_adjust(
+                        prof, "speed", cmd, 0.6, 1.5, 1.0)
+                    if val is None:
+                        return {"applied": cmd["op"],
+                                "ack": "Couldn't save the voice speed."}
+                    pct = int(round(val * 100))
+                    ack = (f"Voice speed set to {pct}%."
+                           if val != 1.0 else "Back to normal speed.")
                 else:
-                    speed = min(1.5, max(0.6,
-                                         speed + float(cmd["delta"])))
-                cur["speed"] = round(speed, 2)
-                try:
-                    atomic_write_text(
-                        vpath, json.dumps(cur, indent=2))
-                except Exception:
-                    return {"applied": "voice_rate",
-                            "ack": "Couldn't save the voice speed."}
-                self._vdm_until = 0.0  # bust the delivery cache
-                pct = int(round(speed * 100))
-                return {"applied": "voice_rate",
-                        "ack": (f"Voice speed set to {pct}%."
-                                if speed != 1.0
-                                else "Back to normal speed.")}
+                    val = self._voice_json_adjust(
+                        prof, "gain_db", cmd, -6.0, 6.0, 0.0)
+                    if val is None:
+                        return {"applied": cmd["op"],
+                                "ack": "Couldn't save the volume."}
+                    ack = (f"Volume adjusted by {val:+.1f} dB."
+                           if val else "Back to normal volume.")
+                return {"applied": cmd["op"], "ack": ack}
             prof = self.profiles.active()
             if not prof:
                 return None
@@ -1041,6 +1059,10 @@ class AppState:
                     if isinstance(user_speed, (int, float)):
                         out["_user_speed"] = max(
                             0.6, min(1.5, float(user_speed)))
+                    user_gain = vsel.get("gain_db")
+                    if isinstance(user_gain, (int, float)):
+                        out["_user_gain"] = max(
+                            -6.0, min(6.0, float(user_gain)))
                 except Exception:
                     pass
                 act = PersonalityStore(pdir).resolve_active(
@@ -1072,6 +1094,12 @@ class AppState:
                     if isinstance(cur, (int, float)):
                         out[k] = round(
                             max(0.5, min(2.0, float(cur) * uspd)), 3)
+            ugain = out.pop("_user_gain", None)
+            if ugain:
+                cur = out.get("output_gain_db")
+                out["output_gain_db"] = round(
+                    (float(cur) if isinstance(cur, (int, float))
+                     else 0.0) + ugain, 2)
             self._vdm_cache, self._vdm_until = out, now + 10.0
             return out
         except Exception:
@@ -3634,6 +3662,17 @@ class AppState:
         if voice is None:
             return
         try:
+            now = time.monotonic()
+            recent = [t for t in self._queue_burst if now - t < 30.0]
+            recent.append(now)
+            self._queue_burst = recent
+            if len(recent) > 2:
+                # Bulk queueing — collapse into one line per window
+                # instead of a line per item.
+                self._speak_notice(f"queue-burst-{int(now // 30)}",
+                                   "status",
+                                   "More tasks joined the queue.")
+                return
             voice.enqueue(f"queue-{item_id}", self._queue_notice_line())
         except Exception:
             pass

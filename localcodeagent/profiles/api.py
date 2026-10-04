@@ -597,7 +597,7 @@ class ProfileAPI:
             return True
         vpath = self.mgr.profile_dir(pid, create=True) / "voice.json"
         cur = self._voice_state(pid)
-        for key in ("preset_id", "speed", "prosody"):
+        for key in ("preset_id", "speed", "prosody", "gain_db"):
             if key in body:
                 cur[key] = body[key]
         atomic_write_text(vpath, json.dumps(cur, indent=2))

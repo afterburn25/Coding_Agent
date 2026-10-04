@@ -201,7 +201,11 @@ User-visible system activity speaks through the same persona layer:
   (with a spoken farewell *before* the mute lands);
   "speak again"/"unmute"/"voice on" restore; "speak faster"/"slow
   down"/"normal speed" adjust the profile's `voice.json` speed bias
-  (0.6–1.5×, persisted, applied on top of the persona delivery map).
+  (0.6–1.5×, persisted, applied on top of the persona delivery map);
+  "speak louder"/"talk softer"/"normal volume" adjust a `gain_db` bias
+  (±6 dB, additive with the persona gain delta).
+- **Burst collapse** — 3+ user tasks queued inside a 30 s window speak
+  one "More tasks joined the queue." line per window.
 
 Personality Studio gains a *Natural Vocalizations* section: level select
 (profile-scoped) + per-style preview buttons hitting

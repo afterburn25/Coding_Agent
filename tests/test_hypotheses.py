@@ -230,7 +230,7 @@ class CognitiveHttpTests(unittest.TestCase):
         import threading
         from localcodeagent.config import AgentConfig, ModelProfile
         from localcodeagent.server import create_server, stop_state
-        cls._td = tempfile.TemporaryDirectory()
+        cls._td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         ws = Path(cls._td.name)
         cfg = AgentConfig(
             profiles_onboarding_gate=False,

@@ -218,6 +218,7 @@ class _StubState:
         self._queue_announced = set()
         self._queue_line_cursor = {}
         self._notice_cursor = {}
+        self._queue_burst = []
         self._style = style
         self.voice = _StubVoice()
         self.events = SimpleNamespace(published=[],
@@ -229,6 +230,7 @@ class _StubState:
     _speak_notice = AppState._speak_notice
     _speak_queue_notice = AppState._speak_queue_notice
     _persona_command = AppState._persona_command
+    _voice_json_adjust = AppState._voice_json_adjust
     _queue_notice_line = AppState._queue_notice_line
     _on_worker_queue_event = AppState._on_worker_queue_event
     _spoken_notice_line = AppState._spoken_notice_line
@@ -418,6 +420,47 @@ class SpokenNotices(unittest.TestCase):
         st._speak_notice("a2", "completed", "build")
         self.assertIn("completed:0:", st.voice.enqueued[0][1])
         self.assertIn("completed:1:", st.voice.enqueued[1][1])
+
+    def test_voice_gain_commands(self):
+        from localcodeagent.personality.commands import (
+            parse_persona_command)
+        self.assertEqual(parse_persona_command("speak louder"),
+                         {"op": "voice_gain", "delta": 2.0})
+        self.assertEqual(parse_persona_command("talk a bit softer"),
+                         {"op": "voice_gain", "delta": -2.0})
+        self.assertEqual(parse_persona_command("volume down"),
+                         {"op": "voice_gain", "delta": -2.0})
+        self.assertEqual(parse_persona_command("normal volume"),
+                         {"op": "voice_gain", "set": 0.0})
+        # "be quieter" stays a persona-style command, not volume.
+        self.assertNotEqual(
+            (parse_persona_command("be quieter") or {}).get("op"),
+            "voice_gain")
+        self.assertIsNone(parse_persona_command("turn up the heat"))
+
+    def test_voice_gain_persists(self):
+        st = _StubState()
+        tmp = Path(tempfile.mkdtemp())
+        prof = {"profile_id": "p1"}
+        st.profiles = SimpleNamespace(
+            active=lambda: prof,
+            profile_dir=lambda pid, create=False: tmp)
+        res = st._persona_command("speak louder")
+        self.assertEqual(res["applied"], "voice_gain")
+        vsel = json.loads((tmp / "voice.json").read_text())
+        self.assertAlmostEqual(vsel["gain_db"], 2.0)
+        res = st._persona_command("normal volume")
+        vsel = json.loads((tmp / "voice.json").read_text())
+        self.assertAlmostEqual(vsel["gain_db"], 0.0)
+        self.assertIn("normal volume", res["ack"].lower())
+
+    def test_queue_burst_collapses(self):
+        st = _StubState()
+        for i in range(5):
+            st._speak_queue_notice(f"item-{i}")
+        enq = st.voice.enqueued
+        self.assertEqual(len(enq), 3)
+        self.assertIn("More tasks", enq[-1][1])
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")
