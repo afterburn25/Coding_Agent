@@ -304,6 +304,7 @@ class AppState:
         from .workers import AdaptiveWorkerManager
         self._queue_announced: set[str] = set()
         self._queue_line_cursor: dict[str, int] = {}
+        self._notice_cursor: dict[str, int] = {}
         self.workers = AdaptiveWorkerManager(
             self.workspace,
             max_workers=int(getattr(config, "worker_ceiling", 8)),
@@ -825,10 +826,12 @@ class AppState:
         except Exception:
             return ""
 
-    def _persona_notice(self, kind: str, fact_text: str) -> str:
+    def _persona_notice(self, kind: str, fact_text: str,
+                        seq: int | None = None) -> str:
         """Persona-flavored lead-in for system notices — facts pass
-        through verbatim; only the wrapper shifts. Best-effort: falls
-        back to the bare fact text on any failure."""
+        through verbatim; only the wrapper shifts. ``seq`` rotates the
+        phrasing variants so repeated notices don't parrot one line.
+        Best-effort: falls back to the bare fact text on any failure."""
         fact = str(fact_text or "")
         try:
             prof = self.profiles.active()
@@ -845,7 +848,7 @@ class AppState:
                 overlay=dyn.overlay(), modifiers=dyn.modifiers(),
                 mode=dyn.mode(), is_adult=bool(prof.get("is_adult")))
             from .personality.notices import persona_notice
-            return persona_notice(kind, fact, card)
+            return persona_notice(kind, fact, card, seq=seq)
         except Exception:
             return fact
 
@@ -3647,7 +3650,10 @@ class AppState:
         voice = getattr(self, "voice", None)
         if voice is None:
             return
-        line = self._persona_notice(kind, fact) or str(fact or "").strip()
+        seq = self._notice_cursor.get(kind, 0)
+        self._notice_cursor[kind] = seq + 1
+        line = self._persona_notice(kind, fact, seq=seq) \
+            or str(fact or "").strip()
         if not line:
             return
         try:

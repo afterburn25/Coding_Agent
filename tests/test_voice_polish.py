@@ -217,12 +217,14 @@ class _StubState:
     def __init__(self, style: str = "playful"):
         self._queue_announced = set()
         self._queue_line_cursor = {}
+        self._notice_cursor = {}
         self._style = style
         self.voice = _StubVoice()
         self.events = SimpleNamespace(published=[],
                                       publish=lambda t, p:
                                       self.events.published.append((t, p)))
-        self._persona_notice = lambda kind, fact: f"{kind}:{fact}"
+        self._persona_notice = \
+            lambda kind, fact, seq=None: f"{kind}:{seq}:{fact}"
 
     _speak_notice = AppState._speak_notice
     _speak_queue_notice = AppState._speak_queue_notice
@@ -410,6 +412,13 @@ class SpokenNotices(unittest.TestCase):
         self.assertAlmostEqual(vsel["speed"], 1.0)
         self.assertIn("normal", res["ack"].lower())
 
+    def test_notice_seq_cursor_rotates(self):
+        st = _StubState()
+        st._speak_notice("a1", "completed", "build")
+        st._speak_notice("a2", "completed", "build")
+        self.assertIn("completed:0:", st.voice.enqueued[0][1])
+        self.assertIn("completed:1:", st.voice.enqueued[1][1])
+
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")
         lines = {st._queue_notice_line() for _ in range(3)}
@@ -444,6 +453,24 @@ class NoticeKinds(unittest.TestCase):
                                {"seriousness": "critical",
                                 "family": "sassy"})
         self.assertTrue(plain.startswith("Cancelled."))
+
+    def test_prefix_variants_rotate(self):
+        from localcodeagent.personality.notices import (
+            KINDS, persona_notice)
+        card = {"family": "playful"}
+        for kind in KINDS:
+            a = persona_notice(kind, "the fact", card, seq=0)
+            b = persona_notice(kind, "the fact", card, seq=1)
+            self.assertNotEqual(a, b, kind)
+            self.assertTrue(a.endswith("the fact"), kind)
+            self.assertTrue(b.endswith("the fact"), kind)
+        # serious/critical stays plain regardless of rotation
+        sc = {"family": "sassy", "seriousness": "critical"}
+        self.assertEqual(
+            persona_notice("completed", "x", sc, seq=0),
+            persona_notice("completed", "x", sc, seq=1))
+        self.assertTrue(
+            persona_notice("completed", "x", sc).startswith("Done."))
 
 
 class ComparativeCommands(unittest.TestCase):
