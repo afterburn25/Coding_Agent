@@ -102,6 +102,13 @@ evidence — nothing claims an action that did not run.
   apply runs tests → build → LKG snapshot → stage → flag; the host
   swaps on the next boot so the running install is never mutated
   mid-flight. `/api/update/{status,plan,apply}` (apply confirm-gated).
+- **Coverage reports** — `coverage_report` runs the detected system's
+  coverage step (coverage.py, cargo tarpaulin, dotnet XPlat,
+  jest/vitest `--coverage`, jacoco) and errors honestly when the system
+  has none.
+- **Pipeline stage strip** — coding-pipeline missions render an
+  ordered spec→implement→verify→review→serve→commit chip strip with
+  live node states in the mission detail panel.
 - **Dependency audit tools** — `dep_list` parses declared deps from
   requirements.txt/pyproject.toml/package.json/Cargo.toml with no
   network; `project_audit` runs the real auditor per ecosystem

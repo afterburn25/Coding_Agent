@@ -7236,6 +7236,10 @@ class Handler(BaseHTTPRequestHandler):
             task_id = query.get("task_id", [""])[0]
             mission_id = query.get("mission_id", [""])[0]
             payload: dict = {"task_id": task_id}
+            if query.get("recent"):
+                limit = min(int(query.get("recent", ["40"])[0] or 40), 200)
+                self._json({"activities": self.state.activities.recent(limit)})
+                return
             if mission_id:
                 payload["mission_id"] = mission_id
                 payload["activities"] = self.state.activities.for_mission(mission_id)
