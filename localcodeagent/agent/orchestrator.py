@@ -172,6 +172,7 @@ class AgentOrchestrator:
         skills=None,
         health=None,
         profile_context=None,
+        image_outputs=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -203,6 +204,9 @@ class AgentOrchestrator:
         # Zero-arg resolver returning the active profile's personality +
         # personal-memory prompt block (presentation only).
         self.profile_context = profile_context
+        # job_id -> output file paths — lets image follow-ups reuse the
+        # last generated image as edit source without holding ImageManager.
+        self._image_outputs = image_outputs
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -685,6 +689,85 @@ class AgentOrchestrator:
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:
         return ConversationManager.image_generation_intent(user_text)
+
+    # "do it now" / "that's not what I asked for" carry no image keywords —
+    # they only read as image requests against the previous turn. These
+    # signals mark a message as a follow-up on a recent image job/request.
+    _IMAGE_FOLLOWUP_RE = re.compile(
+        r"\b(?:do it|do that|try again|retry|redo|again\b|generate it|"
+        r"make it|make her|make him|show me|go ahead|not what i|"
+        r"isn'?t what i|that'?s not|that ain'?t|wrong\b|nope|"
+        r"i wanted|i asked for|i meant|still want|"
+        r"same\s+(?:girl|guy|woman|man|person|pose|image|picture|"
+        r"photo|one|style|character|outfit)|"
+        r"but\s+i\b|instead\b|keep the)\b", re.I)
+    _IMAGEISH_RE = re.compile(
+        r"\b(?:images?|pictures?|photos?|pics?|selfie|portrait|artwork|"
+        r"drawing|illustration|render|wallpaper|girl|woman|man|guy|pose|"
+        r"scene|outfit|suit|dress|nude|naked|her|him|she|he|they)\b", re.I)
+
+    def _resolve_image_followup(
+        self, user_text: str, attached: list[str] | None
+    ) -> dict[str, Any] | None:
+        """Turn a context-dependent follow-up into a concrete image request.
+
+        Without this, "do it now" or "that's not what I asked for" lands on
+        the utility lane and the model narrates a job it can't queue. When
+        recent history shows an image job or image-ish user request, we
+        resolve a prompt + source image so the direct path can fire a real
+        job — the last output becomes the edit source ("same girl, same
+        pose" = edit the previous result)."""
+        t = str(user_text or "").strip()
+        low = t.lower()
+        if not t or len(t) > 320:
+            return None
+        # Bare approvals belong to the approval flow, not image reruns.
+        if low in {"yes", "yeah", "yep", "ok", "okay", "sure", "go", "no"}:
+            return None
+        has_signal = bool(self._IMAGE_FOLLOWUP_RE.search(low))
+        has_imagery = bool(self._IMAGEISH_RE.search(low))
+        if not has_signal and not has_imagery:
+            return None
+        if self.conversation_manager is None:
+            return None
+        messages = (self.conversation_manager.active() or {}).get("messages") or []
+        job_ids: list[str] = []
+        last_user_img = ""
+        for msg in reversed(messages[-12:]):
+            role = msg.get("role")
+            if role == "assistant" and not job_ids:
+                ids = [str(j) for j in (msg.get("image_job_ids") or [])]
+                if ids:
+                    job_ids = ids
+            elif role == "user" and not last_user_img:
+                content = str(msg.get("content") or "").strip()
+                if content and content != t and (
+                        self.direct_image_generation_intent(content)
+                        or self._IMAGEISH_RE.search(content.lower())):
+                    last_user_img = content
+            if job_ids and last_user_img:
+                break
+        if not job_ids and not last_user_img:
+            return None
+        sources: list[str] = []
+        for p in (attached or []):
+            if p and Path(str(p)).is_file():
+                sources.append(str(p))
+        if self._image_outputs is not None and job_ids:
+            for jid in job_ids[:2]:
+                try:
+                    for p in (self._image_outputs(jid) or []):
+                        s = str(p)
+                        if s and Path(s).is_file() and s not in sources:
+                            sources.append(s)
+                except Exception:
+                    continue
+        if not sources and not last_user_img:
+            return None
+        # Detailed follow-up text is the instruction itself; bare "do it"
+        # reuses the last image-ish request as the effective prompt.
+        prompt = t if (has_imagery or len(low.split()) > 8) else (last_user_img or t)
+        return {"prompt": prompt, "source_images": sources}
 
     @staticmethod
     def _split_image_prompts(user_text: str) -> list[str]:
@@ -3203,6 +3286,24 @@ class AgentOrchestrator:
                 event_callback=event_callback,
                 source_images=attach["image_paths"],
             )
+
+        # Context-dependent image follow-ups — "do it now", "that's not
+        # what I asked for" — never match the intent gates above, so they
+        # would land on a tool-less lane and produce a narrated fake job.
+        if (
+            mode == "auto"
+            and conversation_intent == "conversation"
+            and self._brain_subroutine_enabled("image_generation", True)
+        ):
+            followup = self._resolve_image_followup(
+                user_text, attach["image_paths"])
+            if followup is not None:
+                return self._direct_image_result(
+                    task_id=task.id,
+                    user_text=followup["prompt"],
+                    event_callback=event_callback,
+                    source_images=followup["source_images"],
+                )
 
         # Tier 0: deterministic/local handlers — before any hardware probe or
         # model routing so cheap answers stay cheap.

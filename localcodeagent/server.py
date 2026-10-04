@@ -601,6 +601,7 @@ class AppState:
             skills=lambda: self.skills,
             health=lambda: self.health,
             profile_context=self._profile_prompt_context,
+            image_outputs=self._image_job_outputs,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -627,6 +628,15 @@ class AppState:
         self._start_auto_resume()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def _image_job_outputs(self, job_id: str) -> list[str]:
+        """Output file paths for an image job — used by the orchestrator to
+        reuse the last generated image as an edit source on follow-ups."""
+        try:
+            job = self.images.get_job(str(job_id))
+            return [str(p) for p in (getattr(job, "outputs", None) or [])]
+        except Exception:
+            return []
 
     def _profile_prompt_context(self) -> str:
         """Active profile's personality + personal memory for prompts.
