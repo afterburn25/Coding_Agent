@@ -37,12 +37,19 @@ from ..workflow.tasks import TaskRecord, TaskStore
 from ..workflow.verify import detect_verification_commands
 
 
+TRUTH_RULE = """HARD TRUTH RULE — never fabricate execution:
+You may ONLY state that an action happened ("I applied the patch", "I pushed", "I connected to GitHub", "CI passes", "I checked the logs") when a tool result in THIS conversation proves it ran. If no tool ran, claiming it did is a lie and is forbidden.
+If you cannot perform a task — no tool exists, no connection or credential is configured, permission is missing, the capability is absent — say exactly that and name the concrete blocker instead of narrating success.
+Never print fake progress, checkmarks, or results for actions you did not observe ("✅ applied", "tests pass") — those annotations imply real execution and are forbidden without a matching tool result.
+Offering to act is allowed, but phrase it as a proposal ("I can connect if you give me access"), never as something already done.
+"""
+
 UTILITY_PROMPT = """You are Nexus Core, a local-first AI coding workstation.
 For greetings, capability questions, and casual conversation, answer directly and naturally.
 In ordinary conversation, sound like a capable adult rather than a scripted help bot. Track what the user has already said, carry references forward, notice relevant time gaps, vary phrasing, and avoid repetitive stock closings. Do not force a follow-up question onto every reply.
 You can explain that Nexus Core can inspect/edit code, run tools with permission gates, test changes, research technical and general-knowledge questions, use Git/GitHub workflows when authorized, work with local image tools when configured, and adapt conversational behavior through Nexus Brain memory/feedback/training signals.
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
-"""
+""" + TRUTH_RULE
 
 POLICY_PROMPTS = {
     "permissive": """Conversation policy: permissive.
@@ -78,7 +85,7 @@ Use research_topic/search_documentation/search_github/search_errors when externa
 Use native Git/GitHub coding tools for delivery workflows when requested: inspect the current branch, create a feature branch, commit explicit changed paths, push, create issues or pull requests, and check CI. Remote GitHub writes must pass the normal github.write approval gate; never bypass it. Never stage .agent metadata in an agent-created commit.
 When a request needs a tool or capability that is not installed (TOOL_NOT_INSTALLED, tools_not_installed, or find_tools showing install=missing), stop and tell the user exactly which tools must be installed before the request can run, then offer to install them via install_tool or point to the Tools page. Never fake the missing capability or improvise around it silently.
 If build/tests fail after a change, diagnose the exact failure, research it when needed, patch, and retest instead of stopping at the first failed verification.
-"""
+""" + TRUTH_RULE
 
 IMAGE_TOOL_NAMES = {
     "generate_image",
@@ -761,6 +768,50 @@ class AgentOrchestrator:
         r"\b(?:images?|pictures?|photos?|pics?|selfie|portrait|artwork|"
         r"drawing|illustration|render|wallpaper|girl|woman|man|guy|pose|"
         r"scene|outfit|suit|dress|nude|naked|her|him|she|he|they)\b", re.I)
+
+    # HARD TRUTH RULE enforcement — past-tense execution claims about the
+    # external world. A reply asserting these while zero tools ran is a
+    # fabrication the system annotates instead of letting stand unmarked.
+    _ACTION_CLAIM_RE = re.compile(
+        r"(?:\b(?:i['’]ve|i have|i already|i just|just now|i now)\s+"
+        r"(?:connected|synced|synchronized|pulled|cloned|pushed|committed|"
+        r"applied|patched|deployed|installed|ran|executed|verified|tested|"
+        r"merged|checked|inspected|scanned|reviewed|fixed|repaired|"
+        r"restarted|launched|rebuilt|recreated|generated|attached|"
+        r"uploaded|downloaded|fetched|grabbed|did)\b)"
+        # Vaguer "I did it/that/what you asked" — still an execution claim
+        # when nothing actually ran.
+        r"|\bi did\s+(?:it|that|all|everything|what you \w+|so|the \w+)\b"
+        r"|✅|☑|☒|✔"
+        r"|\b(?:patch|fix|commit|changes?|update|build|code)\s+"
+        r"(?:has been |is |was )?(?:successfully\s+)?"
+        r"(?:applied|committed|pushed|deployed|installed)\b"
+        r"|\ball\s+(?:the\s+)?tests?\s+(?:suite\s+)?(?:now\s+)?"
+        r"pass(?:es|ed|ing)?\b"
+        r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)\b"
+        r"|\b(?:successfully|confirmed|verified)\s+"
+        r"(?:applied|connected|synced|pushed|committed|installed|fixed)\b",
+        re.I | re.S)
+    _CLAIM_NEGATION_RE = re.compile(
+        r"(?:haven['’]t|have not|didn['’]t|did not|can['’]t|cannot|"
+        r"couldn['’]t|could not|won['’]t|will not|wouldn['’]t|would not|"
+        r"unable|never|no way|failed to|can only)\s*$", re.I)
+
+    def _unverified_action_claims(self, text: str) -> list[str]:
+        """Sentences in `text` asserting executed actions — fabrication
+        candidates when no tool actually ran. Negated clauses ("I haven't
+        pushed") and proposals ("I can push") are not claims."""
+        s = str(text or "")
+        hits: list[str] = []
+        for m in self._ACTION_CLAIM_RE.finditer(s):
+            # The clause containing the match: text since the last sentence
+            # break, where a negation ("didn't", "can't") voids the claim.
+            boundary = max(s.rfind(c, 0, m.start()) for c in ".!?\n")
+            clause = s[boundary + 1:m.start()]
+            if self._CLAIM_NEGATION_RE.search(clause.strip()):
+                continue
+            hits.append(s[m.start():m.start() + 100].split("\n")[0].strip())
+        return hits
 
     def _resolve_image_followup(
         self, user_text: str, attach: dict[str, Any] | None
@@ -3122,6 +3173,32 @@ class AgentOrchestrator:
                         continue
                     except Exception:
                         pass
+                # HARD TRUTH RULE: a reply asserting executed actions while
+                # zero tools ran this turn is fabrication. The text may
+                # already have streamed, so enforcement appends a visible
+                # unverified-claims annotation and records a model event —
+                # never silently let a fake "✅ applied" stand.
+                claims = self._unverified_action_claims(session.main_content)
+                if claims and not session.tool_events \
+                        and not session.research_context.get("sources"):
+                    notice = (
+                        "\n\n⚠ **Unverified action claims** — no tools or "
+                        "commands ran in this reply. Statements asserting "
+                        "completed actions above are narrative, not "
+                        "confirmed execution.")
+                    session.main_content += notice
+                    claims_event = {
+                        "type": "unverified_action_claims",
+                        "model_id": session.profile.id,
+                        "claims": [c[:120] for c in claims[:3]],
+                    }
+                    session.model_events.append(claims_event)
+                    self._emit(session, "model", event=claims_event)
+                    # Emit as tokens too — the reply may already have
+                    # streamed, and the annotation must render inline in
+                    # the live bubble, not only in the stored transcript.
+                    self._emit(session, "token", text=notice,
+                               model_id=session.profile.id)
                 final = self._finalize(session)
                 if final is not None:
                     return final

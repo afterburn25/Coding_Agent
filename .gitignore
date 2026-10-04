@@ -5,6 +5,7 @@ config.json
 .agent/cache/
 .DS_Store
 .agent/runtime/
+.agent/worker_costs.json
 models/**/*.gguf
 models/*.gguf
 .agent/tasks.json
@@ -70,3 +71,4 @@ tools_*.png
 
 # Windows null-device artifact (something redirects to NUL as a filename)
 NUL
+.repair-worktrees/

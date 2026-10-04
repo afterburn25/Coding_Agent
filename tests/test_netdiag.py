@@ -23,6 +23,7 @@ from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.models.openai_compat import (
     ModelHTTPError, OpenAICompatibleProvider,
 )
+from localcodeagent.models.provider import ProviderResponse
 from localcodeagent.models.router import ModelRouter
 from localcodeagent.netdiag import (
     BackendConnectionError, classify_transport_error, is_transport_failure,
@@ -480,6 +481,80 @@ class RecoveryLoopTests(unittest.TestCase):
                         model_events=[])
             # Escalated once to the ceiling (32768), then refused to loop.
             self.assertEqual(runtime.ctx_calls, [32768])
+
+
+class _ScriptedProvider:
+    """Returns canned provider responses in order — no HTTP involved."""
+
+    def __init__(self, messages: list[dict]):
+        self.queue = list(messages)
+        self.calls = 0
+
+    def complete(self, *, messages, tools=None, max_tokens=None):
+        self.calls += 1
+        msg = self.queue.pop(0) if self.queue else {
+            "role": "assistant", "content": "Done."}
+        return ProviderResponse(message=msg, raw={})
+
+    def complete_stream(self, *, messages, tools=None, on_delta=None,
+                        max_tokens=None):
+        resp = self.complete(messages=messages, tools=tools,
+                             max_tokens=max_tokens)
+        if callable(on_delta) and resp.message.get("content"):
+            on_delta(resp.message["content"])
+        return resp
+
+
+class TruthGateTests(RecoveryLoopTests):
+    """HARD TRUTH RULE — a reply asserting executed actions while zero
+    tools ran this turn is fabrication and gets annotated instead of
+    standing unmarked."""
+
+    def test_fabricated_action_claims_get_annotated(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([{
+                "role": "assistant",
+                "content": (
+                    "I've already connected to GitHub and pulled down "
+                    "the repo. ✅ Patch applied successfully. "
+                    "All tests now pass on every branch."),
+            }])
+            agent._provider_for = lambda p, **kw: provider
+            result = agent.run("fix the failing CI test")
+            self.assertIn("Unverified action claims", result.content)
+
+    def test_tools_ran_suppresses_annotation(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([
+                {"role": "assistant", "content": "",
+                 "tool_calls": [{"id": "1", "type": "function",
+                                 "function": {"name": "list_files",
+                                              "arguments": "{}"}}]},
+                {"role": "assistant",
+                 "content": "I've checked the workspace — it's clean."},
+            ])
+            agent._provider_for = lambda p, **kw: provider
+            result = agent.run("check the workspace files")
+            self.assertNotIn("Unverified action claims", result.content)
+
+    def test_detector_ignores_denials_proposals_and_plain_chat(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._unverified_action_claims
+            self.assertFalse(det(
+                "I can't connect to GitHub because no credentials are "
+                "configured. I could push if you set up a token."))
+            self.assertFalse(det(
+                "I haven't pushed anything yet and did not apply the "
+                "patch."))
+            self.assertFalse(det(
+                "Sure — here's the patch you asked for; it updates the "
+                "pin logic."))
+            hits = det("I've checked the logs and found a mismatch. "
+                       "✅ CI now passes.")
+            self.assertTrue(hits)
 
 
 class _DeadProcess:
