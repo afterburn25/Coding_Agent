@@ -140,6 +140,12 @@ class AppState:
         self.projects = ProjectStore(runtime_root / "data")
         from .requirements import RequirementStore
         self.requirements = RequirementStore(runtime_root / "data" / "requirements.json")
+        from .hypotheses import HypothesisStore
+        from .causal import CausalMemory
+        from .decisions import DecisionJournal
+        self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json")
+        self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json")
+        self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json")
         from .preferences import PreferenceStore
         self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
@@ -1473,6 +1479,9 @@ class AppState:
             on_resumed=lambda op: sup.resume_interrupted(op),
             researcher=self._repair_researcher,
             eval_recorder=lambda inc: self._record_repair_eval(inc),
+            hypotheses=self.hypotheses,
+            causal=self.causal,
+            decisions=self.decisions,
         )
         return coord
 
@@ -5188,6 +5197,34 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"requirements": rows,
                         "summary": self.state.requirements.summary()})
             return
+        if path == "/api/hypotheses":
+            q = parse_qs(urlparse(self.path).query)
+            rows = self.state.hypotheses.list(
+                incident_id=str((q.get("incident_id") or [""])[0]),
+                mission_id=str((q.get("mission_id") or [""])[0]),
+                status=str((q.get("status") or [""])[0]),
+                open_only=str((q.get("open") or [""])[0])
+                in {"1", "true", "yes"})
+            self._json({"hypotheses": rows,
+                        "summary": self.state.hypotheses.summary(),
+                        "discriminating": (
+                            self.state.hypotheses.pick_discriminating(
+                                str((q.get("incident_id") or [""])[0]))
+                            or None)})
+            return
+        if path == "/api/causal-memory":
+            q = parse_qs(urlparse(self.path).query)
+            self._json({"records": self.state.causal.list(
+                subsystem=str((q.get("subsystem") or [""])[0])),
+                "summary": self.state.causal.summary()})
+            return
+        if path == "/api/decisions":
+            q = parse_qs(urlparse(self.path).query)
+            self._json({"decisions": self.state.decisions.list(
+                status=str((q.get("status") or [""])[0]),
+                actor=str((q.get("actor") or [""])[0])),
+                "summary": self.state.decisions.summary()})
+            return
         if path == "/api/nexus-brain":
             self._json(self.state.nexus_brain.summary())
             return
@@ -6407,6 +6444,99 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "unknown requirement"}, 404)
                     return
                 self._json({"ok": True, "requirement": row})
+                return
+
+            if path == "/api/hypotheses":
+                stmt = str(body.get("statement") or "").strip()
+                if not stmt:
+                    self._json({"error": "statement is required"}, 400)
+                    return
+                row = self.state.hypotheses.propose(
+                    stmt,
+                    kind=str(body.get("kind") or ""),
+                    confidence=float(body.get("confidence") or 0.3),
+                    source=str(body.get("source") or "manual"),
+                    incident_id=str(body.get("incident_id") or ""),
+                    mission_id=str(body.get("mission_id") or ""),
+                    test=body.get("test")
+                    if isinstance(body.get("test"), dict) else None)
+                self._json({"ok": True, "hypothesis": row})
+                return
+
+            if path == "/api/hypotheses/status":
+                hid = str(body.get("id") or "")
+                act = str(body.get("action") or "status")
+                if act == "confirm":
+                    row = self.state.hypotheses.confirm(
+                        hid, evidence=str(body.get("evidence") or ""))
+                elif act == "reject":
+                    row = self.state.hypotheses.reject(
+                        hid, reason=str(body.get("reason") or ""))
+                else:
+                    row = self.state.hypotheses.set_status(
+                        hid, str(body.get("status") or ""),
+                        detail=str(body.get("detail") or ""))
+                if row is None:
+                    self._json({"error": "unknown hypothesis or status"},
+                               404)
+                    return
+                self._json({"ok": True, "hypothesis": row})
+                return
+
+            if path == "/api/hypotheses/evidence":
+                row = self.state.hypotheses.add_evidence(
+                    str(body.get("id") or ""),
+                    supporting=bool(body.get("supporting", True)),
+                    detail=str(body.get("detail") or ""),
+                    ref=str(body.get("ref") or ""))
+                if row is None:
+                    self._json({"error": "unknown hypothesis"}, 404)
+                    return
+                self._json({"ok": True, "hypothesis": row})
+                return
+
+            if path == "/api/hypotheses/test":
+                row = self.state.hypotheses.record_test(
+                    str(body.get("id") or ""),
+                    passed=bool(body.get("passed")),
+                    output=str(body.get("output") or ""),
+                    test_name=str(body.get("test") or ""))
+                if row is None:
+                    self._json({"error": "unknown hypothesis"}, 404)
+                    return
+                self._json({"ok": True, "hypothesis": row})
+                return
+
+            if path == "/api/decisions":
+                problem = str(body.get("problem") or "").strip()
+                if not problem:
+                    self._json({"error": "problem is required"}, 400)
+                    return
+                row = self.state.decisions.record(
+                    problem,
+                    alternatives=body.get("alternatives")
+                    if isinstance(body.get("alternatives"), list) else [],
+                    evidence=body.get("evidence")
+                    if isinstance(body.get("evidence"), list) else [],
+                    decision=str(body.get("decision") or ""),
+                    expected_outcome=str(
+                        body.get("expected_outcome") or ""),
+                    actor=str(body.get("actor") or "manual"),
+                    context=body.get("context")
+                    if isinstance(body.get("context"), dict) else None)
+                self._json({"ok": True, "decision": row})
+                return
+
+            if path == "/api/decisions/outcome":
+                row = self.state.decisions.outcome(
+                    str(body.get("id") or ""),
+                    str(body.get("actual") or ""),
+                    reviewer_result=str(body.get("reviewer_result") or ""),
+                    lessons=str(body.get("lessons") or ""))
+                if row is None:
+                    self._json({"error": "unknown decision"}, 404)
+                    return
+                self._json({"ok": True, "decision": row})
                 return
 
             if path == "/api/conversation-memory/exchange":

@@ -80,7 +80,10 @@ class SelfRepairCoordinator:
                  notify: Callable[[str, str, str], None] | None = None,
                  on_resumed: Callable[[dict], None] | None = None,
                  researcher: Callable[[dict], dict | None] | None = None,
-                 eval_recorder: Callable[[dict], None] | None = None) -> None:
+                 eval_recorder: Callable[[dict], None] | None = None,
+                 hypotheses: Any = None,
+                 causal: Any = None,
+                 decisions: Any = None) -> None:
         self._store = store                     # AutonomyStore
         self.repo_root = Path(repo_root)
         self.state_root = Path(state_root or
@@ -88,6 +91,12 @@ class SelfRepairCoordinator:
         self.localizer = localizer or Localizer(self.repo_root)
         self.diagnostician = diagnostician or Diagnostician()
         self.memory = RepairMemory(self.state_root / "repair_memory.json")
+        # Phase-2 cognitive stores — hypothesis lifecycle, causal
+        # memory, decision journal. All optional: an unwired coordinator
+        # behaves exactly as before.
+        self.hypotheses = hypotheses
+        self.causal = causal
+        self.decisions = decisions
         self.patcher = Patcher(self.repo_root)
         self.rollback = Rollback(self.repo_root, self.state_root)
         self.canary = canary or Canary()
@@ -262,8 +271,54 @@ class SelfRepairCoordinator:
             int(inc["attempts"].get("diagnosis") or 0) + 1
         diag = self.diagnostician.diagnose(inc)
         inc["hypotheses"] = diag["hypotheses"]
+        # Prior causal records seed ranked hypotheses — ranked
+        # candidates to test, never assumed causes.
+        if self.causal is not None:
+            try:
+                symptom = f"{inc.get('error_class','')} " \
+                          f"{inc.get('error_message','')[:200]}"
+                for p in self.causal.priors(
+                        symptom, subsystem=str(inc.get("subsystem") or "")):
+                    if all(h.get("causal_id") != p.get("causal_id")
+                           for h in inc["hypotheses"]):
+                        inc["hypotheses"].append(p)
+                inc["hypotheses"].sort(
+                    key=lambda h: -h.get("confidence", 0))
+                inc["hypotheses"] = inc["hypotheses"][:6]
+            except Exception:
+                pass
         inc["repair_kind"] = diag["repair_kind"]
         inc["confidence"] = diag["confidence"]
+        if inc["hypotheses"]:
+            inc["confidence"] = max(inc["confidence"],
+                                    inc["hypotheses"][0].get(
+                                        "confidence", 0))
+        # First-class hypothesis rows — persisted lifecycle + evidence,
+        # not just incident payloads.
+        if self.hypotheses is not None:
+            try:
+                self.hypotheses.upsert_for_incident(
+                    inc["id"], inc["hypotheses"])
+            except Exception:
+                pass
+        # Significant choice → journal it with the alternatives that
+        # were on the table.
+        if self.decisions is not None and inc["hypotheses"]:
+            try:
+                self.decisions.record(
+                    f"{inc.get('subsystem','')}: "
+                    f"{inc.get('error_class','')}",
+                    alternatives=[h.get("kind", "?") for h in
+                                  inc["hypotheses"]],
+                    evidence=[e for h in inc["hypotheses"][:2]
+                              for e in (h.get("evidence") or [])[:2]],
+                    decision=f"repair_kind={inc['repair_kind']}; "
+                             f"top={inc['hypotheses'][0].get('kind')}",
+                    expected_outcome="repair resolves incident",
+                    actor="self_repair",
+                    context={"incident_id": inc["id"]})
+            except Exception:
+                pass
         # Prior procedures adjust confidence — a proven fix lifts it,
         # a known-bad history warns.
         prior = self.memory.best_fix(inc["signature"])
@@ -591,6 +646,39 @@ class SelfRepairCoordinator:
                            detail=inc["hypotheses"][0]["detail"]
                            if inc.get("hypotheses") else "",
                            duration_s=dur)
+        # Resolution proves the top hypothesis — confirm it in the
+        # lifecycle store and write the full causal chain to memory so
+        # the next similar symptom starts with a ranked prior.
+        top_h = (inc.get("hypotheses") or [{}])[0]
+        if self.hypotheses is not None:
+            try:
+                for h in self.hypotheses.list(incident_id=inc["id"]):
+                    if h.get("kind") == top_h.get("kind"):
+                        self.hypotheses.confirm(
+                            h["id"], evidence="incident resolved")
+                    elif h.get("status") in {"proposed", "testing",
+                                             "supported", "weakened"}:
+                        self.hypotheses.reject(
+                            h["id"], reason="not the resolved cause")
+            except Exception:
+                pass
+        if self.causal is not None:
+            try:
+                ver = inc.get("verification") or {}
+                ver_s = f"targeted={len(ver.get('targeted') or [])} " \
+                        f"regression={len(ver.get('regression') or [])}"
+                self.causal.record(
+                    f"{inc.get('error_class','')} "
+                    f"{inc.get('error_message','')[:200]}",
+                    root_cause=str(top_h.get("kind") or "unknown"),
+                    mechanism=str(top_h.get("detail") or ""),
+                    fix=inc.get("repair_procedure") or
+                    inc.get("repair_kind") or "",
+                    verification=ver_s,
+                    subsystem=str(inc.get("subsystem") or ""),
+                    incident_id=inc["id"])
+            except Exception:
+                pass
         # Resume the operation the failure interrupted.
         if self._on_resumed and inc.get("interrupted_operation"):
             try:
