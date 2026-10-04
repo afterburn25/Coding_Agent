@@ -1,4 +1,6 @@
-import { Timeline, sample, clamp, validateManifest } from './timeline.mjs';
+import { sample, clamp, validateManifest } from './timeline.mjs';
+import { SplashController, RECOVERY_STATES } from './controller.mjs';
+import { verifyFailurePlayback } from './verification.mjs';
 import { Renderer } from './renderer.mjs';
 import { AudioEngine } from './audio.mjs';
 
@@ -9,36 +11,63 @@ const host = message => window.chrome?.webview?.postMessage(message);
 let clock, renderer, audio, manifest, raf, failed = false, reduced = false;
 let lastDraw = -Infinity, lastUi = -Infinity, previousHeld = false;
 let draws = [], intervals = [], lastFrame = null, externalProgress = null, visibilityPaused = false;
+let lastRevision = 0, lastPanel = false, lastHostMode = 'normal', panelAnnounced = false;
 
 function fail(error) {
   if (failed) return;
   failed = true; cancelAnimationFrame(raf); audio?.stop();
   $('scene').hidden = true; $('status').textContent = 'NEXUS CORE';
-  $('detail').textContent = 'STATIC PREVIEW · ANIMATION UNAVAILABLE';
+  $('detail').textContent = clock?.activeFault ? 'STARTUP COULD NOT COMPLETE · RECOVERY AVAILABLE' : 'STATIC PREVIEW · ANIMATION UNAVAILABLE';
   $('health').textContent = `Static fallback: ${error.message}`;
   for (const id of ['play', 'replay', 'scrub', 'phase', 'speed', 'gate', 'release']) $(id).disabled = true;
-  host({ type: 'prototype-fatal', reason: error.message });
+  if (clock?.activeFault) updateRecovery({ panel: 1, contained: true });
+  host({ type: 'prototype-fatal', reason: error.message, startupFault: Boolean(clock?.activeFault) });
+}
+
+function updateRecovery(state) {
+  const visible = (state.panel ?? 0) > 0;
+  $('recovery').hidden = !visible;
+  $('recovery').style.opacity = String(state.panel ?? 0);
+  $('recovery').inert = !visible;
+  if (!visible) { lastPanel = false; panelAnnounced = false; return; }
+  if (state.panel >= .99 && !panelAnnounced) { panelAnnounced = true; host({ type: 'recovery-visible' }); }
+  const mode = clock.recoveryState;
+  setText('recovery-title', mode === 'SAFE_MODE' ? 'Nexus Core Safe Mode' : 'Nexus Core startup failure');
+  setText('recovery-state', clock.mode === 'repair' ? 'REPAIR COMPLETE · REAUTHORIZING' : RECOVERY_STATES[mode][0]);
+  setText('recovery-message', clock.diagnostics.message);
+  setText('recovery-description', RECOVERY_STATES[mode][1]);
+  setText('recovery-attempt', clock.attempt ? `RECOVERY ATTEMPT ${clock.attempt.attempt} OF ${clock.attempt.total}` : '');
+  $('recovery-attempt').hidden = !clock.attempt;
+  setText('error-details', clock.diagnostics.detail || 'No additional details supplied.');
+  if (!lastPanel && !document.body.classList.contains('capture')) $('recovery-title').focus({ preventScroll: true });
+  lastPanel = true;
 }
 
 function paint() {
   const started = performance.now();
-  const state = sample(manifest, clock.time, reduced, clock.ambientTime); renderer.render(state);
-  $('shade').style.opacity = (.75 - .75 * state.charge).toFixed(2);
+  const state = clock.sample(reduced); renderer.render(state);
+  $('shade').style.opacity = Math.min(1, .75 - .75 * state.charge + (state.fault ? .18 * state.warning : 0)).toFixed(2);
   const label = state.phase.label.toLowerCase();
   if ($('scene').getAttribute('aria-label') !== label) $('scene').setAttribute('aria-label', label);
-  setText('status', externalProgress?.primary ?? state.phase.label);
-  setText('detail', externalProgress?.secondary ?? (clock.held ? (state.charge === 1 ? 'FULL POWER SUSTAINED · AWAITING READINESS' : 'AWAITING STARTUP SIGNAL · SAFE HOLD') : state.online ? 'CONTAINMENT RELEASED · ENERGY STABLE' : state.phase.id === 'charged_hold' ? 'FULL POWER SUSTAINED · READINESS GATE ARMED' : 'CONTAINMENT PROTOCOL · NOMINAL PREVIEW'));
-  $('fill').style.transform = `scaleX(${(externalProgress?.value ?? clamp(clock.time / manifest.duration)).toFixed(3)})`;
+  const normal = clock.mode === 'normal';
+  setText('status', normal ? externalProgress?.primary ?? state.phase.label : state.phase.label);
+  setText('detail', normal ? externalProgress?.secondary ?? (clock.held ? (state.charge === 1 ? 'FULL POWER SUSTAINED · AWAITING READINESS' : 'AWAITING STARTUP SIGNAL · SAFE HOLD') : state.online ? 'CONTAINMENT RELEASED · ENERGY STABLE' : state.phase.id === 'charged_hold' ? 'FULL POWER SUSTAINED · READINESS GATE ARMED' : 'CONTAINMENT PROTOCOL · NOMINAL PREVIEW') : state.contained ? 'CORE SECURED · RECOVERY CONTROLS AVAILABLE' : 'AUTOMATIC CONTAINMENT · RECOVERY REMAINS AVAILABLE');
+  $('fill').style.transform = `scaleX(${(normal ? externalProgress?.value ?? clamp(clock.time / manifest.duration) : clock.progressAtFault).toFixed(3)})`;
+  $('stage').classList.toggle('fault', Boolean(state.fault));
+  updateRecovery(state);
   draws.push(performance.now() - started); if (draws.length > 600) draws.shift();
 }
 
 function updateUi(now) {
   if (now - lastUi < 125) return;
   lastUi = now;
-  $('time').textContent = `${Math.min(clock.time, manifest.duration).toFixed(2)} / ${manifest.duration.toFixed(2)} s`;
-  $('scrub').value = Math.min(clock.time, manifest.duration);
+  $('time').textContent = `${Math.min(clock.time, clock.duration).toFixed(2)} / ${clock.duration.toFixed(2)} s`;
+  $('scrub').max = clock.duration; $('scrub').value = Math.min(clock.time, clock.duration);
   $('play').textContent = clock.playing ? 'Pause' : clock.time > 0 ? 'Resume' : 'Play sequence';
-  $('phase').value = sample(manifest, clock.time).phase.id;
+  $('phase').disabled = clock.mode !== 'normal'; $('gate').disabled = clock.mode !== 'normal';
+  if (clock.mode === 'normal') $('phase').value = sample(manifest, clock.time).phase.id;
+  $('recover-success').disabled = !clock.activeFault || clock.recoveryState === 'SAFE_MODE';
+  $('recovery-controls').hidden = !clock.activeFault;
   $('health').textContent = audio.disabled ? 'Audio disabled · visuals active' : audio.warnings.length ? `Audio: ${audio.warnings.length} unavailable stem(s)` : clock.held ? 'Holding for readiness' : audio.context ? 'Local stereo stems · 45% recommended' : 'Press Play to enable sound';
   if (intervals.length > 10) $('metrics').textContent = `${Math.round(1000 / percentile(intervals, .5))} fps · ${percentile(draws, .95).toFixed(1)} ms draw`;
   audio.measure();
@@ -47,8 +76,13 @@ function updateUi(now) {
 function frame(now) {
   if (failed) return;
   try {
-    // requestAnimationFrame follows the display clock. Cap at 60 Hz on fast monitors.
-    if (now - lastDraw >= 1000 / 60 - .75) {
+    // Cinematics target 60 Hz. Once contained, diagnostics only need a quiet
+    // 15 Hz scanner, leaving more resources available to independent recovery.
+    const fps = clock.activeFault && clock.time >= clock.duration ? 15 : 60;
+    if (now - lastDraw >= 1000 / fps - .75) {
+      clock.update(reduced);
+      if (clock.mode !== lastHostMode) { lastHostMode = clock.mode; if (clock.mode === 'normal') host({ type: 'startup-normal' }); }
+      if (clock.revision !== lastRevision) { lastRevision = clock.revision; void audio.sync(clock, { fade: .16 }); }
       if (lastFrame !== null && clock.playing) { intervals.push(now - lastFrame); if (intervals.length > 600) intervals.shift(); }
       lastFrame = now; lastDraw = now;
       if (clock.playing) paint();
@@ -59,7 +93,19 @@ function frame(now) {
   } catch (error) { fail(error); }
 }
 function percentile(values, p) { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.floor((sorted.length - 1) * p)] ?? 0; }
-function changed() { previousHeld = clock.held; lastFrame = null; paint(); lastUi = -Infinity; updateUi(performance.now()); void audio.sync(clock); }
+function changed(fade = .008) {
+  if (failed) { if (clock?.activeFault) updateRecovery({ panel: 1, contained: true }); return; }
+  try { previousHeld = clock.held; lastRevision = clock.revision; lastFrame = null; paint(); lastUi = -Infinity; updateUi(performance.now()); void audio.sync(clock, { fade }); }
+  catch (error) { fail(error); }
+}
+function triggerFault(details = {}) {
+  const started = clock.triggerFault(details, reduced, externalProgress?.value ?? clamp(clock.time / manifest.duration));
+  lastHostMode = clock.mode;
+  host({ type: 'startup-fault', message: clock.diagnostics.message });
+  if (started) changed(.16); else if (!failed) paint(); else updateRecovery({ panel: 1, contained: true });
+  return started;
+}
+function recovery(state, values) { if (!clock.activeFault) triggerFault(); clock.setRecoveryState(state, values); changed(.16); }
 
 async function boot() {
   $('chamber').addEventListener('error', () => { $('missing-art').hidden = false; $('chamber').hidden = true; });
@@ -67,7 +113,7 @@ async function boot() {
   const response = await fetch('../animation_manifest.json');
   if (!response.ok) throw new Error('Timeline asset missing');
   manifest = validateManifest(await response.json());
-  clock = new Timeline(manifest);
+  clock = new SplashController(manifest);
   $('scrub').max = manifest.duration;
   reduced = params.has('reduced') || matchMedia('(prefers-reduced-motion: reduce)').matches;
   $('reduced').checked = reduced;
@@ -80,6 +126,23 @@ async function boot() {
     changed();
   };
   $('replay').onclick = async () => { await audio.initialize(); clock.replay(); changed(); };
+  $('normal-start').onclick = () => { clock.resetNormal(); externalProgress = null; clock.play(); changed(.16); };
+  $('fault-now').onclick = () => triggerFault({ message: 'Core initialization could not complete.', detail: 'Preview injection. No actual Nexus startup or repair was run.' });
+  for (const [id, at] of [['fault-auth', 1.9], ['fault-unlock', 2.8], ['fault-charge', 7.8]]) $(id).onclick = () => {
+    clock.resetNormal(); for (const g of manifest.gates) clock.setGate(g.id, true);
+    clock.seek(at); triggerFault({ detail: `Development fault injected at ${at.toFixed(2)} seconds.` });
+  };
+  $('recover-success').onclick = () => { clock.repairSuccess(reduced); changed(.16); };
+  $('rollback').onclick = () => recovery('ROLLBACK');
+  $('safe-mode').onclick = () => recovery('SAFE_MODE');
+  $('recovery-controls').onclick = () => { clock.showRecoveryImmediately(); changed(.16); };
+  $('recovery-visual').onchange = () => recovery($('recovery-visual').value, $('recovery-visual').value === 'REPAIR_ATTEMPT' ? { attempt: 1, total: 3 } : {});
+  for (const button of document.querySelectorAll('[data-recovery-action]')) button.onclick = () => {
+    const action = button.dataset.recoveryAction;
+    window.dispatchEvent(new CustomEvent('nexus-recovery-action', { detail: { action } }));
+    host({ type: 'recovery-action', action });
+    setText('action-feedback', `Preview request: ${button.textContent}. Connect this action during integration.`);
+  };
   $('mute').onclick = () => { audio.setMuted(!audio.muted); $('mute').textContent = audio.muted ? 'Unmute' : 'Mute'; $('mute').setAttribute('aria-pressed', String(audio.muted)); };
   $('volume').oninput = () => audio.setVolume(Number($('volume').value) / 100);
   $('speed').onchange = () => { clock.setSpeed(Number($('speed').value)); changed(); };
@@ -106,6 +169,11 @@ async function boot() {
       if (!Number.isFinite(value)) throw new Error('Invalid progress');
       externalProgress = { value: clamp(value), primary: String(primary), secondary: String(secondary) }; paint();
     },
+    triggerFault,
+    setRecoveryState(state, values = {}) { clock.setRecoveryState(state, values); changed(.16); },
+    repairSuccess() { const started = clock.repairSuccess(reduced); changed(.16); return started; },
+    showRecoveryImmediately() { clock.showRecoveryImmediately(); changed(.16); },
+    playNormal() { clock.resetNormal(); externalProgress = null; clock.play(); changed(.16); },
     setAudioEnabled(enabled) { if (!enabled) { audio.disabled = true; audio.stop(); } else { audio.disabled = false; void audio.sync(clock); } },
     setVolume(value) { audio.setVolume(value); },
     setReducedMotion(value) { reduced = Boolean(value); $('reduced').checked = reduced; paint(); },
@@ -114,13 +182,22 @@ async function boot() {
     replay() { clock.replay(); changed(); },
     dispose() { clock.pause(); cancelAnimationFrame(raf); void audio.dispose(); },
     capture(t, minimal = false) {
-      clock.pause(); clock.seek(t); reduced = minimal; document.body.classList.add('capture');
+      clock.resetNormal(); clock.pause(); clock.seek(t); reduced = minimal; document.body.classList.add('capture');
       paint(); audio.stop(); return { t: clock.time, phase: sample(manifest, clock.time).phase.id };
     },
+    captureFailure(at, elapsed, mode = null, minimal = false) {
+      clock.resetNormal(); for (const g of manifest.gates) clock.setGate(g.id, true);
+      clock.pause(); clock.seek(at); reduced = minimal;
+      triggerFault({ detail: 'Standalone preview fault. No backend or recovery worker is running.' });
+      clock.pause(); clock.seek(elapsed); if (mode) clock.setRecoveryState(mode, mode === 'REPAIR_ATTEMPT' ? { attempt: 1, total: 3 } : {});
+      document.body.classList.add('capture'); paint(); audio.stop(); return clock.sample(reduced);
+    },
+    verifyFailurePlayback() { return verifyFailurePlayback({ clock, audio, manifest, changed, triggerFault, paint, host, setReduced: v => { reduced = v; }, fail, renderer, progress: () => $('fill').style.transform }); },
+    simulateRendererFailure() { triggerFault(); renderer.render = () => { throw new Error('Injected renderer fault'); }; changed(); },
     async verifyPlayback() {
       const checks = {};
       await audio.initialize();
-      clock.replay(); changed();
+      clock.resetNormal(); clock.replay(); changed();
       await delay(320); clock.pause(); changed(); const paused = clock.time;
       await delay(100); checks.pauseFreezesTime = clock.time === paused;
       window.preview.setProgress(.37, 'LOADING · MODELS', 'Preparing the local model');
@@ -152,6 +229,7 @@ async function boot() {
     }
   };
   paint(); raf = requestAnimationFrame(frame); host({ type: 'prototype-ready' });
+  if (params.has('safe-mode')) recovery('SAFE_MODE');
   if (params.has('autoplay')) { await audio.initialize(); clock.play(); changed(); }
 }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

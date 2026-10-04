@@ -39,14 +39,14 @@ export class AudioEngine {
       this.context = null; return false;
     }
   }
-  stop() {
+  stop(fade = .008) {
     this.generation++;
     for (const { source, gain, pan } of this.sources) {
       try {
         const now = this.context.currentTime;
-        gain.gain.cancelAndHoldAtTime(now); gain.gain.linearRampToValueAtTime(0, now + .008);
+        gain.gain.cancelAndHoldAtTime(now); gain.gain.linearRampToValueAtTime(0, now + fade);
         source.onended = () => { source.disconnect(); gain.disconnect(); pan.disconnect(); };
-        source.stop(now + .01);
+        source.stop(now + fade + .002);
       } catch { source.disconnect(); gain.disconnect(); pan.disconnect(); }
     }
     this.sources = []; this.scheduled = [];
@@ -56,8 +56,8 @@ export class AudioEngine {
     if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.context.currentTime, .012);
   }
   setMuted(muted) { this.muted = Boolean(muted); this.setVolume(this.volume); }
-  async sync(clock) {
-    this.stop(); const version = this.generation;
+  async sync(clock, { fade = .008 } = {}) {
+    this.stop(fade); const version = this.generation;
     if (!clock.playing || this.disabled) return;
     if (!await this.initialize() || version !== this.generation) return;
     try {
@@ -74,7 +74,7 @@ export class AudioEngine {
           : { id: 'hold_hum', sound: 'ambient_hum', at: 0, gain: .26, loop: true, fadeIn: .08 };
         this.schedule(heldEvent, clock.ambientTime ?? t, speed, Infinity);
       } else {
-        for (const event of this.manifest.events)
+        for (const event of clock.audioEvents ?? this.manifest.events)
           if (event.sound && event.at < limit) this.schedule(event, t, speed, limit);
       }
     } catch (e) { this.warnings.push(`Playback unavailable: ${e.message}`); this.stop(); }

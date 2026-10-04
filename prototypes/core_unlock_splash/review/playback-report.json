@@ -1,40 +1,40 @@
 {
-  "initializationMs": 565.4062,
-  "hostCpuSeconds": 0.09375,
-  "elapsedSeconds": 16.5677048,
-  "hostWorkingSetMb": 63.00390625,
-  "browserCpuSeconds": 3.640625,
-  "browserWorkingSetMb": 459.7578125,
+  "initializationMs": 2473.4669,
+  "hostCpuSeconds": 0.0625,
+  "elapsedSeconds": 16.5768867,
+  "hostWorkingSetMb": 60.39453125,
+  "browserCpuSeconds": 4.296875,
+  "browserWorkingSetMb": 474.39453125,
   "browserProcesses": [
-    {
-      "Kind": "Gpu",
-      "CpuSeconds": 2.578125,
-      "WorkingSetMb": 101.078125
-    },
-    {
-      "Kind": "Utility",
-      "CpuSeconds": 0.046875,
-      "WorkingSetMb": 19.8359375
-    },
-    {
-      "Kind": "Utility",
-      "CpuSeconds": 0.078125,
-      "WorkingSetMb": 37.16796875
-    },
     {
       "Kind": "Utility",
       "CpuSeconds": 0.03125,
       "WorkingSetMb": 26.91015625
     },
     {
-      "Kind": "Browser",
-      "CpuSeconds": 0.59375,
-      "WorkingSetMb": 134.69921875
+      "Kind": "Gpu",
+      "CpuSeconds": 3.046875,
+      "WorkingSetMb": 105.3125
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.046875,
+      "WorkingSetMb": 19.85546875
     },
     {
       "Kind": "Renderer",
-      "CpuSeconds": 1.34375,
-      "WorkingSetMb": 140.06640625
+      "CpuSeconds": 1.546875,
+      "WorkingSetMb": 149.59375
+    },
+    {
+      "Kind": "Browser",
+      "CpuSeconds": 0.640625,
+      "WorkingSetMb": 135.4375
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.078125,
+      "WorkingSetMb": 37.28515625
     }
   ],
   "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
@@ -56,7 +56,7 @@
       "reducedMotion": true
     },
     "passed": true,
-    "decodedStems": 16,
+    "decodedStems": 28,
     "audioPeak": 0.2771196961402893,
     "audioState": "running",
     "warnings": [],

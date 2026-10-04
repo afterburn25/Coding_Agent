@@ -103,6 +103,79 @@
       "peak_dbfs": -6.375175252488256,
       "rms_dbfs": -20.719051289086945,
       "sha256": "76d8551081c9516b7135f5fe0de2af2b2495a4f9a4ff7f6c38388e13dbc429fb"
+    },
+    "core_instability": {
+      "seconds": 3.5,
+      "peak_dbfs": -6.558042841285651,
+      "rms_dbfs": -15.015213405139807,
+      "sha256": "505a5698780c775215953ff9d46d3e3d451689d1ffe8d82adef74e5113c93a76"
+    },
+    "failure_warning": {
+      "seconds": 0.36,
+      "peak_dbfs": -12.39577516576788,
+      "rms_dbfs": -23.398850387338456,
+      "sha256": "0768d38b8d6c3656d9454e560a01a58a1c2f1993325dfeab48d2c39cc0d454a7"
+    },
+    "electrical_instability": {
+      "seconds": 2.95,
+      "peak_dbfs": -13.979400086720375,
+      "rms_dbfs": -21.226581501328333,
+      "sha256": "2f7c125fced6e4cc6d68924eaf6d22520ceebdd367dd242f3858a582a26505f4"
+    },
+    "emergency_powerdown": {
+      "seconds": 0.95,
+      "peak_dbfs": -6.744843366368518,
+      "rms_dbfs": -14.664282560489772,
+      "sha256": "8aa5198c7772eb00fbf83425c8693c4140988f74de61636d2ef34a160683dbde"
+    },
+    "emergency_iris_close": {
+      "seconds": 0.7,
+      "peak_dbfs": -6.935749724493126,
+      "rms_dbfs": -19.91891973723784,
+      "sha256": "82090543d434dac83ef9c6488d48310995210f64c3c68c3e78f17da5ffa55971"
+    },
+    "failure_pin_01": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408271,
+      "rms_dbfs": -29.962355009652676,
+      "sha256": "19caf177e3bb8bd5c6111f74d41a1d48862df80ea7426e501b4ebbee75c6a20f"
+    },
+    "failure_pin_02": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -29.551594823655037,
+      "sha256": "b24acc01da04df216fbe476445e58c3084614033b780f80383b4881bce14b5f7"
+    },
+    "failure_pin_03": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -30.832156500859856,
+      "sha256": "e8745a54a9cbe9f7d12342928d1c5a11312cf9ba1ec7bdd464e6826ff5b6caed"
+    },
+    "failure_pin_04": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -32.10595556149093,
+      "sha256": "4f18fc3b0e2be3a9220a0cd6139bd9652e60b6c269745a1d33398b37ebe25c1c"
+    },
+    "failure_ring_lock": {
+      "seconds": 0.41,
+      "peak_dbfs": -7.1309464702762515,
+      "rms_dbfs": -30.380839901321565,
+      "sha256": "3e963bddb590012eec4c766efe260e682579b8082de07ea8f93c5782207d691c"
+    },
+    "fault_contained": {
+      "seconds": 0.55,
+      "peak_dbfs": -7.958800173440753,
+      "rms_dbfs": -21.420443832764484,
+      "sha256": "01dadb920e7cc6889385a84f0c5ee13c50e53e4b7d4bfba89585c7dc300a8000"
+    },
+    "emergency_idle_hum": {
+      "seconds": 4.0,
+      "peak_dbfs": -17.721132953863265,
+      "rms_dbfs": -21.09605493905804,
+      "sha256": "e92694222d196b1fe12ca62e9a508b0b28fb113cc22a535218f2a67bbe4957df"
     }
-  }
+  },
+  "failure_standalone_peak": 0.5729694509720145
 }

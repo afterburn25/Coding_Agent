@@ -16,6 +16,17 @@
       <canvas id="scene" width="1024" height="576" aria-label="Locked shield; press Play to begin"></canvas>
       <div id="missing-art" hidden>NEXUS CORE<span>INTELLIGENCE PROTECTED</span></div>
       <div id="readout"><div id="track"><div id="fill"></div></div><p id="status" role="status">INITIALIZING NEXUS CORE</p><p id="detail">CONTAINMENT SEALED · PREVIEW READY</p></div>
+      <aside id="recovery" aria-labelledby="recovery-title" hidden inert>
+        <span class="recovery-eyebrow">CONTAINMENT SECURED</span>
+        <h2 id="recovery-title" tabindex="-1">Nexus Core startup failure</h2>
+        <p id="recovery-message">Core initialization could not complete.</p>
+        <p id="recovery-state" role="status">ANALYZING STARTUP FAILURE</p>
+        <p id="recovery-description">Diagnostic analysis is beginning.</p>
+        <p id="recovery-attempt" hidden></p>
+        <details><summary>Details</summary><pre id="error-details"></pre></details>
+        <div class="recovery-actions"><button data-recovery-action="open-log">Open Log</button><button data-recovery-action="retry">Retry</button><button data-recovery-action="rollback">Rollback</button><button data-recovery-action="safe-mode">Safe Mode</button><button data-recovery-action="exit">Exit</button></div>
+        <p id="action-feedback">Preview controls · recovery actions are not connected.</p>
+      </aside>
       <noscript><p class="no-script">NEXUS CORE · STATIC PREVIEW · Animation unavailable</p></noscript>
     </section>
     <nav class="transport" aria-label="Preview controls">
@@ -26,8 +37,15 @@
       <label class="check"><input id="reduced" type="checkbox"> Reduced motion</label>
     </nav>
     <div class="timeline"><output id="time">0.00 / 12.60 s</output><input id="scrub" aria-label="Seek timeline" type="range" min="0" max="12.6" step="0.01" value="0"><select id="phase" aria-label="Jump to phase"></select></div>
+    <nav class="failure-controls" aria-label="Failure and recovery simulations">
+      <button id="normal-start">Play normal startup</button><button id="fault-now">Trigger failure</button>
+      <button id="fault-auth">Fail during authorization</button><button id="fault-unlock">Fail during unlock</button><button id="fault-charge">Fail during power-up</button>
+      <button id="recover-success">Simulate recovery success</button><button id="rollback">Simulate rollback</button><button id="safe-mode">Simulate Safe Mode</button>
+      <button id="recovery-controls" hidden>Open recovery controls now</button>
+      <label>Recovery visual <select id="recovery-visual"><option value="RECOVERY_ANALYZING">Analyzing</option><option value="REPAIR_ATTEMPT">Repair attempt (demo 1 of 3)</option><option value="RESTARTING">Restarting</option><option value="ROLLBACK">Rollback</option><option value="SAFE_MODE">Safe Mode</option><option value="HUMAN_INTERVENTION_REQUIRED">Needs attention</option></select></label>
+    </nav>
     <footer><label>Hold before <select id="gate"><option value="">No hold · ideal start</option><option value="unlock">Unlock</option><option value="open">Iris opening</option><option value="charge">Core charge</option><option value="ready">Online pulse</option></select></label><button id="release" disabled>Release hold</button><span id="health">Loading local assets…</span><span id="metrics"></span></footer>
-    <p class="note">Preview timing only. Real startup readiness will remain authoritative during integration.</p>
+    <p class="note">Preview only. Recovery actions are visual hooks; no actual repair, rollback or restart is performed. Real startup readiness remains authoritative.</p>
   </main>
   <script type="module" src="app.mjs"></script>
 </body>

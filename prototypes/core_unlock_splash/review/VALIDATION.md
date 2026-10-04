@@ -1,94 +1,107 @@
 # Prototype verification
 
 Verified on Windows on 2026-10-04. Production startup was not launched or modified.
-The final sequence is 12.6 seconds: a four-second charge followed by a full-power
-plateau, with an unbounded charged-hum/bright-core hold when readiness is delayed.
+Normal startup remains 12.6 seconds with its full-power readiness hold. Failure
+now lasts **5.6 seconds**, including roughly 2.5 seconds of visible instability
+before power collapse. The iris starts closing at 3.5 seconds. Recovery work is
+independent of cosmetic timing; immediate controls and Safe Mode bypass it.
 
 ## Results
 
-- **28 Node tests passed**: deterministic transforms, phase and event ordering,
-  gates, long waits, idle motion, replay/pause/speed/seek, sound scheduling, missing
-  stems, unavailable devices, silent mode, mute before initialization, and charged
-  hum persistence/release.
-- **5 Python tests passed**: all sound formats and headroom, loop seam slopes,
-  asset hashes, byte-identical production art, and standalone host isolation.
-- **.NET Release build and Windows x64 publish passed**, with zero warnings.
-- **14 native playback checks passed**, including the actual Web Audio output
-  path and loading text/progress independent from animation time. All 16 stems
-  decoded, output was nonzero and unclipped, and a delayed readiness gate kept
-  the charged hum audible and the core at full brightness.
-- **Silent native playback passed**: zero decoded stems, no AudioContext, zero
-  output, and animation completed normally.
-- **Static recovery and missing-manifest exercises passed**: the native artwork
-  fallback remained available; a missing manifest returned the expected test
-  failure status rather than aborting without a splash.
-- Reviewed the visible native controls and captured locked, authorized, pin
-  release, opening, charging, full-power hold, online and reduced-motion states.
-  The wordmark stays unchanged and the six iris leaves keep their geometry.
-- The reference-lighting revision adds a brighter core and orbitals, blue
-  chamber haze, platform/floor light, and deeper mechanical recess shadows.
-  The full-power hold retains this lighting without repeating the online pulse.
+- **46 Node tests and 6 Python tests passed.** Coverage includes unchanged normal
+  transforms/audio, every startup phase as a fault origin, exact snapshot
+  continuity, monotonic half-open iris closure, sequence/pin order, final lock,
+  supplied attempt counts, duplicate errors, recovery success with closed
+  readiness gates, rollback, Safe Mode, pause/replay, missing stems/devices,
+  muted/silent audio, outgoing gain ramps, loop seams, hashes and mix headroom.
+- **Release build and Windows x64 publish passed**, with zero warnings.
+- **14 native normal-playback checks passed**, with and without sound. The
+  charged hum/core hold, progress/text separation and normal ONLINE state remain
+  functional. Silent playback created no AudioContext and decoded no stems.
+- **26 native failure/recovery checks passed**, with and without sound. Faults
+  were injected at normal times 0, 1.9, 2.8, 5.15, 7.8 and 11.79 seconds. The
+  real DOM, Canvas and Web Audio confirmed continuity, visible instability,
+  frozen progress, containment, recovery panel, actual audio output, mute,
+  supplied counters, all six recovery states and successful reauthorization.
+- **Renderer exception and stalled presentation checks passed.** Both exposed
+  native static recovery controls. The independent watchdog is six seconds;
+  repeated errors cannot extend it. These deliberate faults exit with 1 as
+  expected. Static mode and missing-manifest recovery checks also passed.
+- The native fallback was additionally inspected through the visible Windows
+  UI and accessibility tree: its Details, Open Log, Retry, Rollback, Safe Mode
+  and Exit controls remained available independently of WebView2.
+- Compared the previous revision: the normal manifest phases/events/gates are
+  semantically identical; all original 16 WAV stems are byte-identical; locked,
+  full-power hold and online captures are byte-identical. Source art is unchanged.
+- Visually inspected instability, emergency iris closure, contained state,
+  recovery panel and Safe Mode. The panel leaves the original wordmark visible.
 
-`playback-report.json` records the updated Release preview with audio enabled.
-`silent-report.json` records the corresponding published Windows x64 preview
-with audio disabled. Both include the reference-lighting revision and the
-mute-before-Play fix. The fallback reports record the previously verified,
-unchanged injected-fault and static recovery routes. Process IDs were removed
-from saved reports.
+`playback-report.json` and `silent-report.json` record the final normal path.
+`failure-report.json` records the **published Windows x64** failure/recovery
+preview; `failure-silent-report.json` records its silent counterpart. All reports
+use the extended 5.6-second failure sequence. Fallback reports record the native
+exception, six-second deadline, static mode and missing-manifest exercises.
+Process IDs were removed from saved reports.
 
 ## Measured performance and limits
 
-The final renderer uses a fixed **1024×576** backing surface, matching production
-artwork. Mechanical textures and light sprites are cached at 2×; the procedural
-nebula density field is computed once and cached at 384×384. Unchanged accessibility labels
-and status text are no longer rewritten every frame; the bar uses a transform
-instead of relayout. That reduced measured host/browser CPU cost substantially.
+The renderer uses a fixed 1024x576 backing surface. Mechanical and light sprites
+are cached; procedural noise is computed once. Cinematic motion targets 60 Hz.
+The contained diagnostic scanner runs at 15 Hz, and Safe Mode is static.
 
-| Metric | Updated Release preview measurement |
-| --- | ---: |
-| Median frame interval | 16.7 ms (about 60 FPS) |
-| 95th-percentile frame interval | 16.8 ms |
-| Median / 95th-percentile draw submission | 0.3 / 0.4 ms |
-| Renderer initialization | 565 ms |
-| Host CPU / WebView2 CPU during 16.57 s test | 0.094 / 3.641 CPU-seconds |
-| Host / aggregate WebView2 working set | 63.0 / 459.8 MiB |
-| Active decoded stems | 16 |
-| Playback measured digital peak, default volume | 0.277 full scale |
-| Offline nominal mix peak, master at 100% | 0.712 full scale |
-| Offline nominal mix peak, default 45% | -9.89 dBFS |
+| Metric | Normal preview | Published failure/recovery test |
+| --- | ---: | ---: |
+| Test duration | 16.58 s | 13.13 s |
+| Median / p95 frame interval | 16.7 / 16.8 ms | Mixed cinematic and idle states; no aggregate FPS claim |
+| Median / p95 draw submission | 0.3 / 0.4 ms | Not separately sampled |
+| Renderer initialization | 2473 ms | 610 ms |
+| Host / browser CPU | 0.063 / 4.297 CPU-seconds | 0.125 / 3.844 CPU-seconds |
+| Host / aggregate browser working set | 60.4 / 474.4 MiB | 65.1 / 482.4 MiB |
+| Decoded stems | 28 | 28 |
+| Digital output peak at default volume | 0.277 full scale | 0.294 full scale |
 
-The published silent preview also measured a 16.7 ms median frame interval and
-16.8 ms p95, with 0.3 / 0.5 ms draw submission and 2.47 s initialization. Startup
-initialization varies between launches; the native static artwork covers it.
+Initialization varies between launches; native static artwork covers preparation.
+CPU averages roughly 0.26–0.30 of one logical core across these test processes,
+not a machine-wide percentage. Summed working sets include shared pages and are
+not private committed memory. Draw timing measures command submission, not GPU
+completion. The normal report retains the most recent 600 frame samples.
 
-CPU is roughly 0.23 of one logical core across the measured processes, not a
-machine-wide percentage. Working sets include shared pages; summed working sets
-are not private committed memory. Draw timing measures command submission, not
-GPU completion. Frame statistics retain the most recent 600 samples. The digital
-audio measurement verifies scheduling/output, not a calibrated loudness level
-from physical speakers. No clipping was detected in the offline mix.
+Offline nominal normal mix peaks at 0.712 full scale at master 100% (-9.89 dBFS
+at default 45%). Standalone failure peaks at 0.573; conservative mixes at nine
+interruption times never exceed 0.712. They include all failure cues even when
+the runtime would suppress motion sounds for already locked components. No
+clipping was detected. Digital measurements verify signal scheduling/output,
+not calibrated acoustic loudness from physical speakers.
 
-These are observations on this desktop, not a guarantee for integrated GPUs,
-RDP, battery mode or simultaneous model initialization. A separate WebView2
-environment carries a substantial memory baseline. Devin must measure/reuse the
-existing application environment where practical and retain static fallback.
-Actual production loading impact and the final overlapping-window transition
-remain integration work; they cannot be validated in an isolated prototype.
+These are desktop observations, not a guarantee for integrated GPUs, RDP,
+battery operation or simultaneous model initialization/diagnostics/rollback.
+WebView2 has a substantial process/memory baseline. Devin must reuse the existing
+environment where practical and profile the integrated application on target
+hardware. Actual recovery workers and final overlapping-window transitions
+remain integration work; they are not implemented by this prototype.
 
-## Exact captured states
+## Captured states
 
-| Time | Preview |
-| ---: | --- |
-| 0.00 | [Sealed](01-locked.png) |
-| 2.25 | [Authorized](02-authorized.png) |
-| 3.80 | [Pins released](03-pins.png) |
-| 5.15 | [Iris opening](04-opening.png) |
-| 7.80 | [Core charging](05-core.png) |
-| 10.50 | [Full-power plateau](08-charged-hold.png) |
-| 12.60 | [Online](06-online.png) |
-| 12.60, reduced motion | [Reduced motion](07-reduced.png) |
+| Timeline | Seconds | Preview |
+| --- | ---: | --- |
+| Normal | 0.00 | [Sealed](01-locked.png) |
+| Normal | 2.25 | [Authorized](02-authorized.png) |
+| Normal | 3.80 | [Pins released](03-pins.png) |
+| Normal | 5.15 | [Iris opening](04-opening.png) |
+| Normal | 7.80 | [Core charging](05-core.png) |
+| Normal | 10.50 | [Full-power hold](08-charged-hold.png) |
+| Normal | 12.60 | [Online](06-online.png) / [reduced motion](07-reduced.png) |
+| Failure, from normal 9.60 | 1.50 | [Visible instability](09-instability.png) |
+| Failure, from normal 9.60 | 3.18 | [Power collapse](10-power-drop.png) |
+| Failure, from normal 9.60 | 3.78 | [Emergency iris closure](11-emergency-closure.png) |
+| Failure, from normal 9.60 | 5.25 | [Fault contained](12-contained.png) |
+| Failure, from normal 9.60 | 5.60 | [Recovery](13-recovery.png) / [rollback](14-rollback.png) |
+| Recovery | Immediate | [Safe Mode](15-safe-mode.png) |
+| Recovery | 5.60 | [Supplied repair counter](16-repair-attempt.png) |
+| Failure, from normal 5.15 | 0.01 | [Half-open origin preserved](17-half-open-fault.png) |
+| Failure, reduced motion | 5.60 | [Reduced-motion recovery](18-reduced-fault.png) |
 
-Reproduce with `./tools/verify.ps1 -Native` from the prototype folder. It does
-not start Nexus, contact a backend, alter global audio settings, or change the
-production splash. The fault exercise creates a disposable copy, without
-deleting any source assets.
+Reproduce with `./tools/verify.ps1 -Native` from the prototype folder. The script
+does not start Nexus, contact a backend, change global audio settings or alter
+production startup. Fault tests use a disposable distribution copy; no source
+assets are deleted.

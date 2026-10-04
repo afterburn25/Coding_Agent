@@ -1,4 +1,1 @@
-{
-  "staticFallback": true,
-  "reason": "Animation failed; static artwork remains available"
-}
+{"staticFallback":true,"recoveryUi":false,"reason":"Animation failed; static recovery remains available"}

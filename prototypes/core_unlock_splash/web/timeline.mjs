@@ -7,7 +7,7 @@ export function validateManifest(m) {
   if (m?.schemaVersion !== 1 || !Number.isFinite(m.duration) || m.duration <= 0)
     throw new Error('Unsupported timeline');
   for (const group of ['phases', 'gates', 'events']) {
-    if (!Array.isArray(m[group]) || !m[group].length) throw new Error(`Missing ${group}`);
+    if (!Array.isArray(m[group]) || (group !== 'gates' && !m[group].length)) throw new Error(`Missing ${group}`);
     let previous = -1;
     const ids = new Set();
     for (const e of m[group]) {
@@ -23,6 +23,8 @@ export function validateManifest(m) {
   }
   for (const path of Object.values(m.sounds))
     if (!/^audio\/[a-z0-9_]+\.wav$/.test(path)) throw new Error('Unsafe audio path');
+  for (const path of ['failure', 'repair']) if (m[path])
+    validateManifest({ schemaVersion: 1, ...m[path], gates: [], sounds: m.sounds });
   return m;
 }
 

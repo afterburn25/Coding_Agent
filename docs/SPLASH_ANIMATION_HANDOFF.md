@@ -119,6 +119,144 @@ rebuilding the permitted portion. Do not play `mixed_preview.wav` in production.
 
 ## Final handoff and recovery
 
+### Fatal startup failure: presentation is not the recovery coordinator
+
+The prototype now includes a **5.6-second emergency containment path**, separate
+from the unchanged normal-startup timeline. `web/controller.mjs` captures current
+lock angle, three ring angles, four pin positions, six iris positions, core
+brightness, orbital position and reveal amount. Failure interpolates from those
+values. A 53%-open iris closes from 53%; it never jumps fully open first.
+
+The failure path is:
+
+`ANY_STARTUP_STATE → FAULT_DETECTED → CORE_INSTABILITY → EMERGENCY_POWER_DROP → EMERGENCY_CONTAINMENT → LOCKDOWN → FAULT_CONTAINED → RECOVERY_UI`.
+
+| Failure-relative seconds | Presentation / sound |
+| ---: | --- |
+| 0.00 | Freeze progress; snapshot current state; crossfade startup audio into unstable reactor harmonics over 160 ms |
+| 0.10–2.80 | Sustained visible instability: one amber indicator, a small diagnostic glyph, uneven core/platform light, violet/cyan imbalance, orbital desynchronization and a small inner-ring shudder |
+| 0.30 / 0.65 | Quiet electrical texture / one restrained double warning |
+| 2.80–3.50 | Smooth power drop, contracting halo, slower orbitals and reduced particles; descending power tone |
+| 3.50–4.10 | Decisive iris closure from current positions; armored plate/servo sound only if the iris was open |
+| 3.85–4.41 | Inner, outer, then middle ring realign with controlled easing |
+| 4.38 / 4.55 / 4.72 / 4.89 | Bottom / left / right / top pins engage; each impact lands 130 ms later at its end stop |
+| 4.99–5.21 | Cylinder returns to secure position with a slight end-stop recoil |
+| 5.22 | FAULT CONTAINED, restrained thump and quiet emergency hum |
+| 5.36–5.60 | Matching recovery panel fades in; contained core stays dim and locked |
+
+Red is confined to a critical indicator; the chamber remains blue. Instability
+is visibly distinct before shutdown, without lightning, explosions or a full
+screen flash. Reduced motion removes shudder, flicker and orbital drift.
+Instability gets roughly 2.5 seconds of viewing time before power collapse, and
+the iris does not begin closing until 3.5 seconds after the fault. Extending
+this presentation never postpones actual recovery work or immediate controls.
+The normal source artwork and original sixteen audio stems remain unchanged.
+Twelve separate failure stems, timings and event gains are in the manifest.
+The failure mix and outgoing crossfade are measured at nine interruption points.
+
+**Do not replace the current `ShowFailure(...)` call with an awaited animation.**
+The current fatal catch in `NexusCoreApplicationContext.RunStartupAsync()` in
+`desktop/ChatNexus.Desktop/Program.cs` still reaches `SplashForm.ShowFailure(...)`;
+this branch has not changed it. For integration, introduce a host-level
+`TriggerStartupFault(exception)` wrapper with this order:
+
+1. Record the exception and diagnostic context immediately.
+2. Start/notify the existing recovery analysis, rollback or restart preparation
+   independently; observe worker exceptions using the recovery coordinator.
+3. Best-effort signal the splash with `window.preview.triggerFault(...)` on the
+   UI thread. The call starts presentation and returns a boolean immediately.
+   It does not return an animation-completion task to await.
+4. Show the recovery view as containment settles. Expose recovery controls
+   immediately when needed, including an explicit skip and Safe Mode.
+5. On any rendering, bridge or audio failure, retain real recovery state and
+   show the existing static `ShowFailure(...)`/recovery controls. Logging,
+   diagnostics and recovery workers must continue regardless of presentation.
+
+Never wait for a renderer-ready callback, decoder, animation completion, fade,
+or this 5.6-second sequence before logging, diagnostics, rollback, Safe Mode,
+recovery workers or restart preparation. The standalone prototype does not
+implement any of those workers. Its recovery labels and buttons are previews.
+
+### Failure and recovery API
+
+```javascript
+// Serialize real values through the host bridge; never interpolate raw exception text.
+window.preview.triggerFault({
+  message: 'Core initialization could not complete.',
+  detail: 'User-readable diagnostic context; keep full logs in the host.'
+});
+window.preview.setRecoveryState('RECOVERY_ANALYZING');
+window.preview.setRecoveryState('REPAIR_ATTEMPT', { attempt: 2, total: 3 });
+window.preview.setRecoveryState('ROLLBACK');
+window.preview.setRecoveryState('RESTARTING');
+window.preview.setRecoveryState('HUMAN_INTERVENTION_REQUIRED');
+window.preview.setRecoveryState('SAFE_MODE'); // Immediate locked, static, silent view.
+window.preview.showRecoveryImmediately();   // Skip presentation; keep recovery policy.
+window.preview.repairSuccess();             // Presentation only; real worker reports success.
+```
+
+`triggerFault` accepts faults from any normal phase and a reauthorization retry.
+While one fault is active, subsequent calls update bounded diagnostic strings
+and a count but return `false`, retaining the same snapshot and elapsed time.
+They never restart containment or replay audio. Failure status overrides normal
+loading labels, and the bar freezes at the last supplied real fraction even if
+late progress messages arrive. Diagnostic details appear only in the panel's
+expandable Details area; text uses `textContent`, never injected HTML.
+
+Recovery states require an active fault. The caller supplies any attempt count;
+there is no automatic retry counter in production-facing behavior. `ROLLBACK`
+uses a reverse outer diagnostic scan while all actual containment hardware
+stays locked. `RESTARTING` and `HUMAN_INTERVENTION_REQUIRED` keep the lock closed.
+`SAFE_MODE` bypasses the cinematic immediately, pauses motion and schedules no
+audio. It cannot accidentally launch a recovery-success power-up; explicit
+normal-start presentation is needed for a later real startup attempt.
+
+`repairSuccess()` during closure queues the presentation transition until the
+core is secured. Then `REPAIR_SUCCESS → REAUTHORIZATION → UNLOCK → CORE_CHARGE →
+ONLINE` clears amber/red indicators, plays authentication, and resumes the normal
+sequence at authorization. **It does not release any readiness gate.** All
+remaining gates, real StartupProgress values and the app-ready handshake remain
+host-owned. Early normal gates also remain authoritative; the sampler resumes
+no later than the earliest closed boundary. A new failure during this retry can
+start a new containment sequence. Only explicit success/retry ends the active
+fault episode; duplicate errors alone cannot create a failure loop.
+
+Panel actions dispatch `nexus-recovery-action` on the window and a WebView2
+`recovery-action` message, with `action` equal to `open-log`, `retry`, `rollback`,
+`safe-mode` or `exit`. Details expands locally. Wire those requests to existing
+host recovery commands later. The current preview displays an acknowledgement;
+it never starts repair, restarts, opens logs, rolls back, or exits production.
+The native static fallback has independent buttons; its Exit closes only this
+standalone preview.
+
+### Recovery fallback and resource limits
+
+The preview host receives `startup-fault` immediately. A renderer exception or
+WebView2 process failure after that disposes the renderer/audio and reveals a
+native WinForms recovery panel. An independent **6-second native watchdog**
+also shows those controls if `recovery-visible` never arrives, including a
+stalled/paused presentation. Repeated errors do not restart the watchdog. A new
+normal attempt invalidates the previous watchdog. Carry this independent bound
+into production, with the real recovery view model retained outside WebView2.
+Do not make a web page, animation timer or audio device the sole route to recovery.
+
+After containment the optional diagnostic scanner runs at 15 Hz; the short
+cinematic targets 60 Hz. Safe Mode draws once. Noise/lighting textures are cached,
+the backing surface remains 1024×576, and background playback pauses. The host
+must still profile concurrent diagnostics/rollback on target hardware; the
+WebView2 memory baseline remains significant. No production performance claim
+is implied by this isolated preview.
+
+Native verification covers faults from locked, authorization, lock turn,
+half-open iris, power-up and pre-ONLINE states; frozen progress; duplicate
+errors; output/mute/silent audio; supplied attempt counts; rollback, restarting,
+human intervention, Safe Mode and successful recovery through a closed readiness
+gate. Injected renderer failure and a deliberately stalled presentation must
+both expose native static recovery controls. See the saved review reports and
+`tools/verify.ps1 -Native`.
+
+### Successful startup handoff
+
 After genuine readiness: online pulse → short settle → splash fade → main window.
 Prepare the main window behind the splash, give it a rendered frame, then overlap
 the windows during the fade. Keep an opaque chamber underneath until the main

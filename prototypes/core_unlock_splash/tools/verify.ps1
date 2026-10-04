@@ -16,6 +16,17 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Normal playback failed' }
         & dotnet $assembly --silent --verify (Join-Path $runRoot 'silent')
         if ($LASTEXITCODE -ne 0) { throw 'Silent playback failed' }
+        & dotnet $assembly --verify-failure --verify (Join-Path $runRoot 'failure')
+        if ($LASTEXITCODE -ne 0) { throw 'Failure/recovery playback failed' }
+        & dotnet $assembly --silent --verify-failure --verify (Join-Path $runRoot 'failure-silent')
+        if ($LASTEXITCODE -ne 0) { throw 'Silent failure/recovery playback failed' }
+        foreach ($fault in @('renderer-fault', 'recovery-timeout')) {
+            $faultOutput = Join-Path $runRoot $fault
+            & dotnet $assembly "--verify-$fault" --verify $faultOutput
+            if ($LASTEXITCODE -ne 1) { throw "$fault did not return expected fallback status" }
+            $recoveryFallback = Get-Content (Join-Path $faultOutput 'fallback.json') -Raw | ConvertFrom-Json
+            if (-not $recoveryFallback.recoveryUi) { throw "$fault did not expose native static recovery controls" }
+        }
         & dotnet $assembly --static --verify (Join-Path $runRoot 'static')
         if ($LASTEXITCODE -ne 0) { throw 'Static fallback failed' }
         # Create a disposable distribution with a missing manifest. No source deletion.
@@ -29,5 +40,6 @@ try {
         $fallback = Get-Content (Join-Path $runRoot 'missing-manifest-result/fallback.json') -Raw | ConvertFrom-Json
         if (-not $fallback.staticFallback) { throw 'Missing manifest did not show static fallback' }
         Write-Output "Native verification passed. Reports: $runRoot"
+        $global:LASTEXITCODE = 0
     }
 } finally { Pop-Location }

@@ -1,7 +1,7 @@
 # Original procedural sound assets
 
 All WAVs in this directory were synthesized specifically for this prototype by
-`tools/generate_audio.py`. They use oscillators, deterministic seeded noise,
+`tools/generate_audio.py` and `tools/generate_failure_audio.py`. They use oscillators, deterministic seeded noise,
 filters and envelopes. They contain no recordings, music, speech, external
 samples, model-generated imitations or franchise material.
 
@@ -28,7 +28,25 @@ maximum-level nominal mix. The default master volume is 0.45; start at 0.3 on
 small speakers. The mix has headroom before its protective -3 dB compressor.
 Muting and silent startup do not alter animation time.
 
-To regenerate with Python 3.10+ and NumPy: `python tools/generate_audio.py`.
+Twelve additional failure stems cover detuned reactor harmonics, a restrained
+double warning, low electrical crackle, descending reactor power, armored iris
+closure, four separate pin impacts, the final ring lock, containment thump, and
+a quiet four-second periodic emergency hum. Pin impacts land 130 ms into each
+stem, at the visual carriage end stop. Their pan matches the corresponding pin.
+The original sixteen normal stems are unchanged.
+
+The runtime ramps outgoing startup sources down over 160 ms while the unstable
+hum rises. Future startup events are cancelled, so no successful-online cue
+plays during containment. Closed pins/iris do not produce invented movement
+sounds. Safe Mode cancels all sound. `failure_mix_report.json` measures nine
+interruption mixes, conservatively including every failure stem even if the
+runtime would suppress it. Peak is 0.573 for the failure sequence and at most
+0.712 across transitions at master 100%; the failure is not louder than normal.
+`mixed_failure_preview.wav` demonstrates interruption at 7.8 seconds, at 45%
+master volume. Both mixed files are listening previews, not runtime movies.
+
+To regenerate with Python 3.10+ and NumPy, run both commands in order:
+`python tools/generate_audio.py`, then `python tools/generate_failure_audio.py`.
 All synthesis parameters and seeds are checked in. Different NumPy/platform
 floating-point implementations may change least-significant PCM bits; use the
 committed WAVs for byte-exact reproduction.

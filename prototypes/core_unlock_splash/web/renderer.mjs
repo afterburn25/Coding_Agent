@@ -161,6 +161,7 @@ export class Renderer {
     this.nebula = nebulaSprite();
     this.bloom = lightSprite([[0, '#dbffffed'], [.08, '#8cffffd4'], [.2, '#38d5ffad'], [.4, '#1387ff70'], [.7, '#1255fa28'], [1, '#0938ef00']]);
     this.hotspot = lightSprite([[0, '#ffffffff'], [.09, '#f5fffff5'], [.22, '#baffffdb'], [.42, '#42cfff7a'], [.7, '#126eff20'], [1, '#0654ff00']]);
+    this.instabilityLight = lightSprite([[0, '#e3c3ffbb'], [.25, '#b276faaa'], [.6, '#6544da44'], [1, '#452cc000']]);
     this.housingShadow = lightSprite([[0, '#00020aff'], [.64, '#00020afa'], [.77, '#00020ab0'], [.9, '#00020a28'], [1, '#00020a00']]);
     this.orbits = [orbitSprite('#55dbff'), orbitSprite('#a284ff'), orbitSprite('#5eeeff')];
     this.ringEmission = sprite(240, c => {
@@ -213,12 +214,14 @@ export class Renderer {
       c.lineWidth = i === 1 ? 1.5 : 1;
       for (let j = 0; j < 6; j++) {
         const activated = clamp(s.security * 6 - j);
-        c.strokeStyle = j % 3 === 2 ? `rgba(149,98,249,${.06 + .64 * activated})` : `rgba(69,205,255,${.07 + .75 * activated})`;
+        c.strokeStyle = s.fault && s.warning > .2 && j === 0
+          ? `rgba(255,${s.critical > .7 ? 104 : 185},74,${.15 + .6 * s.warning})`
+          : j % 3 === 2 ? `rgba(149,98,249,${.06 + .64 * activated})` : `rgba(69,205,255,${.07 + .75 * activated})`;
         c.beginPath(); c.arc(0, 0, [85, 75, 65][i], j * TAU / 6 + .13, j * TAU / 6 + .7); c.stroke();
       }
       c.restore();
     }
-    c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = .18 * s.security + .82 * s.charge;
+    c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = (.18 * s.security + .82 * s.charge) * (s.energyScale ?? 1);
     blit(c, this.ringEmission, 240); c.restore();
     if (s.security > 0 && s.authorization < 1 && !s.reduced) {
       c.strokeStyle = '#a0ebff'; c.lineWidth = 1; c.beginPath();
@@ -229,6 +232,8 @@ export class Renderer {
       c.save(); c.rotate(i * Math.PI / 2); c.translate(0, -80 - s.pins[i] * (s.reduced ? 3 : 13));
       blit(c, this.clamp, 60);
       c.fillStyle = s.pins[i] > .9 ? '#8bf4ed' : (s.security > i / 4 ? '#46acdc' : '#203950');
+      if (s.fault && s.warning > .2 && (i === 0 || s.contained || s.pinFlash?.[i] > 0))
+        c.fillStyle = s.pinFlash?.[i] > .1 ? '#ffde91' : i === 0 && s.critical > .7 ? '#ec7359' : '#c79550';
       c.fillRect(-2, -7, 4, 5); c.restore();
       if (s.charge > 0) {
         c.save(); c.rotate(i * Math.PI / 2); c.translate(0, -87 - s.pins[i] * (s.reduced ? 3 : 13));
@@ -241,6 +246,7 @@ export class Renderer {
       blit(c, this.bloom, 235); c.restore();
     }
     this.drawOrbitals(c, s);
+    if (s.fault) this.drawFaultIndicators(c, s);
     // Restrained activation halo, localized to the shield (never a screen flash).
     if (s.pulse > 0) {
       circle(c, 97 + 25 * smooth(s.pulsePhase));
@@ -252,7 +258,7 @@ export class Renderer {
 
   drawEnvironment(c, s) {
     if (s.reveal <= 0) return;
-    const energy = s.reveal * (.12 + .88 * s.charge);
+    const energy = s.reveal * (.12 + .88 * s.charge) * (s.energyScale ?? 1);
     c.save(); c.globalCompositeOperation = 'screen';
     c.save(); c.translate(512, 204); c.globalAlpha = energy * .88;
     blit(c, this.bloom, 435 + s.pulse * 25);
@@ -278,6 +284,12 @@ export class Renderer {
     c.save(); c.globalCompositeOperation = 'screen';
     c.globalAlpha = .18 + .65 * s.charge; blit(c, this.bloom, 132);
     c.globalAlpha = .2 + .74 * s.charge; blit(c, this.hotspot, 67); c.restore();
+    if (s.instability > 0) {
+      c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = s.instability * .5;
+      c.translate(Math.sin(s.t * 17) * 12, Math.cos(s.t * 13) * 8); blit(c, this.instabilityLight, 122);
+      c.strokeStyle = '#c0a3ff'; c.lineWidth = .65;
+      c.rotate(s.t * .8); c.beginPath(); c.ellipse(0, 0, 46, 19, .4, .2, 2.6); c.stroke(); c.restore();
+    }
     // Internal current: deterministic ellipses, clipped to the sphere surface.
     c.save(); circle(c, 43); c.clip();
     for (let i = 0; i < 7; i++) {
@@ -303,11 +315,34 @@ export class Renderer {
     // Foreground orbital light can cross the housing, as in the supplied reference.
     // Cached bloom creates a luminous tube instead of a thin diagram-like line.
     for (let i = 0; i < 3; i++) {
-      c.save(); c.rotate(i * Math.PI / 3 + s.orbit * (i % 2 ? -1 : 1));
+      c.save(); c.rotate(i * Math.PI / 3 + s.orbit * (i % 2 ? -1 : 1) + (s.orbitOffsets?.[i] ?? 0));
       c.globalCompositeOperation = 'screen'; c.globalAlpha = s.charge * .88;
       blit(c, this.orbits[i], 184);
       const p = s.orbit * 2 + i * 2;
       c.translate(Math.cos(p) * 72, Math.sin(p) * 25); blit(c, this.hotspot, 14);
+      c.restore();
+    }
+  }
+
+  drawFaultIndicators(c, s) {
+    c.save(); c.globalAlpha = s.warning;
+    // Local warning only: retain the blue shield/chamber and original lettering.
+    c.strokeStyle = s.critical > .7 ? '#dc7652' : '#d1a05b'; c.lineWidth = .85;
+    c.beginPath(); c.arc(0, 0, 62, -.75, .1); c.stroke();
+    c.globalAlpha = s.warning * .52;
+    c.beginPath(); c.arc(0, 0, 84, 1.12, 1.9); c.stroke();
+    c.globalAlpha = s.warning;
+    c.translate(115, -71);
+    c.beginPath(); c.moveTo(0, -6); c.lineTo(5, 4); c.lineTo(-5, 4); c.closePath(); c.stroke();
+    c.fillStyle = '#e2bb7d'; c.fillRect(-.55, -2.5, 1.1, 3); c.fillRect(-.55, 1.7, 1.1, 1);
+    c.font = '5px Segoe UI'; c.fillText(s.contained ? 'SECURED' : 'SYNC', 9, 2);
+    c.restore();
+    if (s.diagnosticActive) {
+      c.save(); c.rotate(s.diagnosticAngle); c.strokeStyle = '#d9ac6366'; c.lineWidth = 1;
+      for (let i = 0; i < 3; i++) {
+        c.beginPath(); c.arc(0, 0, 106, i * TAU / 3, i * TAU / 3 + .38); c.stroke();
+        for (let j = 0; j < 4; j++) { c.rotate(.025); c.fillStyle = '#c9a46a55'; c.fillRect(109, -1, 2, 2); }
+      }
       c.restore();
     }
   }

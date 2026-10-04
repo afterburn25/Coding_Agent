@@ -22,7 +22,11 @@ internal sealed class PreviewForm : Form
     private readonly PictureBox _static = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(4, 8, 18) };
     private readonly Label _status = new() { Dock = DockStyle.Bottom, Height = 40, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.LightSteelBlue, BackColor = Color.FromArgb(4, 8, 18), Text = "NEXUS CORE · Preparing standalone preview" };
     private WebView2? _web;
-    private bool _ready, _fallback, _closing;
+    private bool _ready, _fallback, _closing, _startupFault;
+    private string _faultMessage = "Core initialization could not complete.";
+    private Panel? _recovery;
+    private bool _recoveryShown;
+    private int _faultEpoch;
     private readonly TaskCompletionSource<JsonElement> _report = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly string? _verificationPath;
     private readonly Stopwatch _startup = Stopwatch.StartNew();
@@ -35,7 +39,7 @@ internal sealed class PreviewForm : Form
         Text = "Nexus Core — Containment Preview";
         BackColor = Color.FromArgb(4, 8, 18);
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1120, 870); MinimumSize = new Size(900, 740);
+        ClientSize = new Size(1120, 960); MinimumSize = new Size(900, 740);
         Controls.Add(_static); Controls.Add(_status);
         var imagePath = Path.Combine(AppContext.BaseDirectory, "assets", "nexus-core-splash.png");
         try { _static.Image = Image.FromFile(imagePath); }
@@ -80,7 +84,20 @@ internal sealed class PreviewForm : Form
                             _web.Visible = true; _web.BringToFront();
                             if (_verificationPath is not null) await VerifyAsync();
                             break;
-                        case "prototype-fatal": ShowStatic("Animation failed; static artwork remains available"); break;
+                        case "startup-fault":
+                            if (!_startupFault) { _recoveryShown = false; _ = RecoveryWatchdogAsync(++_faultEpoch); }
+                            _startupFault = true;
+                            _faultMessage = message.RootElement.GetProperty("message").GetString() ?? _faultMessage;
+                            break;
+                        case "recovery-visible": _recoveryShown = true; break;
+                        case "startup-normal": _startupFault = false; _faultEpoch++; break;
+                        case "prototype-fatal":
+                            _startupFault |= message.RootElement.TryGetProperty("startupFault", out var fault) && fault.GetBoolean();
+                            ShowStatic("Animation failed; static recovery remains available"); break;
+                        case "recovery-action":
+                            // Deliberately no repair, process launch, rollback or production wiring.
+                            // These are presentation hooks for Devin, not a recovery worker.
+                            break;
                         case "verification-result": _report.TrySetResult(message.RootElement.GetProperty("report").Clone()); break;
                     }
                 }
@@ -90,6 +107,7 @@ internal sealed class PreviewForm : Form
             if (_args.Contains("--silent")) query.Add("silent=1");
             if (_args.Contains("--reduced-motion")) query.Add("reduced=1");
             if (_args.Contains("--autoplay")) query.Add("autoplay=1");
+            if (_args.Contains("--safe-mode")) query.Add("safe-mode=1");
             core.Navigate("https://nexus-splash.example/web/index.html?" + string.Join('&', query));
         }
         catch (Exception ex) { ShowStatic($"Animation unavailable: {ex.GetType().Name}"); }
@@ -101,6 +119,13 @@ internal sealed class PreviewForm : Form
         if (!_ready && !_closing) ShowStatic("Animation timed out; static artwork remains available");
     }
 
+    private async Task RecoveryWatchdogAsync(int epoch)
+    {
+        await Task.Delay(6000);
+        if (_startupFault && !_recoveryShown && epoch == _faultEpoch && !_closing && !_fallback)
+            ShowStatic("Containment presentation timed out; recovery is available");
+    }
+
     private void ShowStatic(string reason)
     {
         if (_closing || _fallback) return;
@@ -109,26 +134,61 @@ internal sealed class PreviewForm : Form
         _web?.Dispose(); _web = null;
         _static.Visible = true; _status.Visible = true;
         _static.BringToFront(); _status.Text = $"NEXUS CORE · {reason}"; _status.BringToFront();
+        if (_startupFault || _args.Contains("--safe-mode")) ShowStaticRecovery();
         if (_verificationPath is not null)
         {
             Directory.CreateDirectory(_verificationPath);
-            File.WriteAllText(Path.Combine(_verificationPath, "fallback.json"), JsonSerializer.Serialize(new { staticFallback = true, reason }));
+            File.WriteAllText(Path.Combine(_verificationPath, "fallback.json"), JsonSerializer.Serialize(new { staticFallback = true, recoveryUi = _recovery?.Visible == true, reason }));
             Environment.ExitCode = _args.Contains("--static") ? 0 : 1;
             BeginInvoke(Close);
         }
+    }
+
+    private void ShowStaticRecovery()
+    {
+        // Native controls survive a failed Canvas, script or WebView2 process.
+        // No animation, timer, or Web Audio is required to reach recovery actions.
+        _recovery = new Panel { Width = 390, Height = 280, BackColor = Color.FromArgb(12, 22, 35), BorderStyle = BorderStyle.FixedSingle };
+        var title = new Label { Text = "NEXUS CORE · STARTUP RECOVERY", ForeColor = Color.Wheat, AutoSize = false, Bounds = new Rectangle(22, 20, 345, 30) };
+        var detail = new Label { Text = _faultMessage + "\n\nStatic recovery is available. The cinematic renderer is not required.", ForeColor = Color.LightSteelBlue, Bounds = new Rectangle(22, 62, 345, 90) };
+        var feedback = new Label { Text = "Preview only · recovery actions are not connected.", ForeColor = Color.SlateGray, Bounds = new Rectangle(22, 233, 345, 32) };
+        _recovery.Controls.AddRange([title, detail, feedback]);
+        string[] actions = ["Details", "Open Log", "Retry", "Rollback", "Safe Mode", "Exit"];
+        for (var i = 0; i < actions.Length; i++)
+        {
+            var action = actions[i];
+            var button = new Button { Text = action, Bounds = new Rectangle(22 + i % 3 * 117, 157 + i / 3 * 35, 109, 29), FlatStyle = FlatStyle.Flat, ForeColor = Color.LightSteelBlue };
+            button.Click += (_, _) => { if (action == "Exit") Close(); else feedback.Text = $"Preview request: {action}. Connect during integration."; };
+            _recovery.Controls.Add(button);
+        }
+        Controls.Add(_recovery);
+        void PositionPanel() { if (_recovery is not null) _recovery.Location = new Point(Math.Max(0, (ClientSize.Width - _recovery.Width) / 2), Math.Max(0, (ClientSize.Height - _recovery.Height) / 2)); }
+        Resize += (_, _) => PositionPanel(); PositionPanel(); _recovery.BringToFront();
     }
 
     private async Task VerifyAsync()
     {
         var output = _verificationPath!;
         Directory.CreateDirectory(output);
+        if (_args.Contains("--verify-renderer-fault"))
+        {
+            _startupFault = true;
+            await _web!.CoreWebView2.ExecuteScriptAsync("window.preview.simulateRendererFailure()");
+            return;
+        }
+        if (_args.Contains("--verify-recovery-timeout"))
+        {
+            await _web!.CoreWebView2.ExecuteScriptAsync("window.preview.triggerFault(); window.preview.pause()");
+            return;
+        }
         var initializationMs = _startup.Elapsed.TotalMilliseconds;
         var process = Process.GetCurrentProcess();
         var cpuStart = process.TotalProcessorTime;
         var browserCpuStart = BrowserProcesses().ToDictionary(p => p.Id, p => p.CpuSeconds);
         var watch = Stopwatch.StartNew();
-        await _web!.CoreWebView2.ExecuteScriptAsync("void window.preview.verifyPlayback()");
-        var report = await _report.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var failureVerification = _args.Contains("--verify-failure");
+        await _web!.CoreWebView2.ExecuteScriptAsync(failureVerification ? "void window.preview.verifyFailurePlayback()" : "void window.preview.verifyPlayback()");
+        var report = await _report.Task.WaitAsync(TimeSpan.FromSeconds(40));
         var browserProcesses = BrowserProcesses();
         var native = new { initializationMs, hostCpuSeconds = (process.TotalProcessorTime - cpuStart).TotalSeconds, elapsedSeconds = watch.Elapsed.TotalSeconds, hostWorkingSetMb = process.WorkingSet64 / 1048576.0,
             browserCpuSeconds = browserProcesses.Sum(p => Math.Max(0, p.CpuSeconds - browserCpuStart.GetValueOrDefault(p.Id))),
@@ -143,6 +203,26 @@ internal sealed class PreviewForm : Form
             await Task.Delay(100);
             await using var stream = File.Create(Path.Combine(output, label + ".png"));
             await _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+        }
+        if (failureVerification)
+        {
+            foreach (var (label, at, elapsed, state, minimal) in new[] {
+                ("09-instability", 9.6, 1.5, "null", false),
+                ("10-power-drop", 9.6, 3.18, "null", false),
+                ("11-emergency-closure", 9.6, 3.78, "null", false),
+                ("12-contained", 9.6, 5.25, "null", false),
+                ("13-recovery", 9.6, 5.6, "null", false),
+                ("14-rollback", 9.6, 5.6, "'ROLLBACK'", false),
+                ("15-safe-mode", 7.8, 0.1, "'SAFE_MODE'", false),
+                ("16-repair-attempt", 7.8, 5.6, "'REPAIR_ATTEMPT'", false),
+                ("17-half-open-fault", 5.15, .01, "null", false),
+                ("18-reduced-fault", 7.8, 5.6, "null", true) })
+            {
+                await _web.CoreWebView2.ExecuteScriptAsync(FormattableString.Invariant($"window.preview.captureFailure({at}, {elapsed}, {state}, {minimal.ToString().ToLowerInvariant()})"));
+                await Task.Delay(100);
+                await using var stream = File.Create(Path.Combine(output, label + ".png"));
+                await _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+            }
         }
         Environment.ExitCode = report.GetProperty("passed").GetBoolean() ? 0 : 1;
         Close();

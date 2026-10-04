@@ -1,4 +1,1 @@
-{
-  "staticFallback": true,
-  "reason": "Static / recovery preview"
-}
+{"staticFallback":true,"recoveryUi":false,"reason":"Static / recovery preview"}

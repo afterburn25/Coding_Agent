@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { AudioEngine } from '../web/audio.mjs';
 import { Timeline } from '../web/timeline.mjs';
+import { SplashController } from '../web/controller.mjs';
 const manifest = JSON.parse(readFileSync(new URL('../animation_manifest.json', import.meta.url)));
 
-class Param { value = 0; cancelAndHoldAtTime() {} setValueAtTime(v) { this.value = v; } linearRampToValueAtTime(v) { this.value = v; } setTargetAtTime(v) { this.value = v; } }
-class Node { gain = new Param(); pan = new Param(); playbackRate = new Param(); connect() {} disconnect() { this.disconnected = true; } start(...args) { this.started = args; } stop() { this.stopped = true; } }
+class Param { value = 0; ramps = []; cancelAndHoldAtTime() {} setValueAtTime(v) { this.value = v; } linearRampToValueAtTime(v, t) { this.value = v; this.ramps.push({ v, t }); } setTargetAtTime(v) { this.value = v; } }
+class Node { gain = new Param(); pan = new Param(); playbackRate = new Param(); connect() {} disconnect() { this.disconnected = true; } start(...args) { this.started = args; } stop(at) { this.stopped = true; this.stoppedAt = at; } }
 class Context {
   currentTime = 10; destination = {}; state = 'running';
   createGain() { return new Node(); } createStereoPanner() { return new Node(); }
@@ -32,10 +33,10 @@ test('audio initialization failure is isolated', async () => {
 });
 test('missing audio asset is nonfatal and other stems still load', async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async url => ({ ok: !String(url).includes('pin_02'), status: 404, arrayBuffer: async () => new ArrayBuffer(8) });
+  globalThis.fetch = async url => ({ ok: !String(url).endsWith('/pin_02.wav'), status: 404, arrayBuffer: async () => new ArrayBuffer(8) });
   try {
     const a = new AudioEngine(manifest, { factory: () => new Context() });
-    assert.equal(await a.initialize(), true); assert.equal(a.buffers.size, 15); assert.equal(a.warnings.length, 1); await a.dispose();
+    assert.equal(await a.initialize(), true); assert.equal(a.buffers.size, Object.keys(manifest.sounds).length - 1); assert.equal(a.warnings.length, 1); await a.dispose();
   } finally { globalThis.fetch = original; }
 });
 test('mute selected before Play remains silent when audio initializes', async () => {
@@ -89,4 +90,33 @@ test('full-charge readiness holds loop the charged hum indefinitely, not dormant
   const old = audio.sources[0].source;
   clock.setGate('ready', true); await audio.sync(clock); assert.ok(old.stopped);
   assert.ok(audio.scheduled.some(s => s.id === 'online_pulse'));
+});
+
+test('fault audio replaces future startup cues with a 160ms outgoing ramp', async () => {
+  const { audio } = make(); const c = new SplashController(manifest, () => 0); c.seek(7.8); c.play(); await audio.sync(c);
+  const outgoing = [...audio.sources]; c.triggerFault(); await audio.sync(c, { fade: .16 });
+  assert.ok(outgoing.every(s => s.gain.gain.ramps.at(-1).t === 10.16 && s.source.stoppedAt === 10.162));
+  assert.ok(audio.scheduled.some(s => s.id === 'instability_start')); assert.ok(!audio.scheduled.some(s => s.id === 'online_pulse'));
+  assert.deepEqual(audio.scheduled.filter(s => s.id.startsWith('pin_')).map(s => s.id), ['pin_3_lock', 'pin_4_lock', 'pin_2_lock', 'pin_1_lock']);
+  assert.equal(audio.scheduled.find(s => s.id === 'pin_3_lock').when, 10 + manifest.failure.events.find(e => e.id === 'pin_3_lock').at);
+});
+test('muted fault never raises the master gain and silent fault never initializes', async () => {
+  const { audio } = make(); const c = new SplashController(manifest, () => 0); c.seek(8); c.triggerFault();
+  audio.setMuted(true); await audio.sync(c); assert.equal(audio.master.gain.value, 0);
+  const silent = new AudioEngine(manifest, { disabled: true, factory: () => { throw Error('Must not run'); } });
+  await silent.sync(c); assert.equal(silent.context, null); assert.equal(silent.sources.length, 0);
+});
+test('missing failure stem leaves remaining containment audio available', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async url => ({ ok: !String(url).endsWith('/emergency_iris_close.wav'), status: 404, arrayBuffer: async () => new ArrayBuffer(8) });
+  try {
+    const audio = new AudioEngine(manifest, { factory: () => new Context() }); const c = new SplashController(manifest, () => 0); c.seek(8); c.triggerFault();
+    await audio.sync(c); assert.equal(audio.warnings.length, 1); assert.ok(!audio.scheduled.some(s => s.id === 'iris_close_start'));
+    assert.ok(audio.scheduled.some(s => s.id === 'fault_contained')); await audio.dispose();
+  } finally { globalThis.fetch = original; }
+});
+test('Safe Mode cancels every cue, including the emergency loop', async () => {
+  const { audio } = make(); const c = new SplashController(manifest, () => 0); c.seek(8); c.triggerFault(); c.seek(manifest.failure.duration); await audio.sync(c);
+  assert.ok(audio.scheduled.some(s => s.id === 'emergency_idle'));
+  c.setRecoveryState('SAFE_MODE'); await audio.sync(c); assert.equal(audio.sources.length, 0);
 });

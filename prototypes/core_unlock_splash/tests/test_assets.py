@@ -21,7 +21,7 @@ class AssetTests(unittest.TestCase):
                 self.assertLess(abs(sum(samples) / len(samples)), 2)
 
     def test_periodic_hum_loops_have_no_seam_click(self):
-        for name in ['ambient_hum', 'charged_hum', 'stable_hum']:
+        for name in ['ambient_hum', 'charged_hum', 'stable_hum', 'emergency_idle_hum']:
             with wave.open(str(ROOT / 'audio' / f'{name}.wav')) as wav:
                 data = array.array('h', wav.readframes(wav.getnframes()))
                 for channel in [0, 1]:
@@ -50,6 +50,13 @@ class AssetTests(unittest.TestCase):
         host = (ROOT / 'Program.cs').read_text()
         self.assertIn('ProcessFailed', host); self.assertIn('ShowStatic', host)
         self.assertNotIn('Process.Start(', host)
+
+    def test_failure_mix_has_headroom_and_is_not_louder_than_normal(self):
+        failure = json.loads((ROOT / 'audio/failure_mix_report.json').read_text())
+        normal = json.loads((ROOT / 'audio/mix_report.json').read_text())
+        self.assertLess(failure['failure_peak_at_volume_1'], normal['mix_peak_at_volume_1'])
+        self.assertLess(max(failure['interruption_peaks_at_volume_1'].values()), .86)
+        self.assertLessEqual(max(failure['interruption_peaks_at_volume_1'].values()), normal['mix_peak_at_volume_1'] * 1.05)
 
 
 if __name__ == '__main__':
