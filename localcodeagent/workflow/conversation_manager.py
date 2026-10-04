@@ -342,6 +342,69 @@ class ConversationManager:
             hits.sort(key=lambda x: (x[0], x[1]), reverse=True)
             return [{"id": row.get("id"), "title": row.get("title"), "summary": row.get("summary", ""), "updated_at": row.get("updated_at"), "score": score} for score, _updated, row in hits[:max(1, int(limit))]]
 
+    # Conversational scaffolding that pads a prompt without describing the
+    # image — image models do better with the bare descriptive phrase.
+    _PROMPT_SCAFFOLD_RE = re.compile(
+        r"^(?:hey(?:\s+nexus)?[,!]?\s+|okay[,!]?\s+|please\s+|"
+        r"(?:can|could|would|will)\s+you\s+|"
+        r"i\s+(?:want|need|would\s+like|'?d\s+like)\s+(?:you\s+to\s+)?|"
+        r"go\s+ahead\s+and\s+|"
+        r"(?:generate|create|make|draw|paint|render|produce|show\s+me|"
+        r"give\s+me|whip\s+up)\s+"
+        r"(?:me\s+)?(?:an?\s+|the\s+|some\s+|another\s+|a\s+few\s+)?"
+        r"(?:images?|pictures?|photos?|pics?|illustrations?|drawings?|"
+        r"renders?|wallpapers?|portraits?|versions?)\s+"
+        r"(?:of|showing|depicting|featuring|with|where|that\s+shows?)\s+)+",
+        re.IGNORECASE)
+
+    @classmethod
+    def refine_image_prompt(cls, text: str) -> str:
+        """Strip request scaffolding so the image model sees the descriptive
+        core — 'please generate an image of a red cat' → 'a red cat'."""
+        t = re.sub(r"\s+", " ", str(text or "")).strip()
+        prev = None
+        while prev != t:
+            prev = t
+            t = cls._PROMPT_SCAFFOLD_RE.sub("", t, count=1).strip(" ,.:;")
+        return t or re.sub(r"\s+", " ", str(text or "")).strip()
+
+    @classmethod
+    def split_negative_prompt(cls, text: str) -> tuple[str, str]:
+        """Split 'a red cat, no collar, without a hat, negative: blurry'
+        → ('a red cat', 'collar, hat, blurry').
+
+        Exclusion clauses are moved to the negative prompt; everything else
+        stays positive. 'no X' binds only to the clause it starts — commas
+        and 'but' end it so 'no collar, red fur' keeps 'red fur' positive."""
+        t = str(text or "").strip()
+        negative: list[str] = []
+        # Explicit negative prompt wins outright.
+        m = re.search(
+            r"\bnegative[\s_-]*prompt\s*[:=\-]\s*(.+)$", t, re.IGNORECASE)
+        if m:
+            negative.append(m.group(1).strip(" .,;"))
+            t = t[:m.start()].strip(" ,.;")
+        # "but no X" / ", no X" / "without X" / "not X" / "don't include X"
+        # / "excluding X" — each binds up to the next comma/period.
+        def _pull(match: re.Match) -> str:
+            clause = match.group(2).strip(" .,;")
+            if clause:
+                negative.append(clause)
+            g1 = match.group(1) or ""
+            # A consumed conjunction ("but no flowers") leaves no residue;
+            # punctuation boundaries are kept so joins stay grammatical.
+            return "" if g1.strip().lower() in {"", "but"} else g1
+        t = re.sub(
+            r"(^|[,;.?!]|\bbut\b)\s*"
+            r"(?:without\s+|not\s+|don't\s+include\s+|"
+            r"do\s+not\s+include\s+|exclud\w+\s+|no\s+)"
+            r"([^,.;?!]+?)(?=[,.;?!]|$)",
+            _pull, t, flags=re.IGNORECASE)
+        t = re.sub(r"\s+", " ", t).strip(" ,.;")
+        # If every clause was negative the original text is the only signal
+        # the model has — keep it rather than send an empty prompt.
+        return (t or str(text or "").strip()), ", ".join(x for x in negative if x)
+
     @staticmethod
     def image_generation_intent(text: str) -> bool:
         t = re.sub(r"\s+", " ", str(text or "").lower()).strip()

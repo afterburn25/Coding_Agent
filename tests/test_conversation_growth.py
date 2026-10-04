@@ -229,6 +229,30 @@ class ScopedConversationMemoryTests(unittest.TestCase):
         self.assertFalse(AgentOrchestrator.direct_image_generation_intent("please create a website with a logo"))
         self.assertEqual(ConversationManager.classify_intent("how was your day?"), "conversation")
 
+    def test_image_prompt_refinement_strips_scaffolding(self):
+        r = ConversationManager.refine_image_prompt
+        self.assertEqual(r("please generate an image of a red cat"), "a red cat")
+        self.assertEqual(r("can you make me a picture of a sunset over the ocean"),
+                         "a sunset over the ocean")
+        self.assertEqual(r("hey nexus make me an image of a dragon"), "a dragon")
+        # Already-descriptive prompts pass through untouched.
+        self.assertEqual(r("a woman in a red suit"), "a woman in a red suit")
+        self.assertEqual(r("a cat with a hat"), "a cat with a hat")
+
+    def test_negative_prompt_extraction(self):
+        s = ConversationManager.split_negative_prompt
+        self.assertEqual(s("a woman in a red suit, no watermark, without jewelry"),
+                         ("a woman in a red suit", "watermark, jewelry"))
+        self.assertEqual(s("a portrait, negative prompt: blurry, low quality"),
+                         ("a portrait", "blurry, low quality"))
+        self.assertEqual(s("a garden but no flowers"), ("a garden", "flowers"))
+        # 'with' is inclusion, not exclusion.
+        self.assertEqual(s("a cat with a hat"), ("a cat with a hat", ""))
+        # An all-negative prompt keeps the original so the job has signal.
+        pos, neg = s("no people, no text")
+        self.assertTrue(pos)
+        self.assertEqual(neg, "people, text")
+
     def test_coding_model_bypass_is_limited_to_local_or_direct_image_work(self):
         self.assertTrue(AgentOrchestrator.can_run_without_coding_model("hi"))
         self.assertTrue(AgentOrchestrator.can_run_without_coding_model("generate a picture of a woman"))

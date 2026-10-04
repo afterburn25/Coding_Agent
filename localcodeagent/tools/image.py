@@ -10,10 +10,12 @@ from .base import ToolRegistry, ToolSpec
 
 def _schema(extra: dict[str, Any] | None = None, required: list[str] | None = None) -> dict[str, Any]:
     props={
-        "prompt":{"type":"string"},
+        "prompt":{"type":"string",
+                  "description":"Clean descriptive image prompt — just the visual subject, style, and details. No conversational filler like 'please generate' or 'can you make'."},
         "prompts":{"type":"array","items":{"type":"string"},
-                   "description":"Distinct prompts — one job per prompt; each image appears in the chat gallery as it finishes."},
-        "negative_prompt":{"type":"string"},
+                   "description":"For MULTIPLE images pass every prompt here in ONE call — never call this tool once per image. One job per prompt; each image appears in the chat gallery as it finishes."},
+        "negative_prompt":{"type":"string",
+                           "description":"Things to exclude: 'blurry, low quality, watermark, extra fingers'. Fill when the user says 'no X', 'without X', 'don't include X', or names a negative prompt."},
         "source_image":{"type":"string"}, "reference_images":{"type":"array","items":{"type":"string"}},
         "mask_path":{"type":"string"}, "subject_profile":{"type":"string"},
         "model_override":{"type":"string","default":"auto"}, "quality":{"type":"string","default":"balanced"},

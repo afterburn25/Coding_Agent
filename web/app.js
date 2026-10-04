@@ -454,12 +454,14 @@ function imageJobActivityRow(job){
   const state={queued:'waiting',completed:'completed',done:'completed',finished:'completed',failed:'failed',error:'failed'}[stage]||'running';
   const cold=job.backend_starting&&state!=='completed'&&state!=='failed';
   const label=stage==='finished'?'Image Generation Complete':cold?'Starting image generator — first start can take a few minutes':stage.replaceAll('_',' ');
+  const reqPrompt=String((job.request&&job.request.prompt)||'').trim();
+  const excerpt=reqPrompt.length>60?reqPrompt.slice(0,57)+'…':reqPrompt;
   upsertActivityRow({
     id:'img:'+String(job.id||'job'),
     task_id:job.task_id||'',
     category:'image',
     title:'Image Generation',
-    summary:label+(job.progress!=null&&!cold?' · '+Math.round(job.progress*100)+'%':''),
+    summary:label+(excerpt?' — “'+excerpt+'”':'')+(job.progress!=null&&!cold?' · '+Math.round(job.progress*100)+'%':''),
     details:{model:job.model_id||job.model||'',size:[job.width,job.height].filter(Boolean).join(' × ')},
     state,started_at:Number(job.started_at||Date.now()/1000),
     ended_at:['completed','done','finished','failed','error'].includes(stage)?(job.finished_at||Date.now()/1000):null,
