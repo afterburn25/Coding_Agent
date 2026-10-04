@@ -23,7 +23,7 @@ workspace UI → `f33b173` paste-attachments):
 - **Capability Registry** — `localcodeagent/capabilities.py`; probed
   states + dispositions for filesystem, code editing, terminal, git,
   github, toolchains, testing, browser preview, deployment, image gen,
-  STT, TTS, desktop control, coding model. `GET /api/capabilities`,
+  STT, TTS, desktop control, coding model. `GET /api/capability-states`,
   prompt injection of blocked caps, and capability-contradiction
   flagging in the truth gate (25 tests).
 - **Workspace Manager** — `localcodeagent/workspace.py` +

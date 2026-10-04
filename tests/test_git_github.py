@@ -55,7 +55,11 @@ class LocalGitToolTests(unittest.TestCase):
             reg = _reg(root)
             out = json.loads(_exec(reg, "git_init", {"path": str(root)}))
             self.assertTrue((root / ".git").is_dir())
-            # Make a commit via real git then check log.
+            # Make a commit via real git then check log. A local
+            # identity is required on CI runners with no global config.
+            for k, v in (("user.email", "t@t.t"), ("user.name", "T")):
+                subprocess.run(["git", "config", k, v], cwd=root,
+                               check=True, capture_output=True)
             (root / "a.txt").write_text("one")
             subprocess.run(["git", "add", "a.txt"], cwd=root,
                            check=True, capture_output=True)

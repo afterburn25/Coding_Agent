@@ -741,7 +741,7 @@ class AppState:
         self.activities = ActivityStore(runtime_root / "data" / "activity.jsonl")
         self.activities.on_row = lambda row: self.events.publish("activity", row)
         self.runtime.on_residency_event = self._residency_activity
-        self.capabilities = self._build_capability_registry(config)
+        self.capability_registry = self._build_capability_registry(config)
         self.agent = AgentOrchestrator(
             config,
             self.router,
@@ -768,7 +768,7 @@ class AppState:
             health=lambda: self.health,
             profile_context=self._profile_prompt_context,
             image_outputs=self._image_job_outputs,
-            capability_registry=self.capabilities,
+            capability_registry=self.capability_registry,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -6820,20 +6820,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/readiness":
             self._json(self.state.readiness_payload(probe_external=True))
             return
-        if path.startswith("/api/capabilities"):
+        if path.startswith("/api/capability-states"):
             # First-class capability honesty surface — real probed states
             # (verified/available/degraded/setup_required/unauthorized/
             # unavailable/broken) plus claim dispositions. ?refresh=1
-            # forces re-probing after a setup/auth change.
+            # forces re-probing after a setup/auth change. Kept off
+            # /api/capabilities, which belongs to CapabilityHealth.
             params = parse_qs(urlparse(self.path).query)
             force = params.get("refresh", [""])[0] in ("1", "true", "yes")
-            cap_id = path.split("/api/capabilities/", 1)[-1] \
-                if "/api/capabilities/" in path else ""
+            cap_id = path.split("/api/capability-states/", 1)[-1] \
+                if "/api/capability-states/" in path else ""
             if cap_id:
-                self._json(self.state.capabilities.evaluate_one(
+                self._json(self.state.capability_registry.evaluate_one(
                     cap_id, force=force).as_dict())
             else:
-                self._json(self.state.capabilities.summary(force=force))
+                self._json(
+                    self.state.capability_registry.summary(force=force))
             return
         if path == "/api/workspaces":
             self._json({

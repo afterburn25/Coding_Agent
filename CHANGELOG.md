@@ -21,7 +21,7 @@ evidence — nothing claims an action that did not run.
   important capability reports a real probed state
   (verified/available/degraded/setup_required/unauthorized/unavailable/
   broken/experimental) and a claim disposition (can_do_now,
-  authorization_required, explanation_only, …). `GET /api/capabilities`
+  authorization_required, explanation_only, …). `GET /api/capability-states`
   exposes it; the system prompt names blocked capabilities so the model
   explains missing requirements instead of promising dead paths; the
   truth gate now flags claims that contradict a hard-negative

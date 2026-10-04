@@ -10,7 +10,7 @@ narrated:
 
 - **Capability honesty** — `localcodeagent/capabilities.py` gives every
   important capability a real probed state and claim disposition,
-  exposed at `GET /api/capabilities`. Blocked capabilities are named in
+  exposed at `GET /api/capability-states`. Blocked capabilities are named in
   the system prompt, and the truth gate flags claims that contradict a
   hard-negative capability even when other tools ran.
 - **Workspace/filesystem foundation** — `WorkspaceManager` inspects,
