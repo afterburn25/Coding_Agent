@@ -921,7 +921,7 @@ No image weights are downloaded automatically yet.
 2. ~~Add dedicated background-removal and upscaler adapters/workflows~~ — done: Qwen keeps the dedicated background-removal API workflow; Real-ESRGAN x4+ is now a verified `upscale` profile with a standard ComfyUI adapter workflow and powers the workspace “Upscale after generation” post-process stage.
 3. ~~WebSocket/SSE streaming~~ — done: `/api/chat/stream` tokens + `/api/events` bus mirror all non-token events with task attribution.
 4. ~~Persistent browser sessions~~ — done: `browser_run` accepts `session` + `save_session` (`storage_state` JSON under `.agent/browser/`).
-5. Voice STT session scaffold exists (`voice/stt.py`) but needs `sounddevice` + a model (Vosk/faster-whisper) installed on the host.
+5. ~~Voice STT host dependency setup~~ — done on this host: `sounddevice==0.5.6`, `faster-whisper==1.2.1`, and compatible `av==18.1.0` are installed; the `base` CPU/int8 model initialized and passed a real WAV transcription smoke test. `stt_backend`, `stt_model`, `vosk_model_path`, and `stt_auto_submit` are now first-class config fields.
 6. Runtime tuner produces real numbers only when probes run on hardware — idle auto-tuner covers this; `data/runtime_tuning.json` accumulates results.
 7. ~~LLM model downloads as a mission `job` op~~ — done: `model_install` accepts coding-model catalog IDs as well as image profiles; manager startup removes orphaned `.part` downloads before resuming work.
 
@@ -931,7 +931,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1400 tests` passing (2 environment skips).
+Expected at this checkpoint: `1402 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

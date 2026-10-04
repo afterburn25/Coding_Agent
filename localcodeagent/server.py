@@ -3190,9 +3190,14 @@ class AppState:
             return self._stt_engine
         self._stt_tried = True
         from .voice.stt import FasterWhisperEngine, VoskEngine
-        backend = str(getattr(self.config, "stt_backend", "auto") or "auto")
-        vosk_path = str(getattr(self.config, "vosk_model_path", "") or "")
-        if backend in {"auto", "vosk"} and vosk_path:
+        backend = str(getattr(self.config, "stt_backend", "auto") or "auto").strip().lower() or "auto"
+        if backend in {"off", "none"}:
+            return None
+        vosk_raw = str(getattr(self.config, "vosk_model_path", "") or "").strip()
+        vosk_path = Path(vosk_raw) if vosk_raw else None
+        if vosk_path is not None and not vosk_path.is_absolute():
+            vosk_path = self.runtime_root / vosk_path
+        if backend in {"auto", "vosk"} and vosk_path is not None:
             eng = VoskEngine(vosk_path)
             if eng.available():
                 self._stt_engine = eng
@@ -3207,11 +3212,15 @@ class AppState:
     def stt_status(self) -> dict:
         from .voice.stt import list_input_devices
         eng = self.stt_engine()
+        configured_backend = str(getattr(self.config, "stt_backend", "auto") or "auto").strip().lower() or "auto"
         vosk_path = str(getattr(self.config, "vosk_model_path", "") or "")
         engines = {
-            "faster_whisper": {"configured": True,
-                               "available": eng is not None and
-                               eng.name == "faster-whisper" and eng.available()},
+            "faster_whisper": {
+                "configured": configured_backend in {
+                    "auto", "faster-whisper", "whisper"},
+                "model": str(getattr(self.config, "stt_model", "base") or "base"),
+                "available": eng is not None and
+                eng.name == "faster-whisper" and eng.available()},
             "vosk": {"configured": bool(vosk_path),
                      "available": eng is not None and
                      eng.name == "vosk" and eng.available()},
@@ -3222,6 +3231,8 @@ class AppState:
         return {"ok": True,
                 "available": eng is not None and eng.available(),
                 "backend": getattr(eng, "name", ""),
+                "configured_backend": configured_backend,
+                "model": str(getattr(self.config, "stt_model", "base") or "base"),
                 "streaming": bool(getattr(eng, "streaming", False)),
                 "engines": engines, "input_devices": devices,
                 "auto_submit": bool(getattr(self.config, "stt_auto_submit",

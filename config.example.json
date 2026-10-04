@@ -453,5 +453,9 @@
   "voice_output_device": "",
   "voice_cache_max_mb": 512,
   "voice_max_concurrency": 1,
-  "voice_idle_unload_seconds": 600
+  "voice_idle_unload_seconds": 600,
+  "stt_backend": "auto",
+  "stt_model": "base",
+  "vosk_model_path": "",
+  "stt_auto_submit": false
 }

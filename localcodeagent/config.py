@@ -303,6 +303,13 @@ class AgentConfig:
     voice_max_concurrency: int = 1
     voice_idle_unload_seconds: float = 600.0
 
+    # Local speech-to-text. Faster-whisper handles push-to-talk/file
+    # transcription; a configured Vosk model can provide streaming partials.
+    stt_backend: str = "auto"              # auto | faster-whisper | whisper | vosk | off
+    stt_model: str = "base"                # faster-whisper model size/name
+    vosk_model_path: str = ""              # optional streaming STT model dir
+    stt_auto_submit: bool = False
+
     # v0.5 research/documentation subsystem settings.
     research_enabled: bool = True
     research_mode: str = "auto"  # auto | local_only | official | balanced | deep | offline | none
@@ -715,6 +722,12 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.voice_device = str(raw.get("voice_device", cfg.voice_device))
     cfg.voice_max_concurrency = max(1, int(raw.get("voice_max_concurrency", cfg.voice_max_concurrency)))
     cfg.voice_idle_unload_seconds = max(0.0, float(raw.get("voice_idle_unload_seconds", cfg.voice_idle_unload_seconds)))
+    stt_backend = str(raw.get("stt_backend", cfg.stt_backend)).strip().lower()
+    cfg.stt_backend = stt_backend if stt_backend in {
+        "auto", "faster-whisper", "whisper", "vosk", "off", "none"} else "auto"
+    cfg.stt_model = str(raw.get("stt_model", cfg.stt_model)).strip() or "base"
+    cfg.vosk_model_path = str(raw.get("vosk_model_path", cfg.vosk_model_path))
+    cfg.stt_auto_submit = bool(raw.get("stt_auto_submit", cfg.stt_auto_submit))
     cfg.research_enabled = bool(raw.get("research_enabled", cfg.research_enabled))
     cfg.research_mode = str(raw.get("research_mode", cfg.research_mode))
     cfg.research_data_dir = str(raw.get("research_data_dir", cfg.research_data_dir))

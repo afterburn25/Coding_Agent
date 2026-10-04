@@ -520,5 +520,77 @@ class TestDSP(unittest.TestCase):
             self.assertEqual(w.getframerate(), sr)
 
 
+# --------------------------------------------------------------------------
+# speech-to-text configuration/provisioning contract
+
+class TestSpeechToTextConfig(unittest.TestCase):
+    def test_stt_settings_load_and_voice_extra_is_pinned(self):
+        from localcodeagent.config import AgentConfig, load_config
+
+        defaults = AgentConfig()
+        self.assertEqual(defaults.stt_backend, "auto")
+        self.assertEqual(defaults.stt_model, "base")
+        self.assertEqual(defaults.vosk_model_path, "")
+        self.assertFalse(defaults.stt_auto_submit)
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / "config.json"
+            cfg_path.write_text(json.dumps({
+                "stt_backend": "faster-whisper",
+                "stt_model": "small",
+                "vosk_model_path": "models/vosk/en-us",
+                "stt_auto_submit": True,
+            }), encoding="utf-8")
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg.stt_backend, "faster-whisper")
+            self.assertEqual(cfg.stt_model, "small")
+            self.assertEqual(cfg.vosk_model_path, "models/vosk/en-us")
+            self.assertTrue(cfg.stt_auto_submit)
+
+        import tomllib
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))[
+            "project"]["optional-dependencies"]
+        self.assertIn("sounddevice==0.5.6", extras["voice-stt"])
+        self.assertIn("faster-whisper==1.2.1", extras["voice-stt"])
+        self.assertIn("av==18.1.0", extras["voice-stt"])
+
+    def test_server_stt_backend_selection_and_relative_vosk_path(self):
+        from unittest import mock
+        from localcodeagent.config import AgentConfig
+        from localcodeagent.server import AppState
+        from localcodeagent.voice import stt as stt_module
+
+        state = object.__new__(AppState)
+        state._stt_tried = False
+        state._stt_engine = None
+        with tempfile.TemporaryDirectory() as td:
+            state.runtime_root = Path(td)
+            state.config = AgentConfig(
+                stt_backend="vosk",
+                vosk_model_path="models/vosk/en-us")
+            seen = []
+
+            class FakeVosk:
+                name = "vosk"
+                streaming = True
+
+                def __init__(self, model_path):
+                    seen.append(Path(model_path))
+
+                def available(self):
+                    return True
+
+            with mock.patch.object(stt_module, "VoskEngine", FakeVosk):
+                eng = AppState.stt_engine(state)
+            self.assertIsInstance(eng, FakeVosk)
+            self.assertEqual(seen, [state.runtime_root / "models/vosk/en-us"])
+
+            state._stt_tried = False
+            state._stt_engine = None
+            state.config.stt_backend = "off"
+            self.assertIsNone(AppState.stt_engine(state))
+
+
 if __name__ == "__main__":
     unittest.main()

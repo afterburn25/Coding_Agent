@@ -44,6 +44,7 @@ Module layout (`localcodeagent/voice/`):
 | `presets.py` | preset store: official seed, CRUD, import/export, quarantine |
 | `cache.py` | LRU WAV cache keyed by text+engine+voice+preset+speed |
 | `manager.py` | queue, mute/cancel, segment registry, export, metrics |
+| `stt.py` | microphone enumeration, Vosk/faster-whisper engines, hands-free session |
 | `tools.py` | ToolRegistry entries (`voice_*`, `audio.*` permissions) |
 | `official/` | shipped presets (`nexus-synthetic-isabella.json`) |
 
@@ -61,6 +62,28 @@ Module layout (`localcodeagent/voice/`):
   - Source: `github.com/thewh1teagle/kokoro-onnx` `model-files-v1.0` release.
 - Default device: **CPU** (`voice_device=cpu`) so TTS never evicts a coding
   model from VRAM. Model load ≈0.8 s, warm synthesis RTF ≈0.43 (measured).
+
+## Speech-to-text
+
+Push-to-talk uses the browser microphone/`MediaRecorder` and posts audio to
+`/api/stt/transcribe`; faster-whisper decodes browser audio locally through
+PyAV and returns text for the composer. `stt_auto_submit` controls whether a
+successful transcript submits immediately or remains editable. Hands-free
+sessions use `VoiceSession`; Vosk supplies streaming partials when
+`vosk_model_path` is configured, while faster-whisper supplies non-streaming
+file/chunk transcription.
+
+Install the optional host stack with:
+
+```bash
+python -m pip install ".[voice-stt]"
+```
+
+The `voice-stt` extra pins `sounddevice==0.5.6`, `faster-whisper==1.2.1`,
+and `av==18.1.0`. PyAV 19.x removed an `av.open()` keyword consumed by
+faster-whisper 1.2.1, so the compatibility boundary is explicit rather than
+floating. On this host the `base` faster-whisper model has been initialized
+for CPU/int8 and a WAV smoke transcription completed successfully.
 
 ## Official preset: `nexus-synthetic-isabella`
 
@@ -179,6 +202,9 @@ POST /api/voice/config            {voice_* fields}
 POST /api/voice/preset/save|duplicate|rename|delete|import
 POST /api/voice/export            {segment_id, format: wav|mp3, name}
 POST /api/voice/assets/install    verified asset download (job, progress events)
+GET  /api/stt                     backend/device/session status
+POST /api/stt/transcribe          {audio(base64), format} → transcript
+POST /api/stt/session             {action: start|status|stop, device?}
 ```
 
 During `/api/chat/stream`, token deltas feed the streamer and `voice` SSE
@@ -199,7 +225,8 @@ mutations honor permission levels; official presets are protected.
 `voice_speed`, `voice_output_device`, `voice_assets_dir` (`models/voice`),
 `voice_presets_dir` (`data/voice/presets`), `voice_cache_dir`,
 `voice_cache_max_mb`, `voice_device`, `voice_max_concurrency`,
-`voice_idle_unload_seconds`.
+`voice_idle_unload_seconds`, `stt_backend`, `stt_model`, `vosk_model_path`,
+`stt_auto_submit`.
 
 ## Installer / upgrades
 

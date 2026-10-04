@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1400 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1402 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -19,7 +19,9 @@ v0.15.0 deepens the workstation core:
 - **Speech-to-text** — push-to-talk mic in the composer
   (`MediaRecorder` → `/api/stt/transcribe`), `/api/stt/session`
   hands-free loop with barge-in, `stt_utterance`/`stt_partial` SSE
-  events; degrades cleanly when no local STT backend is installed.
+  events, first-class backend/model/auto-submit config, and a pinned
+  `voice-stt` host stack (`sounddevice`, `faster-whisper`, compatible
+  PyAV); degrades cleanly when no local STT backend is installed.
 - **Operational state + return briefing** — `/api/nexus/state` exposes
   focus/load/pressure/next-action (a measured operational model, not
   consciousness); `/api/briefing` produces a deduped "while you were
@@ -60,7 +62,7 @@ v0.15.0 deepens the workstation core:
   `model_install` jobs cover LLM catalog IDs and image profiles, while
   startup removes orphaned `.part` model downloads before work resumes.
 
-Verified: **1400 tests** (2 environment skips).
+Verified: **1402 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -424,7 +426,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1400 tests passing** (2 environment skips).
+- Current automated checkpoint: **1402 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 
