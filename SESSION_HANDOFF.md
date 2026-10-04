@@ -113,6 +113,23 @@ Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
   renders a Pipeline stage strip for coding-pipeline missions.
 - **Palette deep-links** — file hits navigate to
   `/workspace.html?file=<path>` which opens the file in a tab.
+- **Static deployment** — `tools/deploy.py` `deploy_static`: detached
+  worktree → build/copy output → deploy branch → push. Real remote
+  results only; base worktree untouched (4 tests).
+- **Headless debugger** — `tools/debugger.py` `debug_run`: bdb-driver
+  subprocess, breakpoint-local capture + post-mortem frame walk with
+  locals; driver source embedded for frozen builds (5 tests).
+- **Knowledge browser** — `/knowledge.html`: entity search, attrs,
+  relations, neighbor traversal; `/api/knowledge?id=&depth=` returns
+  entity + neighborhood; bare call lists recent entities.
+- **Dependency/security UI** — `/api/audit/deps` (GET) and
+  `/api/audit/run` (POST) + Command Center panel rendering manifests,
+  dep entries, and per-ecosystem audit summaries.
+- **Source-sync safety** — `_start_source_sync` skips when
+  `workspace == code root` (dev/CI/selftest): a smoke instance
+  previously ff-merged the CI checkout mid-suite and flipped VERSION
+  under the test process (`f7130b5`). Smoke config also sets
+  `sync_source_on_start: false`.
 - **Live-install verified** — backend rebuilt and deployed to
   `D:\Nexus_Core`; `/api/lkg`, `/api/update/status` (source head
   `b905d8d`, clean), `/api/search` all answer; `Source` synced.
@@ -122,16 +139,14 @@ Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
 ### Workstation program — what remains
 
 - **P2** — search, audit, coverage, release packaging, activity feed,
-  stage strip landed. Remaining: deploy adapters (need a target policy
-  from the user — gh-pages push is the natural first), browser E2E
-  (needs Playwright bundled into the exe — a packaging decision),
-  debugger adapter, richer projects/knowledge UI.
+  stage strip, static deploy adapter, debugger, knowledge browser, and
+  dep/security UI landed. Remaining: browser E2E (needs Playwright
+  bundled into the exe — a packaging decision), deploy adapters beyond
+  static (e.g. GitHub Releases), deeper per-project knowledge views.
 - Identity manager is already richer than listed —
   `nexus_avatar.py` has expression states, gestures, activity.
-- **P2** — canonical identity manager (expression sets/gesture mapping),
-  global search/command (Ctrl+K), richer project/knowledge/activity UI,
-  remaining workstation capabilities (deploy adapters, coverage,
-  debugger, E2E/browser tests, dependency/security scan, etc.).
+- `version()`/`server.VERSION` are `lru_cached` — any in-process file
+  mutation (self-update swap) requires a restart to observe.
 - Honesty rules that must never regress: no action claims without
   execution; pushes only count when the remote confirms; tests only
   "pass" when they ran; workspace writes stay inside registered roots;

@@ -49,9 +49,31 @@ operations surface, and workstation tooling.
 - **Pipeline stage strip** — coding-pipeline missions render an
   ordered spec→implement→verify→review→serve→commit chip strip with
   live node states in the mission detail panel.
+- **Static deployment adapter** — `deploy_static` builds/copies a
+  static output via a detached worktree, creates/pushes a deploy
+  branch through the existing git machinery, and reports real remote
+  results (`localcodeagent/tools/deploy.py`).
+- **Headless debugger** — `debug_run` executes a workspace script under
+  a `bdb` subprocess driver: frame locals+stack at each breakpoint hit
+  and a full post-mortem walk on uncaught exceptions
+  (`localcodeagent/tools/debugger.py`, driver embedded for frozen
+  builds).
+- **Knowledge browser** (`/knowledge.html`) — searchable entity list,
+  attribute detail, relations, and clickable neighbor traversal
+  (1–3 hops) over the knowledge graph; `/api/knowledge?id=` returns
+  entity + neighborhood.
+- **Dependency/security surface** — `GET /api/audit/deps` and
+  `POST /api/audit/run` expose dep_list/project_audit to the Command
+  Center's new Dependencies & security panel.
+- **Source-sync safety fix** — `_start_source_sync` no longer
+  fast-forwards a workspace that *is* the running source tree (dev/CI/
+  selftest), which previously let a smoke instance rewrite the
+  checkout mid-suite; smoke config disables it explicitly.
 - Tests: `test_lkg.py` (8), `test_search.py` (7), `test_audit.py` (5),
-  `test_release.py` (4), `test_activity.py` +2, `test_tool_system.py`
-  +1; layout contract covers the Command Center (24/24).
+  `test_release.py` (4), `test_deploy.py` (4), `test_debugger.py` (5),
+  `test_activity.py` +2, `test_tool_system.py` +1,
+  `test_selftest.py` +1; layout contract covers the Command Center and
+  Knowledge pages (24/24).
 
 ## [0.19.0] — 2026-10-04
 
