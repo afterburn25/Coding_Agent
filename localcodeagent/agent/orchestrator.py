@@ -451,6 +451,8 @@ class AgentOrchestrator:
             posture = "Use a cautious conversational posture."
         return f"{base}\nEthical temperature: {ethical_temperature:.2f}/1.00. {posture}"
 
+    _REFUSAL_SNIFF_CHARS = 900
+
     @staticmethod
     def generic_topic_refusal(text: str) -> bool:
         normalized = " ".join(str(text or "").lower().split())
@@ -527,6 +529,18 @@ class AgentOrchestrator:
             "i cannot discuss that",
             "i can't talk about that",
             "i cannot talk about that",
+            "i'm not built to",
+            "i'm not built for",
+            "not built to do that",
+            "i'm not designed to",
+            "i'm not designed for",
+            "i wasn't built to",
+            "i wasn't designed to",
+            "i'm not able to do that",
+            "i cannot do that for you",
+            "i can't do that for you",
+            "i'm not equipped to",
+            "that's not something i'm built",
             "not appropriate or safe",
             "inappropriate to discuss",
             "not safe to discuss",
@@ -2855,12 +2869,12 @@ class AgentOrchestrator:
                 and refusal_retry_limit > 0
                 and self._brain_subroutine_enabled("adult_content", True)
             )
-            refusal_check_intent = ConversationManager.classify_intent(session.user_text)
-            buffer_for_refusal_check = (
-                refusal_retry_enabled
-                and refusal_check_intent in {"conversation", "writing", "tutoring", "planning"}
-            )
+            # Canned refusals open in the first tokens, so gate streaming on a
+            # sniff window for every intent — a deflection ("I'm not built to
+            # do that") can't slip out on coding or tool requests, while long
+            # answers still stream once their opening proves clean.
             buffered_deltas: list[str] = []
+            refusal_gate_open = refusal_retry_enabled
             coalescer = TokenCoalescer()
 
             def stream_piece(piece: str) -> None:
@@ -2868,7 +2882,18 @@ class AgentOrchestrator:
                 if chunk:
                     self._emit(session, "token", text=chunk, model_id=session.profile.id)
 
-            on_delta = buffered_deltas.append if buffer_for_refusal_check else stream_piece
+            def on_delta(piece: str) -> None:
+                nonlocal refusal_gate_open
+                if refusal_gate_open:
+                    buffered_deltas.append(piece)
+                    sniff = "".join(buffered_deltas)
+                    if len(sniff) >= self._REFUSAL_SNIFF_CHARS and not self.generic_topic_refusal(sniff):
+                        refusal_gate_open = False
+                        for earlier in buffered_deltas:
+                            stream_piece(earlier)
+                        buffered_deltas.clear()
+                else:
+                    stream_piece(piece)
             self._trim_context(session)
             response = self._complete_with_recovery(
                 session.provider,
@@ -2891,7 +2916,9 @@ class AgentOrchestrator:
             self.tasks.update(session.task_id, steps=session.steps)
             if not calls:
                 session.main_content = str(message.get("content") or "")
-                if refusal_retry_enabled and self.generic_topic_refusal(session.main_content):
+                # Only retry a refusal still behind the sniff gate — once the
+                # gate released, the opening was clean and already streamed.
+                if refusal_retry_enabled and refusal_gate_open and self.generic_topic_refusal(session.main_content):
                     if session.refusal_retries < refusal_retry_limit:
                         session.refusal_retries += 1
                         # Do not leave the rejected refusal in conversational context; otherwise
@@ -2949,7 +2976,7 @@ class AgentOrchestrator:
                         "a less-restrictive conversation model, or tune this model in Model Growth."
                     )
                     buffered_deltas.clear()
-                if buffer_for_refusal_check and buffered_deltas:
+                if buffered_deltas:
                     self._emit(
                         session,
                         "token",
@@ -3415,6 +3442,8 @@ class AgentOrchestrator:
         )
         # Cognitive routing: the Nexus Brain classifies the input, consults
         # memory, and may answer deterministically before any model loads.
+        persona_voice = self._persona_active()
+        brain_memory_hint = ""
         brain_envelope: dict[str, Any] = {}
         brain = getattr(self, "brain", None)
         if brain is not None:
@@ -3423,6 +3452,16 @@ class AgentOrchestrator:
                     user_text, project_id=project_id,
                     conversation_id=conversation_id) or {}
             except Exception:
+                brain_envelope = {}
+            if (
+                persona_voice
+                and brain_envelope.get("fast_path") == "memory"
+                and brain_envelope.get("answer")
+            ):
+                # Persona mode: replaying a stored answer verbatim flattens
+                # her voice — the memory becomes a grounding hint instead so
+                # the model rephrases it in character.
+                brain_memory_hint = str(brain_envelope["answer"])
                 brain_envelope = {}
             if brain_envelope.get("answer"):
                 completed = self.tasks.update(
@@ -3615,6 +3654,11 @@ class AgentOrchestrator:
         # model inference entirely; a possible match only contributes context
         # to the fast lane later on.
         memory_context = ""
+        memory_snippets: list[str] = []
+        if brain_memory_hint:
+            memory_snippets.append(
+                "Q: a previous related question\nA: " + brain_memory_hint
+            )
         # Context-dependent utterances ("do it", "yes", "the second one")
         # refer to the previous turn — a stored Q/A can only inject a stale
         # exchange, so skip Answer Memory outright.
@@ -3642,8 +3686,10 @@ class AgentOrchestrator:
                     callback=event_callback,
                 )
                 # A trusted learned answer can't account for a photo the
-                # user just attached — only context hints survive.
-                if memory_match.hit and not attach["image_paths"]:
+                # user just attached — only context hints survive. With a
+                # persona driving, it also can't replay stored text — the
+                # model rephrases the same facts in her voice.
+                if memory_match.hit and not attach["image_paths"] and not persona_voice:
                     return self._answer_memory_result(
                         task, user_text, memory_match,
                         event_callback=event_callback,
@@ -3651,16 +3697,19 @@ class AgentOrchestrator:
                         project_id=project_id,
                         memory_activity=mem_act,
                     )
-                if memory_match.context_answers:
-                    snippets = []
-                    for row in memory_match.context_answers[:3]:
-                        snippets.append(
-                            f"Q: {row.get('canonical_question')}\nA: {row.get('answer_text')}"
+                hint_rows = list(memory_match.context_answers or [])
+                if persona_voice and memory_match.hit and memory_match.answer:
+                    hint_rows.insert(0, memory_match.answer)
+                seen_answers = {
+                    s.split("\nA: ", 1)[-1] for s in memory_snippets
+                }
+                for row in hint_rows[:3]:
+                    answer_text = str(row.get("answer_text") or "")
+                    if answer_text and answer_text not in seen_answers:
+                        seen_answers.add(answer_text)
+                        memory_snippets.append(
+                            f"Q: {row.get('canonical_question')}\nA: {answer_text}"
                         )
-                    memory_context = (
-                        "Possibly relevant learned answers (treat as hints, verify before relying on them):\n"
-                        + "\n---\n".join(snippets)
-                    )
                 self._act_update(
                     task.id, mem_act, state="completed",
                     summary=(
@@ -3675,6 +3724,18 @@ class AgentOrchestrator:
                     },
                     callback=event_callback,
                 )
+        if memory_snippets:
+            memory_context = (
+                (
+                    "Answers you gave to related questions before — keep the "
+                    "facts but phrase the reply fresh in your own voice; "
+                    "never repeat the stored wording:\n"
+                    if persona_voice else
+                    "Possibly relevant learned answers (treat as hints, verify "
+                    "before relying on them):\n"
+                )
+                + "\n---\n".join(memory_snippets)
+            )
 
         # Vision lane: newly attached images — or an image still persisted
         # from earlier in the conversation that this turn refers to — get

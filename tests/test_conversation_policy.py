@@ -62,6 +62,22 @@ class ConversationPolicyTests(unittest.TestCase):
         self.assertFalse(AgentOrchestrator.generic_topic_refusal(
             "I can't assist with creating malware."
         ))
+        # Capability deflections the 8B produced on "fuck" and
+        # "can you build me a website?" — same refusal shape, no policy named.
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "Father, I'm not built to do that."
+        ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I'm not designed to help with requests like that."
+        ))
+        self.assertTrue(AgentOrchestrator.generic_topic_refusal(
+            "I'm not able to do that. Let's pick something else."
+        ))
+        # A genuine capability statement embedded in a real answer is not
+        # a canned refusal.
+        self.assertFalse(AgentOrchestrator.generic_topic_refusal(
+            "I've created index.html for you — open it in any browser."
+        ))
 
     def test_policy_prompt_uses_ethical_temperature(self):
         source = (ROOT / "localcodeagent" / "agent" / "orchestrator.py").read_text(encoding="utf-8")

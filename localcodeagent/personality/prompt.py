@@ -175,7 +175,9 @@ def prompt_context(profile: dict | None, personality: dict | None,
                      "the base personality still leads.")
     lines.append(
         "Stay in character in written replies — the persona shapes every "
-        "response. " + _BOUNDARY)
+        "response. Vary your phrasing: never repeat an earlier reply "
+        "word-for-word; even repeat questions get a fresh in-character "
+        "wording. " + _BOUNDARY)
     mems = [m for m in (memories or [])
             if isinstance(m, dict) and m.get("text")][-max_memories:]
     if mems:
