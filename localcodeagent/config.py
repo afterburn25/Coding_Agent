@@ -277,6 +277,14 @@ class AgentConfig:
     image_job_timeout: int = 900
     image_output_dir: str = "output/images"
 
+    # Adaptive Worker Manager — absolute safety ceiling only; real
+    # concurrency is measured from live hardware, reservations and
+    # reserves. worker_ceiling caps worker count even on big machines;
+    # model_slots overrides per-tier concurrent inference capacity
+    # (llama.cpp backends typically serialize: 1 slot per resident model).
+    worker_ceiling: int = 8
+    worker_model_slots: dict = field(default_factory=dict)
+
     # Voice / TTS subsystem (local-first; Kokoro ONNX on CPU by default so
     # speech never competes with coding models for VRAM).
     voice_enabled: bool = True
@@ -663,6 +671,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.comfyui_startup_timeout = max(10, int(raw.get("comfyui_startup_timeout", cfg.comfyui_startup_timeout)))
     cfg.comfyui_idle_unload_seconds = max(0.0, float(raw.get("comfyui_idle_unload_seconds", cfg.comfyui_idle_unload_seconds)))
     cfg.image_resource_mode = str(raw.get("image_resource_mode", cfg.image_resource_mode))
+    cfg.worker_ceiling = max(1, int(raw.get("worker_ceiling", cfg.worker_ceiling) or cfg.worker_ceiling))
+    if isinstance(raw.get("worker_model_slots"), dict):
+        cfg.worker_model_slots = {str(k).upper(): max(0, int(v))
+                                  for k, v in raw["worker_model_slots"].items()}
     cfg.image_restore_chat_model = bool(raw.get("image_restore_chat_model", cfg.image_restore_chat_model))
     cfg.image_auto_run_jobs = bool(raw.get("image_auto_run_jobs", cfg.image_auto_run_jobs))
     cfg.image_job_timeout = max(30, int(raw.get("image_job_timeout", cfg.image_job_timeout)))

@@ -17,6 +17,30 @@ from localcodeagent.autonomy.recovery import PLAYBOOKS, failure_signature
 from localcodeagent.autonomy.task_graph import new_task
 
 
+class _AnyFitWorkers:
+    """Permissive worker-manager stub — always admits, never queues.
+
+    Resource admission policy itself is covered deterministically in
+    tests/test_workers.py; supervisor tests here verify mission
+    orchestration, which must not depend on the host's live hardware."""
+
+    def admit_node(self, task_id, title, **kw):
+        from localcodeagent.workers.manager import WorkerRecord
+        w = WorkerRecord(id="w-test", role="generic", task_id=str(task_id),
+                         mission_id=str(kw.get("mission_id") or ""))
+        return w, "", ""
+
+    def worker_started(self, *a, **kw): pass
+    def heartbeat(self, *a, **kw): pass
+    def set_status(self, *a, **kw): pass
+    def set_worktree(self, *a, **kw): pass
+    def release(self, *a, **kw): pass
+    def reconcile(self): return {"reaped": 0}
+    def tick(self): return []
+    def status(self): return {"capacity": {"active": 0, "ceiling": 8},
+                              "workers": [], "queue": []}
+
+
 def make_sup(td: str, **kw):
     root = Path(td)
     defaults = dict(
@@ -24,6 +48,7 @@ def make_sup(td: str, **kw):
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
         lane_free=lambda: True,
+        worker_manager=_AnyFitWorkers(),
     )
     defaults.update(kw)
     return AutonomousSupervisor(**defaults)

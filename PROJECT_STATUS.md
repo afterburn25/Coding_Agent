@@ -1,8 +1,25 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1183 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1342 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
-## Active version: 0.13.0 — Natural Vocalization & Gesture Engine
+## Active version: 0.14.0 — Adaptive Worker Manager
+
+v0.14.0 makes worker concurrency measured, not configured: the new
+`AdaptiveWorkerManager` (`localcodeagent/workers/`) reserves live-measured
+CPU/RAM/VRAM/GPU/model-slot capacity before any work starts, queues what
+doesn't fit on a durable reason-tagged queue that survives restart, drains
+it fit-aware with priority aging, and backs the ceiling off on
+OOM/crash-class failures while a per-hardware cost learner converges
+estimates toward observed usage. Mission DAG nodes admit through the
+manager (queue reasons are stamped for the UI); coding workers get
+isolated `.nexus/worktrees` on `nexus/<id>/<slug>` branches with hotspot
+detection. User work that queues triggers a persona-styled voice notice
+exactly once. A durable Projects store adds profile-scoped goals,
+structured project memory and worker history; the Missions page gains an
+Operations panel (capacity, workers, queue); and the canonical Nexus
+portrait pipeline (`nexus_avatar.py` + `/api/nexus/avatar`) gives her a
+single visual identity with expression-state hooks for future animation.
+Details: `docs/WORKERS.md`. 28 new tests.
 
 v0.12.1 fixes the update path reading as frozen: Inno Setup now reports
 live stage text for every blocking operation — closing Nexus Core

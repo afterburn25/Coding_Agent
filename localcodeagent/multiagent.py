@@ -154,19 +154,20 @@ class AgentPool:
         self.agents.clear()
 
 
-def sweep_worktree_orphans(repo: Path) -> dict[str, Any]:
+def sweep_worktree_orphans(repo: Path, *, root: Path | None = None) -> dict[str, Any]:
     """Reclaim worktree dirs stranded by a crashed/killed process.
 
-    Worktree directories under ``.agent/worktrees`` are removed (``git
-    worktree remove --force`` with an rmtree fallback). ``nexus-agent/*``
-    branches are deliberately kept — a merge-conflict path preserves them
-    for recovery — and their names are returned so callers can surface
-    them rather than silently discarding work.
+    Worktree directories under ``.agent/worktrees`` (or ``root`` when given)
+    are removed (``git worktree remove --force`` with an rmtree fallback).
+    ``nexus-agent/*``/``nexus/*`` branches are deliberately kept — a
+    merge-conflict path preserves them for recovery — and their names are
+    returned so callers can surface them rather than silently discarding
+    work.
     """
     repo = Path(repo).resolve()
     if not is_repo(repo):
         return {"removed": 0, "kept_branches": []}
-    root = repo / ".agent" / "worktrees"
+    root = Path(root) if root is not None else repo / ".agent" / "worktrees"
     removed = 0
     if root.is_dir():
         rc, out = _git(repo, "worktree", "list", "--porcelain")
@@ -183,9 +184,10 @@ def sweep_worktree_orphans(repo: Path) -> dict[str, Any]:
             if d.is_dir():
                 shutil.rmtree(d, ignore_errors=True)
             removed += 1
-    rc, out = _git(repo, "branch", "--list", "nexus-agent/*")
     kept = []
-    if rc == 0:
-        kept = [line.strip().lstrip("* ").strip()
-                for line in out.splitlines() if line.strip()]
+    for pattern in ("nexus-agent/*", "nexus/*"):
+        rc, out = _git(repo, "branch", "--list", pattern)
+        if rc == 0:
+            kept.extend(line.strip().lstrip("* ").strip()
+                        for line in out.splitlines() if line.strip())
     return {"removed": removed, "kept_branches": kept}

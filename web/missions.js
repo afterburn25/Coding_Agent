@@ -13,7 +13,7 @@ let missions=[],selected=null;
 
 async function refresh(){
   try{
-    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings]=await Promise.all([
+    const [st,ms,appr,notes,sgoals,scheds,trigs,summary,goals,repairs,findings,ops]=await Promise.all([
       api('/api/autonomy/status'),
       api('/api/missions'),
       api('/api/autonomy/approvals?pending=1'),
@@ -25,6 +25,7 @@ async function refresh(){
       api('/api/goals'),
       api('/api/self-repair'),
       api('/api/findings'),
+      api('/api/workers'),
     ]);
     renderStatus(st);
     missions=ms.missions||[];
@@ -39,6 +40,7 @@ async function refresh(){
     renderFindings(findings.findings||[]);
     renderSchedules(scheds.schedules||[]);
     renderTriggers(trigs.triggers||[]);
+    renderOps(ops||{});
     if(Array.isArray(trigs.signals)&&trigs.signals.length&&
        $('#newTrigEvent')&&!$('#newTrigEvent').options.length)
       $('#newTrigEvent').innerHTML=trigs.signals.map(s=>
@@ -143,6 +145,32 @@ function renderApprovals(rows){
     `<button class="mini-button danger" data-appr="${a.id}:deny">Deny</button></div></div>`
   ).join('')||'<div class="hist-row">none pending</div>';
 }
+function renderOps(ops){
+  const cap=ops.capacity||{},hw=ops.hardware||{},sch=ops.schedulable||{};
+  const capEl=$('#opsCapacity');
+  if(capEl)capEl.innerHTML=
+    `<div class="hist-row">Workers: <b>${cap.active||0} active</b> / ${cap.ceiling||'—'} currently safe</div>`+
+    `<div class="hist-row">CPU ${hw.cpu_util!=null?Math.round(hw.cpu_util*100)+'%':'—'} · `+
+    `RAM ${((hw.ram_free_mb||0)/1024).toFixed(1)}/${((hw.ram_total_mb||0)/1024).toFixed(0)} GB free · `+
+    `VRAM ${((hw.vram_free_mb||0)/1024).toFixed(1)}/${((hw.vram_total_mb||0)/1024).toFixed(1)} GB free</div>`+
+    `<div class="hist-row">schedulable: ${(sch.cpu_cores||0).toFixed(1)} cores · `+
+    `${((sch.ram_mb||0)/1024).toFixed(1)} GB RAM · ${((sch.vram_mb||0)/1024).toFixed(1)} GB VRAM</div>`;
+  const wEl=$('#opsWorkers');
+  if(wEl)wEl.innerHTML=(ops.workers||[]).map(w=>
+    `<div class="mission-card"><div class="title">${esc(w.role||'worker')} · ${esc(w.model_tier||'tool')}</div>`+
+    `<div class="meta">${esc(w.title||'')} — ${esc(w.status)}`+
+    (w.elapsed_s?` · ${Math.round(w.elapsed_s)}s`:'')+
+    (w.branch?` · <code>${esc(w.branch)}</code>`:'')+`</div></div>`
+  ).join('')||'<div class="hist-row">no active workers</div>';
+  const qEl=$('#opsQueue');
+  if(qEl)qEl.innerHTML=(ops.queue||[]).map(q=>
+    `<div class="mission-card"><div class="title">#${q.position} ${esc(q.title||'')}</div>`+
+    `<div class="meta">${esc(q.message||q.reason||'queued')}`+
+    (q.reason_detail?` — ${esc(q.reason_detail)}`:'')+`</div>`+
+    `<div class="side-actions"><button class="mini-button danger" data-wcancel="${esc(q.id)}">Cancel</button></div></div>`
+  ).join('')||'<div class="hist-row">queue empty</div>';
+}
+
 function renderNotes(rows){
   $('#notifications').innerHTML=rows.slice(0,15).map(n=>
     `<div class="hist-row"><b>${esc(n.level)}</b> ${esc(n.title||n.message).slice(0,120)}</div>`
@@ -243,6 +271,11 @@ document.addEventListener('click',async e=>{
   if(appr){
     const[id,verb]=appr.dataset.appr.split(':');
     try{await api(`/api/autonomy/approvals/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;
+  }
+  const wc=e.target.closest('[data-wcancel]');
+  if(wc){
+    try{await api('/api/workers/cancel','POST',{id:wc.dataset.wcancel});refresh();}catch(err){alert(err.message);}
     return;
   }
   const gr=e.target.closest('[data-goalrun]');

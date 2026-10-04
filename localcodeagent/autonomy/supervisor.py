@@ -61,9 +61,22 @@ class AutonomousSupervisor:
         metrics: MetricRegistry | None = None,
         repair: Any = None,
         signal_sources: dict | None = None,
+        worker_manager: Any = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
+        # Adaptive Worker Manager — measured-capacity admission control for
+        # every mission node (and, via the shared instance, ad-hoc user
+        # work). Injected by the server so the queue can reach voice/UI;
+        # default-constructed for tests/embedded use.
+        if worker_manager is not None:
+            self.workers = worker_manager
+        else:
+            from ..workers import AdaptiveWorkerManager
+            self.workers = AdaptiveWorkerManager(
+                self.workspace,
+                on_queue_event=lambda t, p: self._emit("worker_event",
+                                                     {"event": t, **p}))
         self._emit_bus = emit or (lambda t, p: None)
         self.enabled = enabled
 
@@ -650,6 +663,19 @@ class AutonomousSupervisor:
                 self.missions.append_history(
                     m["id"], "lease_expired",
                     f"task '{node.get('title')}' worker lost — requeued")
+                wid = str((node.get("metadata") or {}).get("worker_id") or "")
+                if wid:
+                    self.workers.release(
+                        wid, outcome="interrupted",
+                        result={"error": "lease expired — worker lost"})
+
+        # 3b. worker manager housekeeping — reap dead heartbeats, then drain
+        # the durable queue into whatever capacity freed up this tick.
+        try:
+            self.workers.reconcile()
+            self.workers.tick()
+        except Exception:
+            pass
 
         # 4. drive live missions
         if self.policy.is_stopped() or self.policy.is_paused():
@@ -783,44 +809,84 @@ class AutonomousSupervisor:
 
         runnable = graph.runnable(limit=8)
         started = 0
-        max_parallel = {"conservative": 1, "balanced": 2,
-                        "performance": 3}.get(self.policy.resource_mode(), 2)
+        # Admission is hardware-measured, not a fixed mode→count map: each
+        # node requests a reservation sized by role and the manager admits
+        # only when it fits live schedulable capacity. A small per-mission
+        # sprawl bound still applies; resource_mode biases it.
+        mission_cap = {"conservative": 2, "balanced": 4,
+                       "performance": 6}.get(self.policy.resource_mode(), 4)
         in_flight = len(graph.running())
-        budget_parallel = max(0, max_parallel - in_flight)
+        budget_parallel = max(0, mission_cap - in_flight)
 
         for node in runnable:
             if started >= budget_parallel:
                 break
             kind = node.get("kind", "agent")
+            meta = node.get("metadata") or {}
+            # Cheap structural gates first — lane/locks/GPU-yield — so a
+            # node that can't start never takes a reservation.
             if kind == "agent":
                 # The agent lane is exclusive and interactive work outranks
                 # background missions — except urgent (critical recovery)
                 # work, which may interleave between user turns.
                 if not self._lane_free() and \
                         str(m.get("priority")) != "urgent":
+                    node["queue_reason"] = "waiting_for_worker"
+                    node["queue_detail"] = "interactive lane is busy"
                     break
                 if not self.locks.acquire("agent_lane", node["id"]):
+                    node["queue_reason"] = "waiting_for_worker"
+                    node["queue_detail"] = "agent lane in use"
                     break
-            elif kind == "job" and str(
-                    (node.get("metadata") or {}).get("job") or "") == "image" \
+            elif kind == "job" and str(meta.get("job") or "") == "image" \
                     and not self.budgets.may_use_gpu(
                         m, foreground_busy=not self._lane_free(),
                         resource_mode=self.policy.resource_mode()):
                 # GPU-bound background work yields to the interactive lane
                 # in conservative mode — stays ready for the next tick.
+                node["queue_reason"] = "waiting_for_gpu"
+                node["queue_detail"] = "yielding to interactive use"
                 continue
             else:
                 lock = node.get("lock") or ""
                 if lock and not self.locks.acquire(lock, node["id"]):
+                    node["queue_reason"] = "waiting_for_worker"
+                    node["queue_detail"] = f"resource lock: {lock}"
                     continue
-            if not graph.claim(node["id"], owner=f"supervisor"):
+            # Adaptive admission — reserve before start so several nodes
+            # can never observe the same free RAM/VRAM and overcommit.
+            worker, w_reason, w_detail = self.workers.admit_node(
+                str(node.get("id") or ""),
+                str(node.get("title") or node.get("instruction") or ""),
+                role=str(meta.get("worker_role") or ""),
+                kind=kind,
+                text=str(node.get("instruction") or ""),
+                priority=int(node.get("priority", 50)),
+                mission_id=str(m.get("id") or ""),
+                project_id=str(meta.get("project_id") or ""),
+                profile_id=str(m.get("profile_id") or ""),
+                estimate_overrides=meta.get("estimate"))
+            if worker is None:
+                node["queue_reason"] = w_reason
+                node["queue_detail"] = w_detail
                 if kind == "agent":
                     self.locks.release("agent_lane", node["id"])
                 elif node.get("lock"):
                     self.locks.release(node["lock"], node["id"])
                 continue
+            node.pop("queue_reason", None)
+            node.pop("queue_detail", None)
+            meta["worker_id"] = worker.id
+            node["metadata"] = meta
+            if not graph.claim(node["id"], owner=f"supervisor"):
+                if kind == "agent":
+                    self.locks.release("agent_lane", node["id"])
+                elif node.get("lock"):
+                    self.locks.release(node["lock"], node["id"])
+                self.workers.release(worker.id, outcome="cancelled")
+                continue
             started += 1
-            self._spawn_worker(mission_id, node["id"])
+            self._spawn_worker(mission_id, node["id"], worker_id=worker.id)
 
         if started:
             self.missions.update(mission_id, graph=graph.graph)
@@ -997,7 +1063,11 @@ class AutonomousSupervisor:
     # ------------------------------------------------------------------
     # worker execution
 
-    def _spawn_worker(self, mission_id: str, node_id: str) -> None:
+    def _spawn_worker(self, mission_id: str, node_id: str,
+                      worker_id: str | None = None) -> None:
+        if worker_id:
+            self.workers.worker_started(worker_id)
+
         def work() -> None:
             try:
                 self._run_node(mission_id, node_id)
@@ -1031,6 +1101,11 @@ class AutonomousSupervisor:
 
         def emit(event: dict) -> None:
             try:
+                wid = str((node.get("metadata") or {}).get("worker_id") or "")
+                if wid:
+                    self.workers.heartbeat(
+                        wid, phase=str(event.get("phase")
+                                       or event.get("title") or ""))
                 e = dict(event)
                 e.setdefault("mission_id", mission_id)
                 e.setdefault("mission_node", node_id)
@@ -1120,6 +1195,21 @@ class AutonomousSupervisor:
         m = self.missions.get(mission_id)
         if m is None:
             return
+        # Release the worker's resource reservation — the run ended (even
+        # when the node will retry, the retry re-admits fresh). A node
+        # parked on approval frees its slot; resumption re-admits too.
+        wid = str((TaskGraph(m).get(node_id) or {})
+                  .get("metadata", {}).get("worker_id") or "")
+        if wid:
+            obs = (result or {}).get("observed") or {}
+            self.workers.release(
+                wid,
+                outcome=("waiting_for_permission" if result.get(
+                    "pending_approval") else
+                    "completed" if result.get("ok") else "failed"),
+                result={"error": str((result or {}).get("error")
+                                     or (result or {}).get("output") or "")[:300]},
+                observed=obs)
         ok = bool(result.get("ok"))
         pending_approval = result.get("pending_approval")
 
@@ -1659,6 +1749,8 @@ class AutonomousSupervisor:
             "unread_notifications": self.notifications.pending_count(),
             "locks": self.locks.snapshot(),
             "workers": len(self._workers),
+            "worker_manager": (self.workers.status()
+                               if self.workers is not None else {}),
             "next_schedule": self.scheduler.next_due(),
             "store": self.store.health(),
         }

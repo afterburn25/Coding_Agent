@@ -135,6 +135,8 @@ class AppState:
         self.tasks = TaskStore(self.workspace)
         from .workqueue import WorkQueue
         self.queue = WorkQueue(self.workspace)
+        from .projects import ProjectStore
+        self.projects = ProjectStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
         # Drop snapshots whose task aged out of the ledger — checkpoints
         # hold per-file copies and would otherwise grow without bound.
@@ -268,6 +270,48 @@ class AppState:
             ["comfyui"], capability="image_generation")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
+        # Adaptive Worker Manager — one shared admission controller for
+        # mission nodes and user-submitted work. Queue events feed SSE and
+        # the (once-per-item, mute-respecting) voice notice.
+        from .workers import AdaptiveWorkerManager
+        self._queue_announced: set[str] = set()
+        self.workers = AdaptiveWorkerManager(
+            self.workspace,
+            max_workers=int(getattr(config, "worker_ceiling", 8)),
+            model_capacity=dict(getattr(config, "worker_model_slots",
+                                        {}) or {}),
+            on_queue_event=self._on_worker_queue_event,
+            interactive_probe=lambda: self._agent_lane_active())
+
+        def _dispatch_admitted(worker) -> None:
+            """A durable worker-queue entry got resources — turn its
+            payload into real execution via the normal prompt queue (which
+            owns the agent lane + voice context)."""
+            payload = getattr(worker, "payload", None) or {}
+            prompt = str(payload.get("prompt") or "")
+            if prompt:
+                try:
+                    self.queue.enqueue(prompt,
+                                       mode=str(payload.get("mode") or "auto"))
+                    self._dequeue_next()
+                except Exception:
+                    pass
+            # Reservation released — the prompt queue owns the work now.
+            try:
+                self.workers.release(worker.id, outcome="completed")
+            except Exception:
+                pass
+
+        self.workers.on_admit = _dispatch_admitted
+        # Canonical Nexus portrait — the assistant's face, resolved once
+        # here so every surface (chat avatar, greeting, ops header) shares
+        # the same identity and never drifts to a random character.
+        # <repo>/web in dev; _internal/web in the frozen bundle — both land
+        # one level above localcodeagent/.
+        from .nexus_avatar import NexusAvatar
+        self.nexus_avatar = NexusAvatar(
+            Path(__file__).resolve().parent.parent / "web",
+            runtime_root / "data" / "nexus_avatar")
         _process_bus_emit = make_emitter(self.events, "process")
         self.processes.on_event = lambda payload: self._on_process_event(
             payload, _process_bus_emit)
@@ -1136,6 +1180,7 @@ class AppState:
             quiet_hours=quiet_hours,
             enabled=bool(getattr(config, "autonomy_enabled", True)),
             metrics=registry,
+            worker_manager=self.workers,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         sup.repair = self._build_self_repair(config, sup, runtime_root,
@@ -1671,8 +1716,8 @@ class AppState:
         recovery — and surfaced as a notification instead of vanishing.
         """
         try:
-            from .multiagent import sweep_worktree_orphans
-            out = sweep_worktree_orphans(self.workspace)
+            from .workers.worktree import reconcile_worktrees
+            out = reconcile_worktrees(self.workspace)
             kept = out.get("kept_branches") or []
             if kept:
                 self.autonomy.notifications.notify(
@@ -3011,6 +3056,73 @@ class AppState:
                 f"image-fail-{job_id}",
                 f"Sorry — the image didn't finish: {reason}. "
                 "The error card has the details if you want them.")
+        except Exception:
+            pass
+
+    # -- queue announcements ------------------------------------------------
+    #
+    # Persona-styled voice notice when USER work lands in a queue — spoken
+    # once per item, mute-respecting (voice.enqueue drops when muted).
+    _QUEUED_LINES = {
+        "default":      "I've placed that task in the queue. It will start "
+                        "as soon as a worker is available.",
+        "professional": "The task has been queued and will begin when "
+                        "sufficient resources become available.",
+        "playful":      "My workers are busy right now, so I've put that "
+                        "one next in line.",
+        "warm":         "I've got that queued up for you — it'll start as "
+                        "soon as a worker frees up.",
+        "calm":         "That task is queued. I'll begin it as soon as "
+                        "there's room.",
+        "sassy":        "Queued. My hands are full — it goes next as soon "
+                        "as something finishes.",
+        "nerdy":        "Task queued. The scheduler will admit it once "
+                        "sufficient resources free up.",
+        "flirty":       "That one's in my queue, love — I'll get to it the "
+                        "moment a worker frees up.",
+        "raunchy":      "That one's in my queue — I'll get to it the moment "
+                        "a worker frees up.",
+        "rude":         "Queued. It'll start when something finishes.",
+    }
+
+    def _queue_notice_line(self) -> str:
+        style = "default"
+        try:
+            style = str(self._vocalization_context().get("style")
+                        or "default")
+        except Exception:
+            pass
+        return self._QUEUED_LINES.get(style, self._QUEUED_LINES["default"])
+
+    def _on_worker_queue_event(self, event_type: str, payload: dict) -> None:
+        """Worker-manager semantic events → SSE + voice for user work."""
+        try:
+            self.events.publish("worker", {"event": event_type, **payload})
+        except Exception:
+            pass
+        if event_type != "task_queued" or not payload.get("user_initiated"):
+            return
+        entry = payload.get("entry") or {}
+        self._speak_queue_notice(str(entry.get("id") or ""))
+
+    def _speak_queue_notice(self, item_id: str) -> None:
+        if not item_id or item_id in self._queue_announced:
+            return
+        if len(self._queue_announced) > 512:
+            self._queue_announced.clear()
+        self._queue_announced.add(item_id)
+        voice = getattr(self, "voice", None)
+        if voice is None:
+            return
+        try:
+            voice.enqueue(f"queue-{item_id}", self._queue_notice_line())
+        except Exception:
+            pass
+
+    def announce_prompt_queued(self, queue_item: dict) -> None:
+        """Chat-busy /api/queue paths — same once-per-item guarantee."""
+        try:
+            self._speak_queue_notice(str((queue_item or {}).get("id") or ""))
         except Exception:
             pass
 
@@ -4919,6 +5031,42 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/jobs":
             self._json(self.state.jobs_payload())
             return
+        if path == "/api/projects":
+            profile_id = ""
+            try:
+                prof = self.state.profiles.active() or {}
+                profile_id = str(prof.get("profile_id") or "")
+            except Exception:
+                pass
+            self._json({"projects": self.state.projects.list(
+                profile_id=profile_id)})
+            return
+        if path.startswith("/api/projects/"):
+            pid = path[len("/api/projects/"):].strip("/")
+            proj = self.state.projects.get(pid)
+            if proj is None:
+                self._json({"error": "project not found"}, 404)
+                return
+            q = parse_qs(urlparse(self.path).query)
+            if "summary" in q:
+                proj["memory_summary"] = self.state.projects.memory_summary(pid)
+            self._json(proj)
+            return
+        # Adaptive Worker Manager — live capacity, reservations, queue.
+        if path == "/api/workers":
+            self._json(self.state.workers.status())
+            return
+        if path == "/api/workers/queue":
+            self._json({"queue": self.state.workers.status().get("queue", [])})
+            return
+        if path == "/api/workers/explain":
+            q = parse_qs(urlparse(self.path).query)
+            wid = str(q.get("id", [""])[0]).strip()
+            if not wid:
+                self._json({"error": "id is required"}, 400)
+                return
+            self._json(self.state.workers.explain(wid))
+            return
         if path == "/api/processes":
             self._json({"processes": self.state.processes.list()})
             return
@@ -5103,6 +5251,29 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"styles": v.vocal.styles(is_adult=is_adult)
                         if v else [],
                         "levels": list(_vlevels)})
+            return
+        if path == "/api/nexus/avatar/status":
+            self._json(self.state.nexus_avatar.status())
+            return
+        if path.startswith("/api/nexus/avatar"):
+            q = parse_qs(urlparse(self.path).query)
+            size = int(q.get("size", ["128"])[0] or 128)
+            got = self.state.nexus_avatar.avatar(size)
+            if got is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            fp, mime = got
+            try:
+                data = fp.read_bytes()
+            except OSError:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
             return
         if path.startswith("/api/voice/audio/"):
             seg_id = path[len("/api/voice/audio/"):].strip("/")
@@ -6012,6 +6183,7 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"error": str(exc)}, 429)
                         return
                     self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                    self.state.announce_prompt_queued(item)
                     self._sse_begin()
                     self._sse_event("ready", {"mode": mode, "queued": True})
                     self._sse_event("task", {"event": "queued", "queue_item": item})
@@ -6212,6 +6384,7 @@ class Handler(BaseHTTPRequestHandler):
                         self._json({"error": str(exc)}, 429)
                         return
                     self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                    self.state.announce_prompt_queued(item)
                     self._json({
                         "content": _queued_notice(current, len(self.state.queue)),
                         "queued": True,
@@ -6279,11 +6452,79 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 429)
                     return
                 self.state.events.publish("task", {"event": "queued", "queue_item": item})
+                self.state.announce_prompt_queued(item)
                 try:
                     self.state._dequeue_next()
                 except Exception:
                     pass
                 self._json({"ok": True, "item": item})
+                return
+
+            if path == "/api/projects":
+                name = str(body.get("name", "")).strip()
+                if not name:
+                    self._json({"error": "name is required"}, 400)
+                    return
+                prof = {}
+                try:
+                    prof = self.state.profiles.active() or {}
+                except Exception:
+                    pass
+                proj = self.state.projects.create(
+                    name, description=str(body.get("description") or ""),
+                    profile_id=str(prof.get("profile_id") or ""),
+                    repositories=list(body.get("repositories") or []))
+                self._json({"ok": True, "project": proj})
+                return
+
+            if path.startswith("/api/projects/"):
+                rest = path[len("/api/projects/"):].strip("/")
+                pid, _, action = rest.rpartition("/")
+                proj = self.state.projects.get(pid)
+                if proj is None:
+                    self._json({"error": "project not found"}, 404)
+                    return
+                if action == "goal":
+                    g = self.state.projects.add_goal(
+                        pid, str(body.get("objective") or ""),
+                        done_when=str(body.get("done_when") or ""))
+                    self._json({"ok": bool(g), "goal": g})
+                    return
+                if action == "remember":
+                    row = self.state.projects.remember(
+                        pid, str(body.get("kind") or "note"),
+                        str(body.get("text") or ""))
+                    self._json({"ok": bool(row), "memory": row})
+                    return
+                self._json({"error": "unsupported project action"}, 400)
+                return
+
+            if path == "/api/workers/submit":
+                prompt = str(body.get("prompt", "")).strip()
+                if not prompt:
+                    self._json({"error": "prompt is required"}, 400)
+                    return
+                prof = None
+                try:
+                    prof = self.state.profiles.active() or {}
+                except Exception:
+                    prof = {}
+                out = self.state.workers.submit(
+                    prompt, text=prompt,
+                    priority_class="user_queued", user_initiated=True,
+                    profile_id=str(prof.get("profile_id") or ""),
+                    payload={"prompt": prompt,
+                             "mode": str(body.get("mode") or "auto")})
+                self._json(out, 200 if out.get("status") != "rejected" else 429)
+                return
+
+            if path == "/api/workers/cancel":
+                wid = str(body.get("id", "")).strip()
+                if not wid:
+                    self._json({"error": "id is required"}, 400)
+                    return
+                ok = self.state.workers.cancel(wid)
+                self._json({"ok": ok})
                 return
 
             if path == "/api/queue/cancel":
