@@ -66,18 +66,18 @@ if (Test-Path (Join-Path $PackageRoot "config.json")) {
 Remove-Item -Recurse -Force "build","dist",$RuntimeExtract -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "build","dist" | Out-Null
 
+Write-Host "Ensuring pinned build and local voice dependencies..."
+& $Python -m pip install --quiet --disable-pip-version-check "pyinstaller==6.22.3" "pillow==12.3.0" "cryptography==50.0.1" "py7zr==1.1.3" "onnxruntime==1.30.0" "phonemizer==3.4.0" "espeakng-loader==0.2.4" "numpy==2.3.5"
+if ($LASTEXITCODE -ne 0) { throw "build/voice dependency install failed" }
+# kokoro-onnx declares Python <3.14; verified working on 3.14 locally.
+& $Python -m pip install --quiet --disable-pip-version-check --ignore-requires-python "kokoro-onnx==0.6.1"
+if ($LASTEXITCODE -ne 0) { throw "kokoro-onnx install failed" }
+
 Write-Host "Verifying Nexus Core brand assets..."
 if (-not (Test-Path $DesktopIcon)) { throw "nexus-core.ico missing — the official multi-resolution icon must be committed" }
 if (-not (Test-Path $DesktopSplash)) { throw "nexus-core-splash.png missing — the official splash artwork must be committed" }
 & $Python -c "from PIL import Image; im=Image.open(r'$DesktopIcon'); req={(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)}; missing=req-set(im.ico.sizes()); assert not missing, f'ico missing sizes: {missing}'"
 if ($LASTEXITCODE -ne 0) { throw "nexus-core.ico does not contain the required resolution layers" }
-
-Write-Host "Ensuring local voice runtime dependencies (kokoro-onnx stack)..."
-& $Python -m pip install --quiet "onnxruntime==1.30.0" "phonemizer==3.4.0" "espeakng-loader==0.2.4" "numpy>=1.26"
-if ($LASTEXITCODE -ne 0) { throw "voice runtime dependency install failed" }
-# kokoro-onnx declares Python <3.14; verified working on 3.14 locally.
-& $Python -m pip install --quiet --ignore-requires-python "kokoro-onnx==0.6.1"
-if ($LASTEXITCODE -ne 0) { throw "kokoro-onnx install failed" }
 
 Write-Host "Building hidden Python agent backend..."
 & $Python -m PyInstaller `
@@ -206,7 +206,8 @@ $ExpectedImageWorkflows = @(
     "image\qwen\qwen-image-2.1-background-removal-api.json",
     "image\flux\flux2-klein-4b-t2i-api.json",
     "image\flux\flux2-klein-4b-edit-api.json",
-    "image\sdxl\juggernaut-x-v10-t2i-api.json"
+    "image\sdxl\juggernaut-x-v10-t2i-api.json",
+    "image\upscalers\realesrgan-x4plus-api.json"
 )
 foreach ($RelativeWorkflow in $ExpectedImageWorkflows) {
     if (-not (Test-Path (Join-Path $WorkflowTarget $RelativeWorkflow))) {

@@ -67,7 +67,9 @@ v0.15.0 deepens the workstation core:
   covers every primary page and the workstation API surface (autonomy,
   tools/plugins, MCP, projects, library/preferences, STT, operational
   state, tasks/activity/queue, readiness/resources), with UTF-8-safe
-  process-log capture and tolerant external CI log decoding.
+  process-log capture and tolerant external CI log decoding. Windows
+  packaging also requires the verified Real-ESRGAN workflow, and direct
+  build/test dependencies are pinned for reproducible artifacts.
 
 Verified: **1403 tests** (2 environment skips).
 

@@ -51,7 +51,7 @@ Module layout (`localcodeagent/voice/`):
 ## Engine
 
 - **Model**: Kokoro-82M (`hexgrad/Kokoro-82M`), ONNX v1.0 build.
-- **Package**: `kokoro-onnx==0.6.1` + `onnxruntime==1.30.0` + `phonemizer==3.4.0` + `espeakng-loader==0.2.4`.
+- **Package**: `kokoro-onnx==0.6.1` + `onnxruntime==1.30.0` + `phonemizer==3.4.0` + `espeakng-loader==0.2.4` + `numpy==2.3.5`.
 - **License**: Apache-2.0 (model). `kokoro-onnx` MIT.
 - **Python 3.14 note**: `kokoro-onnx` declares `<3.14`; verified working on
   CPython 3.14 installed with `--ignore-requires-python`. The build script

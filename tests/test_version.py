@@ -38,6 +38,9 @@ class VersionTests(unittest.TestCase):
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         raw = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         self.assertIn(f'version = "{raw}"', text)
+        self.assertIn(
+            'dependencies = ["cryptography==50.0.1", "py7zr==1.1.3"]',
+            text)
 
     def test_installer_defaults_match(self):
         text = (ROOT / "installer" / "ChatNexus.iss").read_text(encoding="utf-8")

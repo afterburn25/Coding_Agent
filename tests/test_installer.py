@@ -324,6 +324,7 @@ class InstallerContractTests(unittest.TestCase):
             "qwen-image-2.1-background-removal-api.json",
             "flux2-klein-4b-t2i-api.json",
             "flux2-klein-4b-edit-api.json",
+            "realesrgan-x4plus-api.json",
         ):
             self.assertIn(workflow, self.build)
 
@@ -336,6 +337,14 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("--collect-submodules py7zr", self.build)
         for dep in ("pybcj", "pyppmd", "pyzstd", "Cryptodome"):
             self.assertIn(f"--hidden-import {dep}", self.build)
+        for dep in (
+            "pyinstaller==6.22.3", "pillow==12.3.0",
+            "cryptography==50.0.1", "py7zr==1.1.3",
+            "onnxruntime==1.30.0", "phonemizer==3.4.0",
+            "espeakng-loader==0.2.4", "numpy==2.3.5",
+        ):
+            self.assertIn(dep, self.build)
+        self.assertNotIn("numpy>=", self.build)
 
     def test_update_uses_installer_owned_process_shutdown(self):
         self.assertIn("CloseApplications=no", self.installer)
@@ -345,7 +354,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("taskkill.exe", self.installer)
         self.assertIn("TaskKillImage('{#AppExeName}', False)", self.installer)
         self.assertIn("TaskKillImage('ChatNexus.exe', False)", self.installer)
-        self.assertIn('Type: files; Name: "{app}\ChatNexus.exe"', self.installer)
+        self.assertIn('Type: files; Name: "{app}\\ChatNexus.exe"', self.installer)
         self.assertIn("TaskKillImage('ChatNexus.Backend.exe', True)", self.installer)
         self.assertIn("TaskKillImage('llama-server.exe', True)", self.installer)
         self.assertIn("StopRunningNexusCore();", self.installer)
@@ -366,6 +375,13 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Build native Nexus Core desktop app", self.workflow)
         self.assertIn("Installed Source workspace is incomplete", self.workflow)
         self.assertIn("CHAT_NEXUS_SKIP_MODEL_DOWNLOADS", self.workflow)
+        for dep in (
+            "pyinstaller==6.22.3", "pillow==12.3.0",
+            "cryptography==50.0.1", "py7zr==1.1.3",
+            "numpy==2.3.5",
+        ):
+            self.assertIn(dep, self.workflow)
+        self.assertNotIn("pip install --upgrade pip", self.workflow)
         self.assertIn("Fake Nexus Core Process", self.workflow)
         self.assertIn("Installer did not close the running NexusCore.exe process", self.workflow)
         self.assertIn("Update left the legacy ChatNexus.exe behind", self.workflow)
