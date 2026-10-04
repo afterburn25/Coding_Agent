@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 # Event kinds recognized by persona_notice().
-KINDS = ("queued", "completed", "failed", "approval", "briefing",
-         "self_repair", "update", "status")
+KINDS = ("queued", "started", "completed", "failed", "cancelled",
+         "approval", "briefing", "self_repair", "update", "status")
 
 # Style prefix/suffix per persona family — deliberately short; the
 # factual body always follows unchanged.
@@ -27,6 +27,14 @@ _PREFIX: dict[str, dict[str, str]] = {
         "sassy": "Fine, it's queued.", "rude": "Queued. Wait.",
         "flirty": "Anything for you — queued.",
         "raunchy": "Queued, hot stuff.",
+    },
+    "started": {
+        "default": "Starting now.", "professional": "Work has begun.",
+        "warm": "Starting on it now.", "playful": "On it!",
+        "nerdy": "Admitted — executing.",
+        "calm": "Starting now — steady pace.",
+        "sassy": "On it, already.", "rude": "Started. Hold on.",
+        "flirty": "Starting for you now.", "raunchy": "On it, gorgeous.",
     },
     "completed": {
         "default": "Done.", "professional": "Task complete.",
@@ -49,6 +57,17 @@ _PREFIX: dict[str, dict[str, str]] = {
         "rude": "It failed. Obviously.",
         "flirty": "That one slipped away from us.",
         "raunchy": "That crashed and burned.",
+    },
+    "cancelled": {
+        "default": "Cancelled.", "professional": "The task was cancelled.",
+        "warm": "I stopped that one — all clear.",
+        "playful": "Poof — cancelled.",
+        "nerdy": "Execution aborted cleanly.",
+        "calm": "Cancelled — nothing left hanging.",
+        "sassy": "Cancelled. As you wish.",
+        "rude": "Cancelled. Done waiting.",
+        "flirty": "Cancelled, darling.",
+        "raunchy": "Killed it. You're welcome.",
     },
     "approval": {
         "default": "Needs your approval.",
@@ -112,8 +131,9 @@ _PREFIX: dict[str, dict[str, str]] = {
 }
 
 _FALLBACK_PREFIX = {
-    "queued": "Queued.", "completed": "Done.",
-    "failed": "That didn't work.", "approval": "Needs your approval.",
+    "queued": "Queued.", "started": "Started.", "completed": "Done.",
+    "failed": "That didn't work.", "cancelled": "Cancelled.",
+    "approval": "Needs your approval.",
     "briefing": "Briefing.", "self_repair": "Self-repair ran.",
     "update": "Update available.", "status": "Status:",
 }

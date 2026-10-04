@@ -1,575 +1,575 @@
 {
- "name": "Nexus Core",
- "version": "0.17.0",
- "default_model_mode": "auto",
- "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
- "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1637,
- "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done \u00e2\u20ac\u201d requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Milestone COMPLETE: all 12 phases landed \u00e2\u20ac\u201d lineage + artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + env manifests; predictive health + idle cleanup + benchmark lab + temp specialists. 1531 tests green. Still host-blocked: real ComfyUI workflow validation (no image weights). Persona-depth milestone (v0.16.0): behavior profiles per family + preset overrides, seriousness/topic classifiers, effective-persona compiler, per-profile dynamics (relationship + mood decay), learned overlays + expiring modifiers + modes, NL persona commands, vocal/gesture persona tendencies, persona-aware notices, coherence scoring, preset blending, behavior versioning, import/export, consistency/drift/repetition layer, debug view. 1578 tests. Persona social-continuity milestone (v0.17.0): social-cue/sarcasm detection, energy+session pacing, focus tracking, shared-history milestones + relevance-gated callbacks, stated-preference consistency, preferred address, saturation dampening, humor adaptation, voice smoothing, gesture timing, introspection/compare/similarity + QA metrics, 50-turn continuity stress. 1637 tests.",
- "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
- "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
- "default_coding_models": {
-  "fast_primary": "Qwen3 14B Q4_K_M",
-  "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
- },
- "installer": {
-  "canonical_script": "installer/ChatNexus.iss",
-  "app_id": "ChatNexus.Afterburn25",
-  "default_dir": "<drive>:\\Nexus_Core (most-free fixed drive)",
-  "interactive_existing_install_action": "Update",
-  "preserves_on_update": [
-   "models",
-   "data",
-   "config.json",
-   "Source Git workspace/task state",
-   "workflows/"
-  ],
-  "downloads_default_coding_models_when_missing": true,
-  "model_download_progress": "Inno Setup native install progress",
-  "model_download_hash_verification": "SHA-256",
-  "default_model_download_bytes": 27558441344,
-  "default_model_download_gib": 25.66,
-  "progress_ui": {
-   "overall": "Inno Setup native install/update progress including ExternalSize model downloads",
-   "model": "Second per-model progress bar under overall bar",
-   "model_sequence": [
-    "Qwen3 14B Q4_K_M",
-    "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
-   ],
-   "resets_between_models": true,
-   "shows_downloaded_mb": true
+  "name": "Nexus Core",
+  "version": "0.18.0",
+  "default_model_mode": "auto",
+  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
+  "source_of_truth": "afterburn25/Coding_Agent",
+  "test_checkpoint": 1660,
+  "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done â€” requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Milestone COMPLETE: all 12 phases landed â€” lineage + artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + env manifests; predictive health + idle cleanup + benchmark lab + temp specialists. 1531 tests green. Still host-blocked: real ComfyUI workflow validation (no image weights). Persona-depth milestone (v0.16.0): behavior profiles per family + preset overrides, seriousness/topic classifiers, effective-persona compiler, per-profile dynamics (relationship + mood decay), learned overlays + expiring modifiers + modes, NL persona commands, vocal/gesture persona tendencies, persona-aware notices, coherence scoring, preset blending, behavior versioning, import/export, consistency/drift/repetition layer, debug view. 1578 tests. Persona social-continuity milestone (v0.17.0): social-cue/sarcasm detection, energy+session pacing, focus tracking, shared-history milestones + relevance-gated callbacks, stated-preference consistency, preferred address, saturation dampening, humor adaptation, voice smoothing, gesture timing, introspection/compare/similarity + QA metrics, 50-turn continuity stress. 1637 tests.",
+  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
+  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
+  "default_coding_models": {
+    "fast_primary": "Qwen3 14B Q4_K_M",
+    "deep_reviewer": "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
   },
-  "close_applications": "installer-owned",
-  "restart_manager_close_disabled": true,
-  "shutdown_sequence": [
-   "graceful NexusCore.exe process-tree close",
-   "brief grace period",
-   "force NexusCore.exe cleanup",
-   "force legacy ChatNexus.exe cleanup",
-   "force orphan ChatNexus.Backend.exe cleanup",
-   "force llama-server.exe / llama.exe cleanup"
-  ],
-  "ci_running_app_close_smoke": true,
-  "exe": "NexusCore.exe",
-  "setup_name": "NexusCore-Setup-<version>-Windows-x64",
-  "upgrade_identity_note": "AppId ChatNexus.Afterburn25 kept deliberately so existing Chat Nexus installs update in place",
-  "busy_status_reporting": "stage text + marquee for shutdown/verify waits"
- },
- "first_run_model_setup": {
-  "starter": "Install recommended 14B",
-  "full_stack": "Install full 14B + 30B stack",
-  "deep_upgrade": "Add 30B deep coder",
-  "checksum_verified": true,
-  "auto_configure_after_download": true,
-  "restart_after_configure": false,
-  "live_runtime_reload": true,
-  "starter_auto_start": true,
-  "diagnostics": "Collapsed under Technical model status during setup",
-  "install_path_visible": true,
-  "free_disk_visible": true,
-  "top_level_progress": true,
-  "disk_preflight": true,
-  "active_plan_controls_locked": true,
-  "normal_windows_flow": "Installer bootstraps both 14B and 30B before setup completes",
-  "in_app_flow": "Recovery/portable/manual repair path",
-  "installer_skips_verified_models": true
- },
- "ci_hardening": "Installer/app smoke processes have explicit timeouts so hung setup/self-test runs fail deterministically.",
- "routing_telemetry": {
-  "enabled_by_default": true,
-  "path": ".agent/model_performance.json",
-  "min_samples": 3,
-  "weight": 20,
-  "content_free": true,
-  "api": "GET /api/model-telemetry"
- },
- "model_switching": {
-  "accounts_for_reclaimable_resident_memory": true,
-  "auto_activation_fallback": true,
-  "reviewer_activation_fallback": true,
-  "durable_stream_error_recovery": true,
-  "managed_llama_near_ram_autofit": true,
-  "near_ram_margin": "max(2 GB, min(6 GB, 8% total system RAM))",
-  "observed_case": "30.0 GB estimated vs 29.8 GB available is allowed to runtime auto-fit"
- },
- "local_chat_latency": {
-  "lightweight_utility_route": true,
-  "utility_skips_repo_research_tools": true,
-  "qwen3_14b_default_reasoning": "off unless explicitly overridden",
-  "max_output_tokens": {
-   "qwen3_14b": 2048,
-   "qwen3_coder_30b": 8192,
-   "generic": 4096
+  "installer": {
+    "canonical_script": "installer/ChatNexus.iss",
+    "app_id": "ChatNexus.Afterburn25",
+    "default_dir": "<drive>:\\Nexus_Core (most-free fixed drive)",
+    "interactive_existing_install_action": "Update",
+    "preserves_on_update": [
+      "models",
+      "data",
+      "config.json",
+      "Source Git workspace/task state",
+      "workflows/"
+    ],
+    "downloads_default_coding_models_when_missing": true,
+    "model_download_progress": "Inno Setup native install progress",
+    "model_download_hash_verification": "SHA-256",
+    "default_model_download_bytes": 27558441344,
+    "default_model_download_gib": 25.66,
+    "progress_ui": {
+      "overall": "Inno Setup native install/update progress including ExternalSize model downloads",
+      "model": "Second per-model progress bar under overall bar",
+      "model_sequence": [
+        "Qwen3 14B Q4_K_M",
+        "Qwen3-Coder 30B-A3B Instruct Q4_K_M"
+      ],
+      "resets_between_models": true,
+      "shows_downloaded_mb": true
+    },
+    "close_applications": "installer-owned",
+    "restart_manager_close_disabled": true,
+    "shutdown_sequence": [
+      "graceful NexusCore.exe process-tree close",
+      "brief grace period",
+      "force NexusCore.exe cleanup",
+      "force legacy ChatNexus.exe cleanup",
+      "force orphan ChatNexus.Backend.exe cleanup",
+      "force llama-server.exe / llama.exe cleanup"
+    ],
+    "ci_running_app_close_smoke": true,
+    "exe": "NexusCore.exe",
+    "setup_name": "NexusCore-Setup-<version>-Windows-x64",
+    "upgrade_identity_note": "AppId ChatNexus.Afterburn25 kept deliberately so existing Chat Nexus installs update in place",
+    "busy_status_reporting": "stage text + marquee for shutdown/verify waits"
   },
-  "sse_worker_queue": true,
-  "heartbeat_seconds": 1,
-  "heartbeat_fields": [
-   "elapsed_seconds",
-   "phase",
-   "status",
-   "model_id",
-   "model_role"
-  ],
-  "client_heartbeat_status": true,
-  "builtin_greetings": true,
-  "builtin_capability_questions": true,
-  "builtin_model_id": "builtin-local",
-  "builtin_bypasses_model_readiness": true
- },
- "desktop_backend": {
-  "log_path": "data/logs/backend-host.log",
-  "redirects_stdout_stderr": true,
-  "unexpected_exit_restart": true,
-  "max_restart_attempts": 3,
-  "interrupted_tasks_remain_recoverable": true
- },
- "task_state": {
-  "newest_task_is_current": true,
-  "older_interrupted_remains_recent": true,
-  "stream_disconnect_request_scoped": true
- },
- "ui_cache": {
-  "static_assets_no_store": true,
-  "client_builtin_greeting_before_sse": true
- },
- "conversation_memory": {
-  "enabled_by_default": true,
-  "path": "data/conversation_memory.json",
-  "persists_across_restart_and_update": true,
-  "bounded_history": true,
-  "preferences_and_rules": true,
-  "correction_examples": true,
-  "prompt_injection_of_saved_rules": true,
-  "ui": "Local system \u2192 Memory & training",
-  "api": "GET /api/conversation-memory"
- },
- "stream_recovery": {
-  "durable_final_content": true,
-  "completed_result_recovery": true,
-  "request_scoped_task_matching": true,
-  "newest_durable_task_preferred": true
- },
- "routing": {
-  "short_non_coding_conversation": "utility",
-  "primary_14b_background_prewarm": true
- },
- "conversation_manager": {
-  "durable_sessions": true,
-  "search_restore": true,
-  "summaries": true,
-  "personality": true,
-  "scoped_memory": true,
-  "feedback": true,
-  "trainer_ui": "/trainer.html",
-  "temporal_continuity": true,
-  "recent_message_elapsed_context": true,
-  "previous_conversation_recency": true,
-  "mature_conversation_prompt": true,
-  "dry_humor_when_appropriate": true,
-  "lower_forced_followups": true,
-  "feedback_exact_message_pairing": true,
-  "verified_code_checkpoint": "d398b77",
-  "general_fact_commands": true,
-  "brain_autobiographical_sync": true,
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "knowledge_memory": {
-  "enabled": true,
-  "provenance": true,
-  "freshness": true,
-  "refresh_current_sensitive": true
- },
- "model_growth": {
-  "base_model_preserved": true,
-  "review_candidates": true,
-  "dataset_export": true,
-  "offline_training_jobs": [
-   "lora",
-   "qlora",
-   "full_finetune"
-  ],
-  "evaluation": true,
-  "promotion": true,
-  "rollback": true,
-  "positive_feedback_conversation_examples": true,
-  "negative_feedback_signals": true,
-  "negative_feedback_excluded_from_sft_targets": true,
-  "brain_training_signal_sync": true,
-  "portable_approved_skill_context": true,
-  "verified_code_checkpoint": "d398b77",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "conversation_policy": {
-  "default": "permissive",
-  "modes": [
-   "permissive",
-   "balanced",
-   "strict"
-  ],
-  "hard_safety_off_mode": false,
-  "live_api": [
-   "GET /api/policy",
-   "POST /api/policy/mode"
-  ],
-  "ui": "Local system \u2192 Conversation policy",
-  "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
-  "ethical_temperature_default": 1,
-  "ethical_temperature_range": [
-   0,
-   1
-  ],
-  "sampling_temperature_default": 0.2,
-  "generic_refusal_retry": true,
-  "generic_refusal_retry_limit": 3,
-  "adult_only_consensual_explicit_text": true,
-  "profanity_is_not_sexual_content": true,
-  "generic_refusal_retry_limit_range": [
-   0,
-   5
-  ],
-  "rejected_refusal_removed_from_context": true,
-  "refusal_stream_buffering": true,
-  "refusal_exhaustion_reports_model_blocker": true,
-  "verified_code_checkpoint": "d398b77",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "direct_image_routing": {
-  "auto_text_to_image": true,
-  "bypasses_chat_model": true,
-  "permission_aware": true,
-  "approval_model_free": true,
-  "policy_source": "ImageSafetyPolicy",
-  "naked_term_explicit": true,
-  "specialized_edit_paths_preserved": true,
-  "commits": [
-   "d2959c9",
-   "55715dc",
-   "66170a4",
-   "0d0d0fc",
-   "45a34f8",
-   "cb1ae4c",
-   "fbf328c"
-  ],
-  "coding_model_preflight_bypass": true,
-  "natural_request_prefixes": true,
-  "source_image_edit_exclusion": true,
-  "verified_code_checkpoint": "d398b77",
-  "nexus_brain_adult_content_gate": true,
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388",
-  "default_text_to_image_model": "juggernaut-x-v10",
-  "editing_model": "qwen-image-2.1",
-  "fast_preview_model": "flux2-klein-4b",
-  "dedicated_upscaler_model": "realesrgan-x4plus",
-  "default_t2i_source": "RunDiffusion/Juggernaut-X-v10 @ e53841ec (sha256 d91d3573\u20260c45, OpenRAIL-M)"
- },
- "live_clock": {
-  "source": "host OS local clock via datetime.now().astimezone()",
-  "refreshed_each_user_turn": true,
-  "recovered_tasks_refresh": true,
-  "builtin_time_date_day_answers": true,
-  "timezone_aware": true,
-  "fields": [
-   "iso",
-   "date",
-   "time",
-   "weekday",
-   "timezone",
-   "utc_offset",
-   "human_date",
-   "human_time"
-  ],
-  "api": "GET /api/time",
-  "status_field": "clock",
-  "relative_time_grounding": [
-   "today",
-   "now",
-   "yesterday",
-   "tomorrow",
-   "this morning",
-   "this afternoon",
-   "tonight"
-  ],
-  "verified_code_checkpoint": "d398b77",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "activity_hud": {
-  "enabled": true,
-  "title": "NEXUS CORE // ACTIVE",
-  "style": "animated starship-console sci-fi HUD",
-  "high_level_only": true,
-  "private_chain_of_thought_exposed": false,
-  "elapsed_telemetry": true,
-  "event_types": [
-   "context",
-   "task_phase",
-   "model_route",
-   "model_switch",
-   "research",
-   "tool",
-   "verification",
-   "review",
-   "approval",
-   "image_generation",
-   "policy_retry"
-  ],
-  "compacts_on_token_stream": true,
-  "reduced_motion_support": true,
-  "verified_code_checkpoint": "d398b77",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "nexus_brain": {
-  "enabled": true,
-  "path": "data/nexus_brain.json",
-  "auth_path": "data/nexus_brain.auth.json",
-  "model_independent": true,
-  "preserved_on_update": true,
-  "protected_write_mode": "explicit creator-authenticated sync only",
-  "staging_sources": [
-   "conversation_memory",
-   "knowledge_memory",
-   "conversation_manager",
-   "model_growth"
-  ],
-  "records": [
-   "fact",
-   "rule",
-   "knowledge",
-   "training_signal",
-   "autobiographical"
-  ],
-  "creator_passcode_plaintext_stored": false,
-  "creator_session_token": "ephemeral in-memory Trainer token",
-  "integrity": "Ed25519 signed Brain payload with public verification; creator private signing key encrypted locally",
-  "tamper_detection": true,
-  "locked_export_import": true,
-  "verified_read_after_relock_same_process": true,
-  "fresh_process_requires_creator_verification": false,
-  "subroutines": [
-   "adult_content",
-   "image_generation",
-   "web_research",
-   "long_term_memory",
-   "self_learning",
-   "general_knowledge_learning",
-   "conversation_learning",
-   "model_growth",
-   "temporal_context",
-   "humor",
-   "emotions",
-   "self_model"
-  ],
-  "code_gated_routes": [
-   "image_generation",
-   "web_research",
-   "model_growth",
-   "adult_explicit_image_generation"
-  ],
-  "general_fact_commands": [
-   "Remember that ...",
-   "Learn that ...",
-   "Fact: ..."
-  ],
-  "sourced_general_knowledge": true,
-  "freshness_aware_knowledge_recall": true,
-  "portable_approved_conversation_skill_recall": true,
-  "autobiographical_continuity": true,
-  "emotion_profile_signed": true,
-  "transient_affect_engine": true,
-  "self_model": {
-   "human_like_behavior": true,
-   "autobiographical_continuity": true,
-   "stable_preferences": true,
-   "growth_enabled": true,
-   "immutable_identity_type": "AI system",
-   "biological_human_claim": false
+  "first_run_model_setup": {
+    "starter": "Install recommended 14B",
+    "full_stack": "Install full 14B + 30B stack",
+    "deep_upgrade": "Add 30B deep coder",
+    "checksum_verified": true,
+    "auto_configure_after_download": true,
+    "restart_after_configure": false,
+    "live_runtime_reload": true,
+    "starter_auto_start": true,
+    "diagnostics": "Collapsed under Technical model status during setup",
+    "install_path_visible": true,
+    "free_disk_visible": true,
+    "top_level_progress": true,
+    "disk_preflight": true,
+    "active_plan_controls_locked": true,
+    "normal_windows_flow": "Installer bootstraps both 14B and 30B before setup completes",
+    "in_app_flow": "Recovery/portable/manual repair path",
+    "installer_skips_verified_models": true
   },
-  "hard_tool_safety_bypass": false,
-  "verified_code_checkpoint": "d398b77",
-  "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
-  "canonical_path_enforced": true,
-  "config_redirect_or_disable_after_initialization": false,
-  "signature_scheme": "ed25519",
-  "legacy_hmac_migration_on_creator_unlock": true,
-  "creator_private_key_in_public_export": false,
-  "public_export_read_only": true,
-  "public_export_creator_absent_verification": true,
-  "signed_update_policy": "newer signed Brain from exact same creator key only",
-  "stale_signed_update_ignored": true,
-  "different_creator_update_rejected": true,
-  "creator_install_auto_overwrite": false,
-  "installer_seed_env": "CHAT_NEXUS_BRAIN_SEED",
-  "installer_seed_path": "brain-seed/nexus-brain-locked.json",
-  "installer_seed_public_only": true,
-  "installer_seed_build_validation": true,
-  "adult_content_image_gate": true,
-  "audit_log": "data/nexus_brain.audit.jsonl \u2014 signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit",
-  "verified_test_count": 423,
-  "verified_ci_run_id": 36917101388,
-  "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
- },
- "takeover": {
-  "owner": "Devin",
-  "start_here": "DEVIN_START_HERE.md",
-  "branch": "main",
-  "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "d398b77",
-  "verified_test_count": 1637,
-  "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
-  "required_read_order": [
-   "DEVIN_START_HERE.md",
-   "README.md",
-   "PROJECT_STATUS.md",
-   "ARCHITECTURE.md",
-   "SESSION_HANDOFF.md",
-   ".agent/project.json"
-  ],
-  "must_update_before_end": [
-   "PROJECT_STATUS.md",
-   "SESSION_HANDOFF.md",
-   ".agent/project.json",
-   "DEVIN_START_HERE.md when takeover-critical state changes"
-  ],
-  "takeover_anchor_commit": "21aa4fb0090d7fbd1ef119d5026b5289b6a81e10"
- },
- "tool_system": {
-  "registry": "localcodeagent/tools/base.py (manifest-driven ToolSpec)",
-  "builtin_manifests": "localcodeagent/tools/manifests.py",
-  "interfaces": "localcodeagent/tools/interfaces.py",
-  "plugin_manifests_dir": "tools/manifests",
-  "permission_manager": "localcodeagent/permissions.py",
-  "job_manager": "localcodeagent/jobs.py",
-  "process_manager": "localcodeagent/processes.py",
-  "tools_ui": "/tools.html",
-  "state_files": [
-   "data/tools_state.json",
-   "data/jobs.json"
-  ],
-  "apis": [
-   "GET /api/tools",
-   "GET /api/tools/health/<id>",
-   "POST /api/tools/state",
-   "GET /api/permissions",
-   "POST /api/permissions/level",
-   "POST /api/permissions/profile",
-   "GET /api/jobs",
-   "POST /api/jobs/cancel",
-   "GET /api/processes",
-   "POST /api/processes/action",
-   "GET /api/resources",
-   "GET /api/tools/route/<capability>",
-   "GET /api/tools/telemetry",
-   "GET /api/mcp",
-   "POST /api/mcp/action",
-   "GET /api/skills",
-   "GET /api/skills/<name>",
-   "POST /api/skills/verify",
-   "POST /api/skills/install",
-   "POST /api/skills/update",
-   "POST /api/skills/enable|disable",
-   "POST /api/skills/rollback",
-   "POST /api/skills/remove",
-   "POST /api/skills/health"
-  ],
-  "skill_packages": "localcodeagent/skills/ \u00e2\u20ac\u201d verified skill.json/SKILL.md packages under data/skills; skills.manage-gated install/update/enable/disable/rollback/remove, bounded rollback snapshots, bounded package digests, declared or shell.execute-gated health checks",
-  "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
-  "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
-  "browser": "localcodeagent/webtools/browser.py \u2014 Playwright runner w/ sessions, console+network capture, extended actions, health probe",
-  "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep \u2014 live install status in Tool Manager",
-  "install_manager": "POST /api/tools/install \u2014 packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
-  "secrets": "localcodeagent/secrets.py \u2014 Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
-  "codeintel": "localcodeagent/tools/codeintel.py \u2014 code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
-  "computer_use": "localcodeagent/computer_use/ + tools/computer_use.py \u2014 granular desktop permissions, terminal action audit, sanitized typed/clipboard metadata",
-  "data": "localcodeagent/tools/data.py \u2014 data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
-  "models_ui": "/models.html",
-  "media": "localcodeagent/tools/media.py \u2014 media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
-  "documents": "localcodeagent/tools/documents.py \u2014 extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
-  "knowledge": "localcodeagent/tools/knowledge.py \u2014 local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
-  "sandbox": "localcodeagent/tools/sandbox.py \u2014 python_exec isolated -I interpreter in .agent/sandbox",
-  "workflows": "localcodeagent/tools/workflows.py \u2014 declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
-  "blender3d": "localcodeagent/tools/blender3d.py \u2014 blender_render scene-script generator delegating to blender manifest",
-  "events": "localcodeagent/events.py + GET /api/events \u2014 SSE bus for job/tool events; tools.js live refresh",
-  "capability_dispatch": "use_capability tool \u2014 model-callable ToolRouter dispatch (outcome-based tool selection)",
-  "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
-  "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
-  "workflows_api": "GET /api/workflows + Tools-page Workflows panel",
-  "work_queue": {
-   "durable": ".agent/queue.json",
-   "apis": [
-    "GET /api/queue",
-    "POST /api/queue",
-    "POST /api/queue/cancel"
-   ],
-   "agent_tools": [
-    "queue_task",
-    "queue_list",
-    "queue_cancel"
-   ],
-   "busy_chat": "chat_queue_when_busy auto-enqueues while a task is active"
+  "ci_hardening": "Installer/app smoke processes have explicit timeouts so hung setup/self-test runs fail deterministically.",
+  "routing_telemetry": {
+    "enabled_by_default": true,
+    "path": ".agent/model_performance.json",
+    "min_samples": 3,
+    "weight": 20,
+    "content_free": true,
+    "api": "GET /api/model-telemetry"
   },
-  "event_bus_reconnect": {
-   "bus": "localcodeagent/events.py EventBus \u2014 /api/events SSE, 100-event replay",
-   "mirroring": "non-token agent events publish with task_id via AppState._bus_emit",
-   "ui": "web/app.js connectAgentEvents + agentStreamActive dedup",
-   "transcript": ".agent/terminal/<task>.log, GET /api/task-log, pruned on load"
+  "model_switching": {
+    "accounts_for_reclaimable_resident_memory": true,
+    "auto_activation_fallback": true,
+    "reviewer_activation_fallback": true,
+    "durable_stream_error_recovery": true,
+    "managed_llama_near_ram_autofit": true,
+    "near_ram_margin": "max(2 GB, min(6 GB, 8% total system RAM))",
+    "observed_case": "30.0 GB estimated vs 29.8 GB available is allowed to runtime auto-fit"
   },
-  "autonomy": {
-   "autonomous_mode": "auto-approves ask/session; hard gates never auto-approve",
-   "bounds": [
-    "agent_tool_timeout_seconds",
-    "autonomous_max_continuations",
-    "autonomous_approval_timeout_seconds",
-    "autonomous_error_retry_seconds",
-    "autonomous_max_recoveries",
-    "model_idle_unload_seconds"
-   ]
-  }
- },
- "verified_tests": 1637,
- "head": "d398b77",
- "test_count": 1637,
- "branding": {
-  "canonical_name": "Nexus Core",
-  "full_logo": "web/assets/nexus-core-logo.png",
-  "compact_icon": "web/assets/nexus-core-icon.png",
-  "windows_icon": "desktop/ChatNexus.Desktop/nexus-core.ico (16-256px layers)",
-  "splash_artwork": "web/assets/nexus-core-splash.png + desktop copy",
-  "retired": "chat-nexus-emblem.png (orbital CN) no longer primary identity"
- },
- "startup_splash": {
-  "coordinator": "StartupProgress in desktop/ChatNexus.Desktop/Program.cs",
-  "minimum_seconds": 7,
-  "dismiss_rule": "AppReady AND MinimumElapsed; never timer-only",
-  "ready_handshake": "web/app.js posts {type:\"nexus-core-ready\"} via chrome.webview.postMessage after shell init",
-  "two_line_status": "ACTION \u00b7 SUBSYSTEM + secondary description under the progress bar",
-  "completion_effect": "READY \u00b7 NEXUS CORE + ~850ms shield-core glow bloom",
-  "failure_state": "NEXUS CORE COULD NOT START with Retry / Open Log (backend-host.log) / Exit",
-  "navigation_fallback": "NavigationCompleted + 15s bounded fallback prevents hangs on broken pages"
- },
- "voice_system": {
-  "engine": "kokoro-onnx 0.6.1 / Kokoro-82M ONNX v1.0 (Apache-2.0)",
-  "default_preset": "nexus-synthetic-isabella",
-  "docs": "docs/VOICE_SYSTEM.md",
-  "studio": "web/voice.html",
-  "api": "/api/voice/*",
-  "commits": [
-   "74a44ac",
-   "092840a"
-  ],
-  "packaged_assets": "build_windows.ps1 bundles SHA-256-verified kokoro-v1.0.onnx + voices-v1.0.bin into dist\\ChatNexus\\models\\voice (cache: packaging\\voice-assets); installer downloads hash-checked copies and skips verified files on update",
-  "idle_unload": "watchdog releases Kokoro model after voice_idle_unload_seconds of silence",
-  "packaged_verification": "NexusCore.exe --self-test green incl. voice.html probe; /api/voice/speak + /api/voice/audio verified on dist build"
- },
- "checkpoints": {}
+  "local_chat_latency": {
+    "lightweight_utility_route": true,
+    "utility_skips_repo_research_tools": true,
+    "qwen3_14b_default_reasoning": "off unless explicitly overridden",
+    "max_output_tokens": {
+      "qwen3_14b": 2048,
+      "qwen3_coder_30b": 8192,
+      "generic": 4096
+    },
+    "sse_worker_queue": true,
+    "heartbeat_seconds": 1,
+    "heartbeat_fields": [
+      "elapsed_seconds",
+      "phase",
+      "status",
+      "model_id",
+      "model_role"
+    ],
+    "client_heartbeat_status": true,
+    "builtin_greetings": true,
+    "builtin_capability_questions": true,
+    "builtin_model_id": "builtin-local",
+    "builtin_bypasses_model_readiness": true
+  },
+  "desktop_backend": {
+    "log_path": "data/logs/backend-host.log",
+    "redirects_stdout_stderr": true,
+    "unexpected_exit_restart": true,
+    "max_restart_attempts": 3,
+    "interrupted_tasks_remain_recoverable": true
+  },
+  "task_state": {
+    "newest_task_is_current": true,
+    "older_interrupted_remains_recent": true,
+    "stream_disconnect_request_scoped": true
+  },
+  "ui_cache": {
+    "static_assets_no_store": true,
+    "client_builtin_greeting_before_sse": true
+  },
+  "conversation_memory": {
+    "enabled_by_default": true,
+    "path": "data/conversation_memory.json",
+    "persists_across_restart_and_update": true,
+    "bounded_history": true,
+    "preferences_and_rules": true,
+    "correction_examples": true,
+    "prompt_injection_of_saved_rules": true,
+    "ui": "Local system → Memory & training",
+    "api": "GET /api/conversation-memory"
+  },
+  "stream_recovery": {
+    "durable_final_content": true,
+    "completed_result_recovery": true,
+    "request_scoped_task_matching": true,
+    "newest_durable_task_preferred": true
+  },
+  "routing": {
+    "short_non_coding_conversation": "utility",
+    "primary_14b_background_prewarm": true
+  },
+  "conversation_manager": {
+    "durable_sessions": true,
+    "search_restore": true,
+    "summaries": true,
+    "personality": true,
+    "scoped_memory": true,
+    "feedback": true,
+    "trainer_ui": "/trainer.html",
+    "temporal_continuity": true,
+    "recent_message_elapsed_context": true,
+    "previous_conversation_recency": true,
+    "mature_conversation_prompt": true,
+    "dry_humor_when_appropriate": true,
+    "lower_forced_followups": true,
+    "feedback_exact_message_pairing": true,
+    "verified_code_checkpoint": "d398b77",
+    "general_fact_commands": true,
+    "brain_autobiographical_sync": true,
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "knowledge_memory": {
+    "enabled": true,
+    "provenance": true,
+    "freshness": true,
+    "refresh_current_sensitive": true
+  },
+  "model_growth": {
+    "base_model_preserved": true,
+    "review_candidates": true,
+    "dataset_export": true,
+    "offline_training_jobs": [
+      "lora",
+      "qlora",
+      "full_finetune"
+    ],
+    "evaluation": true,
+    "promotion": true,
+    "rollback": true,
+    "positive_feedback_conversation_examples": true,
+    "negative_feedback_signals": true,
+    "negative_feedback_excluded_from_sft_targets": true,
+    "brain_training_signal_sync": true,
+    "portable_approved_skill_context": true,
+    "verified_code_checkpoint": "d398b77",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "conversation_policy": {
+    "default": "permissive",
+    "modes": [
+      "permissive",
+      "balanced",
+      "strict"
+    ],
+    "hard_safety_off_mode": false,
+    "live_api": [
+      "GET /api/policy",
+      "POST /api/policy/mode"
+    ],
+    "ui": "Local system → Conversation policy",
+    "purpose": "reduce generic topic-based refusals and moralizing while preserving narrow hard tool/action safety",
+    "ethical_temperature_default": 1,
+    "ethical_temperature_range": [
+      0,
+      1
+    ],
+    "sampling_temperature_default": 0.2,
+    "generic_refusal_retry": true,
+    "generic_refusal_retry_limit": 3,
+    "adult_only_consensual_explicit_text": true,
+    "profanity_is_not_sexual_content": true,
+    "generic_refusal_retry_limit_range": [
+      0,
+      5
+    ],
+    "rejected_refusal_removed_from_context": true,
+    "refusal_stream_buffering": true,
+    "refusal_exhaustion_reports_model_blocker": true,
+    "verified_code_checkpoint": "d398b77",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "direct_image_routing": {
+    "auto_text_to_image": true,
+    "bypasses_chat_model": true,
+    "permission_aware": true,
+    "approval_model_free": true,
+    "policy_source": "ImageSafetyPolicy",
+    "naked_term_explicit": true,
+    "specialized_edit_paths_preserved": true,
+    "commits": [
+      "d2959c9",
+      "55715dc",
+      "66170a4",
+      "0d0d0fc",
+      "45a34f8",
+      "cb1ae4c",
+      "fbf328c"
+    ],
+    "coding_model_preflight_bypass": true,
+    "natural_request_prefixes": true,
+    "source_image_edit_exclusion": true,
+    "verified_code_checkpoint": "d398b77",
+    "nexus_brain_adult_content_gate": true,
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388",
+    "default_text_to_image_model": "juggernaut-x-v10",
+    "editing_model": "qwen-image-2.1",
+    "fast_preview_model": "flux2-klein-4b",
+    "dedicated_upscaler_model": "realesrgan-x4plus",
+    "default_t2i_source": "RunDiffusion/Juggernaut-X-v10 @ e53841ec (sha256 d91d3573…0c45, OpenRAIL-M)"
+  },
+  "live_clock": {
+    "source": "host OS local clock via datetime.now().astimezone()",
+    "refreshed_each_user_turn": true,
+    "recovered_tasks_refresh": true,
+    "builtin_time_date_day_answers": true,
+    "timezone_aware": true,
+    "fields": [
+      "iso",
+      "date",
+      "time",
+      "weekday",
+      "timezone",
+      "utc_offset",
+      "human_date",
+      "human_time"
+    ],
+    "api": "GET /api/time",
+    "status_field": "clock",
+    "relative_time_grounding": [
+      "today",
+      "now",
+      "yesterday",
+      "tomorrow",
+      "this morning",
+      "this afternoon",
+      "tonight"
+    ],
+    "verified_code_checkpoint": "d398b77",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "activity_hud": {
+    "enabled": true,
+    "title": "NEXUS CORE // ACTIVE",
+    "style": "animated starship-console sci-fi HUD",
+    "high_level_only": true,
+    "private_chain_of_thought_exposed": false,
+    "elapsed_telemetry": true,
+    "event_types": [
+      "context",
+      "task_phase",
+      "model_route",
+      "model_switch",
+      "research",
+      "tool",
+      "verification",
+      "review",
+      "approval",
+      "image_generation",
+      "policy_retry"
+    ],
+    "compacts_on_token_stream": true,
+    "reduced_motion_support": true,
+    "verified_code_checkpoint": "d398b77",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "nexus_brain": {
+    "enabled": true,
+    "path": "data/nexus_brain.json",
+    "auth_path": "data/nexus_brain.auth.json",
+    "model_independent": true,
+    "preserved_on_update": true,
+    "protected_write_mode": "explicit creator-authenticated sync only",
+    "staging_sources": [
+      "conversation_memory",
+      "knowledge_memory",
+      "conversation_manager",
+      "model_growth"
+    ],
+    "records": [
+      "fact",
+      "rule",
+      "knowledge",
+      "training_signal",
+      "autobiographical"
+    ],
+    "creator_passcode_plaintext_stored": false,
+    "creator_session_token": "ephemeral in-memory Trainer token",
+    "integrity": "Ed25519 signed Brain payload with public verification; creator private signing key encrypted locally",
+    "tamper_detection": true,
+    "locked_export_import": true,
+    "verified_read_after_relock_same_process": true,
+    "fresh_process_requires_creator_verification": false,
+    "subroutines": [
+      "adult_content",
+      "image_generation",
+      "web_research",
+      "long_term_memory",
+      "self_learning",
+      "general_knowledge_learning",
+      "conversation_learning",
+      "model_growth",
+      "temporal_context",
+      "humor",
+      "emotions",
+      "self_model"
+    ],
+    "code_gated_routes": [
+      "image_generation",
+      "web_research",
+      "model_growth",
+      "adult_explicit_image_generation"
+    ],
+    "general_fact_commands": [
+      "Remember that ...",
+      "Learn that ...",
+      "Fact: ..."
+    ],
+    "sourced_general_knowledge": true,
+    "freshness_aware_knowledge_recall": true,
+    "portable_approved_conversation_skill_recall": true,
+    "autobiographical_continuity": true,
+    "emotion_profile_signed": true,
+    "transient_affect_engine": true,
+    "self_model": {
+      "human_like_behavior": true,
+      "autobiographical_continuity": true,
+      "stable_preferences": true,
+      "growth_enabled": true,
+      "immutable_identity_type": "AI system",
+      "biological_human_claim": false
+    },
+    "hard_tool_safety_bypass": false,
+    "verified_code_checkpoint": "d398b77",
+    "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
+    "canonical_path_enforced": true,
+    "config_redirect_or_disable_after_initialization": false,
+    "signature_scheme": "ed25519",
+    "legacy_hmac_migration_on_creator_unlock": true,
+    "creator_private_key_in_public_export": false,
+    "public_export_read_only": true,
+    "public_export_creator_absent_verification": true,
+    "signed_update_policy": "newer signed Brain from exact same creator key only",
+    "stale_signed_update_ignored": true,
+    "different_creator_update_rejected": true,
+    "creator_install_auto_overwrite": false,
+    "installer_seed_env": "CHAT_NEXUS_BRAIN_SEED",
+    "installer_seed_path": "brain-seed/nexus-brain-locked.json",
+    "installer_seed_public_only": true,
+    "installer_seed_build_validation": true,
+    "adult_content_image_gate": true,
+    "audit_log": "data/nexus_brain.audit.jsonl — signed saves, unlock attempts, distribution installs, signed-update decisions, tamper detection; GET /api/nexus-brain/audit",
+    "verified_test_count": 423,
+    "verified_ci_run_id": 36917101388,
+    "verified_ci_run_url": "https://github.com/afterburn25/Coding_Agent/actions/runs/36917101388"
+  },
+  "takeover": {
+    "owner": "Devin",
+    "start_here": "DEVIN_START_HERE.md",
+    "branch": "main",
+    "repository_head": "main (pull latest; do not pin to documentation commit)",
+    "verified_code_checkpoint": "d398b77",
+    "verified_test_count": 1637,
+    "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
+    "required_read_order": [
+      "DEVIN_START_HERE.md",
+      "README.md",
+      "PROJECT_STATUS.md",
+      "ARCHITECTURE.md",
+      "SESSION_HANDOFF.md",
+      ".agent/project.json"
+    ],
+    "must_update_before_end": [
+      "PROJECT_STATUS.md",
+      "SESSION_HANDOFF.md",
+      ".agent/project.json",
+      "DEVIN_START_HERE.md when takeover-critical state changes"
+    ],
+    "takeover_anchor_commit": "21aa4fb0090d7fbd1ef119d5026b5289b6a81e10"
+  },
+  "tool_system": {
+    "registry": "localcodeagent/tools/base.py (manifest-driven ToolSpec)",
+    "builtin_manifests": "localcodeagent/tools/manifests.py",
+    "interfaces": "localcodeagent/tools/interfaces.py",
+    "plugin_manifests_dir": "tools/manifests",
+    "permission_manager": "localcodeagent/permissions.py",
+    "job_manager": "localcodeagent/jobs.py",
+    "process_manager": "localcodeagent/processes.py",
+    "tools_ui": "/tools.html",
+    "state_files": [
+      "data/tools_state.json",
+      "data/jobs.json"
+    ],
+    "apis": [
+      "GET /api/tools",
+      "GET /api/tools/health/<id>",
+      "POST /api/tools/state",
+      "GET /api/permissions",
+      "POST /api/permissions/level",
+      "POST /api/permissions/profile",
+      "GET /api/jobs",
+      "POST /api/jobs/cancel",
+      "GET /api/processes",
+      "POST /api/processes/action",
+      "GET /api/resources",
+      "GET /api/tools/route/<capability>",
+      "GET /api/tools/telemetry",
+      "GET /api/mcp",
+      "POST /api/mcp/action",
+      "GET /api/skills",
+      "GET /api/skills/<name>",
+      "POST /api/skills/verify",
+      "POST /api/skills/install",
+      "POST /api/skills/update",
+      "POST /api/skills/enable|disable",
+      "POST /api/skills/rollback",
+      "POST /api/skills/remove",
+      "POST /api/skills/health"
+    ],
+    "skill_packages": "localcodeagent/skills/ â€” verified skill.json/SKILL.md packages under data/skills; skills.manage-gated install/update/enable/disable/rollback/remove, bounded rollback snapshots, bounded package digests, declared or shell.execute-gated health checks",
+    "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
+    "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
+    "browser": "localcodeagent/webtools/browser.py — Playwright runner w/ sessions, console+network capture, extended actions, health probe",
+    "bundled_manifests": "tools/manifests/: ffmpeg, ffprobe, whisper.cpp, tesseract, pandoc, duckdb, docker, blender, ripgrep — live install status in Tool Manager",
+    "install_manager": "POST /api/tools/install — packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
+    "secrets": "localcodeagent/secrets.py — Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
+    "codeintel": "localcodeagent/tools/codeintel.py — code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
+    "computer_use": "localcodeagent/computer_use/ + tools/computer_use.py — granular desktop permissions, terminal action audit, sanitized typed/clipboard metadata",
+    "data": "localcodeagent/tools/data.py — data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
+    "models_ui": "/models.html",
+    "media": "localcodeagent/tools/media.py — media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
+    "documents": "localcodeagent/tools/documents.py — extract_text (txt/md/html/csv/json/pdf), ocr_image->tesseract manifest, convert_document->pandoc manifest",
+    "knowledge": "localcodeagent/tools/knowledge.py — local keyword RAG index (.agent/knowledge_index.json, mtime-incremental, TF-IDF scoring)",
+    "sandbox": "localcodeagent/tools/sandbox.py — python_exec isolated -I interpreter in .agent/sandbox",
+    "workflows": "localcodeagent/tools/workflows.py — declarative multi-step pipelines (workflows/*.json, {params}/{steps} templating, JobManager-tracked)",
+    "blender3d": "localcodeagent/tools/blender3d.py — blender_render scene-script generator delegating to blender manifest",
+    "events": "localcodeagent/events.py + GET /api/events — SSE bus for job/tool events; tools.js live refresh",
+    "capability_dispatch": "use_capability tool — model-callable ToolRouter dispatch (outcome-based tool selection)",
+    "telemetry": "ToolRouter persists data/routing_telemetry.jsonl; stats() aggregates; learned score bonus feeds ranking; /api/tools/telemetry + Tools-page panel",
+    "git_worktrees": "git_worktree_add/list/remove under .agent/worktrees/ (git.execute gate)",
+    "workflows_api": "GET /api/workflows + Tools-page Workflows panel",
+    "work_queue": {
+      "durable": ".agent/queue.json",
+      "apis": [
+        "GET /api/queue",
+        "POST /api/queue",
+        "POST /api/queue/cancel"
+      ],
+      "agent_tools": [
+        "queue_task",
+        "queue_list",
+        "queue_cancel"
+      ],
+      "busy_chat": "chat_queue_when_busy auto-enqueues while a task is active"
+    },
+    "event_bus_reconnect": {
+      "bus": "localcodeagent/events.py EventBus — /api/events SSE, 100-event replay",
+      "mirroring": "non-token agent events publish with task_id via AppState._bus_emit",
+      "ui": "web/app.js connectAgentEvents + agentStreamActive dedup",
+      "transcript": ".agent/terminal/<task>.log, GET /api/task-log, pruned on load"
+    },
+    "autonomy": {
+      "autonomous_mode": "auto-approves ask/session; hard gates never auto-approve",
+      "bounds": [
+        "agent_tool_timeout_seconds",
+        "autonomous_max_continuations",
+        "autonomous_approval_timeout_seconds",
+        "autonomous_error_retry_seconds",
+        "autonomous_max_recoveries",
+        "model_idle_unload_seconds"
+      ]
+    }
+  },
+  "verified_tests": 1660,
+  "head": "d398b77",
+  "test_count": 1660,
+  "branding": {
+    "canonical_name": "Nexus Core",
+    "full_logo": "web/assets/nexus-core-logo.png",
+    "compact_icon": "web/assets/nexus-core-icon.png",
+    "windows_icon": "desktop/ChatNexus.Desktop/nexus-core.ico (16-256px layers)",
+    "splash_artwork": "web/assets/nexus-core-splash.png + desktop copy",
+    "retired": "chat-nexus-emblem.png (orbital CN) no longer primary identity"
+  },
+  "startup_splash": {
+    "coordinator": "StartupProgress in desktop/ChatNexus.Desktop/Program.cs",
+    "minimum_seconds": 7,
+    "dismiss_rule": "AppReady AND MinimumElapsed; never timer-only",
+    "ready_handshake": "web/app.js posts {type:\"nexus-core-ready\"} via chrome.webview.postMessage after shell init",
+    "two_line_status": "ACTION · SUBSYSTEM + secondary description under the progress bar",
+    "completion_effect": "READY · NEXUS CORE + ~850ms shield-core glow bloom",
+    "failure_state": "NEXUS CORE COULD NOT START with Retry / Open Log (backend-host.log) / Exit",
+    "navigation_fallback": "NavigationCompleted + 15s bounded fallback prevents hangs on broken pages"
+  },
+  "voice_system": {
+    "engine": "kokoro-onnx 0.6.1 / Kokoro-82M ONNX v1.0 (Apache-2.0)",
+    "default_preset": "nexus-synthetic-isabella",
+    "docs": "docs/VOICE_SYSTEM.md",
+    "studio": "web/voice.html",
+    "api": "/api/voice/*",
+    "commits": [
+      "74a44ac",
+      "092840a"
+    ],
+    "packaged_assets": "build_windows.ps1 bundles SHA-256-verified kokoro-v1.0.onnx + voices-v1.0.bin into dist\\ChatNexus\\models\\voice (cache: packaging\\voice-assets); installer downloads hash-checked copies and skips verified files on update",
+    "idle_unload": "watchdog releases Kokoro model after voice_idle_unload_seconds of silence",
+    "packaged_verification": "NexusCore.exe --self-test green incl. voice.html probe; /api/voice/speak + /api/voice/audio verified on dist build"
+  },
+  "checkpoints": {}
 }

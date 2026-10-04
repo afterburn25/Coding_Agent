@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import queue
+import re
 import secrets
 import sys
 import threading
@@ -553,6 +554,7 @@ class AppState:
                     persona_context=self._vocalization_context,
                 )
                 register_voice_tools(self.tools, self.voice)
+                self._start_notice_listener()
             except Exception as exc:
                 try:
                     self.events.publish("log",
@@ -3466,6 +3468,27 @@ class AppState:
             self.events.publish("worker", {"event": event_type, **payload})
         except Exception:
             pass
+        if event_type == "worker_finished":
+            w = payload.get("worker") or {}
+            if not w.get("user_initiated"):
+                return
+            outcome = str(payload.get("outcome") or w.get("status") or "")
+            kind = ("completed" if outcome == "completed"
+                    else "cancelled" if outcome in ("cancelled", "killed")
+                    else "failed")
+            title = str(w.get("title") or "").strip() or "the queued task"
+            fact = title if kind != "failed" \
+                else f"{title} — {outcome or 'failed'}"
+            self._speak_notice(f"worker-{w.get('id') or ''}", kind, fact)
+            return
+        if event_type == "queued_task_started":
+            w = payload.get("worker") or {}
+            if w.get("user_initiated") or payload.get("user_initiated"):
+                title = str(payload.get("title") or w.get("title")
+                            or "").strip() or "the queued task"
+                self._speak_notice(f"start-{w.get('id') or ''}",
+                                   "started", title)
+            return
         if event_type != "task_queued" or not payload.get("user_initiated"):
             return
         entry = payload.get("entry") or {}
@@ -3484,6 +3507,95 @@ class AppState:
             voice.enqueue(f"queue-{item_id}", self._queue_notice_line())
         except Exception:
             pass
+
+    def _speak_notice(self, dedup_id: str, kind: str, fact: str) -> None:
+        """Persona-wrapped spoken notice for worker/notification events.
+        Deduplicates by id against the shared announced set; silent when
+        voice is unavailable or muted (enqueue drops muted jobs)."""
+        if not dedup_id or dedup_id in self._queue_announced:
+            return
+        if len(self._queue_announced) > 512:
+            self._queue_announced.clear()
+        self._queue_announced.add(dedup_id)
+        voice = getattr(self, "voice", None)
+        if voice is None:
+            return
+        line = self._persona_notice(kind, fact) or str(fact or "").strip()
+        if not line:
+            return
+        try:
+            voice.enqueue(f"notice-{dedup_id}", line)
+        except Exception:
+            pass
+
+    # -- spoken notification listener -------------------------------------
+    # A single daemon drains the event bus; important/failure/approval/
+    # completion notifications become short spoken notices. Info-level
+    # rows only speak when they carry a report/briefing. Rate-limited so
+    # a noisy incident can't monologue at the user.
+
+    _SPOKEN_LEVELS = {"important", "failure", "approval", "completion"}
+    _LEVEL_KIND = {"completion": "completed", "failure": "failed",
+                   "approval": "approval", "important": "status",
+                   "info": "status"}
+    _NOTICE_GAP_S = 20.0      # min seconds between spoken notices
+    _NOTICE_GAP_URGENT_S = 5.0
+
+    def _start_notice_listener(self) -> None:
+        if getattr(self, "_notice_listener_started", False) \
+                or self.voice is None:
+            return
+        self._notice_listener_started = True
+        try:
+            q = self.events.subscribe(replay=0)
+        except Exception:
+            self._notice_listener_started = False
+            return
+        threading.Thread(target=self._notice_loop, args=(q,),
+                         daemon=True, name="nexus-voice-notices").start()
+
+    def _notice_loop(self, q: queue.Queue) -> None:
+        last_spoke = 0.0
+        while True:
+            try:
+                ev = q.get()
+            except Exception:
+                return
+            try:
+                level = str((ev.get("notification") or {}).get("level") or "")
+                gap = (self._NOTICE_GAP_URGENT_S
+                       if level in ("failure", "approval")
+                       else self._NOTICE_GAP_S)
+                now = time.time()
+                if now - last_spoke < gap:
+                    continue
+                line = self._spoken_notice_line(ev)
+                if not line:
+                    continue
+                last_spoke = now
+            except Exception:
+                continue
+
+    def _spoken_notice_line(self, ev: dict) -> bool:
+        """Speak one event if it warrants a voice notice. Returns True
+        when a line was enqueued."""
+        if ev.get("type") != "notification":
+            return False
+        row = ev.get("notification") or {}
+        level = str(row.get("level") or "")
+        title = str(row.get("title") or "").strip()
+        if level not in self._SPOKEN_LEVELS:
+            if level != "info" or not re.search(
+                    r"report|briefing|summary", title or
+                    str(row.get("message") or ""), re.I):
+                return False
+        fact = title or str(row.get("message") or "")[:90].strip()
+        kind = self._LEVEL_KIND.get(level, "status")
+        nid = str(row.get("id") or "")
+        if not nid or nid in self._queue_announced:
+            return False
+        self._speak_notice(nid, kind, fact)
+        return True
 
     def announce_prompt_queued(self, queue_item: dict) -> None:
         """Chat-busy /api/queue paths — same once-per-item guarantee."""

@@ -63,6 +63,11 @@ class ResolveResult:
 # added by _TOKEN_RE assembly). Order in the alternation is by descending
 # surface length so "mmmm" beats "mmm" and "mm-hmm" beats "hmm".
 _TOKENS: list[tuple[str, str, float, str, bool]] = [
+    # Multi-word forms precede their components — the alternation is
+    # first-match-wins, so "uh-oh" must outrank bare "uh" and "oh yes"
+    # must outrank bare "oh".
+    ("uh_oh",      "surprise",     0.5,  r"uh[-\s]?oh", False),
+    ("ohh_yes",    "pleasure",     0.5,  r"oh+\s+ye+s+|ye+s+!", False),
     # -- agreement / acknowledgment
     ("mm_hmm",     "agreement",    0.4, r"mm[-–\s]?hmm|mhm|mmhmm", False),
     ("uh_huh",     "agreement",    0.4, r"uh[-–\s]?huh", False),
@@ -94,7 +99,7 @@ _TOKENS: list[tuple[str, str, float, str, bool]] = [
     ("phew",       "relief",       0.6, r"phew+", False),
     # -- frustration / effort / discomfort
     ("ugh",        "frustration",  0.55, r"ugg?h+|ar+g+h|grr+", False),
-    ("oof",        "discomfort",   0.4, r"oo?f\b", False),
+    ("oof",        "discomfort",   0.4, r"o{2,}f+\b", False),
     ("ow",         "discomfort",   0.5, r"oww*!?|ouch", False),
     ("ngh",        "effort",       0.45, r"ngh+|ungh", False),
     ("hup",        "effort",       0.4, r"hup+\b", False),
@@ -126,6 +131,26 @@ _TOKENS: list[tuple[str, str, float, str, bool]] = [
     ("sigh",       "sigh",         0.45,
      r"sigh(?:s|ed|ing)?(?=[\s,.!?…*]|$)", False),
     ("breath",     "breathing",    0.35, r"(?:deep\s+)?breath(?=[\s,.!?…*]|$)", False),
+    # -- casual acknowledgments / verbal filler (unambiguous forms only —
+    # words like "right"/"alright" stay out: too common in real prose)
+    ("yep",        "agreement",    0.35, r"ye+p+(?:ers)?|yu+p+", False),
+    ("mkay",       "agreement",    0.35, r"m'?kay|mkay+", False),
+    ("gotcha",     "agreement",    0.4,  r"gotcha", False),
+    ("nope",       "disagreement", 0.4,  r"no+pe|nah+", False),
+    # -- reaction interjections
+    ("welp",       "discomfort",   0.4,  r"wel+p", False),
+    ("sheesh",     "annoyance",    0.45, r"she+sh", False),
+    ("jeez",       "annoyance",    0.4,  r"je+ez|jeez", False),
+    ("yikes",      "discomfort",   0.45, r"yi+kes", False),
+    ("whew",       "relief",       0.5,  r"whe+w", False),
+    ("dang",       "surprise",     0.35, r"da+ng|darn", False),
+    ("gosh",       "surprise",     0.3,  r"go+sh", False),
+    ("hmph",       "annoyance", 0.4,  r"hmp+h|harrumph", False),
+    ("mwah",       "pleasure",     0.45, r"mwa+h+", False),
+    ("aight",      "agreement",    0.35, r"a'?ight", False),
+    # -- longer laugh / delight forms
+    ("bwahaha",    "amusement",    0.6,  r"bwa+(?:ha){2,}|mu+(?:ha){2,}", False),
+    ("tee_hee",    "playfulness",  0.45, r"tee[-\s]?hee+", False),
 ]
 
 # Stage-direction inner phrases: "*sighs*", "(giggles)", "*clears throat*".
@@ -181,6 +206,40 @@ _STAGE: dict[str, tuple[str, str, float]] = {
     "whistles": ("whistle", "playfulness", 0.45),
     "pauses": ("pause", "thinking", 0.25),
     "bites lip": ("nervous", "embarrassment", 0.4),
+    "smirks": ("smirk", "dismissive", 0.4),
+    "smirks slightly": ("smirk", "dismissive", 0.35),
+    "winces": ("wince", "discomfort", 0.5),
+    "nods": ("nod", "agreement", 0.3),
+    "nods slowly": ("nod", "agreement", 0.35),
+    "shakes head": ("head_shake", "disagreement", 0.45),
+    "shakes her head": ("head_shake", "disagreement", 0.45),
+    "shakes his head": ("head_shake", "disagreement", 0.45),
+    "raises an eyebrow": ("eyebrow_raise", "surprise", 0.45),
+    "raises eyebrow": ("eyebrow_raise", "surprise", 0.45),
+    "breathes out": ("exhale", "breathing", 0.4),
+    "mutters": ("mutter", "frustration", 0.4),
+    "mutters under her breath": ("mutter", "frustration", 0.5),
+    "mutters under his breath": ("mutter", "frustration", 0.5),
+    "whispers": ("whisper", "warmth", 0.35),
+    "whispers softly": ("whisper", "warmth", 0.3),
+    "laughs softly": ("soft_laugh", "amusement", 0.5),
+    "laughs warmly": ("warm_laugh", "warmth", 0.5),
+    "snorts": ("snort", "amusement", 0.5),
+    "snorts softly": ("snort", "amusement", 0.4),
+    "hums a tune": ("hum", "humming", 0.45),
+    "sighs happily": ("sigh_content", "pleasure", 0.4),
+    "sighs contentedly": ("sigh_content", "pleasure", 0.4),
+    "sighs wistfully": ("sigh_soft", "sadness", 0.45),
+    "giggles softly": ("giggle", "playfulness", 0.4),
+    "cracks a smile": ("smile", "amusement", 0.4),
+    "grins widely": ("grin", "amusement", 0.5),
+    "leans in": ("lean_in", "curiosity", 0.4),
+    "leans back": ("lean_back", "thinking", 0.35),
+    "rolls her eyes": ("eye_roll", "annoyance", 0.5),
+    "rolls his eyes": ("eye_roll", "annoyance", 0.5),
+    "stretches": ("stretch", "fatigue", 0.4),
+    "perks up": ("perk_up", "excitement", 0.45),
+    "sits up": ("perk_up", "excitement", 0.4),
 }
 
 # Gesture paired with each category — semantic events only; the avatar
@@ -199,7 +258,7 @@ _GESTURE: dict[str, str] = {
     "sigh": "subtle_exhale", "breathing": "subtle_exhale",
     "humming": "contented_expression", "discomfort": "wince",
     "effort": "wince", "embarrassment": "look_away",
-    "warmth": "soft_smile",
+    "warmth": "soft_smile", "excitement": "bright_eyes",
 }
 
 # ---------------------------------------------------------------------------
@@ -320,6 +379,25 @@ _KOKORO_FORMS: dict[str, tuple[str, str | None]] = {
     "psst": ("pssst.", None),
     "sigh": ("ahhh…", "hhh-ahh…"),
     "breath": ("hah…", None),
+    # casual acknowledgments / interjections
+    "yep": ("yep.", None),
+    "mkay": ("mm-kay.", None),
+    "gotcha": ("gotcha.", None),
+    "nope": ("nope.", None),
+    "uh_oh": ("uh-oh.", None),
+    "welp": ("welp.", None),
+    "sheesh": ("sheesh.", None),
+    "jeez": ("jeez.", None),
+    "yikes": ("yikes.", None),
+    "whew": ("whew.", None),
+    "dang": ("dang.", None),
+    "gosh": ("gosh.", None),
+    "hmph": ("hmph.", None),
+    "mwah": ("mwah.", None),
+    "aight": ("a'ight.", None),
+    "bwahaha": ("ba-ha-ha!", None),
+    "tee_hee": ("tee-hee.", "tee-hee…"),
+    "ohh_yes": ("ohh, yes.", "ohh, yes…"),
     # stage-direction styles
     "sigh_soft": ("ahh…", "hhh-ahh…"),
     "sigh_deep": ("ahhh…", "haahh…"),
@@ -346,6 +424,24 @@ _KOKORO_FORMS: dict[str, tuple[str, str | None]] = {
     "whistle": ("hmm hmm.", None),
     "pause": ("…", None),
     "nervous": ("hmm…", None),
+    # gesture-dominant stage actions — render as the small sound that
+    # would accompany them rather than literal action description.
+    "smirk": ("heh.", None),
+    "wince": ("hmm.", None),
+    "nod": ("mm-hmm.", None),
+    "head_shake": ("mm-mm.", None),
+    "eyebrow_raise": ("hmm?", None),
+    "mutter": ("hmm…", None),
+    "whisper": ("hmm…", None),
+    "warm_laugh": ("ha, ha.", "hmm, ha…"),
+    "snort": ("hng.", None),
+    "sigh_content": ("ahhh…", "mmm…"),
+    "grin": ("heh.", None),
+    "lean_in": ("hmm?", None),
+    "lean_back": ("hmm…", None),
+    "eye_roll": ("huh.", None),
+    "stretch": ("mmh…", None),
+    "perk_up": ("oh!", None),
 }
 
 
@@ -443,7 +539,7 @@ _TOKEN_RE = re.compile(
 # Word-level tokens that are also ordinary prose words ("a sigh of
 # relief", "take a breath") only count when they stand alone as an
 # interjection — line start or after sentence punctuation.
-_STANDALONE_WORDS = {"sigh", "breath"}
+_STANDALONE_WORDS = {"sigh", "breath", "gasp", "sniff", "yawn", "scoff"}
 
 
 # User-message → candidate lead vocalization categories. A lead is a
@@ -468,6 +564,25 @@ _LEAD_TRIGGERS: list[tuple[re.Pattern, list[tuple[str, str, float]]]] = [
     (re.compile(r"\b(?:rough day|so tired|exhausted|sad|upset|"
                 r"frustrated with)\b", re.I),
      [("aww", "sympathy", 0.45), ("sigh_soft", "sympathy", 0.4)]),
+    (re.compile(r"\b(?:sorry|apolog(?:y|ies|ize)|my bad|my mistake)\b",
+                re.I),
+     [("aww", "sympathy", 0.3), ("mmm_pleased", "warmth", 0.35)]),
+    (re.compile(r"\b(?:wow|whoa|no way|really\?|are you serious|"
+                r"what the)\b", re.I),
+     [("aha", "realization", 0.4), ("gasp", "surprise", 0.45)]),
+    (re.compile(r"\b(?:excited|can't wait|awesome|amazing|"
+                r"let's go|heck yeah)\b", re.I),
+     [("perk_up", "excitement", 0.45), ("soft_laugh", "amusement", 0.4)]),
+    (re.compile(r"\b(?:good morning|good evening|good afternoon|"
+                r"hey there|hello again)\b", re.I),
+     [("mmm_pleased", "warmth", 0.35), ("hum", "humming", 0.3)]),
+    (re.compile(r"\b(?:worried|anxious|nervous|concerned about)\b", re.I),
+     [("hmm", "thinking", 0.35), ("sigh_soft", "sympathy", 0.4)]),
+    (re.compile(r"\b(?:welp|here we go|again\?|not again)\b", re.I),
+     [("sigh_frustrated", "frustration", 0.4), ("hmm", "thinking", 0.35)]),
+    (re.compile(r"\b(?:congrats|congratulations|well done|"
+                r"nice work|proud)\b", re.I),
+     [("yay", "celebration", 0.45), ("soft_laugh", "warmth", 0.4)]),
 ]
 
 
@@ -544,6 +659,18 @@ class VocalizationEngine:
             targets.append("amusement")
         if re.search(r"(fewer|less|stop)\s+\w*\s*hum", t):
             targets.extend(("pleasure", "humming", "thinking"))
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*giggl", t):
+            targets.extend(("playfulness", "amusement"))
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*gas?p", t):
+            targets.append("surprise")
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*moan", t):
+            targets.append("pleasure")
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*yawn", t):
+            targets.append("fatigue")
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*whisper", t):
+            targets.append("warmth")
+        if re.search(r"(fewer|less|stop|no more)\s+\w*\s*groan", t):
+            targets.append("frustration")
         if "vocalization" in t and re.search(r"(off|stop|fewer|less)", t):
             targets.extend(_GESTURE)
         for cat in targets:

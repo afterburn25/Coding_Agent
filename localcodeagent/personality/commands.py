@@ -85,6 +85,28 @@ _TONE_DOWN = re.compile(
     r"^\s*(?:please\s+)?(?:tone\s+down|dial\s+(?:it\s+)?(?:down|back)|"
     r"ease\s+up\s+on|cut\s+(?:back\s+on|out)|stop\s+being\s+so)\s+"
     r"(?:the\s+|your\s+)?(\w+(?:\s+\w+)?)\s*(.*?)\s*$", re.I)
+# Comparative adjectives carry their own direction — "be nicer" needs
+# no "more". word → (slider, sign).
+_COMPARATIVES: dict[str, tuple[str, int]] = {
+    "nicer": ("friendliness", 1), "friendlier": ("friendliness", 1),
+    "kinder": ("friendliness", 1), "sweeter": ("warmth", 1),
+    "warmer": ("warmth", 1), "gentler": ("warmth", 1),
+    "meaner": ("rudeness", 1), "ruder": ("rudeness", 1),
+    "funnier": ("humor", 1), "sassier": ("sass", 1),
+    "snarkier": ("sarcasm", 1), "calmer": ("calmness", 1),
+    "chattier": ("verbosity", 1), "quieter": ("verbosity", -1),
+    "briefer": ("verbosity", -1), "shorter": ("verbosity", -1),
+    "sharper": ("directness", 1), "blunter": ("directness", 1),
+    "nerdier": ("nerdiness", 1), "livelier": ("energy", 1),
+    "bouncier": ("energy", 1),
+}
+_BE_ADJ = re.compile(
+    r"^\s*(?:please\s+)?(?:be|act|talk|sound|respond|answer)\s+"
+    r"(?:a\s+(?:little|bit|lot)\s+)?"
+    r"(nicer|friendlier|kinder|sweeter|warmer|gentler|meaner|ruder|"
+    r"funnier|sassier|snarkier|calmer|chattier|quieter|briefer|"
+    r"shorter|sharper|blunter|nerdier|livelier|bouncier)"
+    r"\s*(.*?)\s*$", re.I)
 _USE_MODE = re.compile(
     r"^\s*(?:please\s+)?(?:use|switch\s+to|go\s+into|enter)\s+"
     r"(\w+)\s+mode\s*(.*?)\s*$", re.I)
@@ -99,8 +121,9 @@ _RESET_TEMP = re.compile(
     r"^\s*(?:please\s+)?(?:back\s+to\s+normal|be\s+yourself\s+again|"
     r"drop\s+the\s+(?:modifier|act|mode))\b", re.I)
 _ADDRESS = re.compile(
-    r"^\s*(?:please\s+)?(?:call\s+me|address\s+me\s+as|"
-    r"my\s+name\s+is)\s+([A-Za-z0-9' _.-]{1,40})\s*\.?\s*$", re.I)
+    r"^\s*(?:please\s+)?(?:you\s+can\s+)?(?:call\s+me|"
+    r"address\s+me\s+as|my\s+name\s+is)\s+"
+    r"([A-Za-z0-9' _.-]{1,40})\s*\.?\s*$", re.I)
 _NO_NAME = re.compile(
     r"^\s*(?:please\s+)?(?:don'?t|do\s+not|stop)\s+"
     r"(?:use\s+my\s+name|call\s+me\s+(?:by\s+)?name)\b", re.I)
@@ -154,7 +177,7 @@ def parse_persona_command(text: str) -> dict | None:
         return {"op": "address", "address": ""}
     m = _ADDRESS.match(t)
     if m:
-        name = m.group(1).strip()
+        name = m.group(1).strip().rstrip(".")
         # Guard against "call me when it's done" style captures —
         # a name is ≤3 words and doesn't open with a function word.
         words = name.split()
@@ -191,6 +214,20 @@ def parse_persona_command(text: str) -> dict | None:
                         "note": note, "ttl_seconds": ttl, "scope": scope}
             return {"op": "overlay", "trait_offsets": off,
                     "note": note}
+
+    m = _BE_ADJ.match(t)
+    if m:
+        word = m.group(1).lower()
+        trait, sign = _COMPARATIVES[word]
+        if trait in schema.SLIDERS:
+            off = {trait: sign * _STEP}
+            ttl, scope = _duration(m.group(2) or "")
+            if ttl or scope == "task":
+                return {"op": "modifier", "trait_offsets": off,
+                        "note": f"be {word}", "ttl_seconds": ttl,
+                        "scope": scope}
+            return {"op": "overlay", "trait_offsets": off,
+                    "note": f"be {word}"}
 
     m = _TRAIT_CMD.match(t)
     if m:

@@ -609,6 +609,8 @@ class AdaptiveWorkerManager:
             if self._ceiling < self.max_workers and self._clean_streak >= 5:
                 self._ceiling += 1
                 self._clean_streak = 0
+        self._emit("worker_finished", {"worker": row,
+                                       "outcome": w.status})
 
     def record_resource_failure(self) -> None:
         """OOM / backend crash / GPU error → immediately reduce safe

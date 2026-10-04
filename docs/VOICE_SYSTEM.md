@@ -171,6 +171,28 @@ streamer / direct text
 - Code/JSON/structured output never enters this path — the fence-aware
   streamer and filter drop it upstream.
 
+## Spoken notices (v0.18.0)
+
+User-visible system activity speaks through the same persona layer:
+
+- **Worker lifecycle** — user-initiated queued work announces
+  `queued → started → completed / failed / cancelled` via
+  `persona_notice` (`_speak_notice`), once per event, mute-respecting
+  (muted jobs are dropped in the speech queue). Background/mission
+  worker churn never speaks.
+- **Notifications** — a daemon (`nexus-voice-notices`) drains the event
+  bus; `important`/`failure`/`approval`/`completion` rows — plus
+  info-level report/briefing rows — become short persona-flavored
+  spoken notices. Rate-limited (20s gap, 5s for failure/approval) so a
+  noisy incident cannot monologue; deduplicated by notification id.
+- **Vocabulary** — the engine knows ~18 additional casual token forms
+  (yep/mkay/gotcha/nope, uh-oh, welp, yikes, whew, bwahaha…), ~25 more
+  stage directions (smirks, nods, winces, perks up, rolls eyes,
+  whispers, sighs happily…), render forms for every style, and
+  feedback categories for giggles/gasps/moans/yawns/whispers/groans.
+  Multi-word forms outrank their components ("uh-oh" ≠ "uh"), and
+  prose words ("of"/"off", "a gasp", "she scoffed") aren't vocalized.
+
 Personality Studio gains a *Natural Vocalizations* section: level select
 (profile-scoped) + per-style preview buttons hitting
 `GET /api/voice/vocalizations` (style catalog) and `POST /api/voice/preview`.
