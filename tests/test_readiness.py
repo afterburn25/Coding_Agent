@@ -309,7 +309,34 @@ class ModelSetupPlannerTests(unittest.TestCase):
             self.assertEqual(changes["roles_merged"], [])
             self.assertEqual(changes["added"], [])
 
-    def test_setup_writer_preserves_non_model_config(self):
+    def test_autodetect_reenables_profile_when_file_reappears(self):
+        """Auto-disabled profiles (marker set) come back when the GGUF
+        returns — e.g. a fresh install downloads its models after first
+        boot. User-disabled profiles (no marker) stay off."""
+        with tempfile.TemporaryDirectory() as td:
+            m = self._profile("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf", ["primary_coder"])
+            changes = apply_detected_models([m], [], Path(td))
+            self.assertEqual(changes["disabled"], ["qwen3-14b"])
+            self.assertFalse(m.enabled)
+            self.assertTrue(m.auto_disabled)
+            inv = self._inventory(Path(td), [("Qwen3-14B-Q4_K_M.gguf", 9.0)])
+            changes = apply_detected_models([m], inv, Path(td))
+            self.assertEqual(changes["reenabled"], ["qwen3-14b"])
+            self.assertTrue(m.enabled)
+            self.assertFalse(m.auto_disabled)
+
+    def test_router_allows_all_disabled_models(self):
+        """A config with every profile disabled (fresh install before any
+        download, or user-disabled) must still boot — selection errors
+        per request instead of crashing startup."""
+        from localcodeagent.models.router import ModelRouter
+        m = self._profile("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf",
+                          ["primary_coder"], enabled=False)
+        router = ModelRouter([m])
+        self.assertEqual(router.enabled_models, [])
+        self.assertEqual(router.get_profile("qwen3-14b").id, "qwen3-14b")
+        with self.assertRaises(ValueError):
+            router.choose("hello")
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "config.json"
             path.write_text('{"research_enabled": false, "permissions": {"filesystem.read": "allow"}, "models": []}\n', encoding="utf-8")

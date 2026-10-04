@@ -48,9 +48,10 @@ class ModelRouter:
         resource_advisor: ResourceAdvisor | None = None,
         performance_advisor: PerformanceAdvisor | None = None,
     ) -> None:
-        self.models = [m for m in models if m.enabled]
-        if not self.models:
-            raise ValueError("At least one enabled model profile is required")
+        self.models = list(models)
+        # Routing pool excludes disabled profiles, but an all-disabled config
+        # must not brick the app — selection errors per request instead.
+        self.enabled_models = [m for m in models if m.enabled]
         self.resource_advisor = resource_advisor
         self.performance_advisor = performance_advisor
 
@@ -153,7 +154,7 @@ class ModelRouter:
         exclude_model_ids: set[str] | None = None,
     ) -> RoutingDecision:
         excluded = set(exclude_model_ids or ())
-        available_models = [model for model in self.models if model.id not in excluded]
+        available_models = [model for model in self.enabled_models if model.id not in excluded]
         if not available_models:
             raise ValueError("No enabled model remains after excluding failed candidates")
 

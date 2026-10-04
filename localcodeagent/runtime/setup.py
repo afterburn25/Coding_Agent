@@ -175,15 +175,16 @@ def apply_detected_models(
       absorbs that role — e.g. deleting the 30B hands deep_reasoner to
       the largest remaining model instead of leaving the lane dead.
     - An enabled llama_cpp profile whose file no longer exists is
-      disabled so the router can never select a dead endpoint.
-    - Disabled profiles are never re-enabled or role-edited: a user who
-      turned a model off stays off.
+      disabled (marked ``auto_disabled``) so the router can never select
+      a dead endpoint; if the file reappears the profile is re-enabled.
+    - User-disabled profiles are never re-enabled or role-edited: a user
+      who turned a model off stays off.
 
     Mutates ``models`` in place; callers persist when the returned
     summary is non-empty.
     """
     changes: dict[str, list[str]] = {
-        "added": [], "roles_merged": [], "disabled": []}
+        "added": [], "roles_merged": [], "disabled": [], "reenabled": []}
     base = Path(base_dir).resolve()
     by_name = {
         Path(str(m.model_path or "")).name.lower(): m
@@ -198,15 +199,24 @@ def apply_detected_models(
         Path(str(row.get("path") or "")).name.lower()
         for row in inventory if row.get("path")}
     for m in models:
-        if m.runtime != "llama_cpp" or not m.enabled or not m.model_path:
+        if m.runtime != "llama_cpp" or not m.model_path:
             continue
         mp = Path(str(m.model_path))
-        if mp.name.lower() in disk_names:
-            continue
-        candidates = [mp] if mp.is_absolute() else [
-            base / mp, base / "models" / mp.name]
-        if not any(c.is_file() for c in candidates):
+        present = mp.name.lower() in disk_names
+        if not present:
+            candidates = [mp] if mp.is_absolute() else [
+                base / mp, base / "models" / mp.name]
+            present = any(c.is_file() for c in candidates)
+        if present:
+            if not m.enabled and m.auto_disabled:
+                # The file came back (download finished, drive remounted) —
+                # restore only profiles autodetect itself turned off.
+                m.enabled = True
+                m.auto_disabled = False
+                changes["reenabled"].append(m.id)
+        elif m.enabled:
             m.enabled = False
+            m.auto_disabled = True
             changes["disabled"].append(m.id)
 
     covered = {

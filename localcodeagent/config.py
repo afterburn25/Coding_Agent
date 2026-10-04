@@ -21,6 +21,9 @@ class ModelProfile:
     vision: bool = False
     priority: int = 50
     enabled: bool = True
+    # Set by autodetect when the backing file vanished — lets a reappearing
+    # file re-enable the profile without reviving user-disabled ones.
+    auto_disabled: bool = False
     api_key: str = "local"
     notes: str = ""
 
