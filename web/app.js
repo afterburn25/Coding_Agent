@@ -809,8 +809,10 @@ form.addEventListener('submit',()=>{setTimeout(()=>{input.style.height='';},0);}
 connectAgentEvents();
 // History paints on its own track — a busy backend (model inference,
 // repair missions) must not leave the chat blank while it waits on
-// status/readiness probes.
-loadConversations().then(convos=>{const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});
+// status/readiness probes. Profile status resolves first so user-message
+// avatars don't paint before NexusProfile knows who's active.
+Promise.resolve(window.NexusProfile?.refresh?.()).catch(()=>{}).finally(()=>{
+loadConversations().then(convos=>{const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});});
 loadStatus().then(async()=>{await Promise.all([loadReadiness(),loadConversationMemory()]);}).finally(()=>{
   // Readiness handshake: the desktop host holds the splash screen until the
   // main shell has actually initialized, so the user never sees a blank window.

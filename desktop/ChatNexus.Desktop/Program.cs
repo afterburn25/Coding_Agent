@@ -849,8 +849,20 @@ internal sealed class BackendProcess : IDisposable
         {
             if (!_process.HasExited)
             {
-                _process.Kill(entireProcessTree: true);
-                _process.WaitForExit(5000);
+                // Ask the backend to close gracefully first — a clean exit
+                // lets it mark the session, flush state, and stop model
+                // runtimes. The kill stays as the fallback for a hung stop.
+                try
+                {
+                    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                    client.PostAsync($"{BaseUrl}api/shutdown", new StringContent("{}", System.Text.Encoding.UTF8, "application/json")).Wait(3000);
+                }
+                catch { }
+                if (!_process.WaitForExit(8000))
+                {
+                    _process.Kill(entireProcessTree: true);
+                    _process.WaitForExit(5000);
+                }
             }
         }
         catch

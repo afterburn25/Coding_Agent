@@ -218,12 +218,31 @@ class ProfileAPI:
             is_adult=_is_adult(p))
         health = "ok"
         try:
-            health = "ok" if self.state.health.overall() == "healthy" \
-                else "degraded"
+            # Probe fresh — at greeting time the periodic tick may not have
+            # run yet, leaving every component reading "starting". And treat
+            # "stopped" as fine: models and ComfyUI sit idle by design until
+            # first use, so idle is not a failure worth announcing.
+            states = {
+                name: self.state.health.check(name)
+                for name in list(self.state.health.components)
+            }
+            if any(s in {"degraded", "overloaded", "hung", "crashed",
+                         "restarting", "starting"} for s in states.values()):
+                health = "degraded"
         except Exception:
             pass
         g = self._greetings(pid).greeting(
             p, personality, is_adult=_is_adult(p), health=health)
+        # Report a dirty previous session once — she explains the crash and
+        # what recovery found rather than greeting like nothing happened.
+        prior = getattr(self.state, "prior_session_abnormal", None)
+        if prior and not getattr(self.state, "_crash_greeting_given", False):
+            self.state._crash_greeting_given = True
+            g["text"] += (
+                " (Also — my last session ended without a clean shutdown, "
+                "so a crash or forced close. I ran recovery checks on "
+                "startup; there's a crash report in notifications if you "
+                "want the details.)")
         if g["kind"] == "intro":
             self.mgr.mark_intro_completed(pid)
         h._json(g)

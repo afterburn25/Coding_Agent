@@ -315,6 +315,14 @@ class AppState:
         self.health = HealthService(runtime_root / "data" / "health.json")
         self.profiles = ProfileManager(runtime_root / "data" / "profiles")
         self.profile_api = ProfileAPI(self)
+        # Session marker — written dirty at boot, flipped clean by
+        # stop_state. A dirty record on next launch means the previous
+        # session ended without a graceful shutdown (kill, power loss, or
+        # crash) — surfaced as a startup report and greeting note.
+        self._session_marker = runtime_root / "data" / "session.json"
+        self._session_started = time.time()
+        self.prior_session_abnormal = self._read_prior_session()
+        self._write_session_marker(clean=False)
         # Durable crash/recovery history — patterns feed diagnostics, the
         # tuner and Digital Twin calibration across restarts.
         netdiag.configure_history(runtime_root / "data" / "crash_history.jsonl")
@@ -612,6 +620,7 @@ class AppState:
         self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
+        self._report_prior_crash()
         self.queue.enrich = self._queue_enrich_mission
         self._boot(92, "INITIALIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
         try:
@@ -900,6 +909,57 @@ class AppState:
         self._resume_thread = threading.Thread(
             target=resume, name="auto-resume-interrupted", daemon=True)
         self._resume_thread.start()
+
+    def _report_prior_crash(self) -> None:
+        """Surface a dirty previous session as a notification + diagnostics.
+
+        The crash history's last fault inside the prior session's window is
+        the best evidence of what was happening when it died."""
+        prior = getattr(self, "prior_session_abnormal", None)
+        if not prior:
+            return
+        try:
+            started = float(prior.get("started") or 0)
+            faults = [r for r in netdiag.crash_history(200)
+                      if float(r.get("time") or 0) >= started]
+            last = faults[-1] if faults else {}
+            detail = ""
+            if last:
+                detail = (
+                    f" Last recorded fault: {last.get('subsystem', 'unknown')}"
+                    f" — {last.get('kind', 'unclassified')}."
+                )
+            when = time.strftime("%H:%M", time.localtime(started)) if started else "earlier"
+            self.autonomy.notifications.notify(
+                f"Previous session (started {when}) ended without a clean "
+                "shutdown — crash or forced close. Startup recovery checks "
+                f"completed; interrupted work can be resumed.{detail}",
+                level="failure", title="Crash recovery")
+        except Exception:
+            pass
+
+    def _read_prior_session(self) -> dict | None:
+        """Return the previous session record when it ended dirty."""
+        try:
+            rec = json.loads(
+                self._session_marker.read_text(encoding="utf-8"))
+            if isinstance(rec, dict) and not rec.get("clean_shutdown"):
+                return rec
+        except Exception:
+            pass
+        return None
+
+    def _write_session_marker(self, *, clean: bool) -> None:
+        try:
+            self._session_marker.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(self._session_marker, json.dumps({
+                "pid": os.getpid(),
+                "started": self._session_started,
+                "clean_shutdown": clean,
+                "ended": time.time() if clean else None,
+            }))
+        except Exception:
+            pass
 
     def close(self) -> None:
         """Stop background work and release held resources.
@@ -6280,6 +6340,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.state.runtime.summary(probe_external=True))
                 return
 
+            if path == "/api/shutdown":
+                # Graceful close — the desktop host calls this before killing
+                # so the session marker flips clean and model runtimes stop
+                # through stop_state instead of dying mid-write.
+                self._json({"ok": True})
+                try:
+                    stop = getattr(self.state, "_shutdown", None)
+                    if stop is not None:
+                        stop.set()
+                    threading.Thread(
+                        target=self.server.shutdown, daemon=True).start()
+                except Exception:
+                    pass
+                return
+
             if path == "/api/chat/reset":
                 row = self.state.conversation_manager.create("New chat")
                 self.state.history = []
@@ -6590,6 +6665,12 @@ def create_server(
 
 
 def stop_state(state: AppState) -> None:
+    # Mark the session clean up front — a graceful shutdown intent is what
+    # the next launch reads; teardown work below can only add detail.
+    try:
+        state._write_session_marker(clean=True)
+    except Exception:
+        pass
     try:
         stop = getattr(state, "_shutdown", None)
         if stop is not None:
