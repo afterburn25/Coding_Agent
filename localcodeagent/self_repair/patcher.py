@@ -49,9 +49,13 @@ class Patcher:
                           str(wt), "HEAD")
             if r.returncode == 0:
                 return wt
-            # stale branch or locked tree — clean and retry once
-            self._git("branch", "-D", f"repair/{incident_id}")
+            # Stale branch/registration — the worktree dir may be gone but
+            # git still lists repair/<id> as checked out, so `branch -D`
+            # would refuse. Drop the worktree registration first, then the
+            # branch, then retry once.
+            self._git("worktree", "remove", "--force", str(wt))
             self._git("worktree", "prune")
+            self._git("branch", "-D", f"repair/{incident_id}")
             r = self._git("worktree", "add", "-b",
                           f"repair/{incident_id}", str(wt), "HEAD")
             if r.returncode == 0:
@@ -59,11 +63,12 @@ class Patcher:
         # Fallback sandbox: copy the repo shallowly (code only) so tests
         # still exercise the pipeline where git is unavailable.
         wt.mkdir(parents=True, exist_ok=True)
-        for name in ("localcodeagent", "tests", "installer",
-                     "packaging", "scripts"):
-            src = self.repo_root / name
-            if src.is_dir():
-                shutil.copytree(src, wt / name,
+        skip = {".git", ".repair-worktrees", "__pycache__", "node_modules",
+                "data", "output", "models", "tools", "build", "dist",
+                ".venv", "venv"}
+        for src in self.repo_root.iterdir():
+            if src.is_dir() and src.name not in skip:
+                shutil.copytree(src, wt / src.name,
                                 ignore=shutil.ignore_patterns(
                                     "__pycache__", ".git",
                                     ".repair-worktrees"))

@@ -472,12 +472,34 @@ class SelfRepairCoordinator:
             f"patch:{','.join(inc['patch_files'])[:200]}")
         return "testing"
 
+    def _lost_worktree(self, inc: dict) -> bool:
+        """A persisted incident can outlive its scratch worktree (restart,
+        disk cleanup, manual prune). Rewind to `patching` so the candidate
+        regenerates instead of stranding the incident at needs_human —
+        bounded, so a repeatedly-vanishing worktree still escalates."""
+        losses = int(inc["attempts"].get("worktree_loss") or 0) + 1
+        inc["attempts"]["worktree_loss"] = losses
+        # A lost worktree is infrastructure loss, not a failed patch —
+        # refund the attempt the regeneration is about to consume so a
+        # vanishing scratch dir can't burn the patch budget. The
+        # worktree_loss counter itself is the bound on the rewind loop.
+        inc["attempts"]["patch"] = max(
+            0, int(inc["attempts"].get("patch") or 0) - 1)
+        inc["worktree"] = ""
+        inc["patch_mission"] = ""
+        inc["patch_files"] = []
+        if losses < 3:
+            inc["repair_procedure"].append("worktree lost — regenerating")
+            self._save()
+            return True
+        self._fail_open(inc, "worktree repeatedly missing — cannot verify")
+        return False
+
     def _stage_test(self, inc: dict) -> str:
         self._set(inc, "testing")
         wt = Path(inc["worktree"]) if inc.get("worktree") else None
         if not wt or not wt.exists():
-            self._fail_open(inc, "worktree missing — cannot verify")
-            return ""
+            return "patching" if self._lost_worktree(inc) else ""
         ver = inc.setdefault("verification", {})
         targets = targeted_tests_for(inc, wt)
         results = []
@@ -538,7 +560,9 @@ class SelfRepairCoordinator:
 
     def _stage_review(self, inc: dict) -> str:
         self._set(inc, "reviewing")
-        wt = Path(inc["worktree"])
+        wt = Path(inc["worktree"]) if inc.get("worktree") else None
+        if not wt or not wt.exists():
+            return "patching" if self._lost_worktree(inc) else ""
         diff = ""
         try:
             diff = __import__("subprocess").run(
@@ -565,7 +589,9 @@ class SelfRepairCoordinator:
 
     def _stage_canary(self, inc: dict) -> str:
         self._set(inc, "canary")
-        wt = Path(inc["worktree"])
+        wt = Path(inc["worktree"]) if inc.get("worktree") else None
+        if not wt or not wt.exists():
+            return "patching" if self._lost_worktree(inc) else ""
         result = self.canary.check(dict(inc), wt)
         inc["verification"]["canary"] = result
         if result.get("ok") is False:
@@ -601,6 +627,8 @@ class SelfRepairCoordinator:
         self._set(inc, "promoting")
         if inc["repair_kind"] == "code" and inc.get("worktree"):
             wt = Path(inc["worktree"])
+            if not wt.exists():
+                return "patching" if self._lost_worktree(inc) else ""
             files = self.patcher.changed_files(wt) or inc["patch_files"]
             if not files:
                 self._fail_open(

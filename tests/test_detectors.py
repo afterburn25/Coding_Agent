@@ -186,6 +186,28 @@ class DetectorUnitTests(unittest.TestCase):
         self.assertLessEqual(len(tail), 3000)         # bounded
         self.assertTrue(tail.endswith("z"))
 
+    def test_ci_failure_signature_uses_failure_key_not_commit(self):
+        """The incident message must carry the failing test — commit
+        titles change every push, which would fork a new incident per
+        commit instead of deduping the same fault."""
+        runs = [{"databaseId": 7, "displayTitle": "bump version to 9.9.9",
+                 "conclusion": "failure",
+                 "log_tail": "...\nFAIL: test_auth.LoginTests.test_x\n"
+                             "Ran 100 tests"}]
+        out = detect_ci_failures({"ci_failures": lambda: runs})
+        self.assertIn("test_auth.LoginTests.test_x", out[0]["title"])
+        self.assertNotIn("bump version", out[0]["title"])
+        self.assertEqual(out[0]["evidence"]["failure_key"],
+                         "test_auth.LoginTests.test_x")
+        # run id still in detail/evidence for traceability
+        self.assertIn("7", out[0]["detail"])
+
+    def test_ci_failure_finding_is_one_shot(self):
+        runs = [{"databaseId": 42, "displayTitle": "x",
+                 "conclusion": "failure"}]
+        out = detect_ci_failures({"ci_failures": lambda: runs})
+        self.assertTrue(out[0]["one_shot"])
+
     def test_finding_defaults_and_clamps(self):
         f = new_finding(kind="k", title="t", severity="bogus",
                         confidence=9.9)
@@ -265,6 +287,28 @@ class ScannerTests(unittest.TestCase):
         finally:
             d.ROUTE_COOLDOWN_S = old
         self.assertEqual(len(routed), 2)
+
+    def test_one_shot_finding_never_reroutes(self):
+        """A historical CI run's conclusion can't change — cooldown must
+        not re-fire it into repair forever."""
+        from localcodeagent.autonomy import detectors as d
+        routed = []
+        det = lambda s: {**new_finding(kind="ci_failure", title="t",
+                                      signature="ci_failure:7",
+                                      route="repair"),
+                         "one_shot": True}
+        sc = make_scanner(self._td(), detectors=[det],
+                          route=lambda f: routed.append(f) or "inc-1")
+        sc.tick(NOW)
+        self.assertEqual(len(routed), 1)
+        old = d.ROUTE_COOLDOWN_S
+        try:
+            d.ROUTE_COOLDOWN_S = 60.0
+            sc.force(NOW + 120)
+            sc.force(NOW + 10000)
+        finally:
+            d.ROUTE_COOLDOWN_S = old
+        self.assertEqual(len(routed), 1)   # never re-routed
 
     def test_failed_route_stays_open(self):
         det = lambda s: new_finding(kind="k", title="t", route="mission")

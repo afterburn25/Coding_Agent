@@ -13,6 +13,7 @@ Scenarios (per spec §32):
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -694,6 +695,69 @@ class AbandonTests(unittest.TestCase):
             # abandoned doesn't advance on tick
             coord.tick()
             self.assertEqual(coord.get(inc["id"])["state"], "abandoned")
+
+
+class WorktreeLossTests(unittest.TestCase):
+    """A persisted incident can outlive its scratch worktree (restart,
+    cleanup, manual prune) — the pipeline must regenerate, not strand."""
+
+    def test_missing_worktree_rewinds_and_recovers(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=good_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "resolved")
+
+            # Second incident (distinct signature so it doesn't dedupe) —
+            # drive to a live worktree then delete it.
+            inc2, _ = coord.report_failure(
+                source="test", subsystem="code",
+                exc_type="ZeroDivisionError",
+                error_message="ZeroDivisionError: boom in tests.test_calc2",
+                stack_trace=TRACE.replace(
+                    "{root}", str(repo).replace("\\", "/")))
+            for _ in range(8):
+                coord._advance(inc2)
+                cur = coord.get(inc2["id"])
+                if cur.get("worktree") and Path(cur["worktree"]).exists():
+                    break
+            wt = Path(coord.get(inc2["id"])["worktree"])
+            shutil.rmtree(wt)
+            coord.process_incident(inc2["id"])
+            final2 = coord.get(inc2["id"])
+            self.assertEqual(final2["state"], "resolved")
+            self.assertGreaterEqual(
+                int(final2["attempts"].get("worktree_loss") or 0), 1)
+
+    def test_repeated_worktree_loss_eventually_escalates(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=good_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            # Nuke the worktree while the incident is in a post-patch stage
+            # (testing/review/canary/promoting) — bounded rewind must not
+            # loop forever.
+            for _ in range(60):
+                cur = coord.get(inc["id"])
+                if cur is None or cur["state"] == "needs_human":
+                    break
+                wt = cur.get("worktree")
+                if wt and Path(wt).exists() and cur["state"] in {
+                        "testing", "reviewing", "canary", "promoting"}:
+                    shutil.rmtree(wt)
+                coord._advance(inc)
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "needs_human")
+            self.assertGreaterEqual(
+                int(final["attempts"].get("worktree_loss") or 0), 3)
 
 
 class ScenarioD_OperationalRepair(unittest.TestCase):

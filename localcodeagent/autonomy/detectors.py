@@ -22,6 +22,7 @@ signal returns nothing rather than a guessed finding.
 """
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Callable
@@ -56,6 +57,18 @@ def new_finding(*, kind: str, title: str, severity: str = "normal",
         "routed_at": None,
         "created_at": now, "updated_at": now,
     }
+
+
+def _failure_key(log_tail: str) -> str:
+    """Stable failure identity from a CI log tail — first failing test or
+    error line. Keying incidents on this (not the commit title) means the
+    same fault across pushes dedupes instead of forking per commit."""
+    for pat in (r"FAIL:\s*(\S+)", r"FAILED\s+(\S+)",
+                r"##\[error\](.+)", r"error\s+([A-Za-z_][\w./:-]+)"):
+        m = re.search(pat, log_tail or "")
+        if m:
+            return re.sub(r"\s+", " ", m.group(1).strip())[:80]
+    return ""
 
 
 # ----------------------------------------------------------------------
@@ -320,12 +333,23 @@ def detect_ci_failures(sources: dict) -> dict | None:
         log_tail = str(run.get("log_tail") or "")
         if log_tail:
             ev["log_tail"] = log_tail[-3000:]
-        out.append(new_finding(
+        # The repair incident signature derives from the message — put the
+        # stable failure key in it, not the commit title, so repeats of the
+        # same fault dedupe across pushes.
+        fkey = _failure_key(log_tail)
+        ev["failure_key"] = fkey
+        label = fkey or title[:80]
+        finding = new_finding(
             kind="ci_failure", severity="high", confidence=0.8,
-            title=f"CI failed: {title[:100]}",
-            detail=f"run {rid}" + (f" failing jobs: {jobs}" if jobs else ""),
+            title=f"CI failed: {label[:100]}",
+            detail=f"run {rid} — {title[:80]}"
+                   + (f" failing jobs: {jobs}" if jobs else ""),
             evidence=ev,
-            route="repair", signature=f"ci_failure:{rid}"))
+            route="repair", signature=f"ci_failure:{rid}")
+        # One-shot: a historical run's conclusion never changes — re-routing
+        # it after cooldown just re-opens the same incident forever.
+        finding["one_shot"] = True
+        out.append(finding)
     return out or None
 
 
@@ -420,11 +444,13 @@ class SignalScanner:
                      and row.get("route") != "suggestion")
             cooled = (row.get("status") in {"acted", "open"}
                       and row.get("routed_to")
+                      and not row.get("one_shot")
                       and now - float(row.get("routed_at") or 0)
                       > ROUTE_COOLDOWN_S)
             # A resolved signature firing again means the problem is
             # back — re-open and route fresh. Dismissed stays silent.
-            reopened = row.get("status") == "resolved"
+            reopened = (row.get("status") == "resolved"
+                        and not row.get("one_shot"))
             if cooled or reopened:
                 row["status"] = "open"
                 row["routed_to"] = ""
