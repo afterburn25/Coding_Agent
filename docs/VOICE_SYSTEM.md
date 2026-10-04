@@ -139,8 +139,9 @@ streamer / direct text
   gasp→`eyebrow_raise`, sigh→`exhale`). They ride `voice` segment events
   (`gestures[]` + `utterance_id` = segment id, for future lip-sync) and a
   standalone `gesture` SSE channel; `voice_global.js` sets
-  `document.body.dataset.gesture` as the avatar hook. Gesture count is
-  capped per response — no constant bobbing.
+  `document.body.dataset.gesture` and notifies `web/avatar.js`, which maps
+  them onto the canonical portrait's bounded expression/motion hooks.
+  Gesture count is capped per response — no constant bobbing.
 - **Telemetry**: `vocalization_resolved` stats deque (category/style/kept,
   no text content) + `record_feedback(profile_id, "fewer sighs")`
   suppresses a category per profile.

@@ -351,6 +351,177 @@ body {
   color:transparent;
 }
 
+.nexus-presence {
+  position:relative;
+  width:34px;
+  height:34px;
+  flex:0 0 34px;
+  border-radius:50%;
+  margin:0 2px 0 8px;
+}
+
+.nexus-presence > img {
+  display:block;
+  width:34px;
+  height:34px;
+  border-radius:50%;
+  object-fit:cover;
+  border:1px solid rgba(93,201,255,.38);
+  box-shadow:0 0 12px rgba(44,119,255,.24);
+  animation:nexus-breathe 5.5s ease-in-out infinite;
+}
+
+.nexus-presence:after {
+  content:"";
+  position:absolute;
+  inset:-3px;
+  border-radius:50%;
+  border:1px solid transparent;
+  pointer-events:none;
+  transition:border-color .18s ease, box-shadow .18s ease;
+}
+
+.nexus-presence-mouth {
+  position:absolute;
+  left:50%;
+  bottom:7px;
+  width:9px;
+  height:2px;
+  border-radius:2px;
+  transform:translateX(-50%);
+  background:rgba(136,220,255,.85);
+  opacity:0;
+  pointer-events:none;
+}
+
+.nexus-presence[data-state="listening"]:after {
+  border-color:rgba(78,220,255,.75);
+  box-shadow:0 0 13px rgba(54,214,255,.28);
+  animation:nexus-attend 1.6s ease-in-out infinite;
+}
+
+.nexus-presence[data-state="thinking"] > img,
+.nexus-presence[data-state="focused"] > img {
+  filter:saturate(1.08) brightness(1.06);
+}
+
+.nexus-presence[data-state="thinking"]:after {
+  border-color:rgba(126,93,255,.58);
+  animation:nexus-attend 2.2s ease-in-out infinite;
+}
+
+.nexus-presence[data-state="speaking"] > img {
+  animation:nexus-breathe 4.2s ease-in-out infinite;
+}
+
+.nexus-presence[data-state="speaking"] .nexus-presence-mouth {
+  opacity:calc(.38 + (var(--mouth-open,.5) * .34));
+  transform:translateX(-50%)
+    scaleX(calc(.58 + (var(--mouth-open,.5) * .72)))
+    scaleY(calc(.7 + (var(--mouth-open,.5) * .95)));
+}
+
+.nexus-presence[data-state="concerned"]:after {
+  border-color:rgba(255,178,75,.68);
+  box-shadow:0 0 13px rgba(255,165,58,.24);
+}
+
+body[data-gesture="small_nod"] .nexus-presence > img,
+body[data-gesture="nod"] .nexus-presence > img {
+  animation:nexus-nod .62s ease-in-out;
+}
+
+body[data-gesture="small_head_shake"] .nexus-presence > img,
+body[data-gesture="shake_head"] .nexus-presence > img {
+  animation:nexus-shake .55s ease-in-out;
+}
+
+body[data-gesture="head_tilt"] .nexus-presence > img {
+  animation:nexus-tilt .7s ease-in-out;
+}
+
+body[data-gesture="eyebrow_raise"] .nexus-presence > img,
+body[data-gesture="eyes_widen"] .nexus-presence > img {
+  animation:nexus-alert .45s ease-out;
+}
+
+body[data-gesture="small_smile"] .nexus-presence-mouth,
+body[data-gesture="soft_smile"] .nexus-presence-mouth,
+body[data-gesture="bright_smile"] .nexus-presence-mouth,
+body[data-gesture="amused_expression"] .nexus-presence-mouth {
+  opacity:.58;
+  transform:translateX(-50%) scaleX(1.35);
+}
+
+body[data-gesture="small_frown"] .nexus-presence-mouth,
+body[data-gesture="eye_narrow"] .nexus-presence-mouth {
+  opacity:.52;
+  transform:translateX(-50%) scaleX(.75);
+}
+
+body[data-gesture="slow_blink"] .nexus-presence > img {
+  animation:nexus-blink .38s ease-in-out;
+}
+
+body[data-gesture="slight_lean"] .nexus-presence > img {
+  animation:nexus-lean .65s ease-in-out;
+}
+
+body[data-gesture="wince"] .nexus-presence > img,
+body[data-gesture="look_away"] .nexus-presence > img {
+  animation:nexus-shake .45s ease-in-out;
+}
+
+@keyframes nexus-breathe {
+  0%,100% { transform:translateY(0) scale(1); }
+  50% { transform:translateY(-.7px) scale(1.012); }
+}
+
+@keyframes nexus-attend {
+  0%,100% { opacity:.55; }
+  50% { opacity:1; }
+}
+
+@keyframes nexus-nod {
+  0%,100% { transform:translateY(0); }
+  35% { transform:translateY(2px); }
+  70% { transform:translateY(-1px); }
+}
+
+@keyframes nexus-shake {
+  0%,100% { transform:translateX(0); }
+  30% { transform:translateX(-2px); }
+  65% { transform:translateX(2px); }
+}
+
+@keyframes nexus-tilt {
+  0%,100% { transform:rotate(0deg); }
+  45% { transform:rotate(-5deg); }
+}
+
+@keyframes nexus-alert {
+  0%,100% { transform:scale(1); }
+  45% { transform:scale(1.055); }
+}
+
+@keyframes nexus-blink {
+  0%,100% { transform:scaleY(1); }
+  50% { transform:scaleY(.94); }
+}
+
+@keyframes nexus-lean {
+  0%,100% { transform:translateX(0) rotate(0deg); }
+  45% { transform:translateX(1.5px) rotate(2deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nexus-presence > img,
+  .nexus-presence:after,
+  .nexus-presence-mouth {
+    animation:none !important;
+  }
+}
+
 .model-picker {
   display:flex;
   align-items:center;

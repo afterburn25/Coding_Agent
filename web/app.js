@@ -836,7 +836,11 @@ loadStatus().then(async()=>{await Promise.all([loadReadiness(),loadConversationM
     mic.classList.toggle('processing',s==='processing');
     mic.textContent=s==='processing'?'⏳':'🎙';
     mic.title=s==='listening'?'Listening… release to transcribe':
-      s==='processing'?'Transcribing…':'Hold to talk — release to transcribe';}
+      s==='processing'?'Transcribing…':'Hold to talk — release to transcribe';
+    if(window.NexusAvatar){
+      NexusAvatar.setListening(s==='listening');
+      NexusAvatar.setThinking(s==='processing');
+    }}
   async function startRec(){
     if(recording)return;
     try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}

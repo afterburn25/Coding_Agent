@@ -160,6 +160,15 @@
           gq.push(g); if (gq.length > 24) gq.shift();
           window.NexusGestures = { last: g, recent: gq };
           document.body.dataset.gesture = g.gesture || '';
+          clearTimeout(window.NexusGestures._clear);
+          window.NexusGestures._clear = setTimeout(() => {
+            if (document.body.dataset.gesture === g.gesture) {
+              document.body.dataset.gesture = '';
+            }
+          }, 900);
+          if (window.NexusAvatar && window.NexusAvatar.gesture) {
+            window.NexusAvatar.gesture(g);
+          }
         } catch (e) {}
       });
     } catch (e) {}

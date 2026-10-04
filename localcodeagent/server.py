@@ -3044,6 +3044,15 @@ class AppState:
     def _voice_publish(self, payload: dict) -> None:
         """Voice events go to the shared bus AND any live chat SSE sinks so
         playback segments reach the requesting client mid-stream."""
+        try:
+            avatar = getattr(self, "nexus_avatar", None)
+            if avatar is not None:
+                if payload.get("type") == "gesture":
+                    avatar.on_gesture(payload.get("gesture"))
+                else:
+                    avatar.on_voice_event(payload)
+        except Exception:
+            pass
         event = {"type": "voice", **payload}
         # Playback segments and stops are one-shot: if they sit in the bus
         # history every page load re-speaks the last line.

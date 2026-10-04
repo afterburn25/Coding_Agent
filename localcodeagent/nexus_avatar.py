@@ -39,6 +39,10 @@ EXPRESSION_STATES = (
     "concerned", "playful", "confident",
 )
 
+# Runtime presentation states. These describe observable activity only;
+# they are deliberately separate from semantic expression states.
+ACTIVITY_STATES = ("idle", "listening", "thinking", "speaking")
+
 # Gesture events → expression hint (bounded, conservative map).
 GESTURE_EXPRESSION = {
     "small_smile": "friendly",
@@ -52,6 +56,20 @@ GESTURE_EXPRESSION = {
     "head_tilt": "playful",
     "eyebrow_raise": "playful",
     "shake_head": "concerned",
+    "small_head_shake": "concerned",
+    "eyes_widen": "playful",
+    "subtle_exhale": "neutral",
+    "small_frown": "concerned",
+    "eye_narrow": "concerned",
+    "smirk": "playful",
+    "soft_gaze": "friendly",
+    "bright_smile": "happy",
+    "slow_blink": "neutral",
+    "slight_lean": "focused",
+    "contented_expression": "friendly",
+    "wince": "concerned",
+    "look_away": "neutral",
+    "soft_smile": "friendly",
 }
 
 
@@ -66,6 +84,8 @@ class NexusAvatar:
         self._portrait_mtime = 0.0
         self._expression = "neutral"
         self._expression_until = 0.0
+        self._activity = "idle"
+        self._activity_until = 0.0
 
     # -- source -----------------------------------------------------------
 
@@ -152,6 +172,44 @@ class NexusAvatar:
             self._expression = "neutral"
         return self._expression
 
+    # -- activity state -----------------------------------------------------
+
+    def set_activity(self, state: str, *, hold_s: float = 6.0) -> bool:
+        """Bounded observable activity for the avatar renderer."""
+        if state not in ACTIVITY_STATES:
+            return False
+        self._activity = state
+        self._activity_until = time.time() + max(0.5, float(hold_s))
+        return True
+
+    def note_utterance(self, seconds: float) -> bool:
+        """Approximate lip-sync timing from an utterance duration."""
+        try:
+            duration = float(seconds)
+        except (TypeError, ValueError):
+            return False
+        if duration <= 0:
+            return False
+        return self.set_activity(
+            "speaking", hold_s=min(30.0, max(0.8, duration + 0.35)))
+
+    def on_voice_event(self, payload: dict | None) -> None:
+        """Consume non-sensitive voice lifecycle events for avatar state."""
+        p = payload or {}
+        event = str(p.get("event") or "")
+        if event == "segment":
+            self.note_utterance(p.get("seconds"))
+        elif event in {"queued", "started"}:
+            self.set_activity("thinking", hold_s=12.0)
+        elif event in {"stop", "muted", "error", "cancelled"}:
+            self.set_activity("idle", hold_s=1.0)
+
+    def activity(self) -> str:
+        if self._activity != "idle" and \
+                time.time() > self._activity_until:
+            self._activity = "idle"
+        return self._activity
+
     def status(self) -> dict[str, Any]:
         src = self._refresh()
         return {
@@ -159,7 +217,9 @@ class NexusAvatar:
             "canonical": bool(src),
             "fallback": None if src else FALLBACK_NAME,
             "expression": self.expression(),
+            "activity": self.activity(),
             "states": list(EXPRESSION_STATES),
+            "activities": list(ACTIVITY_STATES),
             "derivatives": sorted(
                 p.name for p in self.cache_root.glob("portrait-*.webp"))
             if self.cache_root.is_dir() else [],

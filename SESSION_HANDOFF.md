@@ -17,7 +17,8 @@
   integrate → review → verify), plan versioning, project-linked mission
   context, code-reference/impact tools, STT/push-to-talk + hands-free
   session control, operational state + return briefing, mission
-  checkpoints, Knowledge Library, and structured correction learning.
+  checkpoints, Knowledge Library, structured correction learning, granular
+  desktop-control hardening, and the avatar animation/lip-sync foundation.
 - Correction-learning invariant: `PreferenceStore` learns only explicit
   behavioral directives as candidates; repeated evidence or user action
   activates them, prompt overlays are bounded, and permissions/safety/
@@ -30,7 +31,11 @@
   validated, and the audit trail records terminal action state without
   typed or clipboard contents. See `docs/DESKTOP_CONTROL.md`.
 - Canonical portrait hook remains `web/assets/nexus-portrait.*`; do not
-  substitute another face or character for Nexus.
+  substitute another face or character for Nexus. `NexusAvatar` now keeps
+  bounded activity/expression state; `web/avatar.js` consumes voice playback,
+  STT/agent state, gesture SSE, and `/api/nexus/state` for subtle CSS-only
+  motion without delaying speech or shipping conversation/audio content to
+  the renderer. See `docs/AVATAR.md`.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -909,7 +914,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1372 tests` passing (2 environment skips).
+Expected at this checkpoint: `1380 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -214,5 +214,29 @@ class SharedComponentTests(unittest.TestCase):
             self.assertIn(sel, self.css)
 
 
+class AvatarFoundationTests(unittest.TestCase):
+    def test_presence_uses_canonical_avatar_and_script(self):
+        html = read("index.html")
+        self.assertIn('id="nexusPresence"', html)
+        self.assertIn('/api/nexus/avatar?size=72', html)
+        self.assertIn('<script src="/avatar.js"></script>', html)
+
+    def test_avatar_states_and_gesture_hooks_exist(self):
+        css = read("styles.css")
+        self.assertIn('data-state="idle"', read("index.html"))
+        for state in ("listening", "thinking", "speaking"):
+            self.assertIn(f'[data-state="{state}"]', css)
+        for gesture in ("small_nod", "small_head_shake", "head_tilt",
+                        "eyebrow_raise", "small_smile"):
+            self.assertIn(f'[data-gesture="{gesture}"]', css)
+        self.assertIn("prefers-reduced-motion", css)
+
+    def test_avatar_layer_uses_voice_playback_events(self):
+        js = read("avatar.js")
+        self.assertIn("evt.event === 'segment'", js)
+        self.assertIn("evt.seconds", js)
+        self.assertIn("/api/nexus/state", js)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -364,6 +364,26 @@ release → re-evaluate queue (fit-aware, priority-aged) → next worker
   goals, structured memory and worker history.
 - `nexus_avatar.NexusAvatar` resolves the canonical Nexus portrait
   (`web/assets/nexus-portrait.*`), serves circle-cropped derivatives via
-  `/api/nexus/avatar`, and exposes semantic expression states for future
-  animation — the attached portrait is the identity source of truth.
+  `/api/nexus/avatar`, and exposes semantic expression states for avatar
+  presentation — the attached portrait is the identity source of truth.
 - See `docs/WORKERS.md` for the full contract.
+
+## Avatar presentation layer (v0.15)
+
+```text
+voice queued/segment/stop ─┐
+semantic gesture events ───┼─▶ NexusAvatar activity/expression state
+STT listening ─────────────┤        │
+agent thinking ────────────┤        ▼
+/api/nexus/state ──────────┘   web/avatar.js + CSS presence
+```
+
+`NexusAvatar` keeps the identity and bounded state model backend-side:
+`activity` (`idle`, `listening`, `thinking`, `speaking`) describes observable
+work, while `expression` remains the semantic gesture result. Voice playback
+never waits on animation; `web/avatar.js` observes `NexusVoice` playback and
+utterance duration to drive the lightweight mouth cue. STT and chat state set
+listening/thinking, and `/api/nexus/state` supplies the fallback operational
+presentation. CSS handles the initial low-cost motion and honors
+`prefers-reduced-motion`; failure or absence of the renderer leaves the static
+portrait and all agent/voice behavior intact. See `docs/AVATAR.md`.

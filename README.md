@@ -134,6 +134,7 @@ The Windows package bundles llama.cpp itself but not the GGUF bytes inside the i
 - Persistent task ledger, project memory, repository index, and local conversation memory.
 - Interrupted tasks are normalized to a recoverable state after restart; pending approvals can also resume cold from durable task metadata.
 - Local-first TTS voice: Kokoro-82M ONNX engine, official `Nexus Synthetic — Isabella` preset (`bf_isabella` + DSP layers), Voice Studio, global mute, speech filter that never reads code aloud, and `voice_*` tools. See `docs/VOICE_SYSTEM.md`.
+- Canonical Nexus avatar presence with bounded listening/thinking/speaking states, gesture-driven expressions, and lightweight lip-sync timing that degrades to the static portrait. See `docs/AVATAR.md`.
 
 ## Persistent conversation memory
 
@@ -457,7 +458,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1372 tests passing** (2 environment-dependent skips).
+Current expected result: **1380 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 
