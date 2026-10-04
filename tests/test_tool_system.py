@@ -372,6 +372,26 @@ class ProcessManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mgr.action("svc:x", "start")
 
+    def test_list_includes_resource_usage_for_live_pid(self):
+        import os
+        from localcodeagent.processes import process_usage
+        mgr = ProcessManager()
+        mgr.register(ManagedService(
+            id="svc:res", name="res", kind="internal",
+            describe=lambda: {"state": "running", "pid": os.getpid()}))
+        row = mgr.list()[0]
+        self.assertIn("resource", row)
+        if os.name == "nt" or os.path.isdir(f"/proc/{os.getpid()}"):
+            self.assertGreater(row["resource"].get("rss_mb", 0), 0)
+            self.assertIn("cpu_seconds", row["resource"])
+
+    def test_process_usage_never_raises_on_bad_pid(self):
+        from localcodeagent.processes import process_usage
+        self.assertEqual(process_usage(None), {})
+        self.assertEqual(process_usage("bogus"), {})
+        self.assertEqual(process_usage(-1), {})
+        self.assertEqual(process_usage(2 ** 30), {})  # dead/implausible pid
+
     def test_watchdog_invokes_on_tick(self):
         mgr = ProcessManager()
         ticks = []

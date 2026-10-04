@@ -54,6 +54,16 @@ class HardwareTests(unittest.TestCase):
         self.assertEqual(rows[0].free_vram_mb, 10240)
         self.assertEqual(rows[0].utilization_percent, 7)
 
+    def test_detect_hardware_reports_host_fields(self):
+        from localcodeagent.runtime.hardware import detect_hardware
+        snap = detect_hardware()
+        d = snap.as_dict()
+        for key in ("cpu_name", "cpu_logical_cores", "pagefile_gb",
+                    "uptime_seconds", "load_1m", "ram_used_percent"):
+            self.assertIn(key, d)
+        self.assertGreaterEqual(snap.cpu_logical_cores, 1)
+        self.assertTrue(0.0 <= snap.ram_used_percent <= 100.0)
+
 
 class RuntimeManagerTests(unittest.TestCase):
     def _profile(self, **overrides):

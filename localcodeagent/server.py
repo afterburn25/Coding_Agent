@@ -5489,6 +5489,7 @@ class Handler(BaseHTTPRequestHandler):
                 "max_resident_models": runtime.get("max_resident_models"),
                 "image_resource_mode": getattr(self.state.config, "image_resource_mode", "balanced"),
                 "model_storage": runtime.get("model_storage"),
+                "processes": self.state.processes.list(),
             })
             return
         if path == "/api/models/catalog":
@@ -7102,7 +7103,17 @@ class Handler(BaseHTTPRequestHandler):
             if path in {"/api/runtime/start", "/api/runtime/stop"}:
                 model_id = str(body.get("model_id", "")).strip()
                 profile = self.state.router.get_profile(model_id)
-                if path.endswith("/start"):
+                action = "start" if path.endswith("/start") else "stop"
+                gate = self.state._permission_gate(
+                    "runtime.manage", bool(body.get("approve", False)),
+                    f"runtime {action}:{model_id}")
+                if gate is not None:
+                    gate["model_id"] = model_id
+                    gate["action"] = action
+                    status_code = 403 if gate.get("error") and not gate.get("needs_approval") else 200
+                    self._json(gate, status_code)
+                    return
+                if action == "start":
                     endpoint = self.state.runtime.ensure_ready(profile)
                     self._json({"ok": True, "model_id": model_id, "endpoint": endpoint, "runtime": self.state.runtime.summary()})
                 else:
@@ -7218,6 +7229,15 @@ class Handler(BaseHTTPRequestHandler):
                 action = str(body.get("action", "")).strip().lower()
                 if not service_id or action not in {"start", "stop", "restart"}:
                     self._json({"error": "id and action (start|stop|restart) are required"}, 400)
+                    return
+                gate = self.state._permission_gate(
+                    "runtime.manage", bool(body.get("approve", False)),
+                    f"process {action}:{service_id}")
+                if gate is not None:
+                    gate["service"] = service_id
+                    gate["action"] = action
+                    status_code = 403 if gate.get("error") and not gate.get("needs_approval") else 200
+                    self._json(gate, status_code)
                     return
                 try:
                     result = self.state.processes.action(service_id, action)

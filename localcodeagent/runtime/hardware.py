@@ -41,6 +41,11 @@ class HardwareSnapshot:
     available_ram_gb: float
     gpus: list[GPUInfo] = field(default_factory=list)
     nvidia_smi_available: bool = False
+    cpu_name: str = ""
+    cpu_logical_cores: int = 0
+    pagefile_gb: float = 0.0
+    uptime_seconds: float | None = None
+    load_1m: float | None = None
 
     @property
     def total_vram_gb(self) -> float:
@@ -50,14 +55,27 @@ class HardwareSnapshot:
     def free_vram_gb(self) -> float:
         return round(sum(g.free_vram_mb for g in self.gpus) / 1024, 2)
 
+    @property
+    def ram_used_percent(self) -> float:
+        if not self.total_ram_gb:
+            return 0.0
+        used = max(0.0, self.total_ram_gb - self.available_ram_gb)
+        return round(used / self.total_ram_gb * 100, 1)
+
     def as_dict(self) -> dict:
         return {
             "platform": self.platform,
             "total_ram_gb": self.total_ram_gb,
             "available_ram_gb": self.available_ram_gb,
+            "ram_used_percent": self.ram_used_percent,
             "total_vram_gb": self.total_vram_gb,
             "free_vram_gb": self.free_vram_gb,
             "nvidia_smi_available": self.nvidia_smi_available,
+            "cpu_name": self.cpu_name,
+            "cpu_logical_cores": self.cpu_logical_cores,
+            "pagefile_gb": self.pagefile_gb,
+            "uptime_seconds": self.uptime_seconds,
+            "load_1m": self.load_1m,
             "gpus": [asdict(g) | {"total_vram_gb": g.total_vram_gb, "free_vram_gb": g.free_vram_gb, "shared_memory_gb": g.shared_memory_gb} for g in self.gpus],
         }
 
@@ -155,6 +173,8 @@ def _detect_nvidia() -> tuple[bool, list[GPUInfo]]:
             [exe, f"--query-gpu={query}", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
         )
@@ -262,6 +282,27 @@ def _pagefile_windows() -> int:
     return max(0, int(s.ullTotalPageFile) - int(s.ullTotalPhys))
 
 
+def _uptime_seconds() -> float | None:
+    try:
+        if os.name == "nt":
+            import ctypes
+            get_tick = getattr(ctypes.windll.kernel32, "GetTickCount64", None)
+            if get_tick is not None:
+                return round(get_tick() / 1000, 1)
+            return None
+        text = open("/proc/uptime", "r", encoding="utf-8").read()
+        return round(float(text.split()[0]), 1)
+    except (OSError, ValueError, IndexError, AttributeError):
+        return None
+
+
+def _load_1m() -> float | None:
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (AttributeError, OSError):
+        return None
+
+
 def gpu_backend_for(gpus: list[GPUInfo]) -> str:
     """Best llama.cpp GPU backend guess for the installed stack (Vulkan
     runtime is bundled; CUDA only when NVIDIA tooling exists)."""
@@ -288,12 +329,18 @@ def detect_hardware() -> HardwareSnapshot:
             match = reg.get(g.name)
             if match:
                 g.shared_memory_mb = match.shared_memory_mb
+    cpu_name, cores = _cpu_info()
     return HardwareSnapshot(
         platform=f"{platform.system()} {platform.release()}".strip(),
         total_ram_gb=total_ram,
         available_ram_gb=available_ram,
         gpus=gpus,
         nvidia_smi_available=smi,
+        cpu_name=cpu_name,
+        cpu_logical_cores=cores,
+        pagefile_gb=round(_pagefile_windows() / (1024 ** 3), 2),
+        uptime_seconds=_uptime_seconds(),
+        load_1m=_load_1m(),
     )
 
 

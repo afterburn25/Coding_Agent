@@ -456,8 +456,18 @@
 
   async function doProcAction(btn) {
     btn.disabled = true;
-    try { await post("/api/processes/action", { id: btn.dataset.proc, action: btn.dataset.action }); }
-    catch (e) { alert(e.message); }
+    const body = { id: btn.dataset.proc, action: btn.dataset.action };
+    try {
+      let res = await post("/api/processes/action", body);
+      if (res && res.needs_approval) {
+        const who = res.needs_creator ? "an unlocked Nexus Brain creator session" : "your approval";
+        if (!confirm(`${body.action} "${body.id}" requires ${who} (runtime.manage). Continue?`)) {
+          btn.disabled = false; return;
+        }
+        res = await post("/api/processes/action", { ...body, approve: true });
+      }
+      if (res && res.ok === false && res.error) alert(res.error);
+    } catch (e) { alert(e.message); }
     btn.disabled = false;
     setTimeout(loadProcesses, 800);
   }
@@ -524,7 +534,7 @@
         <span>${esc(p.kind)}</span>
         <span class="state ${esc(p.state)}">${esc(p.state)}</span>
         <span>${p.pid ? `pid ${p.pid}` : "—"}</span>
-        <span class="muted">${p.port || "—"}${p.uptime_seconds ? ` · ${fmtUptime(p.uptime_seconds)}` : ""}${p.error ? ` · ${esc(String(p.error).slice(0, 60))}` : ""}</span>
+        <span class="muted">${p.port || "—"}${p.uptime_seconds ? ` · ${fmtUptime(p.uptime_seconds)}` : ""}${(p.resource && p.resource.rss_mb) ? ` · ${fmtBytes(p.resource.rss_mb * 1024 * 1024)}` : ""}${(p.resource && p.resource.cpu_seconds) ? ` · ${fmtUptime(p.resource.cpu_seconds)} cpu` : ""}${p.error ? ` · ${esc(String(p.error).slice(0, 60))}` : ""}</span>
         <span class="row-actions">
           ${p.can_start ? `<button data-proc="${esc(p.id)}" data-action="start">Start</button>` : ""}
           ${p.can_stop ? `<button data-proc="${esc(p.id)}" data-action="stop">Stop</button>` : ""}

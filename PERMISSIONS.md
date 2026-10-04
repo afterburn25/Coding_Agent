@@ -10,7 +10,7 @@ Core keys plus risk-sensitive keys shared across profiles:
 
 `filesystem.read` · `filesystem.write` · `filesystem.delete` ·
 `shell.execute` · `git.execute` · `git.push` · `packages.install` ·
-`skills.manage` · `repair.manage` · `docker.access` · `credentials.use` · `network.read` · `browser.control` ·
+`skills.manage` · `repair.manage` · `runtime.manage` · `docker.access` · `credentials.use` · `network.read` · `browser.control` ·
 `browser.submit` · `external_api.call` · `image.read` · `image.generate` ·
 `image.manage` · `github.read` · `github.write` · `message.send` ·
 `microphone.use` · `camera.use` · `spend.money` · `tasks.queue` ·
@@ -41,7 +41,8 @@ keys default to `ask`.
 
 `filesystem.read`, `filesystem.write`, `filesystem.delete`,
 `shell.execute`, `git.execute`, `git.push`, `packages.install`,
-`skills.manage`, `repair.manage`, `image.read`, `image.generate`, `image.manage`,
+`skills.manage`, `repair.manage`, `runtime.manage`,
+`image.read`, `image.generate`, `image.manage`,
 `network.read`, `browser.control`, `browser.submit`, `external_api.call`,
 `docker.access`, `credentials.use`, `github.read`, `github.write`,
 `tasks.queue`, `desktop.view`, `screen.capture`, `desktop.control`,
@@ -87,9 +88,11 @@ It never bypasses:
 - `deny` levels — denied stays denied.
 - Hard gates (`AUTONOMY_NEVER_AUTO` in `permissions.py`): `spend.money`,
   `message.send`, `microphone.use`, `camera.use`, `skills.manage`,
-  `repair.manage`, and every desktop observation/control key always require
-  an explicit human approval
-  regardless of mode.
+  `repair.manage`, `runtime.manage`, and every desktop observation/control
+  key always require an explicit human approval
+  regardless of mode. (`runtime.manage` gates the HTTP start/stop/restart
+  surface only — autonomous memory management uses `RuntimeManager`'s
+  internal busy-aware eviction path, which never goes through the API.)
 
 Two companion settings bound autonomous runs:
 
@@ -148,6 +151,13 @@ POST /api/permissions/scope       {"permission": "network.read", "scope": {"allo
 
 Changes persist into `config.json` atomically. Session grants are intentionally
 in-memory only and clear on restart or profile change.
+
+Other gated endpoints respond `{"needs_approval": true, "permission": ...}` the
+same way: skill lifecycle routes (`skills.manage`), self-repair actions
+(`repair.manage`), and runtime/process lifecycle
+(`POST /api/processes/action`, `/api/runtime/start`, `/api/runtime/stop` →
+`runtime.manage`). The Tools and Models pages resend with `approve: true`
+after a confirmation prompt.
 
 ## UI
 

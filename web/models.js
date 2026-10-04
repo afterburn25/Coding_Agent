@@ -13,9 +13,13 @@
   function renderHardware(hw) {
     if (!hw) { $("hwBox").textContent = "No hardware data."; return; }
     const gpus = (hw.gpus || []).map((g) => `<div class="muted small">${esc(g.name)} — ${fmtGB(g.free_vram_mb / 1024)} free / ${fmtGB(g.total_vram_mb / 1024)}</div>`).join("");
+    const cpuLine = hw.cpu_name
+      ? `<div class="muted small">${esc(hw.cpu_name)}${hw.cpu_logical_cores ? ` · ${hw.cpu_logical_cores} cores` : ""}${hw.load_1m != null ? ` · load ${hw.load_1m}` : ""}</div>` : "";
+    const pagefileLine = hw.pagefile_gb ? `<div class="muted small">Pagefile ${fmtGB(hw.pagefile_gb)}</div>` : "";
     $("hwBox").innerHTML = `
       ${gpus || '<div class="muted small">No GPU detected</div>'}
-      <div class="muted small">RAM ${fmtGB(hw.available_ram_gb)} free / ${fmtGB(hw.total_ram_gb)}</div>
+      <div class="muted small">RAM ${fmtGB(hw.available_ram_gb)} free / ${fmtGB(hw.total_ram_gb)}${hw.ram_used_percent != null ? ` (${hw.ram_used_percent}% used)` : ""}</div>
+      ${cpuLine}${pagefileLine}
       <div class="muted small">${esc(hw.platform || "")}</div>`;
   }
 
@@ -41,8 +45,15 @@
     $("runtimeList").querySelectorAll("[data-model]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
+        const body = { model_id: btn.dataset.model };
         try {
-          await post(`/api/runtime/${btn.dataset.action}`, { model_id: btn.dataset.model });
+          let res = await post(`/api/runtime/${btn.dataset.action}`, body);
+          if (res && res.needs_approval) {
+            const who = res.needs_creator ? "an unlocked Nexus Brain creator session" : "your approval";
+            if (!confirm(`${btn.dataset.action} runtime "${body.model_id}" requires ${who} (runtime.manage). Continue?`)) return;
+            res = await post(`/api/runtime/${btn.dataset.action}`, { ...body, approve: true });
+          }
+          if (res && res.ok === false && res.error) alert(res.error);
         } catch (e) {
           alert(e.message);
         } finally {

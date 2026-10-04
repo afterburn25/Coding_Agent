@@ -26,6 +26,9 @@ _RISK_DEFAULTS = {
     "packages.install": "ask",
     "skills.manage": "ask",
     "repair.manage": "ask",
+    # Starting/stopping managed runtimes can evict models and strand work;
+    # reversible but disruptive, so every profile requires confirmation.
+    "runtime.manage": "ask",
     "docker.access": "ask",
     "credentials.use": "ask",
     "git.push": "ask",
@@ -187,6 +190,11 @@ AUTONOMY_NEVER_AUTO = frozenset({
     # Repair lifecycle actions can promote or roll back code in the stable
     # source tree; autonomous missions must not trigger them silently.
     "repair.manage",
+    # API-level runtime/process start/stop can strand in-flight missions and
+    # kill a model a running task depends on. Autonomous memory management
+    # uses RuntimeManager's internal eviction path, which is busy-aware and
+    # does not go through this gate — API control always asks a human.
+    "runtime.manage",
     "microphone.use",
     "camera.use",
     # Desktop observation/control can expose the user's live screen or inject
@@ -281,6 +289,9 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
                            "blurb": "Start a local executable directly, without invoking a shell.", "tools": ["computer_launch"]},
     "tasks.queue":       {"label": "Queue background tasks", "category": "Automation", "scope": "Job manager", "risk": "medium",
                           "blurb": "Queue multi-step background work (installs, research, workflows).", "tools": ["task_queue"]},
+    "runtime.manage":    {"label": "Manage runtimes & services", "category": "Automation", "scope": "Local runtimes", "risk": "high",
+                          "blurb": "Start, stop, or restart managed model runtimes and services (llama.cpp, ComfyUI, MCP servers). "
+                                   "Stopping a runtime can interrupt work that depends on it.", "tools": ["process_manager"]},
 }
 
 # Map a key prefix to a category for keys not listed in PERMISSION_INFO
@@ -300,7 +311,7 @@ _PREFIX_CATEGORY = [
     ("keyboard", "Desktop"), ("clipboard", "Desktop"),
     ("application", "Desktop"), ("computer", "Desktop"),
     ("microphone", "Devices"), ("camera", "Devices"), ("tasks", "Automation"),
-    ("repair", "Automation"),
+    ("repair", "Automation"), ("runtime", "Automation"),
 ]
 
 

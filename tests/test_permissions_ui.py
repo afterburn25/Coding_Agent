@@ -162,6 +162,16 @@ class SummaryTests(unittest.TestCase):
         self.assertIn(info["category"], {"Other", "Tool Installation"})
         self.assertTrue(info["label"])
 
+    def test_runtime_manage_is_known_and_never_auto_approved(self):
+        m = PermissionManager({})
+        # Risk default: ask in every shipped profile.
+        self.assertEqual(m.level("runtime.manage"), "ask")
+        self.assertEqual(permission_info("runtime.manage")["category"], "Automation")
+        # Autonomous mode must not auto-grant API-level runtime control —
+        # internal idle eviction is busy-aware and does not use this gate.
+        m.set_autonomous(True)
+        self.assertEqual(m.effective("runtime.manage"), "ask")
+
 
 class ManifestEnrichmentTests(unittest.TestCase):
     def _registry_with_archive(self, td: str):
@@ -331,6 +341,45 @@ class PermissionApiTests(unittest.TestCase):
         self.assertEqual(out.get("action"), "retry")
         out = self._post("/api/self-repair/ri-test/retry", {"approve": True})
         self.assertFalse(out.get("ok"))
+
+    def test_process_action_requires_runtime_manage_approval(self):
+        from localcodeagent.processes import ManagedService
+        calls = []
+        self.state.processes.register(ManagedService(
+            id="svc:test-gate", name="Gate test", kind="internal",
+            describe=lambda: {"state": "stopped"},
+            start=lambda: calls.append("start") or {"state": "running"}))
+        try:
+            out = self._post("/api/processes/action",
+                             {"id": "svc:test-gate", "action": "start"})
+            self.assertTrue(out.get("needs_approval"))
+            self.assertEqual(out.get("permission"), "runtime.manage")
+            self.assertEqual(calls, [])
+            out = self._post("/api/processes/action",
+                             {"id": "svc:test-gate", "action": "start",
+                              "approve": True})
+            self.assertTrue(out.get("ok"), out)
+            self.assertEqual(calls, ["start"])
+        finally:
+            self.state.processes.unregister("svc:test-gate")
+
+    def test_runtime_stop_gate_preserves_external_boundary(self):
+        # "fake" is runtime="external" — the gate fires first, and even an
+        # approved request must still refuse to control external runtimes.
+        out = self._post("/api/runtime/stop", {"model_id": "fake"})
+        self.assertTrue(out.get("needs_approval"))
+        self.assertEqual(out.get("permission"), "runtime.manage")
+        try:
+            self._post("/api/runtime/stop", {"model_id": "fake", "approve": True})
+            self.fail("expected 400")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+            self.assertIn("External", e.read().decode())
+
+    def test_resources_payload_includes_process_list(self):
+        data = self._get("/api/resources")
+        self.assertIn("processes", data)
+        self.assertIsInstance(data["processes"], list)
 
     def test_creator_level_via_api_gates_install(self):
         self._post("/api/permissions/level", {"permission": "packages.install", "level": "creator"})

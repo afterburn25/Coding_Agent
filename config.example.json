@@ -101,6 +101,7 @@
     "packages.install": "ask",
     "skills.manage": "ask",
     "repair.manage": "ask",
+    "runtime.manage": "ask",
     "github.read": "allow",
     "github.write": "ask"
   },

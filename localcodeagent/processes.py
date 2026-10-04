@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -30,6 +32,109 @@ class ManagedService:
 
 
 FAILED_STATES = {"crashed", "error", "exited", "failed", "dead"}
+
+
+def _process_usage_windows(pid: int) -> dict[str, Any]:
+    """Working-set + kernel/user CPU for a live PID via Win32 (no psutil)."""
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return {}
+    try:
+        usage: dict[str, Any] = {}
+
+        class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+                ("PrivateUsage", ctypes.c_size_t),
+            ]
+
+        counters = PROCESS_MEMORY_COUNTERS_EX()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        # Classic export lives in psapi.dll; kernel32 carries the K32 name.
+        get_mem = getattr(ctypes.windll.psapi, "GetProcessMemoryInfo", None)
+        if get_mem is None:
+            get_mem = getattr(ctypes.windll.kernel32,
+                              "K32GetProcessMemoryInfo", None)
+        if get_mem is not None and get_mem(
+                handle, ctypes.byref(counters), counters.cb):
+            usage["rss_mb"] = round(counters.WorkingSetSize / (1024 ** 2), 1)
+            usage["commit_mb"] = round(counters.PrivateUsage / (1024 ** 2), 1)
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", ctypes.c_ulong),
+                        ("dwHighDateTime", ctypes.c_ulong)]
+
+        def _ticks(ft: FILETIME) -> int:
+            return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
+
+        creation, exit_, kernel, user = (
+            FILETIME(), FILETIME(), FILETIME(), FILETIME())
+        if ctypes.windll.kernel32.GetProcessTimes(
+                handle, ctypes.byref(creation), ctypes.byref(exit_),
+                ctypes.byref(kernel), ctypes.byref(user)):
+            usage["cpu_seconds"] = round(
+                (_ticks(kernel) + _ticks(user)) / 10_000_000, 1)
+        return usage
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def _process_usage_procfs(pid: int) -> dict[str, Any]:
+    """RSS + utime/stime from /proc (Linux). Empty dict elsewhere."""
+    proc = Path(f"/proc/{pid}")
+    if not proc.is_dir():
+        return {}
+    usage: dict[str, Any] = {}
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        resident_pages = int(
+            (proc / "statm").read_text(encoding="utf-8").split()[1])
+        usage["rss_mb"] = round(resident_pages * page_size / (1024 ** 2), 1)
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        stat = (proc / "stat").read_text(encoding="utf-8")
+        # comm is wrapped in parens and may itself contain spaces/parens.
+        fields = stat[stat.rfind(")") + 2:].split()
+        ticks = os.sysconf("SC_CLK_TCK")
+        # fields[11]=utime (field 14), fields[12]=stime (field 15) — index 0
+        # here is `state` (field 3).
+        usage["cpu_seconds"] = round(
+            (int(fields[11]) + int(fields[12])) / ticks, 1)
+    except (OSError, IndexError, ValueError):
+        pass
+    return usage
+
+
+def process_usage(pid: Any) -> dict[str, Any]:
+    """Best-effort per-process usage: ``rss_mb`` / ``commit_mb`` /
+    ``cpu_seconds`` (cumulative). Returns {} for dead/foreign/unsupported
+    PIDs — never raises."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {}
+    if pid <= 0:
+        return {}
+    try:
+        if os.name == "nt":
+            return _process_usage_windows(pid)
+        return _process_usage_procfs(pid)
+    except (OSError, ValueError, AttributeError):
+        return {}
 
 
 class ProcessManager:
@@ -147,6 +252,7 @@ class ProcessManager:
                 "started_at": started_at,
                 "uptime_seconds": max(0, int(time.time() - started_at)) if started_at else 0,
                 "error": str(status.get("error") or ""),
+                "resource": process_usage(status.get("pid")),
                 "can_start": service.start is not None,
                 "can_stop": service.stop is not None,
                 "can_restart": service.restart is not None or (service.start is not None and service.stop is not None),
