@@ -43,6 +43,49 @@
   const trait = (k) => work.traits[k] ?? 50;
   const voice = (k) => work.voice[k] ?? 50;
 
+  let applySeq = 0;
+  function markDirty() {
+    dirty = true;
+    const tag = $("dirtyTag");
+    if (tag) tag.hidden = false;
+    const aw = $("applyWork");
+    if (aw && String(data.active.personality_id || "")
+        .startsWith("custom:")) aw.disabled = false;
+  }
+
+  // Sliders live-apply: editing a preset auto-forks it into a custom so the
+  // change actually takes effect; an active custom is patched in place.
+  async function applyLive() {
+    const seq = ++applySeq;
+    try {
+      let cid = String(data.active.personality_id || "");
+      if (!cid.startsWith("custom:")) {
+        const r = await act(pid, { action: "create_custom",
+          name: `Custom based on ${data.active.name || "Preset"}`,
+          base_preset: String(data.active.base_preset || ""),
+          traits: work.traits, voice: work.voice });
+        cid = `custom:${r.custom.personality_id}`;
+        await act(pid, { action: "set_active", target: cid });
+        dirty = false;
+        await load();
+        return;
+      }
+      await act(pid, { action: "patch_custom",
+                       personality_id: cid.split(":")[1],
+                       traits: work.traits, voice: work.voice });
+      if (seq === applySeq) {
+        dirty = false;
+        const tag = $("dirtyTag");
+        if (tag) tag.hidden = true;
+      }
+    } catch { /* keep dirty so the user can retry via the buttons */ }
+  }
+  let applyTimer = null;
+  function scheduleApply() {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(applyLive, 400);
+  }
+
   function sliderRow(key, label, val, isVoice) {
     return `<div class="slider-row">
       <span>${esc(label)}</span>
@@ -107,7 +150,7 @@
     const t = data.active || {};
     $("studioBody").innerHTML = `
       <section class="pst-panel">
-        <h3>Preset — active: ${esc(t.name || "")}${dirty ? ' <em style="color:var(--warn)">(unsaved edits)</em>' : ""}</h3>
+        <h3>Preset — active: ${esc(t.name || "")} <em id="dirtyTag" style="color:var(--warn)" ${dirty ? "" : "hidden"}>(unsaved edits)</em></h3>
         ${presetCards()}
       </section>
 
@@ -161,12 +204,36 @@
             </div>`).join("") || '<small class="hint">No customs yet — edit sliders or duplicate a preset.</small>'}
         </div>
         <div class="pst-actions" style="margin-top:12px">
-          <button id="saveCustom" class="mini-button" type="button" ${dirty ? "" : "disabled"}>Save Custom Personality</button>
+          <button id="saveCustom" class="mini-button" type="button">Save Custom Personality</button>
           <button id="applyWork" class="mini-button" type="button" ${dirty && String(data.active.personality_id || "").startsWith("custom:") ? "" : "disabled"}>Apply to Active Custom</button>
           <button id="resetAll" class="mini-button" type="button">Reset to Default Nexus</button>
         </div>
       </section>`;
     bind();
+  }
+
+  let sampleAudio = null;
+  async function playVoiceSample() {
+    const r = await act(pid, { action: "preview",
+                               traits: work.traits, voice: work.voice });
+    const v = r.voice || {};
+    const res = await fetch("/api/voice/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "Hi, I'm Nexus. This is how I'll sound and respond "
+            + "with your current personality settings.",
+        // Rate rides the engine `speed` arg — tempo stays 1.0 so it
+        // isn't applied twice through the DSP chain.
+        overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
+                   output_gain_db: v.output_gain_db },
+        speed: v.speed }),
+    }).then((x) => x.json().then((d) => (x.ok ? d
+      : Promise.reject(new Error(d.error || x.status)))));
+    if (sampleAudio) { try { sampleAudio.pause(); } catch {} }
+    sampleAudio = new Audio(res.url);
+    sampleAudio.play().catch(() => {});
+    return v;
   }
 
   function bind() {
@@ -176,6 +243,7 @@
           await act(pid, { action: "set_active",
                            target: `preset:${el.dataset.preset}` });
           await load();
+          playVoiceSample().catch(() => {});
         } catch (e) { alert(e.message); }
       }));
 
@@ -195,25 +263,29 @@
         render();
       }));
 
-    $("studioBody").querySelectorAll("[data-tkey]").forEach((sl) =>
+    $("studioBody").querySelectorAll("[data-tkey]").forEach((sl) => {
       sl.addEventListener("input", () => {
         work.traits[sl.dataset.tkey] = +sl.value;
         sl.parentElement.querySelector(".s-val").textContent = sl.value;
-        dirty = true;
-      }));
-    $("studioBody").querySelectorAll("[data-vkey]").forEach((sl) =>
+        markDirty();
+      });
+      sl.addEventListener("change", scheduleApply);
+    });
+    $("studioBody").querySelectorAll("[data-vkey]").forEach((sl) => {
       sl.addEventListener("input", () => {
         work.voice[sl.dataset.vkey] = +sl.value;
         sl.parentElement.querySelector(".s-val").textContent = sl.value;
-        dirty = true;
-      }));
+        markDirty();
+      });
+      sl.addEventListener("change", scheduleApply);
+    });
     $("studioBody").querySelectorAll("[data-treset]").forEach((b) =>
       b.addEventListener("click", () => {
-        delete work.traits[b.dataset.treset]; render(); dirty = true;
+        delete work.traits[b.dataset.treset]; render(); markDirty(); scheduleApply();
       }));
     $("studioBody").querySelectorAll("[data-vreset]").forEach((b) =>
       b.addEventListener("click", () => {
-        delete work.voice[b.dataset.vreset]; render(); dirty = true;
+        delete work.voice[b.dataset.vreset]; render(); markDirty(); scheduleApply();
       }));
     $("voicePreset")?.addEventListener("change", async (e) => {
       try {
@@ -242,25 +314,8 @@
     $("previewVoiceBtn").addEventListener("click", async () => {
       const vo = $("previewVoice");
       try {
-        const r = await act(pid, {
-          action: "preview",
-          traits: work.traits, voice: work.voice });
-        const v = r.voice || {};
         vo.textContent = "Synthesizing…";
-        const res = await fetch("/api/voice/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: "Hi, I'm Nexus. This is how I'll sound and respond "
-                + "with your current personality settings.",
-            // Rate rides the engine `speed` arg — tempo stays 1.0 so it
-            // isn't applied twice through the DSP chain.
-            overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
-                       output_gain_db: v.output_gain_db },
-            speed: v.speed }),
-        }).then((x) => x.json().then((d) => (x.ok ? d
-          : Promise.reject(new Error(d.error || x.status)))));
-        new Audio(res.url).play().catch(() => {});
+        const v = await playVoiceSample();
         vo.textContent = `Playing · speed ${v.speed} · pitch `
           + `${v.pitch_semitones}st · gain ${v.output_gain_db}dB`
           + ((v.preprocess || []).length
