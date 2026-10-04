@@ -109,6 +109,7 @@ function renderDetail(){
     (actionable?`<button class="mini-button danger" data-act="cancel">Cancel</button>`:'')+
     `</div></div>`+
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
+    `<div class="detail-section"><h3>Requirements</h3><div id="missionReqs"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
@@ -116,6 +117,30 @@ function renderDetail(){
     (m.completion?`<div class="detail-section"><h3>Completion</h3><div class="objective">Elapsed: ${m.completion.elapsed_s}s · ${m.completion.state}</div></div>`:'')+
     `<div class="detail-section"><h3>History</h3>${hist||'<div class="hist-row">empty</div>'}</div>`;
   loadMissionActivity(m.id);
+  loadMissionRequirements(m.id);
+}
+
+const REQ_MARKS={verified:'✓',implemented:'◐',in_progress:'~',planned:'~',
+  not_started:'·',failed:'✕',blocked:'⊘',deferred:'→',rejected:'–'};
+async function loadMissionRequirements(mid){
+  // Requirements are first-class entities — derived rows are marked
+  // 'inferred' so users can tell Nexus-derived criteria from explicit asks.
+  try{
+    const r=await api('/api/requirements?scope_type=mission&scope_id='+encodeURIComponent(mid));
+    const el=$('#missionReqs');
+    if(!el||selected!==mid)return;
+    const rows=(r.requirements||[]);
+    el.innerHTML=rows.map(q=>
+      `<div class="criterion" title="${esc(q.source)}${q.inferred?' (inferred)':''}">`+
+      `<span class="dot ${q.status==='verified'?'met':['failed','blocked'].includes(q.status)?'unmet':'unknown'}"></span>`+
+      `<span>${esc(REQ_MARKS[q.status]||'·')} ${esc(q.description)}`+
+      (q.inferred?` <span style="color:#4d5f7c;font-size:10px">· inferred</span>`:'')+
+      `</span></div>`
+    ).join('')||'<div class="criterion"><span class="dot unknown"></span><span>no requirements derived</span></div>';
+  }catch(e){
+    const el=$('#missionReqs');
+    if(el)el.innerHTML='<div class="hist-row">requirements unavailable</div>';
+  }
 }
 
 async function loadMissionActivity(mid){

@@ -64,6 +64,7 @@ class AutonomousSupervisor:
         worker_manager: Any = None,
         projects: Any = None,                # ProjectStore — context + history
         preferences: Any = None,             # PreferenceStore — learned overlays
+        requirements: Any = None,            # RequirementStore — derived criteria entities
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
     ) -> None:
         self.workspace = Path(workspace)
@@ -84,10 +85,13 @@ class AutonomousSupervisor:
         self.enabled = enabled
         self.projects = projects
         self.preferences = preferences
+        self.requirements = requirements
 
         self.missions = MissionStore(
             self.store,
-            on_change=lambda p: self._emit("mission", p))
+            on_change=lambda p: self._emit("mission", p),
+            derive_hook=(requirements.attach_mission
+                         if requirements is not None else None))
         self.locks = ResourceLocks()
         self.recovery = RecoveryManager()
         self.evaluator = MissionEvaluator(self.workspace)
@@ -948,6 +952,16 @@ class AutonomousSupervisor:
             return
         result = self.evaluator.evaluate(m)
         verdict = result["verdict"]
+        # Persist per-criterion outcomes onto the mission row and push
+        # them into linked requirement statuses (continuous, no upkeep).
+        try:
+            self.missions.update(mission_id, criteria_results=
+                                 (result.get("criteria") or [])[:40])
+            if self.requirements is not None:
+                self.requirements.sync_mission(
+                    m, criteria_results=result.get("criteria") or [])
+        except Exception:
+            pass
         if verdict == EvalVerdict.COMPLETE.value:
             self._complete_mission(mission_id, warnings=False)
         elif verdict == EvalVerdict.NEEDS_USER.value:

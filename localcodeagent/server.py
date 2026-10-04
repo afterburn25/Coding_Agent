@@ -138,6 +138,8 @@ class AppState:
         self.queue = WorkQueue(self.workspace)
         from .projects import ProjectStore
         self.projects = ProjectStore(runtime_root / "data")
+        from .requirements import RequirementStore
+        self.requirements = RequirementStore(runtime_root / "data" / "requirements.json")
         from .preferences import PreferenceStore
         self.preferences = PreferenceStore(runtime_root / "data")
         self.checkpoints = CheckpointManager(self.workspace)
@@ -1222,6 +1224,7 @@ class AppState:
             worker_manager=self.workers,
             projects=self.projects,
             preferences=self.preferences,
+            requirements=self.requirements,
             approval_timeout_seconds=lambda: float(getattr(
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
@@ -2583,6 +2586,35 @@ class AppState:
         if not self.nexus_brain.verified_for_session:
             return False
         return self.nexus_brain.subroutine(name, default)
+
+    def _derive_request_specs(self, message: str) -> list[dict]:
+        """Repair-style user asks get explicit derived requirements before
+        any change runs — 'fix this' is never an implicit definition of
+        done. Everything returned is marked inferred."""
+        from .requirements import derive_requirement_specs, is_repair_intent
+        if not is_repair_intent(message):
+            return []
+        try:
+            return derive_requirement_specs(message)
+        except Exception:
+            return []
+
+    def _persist_request_requirements(self, specs: list[dict],
+                                      result) -> list[dict]:
+        """Persist derived requirement rows once the task exists so they
+        scope to the real work item (task > conversation > global)."""
+        try:
+            task = getattr(result, "task", None) or {}
+            task_id = str(task.get("id") or "")
+            conv_id = str(
+                (self.conversation_manager.active() or {}).get("id") or "")
+            scope_type = "task" if task_id else (
+                "conversation" if conv_id else "global")
+            scope_id = task_id or conv_id
+            return self.requirements.create_specs(
+                specs, scope_type=scope_type, scope_id=scope_id)
+        except Exception:
+            return []
 
     def sync_nexus_brain(self) -> dict[str, Any]:
         if not self.nexus_brain.unlocked:
@@ -5147,6 +5179,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
+        if path == "/api/requirements":
+            q = parse_qs(urlparse(self.path).query)
+            rows = self.state.requirements.list(
+                scope_type=str((q.get("scope_type") or [""])[0]),
+                scope_id=str((q.get("scope_id") or [""])[0]),
+                status=str((q.get("status") or [""])[0]))
+            self._json({"requirements": rows,
+                        "summary": self.state.requirements.summary()})
+            return
         if path == "/api/nexus-brain":
             self._json(self.state.nexus_brain.summary())
             return
@@ -6323,6 +6364,51 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "forgotten": forgotten, "memory": self.state.conversation_memory.snapshot()})
                 return
 
+            if path == "/api/requirements":
+                desc = str(body.get("description") or "").strip()
+                if not desc:
+                    self._json({"error": "description is required"}, 400)
+                    return
+                row = self.state.requirements.create(
+                    desc,
+                    source=str(body.get("source") or "user"),
+                    inferred=bool(body.get("inferred")),
+                    priority=str(body.get("priority") or "normal"),
+                    scope_type=str(body.get("scope_type") or ""),
+                    scope_id=str(body.get("scope_id") or ""),
+                    verification=body.get("verification")
+                    if isinstance(body.get("verification"), dict) else None,
+                    acceptance_criteria=body.get("acceptance_criteria")
+                    if isinstance(body.get("acceptance_criteria"), list)
+                    else None)
+                self._json({"ok": True, "requirement": row})
+                return
+
+            if path == "/api/requirements/status":
+                row = self.state.requirements.set_status(
+                    str(body.get("id") or ""),
+                    str(body.get("status") or ""),
+                    evidence=str(body.get("evidence") or ""),
+                    detail=str(body.get("detail") or ""))
+                if row is None:
+                    self._json({"error": "unknown requirement or status"},
+                               404)
+                    return
+                self._json({"ok": True, "requirement": row})
+                return
+
+            if path == "/api/requirements/evidence":
+                row = self.state.requirements.add_evidence(
+                    str(body.get("id") or ""),
+                    str(body.get("kind") or "note"),
+                    str(body.get("detail") or ""),
+                    ref=str(body.get("ref") or ""))
+                if row is None:
+                    self._json({"error": "unknown requirement"}, 404)
+                    return
+                self._json({"ok": True, "requirement": row})
+                return
+
             if path == "/api/conversation-memory/exchange":
                 user_text = str(body.get("user", "")).strip()
                 assistant_text = str(body.get("assistant", "")).strip()
@@ -6618,6 +6704,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.close_connection = True
                     return
 
+                # Repair asks derive acceptance criteria before work starts
+                # — surfaced live, then persisted once the task exists.
+                chat_req_specs = self.state._derive_request_specs(message)
+                if chat_req_specs:
+                    self._sse_event("requirements", {
+                        "specs": [{"description": s["description"],
+                                   "verification": s.get("verification"),
+                                   "inferred": True}
+                                  for s in chat_req_specs]})
+
                 events: queue.Queue[dict] = queue.Queue()
                 self.state._stream_sinks.append(events)
                 done = threading.Event()
@@ -6657,7 +6753,14 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         self.state._voice_finish(voice_rid, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
-                        events.put({"type": "result", **self._agent_payload(result)})
+                        payload = self._agent_payload(result)
+                        if chat_req_specs:
+                            rows = self.state._persist_request_requirements(
+                                chat_req_specs, result)
+                            payload["requirements"] = rows
+                            payload["acceptance_criteria"] = [
+                                r["description"] for r in rows]
+                        events.put({"type": "result", **payload})
                     except Exception as exc:
                         self.state._voice_finish(voice_rid)
                         err = f"{type(exc).__name__}: {exc}"
@@ -6804,6 +6907,11 @@ class Handler(BaseHTTPRequestHandler):
                             "readiness": readiness,
                         }, 409)
                         return
+                # Repair-style asks ("fix this", "make it work") derive
+                # explicit acceptance criteria BEFORE any change runs —
+                # the criteria later drive verification and requirement
+                # status, never just the model's own claim of success.
+                chat_req_specs = self.state._derive_request_specs(message)
                 voice_rid = self.state._voice_begin(message)
                 try:
                     result = self.state.agent.run(message, history=self.state.history, mode=mode,
@@ -6819,6 +6927,15 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 self.state.history = self.state.conversation_manager.history(limit=32)
+                if chat_req_specs:
+                    payload = self._agent_payload(result)
+                    rows = self.state._persist_request_requirements(
+                        chat_req_specs, result)
+                    payload["requirements"] = rows
+                    payload["acceptance_criteria"] = [
+                        r["description"] for r in rows]
+                    self._json(payload)
+                    return
                 self._agent_response(result)
                 return
 

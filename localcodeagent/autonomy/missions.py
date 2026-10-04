@@ -108,6 +108,7 @@ def new_mission(objective: str, *, title: str = "", user_request: str = "",
         "repository": repository,
         "branch": branch,
         "success_criteria": list(success_criteria or []),
+        "requirement_ids": [],
         "constraints": [str(c)[:500] for c in (constraints or [])][:40],
         "autonomy_profile": autonomy_profile,
         "graph": {"nodes": []},
@@ -181,10 +182,15 @@ class MissionStore:
     }
 
     def __init__(self, store: AutonomyStore,
-                 on_change: Callable[[dict], None] | None = None) -> None:
+                 on_change: Callable[[dict], None] | None = None,
+                 derive_hook: Callable[[dict], None] | None = None) -> None:
         self._store = store
         self._lock = threading.RLock()
         self.on_change = on_change
+        # Requirement derivation — called on every create() so every
+        # mission carries explicit requirement entities regardless of
+        # which entry point spawned it.
+        self._derive_hook = derive_hook
         self._recover_orphans()
 
     # -- persistence helpers -------------------------------------------
@@ -242,6 +248,11 @@ class MissionStore:
         })
         with self._lock:
             self._rows().append(mission)
+            if self._derive_hook is not None:
+                try:
+                    self._derive_hook(mission)
+                except Exception:
+                    pass  # derivation must never block mission creation
             self._save()
         self._emit(mission, "mission_created")
         return self._public(mission)

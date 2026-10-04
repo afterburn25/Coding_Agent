@@ -29,7 +29,8 @@ class MissionEvaluator:
     def _check_criterion(self, crit: dict, mission: dict) -> dict:
         """Evaluate one success criterion against persisted evidence."""
         kind = str(crit.get("kind") or "custom")
-        out = {"kind": kind, "met": False, "detail": ""}
+        out = {"kind": kind, "met": False, "detail": "",
+               "requirement_id": str(crit.get("requirement_id") or "")}
         graph_nodes = (mission.get("graph") or {}).get("nodes", [])
 
         if kind == "all_tasks_completed":
@@ -147,3 +148,10 @@ class MissionEvaluator:
             "reasons": result["reasons"][:10],
         })
         mission["evaluator_history"] = mission["evaluator_history"][-50:]
+        # Latest per-criterion outcome — requirement sync reads this to
+        # keep linked requirement statuses current without user upkeep.
+        mission["criteria_results"] = [
+            {"kind": c.get("kind"), "met": c.get("met"),
+             "detail": c.get("detail", ""),
+             "requirement_id": c.get("requirement_id", "")}
+            for c in result.get("criteria", [])][:40]
