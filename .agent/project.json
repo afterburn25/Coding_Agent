@@ -4,8 +4,8 @@
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1183,
- "next_milestone": "v0.12.1 shipped: profiles + creator identity + personality studio + first-run onboarding (v0.12.0), then installer update busy-status UX (stage text + marquee for process shutdown, multi-GB SHA-256 checks, uninstall wait, all four bootstrap downloads). Next: code signing for unsigned-exe SmartScreen delay, real 14B/30B dogfood tasks.",
+ "test_checkpoint": 1372,
+ "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, and hardened permission-gated desktop control. Next: avatar animation/lip sync, plugin/skill packaging depth, self-update/rollback, and long-duration autonomy hardening.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -423,8 +423,8 @@
   "start_here": "DEVIN_START_HERE.md",
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
-  "verified_code_checkpoint": "042be1c",
-  "verified_test_count": 1180,
+  "verified_code_checkpoint": "fb947d1",
+  "verified_test_count": 1372,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
    "DEVIN_START_HERE.md",
@@ -479,6 +479,7 @@
   "install_manager": "POST /api/tools/install \u2014 packages.install-gated installs (winget/choco/pip/uv/npm/apt/dnf/brew) as tracked jobs; Tools page Install button",
   "secrets": "localcodeagent/secrets.py \u2014 Fernet-encrypted credential vault at data/secrets.vault; api_request resolves auth.secret by reference; /api/secrets endpoints never return values",
   "codeintel": "localcodeagent/tools/codeintel.py \u2014 code_symbols/code_map symbol extraction (regex backend; tree-sitter-upgradeable)",
+  "computer_use": "localcodeagent/computer_use/ + tools/computer_use.py \u2014 granular desktop permissions, terminal action audit, sanitized typed/clipboard metadata",
   "data": "localcodeagent/tools/data.py \u2014 data_query/profile_dataset (duckdb-preferred, sqlite fallback), chart_generate (pure-Python SVG)",
   "models_ui": "/models.html",
   "media": "localcodeagent/tools/media.py \u2014 media_probe/extract_audio/trim_video/convert_video/create_thumbnail/normalize_audio/add_subtitles (validated ffmpeg argv) + media_transcribe pipeline (ffmpeg->whisper->srt, JobManager-tracked)",
@@ -524,9 +525,9 @@
    ]
   }
  },
- "verified_tests": 1180,
- "head": "042be1c",
- "test_count": 1180,
+ "verified_tests": 1372,
+ "head": "fb947d1",
+ "test_count": 1372,
  "branding": {
   "canonical_name": "Nexus Core",
   "full_logo": "web/assets/nexus-core-logo.png",

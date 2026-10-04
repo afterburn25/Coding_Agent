@@ -9,8 +9,8 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
 - Current development version: `0.15.0` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
-- Verified unit checkpoint: **1367 passing** (2 environment skips)
-- v0.15.0 adds decomposed mission planning, project context/history, code-impact queries, STT/push-to-talk, operational state + return briefing, mission checkpoints, Knowledge Library, and structured correction learning (see PROJECT_STATUS.md)
+- Verified unit checkpoint: **1372 passing** (2 environment skips)
+- v0.15.0 adds decomposed mission planning, project context/history, code-impact queries, STT/push-to-talk, operational state + return briefing, mission checkpoints, Knowledge Library, structured correction learning, and hardened granular desktop control (see PROJECT_STATUS.md)
 - 2026-10-03 overnight dogfood (`docs/reports/OVERNIGHT_REPORT_2026-10-03.md`): fixed a real queue-wedge — `resume()` leaked `_finalize()`'s internal repair-round `None`, stranding tasks `running` forever with no driver; now a driver registry + watchdog reaper fails driverless active tasks after `stalled_task_grace_seconds`. Also: Answer Memory profile scoping (privacy), personality delivery cues, preset voice defaults, canary `PYTHONPATH` isolation, v2-schema self-heal.
 - Latest commits: `f0a46f5`/`16acf05` (mission-loop dogfood: chat recovery excludes mission-owned tasks), `e3d68ff` (replan sweeps dead-end graph nodes), `5e74928` (mission node ok maps real ledger statuses), `6c684c1` (mission parks don't freeze the agent lane), `523af72` (soak crash root-cause docs), `fd7aab2` (3-task unattended soak report), `95a4124`–`884440d` (concurrent-resume race, claim-time status flip, cancel cleanup), `8ed6f84`/`775ca4c` (full-ledger scans, non-terminal persistence), `04a88ca`/`584d177` (task-scoped mission id, spawn-marker cleanup), `3f8a74a`–`3c810db` (bounded logs, in-memory bound parity, PIPE-child kill), `f6ddc09` (AM schema self-heal), `c4050e5` (queue-wedge fix)
 - GitHub Actions: all-green on the last several pushes; windows-desktop job compiles the real Inno installer and smokes install→update-twice including a fake-process kill check
@@ -35,6 +35,7 @@ Read in this order:
 11. `docs/ANSWER_MEMORY.md` for the learned-answer memory subsystem (trust states, semantic gates, freshness/invalidation, API/UI).
 12. `docs/LEARNING.md` for structured correction learning (scoped preference candidates, prompt overlays, inspection/forget controls, protected-state guardrails).
 13. `docs/AUTONOMY.md` for the persistent-mission autonomy subsystem (missions, DAG, supervisor, policy, scheduler, triggers, recovery).
+14. `docs/DESKTOP_CONTROL.md` for permission-gated local desktop control, audit boundaries, and validation rules.
 
 ## Product direction that must be preserved
 

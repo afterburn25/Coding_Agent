@@ -23,6 +23,12 @@
   activates them, prompt overlays are bounded, and permissions/safety/
   secrets/creator-locked identity can never be overridden. See
   `docs/LEARNING.md`.
+- Desktop-control invariant: computer use stays behind the central
+  `ToolRegistry`/`PermissionManager`, now with granular approval-gated
+  desktop/screen/mouse/keyboard/clipboard/application permissions.
+  Autonomous mode never auto-grants them, coordinates/handles are
+  validated, and the audit trail records terminal action state without
+  typed or clipboard contents. See `docs/DESKTOP_CONTROL.md`.
 - Canonical portrait hook remains `web/assets/nexus-portrait.*`; do not
   substitute another face or character for Nexus.
 
@@ -903,7 +909,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1183 tests` passing (2 environment skips).
+Expected at this checkpoint: `1372 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

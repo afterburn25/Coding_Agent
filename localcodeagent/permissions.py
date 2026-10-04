@@ -34,10 +34,32 @@ _RISK_DEFAULTS = {
     "spend.money": "deny",
     "microphone.use": "deny",
     "camera.use": "deny",
-    # Computer Use — screen observation vs input injection are separate
-    # gates; control is always approval-tier by default.
+    # Computer Use — observation, screen capture, input channels, clipboard,
+    # and process launch are separately gated. The original broad keys remain
+    # compatibility aliases for older configs.
     "computer.observe": "ask",
     "computer.control": "ask",
+    "desktop.view": "ask",
+    "desktop.control": "ask",
+    "screen.capture": "ask",
+    "mouse.control": "ask",
+    "keyboard.control": "ask",
+    "clipboard.read": "ask",
+    "clipboard.write": "ask",
+    "application.launch": "ask",
+}
+
+# Granular permissions inherit the older broad Computer Use keys when the new
+# key has no explicit configured level. Once a granular key is set it wins.
+_PERMISSION_ALIASES = {
+    "desktop.view": ("computer.observe",),
+    "desktop.control": ("computer.control",),
+    "screen.capture": ("computer.observe",),
+    "mouse.control": ("computer.control",),
+    "keyboard.control": ("computer.control",),
+    "clipboard.read": ("computer.observe",),
+    "clipboard.write": ("computer.control",),
+    "application.launch": ("computer.control",),
 }
 
 PROFILES: dict[str, dict[str, str]] = {
@@ -159,6 +181,18 @@ AUTONOMY_NEVER_AUTO = frozenset({
     "message.send",
     "microphone.use",
     "camera.use",
+    # Desktop observation/control can expose the user's live screen or inject
+    # input into unrelated applications; autonomous missions must ask a human.
+    "computer.observe",
+    "computer.control",
+    "desktop.view",
+    "desktop.control",
+    "screen.capture",
+    "mouse.control",
+    "keyboard.control",
+    "clipboard.read",
+    "clipboard.write",
+    "application.launch",
 })
 
 # Audit log bound (entries). Older entries are dropped once exceeded; the log
@@ -213,6 +247,26 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
                           "blurb": "Access the microphone. Always requires explicit approval.", "tools": []},
     "camera.use":        {"label": "Camera", "category": "Devices", "scope": "Local device", "risk": "critical",
                           "blurb": "Access the camera. Always requires explicit approval.", "tools": []},
+    "computer.observe":  {"label": "Legacy desktop observe", "category": "Desktop", "scope": "Local desktop", "risk": "high",
+                          "blurb": "Legacy broad observation permission. Prefer desktop.view, screen.capture, or clipboard.read.", "tools": []},
+    "computer.control":  {"label": "Legacy desktop control", "category": "Desktop", "scope": "Local desktop", "risk": "high",
+                          "blurb": "Legacy broad input-control permission. Prefer the granular desktop/mouse/keyboard/clipboard/application keys.", "tools": []},
+    "desktop.view":      {"label": "View desktop windows", "category": "Desktop", "scope": "Local desktop", "risk": "medium",
+                          "blurb": "List visible windows and identify the foreground application.", "tools": ["computer_windows", "computer_active_window"]},
+    "screen.capture":    {"label": "Capture screen", "category": "Desktop", "scope": "Local display", "risk": "high",
+                          "blurb": "Take screenshots of the visible desktop, including private content on screen.", "tools": ["computer_screenshot"]},
+    "desktop.control":   {"label": "Focus desktop windows", "category": "Desktop", "scope": "Local desktop", "risk": "high",
+                          "blurb": "Switch or restore foreground windows.", "tools": ["computer_focus"]},
+    "mouse.control":     {"label": "Mouse control", "category": "Desktop", "scope": "Local desktop", "risk": "high",
+                          "blurb": "Move the pointer, click, and scroll in the active desktop session.", "tools": ["computer_click", "computer_scroll"]},
+    "keyboard.control":  {"label": "Keyboard control", "category": "Desktop", "scope": "Local desktop", "risk": "high",
+                          "blurb": "Inject keystrokes and shortcuts into the focused application. Typed content is not stored in the audit timeline.", "tools": ["computer_type", "computer_keys"]},
+    "clipboard.read":    {"label": "Read clipboard", "category": "Desktop", "scope": "Local clipboard", "risk": "high",
+                          "blurb": "Read current clipboard text, which may contain private data.", "tools": ["computer_clipboard_get"]},
+    "clipboard.write":   {"label": "Write clipboard", "category": "Desktop", "scope": "Local clipboard", "risk": "medium",
+                          "blurb": "Replace clipboard text. Audit records only the character count.", "tools": ["computer_clipboard_set"]},
+    "application.launch": {"label": "Launch applications", "category": "Desktop", "scope": "Local machine", "risk": "high",
+                           "blurb": "Start a local executable directly, without invoking a shell.", "tools": ["computer_launch"]},
     "tasks.queue":       {"label": "Queue background tasks", "category": "Automation", "scope": "Job manager", "risk": "medium",
                           "blurb": "Queue multi-step background work (installs, research, workflows).", "tools": ["task_queue"]},
 }
@@ -229,6 +283,9 @@ _PREFIX_CATEGORY = [
     ("packages", "Tool Installation"), ("tools", "Tool Installation"),
     ("credentials", "Credentials"), ("secrets", "Credentials"),
     ("message", "Communication"), ("spend", "Communication"),
+    ("desktop", "Desktop"), ("screen", "Desktop"), ("mouse", "Desktop"),
+    ("keyboard", "Desktop"), ("clipboard", "Desktop"),
+    ("application", "Desktop"), ("computer", "Desktop"),
     ("microphone", "Devices"), ("camera", "Devices"), ("tasks", "Automation"),
 ]
 
@@ -404,8 +461,15 @@ class PermissionManager:
     # ------------------------------------------------------------------ state
 
     def level(self, permission: str) -> str:
-        """Raw configured level for a permission key."""
-        mode = str(self.permissions.get(permission, "ask")).strip().lower()
+        """Raw configured level for a permission key, honoring legacy aliases."""
+        permission = str(permission or "").strip()
+        raw = self.permissions.get(permission)
+        if raw is None:
+            for alias in _PERMISSION_ALIASES.get(permission, ()):  # legacy config compatibility
+                raw = self.permissions.get(alias)
+                if raw is not None:
+                    break
+        mode = str(raw or "ask").strip().lower()
         return mode if mode in LEVELS else "ask"
 
     def effective(self, permission: str) -> str:

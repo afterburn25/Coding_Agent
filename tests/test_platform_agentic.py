@@ -7,12 +7,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from localcodeagent.computer_use import ComputerUse
 from localcodeagent.lsp import LspClient, LspPool
 from localcodeagent.multiagent import AgentPool, is_repo
+from localcodeagent.permissions import PermissionManager
+from localcodeagent.tools.base import ToolRegistry
+from localcodeagent.tools.computer_use import register_computer_use_tools
 from localcodeagent.voice.stt import VoiceSession, SttEngine, list_input_devices
+from localcodeagent.workflow.activity import ActivityStore
 
 IS_WIN = os.name == "nt"
 
@@ -51,6 +56,82 @@ class ComputerUseTests(unittest.TestCase):
         cu = ComputerUse()
         out = cu.mouse_move(10, 10)
         self.assertIn("ok", out)  # False off-Windows, True on Windows
+
+    def test_typed_text_is_redacted_from_audit(self):
+        seen = []
+        cu = ComputerUse(audit=lambda action, detail: seen.append((action, detail)))
+        with patch("localcodeagent.computer_use.user32", None):
+            out = cu.type_text("secret-password-123")
+        self.assertFalse(out["ok"])
+        self.assertEqual(seen[0][0], "type_text")
+        self.assertNotIn("secret-password-123", seen[0][1])
+        self.assertNotIn("secret-password-123", str(cu.actions[-1]))
+
+    def test_click_validates_button_and_virtual_bounds(self):
+        class FakeUser32:
+            def GetSystemMetrics(self, metric):
+                return {76: 0, 77: 0, 78: 1920, 79: 1080}.get(metric, 0)
+
+            def SetCursorPos(self, x, y):
+                raise AssertionError("out-of-bounds click moved the cursor")
+
+        cu = ComputerUse()
+        with patch("localcodeagent.computer_use.user32", FakeUser32()):
+            out = cu.click(10, 10, button="middle")
+            self.assertFalse(out["ok"])
+            self.assertIn("button", out["error"])
+            out = cu.click(5000, 5000)
+            self.assertFalse(out["ok"])
+            self.assertIn("outside virtual screen", out["error"])
+        self.assertFalse(cu.actions[-1]["ok"])
+
+    def test_audit_completion_closes_activity_row(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            activity = ActivityStore(Path(td) / "activity.json")
+            manager = PermissionManager({"desktop.view": "allow"})
+            registry = ToolRegistry(manager)
+            register_computer_use_tools(registry, Path(td), activity=activity)
+            result = json.loads(registry.execute("computer_windows", {}, approved=True))
+            self.assertIn("ok", result)
+            rows = activity.for_task("computer-use")
+            self.assertEqual(len(rows), 1)
+            expected = "completed" if result["ok"] else "failed"
+            self.assertEqual(rows[0]["state"], expected)
+            self.assertIsNotNone(rows[0]["ended_at"])
+            self.assertEqual(rows[0]["details"]["result"]["ok"], result["ok"])
+
+    def test_desktop_permissions_are_granular_and_never_auto_granted(self):
+        manager = PermissionManager(
+            {"desktop.view": "ask", "mouse.control": "ask"},
+            autonomous=True,
+        )
+        self.assertEqual(manager.effective("desktop.view"), "ask")
+        self.assertEqual(manager.effective("mouse.control"), "ask")
+        self.assertIn("desktop.view", manager.summary()["autonomy_hard_gates"])
+
+        legacy = PermissionManager({"computer.observe": "allow",
+                                    "computer.control": "deny"})
+        self.assertEqual(legacy.level("desktop.view"), "allow")
+        self.assertEqual(legacy.level("screen.capture"), "allow")
+        self.assertEqual(legacy.level("mouse.control"), "deny")
+
+        registry = ToolRegistry(legacy)
+        register_computer_use_tools(registry, Path(tempfile.mkdtemp()))
+        self.assertEqual(registry.permission_for("computer_windows"), ("desktop.view", "allow"))
+        self.assertEqual(registry.permission_for("computer_click"), ("mouse.control", "deny"))
+        denied = registry.execute("computer_click", {"x": 1, "y": 1}, approved=True)
+        self.assertTrue(denied.startswith("PERMISSION_DENIED"))
+
+    def test_launch_rejects_missing_target_without_shell(self):
+        cu = ComputerUse()
+        if os.name == "nt":
+            out = cu.launch_app("")
+            self.assertFalse(out["ok"])
+            self.assertIn("required", out["error"])
+        else:
+            out = cu.launch_app("anything")
+            self.assertFalse(out["ok"])
+            self.assertIn("unsupported", out["error"])
 
 
 FAKE_LSP = r'''

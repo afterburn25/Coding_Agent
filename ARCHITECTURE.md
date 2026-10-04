@@ -81,6 +81,16 @@ manifests stay visible in the Tool Manager without entering model context.
 model, image, browser, research, media, data, document, sandbox, VCS) so
 providers are interchangeable. See `TOOLS.md` and `PERMISSIONS.md`.
 
+Desktop control follows the same registry boundary. `computer_use` exposes
+Windows observation/input primitives, but all policy stays in
+`PermissionManager`: granular `desktop.view`, `screen.capture`,
+`desktop.control`, `mouse.control`, `keyboard.control`, clipboard, and
+`application.launch` keys default to approval and are hard-gated from
+autonomous auto-grants. Legacy `computer.observe`/`computer.control` settings
+remain aliases for compatibility. Every action opens and then closes an
+activity row with sanitized metadata; typed text and clipboard contents are
+never persisted. See `docs/DESKTOP_CONTROL.md`.
+
 ## v0.3 task state machine
 
 ```text

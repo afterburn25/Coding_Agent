@@ -13,9 +13,16 @@ Core keys plus risk-sensitive keys shared across profiles:
 `docker.access` · `credentials.use` · `network.read` · `browser.control` ·
 `browser.submit` · `external_api.call` · `image.read` · `image.generate` ·
 `image.manage` · `github.read` · `github.write` · `message.send` ·
-`microphone.use` · `camera.use` · `spend.money` · `tasks.queue`
+`microphone.use` · `camera.use` · `spend.money` · `tasks.queue` ·
+`desktop.view` · `screen.capture` · `desktop.control` · `mouse.control` ·
+`keyboard.control` · `clipboard.read` · `clipboard.write` ·
+`application.launch`
 
-High-impact actions (spending money, sending messages, mic/camera) default
+Computer Use's older broad `computer.observe` and `computer.control` levels
+remain aliases when a granular key has not been configured explicitly.
+
+High-impact actions (spending money, sending messages, mic/camera, desktop
+observation/control) default
 to `deny` in every shipped profile; installs/deletes/pushes/submissions
 default to `ask`. Manifest tools may introduce additional keys — unknown
 keys default to `ask`.
@@ -73,8 +80,9 @@ It never bypasses:
 
 - `deny` levels — denied stays denied.
 - Hard gates (`AUTONOMY_NEVER_AUTO` in `permissions.py`): `spend.money`,
-  `message.send`, `microphone.use`, `camera.use` always require an explicit
-  human approval regardless of mode.
+  `message.send`, `microphone.use`, `camera.use`, and every desktop
+  observation/control key always require an explicit human approval
+  regardless of mode.
 
 Two companion settings bound autonomous runs:
 
