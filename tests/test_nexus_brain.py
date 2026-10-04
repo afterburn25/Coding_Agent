@@ -426,9 +426,9 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + path, timeout=15) as r:
             return json.loads(r.read())
 
-    def _post(self, path, body):
+    def _post(self, path, body, base=None):
         req = urllib.request.Request(
-            self.base + path, data=json.dumps(body).encode(),
+            (base or self.base) + path, data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
@@ -527,6 +527,59 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
         code, _ = self._post("/api/nexus-brain/sync",
                              {"creator_token": "bogus"})
         self.assertEqual(code, 403)
+
+        # Distribution round-trip over HTTP: a second live server installs
+        # the signed export as a verified read-only Brain; a tampered
+        # payload is rejected at the signature boundary (403, not 500).
+        from localcodeagent.config import AgentConfig, ModelProfile
+        from localcodeagent.server import create_server, stop_state
+        td2 = tempfile.TemporaryDirectory()
+        self.addCleanup(td2.cleanup)
+        cfg2 = AgentConfig(
+            profiles_onboarding_gate=False,
+            models=[ModelProfile(id="fake", endpoint="http://127.0.0.1:1/v1",
+                                 model="m", roles=["utility"], runtime="external")],
+            process_watchdog=False, research_enabled=False)
+        server2, state2 = create_server(
+            cfg2, Path(td2.name), "127.0.0.1", 0,
+            Path(td2.name) / "web", Path(td2.name) / ".runtime")
+        t2 = threading.Thread(target=server2.serve_forever, daemon=True)
+        t2.start()
+        self.addCleanup(lambda: (server2.shutdown(), server2.server_close(),
+                                 stop_state(state2)))
+        base2 = f"http://127.0.0.1:{server2.server_address[1]}"
+
+        tampered = json.loads(json.dumps(out["brain"]))
+        tampered["brain"]["records"][0]["text"] = "forged record"
+        code, _ = self._post("/api/nexus-brain/import",
+                             {"brain": tampered}, base=base2)
+        self.assertEqual(code, 403)
+        self.assertFalse(state2.nexus_brain.initialized)
+
+        code, installed = self._post("/api/nexus-brain/import",
+                                     {"brain": out["brain"]}, base=base2)
+        self.assertEqual(code, 200, installed)
+        self.assertTrue(installed["brain"]["initialized"])
+        self.assertTrue(installed["brain"]["verified_for_session"])
+        self.assertTrue(installed["brain"]["distribution_read_only"])
+        self.assertFalse(installed["brain"]["creator_signing_key_available"])
+        # Read-only install: no creator session exists — sync is refused.
+        code, _ = self._post("/api/nexus-brain/sync", {}, base=base2)
+        self.assertEqual(code, 403)
+        self.assertIn("oat milk", state2.nexus_brain.prompt_context())
+
+        # The signed file survives a fresh Brain object on the same path —
+        # restart loads it verified without any creator secrets on disk.
+        from localcodeagent.workflow.nexus_brain import NexusBrain
+        reloaded = NexusBrain(state2.nexus_brain.path)
+        self.assertTrue(reloaded.verified_for_session)
+        self.assertTrue(reloaded.summary()["distribution_read_only"])
+
+        # Re-enable web_research so later tests on this class inherit a
+        # default subroutine map.
+        code, out = self._post("/api/nexus-brain/subroutines", {
+            "creator_token": token, "subroutines": {"web_research": True}})
+        self.assertEqual(code, 200, out)
 
         # Lock retires the session — even the once-valid token is refused.
         code, out = self._post("/api/nexus-brain/lock",

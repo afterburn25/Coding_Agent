@@ -81,8 +81,10 @@
 - The creator-Brain lifecycle is now dogfooded over real HTTP
   (`tests/test_nexus_brain.py::NexusBrainHttpLifecycleTests`): initialize →
   stage → `sync` counts → prompt injection → subroutine gating → session
-  lock, all verified end to end. Dogfood found one real fix:
-  creator-session `PermissionError`s answered 500; they now map to 403.
+  lock, plus a signed-export round-trip into a second live server (verified
+  read-only install, tampered payload 403, disk reload still verified).
+  Dogfood found one real fix: creator-session `PermissionError`s answered
+  500; they now map to 403.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 

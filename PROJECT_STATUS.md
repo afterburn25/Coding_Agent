@@ -83,8 +83,10 @@ v0.15.0 deepens the workstation core:
   exercised over real HTTP (initialize → stage facts/rules/corrections/
   knowledge/conversations → creator-session sync → prompt/knowledge/
   training context injection → subroutine gating → session lock) instead
-  of string-asserted routes. `PermissionError` from creator-session gates
-  now maps to a proper 403 instead of an opaque 500.
+  of string-asserted routes — including a signed-export round-trip into a
+  second live server (verified read-only install, tampered payload 403,
+  disk reload still verified). `PermissionError` from creator-session
+  gates now maps to a proper 403 instead of an opaque 500.
 
 Verified: **1411 tests** (2 environment skips).
 
