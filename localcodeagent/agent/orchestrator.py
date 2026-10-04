@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
-from ..models.openai_compat import OpenAICompatibleProvider
+from ..models.openai_compat import (
+    OpenAICompatibleProvider, context_overflow_need)
 from ..models.router import ModelRouter, RoutingDecision
 from ..streaming import TokenCoalescer
 from .classify import research_class, wants_long_form
@@ -1233,6 +1234,7 @@ class AgentOrchestrator:
         max_tokens: int | None = None,
     ):
         attempts = 0
+        last_ctx_target = 0
         failure_rec: dict | None = None
         while True:
             streaming = on_delta is not None and hasattr(provider, "complete_stream")
@@ -1284,6 +1286,41 @@ class AgentOrchestrator:
                     }
                     model_events.append(failure_event)
                     self._safe_emit(event_callback, {"type": "model", "event": failure_event})
+                # A context overflow is recoverable: the prompt assembled
+                # bigger than the resident server's window, so relaunch the
+                # model at the context class covering the reported need and
+                # retry — rather than truncating or failing the task.
+                overflow_need = context_overflow_need(exc)
+                if overflow_need and profile.runtime == "llama_cpp":
+                    try:
+                        from ..runtime.tuner import (
+                            context_class, context_class_size)
+                        target = context_class_size(
+                            context_class(overflow_need + 2048))
+                        launched = 0
+                        probe = getattr(self.runtime, "launched_context", None)
+                        if callable(probe):
+                            launched = int(probe(profile.id) or 0)
+                        if target > max(launched, last_ctx_target):
+                            last_ctx_target = target
+                            endpoint = self.runtime.ensure_ready(
+                                profile, min_context=target)
+                            provider = OpenAICompatibleProvider(
+                                profile, endpoint=endpoint)
+                            esc_event = {
+                                "type": "context_escalation",
+                                "model_id": profile.id,
+                                "to_ctx": target,
+                                "need_tokens": overflow_need,
+                            }
+                            if model_events is not None:
+                                model_events.append(esc_event)
+                            self._safe_emit(
+                                event_callback,
+                                {"type": "model", "event": esc_event})
+                            continue
+                    except Exception:
+                        pass  # escalation failed — normal handling below
                 if attempts >= self.config.runtime_recovery_attempts:
                     netdiag.annotate_recovery(failure_rec, f"gave up after {attempts} retries")
                     raise

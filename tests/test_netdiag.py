@@ -390,6 +390,97 @@ class RecoveryLoopTests(unittest.TestCase):
             self.assertEqual(exc.backend["crash_reason"],
                              "llama-server exited with code 1")
 
+    def test_context_overflow_escalates_model_context(self):
+        """A prompt larger than the resident window relaunches the model at
+        the context class covering the server's reported need."""
+        class _CtxRuntime(_FakeRuntime):
+            def __init__(self):
+                super().__init__()
+                self.ctx = 8192
+                self.ctx_calls: list[int] = []
+
+            def launched_context(self, model_id):
+                return self.ctx
+
+            def ensure_ready(self, profile, min_context=None):
+                if min_context:
+                    self.ctx_calls.append(min_context)
+                    self.ctx = max(self.ctx, min_context)
+                return "http://127.0.0.1:1/v1"
+
+        with tempfile.TemporaryDirectory() as td:
+            runtime = _CtxRuntime()
+            agent = self._agent(Path(td), runtime)
+            profile = agent.config.models[0]
+            provider = OpenAICompatibleProvider(profile)
+            calls = {"n": 0}
+            ok = json.dumps({"choices": [{"message": {
+                "role": "assistant", "content": "ok"},
+                "finish_reason": "stop"}]}).encode()
+
+            def fake_urlopen(req, timeout):
+                calls["n"] += 1
+                if runtime.ctx < 24576:
+                    body = json.dumps({"error": {"message":
+                        "request (19575 tokens) exceeds the available "
+                        "context size (8192 tokens)"}}).encode()
+                    raise urllib.error.HTTPError(
+                        "http://127.0.0.1:1/v1/chat/completions", 400,
+                        "Bad Request", {}, io.BytesIO(body))
+                return _Response(payload=ok,
+                                 content_type="application/json")
+
+            netdiag._FAILURES.clear()
+            with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
+                       side_effect=fake_urlopen):
+                result = agent._complete_with_recovery(
+                    provider, profile, messages=[], tools=None,
+                    model_events=[])
+            self.assertEqual(result.message["content"], "ok")
+            # 8192 launch → overflow reports 19575 needed → 24576 class
+            self.assertEqual(runtime.ctx_calls, [24576])
+            self.assertGreaterEqual(calls["n"], 2)
+            self.assertEqual(runtime.recover_calls, 0)  # not a crash
+
+    def test_context_overflow_escalation_is_bounded(self):
+        """If the need exceeds the largest context class the escalation
+        cannot grow further — the error surfaces instead of looping."""
+        class _MaxRuntime(_FakeRuntime):
+            def __init__(self):
+                super().__init__()
+                self.ctx_calls: list[int] = []
+
+            def launched_context(self, model_id):
+                return max(self.ctx_calls or [8192])
+
+            def ensure_ready(self, profile, min_context=None):
+                if min_context:
+                    self.ctx_calls.append(min_context)
+                return "http://127.0.0.1:1/v1"
+
+        with tempfile.TemporaryDirectory() as td:
+            runtime = _MaxRuntime()
+            agent = self._agent(Path(td), runtime)
+            profile = agent.config.models[0]
+            provider = OpenAICompatibleProvider(profile)
+            body = json.dumps({"error": {"message":
+                "request (60000 tokens) exceeds the available "
+                "context size (32768 tokens)"}}).encode()
+
+            def fake_urlopen(req, timeout):
+                raise urllib.error.HTTPError(
+                    "http://127.0.0.1:1/v1/chat/completions", 400,
+                    "Bad Request", {}, io.BytesIO(body))
+
+            with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
+                       side_effect=fake_urlopen):
+                with self.assertRaises(ModelHTTPError):
+                    agent._complete_with_recovery(
+                        provider, profile, messages=[], tools=None,
+                        model_events=[])
+            # Escalated once to the ceiling (32768), then refused to loop.
+            self.assertEqual(runtime.ctx_calls, [32768])
+
 
 class _DeadProcess:
     def poll(self):

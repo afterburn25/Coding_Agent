@@ -1041,23 +1041,46 @@ class RuntimeManager:
         elif tuned == attempts[1][2]:
             attempts = [("tuned", True, []), ("bare", False, [])]
 
-        last_exc: Exception | None = None
-        for label, apply_tuning, extra in attempts:
+        def _try(extra_ctx: int | None) -> str:
+            last_exc_inner: Exception | None = None
+            for label, apply_tuning, extra in attempts:
+                try:
+                    return self._spawn_and_wait(
+                        profile, port, endpoint,
+                        apply_tuning=apply_tuning, extra_args=extra,
+                        ctx_override=extra_ctx)
+                except Exception as exc:
+                    last_exc_inner = exc
+                    if label == "tuned" and tuned:
+                        try:
+                            with self._lock:
+                                self.tuner.mark_bad(profile, tuned, str(exc))
+                        except Exception:
+                            pass
+                    continue
+            raise last_exc_inner or RuntimeError("llama-server launch failed")
+
+        try:
+            return _try(ctx_override)
+        except Exception as exc:
+            # A request can force a context larger than memory allows — every
+            # attempt then fails identically on KV-cache allocation. Retry
+            # once at half the window instead of declaring the model dead.
+            tail = self._log_tail(self.logs_dir / f"{profile.id}.log")
+            alloc_fail = any(s in tail.lower() for s in
+                             ("failed to allocate", "out of memory",
+                              "kv cache", "cuda error"))
+            if not (ctx_override and ctx_override > 8192 and alloc_fail):
+                raise
+            reduced = max(8192, ctx_override // 2)
             try:
-                return self._spawn_and_wait(
-                    profile, port, endpoint,
-                    apply_tuning=apply_tuning, extra_args=extra,
-                    ctx_override=ctx_override)
-            except Exception as exc:
-                last_exc = exc
-                if label == "tuned" and tuned:
-                    try:
-                        with self._lock:
-                            self.tuner.mark_bad(profile, tuned, str(exc))
-                    except Exception:
-                        pass
-                continue
-        raise last_exc or RuntimeError("llama-server launch failed")
+                with self._lock:
+                    self._status[profile.id].error = (
+                        f"context {ctx_override} exceeded memory — "
+                        f"retrying at {reduced}")
+            except Exception:
+                pass
+            return _try(reduced)
 
     def _spawn_and_wait(
         self, profile: ModelProfile, port: int, endpoint: str, *,
@@ -1267,6 +1290,11 @@ class RuntimeManager:
         raise TimeoutError(
             f"probe llama-server did not become healthy within "
             f"{max(5, profile.startup_timeout)}s (log: {log_path})")
+
+    def launched_context(self, model_id: str) -> int:
+        """ctx size the resident server launched with (0 when unmanaged)."""
+        with self._lock:
+            return int(self._launch_ctx.get(model_id, 0) or 0)
 
     def ensure_ready(self, profile: ModelProfile, min_context: int | None = None) -> str:
         with self._lock:

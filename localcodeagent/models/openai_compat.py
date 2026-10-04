@@ -23,6 +23,16 @@ _CONTEXT_OVERFLOW_RE = re.compile(
 _OVERFLOW_NUMBERS_RE = re.compile(r"\((\d+)\s*tokens\).*?\((\d+)\s*tokens\)", re.DOTALL)
 
 
+def context_overflow_need(exc: BaseException) -> int | None:
+    """Prompt tokens the server says it needs, when the error is a
+    context-window overflow ('request (N tokens) exceeds ...')."""
+    msg = str(getattr(exc, "server_message", "") or exc)
+    if not _CONTEXT_OVERFLOW_RE.search(msg):
+        return None
+    m = _OVERFLOW_NUMBERS_RE.search(msg)
+    return int(m.group(1)) if m else None
+
+
 class ModelHTTPError(RuntimeError):
     """HTTP failure from the model endpoint with the server's own reason.
 
