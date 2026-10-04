@@ -48,6 +48,21 @@ def _blank() -> dict:
             "modifiers": [], "mode": "",
             "overlay": {"trait_offsets": {}, "notes": []},
             "recent": {"openers": [], "closers": []},
+            # Social layer — last classified user cue + surface energy.
+            "last_cue": "", "sarcasm_detected": False,
+            "user_energy": "medium", "last_outcome": "",
+            # Conversational focus + shared-history continuity.
+            "focus": {"topic": "", "prev": "", "since_turn": 0},
+            "milestones": [], "stated_prefs": [], "address": "",
+            # Expression memory — saturation counters and pattern tags
+            # keep strong personas from caricaturing over long sessions.
+            "saturation": {"humor": 0.0, "sarcasm": 0.0, "vocal": 0.0,
+                           "gesture": 0.0, "intensity": 0.0},
+            "patterns": {}, "humor_feedback": {},
+            # QA metrics — aggregate counters, not surveillance.
+            "metrics": {"words": 0, "questions": 0, "name_uses": 0,
+                        "user_sarcasm": 0, "humor": 0, "vocal": 0,
+                        "gesture": 0, "callbacks": 0},
             "last_seen": 0.0}
 
 
@@ -167,6 +182,40 @@ class PersonaDynamics:
         held = str(md.get("current") or "")
         held_int = float(md.get("intensity") or 0.0)
         ev = mood_event(user_text)
+
+        # Social layer — cue classification (sarcasm-aware), user
+        # energy, focus tracking, milestone detection, saturation decay.
+        try:
+            from . import continuity as _cont
+            from . import social as _soc
+            cue = _soc.classify_social(
+                user_text,
+                context_failed=str(st.get("last_outcome") or "")
+                == "failed")
+            st["last_cue"] = cue.get("cue", "")
+            st["sarcasm_detected"] = bool(cue.get("sarcasm"))
+            st["user_energy"] = _soc.user_energy(
+                user_text, cue.get("cue", ""))
+            new_focus = _soc.tag_focus(user_text)
+            foc = st.setdefault("focus",
+                                {"topic": "", "prev": "",
+                                 "since_turn": 0})
+            if _soc.topic_shifted(str(foc.get("topic") or ""),
+                                  new_focus):
+                foc["prev"], foc["topic"] = foc.get("topic"), new_focus
+                foc["since_turn"] = st["turns"]
+            elif new_focus and not foc.get("topic"):
+                foc["topic"], foc["since_turn"] = new_focus, st["turns"]
+            ms = _cont.detect_milestone(cue, user_text)
+            if ms:
+                _cont.record_milestone(st, ms[1], mtype=ms[0])
+            _cont.decay_saturation(st)
+            met = st.setdefault("metrics", {})
+            if cue.get("sarcasm"):
+                met["user_sarcasm"] = int(
+                    met.get("user_sarcasm") or 0) + 1
+        except Exception:
+            pass
         if not manual_mood:
             if ev and (held not in schema.MOODS
                        or ev[1] >= held_int
@@ -190,9 +239,17 @@ class PersonaDynamics:
         self._save(st)
         return st
 
+    _REPLY_FAIL = re.compile(
+        r"\b(?:failed|failure|error|didn'?t\s+work|couldn'?t|"
+        r"unable\s+to|still\s+broken)\b", re.I)
+    _REPLY_HUMOR = re.compile(
+        r"\b(?:ha(?:ha)+|hehe?|lol)\b|[😂😄😉]|punchline|"
+        r"just\s+kidding", re.I)
+
     def note_reply(self, reply_text: str) -> None:
-        """Track opener/closer n-grams for the repetition guard.
-        Bounded — keeps the last few first/last sentences."""
+        """Track opener/closer n-grams for the repetition guard, plus
+        reply metrics (length, questions, name usage, humor markers,
+        outcome) for QA and sarcasm context. Bounded."""
         st = self._load()
         text = str(reply_text or "").strip()
         if text:
@@ -207,7 +264,27 @@ class PersonaDynamics:
                         " ".join(sents[-1].lower().split()[:6]))
             for k in ("openers", "closers"):
                 rec[k] = rec.get(k, [])[-_MAX_RECENT:]
+            met = st.setdefault("metrics", {})
+            met["words"] = int(met.get("words") or 0) + len(text.split())
+            met["questions"] = int(met.get("questions") or 0) \
+                + text.count("?")
+            addr = str(st.get("address") or "")
+            if addr and re.search(r"\b" + re.escape(addr.lower())
+                                  + r"\b", text.lower()):
+                met["name_uses"] = int(met.get("name_uses") or 0) + 1
+            if self._REPLY_HUMOR.search(text):
+                met["humor"] = int(met.get("humor") or 0) + 1
+                self._bump_saturation(st, "humor")
+            st["last_outcome"] = ("failed"
+                                  if self._REPLY_FAIL.search(text)
+                                  else "ok")
         self._save(st)
+
+    def _bump_saturation(self, st: dict, kind: str,
+                         amount: float = 1.0) -> None:
+        sat = st.setdefault("saturation", {})
+        sat[kind] = round(min(6.0, float(sat.get(kind) or 0.0)
+                              + amount), 2)
 
     # -- queries -----------------------------------------------------------
 
@@ -247,6 +324,148 @@ class PersonaDynamics:
         rec = self._load().get("recent") or {}
         return {"openers": list(rec.get("openers") or []),
                 "closers": list(rec.get("closers") or [])}
+
+    # -- social / continuity ------------------------------------------------
+
+    def social(self) -> dict:
+        """Last-turn social signals for prompt compilation."""
+        st = self._load()
+        return {"cue": str(st.get("last_cue") or ""),
+                "sarcasm": bool(st.get("sarcasm_detected")),
+                "user_energy": str(st.get("user_energy") or "medium"),
+                "last_outcome": str(st.get("last_outcome") or "")}
+
+    def focus_info(self) -> dict:
+        st = self._load()
+        foc = st.get("focus") or {}
+        return {"topic": str(foc.get("topic") or ""),
+                "prev": str(foc.get("prev") or ""),
+                "since_turn": int(foc.get("since_turn") or 0)}
+
+    def callback_for(self, user_text: str) -> dict | None:
+        """Best shared-history callback for this user message — gated
+        by relevance + recency. Persists the last_referenced marker so
+        callbacks stay occasional."""
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            hit = _cont.relevant_callback(st, user_text)
+            if hit is not None:
+                met = st.setdefault("metrics", {})
+                met["callbacks"] = int(met.get("callbacks") or 0) + 1
+                self._save(st)
+            return hit
+        except Exception:
+            return None
+
+    def note_expression(self, kinds: list[str]) -> None:
+        """Bump expression-saturation counters (called by the vocal
+        engine / reply path when humor, sarcasm, vocals, or gestures
+        were actually expressed)."""
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            _cont.note_expression(st, kinds)
+            met = st.setdefault("metrics", {})
+            for k in kinds:
+                if k in ("vocal", "gesture"):
+                    met[k] = int(met.get(k) or 0) + 1
+            self._save(st)
+        except Exception:
+            pass
+
+    def record_pattern(self, kind: str, pattern: str) -> None:
+        """Remember an analogy/humor/metaphor structure tag so it isn't
+        re-used too soon."""
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            _cont.note_pattern(st, kind, pattern)
+            self._save(st)
+        except Exception:
+            pass
+
+    def humor_feedback(self, style: str, positive: bool) -> None:
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            _cont.humor_feedback(st, positive, style)
+            self._save(st)
+        except Exception:
+            pass
+
+    def record_stated_pref(self, subject: str, stance: str) -> None:
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            _cont.record_stated_preference(st, subject, stance)
+            self._save(st)
+        except Exception:
+            pass
+
+    def set_address(self, address: str) -> str:
+        """Profile-level preferred address — independent of Creator
+        titles ('none' clears it)."""
+        st = self._load()
+        try:
+            from . import continuity as _cont
+            out = _cont.set_address(st, address)
+            self._save(st)
+            return out
+        except Exception:
+            return str(st.get("address") or "")
+
+    def metrics(self) -> dict:
+        """Aggregate QA rates — words/reply, question rate, humor rate,
+        callback rate, name-usage rate. Vocal/gesture counters are
+        bumped via note_expression."""
+        st = self._load()
+        met = st.get("metrics") or {}
+        turns = max(1, int(st.get("turns") or 0))
+        words = int(met.get("words") or 0)
+        return {"turns": turns,
+                "avg_words": round(words / turns, 1),
+                "question_rate": round(
+                    int(met.get("questions") or 0) / turns, 2),
+                "humor_rate": round(
+                    int(met.get("humor") or 0) / turns, 2),
+                "sarcasm_user_rate": round(
+                    int(met.get("user_sarcasm") or 0) / turns, 2),
+                "vocal_rate": round(
+                    int(met.get("vocal") or 0) / turns, 2),
+                "gesture_rate": round(
+                    int(met.get("gesture") or 0) / turns, 2),
+                "callback_rate": round(
+                    int(met.get("callbacks") or 0) / turns, 2),
+                "name_use_rate": round(
+                    int(met.get("name_uses") or 0) / turns, 2)}
+
+    def continuity_view(self) -> dict:
+        """Safe inspect surface — counts/stances, no raw memory."""
+        try:
+            from . import continuity as _cont
+            return _cont.continuity_summary(self._load())
+        except Exception:
+            return {}
+
+    def reset_continuity(self) -> None:
+        """Clear shared-history milestones, stated preferences,
+        pattern memory, humor feedback — relationship familiarity and
+        profile memory are preserved."""
+        st = self._load()
+        st["milestones"], st["stated_prefs"] = [], []
+        st["patterns"], st["humor_feedback"] = {}, {}
+        st["saturation"] = {k: 0.0 for k in st.get("saturation") or {}}
+        self._save(st)
+
+    def reset_relationship(self) -> None:
+        """Reset familiarity/mood adaptation without touching memories
+        or persona config."""
+        st = self._load()
+        st["familiarity"], st["stage"] = 0.0, "new"
+        st["mood"] = _blank()["mood"]
+        st["focus"] = {"topic": "", "prev": "", "since_turn": 0}
+        self._save(st)
 
     # -- mutations ----------------------------------------------------------
 

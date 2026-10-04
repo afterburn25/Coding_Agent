@@ -147,7 +147,7 @@ class TestEffectivePersona(unittest.TestCase):
         card = compile_effective(self._active("nerdy"),
                                  user_text="hello")
         lines = card_guidance(card)
-        self.assertLessEqual(len(lines), 14)
+        self.assertLessEqual(len(lines), 18)
         joined = "\n".join(lines)
         self.assertIn("style:", joined.lower())
 

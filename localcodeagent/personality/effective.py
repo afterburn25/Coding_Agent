@@ -136,7 +136,9 @@ def compile_effective(personality: dict, *, user_text: str = "",
                       seriousness: str = "",
                       topic: str = "",
                       is_adult: bool = True,
-                      strength: int | None = None) -> dict:
+                      strength: int | None = None,
+                      state: dict | None = None,
+                      callback: dict | None = None) -> dict:
     """Merge all layers → effective persona card (plain dict)."""
     p = personality or {}
     strength = schema.clean_strength(
@@ -183,6 +185,55 @@ def compile_effective(personality: dict, *, user_text: str = "",
     if mood not in schema.MOODS:
         mood = ""
 
+    # Social layer — cue classification is deterministic and cheap;
+    # sarcasm *understanding* is independent of the persona's humor.
+    st = state or {}
+    social_cue, sarcasm = "", False
+    user_e, energy, pacing = "medium", "medium", 1.0
+    sat = {"humor": 0.0, "sarcasm": 0.0, "vocal": 0.0,
+           "gesture": 0.0, "intensity": 0.0}
+    focus, focus_shifted = "", False
+    addr_hint, humor_adapt, pref_hint, recovery = "", "", "", ""
+    try:
+        from . import continuity as _cont
+        from . import social as _soc
+        cue = _soc.classify_social(
+            user_text,
+            context_failed=str(st.get("last_outcome") or "")
+            == "failed")
+        social_cue = str(cue.get("cue") or "")
+        sarcasm = bool(cue.get("sarcasm"))
+        user_e = _soc.user_energy(user_text, social_cue)
+        turns = int(st.get("turns") or 0)
+        energy = _soc.effective_energy(
+            beh, user_energy=user_e, mood=mood, turns=turns,
+            seriousness=seriousness)
+        pacing = _soc.pacing_factor(turns, social_cue)
+        sat = _cont.saturation_level(st)
+        foc = st.get("focus") or {}
+        focus = str(foc.get("topic") or "")
+        focus_shifted = bool(foc.get("prev")) and bool(focus)
+        # Saturation dampening — heavy recent humor/sarcasm dials the
+        # humor register down one step without changing identity.
+        if _cont.saturated(st, "sarcasm") and humor == "sarcastic":
+            humor = "dry"
+        elif _cont.saturated(st, "humor") and \
+                _HUMOR_RANK.get(humor, 0) >= 3:
+            humor = "dry"
+        damp = max(sat.get("humor", 0.0), sat.get("intensity", 0.0))
+        scale *= (1.0 - 0.35 * damp)
+        addr_hint = _cont.address_hint(
+            st, str(beh.get("family") or "default"), familiarity)
+        humor_adapt = _cont.humor_adaptation(st)
+        recovery = _soc.recovery_cue(str(beh.get("family")
+                                       or "default"))
+        if user_text:
+            hint = _cont.preference_consistency(st, user_text)
+            if hint:
+                pref_hint = hint
+    except Exception:
+        pass
+
     topic_cue = (beh.get("topic_shift") or {}).get(topic, "")
 
     return {
@@ -218,9 +269,30 @@ def compile_effective(personality: dict, *, user_text: str = "",
         "warmup_rate": float(beh.get("warmup_rate") or 1.0),
         "baseline_affect": str(beh.get("baseline_affect") or "relaxed"),
         "silence": str(beh.get("silence") or ""),
+        "curiosity": str(beh.get("curiosity") or "medium"),
+        "noticing": str(beh.get("noticing") or ""),
+        "stable_prefs": list(beh.get("stable_prefs") or []),
         "topic": topic,
         "topic_cue": str(topic_cue or ""),
         "seriousness": seriousness,
+        "social_cue": social_cue,
+        "sarcasm_detected": sarcasm,
+        "user_energy": user_e,
+        "energy": energy,
+        "pacing": round(pacing, 2),
+        "saturation": sat,
+        "focus": focus,
+        "focus_shifted": focus_shifted,
+        "callback_event": str(
+            (callback or {}).get("event") or "")[:120],
+        "address_hint": addr_hint,
+        "humor_adaptation": humor_adapt,
+        "preference_hint": pref_hint,
+        "recovery_cue": recovery,
+        "confidence_delivery": ("steady clear delivery when verified; "
+                                "measured, honestly-flagged delivery "
+                                "when uncertain — hesitation only on "
+                                "genuine uncertainty"),
         "expression_scale": round(scale * s, 2),
         "mode": mode,
         "mood": mood,
@@ -233,7 +305,27 @@ def compile_effective(personality: dict, *, user_text: str = "",
     }
 
 
-def card_guidance(card: dict, *, max_lines: int = 14) -> list[str]:
+_CUE_GUIDANCE = {
+    "frustration": "User sounds frustrated — lead with the fix; keep "
+                   "color minimal.",
+    "venting": "User is venting — brief acknowledgment, then the "
+               "practical path.",
+    "confusion": "User seems confused — simplify; one step at a time.",
+    "excitement": "User is excited — matching some brightness is fine.",
+    "celebration": "User is celebrating — share the win briefly, then "
+                   "continue.",
+    "disappointment": "User sounds let down — acknowledge, stay "
+                      "constructive.",
+    "uncertainty": "User seems unsure — offer a clear path; don't "
+                   "over-commit.",
+    "joking": "User is joking — a light in-character beat is fine, "
+              "then answer.",
+    "serious": "User wants it straight — direct answer, no flourishes.",
+    "casual": "Casual register — keep it easy.",
+}
+
+
+def card_guidance(card: dict, *, max_lines: int = 18) -> list[str]:
     """Render the effective card as compact prompt lines — the 'Style:
     warm, confident, familiar'-style card from the spec, plus the
     behavior profile's style guidance."""
@@ -255,6 +347,46 @@ def card_guidance(card: dict, *, max_lines: int = 14) -> list[str]:
     if card.get("topic_cue"):
         cue = str(card["topic_cue"]).replace("_", " ")
         lines.append(f"Topic ({card['topic']}): {cue}.")
+
+    # Social-context lines — sarcasm is flagged explicitly because the
+    # literal wording points the wrong direction.
+    if card.get("sarcasm_detected"):
+        lines.append("Subtext: the user's remark reads as sarcasm — "
+                     "take the meaning (probably frustration with the "
+                     "event), not the literal words.")
+    cg = _CUE_GUIDANCE.get(str(card.get("social_cue") or ""), "")
+    if cg:
+        lines.append("Social cue: " + cg)
+    if card.get("energy") == "low":
+        lines.append("Energy: low — soften pace; shorter, calmer "
+                     "replies.")
+    elif card.get("energy") == "high":
+        lines.append("Energy: high — brisk, brighter pacing is fine.")
+    if float(card.get("pacing") or 1.0) < 0.8:
+        lines.append("Pacing: long session — ease off jokes, "
+                     "vocalizations, and recap filler; tighter "
+                     "updates.")
+    if card.get("focus_shifted"):
+        lines.append("Topic shifted — transition naturally; don't "
+                     "drag the previous thread forward.")
+    elif card.get("focus"):
+        lines.append(f"Current focus: {card['focus']} — keep "
+                     "continuity with it.")
+    if card.get("callback_event"):
+        lines.append(f"Shared context on point: "
+                     f"'{card['callback_event']}' — reference it "
+                     "naturally if it fits; don't force it.")
+    if card.get("address_hint"):
+        lines.append("Address: " + str(card["address_hint"]) + ".")
+    if card.get("preference_hint"):
+        lines.append(f"Earlier stated preference applies here: "
+                     f"{card['preference_hint']} — stay consistent.")
+    if card.get("humor_adaptation"):
+        lines.append("Humor adaptation: "
+                     + str(card["humor_adaptation"]) + ".")
+    if card.get("noticing"):
+        lines.append("Notices first: "
+                     + str(card["noticing"]) + ".")
 
     beh_lines = behavior_mod.guidance_lines({
         "motivations": card.get("motivations"),

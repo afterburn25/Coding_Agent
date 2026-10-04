@@ -98,6 +98,20 @@ _RESET = re.compile(
 _RESET_TEMP = re.compile(
     r"^\s*(?:please\s+)?(?:back\s+to\s+normal|be\s+yourself\s+again|"
     r"drop\s+the\s+(?:modifier|act|mode))\b", re.I)
+_ADDRESS = re.compile(
+    r"^\s*(?:please\s+)?(?:call\s+me|address\s+me\s+as|"
+    r"my\s+name\s+is)\s+([A-Za-z0-9' _.-]{1,40})\s*\.?\s*$", re.I)
+_NO_NAME = re.compile(
+    r"^\s*(?:please\s+)?(?:don'?t|do\s+not|stop)\s+"
+    r"(?:use\s+my\s+name|call\s+me\s+(?:by\s+)?name)\b", re.I)
+_RESET_ADAPT = re.compile(
+    r"^\s*(?:please\s+)?(?:reset|clear|forget)\s+(?:the\s+)?"
+    r"(?:learned\s+)?(?:adaptations?|learned\s+(?:tone|style|habits)|"
+    r"shared\s+(?:history|memories|context)|familiarity)\b", re.I)
+_SELF_DESCRIBE = re.compile(
+    r"^\s*(?:what\s+are\s+you\s+like|describe\s+your\s+(?:personality|"
+    r"persona|style)|who\s+are\s+you\s+right\s+now|"
+    r"what'?s\s+your\s+personality)\s*\??\s*$", re.I)
 
 
 def _duration(text: str) -> tuple[float, str]:
@@ -131,6 +145,23 @@ def parse_persona_command(text: str) -> dict | None:
         return {"op": "reset_all"}
     if _RESET_TEMP.match(t):
         return {"op": "reset_temp"}
+    if _SELF_DESCRIBE.match(t):
+        return {"op": "describe"}
+    if _RESET_ADAPT.match(t):
+        return {"op": "reset_adaptations"}
+    m = _NO_NAME.match(t)
+    if m:
+        return {"op": "address", "address": ""}
+    m = _ADDRESS.match(t)
+    if m:
+        name = m.group(1).strip()
+        # Guard against "call me when it's done" style captures —
+        # a name is ≤3 words and doesn't open with a function word.
+        words = name.split()
+        if name and len(words) <= 3 and words[0].lower() not in (
+                "when", "if", "once", "after", "before", "that",
+                "a", "an", "the", "it", "you", "back"):
+            return {"op": "address", "address": name}
 
     m = _USE_MODE.match(t) or _BE_MODE.match(t)
     if m:
@@ -217,4 +248,12 @@ def apply_command(dyn: Any, cmd: dict) -> dict:
         dyn.reset_overlay()
         dyn.set_mode("")
         return {"applied": "reset_all"}
+    if op == "address":
+        addr = dyn.set_address(cmd.get("address") or "")
+        return {"applied": "address", "address": addr}
+    if op == "reset_adaptations":
+        dyn.reset_continuity()
+        return {"applied": "reset_adaptations"}
+    if op == "describe":
+        return {"applied": "describe"}
     return {"applied": "none"}

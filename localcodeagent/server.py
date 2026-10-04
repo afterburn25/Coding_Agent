@@ -802,7 +802,9 @@ class AppState:
                 overlay=dyn.overlay(),
                 modifiers=dyn.modifiers(),
                 mode=dyn.mode(),
-                is_adult=bool(prof.get("is_adult")))
+                is_adult=bool(prof.get("is_adult")),
+                state=dyn.state(),
+                callback=dyn.callback_for(user_text))
             mems = PersonalMemory(pdir).list(limit=20)
             text = _profile_prompt_text(prof, active, mems,
                                         effective=effective)
@@ -864,15 +866,36 @@ class AppState:
             applied = str(result.get("applied") or "none")
             if applied == "none":
                 return None
+            if applied == "describe":
+                # Self-description from the actual resolved card.
+                from .personality.introspect import describe_persona
+                active = PersonalityStore(pdir).resolve_active(
+                    is_adult=bool(prof.get("is_adult")))
+                card = compile_effective(
+                    active, relationship=dyn.relationship(),
+                    mood=dyn.effective_mood(
+                        manual_mood=str(active.get("mood") or "")),
+                    overlay=dyn.overlay(), modifiers=dyn.modifiers(),
+                    mode=dyn.mode(), is_adult=bool(prof.get("is_adult")),
+                    state=dyn.state())
+                return {"applied": "describe",
+                        "ack": describe_persona(card, active)}
             acks = {
                 "overlay": "Done — I'll keep that for this profile "
                            "going forward.",
                 "modifier": "Done — applied temporarily; it'll lift on "
                             "its own.",
                 "mode": "Done — mode set until you change it.",
+                "address": ("Got it — no name, then."
+                            if not result.get("address")
+                            else f"Got it — {result['address']} it is. "
+                                 "I'll use it when it fits."),
                 "reset_temp": "Done — temporary adjustments cleared.",
                 "reset_all": "Done — persona adjustments reset; the "
                              "built-in persona is back.",
+                "reset_adaptations": "Done — learned habits, shared-"
+                                     "history callbacks, and pattern "
+                                     "memory cleared for this profile.",
             }
             return {"applied": applied, "detail": result,
                     "ack": acks.get(applied, "Done.")}
@@ -950,11 +973,23 @@ class AppState:
                 act = PersonalityStore(pdir).resolve_active(
                     is_adult=bool(prof.get("is_adult")))
                 from .personality.voice_map import map_voice
-                out.update(map_voice(act.get("voice"), act.get("traits"),
-                                     strength=act.get("strength", 70),
-                                     mood=act.get("mood") or "",
-                                     pitch_bias=float(
-                                         act.get("pitch_bias") or 0.0)))
+                # Smooth voice transitions: mood/trait drift should
+                # interpolate, but a persona *switch* applies at once —
+                # the smooth reference is only reused for the same
+                # active persona on the same profile.
+                ident = (str(prof["profile_id"]),
+                         str(act.get("name") or ""),
+                         str(act.get("base_preset") or ""))
+                prev = getattr(self, "_vdm_prev", None)
+                prev_map = prev[1] if prev and prev[0] == ident else None
+                mapped = map_voice(
+                    act.get("voice"), act.get("traits"),
+                    strength=act.get("strength", 70),
+                    mood=act.get("mood") or "",
+                    pitch_bias=float(act.get("pitch_bias") or 0.0),
+                    previous=prev_map)
+                self._vdm_prev = (ident, dict(mapped))
+                out.update(mapped)
             self._vdm_cache, self._vdm_until = out, now + 10.0
             return out
         except Exception:
@@ -994,6 +1029,33 @@ class AppState:
                         beh.get("vocal_prefer") or [])
                     out["gesture_prefer"] = list(
                         beh.get("gesture_prefer") or [])
+                except Exception:
+                    pass
+                try:
+                    from .personality import continuity as _cont
+                    from .personality.dynamics import PersonaDynamics
+                    from .personality.social import pacing_factor
+                    dst = PersonaDynamics(pdir).state()
+                    sat = _cont.saturation_level(dst)
+                    pace = pacing_factor(int(dst.get("turns") or 0),
+                                         str(dst.get("last_cue")
+                                             or ""))
+                    # Saturation + long-session pacing dampen vocal
+                    # expression; hesitation cues stay gated to real
+                    # uncertainty (seriousness/uncertain mood).
+                    damp = max(0.3, 1.0 - 0.6 * max(
+                        sat.get("vocal", 0.0), sat.get("humor", 0.0)))
+                    out["vocal_bias"] = round(
+                        float(out.get("vocal_bias") or 1.0)
+                        * damp * pace, 3)
+                    out["gesture_bias"] = round(
+                        max(0.3, 1.0 - 0.6 * sat.get("gesture", 0.0))
+                        * pace, 3)
+                    serious = str(dst.get("last_cue") or "") in (
+                        "serious",) or str(
+                        (dst.get("mood") or {}).get("current") or ""
+                        ) in ("serious", "concerned")
+                    out["hesitation_ok"] = not serious
                 except Exception:
                     pass
             self._voc_cache, self._voc_until = out, now + 10.0
@@ -3300,6 +3362,27 @@ class AppState:
                 sink.put(dict(event))
             except Exception:
                 pass
+        # Feed kept expressions into persona saturation + QA counters.
+        # Best-effort; a counting failure must never disturb playback.
+        try:
+            kinds: list[str] = []
+            if payload.get("type") == "gesture":
+                kinds = ["gesture"]
+            elif payload.get("event") == "vocalization" and \
+                    payload.get("kept"):
+                kinds = ["vocal"]
+                if str(payload.get("category") or "") in (
+                        "amusement", "playfulness"):
+                    kinds.append("humor")
+                elif str(payload.get("category") or "") == "dismissive":
+                    kinds.append("sarcasm")
+            if kinds:
+                prof = self.profiles.active()
+                if prof:
+                    PersonaDynamics(self.profiles.profile_dir(
+                        str(prof["profile_id"]))).note_expression(kinds)
+        except Exception:
+            pass
 
     _IMAGE_FAIL_LAYMAN = {
         "cuda_out_of_memory": "the graphics card ran out of memory",

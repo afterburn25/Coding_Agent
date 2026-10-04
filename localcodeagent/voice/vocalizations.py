@@ -573,6 +573,13 @@ class VocalizationEngine:
                                if isinstance(ctx.get("gesture_prefer"),
                                              (list, tuple, set))
                                else None),
+            # Saturation/long-session dampening from the persona layer.
+            "gesture_bias": max(0.0, min(2.0, float(
+                ctx.get("gesture_bias") or 1.0))),
+            # Hesitation sounds ("hmm", "um") only when the persona
+            # layer says real uncertainty is plausible — never a random
+            # 'hmm' on a verified answer in a serious context.
+            "hesitation_ok": bool(ctx.get("hesitation_ok", True)),
         }
 
     def _keep_prob(self, voc: Vocalization, c: dict, hist: deque) -> float:
@@ -587,6 +594,8 @@ class VocalizationEngine:
         if sup.get(voc.category, 0.0) > time.time():
             return 0.0
         if voc.adult and not (c["is_adult"] and policy.get("adult_ok")):
+            return 0.0
+        if voc.category == "thinking" and not c["hesitation_ok"]:
             return 0.0
         prob = (policy.get("bias", 1.0)
                 * c["vocal_bias"]
@@ -747,7 +756,8 @@ class VocalizationEngine:
                                           "semantic": style,
                                           "category": cat,
                                           "tts_form": form})
-                    self._emit_gesture(voc, res, budget, c)
+                    self._emit_gesture(voc, res, budget, c,
+                                       timing="pre")
                     self._emit_telemetry(task_id, c, {
                         "input": voc.token, "semantic": style,
                         "category": cat, "tts_form": form}, kept=True)
@@ -757,9 +767,13 @@ class VocalizationEngine:
         return res
 
     def _emit_gesture(self, voc: Vocalization, res: ResolveResult,
-                      budget: _TaskBudget, c: dict | None = None) -> None:
+                      budget: _TaskBudget, c: dict | None = None,
+                      *, timing: str = "with") -> None:
         gesture = _GESTURE.get(voc.category)
         if not gesture or budget.gestures_used >= 2:
+            return
+        bias = (c or {}).get("gesture_bias", 1.0)
+        if bias < 1.0 and self._rng.random() > bias:
             return
         # Persona gesture tendencies — non-signature gestures soften
         # (intensity dampened) rather than vanish entirely.
@@ -768,9 +782,12 @@ class VocalizationEngine:
         if prefer and gesture not in prefer:
             intensity = round(intensity * 0.6, 2)
         budget.gestures_used += 1
+        # timing: "pre" for lead reactions (fires as the line starts,
+        # e.g. a smile *while* beginning a laugh) vs "with" for inline.
         ev = {"type": "gesture", "gesture": gesture,
               "intensity": round(intensity, 2),
-              "source": voc.style, "ts": time.time()}
+              "source": voc.style, "timing": timing,
+              "ts": time.time()}
         res.events.append(ev)
         try:
             self._publish("gesture", ev)

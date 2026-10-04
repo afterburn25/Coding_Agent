@@ -506,6 +506,58 @@ class ProfileAPI:
             from ..personality.customize import import_custom
             h._json({"ok": True, "custom": import_custom(
                 store, body.get("package"), is_adult=adult)})
+        elif action == "set_address":
+            addr = self._dynamics(pid).set_address(
+                str(body.get("address") or ""))
+            h._json({"ok": True, "address": addr})
+        elif action == "reset_adaptations":
+            self._dynamics(pid).reset_continuity()
+            h._json({"ok": True})
+        elif action == "adaptations":
+            # Inspect learned adaptations — counts/stances only, never
+            # raw private memory.
+            dyn = self._dynamics(pid)
+            h._json({"ok": True,
+                     "adaptations": {
+                         "overlay": dyn.overlay(),
+                         "modifiers": dyn.modifiers(),
+                         "mode": dyn.mode(),
+                         "continuity": dyn.continuity_view(),
+                         "relationship": dyn.relationship(),
+                         "metrics": dyn.metrics()}})
+        elif action == "metrics":
+            from ..personality.introspect import behavior_report
+            h._json({"ok": True,
+                     **behavior_report(self._dynamics(pid).metrics())})
+        elif action == "compare":
+            from ..personality.introspect import compare_personas
+            dyn = self._dynamics(pid)
+            ids = body.get("personas")
+            if not isinstance(ids, list) or not ids:
+                raise ProfileError(
+                    "compare needs 'personas': [preset-id, ...]")
+            h._json({"ok": True, "comparison": compare_personas(
+                store, [str(x) for x in ids],
+                user_text=str(body.get("text") or ""),
+                is_adult=adult, dyn_state=dyn.state(),
+                relationship=dyn.relationship())})
+        elif action == "describe":
+            from ..personality.introspect import describe_persona
+            dyn = self._dynamics(pid)
+            active = store.resolve_active(is_adult=adult)
+            eff = self._persona_effective(pid, p)
+            h._json({"ok": True,
+                     "description": describe_persona(
+                         eff.get("effective") or {}, active)})
+        elif action == "similarity":
+            from ..personality.introspect import (
+                persona_similarity, similarity_audit)
+            a, b = str(body.get("a") or ""), str(body.get("b") or "")
+            if a and b:
+                h._json({"ok": True, **persona_similarity(a, b)})
+            else:
+                h._json({"ok": True,
+                         "flagged": similarity_audit()})
         elif action == "preview":
             # Personality-aware sample text + voice params — no TTS call.
             active = store.resolve_active(is_adult=adult)

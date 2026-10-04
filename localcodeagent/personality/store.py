@@ -159,6 +159,48 @@ class PersonalityStore:
             pitch_bias=float(p.get("pitch_bias") or 0.0),
             is_adult=is_adult)
 
+    def resolve(self, target: str, *, is_adult: bool) -> dict | None:
+        """Preview resolution — 'preset:<id>', 'custom:<id>', a bare
+        preset id, or 'active'. Does not change the active record."""
+        t = str(target or "").strip()
+        if not t or t == "active":
+            return self.resolve_active(is_adult=is_adult)
+        kind, _, pid = t.partition(":")
+        if kind not in ("preset", "custom"):
+            kind, pid = "preset", t
+        st = self._load()
+        if kind == "custom":
+            c = self._custom(st, pid)
+            if c is None:
+                return None
+            base = get_preset(c.get("base_preset") or "") or {}
+            adult_blocked = bool(base.get("adult_only")) and not is_adult
+            return self._effective(
+                name=c.get("name") or "Custom",
+                base_preset=c.get("base_preset") or "",
+                traits=schema.clean_traits(c.get("traits"),
+                                           is_adult=is_adult),
+                voice=schema.clean_voice(c.get("voice")),
+                is_custom=True, personality_id=pid,
+                greeting_style=(
+                    "default" if adult_blocked else str(
+                        base.get("greeting_style") or "default")),
+                pitch_bias=float(base.get("pitch_bias") or 0.0),
+                is_adult=is_adult)
+        p = get_preset(pid)
+        if p is None:
+            return None
+        adult_blocked = bool(p.get("adult_only")) and not is_adult
+        return self._effective(
+            name=p["name"], base_preset=p["id"],
+            traits=schema.clean_traits(p["traits"], is_adult=is_adult),
+            voice=schema.clean_voice(p.get("voice")),
+            is_custom=False, personality_id=f"preset:{p['id']}",
+            greeting_style=("default" if adult_blocked
+                            else p.get("greeting_style") or "default"),
+            pitch_bias=float(p.get("pitch_bias") or 0.0),
+            is_adult=is_adult)
+
     def _effective(self, *, is_adult: bool, **kw) -> dict:
         kw["strength"] = self._load()["strength"]
         kw["mood"] = self._load()["mood"]

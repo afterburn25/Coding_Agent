@@ -98,6 +98,100 @@ Strict NL patterns handled without a model call:
 
 Ambiguous phrasing falls through to the agent unchanged.
 
+Additional commands (v0.17.0): "call me Ash" / "don't use my name"
+(preferred address, independent of Creator titles), "what are you
+like?" (honest self-description from the resolved card), "reset the
+learned adaptations" (clears continuity/adaptation state, keeps
+familiarity and memory).
+
+## Social layer (`social.py`, v0.17.0)
+
+Deterministic, bounded — no model call:
+
+- `classify_social(text)` → joking | sarcasm | frustration |
+  confusion | excitement | disappointment | celebration | venting |
+  uncertainty | casual | serious | neutral, with confidence.
+- `detect_sarcasm(text, context_failed)` — positive surface wording
+  over a negative event or explicit markers ("yeah right", "what a
+  surprise", "went perfectly" after a failure). **Understanding ≠
+  generation**: a persona may detect sarcasm it would never produce.
+- `user_energy(text, cue)` → low|medium|high; `effective_energy`
+  blends persona baseline + user energy + mood + seriousness +
+  session length (long sessions cap energy; serious contexts cap at
+  medium or below).
+- `pacing_factor(turns)` — long-session taper: expression eases off
+  over prolonged work (fewer jokes/vocals/filler); emotional turns
+  (celebration, venting) get a pass.
+- `tag_focus` / `topic_shifted` — current conversational focus and
+  real topic-shift detection, so transitions bridge ("that covers
+  the installer — on the UI issue…") instead of restarting.
+- `recovery_cue(family)` — per-family phrasing for owning a
+  misunderstanding.
+- `confidence_delivery(level)` — verified → steady cadence;
+  uncertain → measured with honestly-flagged hesitation. No random
+  "hmm" on solid answers.
+
+## Continuity (`continuity.py`, v0.17.0)
+
+Stored inside `persona_state.json` — profile-scoped, bounded:
+
+- **Milestones** — notable shared events only (project done,
+  recurring issue, hard bug, success, learned preference, shared
+  joke): `{type: shared_milestone, kind, event, importance, ts}`.
+  Trivial exchanges never create one; near-duplicates refresh.
+- **Callbacks** — `relevant_callback` picks a milestone when
+  token-overlap × recency × importance clears the gate, and a
+  `last_referenced` cooldown prevents nostalgic repetition. Old
+  memories need much stronger relevance than recent ones.
+- **Stated preferences** — when the persona states a subjective
+  preference, `record_stated_preference` keeps it;
+  `preference_consistency` re-surfaces it on-topic so the persona
+  doesn't reverse itself.
+- **Preferred address** — `set_address` stores a profile-level name
+  (independent of Creator titles); `address_hint` scales usage
+  frequency by persona family and gates it behind familiarity — new
+  profiles never get heavy name use.
+- **Saturation** — `note_expression` accumulates humor/sarcasm/
+  vocal/gesture/intensity counters (half-life ~20 turns); high
+  saturation drops humor a register (sarcastic → dry) and dampens
+  `expression_scale` — strong personas get neutral moments instead
+  of caricaturing.
+- **Pattern memory** — `note_pattern`/`pattern_fresh` track recent
+  analogy/humor structure tags so the same one isn't re-run too soon.
+- **Humor adaptation** — `humor_feedback(style, ±)` accumulates into
+  a bounded profile-level nudge ("user responds poorly to sarcasm —
+  keep it rare") rendered into the card.
+
+Per-family extras merged into every behavior profile: `curiosity`
+(low/medium/high), `noticing` (which cues it picks up first), and
+`stable_prefs` (standing subjective preferences, e.g. "prefers
+concise technical explanations").
+
+## Voice & gesture continuity
+
+- `map_voice(..., previous=...)` — per-parameter step clamps
+  (speed/pitch/gain) so delivery interpolates instead of jumping
+  between adjacent utterances; a persona *switch* still applies at
+  once.
+- Vocalization engine context gains `hesitation_ok` (thinking-type
+  vocals suppressed in serious/uncertain-wrong contexts) and
+  `gesture_bias` + persona saturation dampening on `vocal_bias`.
+- Gesture events carry `timing: "pre"|"with"` so avatar expressions
+  align to the speech beat (a smile lands *as* the laugh starts).
+
+## Introspection & QA (`introspect.py`)
+
+- `describe_persona(card)` — first-person self-description built only
+  from resolved card fields; never invents traits.
+- `compare_personas(store, ids, text)` — Personality Studio
+  side-by-side: effective summary, voice params, deterministic
+  preview line for 2–3 personas on the same prompt.
+- `persona_similarity(a, b)` / `similarity_audit` — 0..1 distance over
+  character fields; ≥0.9 flags collapsed personas.
+- `behavior_report(metrics)` — QA flags (high question rate, name
+  overuse, humor-rate creep, callback overuse) over the aggregate
+  `PersonaDynamics.metrics()` counters.
+
 ## Consistency (`consistency.py`)
 
 - `check_repetition` — repeated opener/closer n-grams → flags + score
@@ -138,7 +232,11 @@ rather than silently shifting.
   `add_modifier` {trait_offsets, note, ttl_seconds, scope, mode},
   `clear_modifiers` {scope}, `set_mode` {mode},
   `coherence` {traits, voice}, `blend` {blend, name},
-  `export` {personality_id}, `import` {package}
+  `export` {personality_id}, `import` {package},
+  `set_address` {address}, `reset_adaptations`,
+  `adaptations` (inspect learned overlays/modifiers/continuity —
+  counts and stances, no raw memory), `metrics`,
+  `compare` {personas, text}, `describe`, `similarity` {a, b}
 
 `GET /api/profiles/<id>/personality/effective?text=...` — the compiled
 debug card (no private memory).

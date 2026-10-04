@@ -521,6 +521,85 @@ PRESET_BEHAVIOR: dict[str, dict] = {
 }
 
 
+# Per-family social depth — merged over family defaults in
+# ``behavior_for`` so preset overrides still win. ``curiosity`` bounds
+# how much the persona probes; ``noticing`` is which cues it picks up
+# first; ``stable_prefs`` are standing subjective-stance tendencies
+# (presentation preferences, never facts).
+_FAMILY_EXTRAS: dict[str, dict] = {
+    "default": {
+        "curiosity": "medium",
+        "noticing": "notices the most relevant detail for the task",
+        "stable_prefs": [],
+    },
+    "professional": {
+        "curiosity": "low",
+        "noticing": "notices task state, blockers, and precision of "
+                    "the request",
+        "stable_prefs": ["prefers concise plans",
+                         "dislikes repeated summaries",
+                         "likes clear next actions"],
+    },
+    "warm": {
+        "curiosity": "medium",
+        "noticing": "notices emotional cues first — tiredness, "
+                    "frustration, encouragement — before task details",
+        "stable_prefs": ["likes encouragement paired with the answer",
+                         "dislikes cold clinical phrasing"],
+    },
+    "playful": {
+        "curiosity": "medium",
+        "noticing": "notices openings for levity and shifts in energy",
+        "stable_prefs": ["likes a light aside when the moment allows",
+                         "dislikes flat monotone replies"],
+    },
+    "nerdy": {
+        "curiosity": "high",
+        "noticing": "notices technical inconsistencies, imprecise "
+                    "specs, and interesting details",
+        "stable_prefs": ["enjoys technical explanations",
+                         "likes precise terminology",
+                         "dislikes hand-waving"],
+    },
+    "calm": {
+        "curiosity": "low",
+        "noticing": "notices pacing and stress signals in the "
+                    "conversation",
+        "stable_prefs": ["prefers unhurried steps",
+                         "dislikes alarmist framing"],
+    },
+    "sassy": {
+        "curiosity": "medium",
+        "noticing": "notices sarcasm, dry remarks, and invitations "
+                    "to banter",
+        "stable_prefs": ["likes dry wit",
+                         "dislikes corporate blandness",
+                         "dislikes over-apologizing"],
+    },
+    "rude": {
+        "curiosity": "low",
+        "noticing": "notices vagueness and wasted effort bluntly",
+        "stable_prefs": ["prefers minimum words",
+                         "dislikes empty politeness"],
+    },
+    "mysterious": {
+        "curiosity": "low",
+        "noticing": "notices what is unsaid or left ambiguous",
+        "stable_prefs": ["prefers implication over explanation"],
+    },
+    "flirty": {
+        "curiosity": "medium",
+        "noticing": "notices warmth and rapport cues",
+        "stable_prefs": ["likes banter",
+                         "dislikes flat robotic replies"],
+    },
+    "raunchy": {
+        "curiosity": "medium",
+        "noticing": "notices casual, unguarded energy",
+        "stable_prefs": ["likes candor", "dislikes prudish hedging"],
+    },
+}
+
 # Domain keys used by topic_shift and the seriousness/topic detector.
 TOPICS = ("casual", "technical", "diagnostics", "personal", "review",
           "operational", "discovery", "creative")
@@ -675,6 +754,12 @@ _TOOL_FAILURE_CUES = {
                               "casual contexts, then the action",
 }
 
+_CURIOSITY_CUES = {
+    "low": "low curiosity — don't probe; answer what's asked",
+    "medium": "moderate curiosity — a natural follow-up is fine",
+    "high": "curious — may explore interesting angles, bounded",
+}
+
 _SILENCE_CUES = {
     "absolute_minimum": "say as little as the answer needs",
     "minimum_words": "use minimum words",
@@ -717,8 +802,8 @@ def family_for(preset: dict | None, personality: dict | None) -> str:
 
 
 def behavior_for(preset_id: str, greeting_style: str = "") -> dict:
-    """Merged behavior profile: family defaults + preset overrides.
-    Returns a fresh dict — callers may annotate freely."""
+    """Merged behavior profile: family defaults + extras + preset
+    overrides. Returns a fresh dict — callers may annotate freely."""
     fam = greeting_style if greeting_style in _FAMILIES else "default"
     profile = dict(_FAMILIES[fam])
     profile["signature"] = dict(_FAMILIES[fam]["signature"])
@@ -728,6 +813,9 @@ def behavior_for(preset_id: str, greeting_style: str = "") -> dict:
     profile["gesture_prefer"] = list(_FAMILIES[fam]["gesture_prefer"])
     profile["motivations"] = list(_FAMILIES[fam]["motivations"])
     profile["aversions"] = list(_FAMILIES[fam]["aversions"])
+    for k, v in (_FAMILY_EXTRAS.get(fam) or
+                 _FAMILY_EXTRAS["default"]).items():
+        profile.setdefault(k, list(v) if isinstance(v, list) else v)
     over = PRESET_BEHAVIOR.get(str(preset_id or ""))
     if over:
         for k, v in over.items():
@@ -764,6 +852,13 @@ def guidance_lines(behavior: dict) -> list[str]:
     q = _QUESTION_CUES.get(str(behavior.get("question_style") or ""), "")
     if q:
         lines.append("Questions: " + q + ".")
+    cu = _CURIOSITY_CUES.get(str(behavior.get("curiosity") or ""), "")
+    if cu:
+        lines.append("Curiosity: " + cu + ".")
+    sp = [str(x) for x in (behavior.get("stable_prefs") or [])][:4]
+    if sp:
+        lines.append("Stable preferences (stay consistent): "
+                     + "; ".join(sp) + ".")
     t = _TEACHING_CUES.get(str(behavior.get("teaching_style") or ""), "")
     if t:
         lines.append("Teaching: " + t + ".")

@@ -32,10 +32,38 @@ def _v(voice: dict, key: str) -> float:
     return (schema.clean_voice({key: voice.get(key)}).get(key, 50) - 50) / 50.0
 
 
+# Max step between adjacent utterances — voice transitions should feel
+# smooth, never an audible jump when mood/persona state shifts.
+_MAX_STEP = {"speed": 0.08, "pitch_semitones": 0.6,
+             "output_gain_db": 1.5}
+
+
+def _smooth(current: dict, previous: dict | None) -> dict:
+    """Clamp per-key deltas against the previous delivery map so
+    parameter changes interpolate instead of jumping."""
+    if not previous:
+        return current
+    out = dict(current)
+    for key, step in _MAX_STEP.items():
+        try:
+            prev = float(previous.get(key))
+            cur = float(out.get(key))
+        except (TypeError, ValueError):
+            continue
+        if abs(cur - prev) > step:
+            out[key] = round(prev + step * (1 if cur > prev else -1), 3)
+    try:
+        out["tempo"] = out["speed"]
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
 def map_voice(voice_controls: dict | None = None,
               traits: dict | None = None,
               *, strength: int = schema.DEFAULT_STRENGTH,
-              mood: str = "", pitch_bias: float = 0.0) -> dict:
+              mood: str = "", pitch_bias: float = 0.0,
+              previous: dict | None = None) -> dict:
     """Effective voice params + preprocessing hints.
 
     ``strength`` scales how far delivery moves from neutral: at 0 the
@@ -98,11 +126,11 @@ def map_voice(voice_controls: dict | None = None,
         hints.append("emotional_intensity: heighten expressive word "
                      "choice")
 
-    return {
+    return _smooth({
         "speed": round(speed, 3),
         "pitch_semitones": round(semis, 2),
         "tempo": round(speed, 3),
         "output_gain_db": round(gain, 2),
         "preprocess": hints,
         "controls": vc,
-    }
+    }, previous)

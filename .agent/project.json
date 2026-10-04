@@ -1,11 +1,11 @@
 {
  "name": "Nexus Core",
- "version": "0.16.0",
+ "version": "0.17.0",
  "default_model_mode": "auto",
  "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
  "source_of_truth": "afterburn25/Coding_Agent",
- "test_checkpoint": 1578,
- "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done — requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Milestone COMPLETE: all 12 phases landed — lineage + artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + env manifests; predictive health + idle cleanup + benchmark lab + temp specialists. 1531 tests green. Still host-blocked: real ComfyUI workflow validation (no image weights). Persona-depth milestone (v0.16.0): behavior profiles per family + preset overrides, seriousness/topic classifiers, effective-persona compiler, per-profile dynamics (relationship + mood decay), learned overlays + expiring modifiers + modes, NL persona commands, vocal/gesture persona tendencies, persona-aware notices, coherence scoring, preset blending, behavior versioning, import/export, consistency/drift/repetition layer, debug view. 1578 tests.",
+ "test_checkpoint": 1637,
+ "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done \u00e2\u20ac\u201d requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Milestone COMPLETE: all 12 phases landed \u00e2\u20ac\u201d lineage + artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + env manifests; predictive health + idle cleanup + benchmark lab + temp specialists. 1531 tests green. Still host-blocked: real ComfyUI workflow validation (no image weights). Persona-depth milestone (v0.16.0): behavior profiles per family + preset overrides, seriousness/topic classifiers, effective-persona compiler, per-profile dynamics (relationship + mood decay), learned overlays + expiring modifiers + modes, NL persona commands, vocal/gesture persona tendencies, persona-aware notices, coherence scoring, preset blending, behavior versioning, import/export, consistency/drift/repetition layer, debug view. 1578 tests. Persona social-continuity milestone (v0.17.0): social-cue/sarcasm detection, energy+session pacing, focus tracking, shared-history milestones + relevance-gated callbacks, stated-preference consistency, preferred address, saturation dampening, humor adaptation, voice smoothing, gesture timing, introspection/compare/similarity + QA metrics, 50-turn continuity stress. 1637 tests.",
  "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
  "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
  "default_coding_models": {
@@ -425,7 +425,7 @@
   "branch": "main",
   "repository_head": "main (pull latest; do not pin to documentation commit)",
   "verified_code_checkpoint": "a7511c8",
-  "verified_test_count": 1578,
+  "verified_test_count": 1637,
   "credential_note": "No creator passcode/private signing key is stored in the repository. Do not hardcode one.",
   "required_read_order": [
    "DEVIN_START_HERE.md",
@@ -482,7 +482,7 @@
    "POST /api/skills/remove",
    "POST /api/skills/health"
   ],
-  "skill_packages": "localcodeagent/skills/ — verified skill.json/SKILL.md packages under data/skills; skills.manage-gated install/update/enable/disable/rollback/remove, bounded rollback snapshots, bounded package digests, declared or shell.execute-gated health checks",
+  "skill_packages": "localcodeagent/skills/ \u00e2\u20ac\u201d verified skill.json/SKILL.md packages under data/skills; skills.manage-gated install/update/enable/disable/rollback/remove, bounded rollback snapshots, bounded package digests, declared or shell.execute-gated health checks",
   "tool_router": "localcodeagent/tool_router.py (capability routing, fallback, telemetry)",
   "mcp": "localcodeagent/mcp.py (stdio JSON-RPC client, server lifecycle, registry import, /api/mcp)",
   "browser": "localcodeagent/webtools/browser.py \u2014 Playwright runner w/ sessions, console+network capture, extended actions, health probe",
@@ -536,9 +536,9 @@
    ]
   }
  },
- "verified_tests": 1578,
+ "verified_tests": 1637,
  "head": "fa9357d",
- "test_count": 1578,
+ "test_count": 1637,
  "branding": {
   "canonical_name": "Nexus Core",
   "full_logo": "web/assets/nexus-core-logo.png",
