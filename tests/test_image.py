@@ -974,7 +974,8 @@ class ImageSetupTests(unittest.TestCase):
         base = dict(
             image_models_dir="models/image", image_data_dir="data/image",
             image_workflows_dir="workflows/image",
-            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            # Dead endpoint — a real ComfyUI may be listening on 8188 in dev.
+            comfyui_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
             comfyui_dir="", comfyui_python="", comfyui_logs_dir=".agent/runtime",
             comfyui_extra_args=[], image_resource_mode="balanced",
             image_auto_run_jobs=True, image_max_resumes=1,

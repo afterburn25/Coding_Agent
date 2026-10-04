@@ -25,6 +25,8 @@ def describe_image_error(exc: BaseException) -> dict[str, Any]:
 
     if any(x in low for x in ("cuda out of memory", "outofmemoryerror", "cudnn_status_alloc_failed", "hip out of memory")):
         return result("cuda_out_of_memory", "The GPU ran out of memory while processing this image. Try a lower resolution, fewer images, a smaller/quantized model, or a more aggressive VRAM cleanup mode.")
+    if any(x in low for x in ("hostbuffer", "read_file_slice", "cannot allocate memory", "memoryerror", "bad alloc")):
+        return result("host_buffer_read", "System RAM ran out while loading the image model. Close other programs or let Nexus unload idle chat models, then retry.")
     if any(x in low for x in ("no space left on device", "disk full", "insufficient disk")):
         return result("insufficient_disk_space", "There is not enough free disk space to complete the image operation. Free some storage and try again.")
     if any(x in low for x in ("comfyui is not installed", "comfyui was not found")):

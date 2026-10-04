@@ -114,6 +114,24 @@ class ComfyUIBackend(ImageBackend):
         if not entry:
             return {"state": "running", "progress": 0.0}
         status = entry.get("status", {}) if isinstance(entry, dict) else {}
+        # ComfyUI records failures as an execution_error message with
+        # completed=False — without this check a crashed prompt polls as
+        # "running" forever and the UI hangs on a stuck progress bar.
+        messages = status.get("messages") or []
+        error = next(
+            (m[1] for m in messages
+             if isinstance(m, (list, tuple)) and len(m) > 1
+             and m[0] == "execution_error" and isinstance(m[1], dict)),
+            None)
+        if error is not None:
+            detail = error.get("exception_message") or error.get("exception_type") or "execution error"
+            node = error.get("node_type") or error.get("node_id") or ""
+            return {
+                "state": "failed",
+                "progress": 0.0,
+                "error": f"{detail} (node: {node})" if node else str(detail),
+                "history": entry,
+            }
         complete = bool(status.get("completed", False)) or bool(entry.get("outputs"))
         return {
             "state": "finished" if complete else "running",

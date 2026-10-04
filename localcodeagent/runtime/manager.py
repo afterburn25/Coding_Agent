@@ -732,6 +732,46 @@ class RuntimeManager:
                 self.refresh_hardware()
             return stopped
 
+    def release_managed_models_for_ram(self, *, required_ram_gb: float,
+                                       busy_models: set[str] | None = None) -> list[str]:
+        """Stop managed LLM runtimes when an image job needs system RAM.
+
+        ``ullAvailPhys`` only counts *free* pages — a resident LLM holding
+        20 GB is invisible to it even though its memory is instantly
+        reclaimable by stopping the process. Mirrors the VRAM release:
+        non-keep_loaded models go first (least-recently-used), keep_loaded
+        residents are a last resort so a genuinely oversized job still runs.
+        Busy models serving a task are never touched; external runtimes are
+        never terminated.
+        """
+        busy = set(busy_models or ())
+        with self._lock:
+            self.refresh_hardware()
+            if required_ram_gb <= 0 or self.hardware.available_ram_gb >= required_ram_gb:
+                return []
+            profiles = {m.id: m for m in self.config.models}
+            resident = [mid for mid in self.resident_model_ids() if mid not in busy]
+            if not resident:
+                return []
+            key = lambda mid: self._last_used.get(mid, 0.0)
+            optional = sorted(
+                (mid for mid in resident
+                 if not profiles.get(mid, self.config.models[0]).keep_loaded),
+                key=key)
+            baseline = sorted(
+                (mid for mid in resident
+                 if profiles.get(mid, self.config.models[0]).keep_loaded),
+                key=key)
+            stopped: list[str] = []
+            for mid in optional + baseline:
+                if self.hardware.available_ram_gb >= required_ram_gb:
+                    break
+                self._stop_managed(mid)
+                stopped.append(mid)
+                self._emit_residency("evict", mid, "freeing RAM for image job")
+                self.refresh_hardware()
+            return stopped
+
     def evict_idle(self, *, busy_models: set[str] | None = None) -> list[str]:
         """Stop managed runtimes that are idle or under memory pressure.
 

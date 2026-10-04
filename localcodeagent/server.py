@@ -255,7 +255,14 @@ class AppState:
         self._shutdown = threading.Event()  # set by stop_state — long-lived workers check this
         self._stream_sinks: list = []  # live chat SSE queues that also want voice events
         self.jobs.on_change = make_emitter(self.events, "job")
-        self.images.on_change = make_emitter(self.events, "image_job")
+        _image_emit = make_emitter(self.events, "image_job")
+        self._image_failures_announced: set[str] = set()
+
+        def _on_image_change(payload: dict) -> None:
+            _image_emit(payload)
+            self._maybe_announce_image_failure(payload)
+
+        self.images.on_change = _on_image_change
         self.images.on_setup_change = make_emitter(self.events, "image_setup")
         self.images.on_missing_backend = lambda: self._publish_install_offer(
             ["comfyui"], capability="image_generation")
@@ -2860,6 +2867,47 @@ class AppState:
                 sink.put(dict(event))
             except Exception:
                 pass
+
+    _IMAGE_FAIL_LAYMAN = {
+        "cuda_out_of_memory": "the graphics card ran out of memory",
+        "insufficient_disk_space": "the disk is nearly full",
+        "backend_not_installed": "the image engine isn't installed yet",
+        "backend_offline": "the image engine isn't running",
+        "missing_model": "a model file is missing",
+        "missing_vae": "a model component is missing",
+        "unsupported_workflow": "the workflow isn't usable",
+        "failed_dependency": "a required component is missing",
+        "incompatible_lora": "a selected add-on isn't compatible",
+        "corrupt_checkpoint": "a model file looks damaged",
+        "timeout": "it took too long and timed out",
+        "host_buffer_read": "the system ran out of memory",
+    }
+
+    def _maybe_announce_image_failure(self, payload: dict) -> None:
+        """Speak a one-line notice when an image job fails — plain language,
+        once per job, through the normal speech queue (mute-respecting)."""
+        job = payload.get("job") if isinstance(payload, dict) else None
+        if not isinstance(job, dict) or job.get("state") != "failed":
+            return
+        job_id = str(job.get("id") or "")
+        if not job_id or job_id in self._image_failures_announced:
+            return
+        self._image_failures_announced.add(job_id)
+        voice = getattr(self, "voice", None)
+        if voice is None:
+            return
+        code = str(job.get("error_code") or "")
+        if code.startswith("transport_"):
+            reason = "couldn't reach the image engine"
+        else:
+            reason = self._IMAGE_FAIL_LAYMAN.get(code, "something went wrong")
+        try:
+            voice.enqueue(
+                f"image-fail-{job_id}",
+                f"Sorry — the image didn't finish: {reason}. "
+                "The error card has the details if you want them.")
+        except Exception:
+            pass
 
     def _voice_begin(self) -> str:
         """Open a speech context for a new assistant response.

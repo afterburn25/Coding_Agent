@@ -109,7 +109,13 @@ class ImageManager:
         req_vram = max(0.0, profile.estimated_vram_gb)
         req_ram = max(0.0, profile.estimated_ram_gb)
         if req_ram and avail_ram and req_ram > avail_ram * 0.92:
-            return False, -100, f"estimated RAM need {req_ram:.1f} GB exceeds available {avail_ram:.1f} GB"
+            # RAM is reclaimable — resident LLMs can be evicted before the
+            # job runs. Only hard-fail when the estimate exceeds TOTAL RAM.
+            total_ram = getattr(self.runtime.hardware, "total_ram_gb", 0.0)
+            if total_ram and req_ram > total_ram * 0.92:
+                return False, -100, f"estimated RAM need {req_ram:.1f} GB exceeds total {total_ram:.1f} GB"
+            return True, -10, (f"RAM tight ({avail_ram:.1f} GB free of {total_ram:.1f}); "
+                               "idle models will be unloaded before the job runs")
         if req_vram and free_vram >= req_vram:
             return True, 25, f"fits free VRAM ({free_vram:.1f} GB)"
         if req_vram:
@@ -631,6 +637,15 @@ class ImageManager:
                 required=max(0.0, profile.estimated_vram_gb)
                 if required and self.runtime.hardware.free_vram_gb < required:
                     stopped=self.runtime.release_managed_models_for_vram(required_vram_gb=required, mode=getattr(self.config,"image_resource_mode","balanced"))
+                # RAM is just as binding: ComfyUI memory-maps checkpoint files
+                # (a HostBuffer read failure kills the run), and resident LLMs
+                # can hold most of physical RAM. Evict them, lightest-first,
+                # when the job's RAM estimate exceeds what's actually free.
+                required_ram=max(0.0, profile.estimated_ram_gb)
+                headroom=required_ram*1.15+2.0  # OS + ComfyUI overhead on top of weights
+                if required_ram and self.runtime.hardware.available_ram_gb < headroom:
+                    job.stage="freeing memory"; self._save_jobs(job)
+                    self.runtime.release_managed_models_for_ram(required_ram_gb=headroom)
             self._save_jobs(job)
             job.stage="starting ComfyUI" if job.backend_starting else "connecting to ComfyUI"
             job.progress=max(job.progress,0.10); self._save_jobs(job)
