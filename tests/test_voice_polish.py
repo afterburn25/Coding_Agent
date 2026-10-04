@@ -12,6 +12,7 @@ Guarantees under test:
 """
 from __future__ import annotations
 
+import json
 import queue
 import random
 import tempfile
@@ -375,6 +376,39 @@ class SpokenNotices(unittest.TestCase):
         tid, text = st.voice.enqueued[0]
         self.assertEqual(tid, "voice-mute-ack")
         self.assertIn("status:", text)
+
+    def test_voice_rate_commands(self):
+        from localcodeagent.personality.commands import (
+            parse_persona_command)
+        self.assertEqual(parse_persona_command("speak faster"),
+                         {"op": "voice_rate", "delta": 0.1})
+        self.assertEqual(parse_persona_command("talk a bit slower"),
+                         {"op": "voice_rate", "delta": -0.1})
+        self.assertEqual(parse_persona_command("slow down"),
+                         {"op": "voice_rate", "delta": -0.1})
+        self.assertEqual(parse_persona_command("normal speed"),
+                         {"op": "voice_rate", "set": 1.0})
+        # Ordinary prose must not parse.
+        self.assertIsNone(parse_persona_command(
+            "can you slow down the explanation"))
+        self.assertIsNone(parse_persona_command(
+            "speak up at the meeting"))
+
+    def test_voice_rate_applies_and_persists(self):
+        st = _StubState()
+        tmp = Path(tempfile.mkdtemp())
+        prof = {"profile_id": "p1"}
+        st.profiles = SimpleNamespace(
+            active=lambda: prof,
+            profile_dir=lambda pid, create=False: tmp)
+        res = st._persona_command("speak faster")
+        self.assertEqual(res["applied"], "voice_rate")
+        vsel = json.loads((tmp / "voice.json").read_text())
+        self.assertAlmostEqual(vsel["speed"], 1.1)
+        res = st._persona_command("normal speed")
+        vsel = json.loads((tmp / "voice.json").read_text())
+        self.assertAlmostEqual(vsel["speed"], 1.0)
+        self.assertIn("normal", res["ack"].lower())
 
     def test_queue_lines_rotate(self):
         st = _StubState(style="playful")

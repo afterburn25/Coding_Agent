@@ -881,6 +881,42 @@ class AppState:
                         "ack": ("Muted — I'll keep it text-only."
                                 if cmd["op"] == "voice_mute"
                                 else "Voice is back on.")}
+            if cmd.get("op") == "voice_rate":
+                prof = self.profiles.active()
+                if not prof:
+                    return {"applied": "voice_rate",
+                            "ack": "Voice speed needs an active "
+                                   "profile."}
+                pdir = self.profiles.profile_dir(
+                    str(prof["profile_id"]), create=True)
+                vpath = pdir / "voice.json"
+                try:
+                    cur = json.loads(vpath.read_text(encoding="utf-8"))
+                    if not isinstance(cur, dict):
+                        cur = {}
+                except Exception:
+                    cur = {}
+                old = cur.get("speed")
+                speed = float(old) if isinstance(old, (int, float)) \
+                    else 1.0
+                if "set" in cmd:
+                    speed = float(cmd["set"])
+                else:
+                    speed = min(1.5, max(0.6,
+                                         speed + float(cmd["delta"])))
+                cur["speed"] = round(speed, 2)
+                try:
+                    atomic_write_text(
+                        vpath, json.dumps(cur, indent=2))
+                except Exception:
+                    return {"applied": "voice_rate",
+                            "ack": "Couldn't save the voice speed."}
+                self._vdm_until = 0.0  # bust the delivery cache
+                pct = int(round(speed * 100))
+                return {"applied": "voice_rate",
+                        "ack": (f"Voice speed set to {pct}%."
+                                if speed != 1.0
+                                else "Back to normal speed.")}
             prof = self.profiles.active()
             if not prof:
                 return None
@@ -998,6 +1034,10 @@ class AppState:
                         (pdir / "voice.json").read_text(encoding="utf-8"))
                     if vsel.get("preset_id"):
                         out["preset_id"] = str(vsel["preset_id"])
+                    user_speed = vsel.get("speed")
+                    if isinstance(user_speed, (int, float)):
+                        out["_user_speed"] = max(
+                            0.6, min(1.5, float(user_speed)))
                 except Exception:
                     pass
                 act = PersonalityStore(pdir).resolve_active(
@@ -1020,6 +1060,15 @@ class AppState:
                     previous=prev_map)
                 self._vdm_prev = (ident, dict(mapped))
                 out.update(mapped)
+            # User speed bias (voice.json "speed") multiplies the
+            # persona delivery — "speak faster" survives mood drift.
+            uspd = out.pop("_user_speed", None)
+            if uspd:
+                for k in ("speed", "tempo"):
+                    cur = out.get(k)
+                    if isinstance(cur, (int, float)):
+                        out[k] = round(
+                            max(0.5, min(2.0, float(cur) * uspd)), 3)
             self._vdm_cache, self._vdm_until = out, now + 10.0
             return out
         except Exception:

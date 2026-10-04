@@ -139,6 +139,19 @@ _VOICE_UNMUTE = re.compile(
     r"^\s*(?:please\s+)?(?:(?:you\s+can\s+)?speak\s+again|unmute|"
     r"unmute\s+yourself|voice\s+on|talk\s+to\s+me(?:\s+again)?|"
     r"speak\s+up)\s*[.!]?\s*$", re.I)
+_VOICE_RATE_UP = re.compile(
+    r"^\s*(?:please\s+)?(?:"
+    r"(?:speak|talk)\s+(?:a\s+(?:bit|little)\s+)?(?:faster|quicker)|"
+    r"speed\s+up(?:\s+a\s+(?:bit|little))?)\s*[.!]?\s*$", re.I)
+_VOICE_RATE_DOWN = re.compile(
+    r"^\s*(?:please\s+)?(?:"
+    r"(?:speak|talk)\s+(?:a\s+(?:bit|little)\s+)?slower|"
+    r"slow\s+down(?:\s+a\s+(?:bit|little))?|"
+    r"slow\s+your\s+(?:speech|voice)\s+down)\s*[.!]?\s*$", re.I)
+_VOICE_RATE_RESET = re.compile(
+    r"^\s*(?:please\s+)?(?:normal\s+speed|default\s+speed|"
+    r"speak\s+(?:at\s+)?normal(?:ly)?|talk\s+normal(?:ly)?|"
+    r"reset\s+your\s+(?:voice|speech)\s+speed)\s*[.!]?\s*$", re.I)
 _SELF_DESCRIBE = re.compile(
     r"^\s*(?:what\s+are\s+you\s+like|describe\s+your\s+(?:personality|"
     r"persona|style)|who\s+are\s+you\s+right\s+now|"
@@ -180,6 +193,12 @@ def parse_persona_command(text: str) -> dict | None:
         return {"op": "voice_mute"}
     if _VOICE_UNMUTE.match(t):
         return {"op": "voice_unmute"}
+    if _VOICE_RATE_RESET.match(t):
+        return {"op": "voice_rate", "set": 1.0}
+    if _VOICE_RATE_UP.match(t):
+        return {"op": "voice_rate", "delta": 0.1}
+    if _VOICE_RATE_DOWN.match(t):
+        return {"op": "voice_rate", "delta": -0.1}
     if _SELF_DESCRIBE.match(t):
         return {"op": "describe"}
     if _RESET_ADAPT.match(t):

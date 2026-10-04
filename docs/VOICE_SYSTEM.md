@@ -192,6 +192,16 @@ User-visible system activity speaks through the same persona layer:
   feedback categories for giggles/gasps/moans/yawns/whispers/groans.
   Multi-word forms outrank their components ("uh-oh" ≠ "uh"), and
   prose words ("of"/"off", "a gasp", "she scoffed") aren't vocalized.
+- **Capacity events** — `worker_capacity_reduced` /
+  `worker_capacity_restored` speak once per distinct ceiling;
+  oscillation re-speaks by clearing the opposite direction's dedup id.
+- **Queue rotation** — each persona style has two queue-announcement
+  phrasings that alternate via a per-style cursor.
+- **Voice commands** — "stop talking"/"be quiet"/"voice off" mute
+  (with a spoken farewell *before* the mute lands);
+  "speak again"/"unmute"/"voice on" restore; "speak faster"/"slow
+  down"/"normal speed" adjust the profile's `voice.json` speed bias
+  (0.6–1.5×, persisted, applied on top of the persona delivery map).
 
 Personality Studio gains a *Natural Vocalizations* section: level select
 (profile-scoped) + per-style preview buttons hitting
