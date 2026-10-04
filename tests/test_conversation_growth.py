@@ -72,6 +72,46 @@ class ConversationManagerTests(unittest.TestCase):
             self.assertIn("Europa has a subsurface ocean", context)
             self.assertIn("project codename is Orion", context)
 
+    def test_locked_identity_questions_do_not_raise_refusal(self):
+        """Asking about a locked fact is a question, not a write attempt —
+        no 'locked' key may appear so the normal answer lanes run."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            for q in (
+                "how old are you?",
+                "when is your birthday?",
+                "who is your creator?",
+                "what is your age",
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertNotIn("locked", learned, q)
+                self.assertEqual(learned["facts"], [], q)
+                self.assertEqual(learned["behavior_rules"], [], q)
+
+    def test_locked_identity_write_attempts_still_refuse(self):
+        """Deliberate overwrite attempts keep the lock notice."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            for q in (
+                "remember that your birthday is June 1",
+                "learn: your creator is Bob",
+                "forget your birthday",
+                "no, your age is 40",
+                "fact: your birthday is June 1",       # captured-content guard
+                "teach: your creator is someone else",  # rule-pattern guard
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertIn("locked", learned, q)
+                self.assertIn("creator-locked", learned["locked"][0], q)
+
+    def test_user_own_facts_not_locked(self):
+        """'my birthday' is the user's fact, not Nexus's — stores normally."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            learned = memory.learn_from_user("my birthday is June 1")
+            self.assertNotIn("locked", learned)
+            self.assertTrue(any("june 1" in f.lower() for f in learned["facts"]))
+
     def test_history_survives_truncated_or_missing_main_file(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "conversations.json"

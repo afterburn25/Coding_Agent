@@ -46,6 +46,13 @@ _WRITE_INTENT = re.compile(
 )
 
 
+def is_write_intent(text: str) -> bool:
+    """True when the text is an imperative write/correction attempt —
+    "learn:", "remember that", "forget", "no,", "actually," — as opposed
+    to a question or statement that merely mentions a locked topic."""
+    return bool(_WRITE_INTENT.match(str(text or "")))
+
+
 def locked_topic(text: str) -> str | None:
     """Return the locked identity topic a text targets, or None.
 

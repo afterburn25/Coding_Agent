@@ -375,8 +375,12 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Update installer run failed", self.workflow)
         self.assertIn("Update removed imported workflows", self.workflow)
         self.assertIn('dotnet-version: "8.0.424"', self.workflow)
-        self.assertIn(
-            "choco install innosetup --version=6.6.1", self.workflow)
+        # Runner images may ship a newer Inno than the old 6.6.1 pin — the
+        # step must reuse a preinstalled ISCC and only choco-install when
+        # none is found.
+        self.assertIn("Inno Setup already present", self.workflow)
+        self.assertIn("choco install innosetup", self.workflow)
+        self.assertNotIn("--version=6.6.1", self.workflow)
         self.assertIn("Build native Nexus Core desktop app", self.workflow)
         self.assertIn("Installed Source workspace is incomplete", self.workflow)
         for workflow in (

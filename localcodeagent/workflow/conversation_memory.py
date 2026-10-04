@@ -220,9 +220,12 @@ class ConversationMemory:
 
         # Creator-locked identity facts (birthday/age/creator) cannot be
         # taught, overridden, or forgotten — drop them before any storage.
-        from ..identity import locked_topic, locked_refusal
+        # The refusal only surfaces for an actual write attempt; a plain
+        # question ("how old are you?") must fall through to the normal
+        # answer lanes instead of replying with lock wording.
+        from ..identity import locked_topic, locked_refusal, is_write_intent
         topic = locked_topic(raw)
-        if topic:
+        if topic and is_write_intent(raw):
             result.setdefault("locked", []).append(locked_refusal(topic))
             return result
 
@@ -249,6 +252,10 @@ class ConversationMemory:
                 if match:
                     fact = match.group(1).strip() if match.lastindex else raw
                     break
+            if fact and locked_topic(fact):
+                result.setdefault("locked", []).append(
+                    locked_refusal(locked_topic(fact)))
+                fact = None
             if fact and self._append_unique("facts", fact, self.fact_limit, scope=scope, scope_id=scope_id):
                 result["facts"].append(fact)
 
@@ -283,6 +290,10 @@ class ConversationMemory:
                 if correction_rule:
                     rule = correction_rule.group(1).strip()
 
+            if rule and locked_topic(rule):
+                result.setdefault("locked", []).append(
+                    locked_refusal(locked_topic(rule)))
+                rule = None
             if rule and self._append_unique("behavior_rules", rule, self.rule_limit, scope=scope, scope_id=scope_id):
                 result["behavior_rules"].append(rule)
 
