@@ -52,6 +52,10 @@ class EventBus:
         q: queue.Queue = queue.Queue(maxsize=self._queue_size)
         with self._lock:
             for event in list(self._history)[-max(0, replay):]:
+                # One-shot UI prompts (e.g. install offers) must not refire
+                # on every page load just because they are recent events.
+                if event.get("ephemeral"):
+                    continue
                 try:
                     q.put_nowait(dict(event))
                 except queue.Full:

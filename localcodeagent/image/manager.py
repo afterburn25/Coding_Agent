@@ -501,8 +501,9 @@ class ImageManager:
                     pass
             raise RuntimeError(
                 "ComfyUI is not installed — image generation cannot run without it. "
-                "An install offer was shown to the user; tell them they can install "
-                "ComfyUI and all image models from it, or from the Tools page.")
+                "Nothing is generating right now. An install offer was shown to the "
+                "user; tell them clearly that generation did not start and they can "
+                "install ComfyUI and all image models from the offer or the Tools page.")
         decision=self.router.choose(request)
         # Probe once up front so the UI/copy can distinguish "ComfyUI is
         # already up" from a cold start that may take minutes.

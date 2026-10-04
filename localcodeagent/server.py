@@ -2847,6 +2847,10 @@ class AppState:
         """Voice events go to the shared bus AND any live chat SSE sinks so
         playback segments reach the requesting client mid-stream."""
         event = {"type": "voice", **payload}
+        # Playback segments and stops are one-shot: if they sit in the bus
+        # history every page load re-speaks the last line.
+        if payload.get("event") in ("segment", "stop"):
+            event["ephemeral"] = True
         try:
             self._bus_emit(event)
         except Exception:
@@ -3316,7 +3320,8 @@ class AppState:
             })
         if not offers:
             return
-        payload = {"capability": capability, "tools": offers}
+        payload = {"capability": capability, "tools": offers,
+                   "offer_id": secrets.token_hex(8), "ephemeral": True}
         try:
             self.events.publish("install_offer", payload)
         except Exception:

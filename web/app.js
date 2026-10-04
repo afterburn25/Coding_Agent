@@ -210,11 +210,15 @@ function syncGalleryMain(gal){
   const cold=job.backend_starting&&active;
   if(url){
     if(gal._viewed!==url){vp.innerHTML=`<img class="gallery-image" src="${esc(url)}" alt="Generated image">`;gal._viewed=url;}
-  }else if(gal._viewed!=='__pending__'+job.id){
-    vp.innerHTML=`<div class="image-generation-placeholder"><div class="image-generation-shimmer"></div><div class="image-generation-copy"><strong>${cold?'Starting image generator…':'Generating image…'}</strong><span class="image-job-stage">${esc(job.stage||'queued')}</span></div></div>`;
-    gal._viewed='__pending__'+job.id;
   }else{
-    const st=vp.querySelector('.image-job-stage');if(st&&st.textContent!==String(job.stage||'queued'))st.textContent=job.stage||'queued';
+    const failed=String(job.state)==='failed'||!!(job.error_message||job.error);
+    const vkey='__pending__'+job.id+':'+(failed?'failed':String(job.stage||''));
+    if(gal._viewed!==vkey){
+      vp.innerHTML=`<div class="image-generation-placeholder">${failed?'':'<div class="image-generation-shimmer"></div>'}<div class="image-generation-copy"><strong>${failed?'Image generation failed':(cold?'Starting image generator…':'Generating image…')}</strong><span class="image-job-stage">${esc(failed?(job.error_message||job.error||'failed'):(job.stage||'queued'))}</span></div></div>`;
+      gal._viewed=vkey;
+    }else{
+      const st=vp.querySelector('.image-job-stage');if(st&&st.textContent!==String(job.stage||'queued'))st.textContent=job.stage||'queued';
+    }
   }
   const err=job.error_message||job.error||'';
   let capHtml='';
@@ -521,7 +525,7 @@ function handleAgentStreamEvent(name,data,state){
   }
   if(name==='tool'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' ')+' · done','tool:'+String(t.name||'unknown'));toolCompleteBlock(t);return;}
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
-  if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
+  if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({offer_id:'imgjob:'+String(data.job.id||''),ts:data.job.finished_at||data.job.created_at||0,tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
   if(name==='install_offer'){renderInstallOffer(data,state);return;}
   if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
   if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
@@ -535,16 +539,25 @@ function attachRetry(state){
   btn._retryMessage=state.requestMessage;
   state.wrap.appendChild(btn);
 }
-async function speakInstallLine(t){try{const out=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}).then(r=>r.json());if(out&&out.url)new Audio(out.url).play().catch(()=>{});}catch{}}
-async function renderInstallOffer(data,state){
+const _seenOffers=new Set();
+async function speakInstallLine(t){try{if(window.NexusVoice&&NexusVoice.speak){await NexusVoice.speak(t);return;}const out=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})}).then(r=>r.json());if(out&&out.url)new Audio(out.url).play().catch(()=>{});}catch{}}
+function renderInstallOffer(data,state){
   const tools=(data&&data.tools)||[];if(!tools.length)return;
+  // One offer per card: stream sinks and the event bus can both deliver the
+  // same offer, and replays must not stack duplicates or re-speak.
+  const key=String(data.offer_id||'tools:'+tools.map(t=>t.tool||'').join(','));
+  if(_seenOffers.has(key))return;
+  _seenOffers.add(key);
   const card=document.createElement('div');card.className='install-offer';
   card.innerHTML=`<div class="offer-title">Nexus needs a tool that isn't installed</div>`+tools.map((t,i)=>`<div class="offer-row"><div class="offer-info"><strong>${esc(t.name||t.tool)}</strong>${t.size_bytes?` <small>· ${(t.size_bytes/1e9).toFixed(1)} GB download</small>`:''}${t.description?`<small>${esc(t.description)}</small>`:''}</div><button class="mini-button" data-offer-idx="${i}">Install</button><a class="mini-button" href="/tools.html?tool=${encodeURIComponent(t.tool||'')}">Tools page</a></div>`).join('')+`<div class="offer-progress" hidden><small class="offer-state">Installing…</small><div class="bar"><span style="width:0%"></span></div></div>`;
   card._tools=tools;
   ((state&&state.wrap)||chat).appendChild(card);
   scrollChat();
   const names=tools.map(t=>t.name||t.tool).join(', ');
-  speakInstallLine(`This needs ${names}, which is not installed yet. Want me to install it?`);
+  // Replayed bus events carry the original ts — render the card but stay
+  // silent so an old offer does not talk again on every page load.
+  const stale=data&&data.ts&&(Date.now()/1000-Number(data.ts)>30);
+  if(!stale)speakInstallLine(`This needs ${names}, which is not installed yet. Want me to install it?`);
 }
 async function pollOfferInstall(card,t,res,stateEl,bar){
   const deadline=Date.now()+12*3600*1000;
