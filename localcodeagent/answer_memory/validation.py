@@ -94,6 +94,7 @@ _ACTION_REQUEST = re.compile(
     + "|".join(_ACTION_VERBS) + r")\b"
     r"|^i\s+(?:need|want|would like|need you)\s+you\s+to\s+(?:"
     + "|".join(_ACTION_VERBS) + r")\b"
+    r"|^i'?d?\s+rather\s+you\s+(?:" + "|".join(_ACTION_VERBS) + r")\b"
     r"|^(?:please\s+)?(?:" + "|".join(_ACTION_VERBS)
     + r")\s+(?:me\s+|an?\s+|the\s+|my\s+|this\s+|that\s+))",
     re.I)

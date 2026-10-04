@@ -136,6 +136,7 @@ class _AgentSession:
     review_content: str = ""
     repair_cycles: int = 0
     refusal_retries: int = 0
+    parrot_retries: int = 0
     continuations: int = 0
     verification_round_start: int = 0
     failed_signatures: set[str] = field(default_factory=set)
@@ -676,6 +677,34 @@ class AgentOrchestrator:
                 f"{identity.NEXUS_CREATOR}. I am software, not a person."
             )
         return None
+
+    @staticmethod
+    def _norm_for_parrot(text: str) -> str:
+        return re.sub(r"[^\w]+", " ", str(text).lower()).strip()
+
+    @staticmethod
+    def _prev_assistant_text(messages: list) -> str:
+        for m in reversed(messages):
+            if str(m.get("role") or "") == "assistant" and m.get("content"):
+                return str(m["content"])
+        return ""
+
+    def _repeated_reply(self, session: _AgentSession, content: str) -> bool:
+        """True when `content` is a near-verbatim re-issue of the previous
+        assistant turn — the model parroting its own history instead of
+        answering the newest message. Ignores short replies (<60 chars:
+        "Done." twice is benign)."""
+        prev = self._prev_assistant_text(
+            session.messages[:-1])  # skip the just-appended reply
+        if not prev:
+            return False
+        a, b = self._norm_for_parrot(prev), self._norm_for_parrot(content)
+        if len(a) < 60 or len(b) < 60:
+            return False
+        if b.startswith(a[: max(60, len(a) // 2)]):
+            return True
+        aw, bw = set(a.split()), set(b.split())
+        return bool(aw) and len(aw & bw) / len(aw | bw) >= 0.8
 
     def _persona_active(self) -> bool:
         """True when a named persona preset is driving delivery style."""
@@ -2872,9 +2901,15 @@ class AgentOrchestrator:
             # Canned refusals open in the first tokens, so gate streaming on a
             # sniff window for every intent — a deflection ("I'm not built to
             # do that") can't slip out on coding or tool requests, while long
-            # answers still stream once their opening proves clean.
+            # answers still stream once their opening proves clean. A second
+            # gate holds a reply that is verbatim-repeating the previous
+            # assistant turn (parroting on context-dependent follow-ups) —
+            # it stays closed only while the text keeps matching.
             buffered_deltas: list[str] = []
             refusal_gate_open = refusal_retry_enabled
+            prev_reply_norm = self._norm_for_parrot(
+                self._prev_assistant_text(session.messages))
+            parrot_gate_open = len(prev_reply_norm) >= 60
             coalescer = TokenCoalescer()
 
             def stream_piece(piece: str) -> None:
@@ -2883,12 +2918,22 @@ class AgentOrchestrator:
                     self._emit(session, "token", text=chunk, model_id=session.profile.id)
 
             def on_delta(piece: str) -> None:
-                nonlocal refusal_gate_open
-                if refusal_gate_open:
+                nonlocal refusal_gate_open, parrot_gate_open
+                if refusal_gate_open or parrot_gate_open:
                     buffered_deltas.append(piece)
                     sniff = "".join(buffered_deltas)
-                    if len(sniff) >= self._REFUSAL_SNIFF_CHARS and not self.generic_topic_refusal(sniff):
+                    if parrot_gate_open:
+                        sn = self._norm_for_parrot(sniff)
+                        # Hold while too short to judge (<40 chars) or
+                        # still matching the previous reply — release the
+                        # moment the text provably diverges.
+                        parrot_gate_open = len(sn) < 40 or (
+                            prev_reply_norm.startswith(sn)
+                            or sn.startswith(prev_reply_norm))
+                    if refusal_gate_open and len(sniff) >= self._REFUSAL_SNIFF_CHARS \
+                            and not self.generic_topic_refusal(sniff):
                         refusal_gate_open = False
+                    if not refusal_gate_open and not parrot_gate_open:
                         for earlier in buffered_deltas:
                             stream_piece(earlier)
                         buffered_deltas.clear()
@@ -2916,6 +2961,37 @@ class AgentOrchestrator:
             self.tasks.update(session.task_id, steps=session.steps)
             if not calls:
                 session.main_content = str(message.get("content") or "")
+                # Parroting: the model re-issued its own previous reply
+                # verbatim on a context-dependent follow-up ("I rather you
+                # create the files for me"). The parrot gate held the text
+                # off the wire, so a discard+retry is invisible to the user.
+                if session.parrot_retries < 2 and parrot_gate_open \
+                        and self._repeated_reply(session, session.main_content):
+                    session.parrot_retries += 1
+                    if session.messages and session.messages[-1] is message:
+                        session.messages.pop()
+                    parrot_event = {
+                        "type": "parrot_retry",
+                        "model_id": session.profile.id,
+                        "attempt": session.parrot_retries,
+                        "reason": "reply repeated the previous assistant turn",
+                    }
+                    session.model_events.append(parrot_event)
+                    self._emit(session, "model", event=parrot_event)
+                    session.messages.append({
+                        "role": "system",
+                        "content": (
+                            "Your previous response repeated your earlier "
+                            "reply nearly word-for-word and was discarded. "
+                            "Answer the user's NEWEST message directly — it "
+                            "refers to the conversation above, not to your "
+                            "own prior wording. Do not restate or quote your "
+                            "previous reply; if they asked you to do the "
+                            "thing you offered, do it or ask only the "
+                            "specific detail still missing."),
+                    })
+                    session.main_content = ""
+                    continue
                 # Only retry a refusal still behind the sniff gate — once the
                 # gate released, the opening was clean and already streamed.
                 if refusal_retry_enabled and refusal_gate_open and self.generic_topic_refusal(session.main_content):
