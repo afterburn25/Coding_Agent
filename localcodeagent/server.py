@@ -771,6 +771,7 @@ class AppState:
         self._start_primary_prewarm()
         self._start_auto_tune()
         self._start_auto_resume()
+        self._start_source_sync()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
 
@@ -1415,6 +1416,47 @@ class AppState:
         self._resume_thread = threading.Thread(
             target=resume, name="auto-resume-interrupted", daemon=True)
         self._resume_thread.start()
+
+    def _start_source_sync(self) -> None:
+        """Fast-forward the bundled Source workspace to origin/main.
+
+        The installer deliberately never overwrites an existing Source
+        checkout, so after an update it can lag the packaged backend.
+        A fast-forward-only merge keeps it current; local commits, a
+        dirty tree, a different branch, or no remote all skip cleanly."""
+        if not getattr(config, "sync_source_on_start", True):
+            return
+        if not (self.workspace / ".git" / "HEAD").exists():
+            return
+
+        def _sync() -> None:
+            import subprocess
+            def git(*args: str) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    ["git", "-C", str(self.workspace), *args],
+                    capture_output=True, text=True, timeout=120)
+            try:
+                head = git("rev-parse", "--abbrev-ref", "HEAD")
+                if head.returncode != 0 or head.stdout.strip() != "main":
+                    return
+                before = git("rev-parse", "HEAD").stdout.strip()
+                if git("fetch", "--quiet", "origin", "main").returncode != 0:
+                    return
+                remote = git("rev-parse", "origin/main").stdout.strip()
+                if not remote or remote == before:
+                    return
+                if git("merge", "--ff-only", "origin/main").returncode != 0:
+                    return
+                self.autonomy.notifications.notify(
+                    f"Source workspace updated {before[:7]} → "
+                    f"{remote[:7]} — code-reference and self-repair tools "
+                    "now inspect the same code the backend runs.",
+                    level="info", title="Source synced")
+            except Exception:
+                pass
+
+        threading.Thread(target=_sync, name="source-sync",
+                         daemon=True).start()
 
     def _report_prior_crash(self) -> None:
         """Surface a dirty previous session as a notification + diagnostics.

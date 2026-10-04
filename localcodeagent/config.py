@@ -185,6 +185,12 @@ class AgentConfig:
     # goals. Runs inside the backend so missions continue while the UI is
     # closed; missions never widen tool permissions.
     autonomy_enabled: bool = True
+    # The bundled Source workspace is a git checkout of the upstream repo
+    # that the installer deliberately never overwrites. On startup the
+    # backend fast-forwards it to origin's tip so code-reference/self-repair
+    # tools inspect the same code the packaged backend runs. Fast-forward
+    # only — a dirty tree or local commits skip the sync untouched.
+    sync_source_on_start: bool = True
     # Onboarding gate: while no profile exists, protected APIs return
     # 403 and the UI is locked to Start Here. Real installs leave this
     # on; test harnesses that exercise unrelated APIs disable it.
@@ -646,6 +652,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.agent_tool_timeout_seconds = max(1.0, float(raw.get("agent_tool_timeout_seconds", cfg.agent_tool_timeout_seconds)))
     cfg.autonomous_approval_timeout_seconds = max(0.0, float(raw.get("autonomous_approval_timeout_seconds", cfg.autonomous_approval_timeout_seconds)))
     cfg.autonomy_enabled = bool(raw.get("autonomy_enabled", cfg.autonomy_enabled))
+    cfg.sync_source_on_start = bool(raw.get(
+        "sync_source_on_start", cfg.sync_source_on_start))
     cfg.profiles_onboarding_gate = bool(raw.get(
         "profiles_onboarding_gate", cfg.profiles_onboarding_gate))
     cfg.self_repair_auto_promote = bool(raw.get(
