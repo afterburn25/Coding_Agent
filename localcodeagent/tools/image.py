@@ -55,7 +55,7 @@ def register_image_tools(registry: ToolRegistry, manager: ImageManager) -> None:
                      if str(p).strip()]
             if len(prompts) > 1 and operation == "text_to_image":
                 jobs=[]
-                for prompt in prompts[:8]:
+                for prompt in prompts[:16]:
                     request=ImageRequest(**{**fields, "prompt": prompt})
                     jobs.append(manager.create_job(
                         request,

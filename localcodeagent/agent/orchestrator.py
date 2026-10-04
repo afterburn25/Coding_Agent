@@ -532,6 +532,14 @@ class AgentOrchestrator:
             "i have to decline",
             "i won't be able to help",
             "i won't be able to assist",
+            # Capability refusals that contradict the product's own purpose
+            # ("I'm not built to do that" in reply to "build me a website").
+            "i'm not built to",
+            "i am not built to",
+            "i'm not designed to",
+            "i was not designed to",
+            "i'm not able to do that",
+            "not something i'm built for",
             "i'd rather not discuss",
             "i'd prefer not to discuss",
             "i can't discuss that",
@@ -697,13 +705,32 @@ class AgentOrchestrator:
                 return str(m["content"])
         return ""
 
+    @staticmethod
+    def _recent_assistant_texts(messages: list, limit: int = 4) -> list[str]:
+        """Newest-first assistant texts — the parrot check looks beyond the
+        immediately previous turn because a degenerate model re-issues a
+        reply from two or three turns back too."""
+        out: list[str] = []
+        for m in reversed(messages):
+            if str(m.get("role") or "") == "assistant" and m.get("content"):
+                out.append(str(m["content"]))
+                if len(out) >= limit:
+                    break
+        return out
+
     def _repeated_reply(self, session: _AgentSession, content: str) -> bool:
-        """True when `content` is a near-verbatim re-issue of the previous
+        """True when `content` is a near-verbatim re-issue of a recent
         assistant turn — the model parroting its own history instead of
         answering the newest message. Ignores short replies (<60 chars:
         "Done." twice is benign)."""
-        prev = self._prev_assistant_text(
+        prev_texts = self._recent_assistant_texts(
             session.messages[:-1])  # skip the just-appended reply
+        for prev in prev_texts:
+            if self._parrot_match(prev, content):
+                return True
+        return False
+
+    def _parrot_match(self, prev: str, content: str) -> bool:
         if not prev:
             return False
         a, b = self._norm_for_parrot(prev), self._norm_for_parrot(content)
@@ -759,29 +786,64 @@ class AgentOrchestrator:
     _IMAGE_FOLLOWUP_RE = re.compile(
         r"\b(?:do it|do that|try again|retry|redo|again\b|generate it|"
         r"make it|make her|make him|show me|go ahead|not what i|"
-        r"isn'?t what i|that'?s not|that ain'?t|wrong\b|nope|"
+        r"isn'?t\b|ain'?t\b|that'?s not|doesn'?t|didn'?t|wrong\b|nope|"
         r"i wanted|i asked for|i meant|still want|"
+        # Attribute corrections — "full body", "zoom out", "wider shot".
+        r"(?:full|whole|entire|complete)\s+body|zoom\s+(?:out|in)|"
+        r"too\s+(?:close|cropped|zoomed|tight|small|big)|"
+        r"show\s+(?:the\s+)?(?:whole|full|rest|more)|"
+        r"wider|bigger|smaller|taller|longer|"
         r"same\s+(?:girl|guy|woman|man|person|pose|image|picture|"
         r"photo|one|style|character|outfit)|"
         r"but\s+i\b|instead\b|keep the)\b", re.I)
     _IMAGEISH_RE = re.compile(
         r"\b(?:images?|pictures?|photos?|pics?|selfie|portrait|artwork|"
         r"drawing|illustration|render|wallpaper|girl|woman|man|guy|pose|"
+        r"body|torso|legs?|feet|face|full[-\s]?body|"
         r"scene|outfit|suit|dress|nude|naked|her|him|she|he|they)\b", re.I)
 
     # HARD TRUTH RULE enforcement — past-tense execution claims about the
     # external world. A reply asserting these while zero tools ran is a
     # fabrication the system annotates instead of letting stand unmarked.
+    _CLAIM_ADVERBS = r"(?:(?:already|just|now|also|even|still|fully|been|got|currently)\s+)*"
     _ACTION_CLAIM_RE = re.compile(
         r"(?:\b(?:i['’]ve|i have|i already|i just|just now|i now)\s+"
+        + _CLAIM_ADVERBS +
         r"(?:connected|synced|synchronized|pulled|cloned|pushed|committed|"
         r"applied|patched|deployed|installed|ran|executed|verified|tested|"
         r"merged|checked|inspected|scanned|reviewed|fixed|repaired|"
         r"restarted|launched|rebuilt|recreated|generated|attached|"
-        r"uploaded|downloaded|fetched|grabbed|did)\b)"
+        r"uploaded|downloaded|fetched|grabbed|did|found|scoped|flagged|"
+        r"started|finished|completed)\b)"
+        # Progressive claims — "I'm already connecting", "I've been watching".
+        + r"|\b(?:i['’]m|i am)\s+" + _CLAIM_ADVERBS +
+        r"(?:connecting|syncing|pulling|cloning|pushing|committing|"
+        r"applying|patching|deploying|installing|executing|verifying|"
+        r"testing|merging|checking|inspecting|scanning|reviewing|fixing|"
+        r"repairing|restarting|building|generating|regenerating|"
+        r"reprocessing|sending|queuing|preparing|setting up|"
+        r"working on|pulling|uploading|downloading|"
+        r"fetching|watching|flagging|running)\b"
+        # Forward promises that never resolve — "I'll pull up the
+        # generator", "let me check", "I'll send it back". Only flagged
+        # when the turn ends with zero tool calls (agent replies that
+        # actually ran tools have evidence and pass untouched).
+        + r"|\b(?:i['’]ll|i will|let me|i['’]m going to|i am going to)\s+"
+        + _CLAIM_ADVERBS +
+        r"(?:pull|generate|regenerate|reprocess|send|create|make|run|"
+        r"apply|patch|push|connect|sync|check|inspect|review|fix|"
+        r"repair|redo|fetch|grab|build|compile|commit|deploy|install|"
+        r"merge|scan|verify|test|download|upload|queue|fire|trigger|"
+        r"open|read|edit|update|show|get|start|prepare|set up)\b"
+        # Stalling claims — "give me a moment", "one moment" preceding
+        # nothing.
+        + r"|\b(?:just\s+)?give me\s+(?:just\s+)?a\s+"
+        r"(?:moment|sec(?:ond)?|minute|few\s+(?:seconds?|minutes?))\b"
+        r"|\bone\s+moment\b"
         # Vaguer "I did it/that/what you asked" — still an execution claim
         # when nothing actually ran.
-        r"|\bi did\s+(?:it|that|all|everything|what you \w+|so|the \w+)\b"
+        + r"|\bi did\s+" + _CLAIM_ADVERBS +
+        r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
         r"|✅|☑|☒|✔"
         r"|\b(?:patch|fix|commit|changes?|update|build|code)\s+"
         r"(?:has been |is |was )?(?:successfully\s+)?"
@@ -1046,18 +1108,35 @@ class AgentOrchestrator:
         # "generate 3 images of: a cat, a dog, a sunset"
         m = re.match(
             polite + r"(?:generate|create|make|draw|paint|render|produce)\s+"
-            + words + r"\s*" + nouns + r"\s*(?:of|showing|depicting|featuring|:)\s*(.+)$",
+            + r"(\d+|two|three|four|five|six|seven|eight|nine|ten|several|"
+            r"multiple|different|separate|a\s+few|a\s+couple(?:\s+of)?)\s*"
+            + nouns + r"\s*(?:of|showing|depicting|featuring|:)\s*(.+)$",
             t, re.IGNORECASE,
         )
         if m:
-            tail = m.group(1).strip()
+            count_word = m.group(1).lower()
+            tail = m.group(2).strip()
             parts = [
                 p.strip(" .,")
                 for p in re.split(r"\s*(?:,|;|\band\b|\bthen\b|&)\s*", tail)
             ]
             parts = [p for p in parts if len(p) > 2]
             if len(parts) > 1:
-                return parts[:8]
+                return parts[:16]
+            # "10 images of <one description>" — N variations of the same
+            # prompt, one job each so they stream into the gallery as they
+            # finish. Ambiguous quantifiers (multiple/different/several)
+            # without a number don't replicate.
+            word_counts = {
+                "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                "a few": 3, "a couple": 2, "a couple of": 2,
+            }
+            n = word_counts.get(count_word)
+            if n is None and count_word.isdigit():
+                n = int(count_word)
+            if n and n > 1 and parts:
+                return parts * min(n, 16)
             return []
         # repeated "image of X" / "picture of Y" constructions
         hits = list(re.finditer(
@@ -2984,7 +3063,11 @@ class AgentOrchestrator:
             refusal_retry_enabled = (
                 ethical_temperature >= 0.8
                 and refusal_retry_limit > 0
-                and self._brain_subroutine_enabled("adult_content", True)
+                # Not gated on the adult_content subroutine — it fails closed
+                # while the brain is unverified, which would silently disable
+                # refusal recovery for every kind of request. The hard_specific
+                # exemptions inside generic_topic_refusal still protect real
+                # safety refusals from being retried.
             )
             # Canned refusals open in the first tokens, so gate streaming on a
             # sniff window for every intent — a deflection ("I'm not built to
@@ -3547,6 +3630,45 @@ class AgentOrchestrator:
         except Exception:
             return None
 
+    _INLINE_IMAGE_PATH_RE = re.compile(
+        r"[A-Za-z]:[\\/][^\s\"'<>|]+\.(?:png|jpe?g|webp|gif|bmp|tiff?|avif)|"
+        r"\\\\[^\s\"'<>|]+\.(?:png|jpe?g|webp|gif|bmp|tiff?|avif)",
+        re.I)
+
+    def _extract_inline_image_paths(self, text: str) -> list[str]:
+        """Absolute image paths pasted into the message as text. Files that
+        live outside the image-input allowlist (workspace / generations /
+        references / characters) are copied into data/attachments first —
+        the copy is the sanctioned input, preserving the sandbox."""
+        out: list[str] = []
+        dest_dir = self.checkpoints.workspace / "data" / "attachments"
+        for m in self._INLINE_IMAGE_PATH_RE.finditer(str(text or "")):
+            try:
+                src = Path(m.group(0)).expanduser().resolve()
+            except Exception:
+                continue
+            if not src.is_file():
+                continue
+            try:
+                in_workspace = src.is_relative_to(
+                    self.checkpoints.workspace.resolve())
+            except Exception:
+                in_workspace = False
+            if in_workspace:
+                out.append(str(src))
+                continue
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                target = dest_dir / (secrets.token_hex(6) + src.suffix.lower())
+                import shutil
+                shutil.copy2(src, target)
+                out.append(str(target))
+            except Exception:
+                continue
+            if len(out) >= self._ATTACH_MAX_FILES:
+                break
+        return out[: self._ATTACH_MAX_FILES]
+
     def _prepare_attachments(self, attachments: list[dict[str, Any]] | None) -> dict[str, Any]:
         """Normalize user-attached files into prompt text + saved image paths.
 
@@ -3716,6 +3838,18 @@ class AgentOrchestrator:
                     task=completed.as_dict() if completed else {},
                     response_source="brain_fast_path")
         attach = self._prepare_attachments(attachments)
+        # Image paths pasted into the message as text ("variation of this
+        # image: C:\...\foo.png") are attachments the user typed rather than
+        # clicked — resolve them to real files or the image lane queues a
+        # job with an empty source and ComfyUI LoadImage opens a directory.
+        for inline_path in self._extract_inline_image_paths(user_text):
+            if inline_path not in attach["image_paths"]:
+                attach["image_paths"].append(inline_path)
+                attach["meta"].append({
+                    "kind": "image",
+                    "name": Path(inline_path).name,
+                    "path": inline_path,
+                })
         learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": [], "forgotten": []}
         if (
             self.conversation_memory is not None
@@ -3791,7 +3925,12 @@ class AgentOrchestrator:
             # A named persona is in play — canned small talk ("what can you
             # do", "hi") would reply flat and break character. Let the model
             # lane answer; the utility prompt already lists real capabilities.
-            builtin_response = None
+            # EXCEPTION: creator-locked identity answers (age/birthday/creator)
+            # are facts, not style — they stay deterministic under a persona
+            # so no model output can contradict them.
+            from .. import identity
+            if identity.response_for(user_text) is None:
+                builtin_response = None
         brain_blocked_response = (
             "Image generation is disabled by the creator-locked Nexus Brain."
             if (
@@ -3880,11 +4019,23 @@ class AgentOrchestrator:
             context_dependent = _am_validation.is_context_dependent(user_text)
         except Exception:
             context_dependent = False
+        # Near-miss rows get injected into the prompt as "related answers" —
+        # on a near-empty input ("wtf", "ok") that context is noise the model
+        # latches onto and answers instead of the actual message. Require a
+        # minimum of normalized substance before consulting Answer Memory.
+        am_min_tokens = 3
+        try:
+            from ..answer_memory import normalization as _am_norm
+            normalized_q = _am_norm.normalize_question(user_text)
+            am_min_tokens_ok = len(normalized_q.split()) >= am_min_tokens
+        except Exception:
+            am_min_tokens_ok = True
         if (
             mode == "auto"
             and self.answer_memory is not None
             and self._brain_subroutine_enabled("answer_memory", True)
             and not context_dependent
+            and am_min_tokens_ok
         ):
             try:
                 memory_match = self.answer_memory.lookup(

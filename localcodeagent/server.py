@@ -3607,7 +3607,10 @@ class AppState:
             line = (f"Sorry — the image didn't finish: {reason}. "
                     "The error card has the details if you want them.")
         try:
-            voice.enqueue(f"image-fail-{job_id}", line, vocalize=False)
+            # Priority — image failures are operational events, not prose;
+            # they must not queue behind a long response still speaking.
+            voice.enqueue(f"image-fail-{job_id}", line, vocalize=False,
+                          priority=True)
         except Exception:
             pass
 
@@ -3796,7 +3799,10 @@ class AppState:
         if not line:
             return
         try:
-            voice.enqueue(f"notice-{dedup_id}", line, vocalize=False)
+            # Priority — a notice queued behind a still-streaming response
+            # could otherwise speak minutes after the event it reports.
+            voice.enqueue(f"notice-{dedup_id}", line, vocalize=False,
+                          priority=True)
         except Exception:
             pass
 

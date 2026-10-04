@@ -1081,6 +1081,25 @@ class SplitImagePromptTests(unittest.TestCase):
             AgentOrchestrator._split_image_prompts(
                 "generate an image of a cat and a dog in a park"), [])
 
+    def test_numeric_count_replicates_single_prompt(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        parts = AgentOrchestrator._split_image_prompts(
+            "generate 10 images of a full body nude woman")
+        self.assertEqual(len(parts), 10)
+        self.assertTrue(all(p == "a full body nude woman" for p in parts))
+
+    def test_word_count_replicates_single_prompt(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        parts = AgentOrchestrator._split_image_prompts(
+            "make three pictures of a sunset over water")
+        self.assertEqual(len(parts), 3)
+
+    def test_count_caps_at_bound(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        parts = AgentOrchestrator._split_image_prompts(
+            "generate 99 images of a cat")
+        self.assertEqual(len(parts), 16)
+
     def test_repeated_image_of_construction_splits(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator
         parts = AgentOrchestrator._split_image_prompts(

@@ -28,7 +28,12 @@ _CONTEXT_DEPENDENT_RE = re.compile(
     r"never ?mind|cancel(?: that)?|skip it|forget (?:it|that)|"
     r"that one|this one|the (?:first|second|third|last) one|"
     r"(?:first|second|third|last) one|both|all of them|neither|either one|"
-    r"same(?: thing)?|again|retry|try again|once more"
+    r"same(?: thing)?|again|retry|try again|once more|"
+    # Bare interjections/profanity — pure emotional context, nothing to
+    # match a stored question against.
+    r"wtf|wth|huh|lol|lmao|rofl|haha+|omg|ugh|wow|damn+|shit|crap|"
+    r"fuck(?:\s+(?:you|this|that|off|it|me|sake))?|"
+    r"what\s+the\s+\w+|the\s+hell"
     r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|them))*"
     r"[\s.!?,]*$",
     re.I,

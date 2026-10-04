@@ -330,27 +330,6 @@ body {
   z-index:2;
 }
 
-.top-brand {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  color:#dbe9fb;
-}
-
-.top-brand img {
-  width:30px;
-  height:30px;
-  object-fit:contain;
-}
-
-.top-brand strong {
-  font-size:14px;
-  background:linear-gradient(90deg,var(--cyan),#8b58ff);
-  -webkit-background-clip:text;
-  background-clip:text;
-  color:transparent;
-}
-
 .nexus-presence {
   position:relative;
   width:34px;
@@ -698,6 +677,7 @@ body[data-gesture="look_away"] .nexus-presence > img {
 
 .bubble {
   white-space:pre-wrap;
+  overflow-wrap:anywhere;
   line-height:1.58;
   background:#0c1729;
   border:1px solid #1d3350;

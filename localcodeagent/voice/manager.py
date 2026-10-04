@@ -24,7 +24,7 @@ from .vocalizations import VocalizationEngine, adapter_for
 
 class SpeechJob:
     __slots__ = ("job_id", "task_id", "seq", "text", "preset_id", "speed",
-                 "cancelled", "created_at", "events")
+                 "cancelled", "created_at", "events", "priority")
 
     def __init__(self, task_id: str, seq: int, text: str, preset_id: str,
                  speed: float) -> None:
@@ -37,6 +37,7 @@ class SpeechJob:
         self.cancelled = False
         self.created_at = time.time()
         self.events: list[dict] = []
+        self.priority = False
 
 
 class VoiceManager:
@@ -71,6 +72,11 @@ class VoiceManager:
         self._streamers: dict[str, SentenceStreamer] = {}
         self._spoken_tasks: dict[str, int] = {}  # task_id -> next seq
         self._current_task: str = ""
+        # After the startup greeting's audio publishes, hold every other
+        # utterance until it finishes playing plus a settle gap — no
+        # report may talk over the greeting.
+        self._greeting_hold_until = 0.0
+        self._greeting_settle_s = 5.0
         self._engines: dict[str, Any] = {}
         self._muted_at = 0.0
         self.segments: dict[str, Path] = {}  # seg_id -> wav path (recent)
@@ -274,7 +280,14 @@ class VoiceManager:
                             speed)
             job.events = events
             if priority:
-                self._queue.appendleft(job)
+                # Ahead of normal jobs but behind earlier priority jobs —
+                # plain appendleft would reverse a burst of notices.
+                idx = 0
+                while (idx < len(self._queue)
+                       and getattr(self._queue[idx], "priority", False)):
+                    idx += 1
+                self._queue.insert(idx, job)
+                job.priority = True
             else:
                 self._queue.append(job)
             self._ensure_worker()
@@ -327,6 +340,15 @@ class VoiceManager:
                 continue
             if job.cancelled or self.muted():
                 continue
+            # HARD RULE: while a greeting is speaking — plus a settle gap
+            # after it ends — every other utterance waits its turn.
+            if not job.task_id.startswith("greet-"):
+                with self._lock:
+                    delay = self._greeting_hold_until - time.monotonic()
+                if delay > 0:
+                    time.sleep(min(delay, 30.0))
+                    if job.cancelled or self.muted():
+                        continue
             preset = self.presets.get(job.preset_id) or self.current_preset()
             if preset is None:
                 continue
@@ -356,6 +378,13 @@ class VoiceManager:
                                        for e in job.events]
             self._publish("voice", payload)
             with self._lock:
+                if job.task_id.startswith("greet-"):
+                    # The client plays the segment on arrival — the hold
+                    # covers its audio duration plus the settle gap.
+                    self._greeting_hold_until = (
+                        time.monotonic()
+                        + float(payload.get("seconds") or 0)
+                        + self._greeting_settle_s)
                 # Track the last actually-spoken utterance so
                 # "say that again" can replay it on demand.
                 self._last_spoken = (job.task_id, job.text)
