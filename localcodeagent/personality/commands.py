@@ -131,6 +131,14 @@ _RESET_ADAPT = re.compile(
     r"^\s*(?:please\s+)?(?:reset|clear|forget)\s+(?:the\s+)?"
     r"(?:learned\s+)?(?:adaptations?|learned\s+(?:tone|style|habits)|"
     r"shared\s+(?:history|memories|context)|familiarity)\b", re.I)
+_VOICE_MUTE = re.compile(
+    r"^\s*(?:please\s+)?(?:stop\s+talking|mute\s+(?:yourself|"
+    r"your\s+voice)|voice\s+off|no\s+talking|be\s+quiet|"
+    r"silence\s+(?:yourself|your\s+voice))\s*[.!]?\s*$", re.I)
+_VOICE_UNMUTE = re.compile(
+    r"^\s*(?:please\s+)?(?:(?:you\s+can\s+)?speak\s+again|unmute|"
+    r"unmute\s+yourself|voice\s+on|talk\s+to\s+me(?:\s+again)?|"
+    r"speak\s+up)\s*[.!]?\s*$", re.I)
 _SELF_DESCRIBE = re.compile(
     r"^\s*(?:what\s+are\s+you\s+like|describe\s+your\s+(?:personality|"
     r"persona|style)|who\s+are\s+you\s+right\s+now|"
@@ -168,6 +176,10 @@ def parse_persona_command(text: str) -> dict | None:
         return {"op": "reset_all"}
     if _RESET_TEMP.match(t):
         return {"op": "reset_temp"}
+    if _VOICE_MUTE.match(t):
+        return {"op": "voice_mute"}
+    if _VOICE_UNMUTE.match(t):
+        return {"op": "voice_unmute"}
     if _SELF_DESCRIBE.match(t):
         return {"op": "describe"}
     if _RESET_ADAPT.match(t):

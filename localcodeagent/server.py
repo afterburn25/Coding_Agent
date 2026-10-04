@@ -859,6 +859,16 @@ class AppState:
             cmd = parse_persona_command(message)
             if cmd is None:
                 return None
+            if cmd.get("op") in ("voice_mute", "voice_unmute"):
+                v = getattr(self, "voice", None)
+                if v is None:
+                    return {"applied": cmd["op"],
+                            "ack": "Voice isn't available right now."}
+                v.set_muted(cmd["op"] == "voice_mute")
+                return {"applied": cmd["op"],
+                        "ack": ("Muted — I'll keep it text-only."
+                                if cmd["op"] == "voice_mute"
+                                else "Voice is back on.")}
             prof = self.profiles.active()
             if not prof:
                 return None
@@ -3425,11 +3435,15 @@ class AppState:
             reason = "couldn't reach the image engine"
         else:
             reason = self._IMAGE_FAIL_LAYMAN.get(code, "something went wrong")
+        line = self._persona_notice(
+            "failed",
+            f"The image didn't finish: {reason}. The error card has "
+            "the details if you want them.")
+        if not line:
+            line = (f"Sorry — the image didn't finish: {reason}. "
+                    "The error card has the details if you want them.")
         try:
-            voice.enqueue(
-                f"image-fail-{job_id}",
-                f"Sorry — the image didn't finish: {reason}. "
-                "The error card has the details if you want them.")
+            voice.enqueue(f"image-fail-{job_id}", line)
         except Exception:
             pass
 
@@ -3562,25 +3576,34 @@ class AppState:
 
     def _notice_loop(self, q: queue.Queue) -> None:
         last_spoke = 0.0
-        while True:
-            try:
-                ev = q.get()
-            except Exception:
-                return
-            try:
-                level = str((ev.get("notification") or {}).get("level") or "")
-                gap = (self._NOTICE_GAP_URGENT_S
-                       if level in ("failure", "approval")
-                       else self._NOTICE_GAP_S)
-                now = time.time()
-                if now - last_spoke < gap:
+        try:
+            while True:
+                try:
+                    ev = q.get(timeout=30)
+                except queue.Empty:
+                    if self._shutdown.is_set():
+                        return
                     continue
-                line = self._spoken_notice_line(ev)
-                if not line:
+                try:
+                    level = str((ev.get("notification") or {})
+                                .get("level") or "")
+                    gap = (self._NOTICE_GAP_URGENT_S
+                           if level in ("failure", "approval")
+                           else self._NOTICE_GAP_S)
+                    now = time.time()
+                    if now - last_spoke < gap:
+                        continue
+                    line = self._spoken_notice_line(ev)
+                    if not line:
+                        continue
+                    last_spoke = now
+                except Exception:
                     continue
-                last_spoke = now
+        finally:
+            try:
+                self.events.unsubscribe(q)
             except Exception:
-                continue
+                pass
 
     def _spoken_notice_line(self, ev: dict) -> bool:
         """Speak one event if it warrants a voice notice. Returns True

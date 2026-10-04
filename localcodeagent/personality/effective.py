@@ -195,6 +195,7 @@ def compile_effective(personality: dict, *, user_text: str = "",
     focus, focus_shifted = "", False
     addr_hint, humor_adapt, pref_hint, recovery = "", "", "", ""
     recent_pats: list = []
+    recent_humor_pats: list = []
     try:
         from . import continuity as _cont
         from . import social as _soc
@@ -226,7 +227,9 @@ def compile_effective(personality: dict, *, user_text: str = "",
         addr_hint = _cont.address_hint(
             st, str(beh.get("family") or "default"), familiarity)
         humor_adapt = _cont.humor_adaptation(st)
-        recent_pats = (st.get("patterns") or {}).get("analogy") or []
+        _pats = st.get("patterns") or {}
+        recent_pats = _pats.get("analogy") or []
+        recent_humor_pats = _pats.get("humor") or []
         recovery = _soc.recovery_cue(str(beh.get("family")
                                        or "default"))
         if user_text:
@@ -290,6 +293,7 @@ def compile_effective(personality: dict, *, user_text: str = "",
         "address_hint": addr_hint,
         "humor_adaptation": humor_adapt,
         "recent_analogies": list(recent_pats[-3:]),
+        "recent_humor_patterns": list(recent_humor_pats[-3:]),
         "preference_hint": pref_hint,
         "recovery_cue": recovery,
         "confidence_delivery": ("steady clear delivery when verified; "
@@ -391,6 +395,10 @@ def card_guidance(card: dict, *, max_lines: int = 18) -> list[str]:
         lines.append("Analogy shapes used recently: "
                      + ", ".join(card["recent_analogies"])
                      + " — prefer a fresh comparison.")
+    if card.get("recent_humor_patterns"):
+        lines.append("Joke/reaction shapes used recently: "
+                     + ", ".join(card["recent_humor_patterns"])
+                     + " — vary it or stay dry.")
     if card.get("noticing"):
         lines.append("Notices first: "
                      + str(card["noticing"]) + ".")

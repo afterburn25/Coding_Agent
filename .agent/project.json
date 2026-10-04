@@ -4,7 +4,7 @@
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 1664,
+  "test_checkpoint": 1667,
   "next_milestone": "v0.15.0 autonomous workstation layers: decomposed mission planning, projects, code-impact queries, STT/push-to-talk, operational state, Knowledge Library, correction learning, hardened permission-gated desktop control, avatar animation/lip-sync foundation, managed skill/plugin lifecycle depth, verified/path-safe self-repair rollback, long-duration approval/recovery/retention hardening, mission-owned verified model installs, a dedicated verified Real-ESRGAN post-process upscaler, workstation-depth isolated selftest coverage, permission-gated runtime/process controls with live resource usage, live creator-Brain lifecycle dogfooding (HTTP initialize/stage/sync/prompt/lock + signed-export round-trip), and live conversation-learning dogfooding (/api/chat corrections/facts -> persistence -> prompt recall -> restart), and model-replacement continuity verification (restart under a different model profile preserves Brain/memory). Live-model dogfooding also passed: managed llama_cpp start via the runtime.manage gate -> healthy Qwen3VL-4B in ~18s -> real chat token round + memory persistence. Intelligence/reliability milestone: Phases 1-7 done â€” requirements + acceptance criteria; hypothesis engine + causal memory + decision journal; risk-gated promotion pipeline; evidence board + contradictions; persisted reliability + capability health; regression memory + baselines + bounded bisect; resource modes (quiet/battery) + expiring NL overrides + offline mode + project egress. Milestone COMPLETE: all 12 phases landed â€” lineage + artifact versioning; Safe Mode + golden config; RC scorecard; dependency intelligence + env manifests; predictive health + idle cleanup + benchmark lab + temp specialists. 1531 tests green. Still host-blocked: real ComfyUI workflow validation (no image weights). Persona-depth milestone (v0.16.0): behavior profiles per family + preset overrides, seriousness/topic classifiers, effective-persona compiler, per-profile dynamics (relationship + mood decay), learned overlays + expiring modifiers + modes, NL persona commands, vocal/gesture persona tendencies, persona-aware notices, coherence scoring, preset blending, behavior versioning, import/export, consistency/drift/repetition layer, debug view. 1578 tests. Persona social-continuity milestone (v0.17.0): social-cue/sarcasm detection, energy+session pacing, focus tracking, shared-history milestones + relevance-gated callbacks, stated-preference consistency, preferred address, saturation dampening, humor adaptation, voice smoothing, gesture timing, introspection/compare/similarity + QA metrics, 50-turn continuity stress. 1637 tests.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
@@ -536,9 +536,9 @@
       ]
     }
   },
-  "verified_tests": 1664,
+  "verified_tests": 1667,
   "head": "aa540ba",
-  "test_count": 1664,
+  "test_count": 1667,
   "branding": {
     "canonical_name": "Nexus Core",
     "full_logo": "web/assets/nexus-core-logo.png",

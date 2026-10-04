@@ -276,9 +276,16 @@ class PersonaDynamics:
             if addr and re.search(r"\b" + re.escape(addr.lower())
                                   + r"\b", text.lower()):
                 met["name_uses"] = int(met.get("name_uses") or 0) + 1
-            if self._REPLY_HUMOR.search(text):
+            hm = self._REPLY_HUMOR.search(text)
+            if hm:
                 met["humor"] = int(met.get("humor") or 0) + 1
                 self._bump_saturation(st, "humor")
+                try:
+                    from . import continuity as _cont
+                    _cont.note_pattern(st, "humor",
+                                       hm.group(0).lower()[:20])
+                except Exception:
+                    pass
             am = self._REPLY_ANALOGY.search(text)
             if am:
                 try:

@@ -334,6 +334,41 @@ class AnalogyMemory(unittest.TestCase):
             self.assertFalse(any("fresh comparison" in l
                                  for l in card_guidance(card)))
 
+    def test_humor_pattern_reaches_card(self):
+        from localcodeagent.personality.dynamics import PersonaDynamics
+        from localcodeagent.personality.effective import (
+            card_guidance, compile_effective)
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            dyn = PersonaDynamics(Path(td))
+            dyn.note_reply("Haha — that bug never stood a chance.")
+            card = compile_effective(
+                {"name": "Nexus", "base_preset": "playful"},
+                state=dyn.state())
+            self.assertTrue(card["recent_humor_patterns"])
+            self.assertTrue(any("vary it or stay dry" in l
+                                for l in card_guidance(card)))
+
+
+class VoiceCommands(unittest.TestCase):
+    def test_mute_unmute_parse(self):
+        from localcodeagent.personality.commands import (
+            parse_persona_command as p)
+        for t in ("stop talking", "be quiet", "mute your voice",
+                  "voice off", "silence yourself"):
+            self.assertEqual(p(t), {"op": "voice_mute"}, t)
+        for t in ("speak again", "unmute", "voice on",
+                  "talk to me", "speak up"):
+            self.assertEqual(p(t), {"op": "voice_unmute"}, t)
+
+    def test_mute_does_not_collide(self):
+        from localcodeagent.personality.commands import (
+            parse_persona_command as p)
+        # comparatives and real chat stay untouched
+        self.assertNotEqual((p("be quieter") or {}).get("op"),
+                            "voice_mute")
+        self.assertIsNone(p("stop talking to strangers"))
+
 
 class HumorFeedbackWiring(unittest.TestCase):
     def test_feedback_marks_adaptation(self):
