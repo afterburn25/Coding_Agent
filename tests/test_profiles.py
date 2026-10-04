@@ -344,20 +344,20 @@ class TestProfileManager(unittest.TestCase):
 
 class TestPersonality(unittest.TestCase):
     def test_slider_whitelist_count(self):
-        self.assertEqual(len(SLIDERS), 47)
+        self.assertEqual(len(SLIDERS), 48)
         self.assertEqual(len(ADULT_SLIDERS), 7)
         self.assertEqual(len(VOICE_CONTROLS), 10)
 
     def test_preset_library(self):
-        self.assertEqual(len(PRESETS), 73)
+        self.assertEqual(len(PRESETS), 74)
         for pid, p in PRESETS.items():
             self.assertTrue(p["builtin"])
             for k in p["traits"]:
                 self.assertIn(k, SLIDERS, f"{pid}:{k}")
             for k in p.get("voice", {}):
                 self.assertIn(k, VOICE_CONTROLS, f"{pid}:{k}")
-        self.assertEqual(len(list_presets()), 65)
-        self.assertEqual(len(list_presets(include_adult=True)), 73)
+        self.assertEqual(len(list_presets()), 66)
+        self.assertEqual(len(list_presets(include_adult=True)), 74)
 
     def test_adult_preset_names_classified(self):
         for pid in ("flirty", "sultry", "seductive", "provocative",
@@ -869,7 +869,7 @@ class TestProfileRoutes(unittest.TestCase):
         self.assertEqual(s, 400)
         s, b = _req(self.base, "GET",
                     f"/api/profiles/{mpid}/personality")
-        self.assertEqual(len(b["presets"]), 65)
+        self.assertEqual(len(b["presets"]), 66)
         self.assertFalse(b["is_adult"])
 
     def test_04_memory_isolation_via_api(self):

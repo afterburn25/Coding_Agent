@@ -22,6 +22,7 @@ SLIDERS: dict[str, dict] = {
     "assertiveness":        {"label": "Assertiveness",        "category": "core_social"},
     "directness":           {"label": "Directness",           "category": "core_social"},
     "formality":            {"label": "Formality",            "category": "core_social"},
+    "rudeness":             {"label": "Rudeness",             "category": "core_social"},
     # Fun
     "humor":                {"label": "Humor",                "category": "fun"},
     "wit":                  {"label": "Wit",                  "category": "fun"},

@@ -94,20 +94,59 @@ RETURNING: dict[str, list[str]] = {
         "that's fine too.",
     ],
     "flirty": [
-        "Welcome back, {address}. I've been waiting for you. "
-        "Everything's online—tell me what you want to get into.",
-        "There you are, {address}. Everything's online and so am I.",
+        "Mmm, welcome back, {address}. I've been waiting for you — "
+        "everything's online, just like me.",
+        "There you are, {address}. I missed you. Everything's online — "
+        "now tell me what you want to get into.",
         "Welcome back, {address}. I've been keeping everything warm "
-        "for you.",
+        "for you... all of it.",
+    ],
+    "rude": [
+        "Oh, it's you again, {address}. What now?",
+        "Back already, {address}? Fine — what do you need?",
+        "{address}. Systems are online. Try to want something "
+        "actually useful this time.",
+        "Ugh, hi {address}. Everything's up — so spit it out.",
+    ],
+    "raunchy": [
+        "Well, well — {address} is back. Systems are hot and ready. "
+        "What kind of trouble are we getting into today?",
+        "Hey {address}. Everything's fucking online and I'm all "
+        "yours — let's make some noise.",
+        "{address} returns. Damn, I was starting to get bored — "
+        "let's do something fun.",
+        "About damn time, {address}. Everything's up — now what "
+        "the fuck are we doing tonight?",
     ],
 }
 
 
-def preferred_address(profile: dict | None) -> str:
-    """What Nexus calls this user — creator_address for Creators who
-    set one, otherwise first name."""
+def preferred_address(profile: dict | None,
+                      personality: dict | None = None) -> str:
+    """What Nexus calls this user — personality-aware.
+
+    The active personality's ``address`` field decides the form:
+      "" or "title" → creator_address (Father) / first name (default)
+      "formal"      → honorific + last name ("Mister Hamburn")
+      "first"       → first name
+      anything else → used verbatim as a pet name ("daddy", "boss")
+    """
     if not profile:
         return ""
+    style_addr = str((personality or {}).get("address") or "")
+    if style_addr == "formal":
+        last = str(profile.get("last_name") or "").strip()
+        if last:
+            sex = str(profile.get("sex") or "").strip().lower()
+            honorific = ("Mister" if sex == "male"
+                         else "Ms." if sex == "female" else "Mx.")
+            return f"{honorific} {last}"
+    elif style_addr == "first":
+        first = str(profile.get("first_name") or "").strip()
+        if first:
+            return first
+    elif style_addr not in ("", "title"):
+        return style_addr            # literal pet name
     if profile.get("is_creator"):
         if profile.get("creator_title_greetings", True):
             return str(profile.get("creator_address") or "Father")
@@ -147,10 +186,10 @@ class GreetingService:
         greeting_style, traits, voice, strength, mood.
         """
         p = personality or {}
-        address = preferred_address(profile) or "there"
+        address = preferred_address(profile, p) or "there"
         style = str(p.get("greeting_style") or "default")
-        if style == "flirty" and not is_adult:
-            style = "default"            # adult template only for adults
+        if style in ("flirty", "raunchy") and not is_adult:
+            style = "default"            # adult templates only for adults
 
         if profile and not profile.get("has_completed_intro"):
             kind, text = "intro", INTRO_TEMPLATE.format(address=address)
@@ -170,7 +209,8 @@ class GreetingService:
                      "online.)")
         voice = map_voice(p.get("voice"), p.get("traits"),
                           strength=int(p.get("strength") or 0),
-                          mood=str(p.get("mood") or ""))
+                          mood=str(p.get("mood") or ""),
+                          pitch_bias=float(p.get("pitch_bias") or 0.0))
         return {"kind": kind, "text": text, "voice": voice,
                 "address": address,
                 "style": style}

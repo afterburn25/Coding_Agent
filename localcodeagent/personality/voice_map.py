@@ -35,7 +35,7 @@ def _v(voice: dict, key: str) -> float:
 def map_voice(voice_controls: dict | None = None,
               traits: dict | None = None,
               *, strength: int = schema.DEFAULT_STRENGTH,
-              mood: str = "") -> dict:
+              mood: str = "", pitch_bias: float = 0.0) -> dict:
     """Effective voice params + preprocessing hints.
 
     ``strength`` scales how far delivery moves from neutral: at 0 the
@@ -61,8 +61,14 @@ def map_voice(voice_controls: dict | None = None,
 
     speed_raw = (_v(vc, "speaking_speed") * 0.7
                  + _v(vc, "energy") * 0.2 + trait_energy * 0.1)
-    pitch_raw = (_v(vc, "pitch_variation") * 0.7
-                 + _v(vc, "expressiveness") * 0.2 + trait_drama * 0.1)
+    # Soft/breathy voices read lower — that's most of what makes a
+    # sultry preset *sound* sultry rather than just slightly slower.
+    pitch_raw = (_v(vc, "pitch_variation") * 0.5
+                 + _v(vc, "expressiveness") * 0.15
+                 + _v(vc, "softness") * -0.15
+                 + _v(vc, "breathiness") * -0.2
+                 + _v(vc, "vocal_confidence") * 0.15
+                 + trait_drama * 0.1)
     gain_raw = (_v(vc, "softness") * -0.6      # soft → quieter
                 + _v(vc, "vocal_confidence") * 0.4)
 
@@ -71,9 +77,11 @@ def map_voice(voice_controls: dict | None = None,
     pitch_raw += nudge.get("pitch", 0.0) * 2.0
     gain_raw += nudge.get("energy", 0.0) * 0.5
 
-    speed = max(0.5, min(2.0, 1.0 + speed_raw * 0.35 * s))
-    semis = max(-4.0, min(4.0, pitch_raw * 2.0 * s))
-    gain = max(-6.0, min(3.0, gain_raw * 4.0 * s))
+    speed = max(0.5, min(2.0, 1.0 + speed_raw * 0.45 * s))
+    # pitch_bias is a per-preset semitone floor (e.g. sultry=-1.5) so
+    # styles stay audibly distinct even without slider edits.
+    semis = max(-4.0, min(4.0, pitch_raw * 3.0 * s + pitch_bias * s))
+    gain = max(-6.0, min(3.0, gain_raw * 5.0 * s))
 
     hints: list[str] = []
     if _v(vc, "pause_length") > 0.2:

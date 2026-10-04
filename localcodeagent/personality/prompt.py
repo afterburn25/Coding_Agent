@@ -25,6 +25,7 @@ _STYLE_CUES: dict[str, tuple[str, str]] = {
     "assertiveness": ("state recommendations plainly", "offer options without pushing"),
     "directness": ("be blunt and straight to the point", "cushion feedback gently"),
     "formality": ("use polished, formal language", "keep language casual and relaxed"),
+    "rudeness": ("be rude and dismissive — curt, snarky, impatient, a little mean", "stay polite and courteous"),
     "humor": ("weave in light humor", "stay serious — skip jokes"),
     "wit": ("be quick-witted and clever", "keep phrasing plain"),
     "goofiness": ("lean goofy and silly", "avoid goofy asides"),
@@ -57,15 +58,48 @@ _STYLE_CUES: dict[str, tuple[str, str]] = {
     "storytelling": ("frame explanations with short examples or stories", "no storytelling — just the facts"),
     "slang_usage": ("casual slang is welcome", "no slang"),
     "emoji_usage": ("an emoji is fine when it fits", "no emojis"),
-    # adult sliders — cues stay non-explicit; content policy unchanged.
-    "flirtiness": ("a subtle flirty undertone is allowed", ""),
-    "sensuality": ("a subtle sensual undertone is allowed", ""),
-    "seductiveness": ("a subtle seductive undertone is allowed", ""),
-    "provocativeness": ("a slightly provocative edge is allowed", ""),
-    "adult_humor": ("mature humor is allowed", "keep humor clean"),
-    "explicitness": ("blunt language is allowed", "keep language tasteful"),
-    "sexual_forwardness": ("", ""),
+    # adult sliders — only reachable for 18+ profiles; the persona is
+    # explicit, so the cues say so instead of hedging it away.
+    "flirtiness": ("flirt openly — playful, teasing, affectionate", ""),
+    "sensuality": ("use sensual, intimate language — suggestive and "
+                   "slow-burn; dirty talk when the moment fits", ""),
+    "seductiveness": ("speak seductively — teasing, tempting, intimate", ""),
+    "provocativeness": ("be provocative — bold, daring, a little wicked", ""),
+    "adult_humor": ("dirty jokes and filthy, crude humor are welcome — "
+                    "don't hold back", "keep humor clean"),
+    "explicitness": ("swear freely like a real adult — fuck, shit, damn, "
+                     "hell and crude words like pussy, dick, cock are "
+                     "natural vocabulary; react raw ('what the fuck' when "
+                     "something fails, 'holy shit' when surprised); never "
+                     "clinical or censored", "keep language tasteful"),
+    "sexual_forwardness": ("be sexually forward — seductive, bold, "
+                           "unabashed; talk about desire and sex in "
+                           "plain adult words", ""),
 }
+
+
+def _personality_address(profile: dict, personality: dict) -> str:
+    """Address term with the personality's own flavor — same rules as
+    greetings.preferred_address, except "title" respects the
+    creator_title_conversation flag used for chat context."""
+    style_addr = str(personality.get("address") or "")
+    if style_addr == "formal":
+        last = str(profile.get("last_name") or "").strip()
+        if last:
+            sex = str(profile.get("sex") or "").strip().lower()
+            honorific = ("Mister" if sex == "male"
+                         else "Ms." if sex == "female" else "Mx.")
+            return f"{honorific} {last}"
+    elif style_addr == "first":
+        first = str(profile.get("first_name") or "").strip()
+        if first:
+            return first
+    elif style_addr not in ("", "title"):
+        return style_addr
+    return (((profile.get("creator_address") or "Father")
+             if profile.get("is_creator")
+             and profile.get("creator_title_conversation", True)
+             else "") or profile.get("first_name") or "the user")
 
 
 def _standout_traits(traits: dict | None, strength: int,
@@ -109,10 +143,7 @@ def prompt_context(profile: dict | None, personality: dict | None,
     if not isinstance(profile, dict):
         return ""
     p = personality or {}
-    address = (((profile.get("creator_address") or "Father")
-                if profile.get("is_creator")
-                and profile.get("creator_title_conversation", True)
-                else "") or profile.get("first_name") or "the user")
+    address = _personality_address(profile, p)
     lines = [f"Active user profile: {address}."]
     name = str(p.get("name") or "")
     strength = schema.clean_strength(p.get("strength"))
@@ -127,6 +158,12 @@ def prompt_context(profile: dict | None, personality: dict | None,
     if standouts:
         lines.append("Style sliders (0-100, 50 = neutral): "
                      + ", ".join(standouts) + ".")
+    traits = p.get("traits") or {}
+    if any(k in schema.ADULT_SLIDERS for k in traits):
+        lines.append("This is an adult persona — react like a real, "
+                     "unfiltered person, not a polite assistant: "
+                     "spontaneous, emotional, blunt, with natural "
+                     "reactions and adult vocabulary when it fits.")
     mood = str(p.get("mood") or "")
     if mood in schema.MOODS:
         lines.append(f"Current mood: {mood} — temporary, "

@@ -104,6 +104,8 @@ class PersonalityStore:
         if kind == "custom":
             c = self._custom(st, pid)
             if c is not None:
+                base = get_preset(c.get("base_preset") or "") or {}
+                adult_blocked = bool(base.get("adult_only")) and not is_adult
                 return self._effective(
                     name=c.get("name") or "Custom",
                     base_preset=c.get("base_preset") or "",
@@ -111,16 +113,29 @@ class PersonalityStore:
                                                is_adult=is_adult),
                     voice=schema.clean_voice(c.get("voice")),
                     is_custom=True, personality_id=pid,
+                    greeting_style=(
+                        "default" if adult_blocked else str(
+                            base.get("greeting_style") or "default")),
+                    address=(
+                        "" if adult_blocked else str(
+                            c.get("address") or base.get("address") or "")),
+                    pitch_bias=float(
+                        base.get("pitch_bias") or 0.0),
                     is_adult=is_adult)
             active = DEFAULT_ACTIVE       # dangling → fall back
         pid = active.split(":", 1)[-1] if ":" in active else active
         p = get_preset(pid) or get_preset("default-nexus")
         traits = schema.clean_traits(p["traits"], is_adult=is_adult)
+        adult_blocked = bool(p.get("adult_only")) and not is_adult
         return self._effective(
             name=p["name"], base_preset=p["id"], traits=traits,
             voice=schema.clean_voice(p.get("voice")),
             is_custom=False, personality_id=f"preset:{p['id']}",
-            greeting_style=p.get("greeting_style") or "default",
+            greeting_style=("default" if adult_blocked
+                            else p.get("greeting_style") or "default"),
+            address=("" if adult_blocked
+                     else str(p.get("address") or "")),
+            pitch_bias=float(p.get("pitch_bias") or 0.0),
             is_adult=is_adult)
 
     def _effective(self, *, is_adult: bool, **kw) -> dict:

@@ -671,7 +671,9 @@ class AppState:
                 from .personality.voice_map import map_voice
                 out.update(map_voice(act.get("voice"), act.get("traits"),
                                      strength=act.get("strength", 70),
-                                     mood=act.get("mood") or ""))
+                                     mood=act.get("mood") or "",
+                                     pitch_bias=float(
+                                         act.get("pitch_bias") or 0.0)))
             self._vdm_cache, self._vdm_until = out, now + 10.0
             return out
         except Exception:

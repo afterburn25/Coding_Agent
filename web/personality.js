@@ -221,8 +221,9 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        text: "Hi, I'm Nexus. This is how I'll sound and respond "
-            + "with your current personality settings.",
+        text: String(r.preview
+            || "Hi, I'm Nexus. This is how I'll sound with this personality."
+            ).slice(0, 500),
         // Rate rides the engine `speed` arg — tempo stays 1.0 so it
         // isn't applied twice through the DSP chain.
         overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
