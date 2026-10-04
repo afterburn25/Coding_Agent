@@ -261,6 +261,150 @@ class EndToEndAgentTests(unittest.TestCase):
                     break
                 time.sleep(0.05)
 
+    def test_queued_chat_counts_as_interactive_lane_demand(self):
+        # A user prompt waiting in the queue must register as interactive
+        # lane demand — otherwise mission nodes keep dispatching while the
+        # user's request sits starved behind background work.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            self.assertFalse(state._agent_lane_active())
+            state.queue.enqueue("user question while missions run")
+            self.assertTrue(state._agent_lane_active())
+            # Mission-attributed queue items do NOT count as interactive
+            # demand — the supervisor owns them and must keep working.
+            state.queue.pop()
+            state.autonomy._lane_mission = "m-test"
+            try:
+                state.queue.enqueue("mission subtask prompt")
+            finally:
+                state.autonomy._lane_mission = None
+            self.assertFalse(state._agent_lane_active())
+
+    def test_preempt_for_chat_cancels_mission_task_only(self):
+        # Interactive chat preempts mission work holding the lane — but must
+        # never cancel a foreground (non-mission) task.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            mission_task = state.tasks.create("mission node work", "auto")
+            state.tasks.update(mission_task.id, mission_id="m-abc")
+            self.assertTrue(state._preempt_for_chat(mission_task))
+            self.assertEqual(
+                state.tasks.get(mission_task.id).status, "cancelled")
+            user_task = state.tasks.create("user work", "auto")
+            self.assertFalse(state._preempt_for_chat(user_task))
+            self.assertEqual(
+                state.tasks.get(user_task.id).status, "running")
+
+    def test_queue_item_completed_carries_response_content(self):
+        # The chat placeholder swap depends on a terminal bus event carrying
+        # the queue item and the response content.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            bus = state.events.subscribe(replay=0)
+            item = state.queue.enqueue("queued user question")
+            state._dequeue_next()
+            deadline = time.time() + 30
+            completed = None
+            while time.time() < deadline:
+                try:
+                    ev = bus.get(timeout=0.5)
+                except Exception:
+                    continue
+                if (ev.get("type") == "task"
+                        and ev.get("event") == "queue_item_completed"):
+                    completed = ev
+                    break
+            self.assertIsNotNone(
+                completed, "queue_item_completed must publish on the bus")
+            self.assertEqual(completed["queue_item"]["id"], item["id"])
+            self.assertTrue(completed["ok"])
+            self.assertIn("Resource check complete", completed["content"])
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                workers = [
+                    t for t in threading.enumerate()
+                    if t.name.startswith("queue-") and t.is_alive()
+                ]
+                if not workers:
+                    break
+                time.sleep(0.05)
+
+    def test_dequeue_prefers_user_items_over_mission_items(self):
+        # When both a mission subtask and a user prompt wait in the queue,
+        # the user prompt runs first even though it was enqueued later.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            state.autonomy._lane_mission = "m-test"
+            try:
+                state.queue.enqueue("mission subtask prompt")
+            finally:
+                state.autonomy._lane_mission = None
+            state.queue.enqueue("user question")
+            state._dequeue_next()
+            deadline = time.time() + 30
+            while len(state.queue) and time.time() < deadline:
+                time.sleep(0.1)
+            deadline = time.time() + 30
+            while True:
+                done = [t for t in state.tasks.recent(5)
+                        if t.get("status") == "completed"]
+                if len(done) >= 2 or time.time() >= deadline:
+                    break
+                time.sleep(0.1)
+            self.assertEqual(len(state.queue), 0)
+            self.assertEqual(len(done), 2)
+            # recent() is newest-first — the user task ran first so it is
+            # the OLDER of the two rows.
+            self.assertEqual(done[1]["prompt"], "user question")
+            self.assertEqual(done[0]["prompt"], "mission subtask prompt")
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                workers = [
+                    t for t in threading.enumerate()
+                    if t.name.startswith("queue-") and t.is_alive()
+                ]
+                if not workers:
+                    break
+                time.sleep(0.05)
+
+    def test_mission_executor_never_opens_voice_lane(self):
+        # Regression: mission node runs called _voice_begin → begin_task →
+        # stop_all, which killed user-facing speech every time a background
+        # node dispatched. Background work must not touch the voice lane.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            executor = getattr(getattr(state, "autonomy", None), "_executor", None)
+            if executor is None:
+                self.skipTest("autonomy executor unavailable")
+            calls = {"begin": 0, "finish": 0}
+            orig_begin = state._voice_begin
+            orig_finish = state._voice_finish
+            def spy_begin(*a, **k):
+                calls["begin"] += 1
+                return orig_begin(*a, **k)
+            def spy_finish(*a, **k):
+                calls["finish"] += 1
+                return orig_finish(*a, **k)
+            state._voice_begin = spy_begin
+            state._voice_finish = spy_finish
+            try:
+                out = executor(
+                    {"id": "m-1", "title": "m"},
+                    {"instruction": "check system resources", "title": "n"},
+                    lambda e: None)
+            finally:
+                state._voice_begin = orig_begin
+                state._voice_finish = orig_finish
+            self.assertTrue(out.get("ok"), out)
+            self.assertEqual(calls["begin"], 0)
+            self.assertEqual(calls["finish"], 0)
+
     def test_transient_model_failure_recovers(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)

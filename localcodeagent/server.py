@@ -1494,12 +1494,12 @@ class AppState:
                             rec_row_id = row["id"]
                         except Exception:
                             pass
-                        voice_rid = self._voice_begin()
+                        # Background recovery — no voice lane (begin_task
+                        # would kill user-facing speech mid-utterance).
                         try:
                             res = self.agent.recover(
                                 str(task["id"]),
-                                event_callback=self._voice_tee(voice_rid, self._bus_emit))
-                            self._voice_finish(voice_rid, res.content)
+                                event_callback=self._bus_emit)
                             if rec_row_id:
                                 status = str((res.task or {}).get("status") or "")
                                 self.activities.update(
@@ -1507,7 +1507,6 @@ class AppState:
                                     state="completed" if _task_status_succeeded(status) else "failed",
                                     summary=f"Resumed · task {status or 'finished'}")
                         except Exception:
-                            self._voice_finish(voice_rid)
                             if rec_row_id:
                                 try:
                                     self.activities.update(
@@ -1673,61 +1672,58 @@ class AppState:
                     pass
 
         def executor(mission: dict, node: dict, emit_cb) -> dict:
-            voice_rid = self._voice_begin(
-                str(node.get("instruction") or node.get("title") or ""))
-            try:
-                result = self.agent.run(
-                    str(node.get("instruction") or node.get("title") or ""),
-                    history=[], mode="auto",
-                    event_callback=emit_cb,
-                    mission_id=str(mission.get("id") or "") or None,
-                )
-                task = result.task or {}
-                status = str(task.get("status") or "")
-                out = {
-                    "ok": _task_status_succeeded(status),
-                    "output": result.content or str(task.get("error") or ""),
-                    "task_id": str(task.get("id") or ""),
-                    "artifacts": list(task.get("files_changed") or [])[:20],
-                }
-                if result.pending_approval or status == "waiting_approval":
-                    out["pending_approval"] = (
-                        result.pending_approval
-                        or task.get("pending_approval") or {"kind": "task"})
-                # Feed the cognitive architecture: PFC conflict monitoring
-                # (repeated failures/loops) + Hippocampus episodic memory.
-                brain = getattr(self, "brain", None)
-                if brain is not None:
-                    try:
-                        mid = str(mission.get("id") or "")
-                        brain.pfc.record_outcome(
-                            str(node.get("title") or "mission_node"),
-                            bool(out["ok"]), str(out["output"])[:300],
-                            mission_id=mid)
-                        brain.hippocampus.record_episode(
-                            "mission_node",
-                            f"{node.get('title', 'node')}: "
-                            f"{'ok' if out['ok'] else 'failed'}",
-                            detail=str(out["output"])[:2000],
-                            mission_id=mid, task_id=out["task_id"],
-                            project_id=str(self.workspace),
-                            confidence=0.7 if out["ok"] else 0.4)
-                    except Exception:
-                        pass
-                # Tag any pre-stamp rows so /api/activity?mission_id finds the
-                # whole node run even if a row was opened before stamping.
-                if out["task_id"] and mission.get("id"):
-                    try:
-                        for row in self.activities.for_task(out["task_id"]):
-                            if not row.get("mission_id"):
-                                self.activities.update(
-                                    out["task_id"], row["id"],
-                                    mission_id=str(mission["id"]))
-                    except Exception:
-                        pass
-                return out
-            finally:
-                self._voice_finish(voice_rid)
+            # Background work never opens a voice lane — begin_task would
+            # stop_all() any user-facing speech in flight.
+            result = self.agent.run(
+                str(node.get("instruction") or node.get("title") or ""),
+                history=[], mode="auto",
+                event_callback=emit_cb,
+                mission_id=str(mission.get("id") or "") or None,
+            )
+            task = result.task or {}
+            status = str(task.get("status") or "")
+            out = {
+                "ok": _task_status_succeeded(status),
+                "output": result.content or str(task.get("error") or ""),
+                "task_id": str(task.get("id") or ""),
+                "artifacts": list(task.get("files_changed") or [])[:20],
+            }
+            if result.pending_approval or status == "waiting_approval":
+                out["pending_approval"] = (
+                    result.pending_approval
+                    or task.get("pending_approval") or {"kind": "task"})
+            # Feed the cognitive architecture: PFC conflict monitoring
+            # (repeated failures/loops) + Hippocampus episodic memory.
+            brain = getattr(self, "brain", None)
+            if brain is not None:
+                try:
+                    mid = str(mission.get("id") or "")
+                    brain.pfc.record_outcome(
+                        str(node.get("title") or "mission_node"),
+                        bool(out["ok"]), str(out["output"])[:300],
+                        mission_id=mid)
+                    brain.hippocampus.record_episode(
+                        "mission_node",
+                        f"{node.get('title', 'node')}: "
+                        f"{'ok' if out['ok'] else 'failed'}",
+                        detail=str(out["output"])[:2000],
+                        mission_id=mid, task_id=out["task_id"],
+                        project_id=str(self.workspace),
+                        confidence=0.7 if out["ok"] else 0.4)
+                except Exception:
+                    pass
+            # Tag any pre-stamp rows so /api/activity?mission_id finds the
+            # whole node run even if a row was opened before stamping.
+            if out["task_id"] and mission.get("id"):
+                try:
+                    for row in self.activities.for_task(out["task_id"]):
+                        if not row.get("mission_id"):
+                            self.activities.update(
+                                out["task_id"], row["id"],
+                                mission_id=str(mission["id"]))
+                except Exception:
+                    pass
+            return out
 
         def lane_free() -> bool:
             """Interactive chat/queued work outranks background missions."""
@@ -2313,6 +2309,42 @@ class AppState:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}
 
+    def _preempt_for_chat(self, current) -> bool:
+        """User chat outranks background missions: when a mission-attributed
+        task holds the agent lane, cooperatively cancel it so the queued chat
+        runs at the next drive boundary instead of waiting for the whole node.
+        The mission supervisor observes the cancelled node and retries it
+        through its normal bounded-retry/replan path — the work is not lost.
+        Foreground (non-mission) tasks are never preempted."""
+        try:
+            mission = str(getattr(current, "mission_id", "") or "")
+            mode = str(getattr(current, "mode", "") or "")
+            if not (mission or mode in {"autonomy", "self_repair"}):
+                return False
+            task = self.tasks.update(
+                str(current.id), status="cancelled", phase="done",
+                summary="Preempted by an interactive chat request.",
+                pending_approval=None)
+            try:
+                agent = getattr(self, "agent", None)
+                if agent is not None:
+                    agent._close_session(str(current.id))
+            except Exception:
+                pass
+            try:
+                self.events.publish("task", {
+                    "task": task.as_dict(), "event": "cancelled",
+                    "reason": "preempted_by_chat"})
+            except Exception:
+                pass
+            try:
+                self._dequeue_next()
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
     # -- health probes ---------------------------------------------------
 
     def _probe_llm_runtime(self) -> str:
@@ -2468,6 +2500,51 @@ class AppState:
                         "output": f"index: +{r.get('added', 0)} added, "
                                   f"{r.get('updated', 0)} updated, "
                                   f"{r.get('removed', 0)} removed"}
+            if op == "tool":
+                # Run a registered tool as a mission evidence stage —
+                # the same permission-enforced path the agent uses.
+                tool_name = str(meta.get("tool") or "")
+                tool_args = dict(meta.get("tool_args") or {})
+                if not tool_name:
+                    return {"ok": False, "output": "tool job: no tool name"}
+                out = self.tools.execute(tool_name, tool_args)
+                if str(out).startswith("APPROVAL_REQUIRED"):
+                    return {"ok": False,
+                            "pending_approval": {
+                                "name": tool_name, "kind": "autonomy",
+                                "detail": str(out)[:400]}}
+                failed = str(out).startswith(
+                    ("ERROR", "PERMISSION", "TOOL_", "SCOPE_DENIED",
+                     "CREATOR_APPROVAL"))
+                return {"ok": not failed,
+                        "output": str(out)[:8000],
+                        "error": str(out)[:400] if failed else ""}
+            if op == "serve_check":
+                # Launch a dev server and only pass when it answers a real
+                # HTTP probe inside the timeout.
+                path = str(meta.get("path") or self.workspace)
+                command = str(meta.get("command") or "")
+                if not command:
+                    return {"ok": False,
+                            "output": "serve_check: no command"}
+                started = self.devservers.start(
+                    path, command, name=str(meta.get("name") or ""))
+                if started.get("error"):
+                    return {"ok": False,
+                            "output": f"serve_check start: "
+                                      f"{started['error']}"}
+                sid = started["server"]["id"]
+                wait = self.devservers.wait_for_url(
+                    sid, timeout=float(meta.get("timeout", 60)))
+                row = {"ok": bool(wait.get("ok")),
+                       "server_id": sid,
+                       "url": wait.get("url", ""),
+                       "output": (
+                           f"serving at {wait.get('url')}"
+                           if wait.get("ok") else
+                           f"serve_check failed: {wait.get('error')}\n"
+                           + "\n".join(wait.get("log_tail") or []))}
+                return row
             if op == "worktree":
                 # Isolated execution: provision a git worktree, run the
                 # command inside it sandboxed, commit + merge back only on
@@ -3530,6 +3607,14 @@ class AppState:
         Uncertain answers lean busy so missions/tuning never contend with
         an in-flight drive.
         """
+        try:
+            # A user prompt sitting in the queue IS interactive demand —
+            # without this, missions keep dispatching nodes while a queued
+            # chat waits, starving the user behind background work.
+            if any(not i.get("mission_id") for i in self.queue.list()):
+                return True
+        except Exception:
+            pass
         statuses = {"running", "verifying", "reviewing"}
         def _blocks_lane(row: dict) -> bool:
             if row.get("status") in statuses:
@@ -4273,7 +4358,18 @@ class AppState:
                 return
             if getattr(self, "_retrying_tasks", None) or self._queue_running:
                 return
-            item = self.queue.pop()
+            # Interactive prompts outrank mission-submitted queue work —
+            # pick the oldest non-mission item first, FIFO otherwise.
+            item = None
+            for cand in self.queue.list():
+                if not cand.get("mission_id"):
+                    item = cand
+                    break
+            if item is not None:
+                if not self.queue.remove(str(item["id"])):
+                    return  # raced — another dequeue took it
+            else:
+                item = self.queue.pop()
             if item is None:
                 return
             item_id = str(item["id"])
@@ -4292,6 +4388,19 @@ class AppState:
                     )
                     self._voice_finish(voice_rid, result.content)
                     self.history = self.conversation_manager.history(limit=32)
+                    task = result.task or {}
+                    # Tokens/results stay off the bus by policy — publish an
+                    # explicit terminal event so waiting chat placeholders
+                    # can swap the queued notice for the real response.
+                    self.events.publish("task", {
+                        "event": "queue_item_completed",
+                        "queue_item": entry,
+                        "task_id": str(task.get("id") or ""),
+                        "status": str(task.get("status") or ""),
+                        "content": str(result.content or ""),
+                        "ok": _task_status_succeeded(
+                            str(task.get("status") or "")),
+                    })
                 except Exception as exc:
                     self._voice_finish(voice_rid)
                     # A run that dies before its first logged event leaves a
@@ -4322,6 +4431,8 @@ class AppState:
                     self.events.publish("task", {
                         "event": "queue_item_failed", "queue_item": entry,
                         "error": f"{type(exc).__name__}: {exc}",
+                        "content": (f"Your queued request failed "
+                                    f"({type(exc).__name__}: {exc})"),
                     })
                 finally:
                     self._queue_running.discard(entry["id"])
@@ -4422,15 +4533,12 @@ class AppState:
                 self._retrying_tasks.add(task_id)
 
                 def retry(tid: str = task_id) -> None:
-                    voice_rid = self._voice_begin()
                     try:
                         self.events.publish("task", {"event": "auto_retry", "task_id": tid})
-                        res = self.agent.recover(
+                        self.agent.recover(
                             tid,
-                            event_callback=self._voice_tee(voice_rid, self._bus_emit))
-                        self._voice_finish(voice_rid, res.content)
+                            event_callback=self._bus_emit)
                     except Exception as exc:
-                        self._voice_finish(voice_rid)
                         self.events.publish("task", {
                             "event": "auto_retry_failed", "task_id": tid,
                             "error": f"{type(exc).__name__}: {exc}",
@@ -5541,6 +5649,15 @@ class Handler(BaseHTTPRequestHandler):
                     return True
                 self._json({"graph": m.get("graph") or {"nodes": []}})
                 return True
+            if mid.endswith("/stages"):
+                mid = mid[:-len("/stages")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                from .coding_pipeline import stage_view
+                self._json({"stages": stage_view(m)})
+                return True
             if mid.endswith("/history"):
                 mid = mid[:-len("/history")]
                 m = sup.missions.get(mid)
@@ -5712,6 +5829,21 @@ class Handler(BaseHTTPRequestHandler):
             if not objective:
                 self._json({"error": "objective is required"}, 400)
                 return True
+            if str(body.get("pipeline") or "") == "coding":
+                raw_root = str(body.get("root") or "").strip()
+                if raw_root:
+                    cand = Path(raw_root).expanduser()
+                    try:
+                        cand = cand.resolve()
+                    except OSError:
+                        pass
+                    if not self.state.workspaces.contains(cand):
+                        self._json(
+                            {"error": "coding pipeline root must be inside "
+                                      "a registered workspace — open it "
+                                      "with /api/workspaces/open first"},
+                            403)
+                        return True
             m = sup.create_mission(
                 objective=objective,
                 title=str(body.get("title") or ""),
@@ -5731,7 +5863,17 @@ class Handler(BaseHTTPRequestHandler):
                 project_id=str(body.get("project_id") or ""),
                 decomposition=body.get("decomposition")
                     if isinstance(body.get("decomposition"), list) else None,
-                workspace=str(self.state.workspace))
+                pipeline=str(body.get("pipeline") or ""),
+                pipeline_options={
+                    k: v for k, v in {
+                        "root": str(body.get("root") or ""),
+                        "server_cmd": str(body.get("server_cmd") or ""),
+                        "commit": bool(body.get("commit", False)),
+                        "commit_all": bool(body.get("commit_all", True)),
+                        "commit_message": str(
+                            body.get("commit_message") or ""),
+                    }.items() if v not in ("", None)},
+                workspace=str(body.get("root") or self.state.workspace))
             if body.get("start", True):
                 m = sup.start_mission(m["id"]) or m
             self._json({"ok": True, "mission": m})
@@ -8387,6 +8529,10 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     self.state.events.publish("task", {"event": "queued", "queue_item": item})
                     self.state.announce_prompt_queued(item)
+                    # Interactive chat outranks background missions — if a
+                    # mission node owns the lane, cooperatively cancel it so
+                    # this request runs at the next drive boundary.
+                    self.state._preempt_for_chat(current)
                     self._sse_begin()
                     self._sse_event("ready", {"mode": mode, "queued": True})
                     self._sse_event("task", {"event": "queued", "queue_item": item})
@@ -8623,6 +8769,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     self.state.events.publish("task", {"event": "queued", "queue_item": item})
                     self.state.announce_prompt_queued(item)
+                    self.state._preempt_for_chat(current)
                     self._json({
                         "content": _queued_notice(current, len(self.state.queue)),
                         "queued": True,
@@ -8711,6 +8858,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self.state.events.publish("task", {"event": "queued", "queue_item": item})
                 self.state.announce_prompt_queued(item)
+                try:
+                    _cur = self.state.tasks.current()
+                    if _cur is not None:
+                        self.state._preempt_for_chat(_cur)
+                except Exception:
+                    pass
                 try:
                     self.state._dequeue_next()
                 except Exception:

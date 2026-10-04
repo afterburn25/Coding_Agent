@@ -70,6 +70,19 @@ MAX_HISTORY = 400
 HEARTBEAT_TIMEOUT_S = 900.0       # worker silent this long → suspect
 AGING_GRANT_S = 300.0             # every 5 min queued → +1 effective priority
 
+# Worker pool naming — the first three recruits are always Molly, Nikki,
+# and Kate; beyond the pool, names recycle with a counter suffix
+# ("Molly 2", …) so every live worker still has a distinct name.
+WORKER_NAMES = [
+    "Molly", "Nikki", "Kate",
+    "Emma", "Olivia", "Ava", "Sophia", "Isabella", "Mia", "Charlotte",
+    "Amelia", "Harper", "Evelyn", "Abigail", "Ella", "Scarlett",
+    "Grace", "Lily", "Chloe", "Aria", "Zoe", "Nora", "Hazel",
+    "Violet", "Ruby", "Alice", "Clara", "Ivy", "Luna", "Stella",
+    "Willow", "Aurora", "Naomi", "Eliza", "Freya", "Iris",
+    "Sage", "Wren", "Juno", "Dahlia",
+]
+
 
 @dataclass(slots=True)
 class QueueEntry:
@@ -99,6 +112,7 @@ class QueueEntry:
 class WorkerRecord:
     id: str
     role: str
+    name: str = ""
     task_id: str = ""
     mission_id: str = ""
     project_id: str = ""
@@ -385,6 +399,21 @@ class AdaptiveWorkerManager:
                 "message": REASON_TEXT.get(entry.reason, "Queued"),
                 "queue_position": self.position(entry.id)}
 
+    def _assign_name(self) -> str:
+        """First free name from WORKER_NAMES; once the pool is exhausted,
+        recycle with a counter suffix so every live worker stays distinct."""
+        with self._lock:
+            used = {w.name for w in self._workers.values() if w.name}
+        for n in WORKER_NAMES:
+            if n not in used:
+                return n
+        for i in range(2, 100):
+            for n in WORKER_NAMES:
+                cand = f"{n} {i}"
+                if cand not in used:
+                    return cand
+        return f"Worker {len(used) + 1}"
+
     def _try_admit_entry(self, entry: QueueEntry) -> WorkerRecord | None:
         """Attempt admission; on failure stamp the entry's reason."""
         with self._lock:
@@ -421,7 +450,8 @@ class AdaptiveWorkerManager:
             entry.reason, entry.reason_detail = reason, detail
             return None
         worker = WorkerRecord(
-            id=entry.id, role=entry.role, task_id=entry.task_id,
+            id=entry.id, role=entry.role, name=self._assign_name(),
+            task_id=entry.task_id,
             mission_id=entry.mission_id, project_id=entry.project_id,
             profile_id=entry.profile_id, title=entry.title,
             status="reserved", priority=entry.priority,
@@ -474,7 +504,8 @@ class AdaptiveWorkerManager:
         if not ok:
             return None, reason, detail
         worker = WorkerRecord(
-            id=f"w-{uuid.uuid4().hex[:10]}", role=role, task_id=task_id,
+            id=f"w-{uuid.uuid4().hex[:10]}", role=role,
+            name=self._assign_name(), task_id=task_id,
             mission_id=mission_id, project_id=project_id,
             profile_id=profile_id, title=str(title)[:140],
             status="reserved", priority=int(priority),

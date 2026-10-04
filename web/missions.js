@@ -211,7 +211,7 @@ function renderOps(ops){
     `<div class="hist-row">schedulable: ${(sch.cpu_cores||0).toFixed(1)} cores · `+
     `${((sch.ram_mb||0)/1024).toFixed(1)} GB RAM · ${((sch.vram_mb||0)/1024).toFixed(1)} GB VRAM</div>`);
   setHtml($('#opsWorkers'),(ops.workers||[]).map(w=>
-    `<div class="mission-card"><div class="title">${esc(w.role||'worker')} · ${esc(w.model_tier||'tool')}</div>`+
+    `<div class="mission-card"><div class="title">${esc(w.name?`${w.name} · ${w.role||'worker'}`:(w.role||'worker'))} · ${esc(w.model_tier||'tool')}</div>`+
     `<div class="meta">${esc(w.title||'')} — ${esc(w.status)}`+
     (w.elapsed_s?` · ${Math.round(w.elapsed_s)}s`:'')+
     (w.branch?` · <code>${esc(w.branch)}</code>`:'')+`</div></div>`
