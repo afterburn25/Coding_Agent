@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from .fsutil import atomic_write_text
 from . import netdiag
+from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
 from .agent.orchestrator import AgentOrchestrator
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
@@ -153,6 +154,7 @@ class AppState:
         from .regressions import BaselineStore, RegressionStore
         self.regressions = RegressionStore(runtime_root / "data" / "regressions.json")
         self.baselines = BaselineStore(runtime_root / "data" / "baselines.json")
+        self.policies = ResourcePolicies(runtime_root / "data" / "policies.json")
         from .reliability import CapabilityHealth, ReliabilityTracker
         self.reliability = ReliabilityTracker(runtime_root / "data" / "reliability.json")
         self.capabilities = CapabilityHealth(self.reliability)
@@ -1243,6 +1245,7 @@ class AppState:
             projects=self.projects,
             preferences=self.preferences,
             requirements=self.requirements,
+            policies=self.policies,
             approval_timeout_seconds=lambda: float(getattr(
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
@@ -4210,7 +4213,8 @@ class Handler(BaseHTTPRequestHandler):
     _AUTONOMY_PREFIXES = ("/api/missions", "/api/autonomy", "/api/triggers",
                           "/api/schedules", "/api/standing-goals",
                           "/api/goals", "/api/self-repair",
-                          "/api/findings", "/api/procedures")
+                          "/api/findings", "/api/procedures",
+                          "/api/policies")
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
@@ -4556,6 +4560,49 @@ class Handler(BaseHTTPRequestHandler):
             if mode:
                 sup.policy.set_resource_mode(str(mode))
             self._json({"ok": True, "resource_mode": sup.policy.resource_mode()})
+            return True
+        if path == "/api/policies/mode":
+            mode = str(body.get("mode") or "")
+            if not self.state.policies.set_mode(mode):
+                self._json({"error": "unknown resource mode",
+                            "modes": sorted(RESOURCE_MODES)}, 400)
+                return True
+            self._json({"ok": True, "summary": self.state.policies.summary()})
+            return True
+        if path == "/api/policies/offline":
+            self.state.policies.set_offline(bool(body.get("on")))
+            self._json({"ok": True, "offline": self.state.policies.is_offline()})
+            return True
+        if path == "/api/policies/request":
+            result = self.state.policies.parse_request(str(body.get("text") or ""))
+            self._json({"ok": True, "result": result,
+                        "summary": self.state.policies.summary()})
+            return True
+        if path == "/api/policies/override":
+            row = self.state.policies.add_override(
+                str(body.get("key") or ""), body.get("value"),
+                ttl_seconds=float(body.get("ttl_seconds") or 0),
+                source="api",
+                description=str(body.get("description") or ""))
+            self._json({"ok": True, "override": row})
+            return True
+        if path == "/api/policies/revoke":
+            row = self.state.policies.revoke(str(body.get("id") or ""))
+            if row is None:
+                self._json({"error": "override not found"}, 404)
+                return True
+            self._json({"ok": True, "override": row})
+            return True
+        if path == "/api/policies/egress":
+            pid = str(body.get("project_id") or "")
+            mode = str(body.get("mode") or "")
+            row = self.state.policies.set_egress(
+                pid, mode, note=str(body.get("note") or ""))
+            if row is None:
+                self._json({"error": "unknown egress mode",
+                            "modes": sorted(EGRESS_MODES)}, 400)
+                return True
+            self._json({"ok": True, "egress": row})
             return True
         if path == "/api/autonomy/grants":
             row = sup.policy.grant(
@@ -5640,6 +5687,16 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 self.state.events.unsubscribe(subscription)
             self.close_connection = True
+            return
+        if path == "/api/policies":
+            self._json(self.state.policies.summary())
+            return
+        if path.startswith("/api/policies/egress/"):
+            pid = unquote(path[len("/api/policies/egress/"):]).strip("/")
+            if not pid:
+                self._json({"error": "project id required"}, 400)
+                return
+            self._json(self.state.policies.egress_for(pid))
             return
         if path == "/api/resources":
             runtime = self.state.runtime.summary(probe_external=True)

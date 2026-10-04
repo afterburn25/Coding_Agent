@@ -65,6 +65,7 @@ class AutonomousSupervisor:
         projects: Any = None,                # ProjectStore — context + history
         preferences: Any = None,             # PreferenceStore — learned overlays
         requirements: Any = None,            # RequirementStore — derived criteria entities
+        policies: Any = None,                # ResourcePolicies — modes/offline/egress
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
     ) -> None:
         self.workspace = Path(workspace)
@@ -100,7 +101,9 @@ class AutonomousSupervisor:
         # Nexus Brain is constructed (supervisor builds first).
         self.pfc = None
         self.budgets = BudgetManager(self.workspace, resources=resources)
-        self.policy = AutonomyPolicy(self.store, permission_manager)
+        self.policies = policies
+        self.policy = AutonomyPolicy(self.store, permission_manager,
+                                     policies=policies)
         self.notifications = NotificationCenter(
             self.store,
             publish=self._publish_notification,
@@ -842,10 +845,23 @@ class AutonomousSupervisor:
         # node requests a reservation sized by role and the manager admits
         # only when it fits live schedulable capacity. A small per-mission
         # sprawl bound still applies; resource_mode biases it.
-        mission_cap = {"conservative": 2, "balanced": 4,
-                       "performance": 6}.get(self.policy.resource_mode(), 4)
+        if self.policies is not None:
+            mission_cap = int(self.policies.knobs().get("max_workers") or 4)
+            # An active temporary override ("pause background work")
+            # gates every non-urgent node out of the scheduler.
+            bg_paused = self.policies.effective("background_jobs") is False
+        else:
+            mission_cap = {"conservative": 2, "balanced": 4,
+                           "performance": 6,
+                           "quiet": 1, "battery": 1}.get(
+                               self.policy.resource_mode(), 4)
+            bg_paused = self.policy.resource_mode() in {"quiet", "battery"}
         in_flight = len(graph.running())
         budget_parallel = max(0, mission_cap - in_flight)
+        if bg_paused and str(m.get("priority")) != "urgent":
+            # "Pause background work." — non-urgent missions stay
+            # runnable but take no slots until the override expires.
+            budget_parallel = 0
 
         for node in runnable:
             if started >= budget_parallel:

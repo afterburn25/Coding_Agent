@@ -87,6 +87,6 @@ class BudgetManager:
         from the global policy unless the mission overrides it."""
         mode = str(resource_mode or mission.get("resource_mode")
                    or "balanced")
-        if mode == "conservative" and foreground_busy:
+        if mode in {"conservative", "quiet", "battery"} and foreground_busy:
             return False
         return True

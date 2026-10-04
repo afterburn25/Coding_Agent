@@ -150,8 +150,18 @@
   `GitBisector` binary-searches `good..bad` inside a throwaway
   worktree (endpoint contract verified, bounded steps, always cleaned
   up). API: `/api/regressions`, `/api/baselines`, `/api/bisect`.
-  Docs: `docs/REGRESSIONS.md`. Next: resource modes,
-  offline/egress, lineage, Safe Mode, golden config, RC scorecard.
+  Docs: `docs/REGRESSIONS.md`.
+- **Phase 7** — resource modes + expiring policies + offline + egress
+  (`policies.py`): `quiet`/`battery` modes join the mode set with real
+  knobs (`max_workers` feeds supervisor admission; GPU yield feeds
+  `BudgetManager`); natural-language requests become bounded overrides
+  with `expires_at` ("for the next hour, prioritize coding and don't
+  load 30B" → priority + model_deny, auto-expiring); offline mode
+  denies all network action classes inside `AutonomyPolicy.check`;
+  per-project egress (`local_only`/`restricted`/...) inherits into
+  scoped checks. API: `/api/policies` + mode/offline/request/override/
+  revoke/egress routes. Docs: `docs/POLICIES.md`. Next: lineage,
+  Safe Mode, golden config, RC scorecard, dependency intelligence.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -1033,7 +1043,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1468 tests` passing (2 environment skips).
+Expected at this checkpoint: `1486 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

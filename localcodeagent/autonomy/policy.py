@@ -17,6 +17,8 @@ import time
 import uuid
 from typing import Any, Callable
 
+from ..policies import NETWORK_ACTIONS
+
 AUTONOMY_PROFILES = ("supervised", "local_autonomous", "extended_autonomous", "custom")
 
 # Action classes → the existing permission id that governs them.
@@ -63,9 +65,13 @@ PROFILE_ALLOW = {
 
 
 class AutonomyPolicy:
-    def __init__(self, store, permission_manager=None) -> None:
+    def __init__(self, store, permission_manager=None,
+                 policies=None) -> None:
         self._store = store
         self._pm = permission_manager
+        # ResourcePolicies — offline mode and per-project egress deny
+        # network action classes regardless of profile allowances.
+        self._policies = policies
 
     # -- global control ---------------------------------------------------
 
@@ -88,9 +94,18 @@ class AutonomyPolicy:
         self._store.control.save()
 
     def resource_mode(self) -> str:
+        if self._policies is not None:
+            return self._policies.mode()
         return str(self._store.control.data.get("resource_mode") or "balanced")
 
     def set_resource_mode(self, mode: str) -> None:
+        if self._policies is not None:
+            if self._policies.set_mode(mode):
+                # Mirror into control data for consumers that only read
+                # the autonomy store.
+                self._store.control.data["resource_mode"] = mode
+                self._store.control.save()
+            return
         if mode in {"conservative", "balanced", "performance"}:
             self._store.control.data["resource_mode"] = mode
             self._store.control.save()
@@ -106,6 +121,16 @@ class AutonomyPolicy:
         """
         if self.is_stopped():
             return "deny"
+        # Offline/egress gates outrank profile allowances and grants —
+        # a standing grant can never open the network in offline mode.
+        if self._policies is not None and action in NETWORK_ACTIONS:
+            try:
+                allowed, _why = self._policies.network_allowed(
+                    project_id=scope, action=action)
+                if not allowed:
+                    return "deny"
+            except Exception:
+                pass
         grant = self.matching_grant(action, scope=scope)
         if grant is not None:
             return "allow" if grant.get("effect", "allow") == "allow" else "deny"
