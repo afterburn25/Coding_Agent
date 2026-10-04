@@ -139,10 +139,10 @@ Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
 ### Workstation program — what remains
 
 - **P2** — search, audit, coverage, release packaging, activity feed,
-  stage strip, static deploy adapter, debugger, knowledge browser, and
-  dep/security UI landed. Remaining: browser E2E (needs Playwright
-  bundled into the exe — a packaging decision), deploy adapters beyond
-  static (e.g. GitHub Releases), deeper per-project knowledge views.
+  stage strip, static + release deploy adapters, debugger, knowledge
+  browser, per-project knowledge views, and dep/security UI landed.
+  Remaining: browser E2E (needs Playwright bundled into the exe — a
+  packaging decision) and anything newly specified.
 - Identity manager is already richer than listed —
   `nexus_avatar.py` has expression states, gestures, activity.
 - `version()`/`server.VERSION` are `lru_cached` — any in-process file

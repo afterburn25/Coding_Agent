@@ -53,6 +53,12 @@ operations surface, and workstation tooling.
   static output via a detached worktree, creates/pushes a deploy
   branch through the existing git machinery, and reports real remote
   results (`localcodeagent/tools/deploy.py`).
+- **Release deploy adapter** — `deploy_release` creates a GitHub
+  Release on the workspace repo's origin via the `gh` CLI and attaches
+  workspace-bounded artifacts; honest errors for missing CLI, auth, or
+  artifacts.
+- **Project knowledge views** — project detail panels list linked
+  knowledge-graph entities and their relation context.
 - **Headless debugger** — `debug_run` executes a workspace script under
   a `bdb` subprocess driver: frame locals+stack at each breakpoint hit
   and a full post-mortem walk on uncaught exceptions
