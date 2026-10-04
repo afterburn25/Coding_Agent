@@ -78,6 +78,13 @@
   or /proc — no psutil), `HardwareSnapshot` adds CPU name/cores, pagefile,
   uptime, load average, and `ram_used_percent`, `/api/resources` carries the
   managed process list, and nvidia-smi output decodes UTF-8-safe.
+- Live-model dogfood passed on real bundled artifacts: managed
+  `llama_cpp` start via `/api/runtime/start` gated on `runtime.manage`
+  (unapproved → `needs_approval`, approved → llama-server healthy in ~18s,
+  VRAM 10.57→6.31 GB visible in the enriched hardware snapshot), then a
+  real Qwen3VL-4B chat answered "PONG" in 0.7s on the utility lane and a
+  "remember that…" turn persisted to `/api/conversation-memory`. External
+  runtime still refuses control after approval.
 - Conversation learning is dogfooded over real `/api/chat` too:
   training-command turns ("remember that…", "always…", "no, you should…")
   feed `learn_from_user` without a model, land in facts/rules/training
