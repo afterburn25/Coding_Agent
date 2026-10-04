@@ -290,7 +290,8 @@ def _uptime_seconds() -> float | None:
             if get_tick is not None:
                 return round(get_tick() / 1000, 1)
             return None
-        text = open("/proc/uptime", "r", encoding="utf-8").read()
+        with open("/proc/uptime", "r", encoding="utf-8") as fh:
+            text = fh.read()
         return round(float(text.split()[0]), 1)
     except (OSError, ValueError, IndexError, AttributeError):
         return None

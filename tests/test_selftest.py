@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from localcodeagent.selftest import is_chat_nexus_tree, validate_self_update
+from localcodeagent.selftest import (
+    _smoke_config,
+    is_chat_nexus_tree,
+    validate_self_update,
+)
 from localcodeagent.workflow.verify import detect_verification_commands
 
 
@@ -30,6 +34,12 @@ class SelfUpdateValidationTests(unittest.TestCase):
             self.assertEqual(commands[0]["name"], "Nexus Core isolated self-update validation")
             self.assertIn("localcodeagent.selftest", commands[0]["command"])
             self.assertFalse(any("unittest discover" in item["command"] for item in commands))
+
+    def test_smoke_config_disables_source_sync(self):
+        # The smoke instance runs against the checked-out tree — a startup
+        # fast-forward would mutate the code under test mid-suite (this
+        # actually broke a CI version test when a push landed mid-run).
+        self.assertFalse(_smoke_config()["sync_source_on_start"])
 
     def test_isolated_second_instance_smoke_test(self):
         result = validate_self_update(ROOT, run_tests=False, startup_timeout=20)

@@ -42,6 +42,7 @@ def _smoke_config() -> dict[str, Any]:
         "image_enabled": False,
         "research_enabled": False,
         "profiles_onboarding_gate": False,
+        "sync_source_on_start": False,
         "max_agent_steps": 2,
         "models": [{
             "id": "selftest-model",

@@ -1585,6 +1585,16 @@ class AppState:
             return
         if not (self.workspace / ".git" / "HEAD").exists():
             return
+        # Only ever fast-forward a *bundled reference* checkout. If the
+        # workspace is the tree this code is running from (dev checkout,
+        # CI job, selftest smoke instance), pulling would silently mutate
+        # the very code/tests under execution.
+        code_root = Path(__file__).resolve().parent.parent
+        try:
+            if self.workspace.resolve() == code_root:
+                return
+        except OSError:
+            return
 
         def _sync() -> None:
             import subprocess
