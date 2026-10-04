@@ -59,6 +59,8 @@ from .tools.research import register_research_tools
 from .tools.search import find_ripgrep, register_search_tools
 from .tools.shell import register_shell_tools
 from .tools.terminal import register_terminal_tools
+from .tools.workspace import register_workspace_tools
+from .workspace import WorkspaceManager
 from .tool_router import ToolRouter
 from .mcp import MCPManager, load_mcp_configs
 from .tools.web import register_web_tools
@@ -350,8 +352,17 @@ class AppState:
         if getattr(config, "process_watchdog", True):
             self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
         self._boot(74, "REGISTERING · TOOLS & PLUGINS", "Loading installed capabilities and tool manifests")
-        register_filesystem_tools(self.tools, self.workspace, checkpoints=self.checkpoints, tasks=self.tasks)
-        register_shell_tools(self.tools, self.workspace)
+        # Workspace Manager — registered workspaces the user opens beyond
+        # the primary root. File/shell tools are bounded to these roots.
+        self.workspaces = WorkspaceManager(
+            runtime_root / "data" / "workspaces.json", self.workspace)
+        register_filesystem_tools(
+            self.tools, self.workspace, checkpoints=self.checkpoints,
+            tasks=self.tasks, extra_roots=self.workspaces.allowed_roots)
+        register_shell_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        register_workspace_tools(self.tools, self.workspaces)
         self.terminal_tracker = register_terminal_tools(
             self.tools, self.workspace, jobs=self.jobs, log_dir=runtime_root / ".agent" / "runtime"
         )
@@ -6814,6 +6825,21 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(self.state.capabilities.summary(force=force))
             return
+        if path == "/api/workspaces":
+            self._json({
+                "primary": str(self.state.workspace),
+                "active": self.state.workspaces.active(),
+                "workspaces": self.state.workspaces.list(),
+            })
+            return
+        if path == "/api/workspaces/inspect":
+            q = parse_qs(urlparse(self.path).query)
+            target = q.get("path", [""])[0]
+            if not target:
+                self._json({"error": "path is required"}, status=400)
+                return
+            self._json(self.state.workspaces.inspect(target))
+            return
         if path == "/api/tasks":
             self._json(self.state.task_payload())
             return
@@ -8542,6 +8568,36 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "item": item})
                 return
 
+            if path == "/api/workspaces/open":
+                target = str(body.get("path") or "").strip()
+                if not target:
+                    self._json({"error": "path is required"}, 400)
+                    return
+                try:
+                    rec = self.state.workspaces.open(
+                        target, create=bool(body.get("create")))
+                except FileNotFoundError:
+                    self._json({"error": "path_not_found",
+                                "detail": f"{target} does not exist"}, 404)
+                    return
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                self._json({"ok": True, "workspace": rec})
+                return
+            if path == "/api/workspaces/active":
+                wid = str(body.get("id") or body.get("path") or "").strip()
+                rec = self.state.workspaces.set_active(wid) if wid else None
+                if rec is None:
+                    self._json({"error": "workspace not found"}, 404)
+                    return
+                self._json({"ok": True, "workspace": rec})
+                return
+            if path == "/api/workspaces/remove":
+                wid = str(body.get("id") or body.get("path") or "").strip()
+                ok = bool(wid) and self.state.workspaces.remove(wid)
+                self._json({"ok": ok}, 200 if ok else 404)
+                return
             if path == "/api/projects":
                 name = str(body.get("name", "")).strip()
                 if not name:

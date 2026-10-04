@@ -17,15 +17,35 @@ if TYPE_CHECKING:
 IGNORED_DIRS = {".git", ".agent", "node_modules", ".venv", "venv", "__pycache__"}
 
 
-def _safe_path(workspace: Path, raw: str) -> Path:
+def _allowed_roots(workspace: Path, extra_roots=None) -> list[Path]:
+    """Primary workspace plus any registered workspace roots (from the
+    WorkspaceManager) that file tools may operate inside."""
+    roots = [workspace.resolve()]
+    if extra_roots:
+        try:
+            for r in extra_roots() or []:
+                p = Path(r).resolve()
+                if p not in roots:
+                    roots.append(p)
+        except Exception:
+            pass
+    return roots
+
+
+def _path_base(workspace: Path, candidate: Path, extra_roots=None) -> Path | None:
+    """The allowed root containing `candidate`, or None."""
+    for base in _allowed_roots(workspace, extra_roots):
+        if candidate == base or base in candidate.parents:
+            return base
+    return None
+
+
+def _safe_path(workspace: Path, raw: str, extra_roots=None) -> Path:
     candidate = (workspace / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
-    root = workspace.resolve()
-    if candidate != root and root not in candidate.parents:
+    base = _path_base(workspace, candidate, extra_roots)
+    if base is None:
         raise ValueError("path escapes the selected workspace")
-    try:
-        rel = candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError("path escapes the selected workspace") from exc
+    rel = candidate.relative_to(base)
     if rel.parts and rel.parts[0] == ".agent":
         raise ValueError(".agent contains Local Code Agent metadata and cannot be modified through workspace tools")
     return candidate
@@ -37,8 +57,21 @@ def register_filesystem_tools(
     *,
     checkpoints: CheckpointManager | None = None,
     tasks: TaskStore | None = None,
+    extra_roots=None,
 ) -> None:
     root = workspace.resolve()
+
+    def safe(raw: str) -> Path:
+        return _safe_path(workspace, raw, extra_roots)
+
+    def display_path(path: Path) -> str:
+        """Human-facing relative path — uses the registered root that
+        contains the file so attached-workspace paths display sanely."""
+        base = _path_base(workspace, path, extra_roots) or root
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            return str(path)
 
     def track_mutation(path: Path) -> None:
         tls = registry.context.get("task_tls")
@@ -48,10 +81,10 @@ def register_filesystem_tools(
         if checkpoints:
             checkpoints.snapshot(task_id, path)
         if tasks:
-            tasks.add_changed_file(task_id, path.relative_to(root).as_posix())
+            tasks.add_changed_file(task_id, display_path(path))
 
     def list_files(args: dict) -> str:
-        path = _safe_path(workspace, args.get("path", "."))
+        path = safe(args.get("path", "."))
         depth = max(0, min(int(args.get("depth", 2)), 5))
         lines: list[str] = []
         base_depth = len(path.parts)
@@ -59,7 +92,7 @@ def register_filesystem_tools(
             relative_depth = len(p.parts) - base_depth
             if relative_depth > depth:
                 continue
-            rel_to_root = p.relative_to(root)
+            rel_to_root = Path(display_path(p))
             if any(part in IGNORED_DIRS for part in rel_to_root.parts):
                 continue
             lines.append(str(rel_to_root) + ("/" if p.is_dir() else ""))
@@ -69,7 +102,7 @@ def register_filesystem_tools(
         return "\n".join(lines) or "(empty)"
 
     def read_file(args: dict) -> str:
-        path = _safe_path(workspace, args["path"])
+        path = safe(args["path"])
         text = path.read_text(encoding="utf-8", errors="replace")
         start = max(1, int(args.get("start_line", 1)))
         end = int(args.get("end_line", start + 399))
@@ -77,10 +110,10 @@ def register_filesystem_tools(
         return "\n".join(f"{i+1}: {rows[i]}" for i in range(start-1, min(end, len(rows))))
 
     def write_file(args: dict) -> str:
-        path = _safe_path(workspace, args["path"])
+        path = safe(args["path"])
         track_mutation(path)
         atomic_write_text(path, args.get("content", ""))
-        return f"WROTE {path.relative_to(root)} ({path.stat().st_size} bytes)"
+        return f"WROTE {display_path(path)} ({path.stat().st_size} bytes)"
 
     def apply_patch(args: dict) -> str:
         changes = args.get("changes")
@@ -92,39 +125,39 @@ def register_filesystem_tools(
         for item in changes:
             if not isinstance(item, dict) or not item.get("path"):
                 raise ValueError("every patch change requires a path")
-            path = _safe_path(workspace, str(item["path"]))
+            path = safe(str(item["path"]))
             existed = path.exists()
             old_text = path.read_text(encoding="utf-8", errors="replace") if existed and path.is_file() else ""
             if path.exists() and not path.is_file():
-                raise ValueError(f"cannot patch directory: {path.relative_to(root)}")
+                raise ValueError(f"cannot patch directory: {display_path(path)}")
 
             modes = sum(1 for key in ("content", "replacements", "delete") if key in item and item.get(key) not in (None, False, []))
             if modes != 1:
-                raise ValueError(f"{path.relative_to(root)} must specify exactly one of content, replacements, or delete")
+                raise ValueError(f"{display_path(path)} must specify exactly one of content, replacements, or delete")
 
             if item.get("delete"):
                 if not existed:
-                    raise ValueError(f"cannot delete missing file: {path.relative_to(root)}")
+                    raise ValueError(f"cannot delete missing file: {display_path(path)}")
                 new_text: str | None = None
             elif "content" in item:
                 new_text = str(item.get("content", ""))
             else:
                 if not existed:
-                    raise ValueError(f"cannot apply replacements to missing file: {path.relative_to(root)}")
+                    raise ValueError(f"cannot apply replacements to missing file: {display_path(path)}")
                 new_text = old_text
                 replacements = item.get("replacements")
                 if not isinstance(replacements, list) or not replacements:
-                    raise ValueError(f"{path.relative_to(root)} replacements must be non-empty")
+                    raise ValueError(f"{display_path(path)} replacements must be non-empty")
                 for replacement in replacements:
                     old = str(replacement.get("old", ""))
                     new = str(replacement.get("new", ""))
                     expected = max(1, int(replacement.get("expected_count", 1)))
                     if not old:
-                        raise ValueError(f"{path.relative_to(root)} replacement old text cannot be empty")
+                        raise ValueError(f"{display_path(path)} replacement old text cannot be empty")
                     actual = new_text.count(old)
                     if actual != expected:
                         raise ValueError(
-                            f"{path.relative_to(root)} replacement expected {expected} exact match(es) but found {actual}"
+                            f"{display_path(path)} replacement expected {expected} exact match(es) but found {actual}"
                         )
                     new_text = new_text.replace(old, new, expected)
             staged.append((path, new_text, old_text))
@@ -132,7 +165,7 @@ def register_filesystem_tools(
         diff_lines: list[str] = []
         for path, new_text, old_text in staged:
             track_mutation(path)
-            rel = path.relative_to(root).as_posix()
+            rel = display_path(path).as_posix()
             if new_text is None:
                 path.unlink()
                 new_lines: list[str] = []
@@ -157,7 +190,7 @@ def register_filesystem_tools(
         for p in workspace.rglob(glob):
             if not p.is_file():
                 continue
-            rel = p.relative_to(root)
+            rel = Path(display_path(p))
             if any(part in IGNORED_DIRS for part in rel.parts):
                 continue
             try:
