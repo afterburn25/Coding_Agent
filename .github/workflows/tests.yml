@@ -83,7 +83,18 @@ jobs:
 
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --version=6.6.1 --yes --no-progress
+        # Runner images may already ship a newer Inno — a pinned downgrade
+        # fails under choco. Use the preinstalled ISCC when present; only
+        # install when absent.
+        run: |
+          $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $LocalIscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          if ((Test-Path $Iscc) -or (Test-Path $LocalIscc) -or
+              (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) {
+            Write-Host "Inno Setup already present — skipping choco install."
+          } else {
+            choco install innosetup --yes --no-progress
+          }
 
       - name: Build native Nexus Core desktop app
         shell: pwsh
@@ -125,6 +136,9 @@ jobs:
         shell: pwsh
         run: |
           $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $Iscc)) {
+            $Iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          }
           if (-not (Test-Path $Iscc)) {
             $Iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
           }
