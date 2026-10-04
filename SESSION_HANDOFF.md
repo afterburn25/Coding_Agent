@@ -44,6 +44,11 @@
   lifecycle actions are `skills.manage`-gated and disclose requested
   permissions/capabilities in approval responses; executable health checks
   use the separate `shell.execute` gate. See `TOOLS.md`.
+- Self-repair rollback is now byte-verified and path-safe: promotion fails
+  closed if LKG preservation cannot stage, manifests are bounded/validated
+  before restore, snapshot retention is capped, and repair lifecycle API
+  mutations require the `repair.manage` hard gate. See
+  `docs/architecture/SELF_REPAIR.md`.
 
 ## 2026-10-03 installer lifecycle + startup fixes (commits `5178fca`–`335815f`)
 
@@ -922,7 +927,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1385 tests` passing (2 environment skips).
+Expected at this checkpoint: `1390 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

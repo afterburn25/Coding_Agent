@@ -230,6 +230,7 @@ POST /api/skills/enable|disable    {"name": "...", "approve": true} — gated li
 POST /api/skills/rollback          {"name": "...", "approve": true} — restore latest snapshot
 POST /api/skills/remove            {"name": "...", "approve": true} — remove managed package
 POST /api/skills/health            {"name": "...", "run": false} — declared or executed health check
+POST /api/self-repair/<id>/<action> {"approve": true} — retry/process/rollback/abandon, gated by repair.manage
 GET  /api/permissions              profile + levels + session grants
 POST /api/permissions/level        {"permission": "shell.execute", "level": "session"}
 POST /api/permissions/profile      {"profile": "offline"}

@@ -25,6 +25,7 @@ _RISK_DEFAULTS = {
     "filesystem.delete": "ask",
     "packages.install": "ask",
     "skills.manage": "ask",
+    "repair.manage": "ask",
     "docker.access": "ask",
     "credentials.use": "ask",
     "git.push": "ask",
@@ -183,6 +184,9 @@ AUTONOMY_NEVER_AUTO = frozenset({
     # Skill/plugin lifecycle changes can alter future agent instructions and
     # available tools; autonomous missions must not silently widen themselves.
     "skills.manage",
+    # Repair lifecycle actions can promote or roll back code in the stable
+    # source tree; autonomous missions must not trigger them silently.
+    "repair.manage",
     "microphone.use",
     "camera.use",
     # Desktop observation/control can expose the user's live screen or inject
@@ -227,6 +231,8 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
                           "blurb": "Download, install, update, or remove tools and packages (ComfyUI, Blender, pip packages).", "tools": ["tool_installer", "package_installer"]},
     "skills.manage":     {"label": "Manage skills & plugins", "category": "Tool Installation", "scope": "App skill directories", "risk": "high",
                           "blurb": "Install, update, enable, disable, roll back, or remove reusable skill/plugin packages.", "tools": ["skill_registry"]},
+    "repair.manage":     {"label": "Manage self-repair", "category": "Automation", "scope": "Stable source tree", "risk": "high",
+                          "blurb": "Retry, process, abandon, or roll back self-repair incidents that can modify verified source files.", "tools": ["self_repair"]},
     "docker.access":     {"label": "Docker / sandbox", "category": "Docker / Sandbox", "scope": "Local daemon", "risk": "high",
                           "blurb": "Start containers and run code inside the local Docker sandbox.", "tools": ["docker", "sandbox"]},
     "credentials.use":   {"label": "Use credentials", "category": "Credentials", "scope": "Secret vault", "risk": "high",
@@ -294,6 +300,7 @@ _PREFIX_CATEGORY = [
     ("keyboard", "Desktop"), ("clipboard", "Desktop"),
     ("application", "Desktop"), ("computer", "Desktop"),
     ("microphone", "Devices"), ("camera", "Devices"), ("tasks", "Automation"),
+    ("repair", "Automation"),
 ]
 
 

@@ -4754,6 +4754,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "expected /api/self-repair/{id}/{action}"},
                            400)
                 return True
+            if verb in {"retry", "process", "rollback", "abandon"}:
+                gate = self.state._permission_gate(
+                    "repair.manage", bool(body.get("approve", False)),
+                    f"repair {verb}:{iid}")
+                if gate is not None:
+                    gate["action"] = verb
+                    gate["incident"] = iid
+                    self._json(gate)
+                    return True
             if verb == "retry":
                 self._json({"ok": repair.retry(iid)})
             elif verb == "process":

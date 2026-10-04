@@ -458,7 +458,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **1385 tests passing** (2 environment-dependent skips).
+Current expected result: **1390 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 
@@ -517,7 +517,7 @@ Non-token agent events are also mirrored onto the shared `/api/events` bus with 
 
 **Work queue.** `POST /api/queue` enqueues prompts that run FIFO on the agent whenever it is idle; messages sent while a task is running auto-enqueue (`chat_queue_when_busy`, default on). Queue state lives in `.agent/queue.json`, shows in the chat task card and the Tools page Work queue card, and items can be cancelled via `POST /api/queue/cancel`.
 
-**Autonomous mode.** `POST /api/permissions/autonomous` (or the Tools-page toggle) auto-approves `ask`/`session` workspace actions for unattended runs — hard gates (`spend.money`, `message.send`, `microphone.use`, `camera.use`, `skills.manage`, and the granular desktop-control keys) always wait, and `deny` stays denied. Idle managed models are evicted on a timer to free VRAM/RAM, interrupted tasks auto-resume after a restart, stale errors retry with backoff, and tool calls have a hard timeout — all bounded by `autonomous_*` config keys documented in `config.example.json`.
+**Autonomous mode.** `POST /api/permissions/autonomous` (or the Tools-page toggle) auto-approves `ask`/`session` workspace actions for unattended runs — hard gates (`spend.money`, `message.send`, `microphone.use`, `camera.use`, `skills.manage`, `repair.manage`, and the granular desktop-control keys) always wait, and `deny` stays denied. Idle managed models are evicted on a timer to free VRAM/RAM, interrupted tasks auto-resume after a restart, stale errors retry with backoff, and tool calls have a hard timeout — all bounded by `autonomous_*` config keys documented in `config.example.json`.
 
 Endpoints that ignore `stream:true` and return ordinary OpenAI-compatible JSON are handled transparently. Backend SSE `error` events are retained and shown directly; if a stream closes without a final result, the UI queries durable task state and reports the saved error/recovery status instead of replacing it with a generic stream-ended message. Before the first token arrives, heartbeat/events drive the animated NEXUS activity HUD with phase/model/elapsed seconds and real high-level operations instead of leaving a static `Thinking…`. The non-streaming `POST /api/chat` endpoint remains available for compatibility.
 

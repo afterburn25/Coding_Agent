@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1385 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1390 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints.
 
 ## Active version: 0.15.0 — Autonomous workstation layers
 
@@ -45,8 +45,14 @@ v0.15.0 deepens the workstation core:
   bounded rollback snapshots, removal, and declared-or-executed health
   checks. `skills.manage` approvals disclose requested permissions and
   capabilities; the System page exposes the lifecycle controls.
+- **Self-repair rollback hardening** — LKG snapshots are staged,
+  digest-verified, path-safe, and bounded; promotion refuses to proceed
+  when rollback preservation fails, restore rejects corrupt or escaping
+  manifests before touching the stable tree, and repair lifecycle API
+  actions (`retry`/`process`/`rollback`/`abandon`) require the
+  `repair.manage` hard gate.
 
-Verified: **1385 tests** (2 environment skips).
+Verified: **1390 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -176,9 +182,10 @@ proven fixes and suppresses known-bad ones → interrupted missions resume.
 Incidents persist in `data/autonomy/repairs.json`; exhausted mission
 recovery playbooks open incidents automatically. API `/api/self-repair*`;
 Self Repair panel on Mission Control. Docs: `docs/architecture/SELF_REPAIR.md`.
-Fault-injection suite `tests/test_self_repair.py` (42 tests) proves all
+Fault-injection suite `tests/test_self_repair.py` (46 tests) proves all
 five scenarios: promote, reject, rollback, procedural repair, and
-mid-repair restart resume — plus abandon/dismiss candidate cleanup.
+mid-repair restart resume — plus abandon/dismiss candidate cleanup and
+rollback path/digest/bounds hardening.
 
 Shipped alongside on the 0.9.0 line: the evaluated Goal Manager
 (`autonomy/goals.py` + `metrics.py`) — durable metric-driven goals that
@@ -408,7 +415,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate`.
-- Current automated checkpoint: **1385 tests passing** (2 environment skips).
+- Current automated checkpoint: **1390 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 

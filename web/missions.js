@@ -306,7 +306,15 @@ document.addEventListener('click',async e=>{
     return;}
   const rp=e.target.closest('[data-rep]');
   if(rp){const[id,verb]=rp.dataset.rep.split(':');
-    try{await api(`/api/self-repair/${id}/${verb}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    try{
+      let r=await api(`/api/self-repair/${id}/${verb}`,'POST',{});
+      if(r.needs_approval){
+        if(!confirm(`${r.permission||'repair.manage'} approval is required to ${verb} repair ${id}. Continue?`))return;
+        r=await api(`/api/self-repair/${id}/${verb}`,'POST',{approve:true});
+      }
+      if(r.ok===false&&r.error)alert(r.error);
+      refresh();
+    }catch(err){alert(err.message);}
     return;}
   const fd=e.target.closest('[data-find]');
   if(fd){const[id,verb]=fd.dataset.find.split(':');

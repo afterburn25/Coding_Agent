@@ -123,10 +123,14 @@ patchers for tests.
   canary pass/not-required — **and** `auto_promote` enabled
   (`self_repair_auto_promote` config, default **off** — verified
   candidates wait at `needs_human` with all evidence attached).
-- Before promotion, `Rollback.snapshot` preserves every file the
-  candidate touches byte-for-byte under `lkg/<incident>/`; restore also
-  removes files the candidate added. Post-promotion regressions reopen
-  the incident or restore last-known-good.
+- Before promotion, `Rollback.snapshot` stages and digest-verifies every
+  file the candidate touches under `lkg/<incident>/`, then swaps the
+  snapshot into place atomically. Unsafe repo paths, traversal, protected
+  `.git`/`.repair-worktrees` roots, duplicate paths, corrupt manifests,
+  and digest mismatches fail closed before promotion/restore touches the
+  stable tree. Restore verifies each target after replacement and removes
+  files the candidate added. Snapshots are bounded to the newest 16
+  incidents.
 - After promotion, `Patcher.commit_promotion` commits exactly the
   promoted paths with incident/root-cause/test-evidence metadata
   (`Self-repair: …`, identity `Nexus Self-Repair` when the repo has no
@@ -178,9 +182,10 @@ diagnosing fresh.
   quality is measurable over time, not anecdotal.
 - **API**: `GET /api/self-repair`, `GET /api/self-repair/{id}`,
   `POST /api/self-repair/report`, `POST /api/self-repair/{id}/retry |
-  process | rollback | abandon`. `abandon` closes a `needs_human`
-  candidate without repair and frees its worktree; rollback frees the
-  worktree too — no candidate leaks on disk.
+  process | rollback | abandon`. Lifecycle mutations require the
+  `repair.manage` permission; autonomous mode never auto-grants it.
+  `abandon` closes a `needs_human` candidate without repair and frees its
+  worktree; rollback frees the worktree too — no candidate leaks on disk.
 - **UI**: Self Repair panel on Mission Control — state, severity,
   confidence, recurrence count, top hypothesis, Retry/Dismiss for
   needs_human.

@@ -152,6 +152,7 @@ class SummaryTests(unittest.TestCase):
         info = s["info"]["browser.control"]
         self.assertEqual(info["category"], "Browser Automation")
         self.assertEqual(s["info"]["skills.manage"]["category"], "Tool Installation")
+        self.assertEqual(s["info"]["repair.manage"]["category"], "Automation")
         cats = {c["category"] for c in s["categories"]}
         self.assertIn("Filesystem", cats)
         self.assertIn("Tool Installation", cats)
@@ -322,6 +323,14 @@ class PermissionApiTests(unittest.TestCase):
             detail = self._get("/api/skills/review-helper")
             self.assertEqual(detail["permissions"], ["filesystem.read"])
             self.assertTrue(detail["verification"]["ok"])
+
+    def test_self_repair_actions_require_approval(self):
+        out = self._post("/api/self-repair/ri-test/retry", {})
+        self.assertTrue(out.get("needs_approval"))
+        self.assertEqual(out.get("permission"), "repair.manage")
+        self.assertEqual(out.get("action"), "retry")
+        out = self._post("/api/self-repair/ri-test/retry", {"approve": True})
+        self.assertFalse(out.get("ok"))
 
     def test_creator_level_via_api_gates_install(self):
         self._post("/api/permissions/level", {"permission": "packages.install", "level": "creator"})

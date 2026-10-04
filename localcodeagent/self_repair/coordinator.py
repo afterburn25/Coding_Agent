@@ -547,7 +547,16 @@ class SelfRepairCoordinator:
         if inc["repair_kind"] == "code" and inc.get("worktree"):
             wt = Path(inc["worktree"])
             files = self.patcher.changed_files(wt) or inc["patch_files"]
+            if not files:
+                self._fail_open(
+                    inc, "rollback snapshot failed: no changed files recorded")
+                return ""
             manifest = self.rollback.snapshot(inc["id"], files)
+            if manifest.get("ok") is not True:
+                self._fail_open(
+                    inc, "rollback snapshot failed: "
+                         f"{manifest.get('error', 'invalid snapshot')}")
+                return ""
             inc["rollback"] = {"snapshot": str(self.rollback.lkg_root
                                                  / inc["id"]),
                                "files": [f["path"] for f in

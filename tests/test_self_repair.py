@@ -27,6 +27,7 @@ from localcodeagent.self_repair.canary import Canary, production_launcher
 from localcodeagent.self_repair.coordinator import redact
 from localcodeagent.self_repair.models import (
     new_incident, transition, budget_exceeded)
+from localcodeagent.self_repair.rollback import Rollback
 
 
 # ----------------------------------------------------------------------
@@ -611,6 +612,57 @@ class ScenarioC_Rollback(unittest.TestCase):
             self.assertFalse(
                 (repo / "tests" / "test_calc_repair.py").exists())
             self.assertEqual(coord.get(inc["id"])["state"], "rolled_back")
+
+    def test_rollback_rejects_unsafe_paths_and_ids(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            rb = Rollback(repo, Path(td) / "state")
+            self.assertFalse(rb.snapshot("../escape", ["mod/calc.py"])["ok"])
+            self.assertFalse(rb.snapshot("ri-safe", ["../outside.txt"])["ok"])
+            self.assertFalse(rb.snapshot("ri-safe", [".git/config"])["ok"])
+            self.assertFalse(rb.restore("../escape")["ok"])
+
+    def test_rollback_manifest_escape_cannot_touch_repo_parent(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            outside = Path(td) / "outside.txt"
+            rb = Rollback(repo, Path(td) / "state")
+            manifest = rb.snapshot("ri-escape", ["mod/calc.py"])
+            self.assertTrue(manifest["ok"], manifest)
+            path = Path(manifest["snapshot"]) / "manifest.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["files"] = [{"path": "../outside.txt", "existed": False}]
+            path.write_text(json.dumps(data), encoding="utf-8")
+            self.assertFalse(rb.restore("ri-escape")["ok"])
+            self.assertFalse(outside.exists())
+
+    def test_rollback_verifies_snapshot_digest_before_restore(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            target = repo / "mod" / "calc.py"
+            rb = Rollback(repo, Path(td) / "state")
+            manifest = rb.snapshot("ri-digest", ["mod/calc.py"])
+            self.assertTrue(manifest["ok"], manifest)
+            target.write_text("def divide(a, b):\n    return None\n",
+                              encoding="utf-8")
+            staged = Path(manifest["snapshot"]) / "mod" / "calc.py"
+            staged.write_text("corrupt snapshot\n", encoding="utf-8")
+            result = rb.restore("ri-digest")
+            self.assertFalse(result["ok"], result)
+            self.assertIn("digest", result["errors"][0])
+            self.assertIn("return None", target.read_text(encoding="utf-8"))
+
+    def test_rollback_snapshots_are_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            rb = Rollback(repo, Path(td) / "state", max_snapshots=2)
+            for iid in ("ri-one", "ri-two", "ri-three"):
+                manifest = rb.snapshot(iid, ["mod/calc.py"])
+                self.assertTrue(manifest["ok"], manifest)
+            names = {p.name for p in rb.lkg_root.iterdir()
+                     if p.is_dir() and not p.name.startswith(".")}
+            self.assertEqual(len(names), 2)
+            self.assertIn("ri-three", names)
 
 
 class AbandonTests(unittest.TestCase):

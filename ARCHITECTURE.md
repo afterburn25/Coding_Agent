@@ -219,8 +219,8 @@ driver liveness: _drive_threads registry + watchdog
   `## result` block (4 KiB preview) on terminal status — plus crash lines
   for failures before the session loop begins.
 - `PermissionManager.set_autonomous` auto-approves `ask`/`session` workspace
-  actions; hard gates (spend/message/mic/camera, skill lifecycle, desktop
-  observation/control) and `deny` are never touched.
+  actions; hard gates (spend/message/mic/camera, skill lifecycle, repair
+  lifecycle, desktop observation/control) and `deny` are never touched.
   `autonomous_approval_timeout_seconds` bounds hard-gate waits.
 - `RuntimeManager.evict_idle` on the watchdog tick unloads models idle past
   `model_idle_unload_seconds` or under `memory_pressure_*` floors, while
