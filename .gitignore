@@ -19,6 +19,8 @@ models/*.gguf
 models/image/
 data/image/
 ComfyUI/
+tools/InvokeAI/
+data/invokeai/
 
 # Kokoro TTS model binaries + build-time asset cache
 models/voice/

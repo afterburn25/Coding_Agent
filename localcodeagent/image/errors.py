@@ -29,6 +29,20 @@ def describe_image_error(exc: BaseException) -> dict[str, Any]:
         return result("host_buffer_read", "System RAM ran out while loading the image model. Close other programs or let Nexus unload idle chat models, then retry.")
     if any(x in low for x in ("no space left on device", "disk full", "insufficient disk")):
         return result("insufficient_disk_space", "There is not enough free disk space to complete the image operation. Free some storage and try again.")
+    if any(x in low for x in ("invokeai is not installed", "invokeai was not found",
+                              "invokeai-web", "no invokeai install")):
+        return result("backend_not_installed", "InvokeAI — the primary local image engine — is not installed yet. Nexus can install it, or route the job to ComfyUI instead.")
+    if any(x in low for x in ("invokeai backend is offline", "invokeai is offline")):
+        return result("backend_offline", "The InvokeAI image backend is offline. Start it from the Image workspace, or let Auto routing fall back to ComfyUI.")
+    if "operation_unsupported" in low or ("does not support" in low and "invokeai" in low):
+        return result("operation_unsupported", "The selected backend cannot perform this image operation. Use Auto routing or choose another backend.")
+    if any(x in low for x in ("model load failed", "model_load_failed", "failed to load model",
+                              "could not load model")):
+        return result("model_load_failed", "The image backend could not load the selected model. Check model health in the Image workspace.")
+    if any(x in low for x in ("content filter", "safety filter", "safety_rejected",
+                              "nsfw content detected", "blacklisted by safety",
+                              "flagged by the model", "content_policy")):
+        return result("safety_rejected_by_model", "The model's built-in safety layer rejected this request. This restriction comes from the model itself and cannot be overridden by Nexus.")
     if any(x in low for x in ("comfyui is not installed", "comfyui was not found")):
         return result("backend_not_installed", "ComfyUI — the local image engine — is not installed yet. Nexus can install it together with the image models.")
     if any(x in low for x in ("comfyui backend is offline", "connection refused", "failed to establish a new connection", "backend offline")):

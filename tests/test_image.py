@@ -1027,7 +1027,7 @@ class InterruptedJobResumeTests(unittest.TestCase):
             m1._save_jobs(job)
 
             started = []
-            with patch.object(ImageManager, "_backend_up", lambda self: False), \
+            with patch.object(ImageManager, "_backend_up", lambda self, name="comfyui": False), \
                  patch.object(ImageManager, "_run_job",
                               lambda self, jid: started.append(jid)):
                 m2 = self._manager(root, auto_run=True)
@@ -1061,7 +1061,7 @@ class InterruptedJobResumeTests(unittest.TestCase):
             job.state = "generating"
             job.resume_count = 2
             m1._save_jobs(job)
-            with patch.object(ImageManager, "_backend_up", lambda self: False):
+            with patch.object(ImageManager, "_backend_up", lambda self, name="comfyui": False):
                 m2 = self._manager(root, auto_run=True)
             failed = m2.get_job(job.id)
             self.assertEqual(failed.state, "failed")

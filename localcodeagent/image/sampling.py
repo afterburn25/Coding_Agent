@@ -76,11 +76,18 @@ class SamplingAdvisor:
     # -- learning -----------------------------------------------------
 
     @staticmethod
-    def _key(profile: ImageModelProfile, operation: str) -> str:
-        return f"{(profile.family or 'unknown').lower()}|{operation}"
+    def _key(profile: ImageModelProfile, operation: str,
+             backend: str = "comfyui") -> str:
+        """Learning is keyed per backend — recipes that won on ComfyUI must
+        not leak into InvokeAI guesses (different sampler vocabulary and
+        CFG behavior). The legacy ``family|op`` key is retained for ComfyUI
+        so previously learned stats keep working."""
+        base = f"{(profile.family or 'unknown').lower()}|{operation}"
+        return base if backend == "comfyui" else f"{backend}|{base}"
 
     def record_outcome(self, profile: ImageModelProfile, operation: str,
-                       request_params: dict, rating: str) -> None:
+                       request_params: dict, rating: str,
+                       backend: str = "comfyui") -> None:
         """Persist a thumbs outcome against the job's effective params."""
         rating = (rating or "").lower()
         if rating not in {"up", "better", "down", "worse"}:
@@ -89,7 +96,7 @@ class SamplingAdvisor:
                   if request_params.get(k) not in (None, "")}
         if not params:
             return
-        key = self._key(profile, operation or "auto")
+        key = self._key(profile, operation or "auto", backend)
         with self._lock:
             row = self._stats.setdefault(
                 key, {"wins": 0, "losses": 0, "best": None, "avoid": []})
@@ -119,12 +126,12 @@ class SamplingAdvisor:
     # -- guessing -----------------------------------------------------
 
     def apply(self, request: ImageRequest, profile: ImageModelProfile,
-              operation: str) -> dict[str, str]:
+              operation: str, *, backend: str = "comfyui") -> dict[str, str]:
         """Fill unset sampling fields. Returns reason notes for routing."""
         notes: list[str] = []
         defaults = _family_defaults(profile)
         quality = (request.quality or "balanced").lower()
-        learned = self._learned_params(profile, operation)
+        learned = self._learned_params(profile, operation, backend)
 
         prompt_text = request.prompt or ""
         if request.steps is None:
@@ -167,9 +174,10 @@ class SamplingAdvisor:
                 learned.get("scheduler", defaults["scheduler"]))
         return notes
 
-    def _learned_params(self, profile: ImageModelProfile, operation: str) -> dict[str, Any]:
+    def _learned_params(self, profile: ImageModelProfile, operation: str,
+                        backend: str = "comfyui") -> dict[str, Any]:
         with self._lock:
-            row = self._stats.get(self._key(profile, operation)) or {}
+            row = self._stats.get(self._key(profile, operation, backend)) or {}
             best = row.get("best")
             if isinstance(best, dict) and best:
                 return dict(best)

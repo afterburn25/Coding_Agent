@@ -40,7 +40,7 @@ class IModelBackend(Protocol):
 
 @runtime_checkable
 class IImageBackend(Protocol):
-    """Image generation/editing backend (ComfyUI today, native/future later)."""
+    """Image generation/editing backend (InvokeAI or ComfyUI)."""
 
     def health(self) -> tuple[bool, str]: ...
     def submit(self, payload: dict[str, Any]) -> str: ...

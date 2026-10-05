@@ -93,18 +93,18 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     # -- browser ------------------------------------------------------------------
     "browser_run": {"category": "browsers", "capabilities": ["browser_run", "browser_automation"], "requires_network": True, "provider": "playwright"},
     # -- images ------------------------------------------------------------------
-    "generate_image": {"category": "images", "capabilities": ["generate_image", "text_to_image"], "requires_gpu": True, "provider": "comfyui"},
-    "edit_image": {"category": "images", "capabilities": ["edit_image", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "inpaint_image": {"category": "images", "capabilities": ["inpaint", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "outpaint_image": {"category": "images", "capabilities": ["outpaint", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "remove_background": {"category": "images", "capabilities": ["remove_background", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "upscale_image": {"category": "images", "capabilities": ["upscale", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "create_image_variations": {"category": "images", "capabilities": ["variations", "image_edit"], "requires_gpu": True, "provider": "comfyui"},
-    "list_image_models": {"category": "images", "capabilities": ["image_models"], "provider": "comfyui"},
-    "load_subject_profile": {"category": "images", "capabilities": ["subject_profile"], "provider": "comfyui"},
-    "verify_image_models": {"category": "images", "capabilities": ["image_models", "verify"], "provider": "comfyui"},
-    "install_image_model": {"category": "images", "capabilities": ["image_models", "install"], "requires_network": True, "provider": "comfyui"},
-    "list_loras": {"category": "images", "capabilities": ["loras"], "provider": "comfyui"},
+    "generate_image": {"category": "images", "capabilities": ["generate_image", "text_to_image"], "requires_gpu": True, "provider": "nexus-images"},
+    "edit_image": {"category": "images", "capabilities": ["edit_image", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "inpaint_image": {"category": "images", "capabilities": ["inpaint", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "outpaint_image": {"category": "images", "capabilities": ["outpaint", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "remove_background": {"category": "images", "capabilities": ["remove_background", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "upscale_image": {"category": "images", "capabilities": ["upscale", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "create_image_variations": {"category": "images", "capabilities": ["variations", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},
+    "list_image_models": {"category": "images", "capabilities": ["image_models"], "provider": "nexus-images"},
+    "load_subject_profile": {"category": "images", "capabilities": ["subject_profile"], "provider": "nexus-images"},
+    "verify_image_models": {"category": "images", "capabilities": ["image_models", "verify"], "provider": "nexus-images"},
+    "install_image_model": {"category": "images", "capabilities": ["image_models", "install"], "requires_network": True, "provider": "nexus-images"},
+    "list_loras": {"category": "images", "capabilities": ["loras"], "provider": "nexus-images"},
 }
 
 

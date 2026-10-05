@@ -302,7 +302,7 @@ class AppState:
         self.images.on_change = _on_image_change
         self.images.on_setup_change = make_emitter(self.events, "image_setup")
         self.images.on_missing_backend = lambda: self._publish_install_offer(
-            ["comfyui"], capability="image_generation")
+            ["invokeai", "comfyui"], capability="image_generation")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
         # Adaptive Worker Manager — one shared admission controller for
@@ -884,12 +884,19 @@ class AppState:
                 return False
 
         def _image_state() -> str:
-            rt = getattr(getattr(self, "images", None),
-                         "backend_runtime", None)
-            if rt is None:
+            images = getattr(self, "images", None)
+            if images is None:
                 return ""
-            return str(getattr(getattr(rt, "status", None), "state", "")
-                       or "")
+            states = []
+            for rt in (getattr(images, "invokeai_runtime", None),
+                       getattr(images, "backend_runtime", None)):
+                if rt is None:
+                    continue
+                st = getattr(getattr(rt, "status", None), "state", "") or ""
+                if getattr(getattr(rt, "status", None), "healthy", False):
+                    return "healthy"
+                states.append(st)
+            return next((s for s in states if s), "")
 
         def _stt_state() -> str:
             if getattr(self, "_stt_engine", None) is not None:
@@ -2463,15 +2470,22 @@ class AppState:
         return "degraded"
 
     def _probe_image_backend(self) -> str:
-        rt = getattr(getattr(self, "images", None), "backend_runtime", None)
-        if rt is None:
+        """Aggregate health across both managed image backends — the probe
+        is healthy when *either* engine can serve a job."""
+        images = getattr(self, "images", None)
+        if images is None:
             return "stopped"
-        st = getattr(rt.status, "state", "stopped")
-        if st in ("running", "healthy"):
+        runtimes = [getattr(images, "backend_runtime", None),
+                    getattr(images, "invokeai_runtime", None)]
+        states = [getattr(getattr(rt, "status", None), "state", "stopped")
+                  for rt in runtimes if rt is not None]
+        if not states:
+            return "stopped"
+        if any(s in ("running", "healthy") for s in states):
             return "healthy"
-        if st in ("starting", "loading"):
+        if any(s in ("starting", "loading") for s in states):
             return "starting"
-        if st in ("error", "crashed"):
+        if any(s in ("error", "crashed") for s in states):
             return "crashed"
         return "stopped"
 
@@ -2724,6 +2738,7 @@ class AppState:
                 req = ImageRequest(
                     prompt=str(meta.get("prompt") or node.get("instruction") or ""),
                     operation=str(meta.get("operation") or "auto"),
+                    backend_override=str(meta.get("backend") or "auto"),
                     width=int(meta.get("width", 1024)),
                     height=int(meta.get("height", 1024)),
                     count=max(1, min(int(meta.get("count", 1)), 4)))
@@ -2737,7 +2752,7 @@ class AppState:
                             arts = [self._register_output_artifact(
                                 p, mission_id=str(mission.get("id") or ""),
                                 task_id=str(node.get("id") or ""),
-                                tool="comfyui").get("id")
+                                tool=str(getattr(cur, "backend", "") or "image")).get("id")
                                 for p in (getattr(cur, "outputs", []) or [])]
                         return {"ok": cur.state == "finished",
                                 "output": f"image job {cur.state}: {cur.stage}",
@@ -3573,6 +3588,18 @@ class AppState:
                 start=lambda: self.images.backend_runtime.ensure_ready(),
                 stop=lambda: self.images.backend_runtime.stop(),
                 restart=lambda: self.images.backend_runtime.recover(),
+                metadata={"auto_restart": True},
+            ))
+            invoke_endpoint = str(getattr(self.config, "invokeai_endpoint", ""))
+            self.processes.register(ManagedService(
+                id="invokeai",
+                name="InvokeAI",
+                kind="image_backend",
+                port=self.runtime._port_from_endpoint(invoke_endpoint) or 9090,
+                describe=lambda: self.images.invokeai_runtime.probe(),
+                start=lambda: self.images.invokeai_runtime.ensure_ready(),
+                stop=lambda: self.images.invokeai_runtime.stop(),
+                restart=lambda: self.images.invokeai_runtime.recover(),
                 metadata={"auto_restart": True},
             ))
 
@@ -4759,6 +4786,7 @@ class AppState:
                 self.events.publish("model", {"event": {"type": "context_shrunk",
                                                         "model_id": model_id}})
             self._evict_idle_comfyui()
+            self._evict_idle_invokeai()
         except Exception:
             pass
 
@@ -4787,6 +4815,32 @@ class AppState:
             rt.stop()
             self.events.publish("model", {"event": {"type": "idle_evicted",
                                                     "model_id": "comfyui",
+                                                    "role": "image_backend"}})
+        except Exception:
+            pass
+
+    def _evict_idle_invokeai(self) -> None:
+        """Same idle bound for the managed InvokeAI process — it holds GPU
+        memory between image jobs exactly like ComfyUI does."""
+        timeout = float(getattr(self.config, "invokeai_idle_unload_seconds", 0.0) or 0.0)
+        if timeout <= 0:
+            return
+        try:
+            rt = self.images.invokeai_runtime
+            status = rt.status
+            if not (status.managed and status.state == "running"):
+                return
+            if self.images.has_active_jobs():
+                return
+            idle_since = max(
+                float(getattr(self.images, "last_activity", 0.0)),
+                float(getattr(status, "started_at", 0.0) or 0.0),
+            )
+            if time.time() - idle_since < timeout:
+                return
+            rt.stop()
+            self.events.publish("model", {"event": {"type": "idle_evicted",
+                                                    "model_id": "invokeai",
                                                     "role": "image_backend"}})
         except Exception:
             pass
@@ -4882,6 +4936,8 @@ class AppState:
                 return result
             return self.tool_downloads.install(
                 spec.name, spec.display_name, install, version=spec.version)
+        if str(install.get("method") or "").strip().lower() == "venv":
+            return self._install_venv_tool(spec, install)
         cmd = install_command(install, install_root=self.runtime.base_dir)
         if cmd is None:
             return {"ok": False, "error": "no automated install method — manual install required",
@@ -4907,6 +4963,62 @@ class AppState:
 
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name, "method": str(install.get("method") or "")}
+
+    def _install_venv_tool(self, spec, install: dict) -> dict:
+        """Create a dedicated virtualenv under {app}/tools/{dest} and pip-
+        install the package into it — used for tools (InvokeAI) whose pinned
+        dependencies must not contaminate other embedded Pythons."""
+        import shutil as _shutil
+        import subprocess
+        package = str(install.get("package") or "").strip()
+        dest = str(install.get("dest") or "").strip()
+        if not package or not dest:
+            return {"ok": False, "error": "venv install requires 'package' and 'dest'"}
+        size = int(install.get("size_bytes") or 0)
+        if size:
+            free = _shutil.disk_usage(str(self.runtime.base_dir)).free
+            if free < size:
+                return {"ok": False,
+                        "error": f"not enough disk space — install needs ~"
+                                 f"{size / 1e9:.1f} GB, only {free / 1e9:.1f} GB free"}
+        root = (Path(self.runtime.base_dir) / dest).resolve()
+        if not str(root).startswith(str(Path(self.runtime.base_dir).resolve())):
+            return {"ok": False, "error": "venv dest escapes the install root"}
+        job = self.jobs.submit("install", f"Install {spec.display_name}")
+
+        def _run() -> None:
+            py = shutil.which("python") or shutil.which("python3") or sys.executable
+            pip = root / ("Scripts" if os.name == "nt" else "bin") / (
+                "pip.exe" if os.name == "nt" else "pip")
+            try:
+                self.jobs.update(job.id, state="running",
+                                 detail=f"creating virtualenv at {root}")
+                proc = subprocess.run([py, "-m", "venv", str(root)],
+                                      capture_output=True, text=True, timeout=600)
+                if proc.returncode != 0:
+                    self.jobs.update(job.id, state="failed",
+                                     error=(proc.stderr or "venv creation failed")[-300:])
+                    return
+                self.jobs.update(job.id, detail=f"pip install {package}")
+                proc = subprocess.run(
+                    [str(pip), "install", package],
+                    capture_output=True, text=True, timeout=7200)
+                if proc.returncode == 0:
+                    self.jobs.update(job.id, state="completed",
+                                     detail=(proc.stdout or "")[-300:])
+                else:
+                    self.jobs.update(job.id, state="failed",
+                                     error=(proc.stderr or proc.stdout or "pip install failed")[-300:])
+            except FileNotFoundError as exc:
+                self.jobs.update(job.id, state="failed", error=f"installer not found: {exc}")
+            except subprocess.TimeoutExpired:
+                self.jobs.update(job.id, state="failed", error="install timed out")
+            changed = self.tools.refresh_install_status()
+            if changed:
+                self.jobs.update(job.id, detail=f"install status updated: {changed}")
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": job.id, "tool": spec.name, "method": "venv"}
 
     def _permission_gate(self, key: str, approve: bool, label: str = "") -> dict | None:
         """Shared approval gate for gated API actions.
@@ -7968,17 +8080,55 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/image/backend/start":
-                self.state.images.backend_runtime.start()
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                runtime = self.state.images.backend_runtimes.get(name)
+                if runtime is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                runtime.start()
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
             if path == "/api/image/backend/stop":
-                self.state.images.backend_runtime.stop()
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                runtime = self.state.images.backend_runtimes.get(name)
+                if runtime is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                runtime.stop()
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
             if path == "/api/image/backend/inspect":
-                self._json({"ok": True, "backend": self.state.images.backend.inspect()})
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                backend = self.state.images.backends.get(name)
+                if backend is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                self._json({"ok": True, "backend": backend.inspect()})
+                return
+
+            if path == "/api/image/backend/install":
+                name = str(body.get("backend", "invokeai") or "invokeai").lower()
+                if name not in {"invokeai", "comfyui"}:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                try:
+                    result = self.state.install_tool(name, approve=bool(body.get("approve", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": bool(result.get("ok")), **result})
+                return
+
+            if path == "/api/image/backend/preference":
+                value = str(body.get("backend", "auto") or "auto").lower()
+                if value not in {"auto", "invokeai", "comfyui"}:
+                    self._json({"error": "backend must be auto, invokeai, or comfyui"}, 400)
+                    return
+                self.state._update_config_file({"image_backend": value})
+                self.state.config.image_backend = value
+                self._json({"ok": True, "image_backend": value})
                 return
 
 

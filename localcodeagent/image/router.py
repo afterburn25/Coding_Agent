@@ -152,19 +152,33 @@ class ImageRouter:
             caps.append("transparency")
         return caps
 
-    def choose(self, request: ImageRequest) -> ImageRoutingDecision:
+    def choose(self, request: ImageRequest,
+               backend: str | None = None) -> ImageRoutingDecision:
         operation, reasons = self.infer_operation(request)
         required = self.required_capabilities(operation, request)
 
+        pool_models = self.models
+        if backend:
+            pool_models = [m for m in pool_models
+                           if (m.backend or "comfyui") == backend]
+            reasons.append(f"backend pool: {backend}")
+
         if request.model_override and request.model_override != "auto":
-            matches = [m for m in self.models if m.id == request.model_override]
+            matches = [m for m in pool_models if m.id == request.model_override]
+            if not matches:
+                matches = [m for m in self.models if m.id == request.model_override]
+                if matches and backend and (matches[0].backend or "comfyui") != backend:
+                    raise RuntimeError(
+                        f"Model override '{request.model_override}' runs on "
+                        f"'{matches[0].backend or 'comfyui'}', not '{backend}' — "
+                        "use Auto or pick a model on the selected backend")
             if not matches:
                 raise KeyError(f"Unknown image model override: {request.model_override}")
             chosen = matches[0]
             reasons.append("manual image-model override")
         else:
             candidates = []
-            for m in self.models:
+            for m in pool_models:
                 caps = set(m.capabilities)
                 if not all(cap in caps for cap in required if cap not in {"multi_reference", "transparency"}):
                     continue
@@ -182,7 +196,8 @@ class ImageRouter:
                     quality_score += 20 if m.speed_tier == "fast" else 0
                 candidates.append((fits, resource_score + quality_score + m.priority, m, resource_reason))
             if not candidates:
-                raise RuntimeError(f"No enabled image model supports: {', '.join(required)}")
+                scope = f" on backend '{backend}'" if backend else ""
+                raise RuntimeError(f"No enabled image model{scope} supports: {', '.join(required)}")
             fitting = [c for c in candidates if c[0]]
             pool = fitting or candidates
             # Fast/draft requests go to a fast-tier model when one can serve

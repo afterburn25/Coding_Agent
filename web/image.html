@@ -46,6 +46,11 @@
     <a class="mobile-back" href="/">← Chat</a>
     <header class="topbar">
       <div><strong>Image workspace</strong><span id="imageStatus">Local generation + editing</span></div>
+      <label>Backend
+        <select id="imageBackendSel" title="Auto routes each job to the best engine — InvokeAI for standard generation/editing, ComfyUI for custom workflows">
+          <option value="auto">Auto</option><option value="invokeai">InvokeAI</option><option value="comfyui">ComfyUI</option>
+        </select>
+      </label>
       <label>Model
         <select id="imageModel"><option value="auto">Auto</option></select>
       </label>
@@ -140,13 +145,16 @@
     </section>
   </main>
   <aside class="image-right">
-<div class="section-title">Backend</div>
-    <div id="imageBackend" class="inventory">Checking ComfyUI…</div>
+<div class="section-title">Backends</div>
+    <div id="imageBackend" class="inventory">Checking image backends…</div>
     <div id="imageSetup"></div>
-    <div class="side-actions"><button id="startImageBackend" class="mini-button">Start</button><button id="stopImageBackend" class="mini-button">Stop</button></div>
+    <div class="side-actions"><button id="startImageBackend" class="mini-button">Start</button><button id="stopImageBackend" class="mini-button">Stop</button><button id="installImageBackend" class="mini-button">Install</button></div>
     <div class="section-title">Image models & workflows</div>
     <div class="side-actions"><button id="verifyImageModels" class="mini-button">Verify all</button></div>
     <input id="workflowFile" type="file" accept="application/json,.json" hidden />
+    <select id="modelBackendFilter" class="side-filter" title="Filter models by engine">
+      <option value="">All backends</option><option value="invokeai">InvokeAI</option><option value="comfyui">ComfyUI</option>
+    </select>
     <div id="imageModels" class="models"></div>
     <div class="section-title">Installs</div>
     <div id="imageInstalls" class="inventory"></div>

@@ -23,12 +23,23 @@ def _conn_error(exc: BaseException, url: str, *, method: str = "GET") -> Backend
 
 
 class ComfyUIBackend(ImageBackend):
-    """Small dependency-free adapter for a local ComfyUI server API."""
+    """Small dependency-free adapter for a local ComfyUI server API.
+
+    ComfyUI can execute any operation a configured API workflow exists for
+    — its capability set is the full operation vocabulary; per-model
+    workflow availability is enforced upstream by the router/manager."""
+
+    name = "comfyui"
+    display_name = "ComfyUI"
 
     def __init__(self, endpoint: str = "http://127.0.0.1:8188", *, timeout: float = 10.0) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
         self.client_id = str(uuid.uuid4())
+
+    def capabilities(self) -> set[str]:
+        return {"text_to_image", "edit_image", "inpaint", "outpaint",
+                "remove_background", "upscale", "variation"}
 
     def _json(self, path: str, *, method: str = "GET", payload: dict | None = None) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")

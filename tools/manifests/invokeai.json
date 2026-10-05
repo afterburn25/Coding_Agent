@@ -1,0 +1,28 @@
+{
+  "id": "invokeai",
+  "name": "InvokeAI",
+  "version": "6.x",
+  "category": "images",
+  "description": "Local InvokeAI image-generation backend — the preferred primary engine for standard generation, editing, inpainting, and variations. Installs into a dedicated virtualenv under tools/InvokeAI so its pinned torch stack never conflicts with ComfyUI's embedded Python.",
+  "provider": "invoke-ai",
+  "supported_os": ["windows", "linux", "darwin"],
+  "requires_gpu": true,
+  "requires_network": true,
+  "permissions": ["packages.install"],
+  "capabilities": ["image_generation_backend", "invokeai_runtime"],
+  "process": "invokeai",
+  "dependencies": ["python >= 3.10"],
+  "install": {
+    "method": "venv",
+    "package": "invokeai",
+    "dest": "tools/InvokeAI",
+    "size_bytes": 6000000000
+  },
+  "detect": {
+    "files": [
+      "tools/InvokeAI/Scripts/invokeai-web.exe",
+      "tools/InvokeAI/bin/invokeai-web"
+    ]
+  },
+  "docs": "Pip install into a dedicated venv. InvokeAI's model downloads (~several GB each) are a separate step inside the Image workspace."
+}

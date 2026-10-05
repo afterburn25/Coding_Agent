@@ -421,7 +421,27 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 
 #### Local images
 
-- Modular `ImageBackend` interface.
+- Dual image backends behind one system: **InvokeAI** (preferred primary for
+  standard generation/editing) and **ComfyUI** (advanced/custom workflows,
+  fallback) — never a duplicated pipeline.
+- Modular `ImageBackend` contract with `capabilities()` + `models()`.
+- `InvokeAIBackend` — REST adapter over `/api/v1` (health, model registry,
+  image upload, `enqueue_graph` jobs, status polling, download, cancel).
+- `InvokeAIRuntime` — managed lifecycle (discovery across configured dir /
+  `{app}/tools/InvokeAI` venv / managed-python Scripts / PATH, orphan
+  reclaim, idle eviction).
+- Backend router — Auto prefers InvokeAI for standard ops, ComfyUI for
+  custom-workflow ops, with honest recorded fallback; `backend_override`
+  pins an engine explicitly; `ImageJob.backend` persists which ran.
+- Unified model registry — InvokeAI's live models merge into the router
+  pool as `invokeai:<key>` profiles; `classify_model()` assigns
+  capability/restriction metadata (adult_capable, local_unfiltered_model,
+  …) that is descriptive only and never weakens safety gates.
+- Per-backend sampling learning (`backend|family|op` keys).
+- `venv` tool-install method for InvokeAI (isolated env, disk check,
+  permission-gated, job-tracked).
+- Image UI — backend selector (Auto/InvokeAI/ComfyUI), dual health cards,
+  per-backend install/start/stop, engine/capability/restriction model tags.
 - ComfyUI HTTP adapter.
 - Optional managed ComfyUI process runtime with health/start/stop/recovery.
 - Image model profiles and local weight discovery.

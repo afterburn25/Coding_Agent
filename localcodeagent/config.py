@@ -277,6 +277,18 @@ class AgentConfig:
     comfyui_logs_dir: str = ".agent/runtime"
     comfyui_startup_timeout: int = 300
     comfyui_idle_unload_seconds: float = 900.0
+    # Image backend preference — "auto" lets the router pick the best
+    # engine per request; "invokeai"/"comfyui" pin every job to one engine.
+    image_backend: str = "auto"
+    invokeai_endpoint: str = "http://127.0.0.1:9090"
+    invokeai_auto_start: bool = False
+    invokeai_start_on_image_request: bool = True
+    invokeai_dir: str = ""
+    invokeai_python: str = ""
+    invokeai_extra_args: list[str] = field(default_factory=list)
+    invokeai_logs_dir: str = ".agent/runtime"
+    invokeai_startup_timeout: int = 300
+    invokeai_idle_unload_seconds: float = 900.0
     image_resource_mode: str = "balanced"
     image_restore_chat_model: bool = True
     image_auto_run_jobs: bool = True
