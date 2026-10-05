@@ -114,8 +114,11 @@ user meaning → IntentEnvelope/ActiveContext → SemanticResponse (WHAT)
   `/personality/speech-preview` with per-line delivery plan details,
   plus a genome-summary chip row. `create_custom`/`patch_custom` POST
   actions accept `speech_genome` overrides.
-- Voice: `pace` is applied; emphasis_spans/warmth/energy remain
-  documented hints until the TTS engine exposes controls.
+- Voice: `pace` → job speed; `energy`/`warmth`/`emphasis_level` map to
+  bounded per-utterance pitch/gain deltas (±1 st / ±3 dB via
+  `VoiceManager._delivery_preset`). emphasis_spans/pause_hint/
+  nonverbal_rate/register remain documented hints until the TTS
+  engine exposes controls.
 - Long-session UI soak + real-voice dogfood on the installed app.
 
 

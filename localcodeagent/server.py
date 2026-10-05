@@ -6981,7 +6981,8 @@ class Handler(BaseHTTPRequestHandler):
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                        apply_personality=False)
+                        apply_personality=False,
+                        delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",
@@ -7021,7 +7022,8 @@ class Handler(BaseHTTPRequestHandler):
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                        apply_personality=False)
+                        apply_personality=False,
+                        delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",
@@ -7029,7 +7031,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 out = voice.speak_text(
                     text, preset_id=body.get("preset_id") or None,
-                    auto_filter=True)
+                    auto_filter=True, delivery=body.get("delivery"))
                 self._json(out)
                 return
             if path == "/api/voice/config":

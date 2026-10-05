@@ -25,16 +25,17 @@ from .vocalizations import VocalizationEngine, adapter_for
 
 class SpeechJob:
     __slots__ = ("job_id", "task_id", "seq", "text", "preset_id", "speed",
-                 "cancelled", "created_at", "events", "priority")
+                 "delivery", "cancelled", "created_at", "events", "priority")
 
     def __init__(self, task_id: str, seq: int, text: str, preset_id: str,
-                 speed: float) -> None:
+                 speed: float, delivery: dict | None = None) -> None:
         self.job_id = uuid.uuid4().hex[:16]
         self.task_id = task_id
         self.seq = seq
         self.text = text
         self.preset_id = preset_id
         self.speed = speed
+        self.delivery = delivery or {}
         self.cancelled = False
         self.created_at = time.time()
         self.events: list[dict] = []
@@ -231,9 +232,10 @@ class VoiceManager:
         fully skipped), fall back to a filtered one-shot of final_text.
 
         ``delivery`` is a SpeechDeliveryPlan dict from the persona speech
-        genome — the voice layer consumes what it supports (``pace`` →
-        job speed); unsupported characteristics are documented hints,
-        never fabricated."""
+        genome — the voice layer consumes what the engine can express
+        (``pace`` → job speed; ``energy``/``warmth``/``emphasis_level`` →
+        bounded per-utterance pitch/gain deltas); characteristics with no
+        engine control are documented hints, never fabricated."""
         streamer = self._streamers.pop(task_id, None)
         pace = 1.0
         try:
@@ -247,7 +249,8 @@ class VoiceManager:
                 n_emitted = streamer.emitted_count if streamer else 0
                 if streamer:
                     for sent in streamer.flush():
-                        self.enqueue(task_id, sent, speed=pace)
+                        self.enqueue(task_id, sent, speed=pace,
+                                     delivery=delivery)
                 if n_emitted == 0 and final_text and self.mode() in {
                         "responses", "responses_activity"}:
                     spoken = self.filter.filter(final_text)
@@ -255,7 +258,8 @@ class VoiceManager:
                         for sent in _split_sentences(spoken):
                             for part in split_for_speech(sent):
                                 self.enqueue(task_id, part,
-                                             speed=pace)
+                                             speed=pace,
+                                             delivery=delivery)
         finally:
             try:
                 self.vocal.end_task(task_id)
@@ -265,6 +269,7 @@ class VoiceManager:
     # -- queue --------------------------------------------------------------
     def enqueue(self, task_id: str, text: str, *,
                 preset_id: str | None = None, speed: float = 1.0,
+                delivery: dict | None = None,
                 priority: bool = False,
                 vocalize: bool = True) -> SpeechJob | None:
         """vocalize=False skips vocalization resolution — for
@@ -292,7 +297,7 @@ class VoiceManager:
             job = SpeechJob(task_id, seq, text,
                             preset_id or (self.current_preset().id
                                           if self.current_preset() else ""),
-                            speed)
+                            speed, delivery=delivery)
             job.events = events
             if priority:
                 # Ahead of normal jobs but behind earlier priority jobs —
@@ -365,9 +370,12 @@ class VoiceManager:
 
     def speak_text(self, text: str, *, preset_id: str | None = None,
                    speed: float = 1.0, auto_filter: bool = True,
-                   task_id: str = "") -> dict[str, Any]:
+                   task_id: str = "",
+                   delivery: dict | None = None) -> dict[str, Any]:
         """Direct (non-queued) speak: filter → synth → returns audio id.
-        Used by per-message replay, preview and tools."""
+        Used by per-message replay, preview and tools. ``delivery``
+        accepts a speech-genome delivery plan so previews can audition
+        persona pacing/energy/warmth honestly."""
         if not self.enabled():
             raise VoiceEngineError("voice subsystem is disabled")
         preset = self.presets.get(preset_id) if preset_id else self.current_preset()
@@ -383,7 +391,8 @@ class VoiceManager:
                 ctx=self._persona_ctx()).speech_text
         if not spoken:
             raise VoiceEngineError("nothing speakable in the provided text")
-        pcm, sr, seg = self._synthesize(spoken, preset, speed)
+        pcm, sr, seg = self._synthesize(spoken, preset, speed,
+                                      delivery=delivery)
         seg_id = self._register_segment(seg, task_id or "manual")
         return {"ok": True, "segment_id": seg_id, "url": f"/api/voice/audio/{seg_id}",
                 "seconds": round(pcm.shape[0] / sr, 2), "preset_id": preset.id,
@@ -421,7 +430,8 @@ class VoiceManager:
             if preset is None:
                 continue
             try:
-                pcm, sr, seg_path = self._synthesize(job.text, preset, job.speed)
+                pcm, sr, seg_path = self._synthesize(
+                    job.text, preset, job.speed, delivery=job.delivery)
             except VoiceEngineError as exc:
                 self._publish("voice", {"event": "error", "task_id": job.task_id,
                                         "seq": job.seq, "error": str(exc)[:200]})
@@ -481,8 +491,46 @@ class VoiceManager:
             speed = max(0.5, min(2.0, float(speed) * float(vmap["speed"])))
         return preset, speed
 
+    def _delivery_preset(self, preset: VoicePreset,
+                         delivery: dict) -> VoicePreset:
+        """Fold speech-genome delivery-plan characteristics the engine
+        can express into a per-utterance preset variant.
+
+        ``pace`` rides the job's speed (set in ``finish_task``); here
+        ``energy``/``warmth``/``emphasis_level`` become small bounded
+        pitch/gain deltas around neutral 0.5 so the persona voice
+        signature stays intact. ``pause_hint``/``emphasis_spans``/
+        ``nonverbal_rate``/``register``/``seriousness`` have no engine
+        control and remain documented hints — never faked."""
+        if not isinstance(delivery, dict) or not delivery:
+            return preset
+
+        def _norm(key: str, default: float = 0.5) -> float:
+            try:
+                return max(0.0, min(1.0, float(delivery.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        energy = _norm("energy")
+        warmth = _norm("warmth")
+        emphasis = _norm("emphasis_level", 0.0)
+        d_pitch = ((energy - 0.5) * 1.0 - (warmth - 0.5) * 0.6
+                   + emphasis * 0.2)
+        d_gain = (energy - 0.5) * 4.0 + emphasis * 1.2
+        d_pitch = max(-1.0, min(1.0, d_pitch))
+        d_gain = max(-3.0, min(3.0, d_gain))
+        if abs(d_pitch) < 0.05 and abs(d_gain) < 0.15:
+            return preset
+        raw = preset.as_dict()
+        raw["pitch_semitones"] = (float(getattr(preset, "pitch_semitones", 0.0))
+                                  + d_pitch)
+        raw["output_gain_db"] = (float(getattr(preset, "output_gain_db", 0.0))
+                                 + d_gain)
+        return VoicePreset.from_dict(raw)
+
     def _synthesize(self, text: str, preset: VoicePreset, speed: float,
-                    *, apply_personality: bool = True):
+                    *, apply_personality: bool = True,
+                    delivery: dict | None = None):
         """Full pipeline → stereo WAV on disk. Returns (pcm, sr, path)."""
         if apply_personality:
             try:
@@ -492,6 +540,7 @@ class VoiceManager:
                 vmap = {}
             if vmap:
                 preset, speed = self._apply_delivery(preset, speed, vmap)
+        preset = self._delivery_preset(preset, delivery or {})
         overrides = getattr(preset, "pronunciation_overrides", None) or {}
         if overrides:
             # Per-preset token rewrites — same expansion style as the

@@ -276,9 +276,14 @@ cue to one of 34 acts; canned lanes keep their own act.
 - `SpeechDeliveryPlan`: pace (genome vocal bias + tempo − serious
   slowdown), energy (mirrored user energy), warmth, emphasis_spans
   (= exact_spans), pause density, seriousness, act, register,
-  nonverbal rate, sarcasm — handed to `voice.finish_task(delivery=)`
-  which applies `pace` today; the rest are documented hints until the
-  engine exposes controls.
+  nonverbal rate, sarcasm — handed to `voice.finish_task(delivery=)`.
+  The voice layer consumes what the engine can express: `pace` → job
+  speed; `energy`/`warmth`/`emphasis_level` → bounded per-utterance
+  pitch/gain deltas (±1 semitone / ±3 dB around neutral 0.5) so a
+  hyper persona sounds slightly brighter and a warm one slightly
+  softer without wiping the preset signature. `emphasis_spans`,
+  `pause_hint`, `nonverbal_rate`, `register`, `seriousness` remain
+  documented hints until the engine exposes controls.
 
 `RenderedReply` reports `opening_family`/`closing_family`/
 `micro_reaction`/`used_address`/`repeat_index`/`genome_rendered` for
