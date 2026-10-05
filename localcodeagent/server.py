@@ -5201,9 +5201,9 @@ class AppState:
     def uninstall_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Remove a manifest tool (tracked job).
 
-        Archive installs delete their payload directory; package-manager
-        installs run the manager's own remove command. Tools without an
-        automatable removal report manual instructions.
+        Archive and virtualenv installs delete their payload directory;
+        package-manager installs run the manager's own remove command.
+        Tools without an automatable removal report manual instructions.
         """
         from .tools.plugins import uninstall_command
 
@@ -5215,7 +5215,8 @@ class AppState:
             spec = self.tools.get(match["name"])
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
-        is_archive = str(install.get("method") or "").strip().lower() == "archive"
+        is_archive = str(install.get("method") or "").strip().lower() \
+            in ("archive", "venv")
         cmd = None if is_archive else uninstall_command(
             install, install_root=self.runtime.base_dir)
         if not is_archive and cmd is None:

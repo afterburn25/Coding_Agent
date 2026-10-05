@@ -131,6 +131,7 @@ class ProvisioningManager:
         self._paused = False
         self._scheduler: threading.Thread | None = None
         self._active: set[str] = set()
+        self._last_reconcile = 0.0
         self._cap_events: dict[str, threading.Event] = {}
         # Hooks wired by the server: UI event fan-out, notification, voice,
         # and capability-ready (waiting_for_capability drains).
@@ -188,6 +189,24 @@ class ProvisioningManager:
             kind="tool", priority=60, provides="image_generation",
             est_bytes=2 * _GB, est_disk_bytes=4 * _GB, heavy=True,
             payload={"tool_id": "comfyui"}))
+        # Configured ComfyUI-side image model profiles — the full set, after
+        # the InvokeAI fleet. Pure weight downloads into models/image/.
+        try:
+            profiles = list(getattr(self.config, "image_models", []) or [])
+        except Exception:
+            profiles = []
+        for idx, profile in enumerate(profiles):
+            if not getattr(profile, "enabled", True):
+                continue
+            size = sum(int(c.get("size_bytes") or 0)
+                       for c in (getattr(profile, "components", None) or []))
+            items.append(ProvisionItem(
+                id=f"imagemodel-{profile.id}",
+                label=f"{profile.display_name or profile.id} (image model)",
+                kind="image_model", priority=70 + idx * 10,
+                depends_on=["comfyui"], provides="image_model",
+                est_bytes=size, est_disk_bytes=size + 64 * 1024 ** 2,
+                heavy=True, payload={"model_id": profile.id}))
         return items
 
     def _load(self) -> None:
@@ -255,6 +274,17 @@ class ProvisioningManager:
                 # Verified at install time; re-checking requires a live
                 # backend, so trust the persisted verification.
                 pass
+            elif it.kind == "image_model":
+                # Weight files only — a cheap disk existence re-check.
+                try:
+                    manager = self.image_manager
+                    profile = manager.router.get_profile(
+                        str(it.payload.get("model_id") or ""))
+                    if not manager.library.verify_model(profile).get("installed"):
+                        it.state, it.verified = "waiting", False
+                        it.detail = "components missing — requeued"
+                except Exception:
+                    pass
 
     def _voice_asset_dir(self) -> Path:
         configured = Path(str(getattr(
@@ -391,6 +421,7 @@ class ProvisioningManager:
                     self._wake.wait(2.0)
                     self._wake.clear()
                     continue
+                self._reconcile()
                 dispatched = self._dispatch()
                 self._check_all_done()
                 self._wake.wait(1.0 if dispatched else 5.0)
@@ -400,6 +431,68 @@ class ProvisioningManager:
                 # must never kill the scheduler — back off and retry.
                 self._wake.wait(15.0)
                 self._wake.clear()
+
+    def _reconcile(self) -> None:
+        """Heal terminal states when ground truth changed under us.
+
+        A tool marked failed/cancelled whose payload now detects on disk is
+        completed outright (a verification-time miss must not strand its
+        dependents forever), and items skipped because a dependency failed
+        requeue once every dependency is satisfied. Failed work also earns
+        one bounded requeue per boot while attempts remain — a detection
+        race (AV holding a fresh exe) must never wedge the whole plan.
+        Rate-limited: detection probes are cheap but not free."""
+        now = time.time()
+        if now - self._last_reconcile < 15.0:
+            return
+        self._last_reconcile = now
+        completed: list[ProvisionItem] = []
+        changed = False
+        with self._lock:
+            for it in self._items.values():
+                if it.kind == "tool" and it.state in {"failed", "cancelled"}:
+                    tool_id = str(it.payload.get("tool_id") or it.id)
+                    try:
+                        ok = bool(self._tool_installed
+                                  and self._tool_installed(tool_id))
+                    except Exception:
+                        ok = False
+                    if ok:
+                        it.state = "completed"
+                        it.verified = True
+                        it.error_code = it.error_message = ""
+                        it.detail = "detected installed on disk"
+                        it.finished_at = now
+                        completed.append(it)
+                        changed = True
+            for it in self._items.values():
+                if it.state != "skipped":
+                    continue
+                deps = [self._items.get(d) for d in it.depends_on]
+                if deps and all(d is not None and d.state == "completed"
+                                for d in deps):
+                    it.state = "waiting"
+                    it.detail = "requeued — dependency now satisfied"
+                    changed = True
+            auto_retry = bool(getattr(
+                self.config, "provisioning_auto_retry", True))
+            if auto_retry:
+                for it in self._items.values():
+                    if it.state != "failed" or it.attempts >= MAX_ATTEMPTS:
+                        continue
+                    deps = [self._items.get(d) for d in it.depends_on]
+                    if deps and not all(d is not None
+                                        and d.state == "completed"
+                                        for d in deps):
+                        continue
+                    it.state = "waiting"
+                    it.detail = f"requeued for retry ({it.attempts}/{MAX_ATTEMPTS})"
+                    it.next_retry_at = 0.0
+                    changed = True
+            if changed:
+                self._save()
+        for it in completed:
+            self._finish_lifecycle(it)
 
     def _dispatch(self) -> bool:
         now = time.time()
@@ -465,6 +558,8 @@ class ProvisioningManager:
                 self._run_tool(it)
             elif it.kind == "invokeai_model":
                 self._run_invokeai_model(it)
+            elif it.kind == "image_model":
+                self._run_image_model(it)
             else:
                 raise ValueError(f"unknown provision kind '{it.kind}'")
             self._finish(it, verified=True)
@@ -633,6 +728,50 @@ class ProvisioningManager:
             time.sleep(2.0)
         raise RuntimeError("model installed but not enumerable by backend")
 
+    def _run_image_model(self, it: ProvisionItem) -> None:
+        """Download a configured ComfyUI-side model profile's components.
+        Pure file downloads through ImageAssetLibrary — no live backend."""
+        manager = self.image_manager
+        if manager is None:
+            raise RuntimeError("image manager not wired")
+        model_id = str(it.payload.get("model_id") or "")
+        try:
+            profile = manager.router.get_profile(model_id)
+        except Exception as exc:
+            raise RuntimeError(f"unknown image model profile '{model_id}'") from exc
+        if manager.library.verify_model(profile).get("installed"):
+            return  # already on disk — _finish records verification
+        job = manager.start_model_install(model_id)
+        job_id = str(job.get("id") or "")
+        while not self._stop.is_set():
+            self._check_cancel(it)
+            row = next((j for j in manager.library.install_jobs()
+                        if j.get("id") == job_id), None)
+            if row is None:
+                raise RuntimeError("image model install job disappeared")
+            it.progress = {
+                "bytes_done": None,
+                "bytes_total": it.est_bytes or None,
+                "current_file": str(row.get("current_file") or ""),
+                "job_status": str(row.get("state") or ""),
+                "fraction": row.get("progress", 0.0),
+            }
+            it.detail = str(row.get("state") or "downloading")
+            self._emit(it, "progress")
+            state = str(row.get("state") or "")
+            if state == "finished":
+                break
+            if state in {"failed", "cancelled"}:
+                if state == "cancelled":
+                    raise _ProvisionCancelled()
+                raise RuntimeError(str(row.get("error") or "download failed"))
+            time.sleep(2.0)
+        else:
+            raise _ProvisionCancelled()
+        if not manager.library.verify_model(profile).get("installed"):
+            raise RuntimeError(
+                "model download finished but required components are missing")
+
     # ------------------------------------------------------------ transitions
 
     def _check_cancel(self, it: ProvisionItem) -> None:
@@ -655,6 +794,11 @@ class ProvisioningManager:
             it.finished_at = time.time()
             it.detail = "verified"
             self._save()
+        self._finish_lifecycle(it)
+
+    def _finish_lifecycle(self, it: ProvisionItem) -> None:
+        """Capability unlock + notification for a completion — whether the
+        item just ran to completion or was healed by reconciliation."""
         if self.capabilities is not None:
             try:
                 self.capabilities.invalidate()

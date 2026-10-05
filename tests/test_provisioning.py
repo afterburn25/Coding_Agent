@@ -394,5 +394,142 @@ class WaitForCapabilityTests(unittest.TestCase):
             self.assertEqual(result, [True])
 
 
+class ReconcileTests(unittest.TestCase):
+    """Terminal-state healing: a failed tool that now detects on disk is
+    completed, and items skipped over a failed dependency requeue once the
+    dependency is satisfied."""
+
+    def test_failed_tool_now_detected_completes_and_unskips_dependents(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            installed = []
+            m = _manager(root, tool_installed_hook=lambda tid: tid in installed)
+            invokeai = m._items["invokeai"]
+            invokeai.state = "failed"
+            invokeai.error_code = "install_failed"
+            invokeai.error_message = "not detected on disk"
+            invokeai.attempts = 1
+            for iid in ("model-juggernaut-xl-v9", "model-cyberrealistic-xl-v9",
+                        "model-realvisxl-v5"):
+                dep = m._items[iid]
+                dep.state = "skipped"
+                dep.detail = "dependency did not install"
+            installed.append("invokeai")
+            m._reconcile()
+            self.assertEqual(invokeai.state, "completed")
+            self.assertTrue(invokeai.verified)
+            for iid in ("model-juggernaut-xl-v9", "model-cyberrealistic-xl-v9",
+                        "model-realvisxl-v5"):
+                self.assertEqual(m._items[iid].state, "waiting", iid)
+
+    def test_failed_tool_still_missing_stays_failed_after_attempts(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td), tool_installed_hook=lambda tid: False)
+            it = m._items["invokeai"]
+            it.state = "failed"
+            it.attempts = MAX_ATTEMPTS
+            m._reconcile()
+            self.assertEqual(it.state, "failed")
+
+    def test_failed_tool_under_attempt_cap_requeues_for_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td), tool_installed_hook=lambda tid: False)
+            it = m._items["invokeai"]
+            it.state = "failed"
+            it.attempts = 1
+            m._reconcile()
+            self.assertEqual(it.state, "waiting")
+            self.assertEqual(it.next_retry_at, 0.0)
+
+    def test_skipped_item_without_satisfied_deps_stays_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td), tool_installed_hook=lambda tid: False)
+            dep = m._items["model-juggernaut-xl-v9"]
+            dep.state = "skipped"
+            dep.detail = "dependency did not install"
+            m._items["invokeai"].state = "failed"
+            m._items["invokeai"].attempts = MAX_ATTEMPTS
+            m._reconcile()
+            self.assertEqual(dep.state, "skipped")
+
+    def test_auto_retry_disabled_keeps_failed_terminal(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _config(provisioning_auto_retry=False)
+            m = ProvisioningManager(
+                Path(td), cfg,
+                image_manager=SimpleNamespace(
+                    invokeai_runtime=SimpleNamespace(ensure_ready=lambda: None),
+                    invokeai_backend=None),
+                tool_installed_hook=lambda tid: False)
+            it = m._items["invokeai"]
+            it.state = "failed"
+            it.attempts = 1
+            m._reconcile()
+            self.assertEqual(it.state, "failed")
+
+
+class ComfyImageModelItemTests(unittest.TestCase):
+    """The configured ComfyUI image model profiles join the post-install
+    download plan after the ComfyUI runtime item."""
+
+    def _profiles(self):
+        return [SimpleNamespace(
+            id="juggernaut-x-v10", display_name="Juggernaut X v10",
+            enabled=True,
+            components=[{"size_bytes": 7105348672, "required": True}]),
+            SimpleNamespace(
+            id="flux2-klein-4b", display_name="FLUX.2 Klein 4B",
+            enabled=False,
+            components=[{"size_bytes": 100, "required": True}])]
+
+    def test_plan_includes_enabled_comfy_models_after_comfyui(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = _config(image_models=self._profiles())
+            m = ProvisioningManager(
+                Path(td), cfg,
+                image_manager=SimpleNamespace(
+                    invokeai_runtime=SimpleNamespace(ensure_ready=lambda: None),
+                    invokeai_backend=None))
+            items = m._items
+            self.assertIn("imagemodel-juggernaut-x-v10", items)
+            self.assertNotIn("imagemodel-flux2-klein-4b", items)  # disabled
+            jug = items["imagemodel-juggernaut-x-v10"]
+            self.assertEqual(jug.depends_on, ["comfyui"])
+            self.assertEqual(jug.est_bytes, 7105348672)
+            self.assertGreater(items["comfyui"].priority, 0)
+            self.assertGreater(jug.priority, items["comfyui"].priority)
+
+    def test_image_model_download_verify_and_finish(self):
+        job = {"id": "j1", "state": "queued", "progress": 0.0,
+               "current_file": "", "error": ""}
+
+        class FakeLibrary:
+            def __init__(self):
+                self.calls = 0
+            def verify_model(self, profile):
+                return {"installed": job["state"] == "finished"}
+            def install_jobs(self):
+                return [job]
+
+        class FakeManager:
+            def __init__(self):
+                self.router = SimpleNamespace(
+                    get_profile=lambda mid: SimpleNamespace(id=mid))
+                self.library = FakeLibrary()
+            def start_model_install(self, model_id, repair=False):
+                job["state"] = "downloading"
+                job["state"] = "finished"
+                return dict(job)
+
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td), image_manager=FakeManager())
+            it = _item("imagemodel-x", kind="image_model",
+                       payload={"model_id": "x"})
+            m._items = {"imagemodel-x": it}
+            m._run_item("imagemodel-x")
+            self.assertEqual(it.state, "completed")
+            self.assertTrue(it.verified)
+
+
 if __name__ == "__main__":
     unittest.main()
