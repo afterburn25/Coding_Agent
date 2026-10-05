@@ -177,6 +177,13 @@ async function boot() {
   audio = new AudioEngine(manifest, { disabled: params.has('silent') });
   voice = new VoiceChannel(audio);
   if (params.has('volume')) audio.setVolume(clamp(Number(params.get('volume')) || manifest.defaultVolume));
+  // Host-seeded progress — the bar continues from the position the
+  // warm-up frame already showed; without it the first paint falls back
+  // to clock.time/duration and the loader visibly restarts at zero.
+  if (params.has('p')) {
+    externalProgress = { value: clamp(Number(params.get('p')) || 0),
+      primary: params.get('t1') || undefined, secondary: params.get('t2') || undefined };
+  }
   for (const button of document.querySelectorAll('[data-recovery-action]'))
     button.onclick = () => host({ type: 'recovery-action', action: button.dataset.recoveryAction });
   window.chrome?.webview?.addEventListener('message', e => handleHost(e.data));
