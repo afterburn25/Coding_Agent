@@ -655,6 +655,20 @@ body[data-gesture="look_away"] .nexus-presence > img {
   background:url('/assets/nexus-core-icon.png') center/contain no-repeat;
 }
 
+/* Real portrait replaces the logo: round like the user avatar, face
+   centered, image shrunk to fill the frame — and no logo on top of it. */
+.message.assistant .role.has-avatar {
+  border-radius:50%;
+  overflow:hidden;
+  background-position:center;
+  background-size:cover;
+  box-shadow:0 0 13px rgba(57,83,255,.28);
+}
+
+.message.assistant .role.has-avatar:after {
+  display:none;
+}
+
 .message.user {
   grid-template-columns:minmax(0,1fr) 42px;
 }

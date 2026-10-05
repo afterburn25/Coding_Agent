@@ -187,7 +187,7 @@ function imageGalleryFor(afterEl){
   if(host&&host.classList&&host.classList.contains('image-gallery-host'))return host.querySelector('.image-gallery');
   const wrap=document.createElement('div');
   wrap.className='message assistant image-result image-gallery-host';
-  wrap.innerHTML='<div class="role">IMAGE</div><div class="bubble image-job-card"><div class="image-gallery"><div class="gallery-main"><div class="gallery-viewport"></div><div class="gallery-caption"></div></div><div class="gallery-thumbs"></div></div></div>';
+  wrap.innerHTML='<div class="role has-avatar" style="background-image:url(\'/api/nexus/avatar?size=64\')"></div><div class="bubble image-job-card"><div class="image-gallery"><div class="gallery-main"><div class="gallery-viewport"></div><div class="gallery-caption"></div></div><div class="gallery-thumbs"></div></div></div>';
   if(afterEl)afterEl.insertAdjacentElement('afterend',wrap);else chat.appendChild(wrap);
   return wrap.querySelector('.image-gallery');
 }
@@ -293,7 +293,7 @@ function nexusThinkingPhase(state,phase,model='',elapsed=0){
 function beginAssistantStream(){
   const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();
   const wrap=document.createElement('div');wrap.className='message assistant streaming';
-  wrap.innerHTML='<div class="role">assistant</div><div class="bubble">'+nexusThinkingMarkup()+'</div>';
+  wrap.innerHTML='<div class="role has-avatar" style="background-image:url(\'/api/nexus/avatar?size=64\')"></div><div class="bubble">'+nexusThinkingMarkup()+'</div>';
   chat.appendChild(wrap);scrollChat(true);
   const bubble=wrap.querySelector('.bubble');
   const state={wrap,bubble,hud:bubble.querySelector('.nexus-thinking-hud'),summary:bubble.querySelector('.nexus-thinking-summary'),list:bubble.querySelector('.nexus-thinking-list'),telemetry:bubble.querySelector('.nexus-thinking-telemetry'),text:bubble.querySelector('.nexus-response-text'),steps:[],lastPhase:'',receivedToken:false,result:null,error:null,lastTask:null,pendingText:'',flushScheduled:false,awaitingVoice:false,voiceHoldTimer:null,startedAt:Date.now()/1000,requestMessage:''};

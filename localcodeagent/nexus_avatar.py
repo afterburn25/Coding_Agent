@@ -32,6 +32,14 @@ PORTRAIT_NAMES = ("nexus-portrait.webp", "nexus-portrait.png",
 FALLBACK_NAME = "nexus-core-icon.png"
 CACHE_DIR = "nexus_avatar"
 
+# Face-focused crop for chat avatars. The canonical portrait is a bust
+# render — face in the upper-center — so a plain center-crop leaves the
+# avatar mostly neck/shoulders/background. Crop a square biased toward
+# the face instead, matching how a user profile photo is framed.
+FACE_CROP_SCALE = 0.72   # crop square side, as a fraction of min(w, h)
+FACE_CENTER_Y = 0.36     # face center, as a fraction of image height
+DERIV_VERSION = 2        # bump when the crop recipe changes (cache stamp)
+
 # Semantic states a future animation/variant layer may key on. Keep this
 # vocabulary stable — UI/CSS and the gesture engine already speak it.
 EXPRESSION_STATES = (
@@ -125,7 +133,7 @@ class NexusAvatar:
         self.cache_root.mkdir(parents=True, exist_ok=True)
         size = max(16, min(1024, int(size)))
         out = self.cache_root / f"portrait-{size}.webp"
-        stamp = f"{self._portrait_mtime}-{size}"
+        stamp = f"v{DERIV_VERSION}-{self._portrait_mtime}-{size}"
         stamp_path = self.cache_root / f"portrait-{size}.stamp"
         try:
             if out.is_file() and stamp_path.is_file() and \
@@ -134,8 +142,15 @@ class NexusAvatar:
             im = Image.open(src).convert("RGB")
             w, h = im.size
             side = min(w, h)
-            im = im.crop(((w - side) // 2, (h - side) // 2,
-                          (w + side) // 2, (h + side) // 2))
+            crop = int(side * FACE_CROP_SCALE)
+            if crop < side:
+                cx, cy = w // 2, int(h * FACE_CENTER_Y)
+                left = min(max(0, cx - crop // 2), w - crop)
+                top = min(max(0, cy - crop // 2), h - crop)
+                im = im.crop((left, top, left + crop, top + crop))
+            else:
+                im = im.crop(((w - side) // 2, (h - side) // 2,
+                              (w + side) // 2, (h + side) // 2))
             im = im.resize((size, size), Image.LANCZOS)
             mask = Image.new("L", (size, size), 0)
             ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
