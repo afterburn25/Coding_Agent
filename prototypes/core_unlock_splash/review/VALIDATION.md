@@ -105,3 +105,17 @@ Reproduce with `./tools/verify.ps1 -Native` from the prototype folder. The scrip
 does not start Nexus, contact a backend, change global audio settings or alter
 production startup. Fault tests use a disposable distribution copy; no source
 assets are deleted.
+
+## Full-core glow follow-up — 2026-10-05
+
+The sphere and its plasma/light layers now expand with charge to fill the
+reactor aperture. Updated captures 05–10 show charging, online, reduced motion,
+full-power hold, instability and power collapse. The other twelve captures
+remain byte-identical, including closed mechanics and contained recovery.
+
+Validation rerun for this renderer-only change: all 46 Node tests passed;
+Release build and Windows x64 publish succeeded with no warnings or errors;
+native silent normal playback passed 14 checks and native silent failure/recovery
+passed 26 checks. Online and instability captures were visually reviewed. Audio
+sources, timing, gates and host behavior were not edited; audible playback and
+the full fallback matrix were not rerun for this visual change.
