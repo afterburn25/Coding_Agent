@@ -1081,6 +1081,11 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
+            // Online linger: hold the completed "CORE SYSTEMS · ONLINE"
+            // frame for a beat so the ready state actually registers
+            // before the app takes over.
+            await Task.Delay(2000);
+
             // Voice gate: the splash stays up until the last startup
             // narration has ACTUALLY finished playing (voice-ended ack, not
             // message-posted) plus a 2-second quiet buffer — then the main
