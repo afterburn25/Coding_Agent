@@ -754,7 +754,16 @@ internal sealed class StartupProgress
             if (_logDir is not null)
             {
                 Directory.CreateDirectory(_logDir);
-                File.AppendAllText(Path.Combine(_logDir, "backend-host.log"), $"{DateTimeOffset.Now:O} [STARTUP] {line}{Environment.NewLine}");
+                // ReadWrite share — BackendProcess's stdout writer holds
+                // this file open; a plain AppendAllText collides and the
+                // timing line is silently lost.
+                using (var fs = new FileStream(
+                    Path.Combine(_logDir, "backend-host.log"),
+                    FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                using (var sw = new StreamWriter(fs))
+                {
+                    sw.Write($"{DateTimeOffset.Now:O} [STARTUP] {line}{Environment.NewLine}");
+                }
             }
             System.Diagnostics.Debug.WriteLine(line);
 

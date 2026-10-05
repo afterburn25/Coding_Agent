@@ -751,7 +751,13 @@ internal sealed class BackendProcess : IDisposable
         _process = process;
         _requestedPort = port;
         LogPath = logPath;
-        _logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true) { AutoFlush = true });
+        // FileShare.ReadWrite — AppendHostLog/NoteStartup and the startup
+        // diagnostics append to the SAME file from outside this writer.
+        // The default share mode made every one of those appends throw a
+        // sharing violation that was silently swallowed, hiding narration
+        // delivery and [STARTUP] diagnostics entirely.
+        var logStream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        _logWriter = TextWriter.Synchronized(new StreamWriter(logStream) { AutoFlush = true });
 
         _process.EnableRaisingEvents = true;
         _process.OutputDataReceived += (_, e) =>
@@ -934,8 +940,10 @@ internal sealed class BackendProcess : IDisposable
         {
             try
             {
+                var fs = new FileStream(
+                    LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
                 _logWriter = TextWriter.Synchronized(
-                    new StreamWriter(LogPath, append: true) { AutoFlush = true });
+                    new StreamWriter(fs) { AutoFlush = true });
             }
             catch { }
         }
@@ -948,9 +956,14 @@ internal sealed class BackendProcess : IDisposable
     {
         try
         {
-            File.AppendAllText(
-                logPath,
-                $"{DateTimeOffset.Now:O} [HOST] {line}{Environment.NewLine}");
+            // ReadWrite share — BackendProcess holds this file open for the
+            // backend stdout writer; a Read-share open here collides with
+            // that Write handle and every line is lost to a sharing
+            // violation (silently, by the catch below).
+            using var fs = new FileStream(
+                logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var sw = new StreamWriter(fs);
+            sw.Write($"{DateTimeOffset.Now:O} [HOST] {line}{Environment.NewLine}");
         }
         catch
         {
