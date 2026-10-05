@@ -1622,6 +1622,20 @@ class AutonomousSupervisor:
                     old["state"] = "superseded"
                     old["resolved_at"] = now
             self.store.approvals.data["approvals"].append(row)
+            # Resolved rows are audit history, not working state — keep
+            # 7 days / newest 200 so unattended installs stay bounded.
+            # Pending rows are never pruned.
+            rows = self.store.approvals.data["approvals"]
+            pending = [r for r in rows if r.get("state") == "pending"]
+            resolved = [r for r in rows if r.get("state") != "pending"]
+            resolved.sort(key=lambda r: float(r.get("resolved_at")
+                                                or r.get("created_at") or 0))
+            cutoff = now - 7 * 86400
+            resolved = [r for r in resolved[-200:]
+                        if float(r.get("resolved_at")
+                                 or r.get("created_at") or now) >= cutoff
+                        or r in resolved[-50:]]
+            self.store.approvals.data["approvals"] = resolved + pending
             self.store.approvals.save()
         self.notifications.notify(
             f"Approval needed — {row['action']}: {row['detail'][:200]}",

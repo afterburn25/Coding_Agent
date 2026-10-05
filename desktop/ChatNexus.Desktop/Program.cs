@@ -634,8 +634,14 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
 internal sealed class BackendProcess : IDisposable
 {
     private readonly Process _process;
-    private readonly TextWriter _logWriter;
+    private TextWriter _logWriter;
     private readonly object _logLock = new();
+    private int _logWrites;
+    // Unattended installs run for weeks — bound the host log the same
+    // way the backend bounds its audit stream (trim to a tail, keep the
+    // newest evidence, never grow without limit).
+    private const long LogMaxBytes = 8L * 1024 * 1024;
+    private const long LogKeepBytes = 4L * 1024 * 1024;
     private readonly int _requestedPort;
     private volatile int _announcedPort;
     private volatile bool _disposing;
@@ -767,9 +773,18 @@ internal sealed class BackendProcess : IDisposable
             });
             lock (_logLock)
             {
-                File.AppendAllText(
-                    Path.Combine(dataDir, "crash_history.jsonl"),
-                    entry + Environment.NewLine);
+                var crashLog = Path.Combine(dataDir, "crash_history.jsonl");
+                File.AppendAllText(crashLog, entry + Environment.NewLine);
+                // Bounded history — 1 MB cap, keep the newest half.
+                var info = new FileInfo(crashLog);
+                if (info.Length > 1024 * 1024)
+                {
+                    var raw = File.ReadAllBytes(crashLog);
+                    var keep = raw.Skip(raw.Length - 512 * 1024).ToArray();
+                    var nl = Array.IndexOf(keep, (byte)'\n');
+                    File.WriteAllBytes(crashLog,
+                        nl >= 0 ? keep[(nl + 1)..] : Array.Empty<byte>());
+                }
             }
         }
         catch { /* crash history is best-effort — never block restart */ }
@@ -793,11 +808,49 @@ internal sealed class BackendProcess : IDisposable
             lock (_logLock)
             {
                 _logWriter.WriteLine($"{DateTimeOffset.Now:O} [{stream}] {line}");
+                if (++_logWrites % 200 == 0)
+                {
+                    TrimLogIfOversized();
+                }
             }
         }
         catch
         {
             // Logging must never crash the desktop host.
+        }
+    }
+
+    /// Rotation: caller holds _logLock. When the log exceeds LogMaxBytes,
+    /// drop the writer, keep only the newest LogKeepBytes, reopen.
+    private void TrimLogIfOversized()
+    {
+        try
+        {
+            if (new FileInfo(LogPath).Length <= LogMaxBytes)
+            {
+                return;
+            }
+            _logWriter.Dispose();
+            var raw = File.ReadAllBytes(LogPath);
+            var keep = raw.Skip(Math.Max(0, raw.Length - (int)LogKeepBytes)).ToArray();
+            var nl = Array.IndexOf(keep, (byte)'\n');
+            File.WriteAllBytes(LogPath, nl >= 0 ? keep[(nl + 1)..] : Array.Empty<byte>());
+            File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} [HOST] "
+                + $"log rotated — kept newest {LogKeepBytes / (1024 * 1024)} MB tail"
+                + Environment.NewLine);
+        }
+        catch
+        {
+            // Rotation is best-effort — it must never interrupt logging.
+        }
+        finally
+        {
+            try
+            {
+                _logWriter = TextWriter.Synchronized(
+                    new StreamWriter(LogPath, append: true) { AutoFlush = true });
+            }
+            catch { }
         }
     }
 

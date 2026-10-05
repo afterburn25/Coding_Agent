@@ -895,6 +895,66 @@ class MissionStoreTests(unittest.TestCase):
             self.assertEqual(sup.missions.get(m["id"])["revision"], rev + 1)
             sup.stop()
 
+    def test_terminal_missions_auto_archive(self):
+        """Quiet completions older than retention auto-archive so the
+        resident store stays bounded; failed missions are never
+        auto-archived (they need operator attention)."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            old_done = sup.create_mission(objective="old done")
+            old_fail = sup.create_mission(objective="old fail")
+            past = time.time() - 31 * 86400
+            sup.missions.mutate(old_done["id"], lambda r: r.update(
+                {"status": "completed", "completed_at": past}))
+            sup.missions.mutate(old_fail["id"], lambda r: r.update(
+                {"status": "failed", "completed_at": past}))
+            # Any mission reaching a terminal state runs the sweep.
+            m = sup.create_mission(objective="trigger")
+            sup.missions.transition(m["id"], "ready")
+            sup.missions.transition(m["id"], "cancelled")
+            self.assertEqual(
+                sup.missions.get(old_done["id"])["status"], "archived")
+            self.assertEqual(
+                sup.missions.get(old_fail["id"])["status"], "failed")
+            self.assertEqual(sup.missions.get(m["id"])["status"],
+                             "cancelled")
+            sup.stop()
+
+    def test_notifications_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            data = sup.store.notifications.data.setdefault(
+                "notifications", [])
+            for i in range(505):
+                data.append({"id": f"n-{i}", "ts": time.time(),
+                             "level": "info", "read": True})
+            sup.notifications.notify("newest", level="failure")
+            self.assertLessEqual(len(data), 500)
+            self.assertEqual(data[-1]["message"], "newest")
+            sup.stop()
+
+    def test_approvals_pruned(self):
+        """Resolved approval rows are audit history with a retention
+        bound; pending rows are never pruned."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            rows = sup.store.approvals.data.setdefault("approvals", [])
+            old = time.time() - 30 * 86400
+            for i in range(210):
+                rows.append({"id": f"ap-old-{i}", "mission_id": "m-x",
+                             "state": "approved", "created_at": old,
+                             "resolved_at": old})
+            rows.append({"id": "ap-keep", "mission_id": "m-x",
+                         "state": "pending", "created_at": old})
+            sup._create_approval("m-new", "t-1",
+                                 {"name": "run_tests", "detail": "d"})
+            rows = sup.store.approvals.data["approvals"]
+            states = [r["state"] for r in rows]
+            self.assertEqual(states.count("pending"), 2)
+            self.assertLessEqual(len(rows), 52)
+            self.assertTrue(any(r["id"] == "ap-keep" for r in rows))
+            sup.stop()
+
 
 class TaskGraphTests(unittest.TestCase):
     def _graph(self):

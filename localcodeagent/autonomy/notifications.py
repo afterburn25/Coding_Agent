@@ -83,6 +83,9 @@ class NotificationCenter:
         }
         data = self._store.notifications.data.setdefault("notifications", [])
         data.append(row)
+        # list() only ever serves the newest 100 — bound the store so
+        # unattended installs don't accumulate rows forever.
+        del data[:-500]
         self._store.notifications.save()
         if self._publish is not None and row["level"] != "muted":
             try:

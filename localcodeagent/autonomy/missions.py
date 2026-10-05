@@ -41,6 +41,10 @@ _PRIORITY_RANK = {"urgent": 0, "interactive": 1, "normal": 2, "background": 3, "
 AGE_PROMOTE_AFTER_S = (4 * 3600, 24 * 3600)  # wait → extra rank per tier
 _AGE_FLOOR = _PRIORITY_RANK["normal"]        # never outrank interactive
 
+# Retention — terminal missions stay visible for 30 days, then quiet
+# completions/cancels auto-archive so unattended installs stay bounded.
+MISSION_RETENTION_S = 30 * 86400
+
 
 def effective_rank(mission: dict, now: float | None = None) -> int:
     """Priority rank after aging. Background-tier missions gain one rank
@@ -316,6 +320,7 @@ class MissionStore:
             if new_status in TERMINAL_MISSION_STATUSES:
                 m["completed_at"] = m.get("completed_at") or time.time()
                 m["lease"] = None
+                self._auto_archive_old()
             m.setdefault("history", []).append({
                 "ts": time.time(), "event": "transition",
                 "detail": f"{cur} -> {new_status}" + (f" · {detail}" if detail else "")[:400],
@@ -324,6 +329,23 @@ class MissionStore:
             self._save()
         self._emit(m, "mission_updated")
         return self._public(m)
+
+    def _auto_archive_old(self) -> None:
+        """Long-running installs accumulate terminal missions forever;
+        archive quiet successes/cancels older than RETENTION_S so the
+        resident store stays bounded. Failed missions are never
+        auto-archived — they need operator attention. Caller holds _lock."""
+        cutoff = time.time() - MISSION_RETENTION_S
+        for old in self._rows():
+            if old.get("status") in {"completed", "completed_with_warnings",
+                                     "cancelled"}:
+                try:
+                    done = float(old.get("completed_at") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if done and done < cutoff:
+                    old["status"] = "archived"
+                    old["updated_at"] = time.time()
 
     def update(self, mission_id: str, **fields: Any) -> dict | None:
         """Direct field update for bookkeeping (histories, graph, flags)."""

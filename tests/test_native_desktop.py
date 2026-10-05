@@ -23,6 +23,17 @@ class NativeDesktopArchitectureTests(unittest.TestCase):
         self.assertIn("RecoverBackendAsync", program)
         self.assertIn("_backendRestartCount > 3", program)
 
+    def test_host_log_and_crash_history_are_bounded(self):
+        """Unattended installs run for weeks — the append-only host log
+        and crash history must rotate, never grow without limit."""
+        program = (ROOT / "desktop" / "ChatNexus.Desktop" / "Program.cs").read_text(encoding="utf-8")
+        self.assertIn("TrimLogIfOversized", program)
+        self.assertIn("LogMaxBytes", program)
+        self.assertIn("LogKeepBytes", program)
+        # crash_history.jsonl gets its own size cap in RecordCrashExit.
+        self.assertIn("crash_history.jsonl", program)
+        self.assertIn("1024 * 1024", program)
+
     def test_python_backend_no_longer_owns_desktop_window(self):
         main = (ROOT / "localcodeagent" / "__main__.py").read_text(encoding="utf-8")
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
