@@ -18,6 +18,19 @@ WORKFLOW = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="ut
 APP_JS = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
 
 
+def desktop_method_body(name: str) -> str:
+    """Read a complete desktop method, independent of parameters and length."""
+    match = re.search(
+        rf"^    (?:public|private|protected|internal)\b[^\n{{]*\b{re.escape(name)}"
+        rf"\([^)]*\)\s*\{{(?P<body>.*?)^    \}}",
+        PROGRAM,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"Desktop method not found: {name}")
+    return match.group("body")
+
+
 def ico_sizes(path: Path) -> set[tuple[int, int]]:
     """Parse the ICONDIR directory without external dependencies."""
     raw = path.read_bytes()
@@ -104,12 +117,13 @@ class StartupSplashLifecycleTests(unittest.TestCase):
     """Contract tests for the real startup splash state machine."""
 
     def test_splash_launches_before_main_window(self):
-        context_start = PROGRAM.index("NexusCoreApplicationContext(string appDir)")
-        ctor = PROGRAM[context_start:context_start + 2600]
+        ctor = desktop_method_body("NexusCoreApplicationContext")
         self.assertLess(ctor.index("_splash.Show()"), ctor.index("RunStartupAsync()"))
         # The main window is only created inside the async startup run.
-        self.assertIn("_main = new MainForm(_appDir);", PROGRAM)
-        self.assertIn("_main.CreateControl();", PROGRAM)  # hidden, handle only
+        self.assertNotIn("_main = new MainForm", ctor)
+        startup = desktop_method_body("RunStartupAsync")
+        self.assertIn("_main = new MainForm(_appDir);", startup)
+        self.assertIn("_main.CreateControl();", startup)  # hidden, handle only
 
     def test_splash_uses_minimum_seven_second_rule(self):
         self.assertIn("MinimumDisplayTime = TimeSpan.FromSeconds(7)", PROGRESS)
@@ -126,8 +140,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         self.assertIn("chrome?.webview?.postMessage({type:'nexus-core-ready'})", APP_JS)
 
     def test_splash_closes_only_after_main_ready_and_transition_is_atomic(self):
-        run_start = PROGRAM.index("private async Task RunStartupAsync()")
-        body = PROGRAM[run_start:run_start + 4200]
+        body = desktop_method_body("RunStartupAsync")
         self.assertIn("await _main.PrepareAsync(_progress);", body)
         self.assertIn("_progress.MarkAppReady();", body)
         self.assertLess(body.index("MarkAppReady"), body.index("ReadyToDismiss"))
@@ -186,8 +199,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         self.assertIn("CompletionEffectTime", PROGRESS)
         self.assertIn("CompletionPhase", PROGRESS)
         self.assertIn("PathGradientBrush", PROGRAM)  # core glow bloom
-        body = PROGRAM[PROGRAM.index("private async Task RunStartupAsync()"):]
-        body = body[:2500]
+        body = desktop_method_body("RunStartupAsync")
         self.assertLess(body.index("BeginCompletion"), body.index("_splash?.Close()"))
         self.assertLess(body.index("_splash?.Close()"), body.index("_main.Show()"))
 
