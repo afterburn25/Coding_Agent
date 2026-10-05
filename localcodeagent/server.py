@@ -4503,6 +4503,23 @@ class AppState:
         except Exception:
             return None
 
+    def speak_farewell(self, profile_id: str, text: str) -> dict | None:
+        """Voice-side farewell — once per process per profile, same
+        synchronous url-returning contract as speak_greeting but its own
+        dedupe key so the goodbye isn't swallowed by the hello that
+        already ran this session."""
+        try:
+            v = getattr(self, "voice", None)
+            if v is None:
+                return None
+            bid = f"bye-{profile_id}"
+            if bid in self._queue_announced:
+                return None
+            self._queue_announced.add(bid)
+            return v.speak_greeting(bid, str(text or ""))
+        except Exception:
+            return None
+
     # -- speech-to-text ----------------------------------------------------
 
     def stt_engine(self):
@@ -6116,12 +6133,24 @@ class Handler(BaseHTTPRequestHandler):
             ok = prov.retry_item(str(body.get("id") or "")) if prov else False
             self._json({"ok": ok})
             return True
+        if path == "/api/provisioning/approve":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.approve_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
         if path == "/api/provisioning/config":
             changed = {}
             for key in ("provisioning_enabled", "provisioning_auto_retry",
                         "provisioning_voice_notifications"):
                 if body.get(key) is not None:
                     changed[key] = bool(body[key])
+            if body.get("provisioning_profile") is not None:
+                prof = str(body["provisioning_profile"]).strip().lower()
+                if prof in {"core", "recommended", "complete", "custom"}:
+                    changed["provisioning_profile"] = prof
+            for key in ("provisioning_include", "provisioning_exclude"):
+                if isinstance(body.get(key), list):
+                    changed[key] = [str(x) for x in body[key][:200]]
             for k, v in changed.items():
                 if hasattr(self.state.config, k):
                     setattr(self.state.config, k, v)

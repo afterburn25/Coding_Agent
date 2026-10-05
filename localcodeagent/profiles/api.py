@@ -197,6 +197,9 @@ class ProfileAPI:
             if path.endswith("/greeting"):
                 pid = self._pid(path, "/api/profiles/", "/greeting")
                 return self._greeting(h, pid)
+            if path.endswith("/farewell"):
+                pid = self._pid(path, "/api/profiles/", "/farewell")
+                return self._farewell(h, pid)
             if path.endswith("/memory"):
                 pid = self._pid(path, "/api/profiles/", "/memory")
                 if self.mgr.get(pid) is None:
@@ -294,6 +297,29 @@ class ProfileAPI:
             g["voice_url"] = spoken["url"]
             g["voice_segment_id"] = spoken.get("segment_id") or ""
         h._json(g)
+        return True
+
+    def _farewell(self, h, pid: str) -> bool:
+        """GET /api/profiles/{pid}/farewell — persona-based goodbye for
+        the desktop shutdown sequence. Same render + synchronous voice
+        contract as /greeting; the host plays the wav itself and waits
+        for real playback completion before exiting."""
+        p = self.mgr.get(pid)
+        if p is None:
+            h._json({"error": "no such profile"}, 404)
+            return True
+        personality = self._personality(pid).resolve_active(
+            is_adult=_is_adult(p))
+        f = self._greetings(pid).farewell(
+            p, personality, is_adult=_is_adult(p))
+        try:
+            spoken = self.state.speak_farewell(pid, str(f.get("text") or ""))
+        except Exception:
+            spoken = None
+        if spoken and spoken.get("url"):
+            f["voice_url"] = spoken["url"]
+            f["voice_segment_id"] = spoken.get("segment_id") or ""
+        h._json(f)
         return True
 
     # -- POST / PATCH -----------------------------------------------------

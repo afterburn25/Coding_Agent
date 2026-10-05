@@ -674,6 +674,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // Build the real main window now, still invisible.
             _main = new MainForm(_appDir);
             _main.CreateControl(); // handle exists without showing the window
+            // Shutdown narration: "Shutting down the core." + the persona
+            // farewell — the window holds until playback actually ends.
+            _main.FarewellHook = () =>
+                _narrator?.FarewellAsync(
+                    () => _main?.BackendUrl, TimeSpan.FromSeconds(45))
+                ?? Task.CompletedTask;
 
             _progress.Report(0.15, "services");
             await _main.PrepareAsync(_progress);
@@ -1784,11 +1790,43 @@ internal sealed class MainForm : Form
         _webView.DefaultBackgroundColor = Color.FromArgb(7, 16, 31);
         Controls.Add(_webView);
 
-        FormClosing += (_, _) =>
+    }
+
+    /// <summary>
+    /// Shutdown narration — runs before the window may close, awaited to
+    /// real playback completion by the host. Set by the application
+    /// context; null means close normally.
+    /// </summary>
+    public Func<Task>? FarewellHook { get; set; }
+    private bool _farewellDone;
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        // Farewell holds ONLY deliberate exits — never a Windows logoff,
+        // a task-manager kill, or an owner-driven close.
+        var farewellEligible = e.CloseReason is CloseReason.UserClosing
+            or CloseReason.ApplicationExitCall or CloseReason.None
+            or CloseReason.FormOwnerClosing or CloseReason.MdiFormClosing;
+        if (!_farewellDone && farewellEligible && FarewellHook is not null)
         {
-            _closing = true;
-            _backend?.Dispose();
-        };
+            e.Cancel = true;
+            _farewellDone = true;
+            _ = RunFarewellThenCloseAsync();
+            return;
+        }
+        _closing = true;
+        _backend?.Dispose();
+        base.OnFormClosing(e);
+    }
+
+    private async Task RunFarewellThenCloseAsync()
+    {
+        try { if (FarewellHook is not null) await FarewellHook(); }
+        catch { /* a failed farewell must never trap the exit */ }
+        if (!IsDisposed)
+        {
+            try { BeginInvoke(new Action(Close)); } catch { }
+        }
     }
 
     /// <summary>Backend base URL once the process is up — used by startup narration.</summary>

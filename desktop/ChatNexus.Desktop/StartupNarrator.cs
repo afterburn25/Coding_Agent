@@ -434,4 +434,65 @@ internal sealed class StartupNarrator
     }
 
     public void Cancel() => _cancelled = true;
+
+    /// <summary>Spoken first on close — the user's requested line.</summary>
+    public const string ShutdownLine = "Shutting down the core.";
+
+    /// <summary>
+    /// Shutdown narration: speak ShutdownLine, then the persona farewell
+    /// from /api/profiles/{pid}/farewell. Playback runs on the host
+    /// SoundPlayer so completion is a real PlaySync return — the caller
+    /// holds the window open until this task finishes. Bounded: a dead
+    /// backend or failed synth simply skips that line; only a line
+    /// already playing keeps the close waiting, which is the point.
+    /// </summary>
+    public async Task FarewellAsync(Func<string?> backendUrl, TimeSpan bound)
+    {
+        if (!Enabled) return;
+        var deadline = DateTime.UtcNow + bound;
+        var url = backendUrl()?.TrimEnd('/');
+        if (string.IsNullOrEmpty(url)) return;
+        try
+        {
+            var wav = await Synthesize(url, ShutdownLine, CancellationToken.None);
+            if (wav is not null)
+            {
+                var tmp = CachePath("shutdown");
+                try { Directory.CreateDirectory(_cacheDir); File.WriteAllBytes(tmp, wav); } catch { }
+                Log("farewell 'shutdown' via SoundPlayer");
+                await SoundFilePlayer(tmp);
+            }
+            if (DateTime.UtcNow >= deadline) return;
+
+            // Persona goodbye — the backend renders style-aware text and
+            // synthesizes it; the host just needs the wav to play.
+            var pid = await ActiveProfileId(url);
+            if (pid is null) return;
+            using var resp = await _http.GetAsync($"{url}/api/profiles/{pid}/farewell");
+            if (!resp.IsSuccessStatusCode) return;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var rel = doc.RootElement.TryGetProperty("voice_url", out var u) ? u.GetString() : null;
+            if (string.IsNullOrEmpty(rel)) return;
+            var audio = await _http.GetByteArrayAsync(url + rel);
+            if (audio.Length <= 100) return;
+            var tmp2 = CachePath("farewell");
+            try { File.WriteAllBytes(tmp2, audio); } catch { }
+            Log("farewell 'goodbye' via SoundPlayer");
+            await SoundFilePlayer(tmp2);
+        }
+        catch { /* farewell is best-effort — never traps the exit */ }
+    }
+
+    private async Task<string?> ActiveProfileId(string baseUrl)
+    {
+        try
+        {
+            using var r = await _http.GetAsync($"{baseUrl}/api/profiles");
+            if (!r.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
+            return doc.RootElement.TryGetProperty("active", out var a)
+                ? a.GetString() : null;
+        }
+        catch { return null; }
+    }
 }
