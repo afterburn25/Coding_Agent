@@ -103,6 +103,18 @@ custom-workflow engine and fallback.
   `packaging/build_windows.ps1` and `selfupdate._build_cmd`; otherwise
   the next release/self-update build would try to bundle the multi-GB
   `tools/` install payloads (InvokeAI venv, ComfyUI portable).
+- **Voice regression found in staged build**: the stale
+  `build/ChatNexus.Backend.spec` predated the `--collect-all
+  kokoro_onnx/phonemizer/espeakng_loader` args, so `_internal/kokoro_onnx`
+  shipped only a dist-info — `Kokoro()` failed on
+  `_internal/kokoro_onnx/config.json` → `/api/voice/speak` 500 → no
+  greeting, replies cut out. backend-old (0.20.0) had the same defect.
+  Rebuilt with the full `build_windows.ps1` arg set (fresh spec);
+  verified `config.json` + phonemizer + espeakng_loader + voice presets
+  bundled and `/api/voice/speak` returns a real 3.11s WAV. Re-staged to
+  `backend-new/` (snapshot `snap-1791165159653`, flag rewritten).
+  `piper_onnx`/`llama_cpp` collect lines in the old spec were no-ops —
+  neither package is installed; llama runs as an external binary.
 
 ## Earlier milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
 
