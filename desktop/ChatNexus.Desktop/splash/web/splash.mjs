@@ -14,6 +14,9 @@ const host = message => window.chrome?.webview?.postMessage(message);
 
 let clock, renderer, audio, voice, manifest, raf;
 let failed = false, reduced = false, externalProgress = null;
+// Displayed fill eases toward the real value — the bar sweeps smoothly
+// rather than snapping when the host's progress jumps.
+let shownFill = 0;
 let lastDraw = -Infinity, lastRevision = 0, lastPanel = false;
 let previousHeld = false, completePosted = false, lastPhaseId = '';
 
@@ -75,7 +78,10 @@ function paint() {
         ? (state.charge === 1 ? 'FULL POWER SUSTAINED · AWAITING READINESS' : 'AWAITING STARTUP SIGNAL · SAFE HOLD')
         : state.online ? 'CONTAINMENT RELEASED · ENERGY STABLE' : state.phase.id === 'charged_hold' ? 'FULL POWER SUSTAINED · READINESS GATE ARMED' : 'CONTAINMENT PROTOCOL · NOMINAL')
     : state.contained ? 'CORE SECURED · RECOVERY CONTROLS AVAILABLE' : 'AUTOMATIC CONTAINMENT · RECOVERY REMAINS AVAILABLE');
-  $('fill').style.transform = `scaleX(${(normal ? externalProgress?.value ?? clamp(clock.time / manifest.duration) : clock.progressAtFault).toFixed(3)})`;
+  const fillTarget = normal ? externalProgress?.value ?? clamp(clock.time / manifest.duration) : clock.progressAtFault;
+  shownFill += (fillTarget - shownFill) * .09;   // ~60Hz ease; no snap on host updates
+  if (Math.abs(fillTarget - shownFill) < .003) shownFill = fillTarget;
+  $('fill').style.transform = `scaleX(${shownFill.toFixed(3)})`;
   $('stage').classList.toggle('fault', Boolean(state.fault));
   // Core-online state: green pulsating status — the timeline's stable-online
   // point OR the host's canonical CORE SYSTEMS · ONLINE label, whichever
