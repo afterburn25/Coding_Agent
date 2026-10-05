@@ -102,6 +102,7 @@ internal sealed class SplashForm : Form
 {
     private readonly StartupProgress _progress;
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
     private readonly Panel _cover;
     private readonly string _appDir;
@@ -179,6 +180,23 @@ internal sealed class SplashForm : Form
             if (!_webReady) Invalidate();
         };
         _timer.Start();
+
+        // The splash must ride the topmost band for its whole life — boot
+        // runs long enough that the user WILL click elsewhere. Windows can
+        // silently demote a window shown without foreground rights, so the
+        // property alone isn't sufficient: a slow watchdog re-asserts
+        // HWND_TOPMOST without ever stealing activation.
+        _topmostTimer.Interval = 500;
+        _topmostTimer.Tick += (_, _) =>
+        {
+            if (IsHandleCreated)
+            {
+                Win32.SetWindowPos(Handle, Win32.HwndTopmost,
+                    0, 0, 0, 0,
+                    Win32.SwpNomove | Win32.SwpNosize | Win32.SwpNoactivate);
+            }
+        };
+        _topmostTimer.Start();
 
         _ = InitCinematicAsync();
     }
@@ -876,13 +894,16 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             _splash?.Dispose();
             _splash = null;
             // Without foreground rights Show() can leave the window behind
-            // (looks minimized). The brief TopMost toggle forces it to the
-            // top of the z-order, then releases so the app isn't pinned.
+            // (looks minimized). Attach to the foreground thread's input
+            // queue so SetForegroundWindow is honored, ride it to the top
+            // via a brief TopMost hold, then release so the app isn't
+            // pinned above other windows.
             _main.WindowState = FormWindowState.Normal;
             _main.Show();
             _main.TopMost = true;
             _main.Activate();
             _main.BringToFront();
+            Win32.ForceForeground(_main.Handle);
             _main.TopMost = false;
             // Release the held startup greeting — the splash owned the
             // audio stage until narration + quiet buffer finished.
@@ -2336,6 +2357,77 @@ internal sealed class MainForm : Form
         catch
         {
             // External navigation failure should not crash Nexus Core.
+        }
+    }
+}
+
+/// <summary>
+/// Win32 interop for z-order/foreground control — the pieces WinForms
+/// can't express. Splash uses SetWindowPos(HWND_TOPMOST) as a watchdog
+/// re-assert; the main-window transition uses the attach-thread-input
+/// sequence so SetForegroundWindow is honored even when Nexus was
+/// launched without foreground rights (start menu, scripts, self-update).
+/// </summary>
+internal static class Win32
+{
+    internal static readonly IntPtr HwndTopmost = new(-1);
+
+    internal const uint SwpNomove = 0x0002;
+    internal const uint SwpNosize = 0x0001;
+    internal const uint SwpNoactivate = 0x0010;
+    internal const uint SwpShowwindow = 0x0040;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int x, int y, int cx, int cy, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
+    /// <summary>
+    /// Pull <paramref name="hWnd"/> to the front even when this process
+    /// lacks foreground rights: temporarily share the foreground thread's
+    /// input state so Windows treats the request as user-initiated.
+    /// No-op when nothing is foreground.
+    /// </summary>
+    internal static void ForceForeground(IntPtr hWnd)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            SetForegroundWindow(hWnd);
+            return;
+        }
+        var foregroundThread = GetWindowThreadProcessId(foreground, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != currentThread
+            && AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
         }
     }
 }

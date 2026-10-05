@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -217,9 +218,15 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         if client.authenticated:
             # Header-scoped auth — same pattern as github_clone: the
             # connected credential drives the push without landing in
-            # .git/config or the process-visible remote URL.
+            # .git/config or the process-visible remote URL. Basic
+            # base64(x-access-token:token) — the actions/checkout form —
+            # is accepted by git smart-HTTP for every token type;
+            # "bearer" is rejected for OAuth (gho_) tokens.
             command += ["-c",
-                        f"http.extraHeader=AUTHORIZATION: bearer {client.token}"]
+                        "http.extraHeader=AUTHORIZATION: basic "
+                        + base64.b64encode(
+                            f"x-access-token:{client.token}".encode()
+                        ).decode()]
         command += ["push"]
         if bool(args.get("set_upstream", True)):
             command.extend(["--set-upstream", remote, branch])
@@ -456,9 +463,13 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         argv = ["git"]
         if client.authenticated:
             # Header-scoped auth: the token never lands in .git/config or
-            # the process-visible remote URL.
+            # the process-visible remote URL. Basic base64 form — git
+            # smart-HTTP rejects "bearer" for OAuth (gho_) tokens.
             argv += ["-c",
-                     f"http.extraHeader=AUTHORIZATION: bearer {client.token}"]
+                     "http.extraHeader=AUTHORIZATION: basic "
+                     + base64.b64encode(
+                         f"x-access-token:{client.token}".encode()
+                     ).decode()]
         argv += ["clone", url, str(dest)]
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=600)
