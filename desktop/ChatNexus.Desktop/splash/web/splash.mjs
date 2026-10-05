@@ -192,6 +192,17 @@ function handleHost(msg) {
         else { audio.disabled = false; void audio.sync(clock); }
         break;
       case 'set-reduced': reduced = Boolean(msg.value); paint(); break;
+      case 'complete-sequence': {
+        // Host reached readiness — converge the remaining tail onto the
+        // online state so the sequence ends WITH the truth instead of
+        // trailing it at natural speed.
+        if (clock.mode === 'normal' && !clock.held) {
+          const onlineAt = manifest.events.find(e => e.id === 'stable_online')?.at ?? manifest.duration;
+          const remaining = onlineAt - clock.time;
+          if (remaining > .8) clock.setSpeed(clamp(remaining / 2.5, 1, 1.75));
+        }
+        break;
+      }
       case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
       case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); break;
       case 'dispose': clock.pause(); cancelAnimationFrame(raf); bootvid?.pause(); errvid?.pause(); void audio.dispose(); void voice.dispose(); break;

@@ -160,6 +160,7 @@ export class Renderer {
     this.plasma = plasmaSprite();
     this.nebula = nebulaSprite();
     this.bloom = lightSprite([[0, '#dbffffed'], [.08, '#8cffffd4'], [.2, '#38d5ffad'], [.4, '#1387ff70'], [.7, '#1255fa28'], [1, '#0938ef00']]);
+    this.coreLight = lightSprite([[0, '#d8ffffdd'], [.2, '#8cffffcc'], [.6, '#1ecfffaa'], [.82, '#168aff80'], [1, '#093bff00']]);
     this.hotspot = lightSprite([[0, '#ffffffff'], [.09, '#f5fffff5'], [.22, '#baffffdb'], [.42, '#42cfff7a'], [.7, '#126eff20'], [1, '#0654ff00']]);
     this.instabilityLight = lightSprite([[0, '#e3c3ffbb'], [.25, '#b276faaa'], [.6, '#6544da44'], [1, '#452cc000']]);
     this.housingShadow = lightSprite([[0, '#00020aff'], [.64, '#00020afa'], [.77, '#00020ab0'], [.9, '#00020a28'], [1, '#00020a00']]);
@@ -277,13 +278,15 @@ export class Renderer {
 
   drawCore(c, s) {
     c.fillStyle = '#020a20'; c.fillRect(-64, -64, 128, 128);
+    // Only emitted light expands with charge; the sphere and its surface stay fixed.
+    const glowExpansion = clamp(s.charge);
     c.save(); c.globalAlpha = .35 + .5 * s.brightness; blit(c, this.glow, 186); c.restore();
     c.save(); c.scale(1.12, 1.12);
     c.globalAlpha = .45 + .55 * s.brightness; blit(c, this.sphere, 128); c.restore();
     c.save(); c.rotate(s.orbit * .23); c.globalAlpha = .68; blit(c, this.plasma, 144); c.restore();
     c.save(); c.globalCompositeOperation = 'screen';
-    c.globalAlpha = .18 + .65 * s.charge; blit(c, this.bloom, 132);
-    c.globalAlpha = .2 + .74 * s.charge; blit(c, this.hotspot, 67); c.restore();
+    c.globalAlpha = .18 + .65 * s.charge; blit(c, this.bloom, 132 + 112 * glowExpansion);
+    c.globalAlpha = .2 + .74 * s.charge; blit(c, this.hotspot, 67 + 40 * glowExpansion); c.restore();
     if (s.instability > 0) {
       c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = s.instability * .5;
       c.translate(Math.sin(s.t * 17) * 12, Math.cos(s.t * 13) * 8); blit(c, this.instabilityLight, 122);
@@ -304,10 +307,13 @@ export class Renderer {
       c.fillRect(Math.cos(angle) * r, Math.sin(angle) * r, .65, .65);
     }
     c.restore();
-    // Cavity occlusion darkens its outside edge while the inner core emits light.
+    // Preserve the fixed cavity edge while the glow spreads across its interior.
     const occlusion = c.createRadialGradient(0, 0, 48, 0, 0, 65);
     occlusion.addColorStop(0, '#00030a00'); occlusion.addColorStop(1, '#00030abb');
     circle(c, 65); c.fillStyle = occlusion; c.fill();
+    // Diffuse emission fills the aperture without enlarging the sphere or plasma.
+    c.save(); c.globalCompositeOperation = 'screen'; c.globalAlpha = .85 * glowExpansion;
+    blit(c, this.coreLight, 100 + 100 * glowExpansion); c.restore();
     if (s.pulse > 0) { c.save(); c.globalAlpha = s.pulse * .23; blit(c, this.bloom, 126); c.restore(); }
   }
 

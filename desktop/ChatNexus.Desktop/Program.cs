@@ -131,7 +131,13 @@ internal sealed class SplashForm : Form
     /// <summary>id — the splash reports audio actually finished playing.</summary>
     public event Action<string>? VoicePlaybackEnded;
     private volatile bool _webFailed;
+    private volatile bool _sequenceComplete;
     private int _lastGateIdx = -1;
+
+    /// <summary>The cinematic posted its online frame — the sequence ran to completion.</summary>
+    public bool SequenceComplete => _sequenceComplete;
+    /// <summary>Cinematic is live and fault-free — its completion is worth waiting for.</summary>
+    public bool CinematicActive => _webReady && !_webFailed;
 
     // Manifest gates released at real startup milestones (StartupProgress
     // ladder anchors) — the timeline can never outrun reality.
@@ -403,6 +409,9 @@ internal sealed class SplashForm : Form
                     VoicePlaybackEnded?.Invoke(
                         doc.RootElement.GetProperty("id").GetString() ?? "");
                     break;
+                case "sequence-complete":
+                    _sequenceComplete = true;
+                    break;
                 case "splash-error":
                     _webFailed = true;
                     BeginInvoke(() =>
@@ -441,6 +450,11 @@ internal sealed class SplashForm : Form
 
     private void RecoveryFeedback(string text) =>
         PostToWeb(new { type = "action-feedback", text });
+
+    /// <summary>The app is ready — tell the cinematic to converge its tail
+    /// onto the online state instead of free-running to its fixed duration.</summary>
+    public void RequestSequenceFinish() =>
+        PostToWeb(new { type = "complete-sequence" });
 
     /// <summary>
     /// The context calls Show() up front, but the window stays suppressed
@@ -969,8 +983,28 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // then play the brief READY + core-glow completion effect before
             // handing off — still no blank intermediate state.
             _progress.MarkAppReady();
-            // "Core systems online." fires near full charge — truthful
-            // because the interface already posted its ready handshake.
+
+            // The app is genuinely ready — now converge the cinematic's
+            // remaining tail onto its online state instead of letting it
+            // free-run behind. While it converges the bar parks just under
+            // 100% and the status stays "FINALIZING" so the text never
+            // claims online ahead of the visual. Bounded so a dead WebView
+            // can never hang startup.
+            var splash = _splash;
+            if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
+            {
+                _progress.AwaitingSequence = true;
+                splash.RequestSequenceFinish();
+                var seqDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
+                while (!splash.SequenceComplete && DateTimeOffset.Now < seqDeadline)
+                {
+                    await Task.Delay(50);
+                }
+                _progress.AwaitingSequence = false;
+            }
+
+            // "Core systems online." lands on the visual online moment —
+            // truthful and synchronized instead of early.
             _narrator?.NearlyReady(() => _main?.BackendUrl);
             while (!_progress.ReadyToDismiss)
             {
@@ -982,10 +1016,9 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
-            // Online linger: hold the completed "CORE SYSTEMS · ONLINE"
-            // frame for a beat so the ready state actually registers
-            // before the app takes over.
-            await Task.Delay(2000);
+            // Dwell on the fully-loaded state before the swap — a few
+            // seconds at stable online so the completion actually reads.
+            await Task.Delay(TimeSpan.FromSeconds(2));
 
             // Voice gate: the splash stays up until the last startup
             // narration has ACTUALLY finished playing (voice-ended ack, not

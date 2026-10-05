@@ -350,6 +350,17 @@ internal sealed class StartupProgress
 
     public bool AppReady { get; private set; }
     public bool Failed { get; private set; }
+    /// <summary>
+    /// While set, the bar parks just under 100%: the app is ready but the
+    /// cinematic is still converging on its online state, so "done" would
+    /// be a lie. Cleared when the sequence completes.
+    /// </summary>
+    public bool AwaitingSequence
+    {
+        get { lock (_sync) { return _awaitingSequence; } }
+        set { lock (_sync) { _awaitingSequence = value; } }
+    }
+    private bool _awaitingSequence;
     /// <summary>The only value the progress bar renders.</summary>
     public double DisplayedProgress { get { lock (_sync) { return _displayed; } } }
     /// <summary>Real milestone progress — never rendered directly.</summary>
@@ -397,7 +408,7 @@ internal sealed class StartupProgress
 
     private (string Primary, string Secondary) RawStatus()
     {
-        if (_completionStarted is not null || (AppReady && MinimumElapsed))
+        if (_completionStarted is not null)
         {
             return StartupStatus.Map["online"];
         }
@@ -571,6 +582,10 @@ internal sealed class StartupProgress
     {
         if (AppReady)
         {
+            if (_awaitingSequence)
+            {
+                return 0.996; // hold just short of done while the cinematic converges
+            }
             return MinimumElapsed ? 1.0 : 0.992;
         }
         var next = _phaseIndex + 1 < Ladder.Length
@@ -597,12 +612,13 @@ internal sealed class StartupProgress
         var ceiling = PhaseCeiling();
         if (AppReady)
         {
-            if (MinimumElapsed)
+            if (MinimumElapsed && !_awaitingSequence)
             {
                 return 1.0;
             }
-            // Ready early: keep drifting toward 0.992 across the remaining
-            // minimum-display window instead of parking on a frozen bar.
+            // Ready early: keep drifting toward the ceiling across the
+            // remaining minimum-display window (and the cinematic's tail
+            // while AwaitingSequence) instead of parking on a frozen bar.
             var wait = Math.Max(0.0, (Elapsed - (_readyAt ?? Elapsed)).TotalSeconds);
             var remaining = Math.Max(0.5,
                 (MinimumDisplayTime - (_readyAt ?? Elapsed)).TotalSeconds);
