@@ -1,6 +1,6 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1870 tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.21.0 adds **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1945 tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.21.0 adds **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
 
 ## Active version: 0.21.0 — InvokeAI first-class image backend
 
@@ -701,11 +701,12 @@ regression.
 
 
 - Model files are not bundled and large image models are not silently downloaded.
-- Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
-- Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
+- ~~Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported~~ **Done 2026-10-05**: bundled API workflows for `qwen-image-2.1` (t2i/edit/inpaint/background-removal), `flux2-klein-4b` (t2i/edit) and `juggernaut-x-v10` (t2i) are exercised end-to-end on the real install — managed boot, submit, progress, cancel, output retrieval, history.
+- ~~Image jobs require a configured/running ComfyUI backend~~ — ComfyUI is provisioned and auto-boots on image request (`comfyui_start_on_image_request`); managed lifecycle verified.
 - Image progress refines the coarse /history poll with a dependency-free ComfyUI `/ws` listener (`image/ws.py`) that reports real per-node/step progress.
+- InvokeAI↔ComfyUI dual-backend routing is live-verified (all five cases A–E in SESSION_HANDOFF) including cross-backend memory arbitration and bounded crash-resubmit (`evict_if_managed`, never touches user-owned servers).
 - LoRA file import and richer version/compatibility metadata editing plus richer comparison controls remain upcoming; dedicated Qwen background-removal and Real-ESRGAN upscaler workflows are now configured.
-- Browser automation is optional and requires Playwright + Chromium.
+- Browser automation: Playwright driver ships in the frozen build with Edge-channel fallback (no required browser download), health/provisioning status, verify path, cancellation, timeouts, and job artifacts — see `docs/BROWSER_E2E.md`.
 
 ## v0.6 UI checkpoint
 
