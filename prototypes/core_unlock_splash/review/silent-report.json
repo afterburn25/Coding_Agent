@@ -1,0 +1,69 @@
+{
+  "initializationMs": 2458.7827,
+  "hostCpuSeconds": 0.09375,
+  "elapsedSeconds": 16.4885041,
+  "hostWorkingSetMb": 60.26953125,
+  "browserCpuSeconds": 3.765625,
+  "browserWorkingSetMb": 481.7265625,
+  "browserProcesses": [
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.078125,
+      "WorkingSetMb": 19.90234375
+    },
+    {
+      "Kind": "Renderer",
+      "CpuSeconds": 1.078125,
+      "WorkingSetMb": 124.0234375
+    },
+    {
+      "Kind": "Gpu",
+      "CpuSeconds": 3.015625,
+      "WorkingSetMb": 167.0859375
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.125,
+      "WorkingSetMb": 37.42578125
+    },
+    {
+      "Kind": "Browser",
+      "CpuSeconds": 0.640625,
+      "WorkingSetMb": 133.2890625
+    }
+  ],
+  "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
+  "renderer": {
+    "checks": {
+      "pauseFreezesTime": true,
+      "realProgressIndependent": true,
+      "muteSilencesOutput": true,
+      "speedControl": true,
+      "readinessGateHolds": true,
+      "chargedHumSustains": true,
+      "chargedVisualSustains": true,
+      "releaseContinues": true,
+      "replayResets": true,
+      "reachedOnline": true,
+      "audioOutput": true,
+      "allStemsDecoded": true,
+      "noAudioWarnings": true,
+      "reducedMotion": true
+    },
+    "passed": true,
+    "decodedStems": 0,
+    "audioPeak": 0,
+    "audioState": "disabled",
+    "warnings": [],
+    "frames": 600,
+    "frameMedianMs": 16.700000000000728,
+    "frameP95Ms": 16.80000000000109,
+    "drawMedianMs": 0.2999999523162842,
+    "drawP95Ms": 0.40000009536743164,
+    "dimensions": [
+      1024,
+      576
+    ],
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0"
+  }
+}

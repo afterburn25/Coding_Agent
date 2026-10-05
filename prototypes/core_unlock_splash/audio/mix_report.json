@@ -1,0 +1,181 @@
+{
+  "sample_rate": 48000,
+  "channels": 2,
+  "bits": 16,
+  "seed_policy": "Fixed integer seeds; original oscillator/noise synthesis",
+  "global_scale": 1.0,
+  "recommended_volume": 0.45,
+  "mix_peak_at_volume_1": 0.7115472412950496,
+  "mix_peak_default_dbfs": -9.891674940298753,
+  "stems": {
+    "ambient_hum": {
+      "seconds": 4.0,
+      "peak_dbfs": -15.39102157243452,
+      "rms_dbfs": -20.172205830375006,
+      "sha256": "44e9ed66a69155af03d1a2cb7194a6f168c19796d61e6c167bca32398de5ba64"
+    },
+    "stable_hum": {
+      "seconds": 4.0,
+      "peak_dbfs": -11.056839373155615,
+      "rms_dbfs": -15.729531527313345,
+      "sha256": "49ed1279cacc2f707153438a473884f56acd180390fa620533fd1cd9144da97e"
+    },
+    "charged_hum": {
+      "seconds": 4.0,
+      "peak_dbfs": -4.436974992327128,
+      "rms_dbfs": -10.64716740315565,
+      "sha256": "2c35d43e06cf2a21dbc9ab7169036bcb01028cd7f027e2cb5f6b0ac60571227b"
+    },
+    "security_activate": {
+      "seconds": 0.85,
+      "peak_dbfs": -12.041199826559248,
+      "rms_dbfs": -31.610757732146958,
+      "sha256": "879e633ad9757b206a45f8c5153a783bd14cbc61137ea6fa652cb700ab9a727f"
+    },
+    "authorization": {
+      "seconds": 0.55,
+      "peak_dbfs": -11.70053304058364,
+      "rms_dbfs": -23.190203169305043,
+      "sha256": "c9cdc8be437acd7cccfd80e2faa777d38ce803c8e4f65cb114d2479f15e7cec6"
+    },
+    "tumbler_clicks": {
+      "seconds": 1.3,
+      "peak_dbfs": -5.192746210115122,
+      "rms_dbfs": -30.78307092215902,
+      "sha256": "1ce0f0ec0656c3624947df06080e8a0abc4d84051cf8185dd36f6bb5b4bb47ef"
+    },
+    "lock_turn": {
+      "seconds": 0.8,
+      "peak_dbfs": -6.744843366368519,
+      "rms_dbfs": -29.54839300036614,
+      "sha256": "7f0e55ea721b56d65797d2a54e9586e977a8ba79536aad06bfe69dcc80ae4fbd"
+    },
+    "pin_01": {
+      "seconds": 0.28,
+      "peak_dbfs": -8.178707859470016,
+      "rms_dbfs": -30.538074518831664,
+      "sha256": "93fe61ca2824b70a07482aec863c1d2c81004633c29766fde4a62eeae5b48dfd"
+    },
+    "pin_02": {
+      "seconds": 0.28,
+      "peak_dbfs": -8.178707859470016,
+      "rms_dbfs": -32.67495780619311,
+      "sha256": "95bf2c6f2f3be63651bd3b601be6d47d4554cda8a75d077281be9584bdba2c41"
+    },
+    "pin_03": {
+      "seconds": 0.28,
+      "peak_dbfs": -8.178707859470014,
+      "rms_dbfs": -32.01337772390144,
+      "sha256": "a0d1305780f6a045c36e5c18300c307fe7a8c6b25bfaa2d287c8f174958d8b5f"
+    },
+    "pin_04": {
+      "seconds": 0.28,
+      "peak_dbfs": -8.178707859470016,
+      "rms_dbfs": -30.650220333291397,
+      "sha256": "872b6dec556ab74b67c1adf5a7dbbf6f49a6262c95e6bfcf816f12db48f8fcf4"
+    },
+    "ring_rotation": {
+      "seconds": 0.8,
+      "peak_dbfs": -6.375175252488256,
+      "rms_dbfs": -26.335229022184382,
+      "sha256": "21b749181152cd2719192a9fef2b3565eab6f40c59b9be8a1b7f072d23e17b0d"
+    },
+    "iris_open": {
+      "seconds": 0.95,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -17.876874445956048,
+      "sha256": "77623047e1e6de6ccefe3dca4b819c27576b185fcbcf38614609d511b5499b9f"
+    },
+    "core_charge": {
+      "seconds": 4.75,
+      "peak_dbfs": -4.436974992327128,
+      "rms_dbfs": -14.489336077062184,
+      "sha256": "1d4408d8ad00305c44d307cb3131eef30e3081d121fd1aaf2786d19274cafa10"
+    },
+    "energy_swell": {
+      "seconds": 2.0,
+      "peak_dbfs": -11.372724716820253,
+      "rms_dbfs": -22.23504639671171,
+      "sha256": "6dd60169f063954d06f7bcef31b2b4426641eb2cbd9607779ea6c4dfac6e754b"
+    },
+    "core_online": {
+      "seconds": 0.9,
+      "peak_dbfs": -6.375175252488256,
+      "rms_dbfs": -20.719051289086945,
+      "sha256": "76d8551081c9516b7135f5fe0de2af2b2495a4f9a4ff7f6c38388e13dbc429fb"
+    },
+    "core_instability": {
+      "seconds": 3.5,
+      "peak_dbfs": -6.558042841285651,
+      "rms_dbfs": -15.015213405139807,
+      "sha256": "505a5698780c775215953ff9d46d3e3d451689d1ffe8d82adef74e5113c93a76"
+    },
+    "failure_warning": {
+      "seconds": 0.36,
+      "peak_dbfs": -12.39577516576788,
+      "rms_dbfs": -23.398850387338456,
+      "sha256": "0768d38b8d6c3656d9454e560a01a58a1c2f1993325dfeab48d2c39cc0d454a7"
+    },
+    "electrical_instability": {
+      "seconds": 2.95,
+      "peak_dbfs": -13.979400086720375,
+      "rms_dbfs": -21.226581501328333,
+      "sha256": "2f7c125fced6e4cc6d68924eaf6d22520ceebdd367dd242f3858a582a26505f4"
+    },
+    "emergency_powerdown": {
+      "seconds": 0.95,
+      "peak_dbfs": -6.744843366368518,
+      "rms_dbfs": -14.664282560489772,
+      "sha256": "8aa5198c7772eb00fbf83425c8693c4140988f74de61636d2ef34a160683dbde"
+    },
+    "emergency_iris_close": {
+      "seconds": 0.7,
+      "peak_dbfs": -6.935749724493126,
+      "rms_dbfs": -19.91891973723784,
+      "sha256": "82090543d434dac83ef9c6488d48310995210f64c3c68c3e78f17da5ffa55971"
+    },
+    "failure_pin_01": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408271,
+      "rms_dbfs": -29.962355009652676,
+      "sha256": "19caf177e3bb8bd5c6111f74d41a1d48862df80ea7426e501b4ebbee75c6a20f"
+    },
+    "failure_pin_02": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -29.551594823655037,
+      "sha256": "b24acc01da04df216fbe476445e58c3084614033b780f80383b4881bce14b5f7"
+    },
+    "failure_pin_03": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -30.832156500859856,
+      "sha256": "e8745a54a9cbe9f7d12342928d1c5a11312cf9ba1ec7bdd464e6826ff5b6caed"
+    },
+    "failure_pin_04": {
+      "seconds": 0.29,
+      "peak_dbfs": -7.330630888408269,
+      "rms_dbfs": -32.10595556149093,
+      "sha256": "4f18fc3b0e2be3a9220a0cd6139bd9652e60b6c269745a1d33398b37ebe25c1c"
+    },
+    "failure_ring_lock": {
+      "seconds": 0.41,
+      "peak_dbfs": -7.1309464702762515,
+      "rms_dbfs": -30.380839901321565,
+      "sha256": "3e963bddb590012eec4c766efe260e682579b8082de07ea8f93c5782207d691c"
+    },
+    "fault_contained": {
+      "seconds": 0.55,
+      "peak_dbfs": -7.958800173440753,
+      "rms_dbfs": -21.420443832764484,
+      "sha256": "01dadb920e7cc6889385a84f0c5ee13c50e53e4b7d4bfba89585c7dc300a8000"
+    },
+    "emergency_idle_hum": {
+      "seconds": 4.0,
+      "peak_dbfs": -17.721132953863265,
+      "rms_dbfs": -21.09605493905804,
+      "sha256": "e92694222d196b1fe12ca62e9a508b0b28fb113cc22a535218f2a67bbe4957df"
+    }
+  },
+  "failure_standalone_peak": 0.5729694509720145
+}
