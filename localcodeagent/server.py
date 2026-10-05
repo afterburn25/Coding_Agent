@@ -1855,12 +1855,35 @@ class AppState:
         def executor(mission: dict, node: dict, emit_cb) -> dict:
             # Background work never opens a voice lane — begin_task would
             # stop_all() any user-facing speech in flight.
+            meta = node.get("metadata") or {}
+            parked_task = str((node.get("result") or {}).get("task_id") or "")
+            if meta.get("approval_granted") and parked_task:
+                # Resumed after a mission approval — replay the exact gated
+                # call that parked instead of starting a fresh run that
+                # would re-derive it and re-gate forever.
+                try:
+                    parked_row = self.tasks.get(parked_task)
+                    parked_state = str(getattr(parked_row, "status", "") or "")
+                except Exception:
+                    parked_state = ""
+                if parked_state == "waiting_approval":
+                    try:
+                        result = self.agent.resume(
+                            parked_task, approved=True,
+                            event_callback=emit_cb)
+                    except Exception:
+                        result = None
+                    if result is not None:
+                        return _mission_node_out(mission, node, result)
             result = self.agent.run(
                 str(node.get("instruction") or node.get("title") or ""),
                 history=[], mode="auto",
                 event_callback=emit_cb,
                 mission_id=str(mission.get("id") or "") or None,
             )
+            return _mission_node_out(mission, node, result)
+
+        def _mission_node_out(mission: dict, node: dict, result) -> dict:
             task = result.task or {}
             status = str(task.get("status") or "")
             out = {
