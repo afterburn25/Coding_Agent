@@ -17,6 +17,7 @@ internal static class Program
     {
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var selfTest = args.Any(a => string.Equals(a, "--self-test", StringComparison.OrdinalIgnoreCase));
+        var testFault = args.Any(a => string.Equals(a, "--test-fault", StringComparison.OrdinalIgnoreCase));
 
         // First-breath marker — if the host ever dies before the backend
         // launch path (splash/WebView2 init), this is the line that tells us
@@ -68,7 +69,7 @@ internal static class Program
             }
 
             ApplicationConfiguration.Initialize();
-            Application.Run(new NexusCoreApplicationContext(appDir));
+            Application.Run(new NexusCoreApplicationContext(appDir, testFault));
             return 0;
         }
         catch (Exception ex)
@@ -745,9 +746,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     /// <summary>Backend URL once launched — narration needs the voice API.</summary>
     private string BackendUrl => _main?.BackendUrl ?? "http://127.0.0.1:8765/";
 
-    public NexusCoreApplicationContext(string appDir)
+    private bool _testFault;
+
+    public NexusCoreApplicationContext(string appDir, bool testFault = false)
     {
         _appDir = appDir;
+        _testFault = testFault;
         _progress = CreateProgress();
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
@@ -815,6 +819,18 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         try
         {
             _progress.Report(0.06, "init");
+
+            // --test-fault: one-shot fault for recovery dogfooding — fires
+            // once the cinematic/recovery surface has had time to boot, so
+            // the REAL ShowFailure path (fault narration, containment
+            // animation, recovery panel, host actions) is exercised end to
+            // end. Retry relaunches startup with the flag already spent.
+            if (_testFault)
+            {
+                _testFault = false;
+                await Task.Delay(4000);
+                throw new InvalidOperationException("test fault — recovery dogfood");
+            }
 
             // Build the real main window now, still invisible.
             _main = new MainForm(_appDir);
