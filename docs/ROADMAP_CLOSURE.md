@@ -30,7 +30,7 @@
 | Audio layers (hum/chirps/lock/tumbler/servo/iris/charge/swell/stable/online) | LANDED_VERIFIED | 23 WAV stems 48kHz, `audio.mjs` WebAudio crossfades + one-shots; `splash_audio_enabled`/`splash_volume`/`reduced_motion` config; audio failure → static fallback, never blocks start |
 | Failure breakdown sequence (FAULT_DETECTED→…→LOCKDOWN→recovery UI), ~1.5-2.5s | LANDED_VERIFIED | manifest `failure` timeline (instability arcs/sparks, emergency iris close, pin re-engage, ring lock, containment); `trigger-fault` host msg; failure WAV stems |
 | Recovery visual states (ANALYZING/REPAIR/RESTARTING/ROLLBACK/SAFE_MODE/HUMAN) | LANDED_VERIFIED (rendering) | `RECOVERY_STATES` in controller.mjs; `recovery-state`/`repair-success` host msgs; recovery panel buttons |
-| Recovery actions wired to host | **PARTIAL** | Retry/Open Log/Exit wired (`OnCinematicMessage`). **Rollback and Safe-Mode buttons render but the host handler is missing** — gap to fix. `recoveryWatchdogMs:6000` declared but unconsumed. |
+| Recovery actions wired to host | LANDED_NEEDS_DOGFOOD | All 5 actions wired: rollback→`rollback.flag`→`ApplyLkgFlags` swap on next boot, safe-mode→`safe_mode.json` (SafeModeStore schema, history preserved)→suppressed heavy paths; watchdog consumes `recoveryWatchdogMs:6000`→HUMAN_INTERVENTION_REQUIRED; `--test-fault` injects a real fault for on-demand dogfood. LIVE: fault→narration→containment→panel verified; user Retry clicked→clean boot |
 | Fallback on renderer/audio/manifest failure | LANDED_VERIFIED | Dual-layer SplashForm: WebView2 cinematic over GDI+ static artwork+bar; `splash-error` keeps fallback; missing manifest/asset tolerated |
 | Duplicate-fault protection | LANDED_NEEDS_DOGFOOD | fault mode latched; verify live |
 
@@ -39,7 +39,7 @@
 | Requirement | Status | Evidence |
 |---|---|---|
 | Distinctive production default voice on Isabella concept | LANDED_VERIFIED | `nexus-synthetic-isabella` official preset (Kokoro `bf_isabella` + Neural/Glass/Micro DSP layers); LIVE: startup narration speaks |
-| Voice-profile metadata (id/name/engine/base/pitch/tempo/formant/EQ/compression/layers/blend/output) | PARTIAL | `VoicePreset` schema v1 covers engine/base_voice/language/pitch/tempo/EQ/comp/layers/synthetic — **missing prompt fields: provenance, version, cadence, energy, warmth, formality, emotion range, pronunciation overrides** |
+| Voice-profile metadata (id/name/engine/base/pitch/tempo/formant/EQ/compression/layers/blend/output) | LANDED_VERIFIED | `VoicePreset` now carries provenance/version/cadence/energy/warmth/formality/emotion_range + `pronunciation_overrides` (word-boundary rewrites applied in `_synthesize`, cache-key coherent); official presets refresh from shipped JSON every boot. TEST ×4 |
 | Pipeline to create other authorized voice profiles | PARTIAL | presets.py save/save_as/rename/duplicate/delete + Voice Studio UI (DSP authoring). **Import→preprocess→segment→train-from-samples is not built** — presets are DSP recipes over base voices, by design (`types.py:2-5`). Sample-import/clone training: INTENTIONALLY_DEFERRED? — decide |
 | Preserve Kokoro fallback/queue/persona controls/notices/TTS-safe text/vocalizations/gesture timing | LANDED_VERIFIED | docs/VOICE_SYSTEM.md; LIVE overnight dogfood; `speech_filter.py`, `vocalizations.py`, `voice_map.py` |
 | Versioned voice assets, rollback, non-destructive | LANDED_VERIFIED | preset store versions JSON, official presets copy-on-write, SHA-256-verified packaged assets |
@@ -157,8 +157,8 @@ older than the currently-installed one) and validate snapshot coherence
 
 ## Priority-ordered real work remaining
 
-1. Splash: wire rollback/safe-mode recovery actions to host; consume recoveryWatchdogMs. (small)
-2. Voice: extend VoicePreset metadata (provenance/version/cadence/energy/warmth/formality/emotion_range/pronunciation_overrides). (small)
+1. ~~Splash: wire rollback/safe-mode recovery actions to host; consume recoveryWatchdogMs.~~ **DONE** (69894e4a + earlier; live fault dogfood verified)
+2. ~~Voice: extend VoicePreset metadata (provenance/version/cadence/energy/warmth/formality/emotion_range/pronunciation_overrides).~~ **DONE** (03ddc8af)
 3. Provisioning: full-stack plan + Core/Recommended/Complete/Custom profiles + per-item approval states. (medium)
 4. Env + Secrets editor UI on existing APIs. (medium)
 5. External file watcher for workspace editor. (medium)
