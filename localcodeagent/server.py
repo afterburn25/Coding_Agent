@@ -1967,9 +1967,11 @@ class AppState:
         hooks = {
             "evict_idle_models": lambda: self.runtime.evict_idle(),
             "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
-                required_vram_gb=float(gb)),
+                required_vram_gb=float(gb),
+                busy_models=self._busy_model_ids()),
             "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
-                required_ram_gb=float(gb)),
+                required_ram_gb=float(gb),
+                busy_models=self._busy_model_ids()),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_service": lambda: True,   # process watchdog owns restarts
             "health_probe": lambda: bool(self.runtime.summary()),
@@ -4920,6 +4922,43 @@ class AppState:
         except Exception:
             pass
 
+    def _busy_model_ids(self) -> set[str]:
+        """Model ids pinned by in-flight work — running/verifying/reviewing
+        tasks plus any live drive thread. Demand eviction and idle eviction
+        must never kill one of these mid-request."""
+        busy = {
+            str(t.get("model_id") or "")
+            for t in self.tasks.by_status("running", "verifying", "reviewing")
+        }
+        # A live drive is authoritative even when its task row has aged
+        # out of the recent window — evicting its model mid-drive would
+        # kill the in-flight request.
+        with self.agent._drive_lock:
+            live_ids = [
+                tid for tid, th in self.agent._drive_threads.items()
+                if th.is_alive()
+            ]
+        unknown_model = False
+        for tid in live_ids:
+            try:
+                model_id = str(self.tasks.get(tid).model_id or "")
+            except Exception:
+                model_id = ""
+            if model_id:
+                busy.add(model_id)
+            else:
+                unknown_model = True
+        busy.discard("")
+        if unknown_model:
+            # A live drive with an unattributed model could be serving any
+            # resident runtime — pin them all rather than kill a request
+            # mid-stream under memory pressure.
+            try:
+                busy.update(self.runtime.resident_model_ids())
+            except Exception:
+                pass
+        return busy
+
     def _evict_idle_models(self) -> None:
         """Watchdog tick: reclaim memory from managed models that are not in use.
 
@@ -4928,37 +4967,7 @@ class AppState:
         durable and ensure_ready() restores the runtime on resume.
         """
         try:
-            busy = {
-                str(t.get("model_id") or "")
-                for t in self.tasks.by_status("running", "verifying", "reviewing")
-            }
-            # A live drive is authoritative even when its task row has aged
-            # out of the recent window — evicting its model mid-drive would
-            # kill the in-flight request.
-            with self.agent._drive_lock:
-                live_ids = [
-                    tid for tid, th in self.agent._drive_threads.items()
-                    if th.is_alive()
-                ]
-            unknown_model = False
-            for tid in live_ids:
-                try:
-                    model_id = str(self.tasks.get(tid).model_id or "")
-                except Exception:
-                    model_id = ""
-                if model_id:
-                    busy.add(model_id)
-                else:
-                    unknown_model = True
-            busy.discard("")
-            if unknown_model:
-                # A live drive with an unattributed model could be serving any
-                # resident runtime — pin them all rather than kill a request
-                # mid-stream under memory pressure.
-                try:
-                    busy.update(self.runtime.resident_model_ids())
-                except Exception:
-                    pass
+            busy = self._busy_model_ids()
             stopped = self.runtime.evict_idle(busy_models=busy)
             for model_id in stopped:
                 self.events.publish("model", {"event": {"type": "idle_evicted",

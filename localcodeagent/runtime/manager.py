@@ -849,17 +849,20 @@ class RuntimeManager:
         except Exception:
             pass
 
-    def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced") -> list[str]:
+    def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced",
+                                        busy_models: set[str] | None = None) -> list[str]:
         """Stop managed LLM runtimes when an image job needs GPU memory.
 
         External runtimes are never terminated. The returned ids may be restored later.
+        Models in ``busy_models`` are serving in-flight work and are never touched.
         """
+        busy = set(busy_models or ())
         with self._lock:
             self.refresh_hardware()
             if required_vram_gb <= 0 or self.hardware.free_vram_gb >= required_vram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
-            resident = self.resident_model_ids()
+            resident = [mid for mid in self.resident_model_ids() if mid not in busy]
             active = [mid for mid in resident if not profiles.get(mid, self.config.models[0]).keep_loaded]
             # keep_loaded models are a last resort: still evictable when an
             # image job genuinely cannot fit — otherwise the generation crawls

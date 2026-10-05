@@ -310,6 +310,39 @@ class RuntimeManagerTests(unittest.TestCase):
             manager.ensure_ready(victim)
             self.assertEqual(launches, ["victim"])
 
+    def test_demand_release_never_evicts_busy_model(self):
+        # Regression: the supervisor's release hooks didn't pass busy_models —
+        # a node gated on RAM evicted the model that was mid-stream serving
+        # another node (live evidence: connection reset on :8084).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "serving.gguf").write_bytes(b"GGUF")
+            (root / "models" / "idle.gguf").write_bytes(b"GGUF")
+            serving = self._profile(id="serving", model_path="models/serving.gguf")
+            idle = self._profile(id="idle", model_path="models/idle.gguf")
+            cfg = AgentConfig(models=[serving, idle])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=2.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc_s = _attach_fake_managed(manager, serving, last_used=time.time())
+            proc_i = _attach_fake_managed(manager, idle, last_used=time.time() - 600)
+
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, busy_models={"serving"})
+            self.assertEqual(stopped, ["idle"])
+            self.assertFalse(proc_s.terminated)
+            self.assertTrue(proc_i.terminated)
+
+            # Busy model alone cannot satisfy the request — stop nothing.
+            stopped2 = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, busy_models={"serving", "idle"})
+            self.assertEqual(stopped2, [])
+
     def test_fresh_hardware_reprobes_stale_snapshot(self):
         # Regression: budget auto-resume read runtime.hardware — a cached
         # snapshot taken during a RAM dip stayed stale forever when nothing
