@@ -2198,3 +2198,47 @@ build contained the break and has been replaced.
   avatar) + update.flag rewritten. NOTE: data/lkg/rollback.flag is also
   pending ("5 consecutive unclean boots" → snap-1791165159653) — it
   applies first at next launch, then update.flag swaps in backend-new.
+
+## 2026-10-05 — GitHub account API + voice-drain close + windowing (LIVE dogfooded)
+
+### GitHub account management (commits c3290805, a9ae38d8, 052ad13a)
+- New `localcodeagent/github_account.py` — single account-state surface:
+  env→vault credential resolution, /user validation + scope capture,
+  differentiated states (not_configured/connected/invalid_token/
+  permission_blocked/network_error/vault_error).
+- `/api/github/{status,connect,disconnect,repos,test}` on the frozen backend.
+- Settings → Connections panel (`web/settings.js`).
+- connect/disconnect moved github.write → credentials.use; connector +
+  shared client refresh live without restart.
+- git_push + github_clone: basic base64(x-access-token:token) header auth
+  — 'bearer' is REJECTED by git smart-HTTP for OAuth (gho_) tokens.
+- LIVE EVIDENCE (port 58698/49952 backends):
+  - status→not_configured; connect→`connected as afterburn25`, scopes
+    [repo, workflow, ...]; repos→real repo list; test→ /user + repos +
+    workspace perms (push/admin) + 3 Actions runs — all ok.
+  - Connector status: authed=true credential_source=vault, no restart.
+  - RESTART persistence verified: status still connected after relaunch.
+  - Push: header-auth push of test/nexus-github-dogfood-1791226213 to
+    afterburn25/Coding_Agent succeeded; token count in .git/config = 0;
+    remote branch deleted (204).
+  - disconnect→removed_vault_token=true; status immediately not_configured.
+  - Token never in logs/config/activity (grep-verified).
+- KNOWN DEBT: D:\Nexus_Core\Source checkout is corrupt ('bad tree object
+  HEAD', missing objects) — predates this work; needs a fresh clone.
+- 23 regression tests in tests/test_github_account.py.
+
+### Voice overlap on shutdown + interface handshake (commit 2e91d461)
+- web/voice_global.js reports busy/idle via voice-state webview messages;
+  _draining latch stops new clips on shutdown, in-flight ones finish.
+- Host waits for queue idle before farewell (75s bound). LIVE TRACE:
+  close mid-clip → drain waited 3626ms → busy=False → THEN
+  'shutdown' + 'goodbye' — zero overlap.
+- WebMessageAsJson fix: object posts never matched the old string API —
+  voice-state would've been silent AND nexus-core-ready was falling
+  through to the 15s fallback EVERY boot. interface_ready: 15.2s → 5.4s.
+- Splash: 500ms HWND_TOPMOST re-assert watchdog (Windows can demote
+  borderless windows shown without foreground rights); main-window
+  handoff uses attach-thread-input + SetForegroundWindow.
+- BUILD GOTCHA: PyInstaller must run with repo root as cwd —
+  pathex=[] in the spec relies on it; building from build/ produced an
+  exe missing localcodeagent entirely (ModuleNotFoundError on boot).
