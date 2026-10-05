@@ -32,6 +32,7 @@ packaging/llama-runtime/
 # Local packaging output (PyInstaller/dotnet dist trees)
 build/
 dist/
+dist-*/
 .agent/browser/
 
 .agent/research/
