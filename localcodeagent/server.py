@@ -560,17 +560,29 @@ class AppState:
             state_path=runtime_root / "data" / "connectors_audit.json",
             vault=self.secrets,
             permission_check=lambda perm: self.permission_manager.effective(perm))
-        # First-class connector for the repo host — lazy client factory so a
-        # token exported after boot still authenticates; slug resolves from
-        # the workspace git remote.
+        # First-class connector for the repo host — one shared client so a
+        # token stored by /api/github/connect authenticates every surface
+        # immediately; slug resolves from the workspace git remote.
+        from .tools.github import GitHubCodingClient, _repo_slug
+        self.github_client = GitHubCodingClient(config)
         try:
             from .connectors.github import GitHubConnector
-            from .tools.github import GitHubCodingClient, _repo_slug
             self.connectors.register(GitHubConnector(
-                client_factory=lambda: GitHubCodingClient(config),
+                client_factory=lambda: self.github_client,
                 slug=lambda: _repo_slug(self.workspace)))
         except Exception:
             pass
+        # Single account-state surface for API/tools/connector/capability —
+        # status/connect/disconnect/repos/test all live here so a UI
+        # connect needs no agent-tool call and no restart.
+        from .github_account import GitHubAccountService
+        self.github_account = GitHubAccountService(
+            config, self.secrets, client=self.github_client,
+            slug_resolver=lambda: _repo_slug(self.workspace),
+            connectors=self.connectors,
+            permission_check=lambda p: self.permission_manager.effective(p),
+            audit=lambda e, d: self.connectors._audit(
+                "github", e, json.dumps(d)[:200]))
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         self._rag_db = self.workspace / ".agent" / "rag_index.db"
@@ -632,7 +644,9 @@ class AppState:
             register_github_tools(
                 self.tools, self.workspace, config,
                 vault=self.secrets,
-                workspaces=self.workspaces)
+                workspaces=self.workspaces,
+                client=self.github_client,
+                account=self.github_account)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
@@ -1019,14 +1033,10 @@ class AppState:
                 return None
 
         def _github_authorized() -> bool:
+            # Account service resolves env+vault live — no cached
+            # negative state; connect/disconnect reflect immediately.
             try:
-                from .tools.github import GitHubCodingClient
-                if getattr(GitHubCodingClient(config), "token", ""):
-                    return True
-            except Exception:
-                pass
-            try:
-                return bool(self.secrets.get("github_token"))
+                return bool(self.github_account.authorized())
             except Exception:
                 return False
 
@@ -7192,6 +7202,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"error": "unknown profile route"}, 404)
             return
+        if path == "/api/github/status":
+            q = parse_qs(urlparse(self.path).query)
+            refresh = str((q.get("refresh") or [""])[0]) in {"1", "true", "yes"}
+            self._json(self.state.github_account.status(refresh=refresh))
+            return
+        if path == "/api/github/repos":
+            q = parse_qs(urlparse(self.path).query)
+            self._json(self.state.github_account.list_repos(
+                limit=int((q.get("limit") or ["20"])[0] or 20),
+                visibility=str((q.get("visibility") or ["all"])[0])))
+            return
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
@@ -8202,6 +8223,20 @@ class Handler(BaseHTTPRequestHandler):
                 if self.state.profile_api.handle_post(self, path, body):
                     return
                 self._json({"error": "unknown profile route"}, 404)
+                return
+            if path == "/api/github/connect":
+                # Account setup — credential validation + encrypted vault
+                # store. Not a repo write; no Nexus permission gate beyond
+                # the loopback UI. The token never leaves this method.
+                out = self.state.github_account.connect(
+                    str(body.get("token") or ""))
+                self._json(out, 200 if out.get("connected") else 400)
+                return
+            if path == "/api/github/disconnect":
+                self._json(self.state.github_account.disconnect())
+                return
+            if path == "/api/github/test":
+                self._json(self.state.github_account.test())
                 return
             if path.startswith("/api/voice/"):
                 if self.state.voice is None:

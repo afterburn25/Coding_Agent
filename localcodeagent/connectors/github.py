@@ -47,11 +47,29 @@ class GitHubConnector(Connector):
     # -- Connector contract -------------------------------------------------
 
     def authenticate(self, vault: Any) -> bool:
-        # Capture the vault for token fallback. Reads work without a token;
-        # authentication reflects whether a credential resolves, not whether
-        # one is required.
+        # Capture the vault for token fallback. The connector is
+        # operational without a credential (public reads work
+        # unauthenticated) — authenticate gates CALLS, not reporting.
+        # Credential presence is reported separately via auth_state().
         self._vault = vault
         return True
+
+    def auth_state(self) -> dict[str, Any]:
+        """Cheap (no network) credential state for status surfaces —
+        reflects real token availability so 'vault has valid token but
+        connector reports authed=false' can't persist past the next
+        status() call."""
+        import os
+        client = self._client_factory()
+        env = getattr(client, "token_env", "GITHUB_TOKEN")
+        if os.environ.get(env):
+            return {"authed": True, "source": "env"}
+        try:
+            if self._vault is not None and self._vault.get("github_token"):
+                return {"authed": True, "source": "vault"}
+        except Exception:
+            pass
+        return {"authed": False, "source": None}
 
     def health(self) -> dict[str, Any]:
         t0 = time.time()

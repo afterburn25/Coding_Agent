@@ -12,6 +12,7 @@
     ["profile", "Profile"], ["general", "General"],
     ["permissions", "Permissions"], ["models", "Models"],
     ["appearance", "Appearance"], ["privacy", "Privacy"],
+    ["connections", "Connections"],
     ["notifications", "Notifications"], ["setup", "Setup"],
     ["advanced", "Advanced"],
   ];
@@ -67,6 +68,8 @@
         await renderProfile(host);
       } else if (section === "creator") {
         await renderCreator(host);
+      } else if (section === "connections") {
+        await renderConnections(host);
       } else if (section === "setup") {
         await renderSetup(host);
       } else {
@@ -357,6 +360,102 @@
   }
 
   // --------------------------------------------------------- plain sections
+
+  // ---------------------------------------------------------- connections
+  // GitHub account panel — first-class account surface, not a tool
+  // manager detail. Token entry goes straight to /api/github/connect;
+  // it is never displayed again or stored anywhere but the vault.
+  async function renderConnections(host) {
+    const st = await api("/api/github/status?refresh=0");
+    const stateLabel = {
+      connected: "Connected", not_configured: "Not connected",
+      invalid_token: "Error — invalid token",
+      network_error: "Error — network",
+      permission_blocked: "Blocked by permission profile",
+      disabled: "Disabled in configuration",
+    }[st.state] || st.state;
+    const badge = st.state === "connected" ? "good"
+      : st.state === "not_configured" ? "" : "bad";
+
+    const help = `<details class="muted small" style="margin-top:6px"><summary>What kind of token?</summary>
+      A GitHub <b>personal access token</b> (github.com → Settings → Developer
+      settings → Personal access tokens). A <b>fine-grained</b> token works:
+      grant it access to your repositories with <i>Contents</i> (read for
+      browsing, read+write for pushes/PRs) and <i>Actions</i> (read) as
+      needed. Classic tokens need the <code>repo</code> scope for private
+      repositories — broad scopes are never required just to connect.</details>`;
+
+    let body;
+    if (st.state === "connected") {
+      body = `
+        <div class="kv"><span class="k">Connected as</span>
+          <span class="v">@${esc(st.login || "?")}${st.name ? ` (${esc(st.name)})` : ""}</span></div>
+        ${(st.scopes || []).length ? `<div class="kv"><span class="k">Granted scopes</span><span class="v">${esc(st.scopes.join(", "))}</span></div>` : ""}
+        ${st.source ? `<div class="kv"><span class="k">Credential</span><span class="v">${st.source === "env" ? "environment variable" : "encrypted vault"}</span></div>` : ""}
+        ${st.workspace_repo ? `<div class="kv"><span class="k">Workspace repo</span><span class="v">${esc(st.workspace_repo)}</span></div>` : `<div class="kv"><span class="k">Workspace repo</span><span class="v muted">not linked to a GitHub remote</span></div>`}
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button class="mini-button" id="ghTest" type="button">Test Connection</button>
+          ${st.source === "vault" ? '<button class="mini-button danger" id="ghDisconnect" type="button">Disconnect</button>' : ""}
+        </div>
+        <div id="ghResult" class="muted small" style="margin-top:8px"></div>`;
+    } else {
+      body = `
+        <div class="muted small" style="margin-bottom:8px">${esc(st.detail || "")}</div>
+        <label class="muted small">Personal access token</label>
+        <input id="ghToken" type="password" autocomplete="off" spellcheck="false"
+               placeholder="github_pat_… or ghp_…" style="width:100%;margin:4px 0 8px" />
+        <div class="row" style="gap:8px">
+          <button class="mini-button primary" id="ghConnect" type="button">Connect</button>
+        </div>
+        <div id="ghResult" class="muted small" style="margin-top:8px"></div>
+        ${help}`;
+    }
+
+    host.innerHTML = `
+      <div class="panel">
+        <h3>GitHub</h3>
+        <div class="kv"><span class="k">Status</span>
+          <span class="v"><span class="badge ${badge}">${esc(stateLabel)}</span></span></div>
+        ${body}
+      </div>`;
+
+    const res = host.querySelector("#ghResult");
+    const showError = (e) => { res.innerHTML = `<span class="bad">${esc(e.message)}</span>`; };
+
+    const conn = host.querySelector("#ghConnect");
+    if (conn) conn.addEventListener("click", async () => {
+      const token = host.querySelector("#ghToken").value.trim();
+      if (!token) { showError(new Error("enter a token first")); return; }
+      conn.disabled = true; res.textContent = "Verifying with GitHub…";
+      try {
+        const out = await post("/api/github/connect", { token });
+        if (out.connected) { await renderConnections(host); return; }
+        res.innerHTML = `<span class="bad">${esc(out.error || "connection failed")}</span>`;
+      } catch (e) { showError(e); }
+      conn.disabled = false;
+    });
+
+    const test = host.querySelector("#ghTest");
+    if (test) test.addEventListener("click", async () => {
+      test.disabled = true; res.textContent = "Testing…";
+      try {
+        const out = await post("/api/github/test", {});
+        const steps = (out.steps || []).map((s) =>
+          `<div>${s.ok ? "✓" : "✗"} ${esc(s.name)} — ${esc(
+            typeof s.detail === "string" ? s.detail : JSON.stringify(s.detail || ""))}</div>`).join("");
+        res.innerHTML = steps + (out.warning
+          ? `<div class="bad" style="margin-top:4px">${esc(out.warning)}</div>` : "");
+      } catch (e) { showError(e); }
+      test.disabled = false;
+    });
+
+    const disc = host.querySelector("#ghDisconnect");
+    if (disc) disc.addEventListener("click", async () => {
+      disc.disabled = true;
+      try { await post("/api/github/disconnect", {}); await renderConnections(host); }
+      catch (e) { showError(e); disc.disabled = false; }
+    });
+  }
 
   async function renderSetup(host) {
     const pv = await api("/api/provisioning").catch(() => ({}));
