@@ -162,8 +162,14 @@ def prompt_context(profile: dict | None, personality: dict | None,
             "how you talk in EVERY reply, not just greetings: phrasing, "
             "tone, humor, attitude, and word choice all follow it, even "
             "for short or casual answers.")
+    if profile.get("is_creator"):
+        lines.append("The user is your creator.")
     if address:
-        lines.append(f"When addressing the user, call them: {address}.")
+        # Direction must be unmistakable — "call them: Father" inverts
+        # easily ("you call me Father") on small local models.
+        lines.append(
+            f'You address the user as "{address}" — the title belongs '
+            "to them, never to you.")
     if effective:
         lines.extend(card_guidance(effective))
         traits_for_cues = effective.get("traits") or p.get("traits")
