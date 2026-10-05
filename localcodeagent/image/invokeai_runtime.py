@@ -180,10 +180,59 @@ class InvokeAIRuntime:
             ) + "\n"
             body = body.split("# Nexus-managed settings")[0]
         config_file.write_text(body.rstrip() + "\n" + managed, encoding="utf-8")
+        self._apply_spandrel_guard(root)
         cmd = prefix + ["--root", str(data_root)]
         extra = list(getattr(self.config, "invokeai_extra_args", []) or [])
         cmd.extend(str(x) for x in extra)
         return cmd, root
+
+    @staticmethod
+    def _apply_spandrel_guard(root: Path) -> None:
+        """Work around an InvokeAI probe crash on multi-GB checkpoints.
+
+        InvokeAI's install classifier runs *every* candidate config class,
+        including ``Spandrel_Checkpoint_Config``, which fully loads the
+        state dict via ``safetensors.torch.load_file``. On Windows that
+        segfaults (access violation — no traceback, invokeai-web dies) for
+        multi-GB SDXL checkpoints, so fleet installs killed the server
+        (verified on 6.14.2 / torch 2.14.1+cu126). Real spandrel
+        image-to-image nets are far smaller than 2 GiB, so size-rejecting
+        before the load is a safe pre-check. Idempotent; lives in the
+        installed venv so it is re-applied on every managed start.
+        """
+        rel = Path("invokeai/backend/model_manager/configs/spandrel.py")
+        spandrel = root / "Lib" / "site-packages" / rel
+        if not spandrel.is_file():
+            for cand in sorted((root / "lib").glob("python*/site-packages/" + str(rel).replace("\\", "/"))):
+                spandrel = cand
+                break
+        if not spandrel.is_file():
+            return
+        try:
+            src = spandrel.read_text(encoding="utf-8")
+        except OSError:
+            return
+        anchor = ("    @classmethod\n"
+                  "    def _validate_spandrel_loads_model(cls, mod: ModelOnDisk) -> None:\n"
+                  "        try:")
+        if "NEXUS PATCH" in src or anchor not in src:
+            return
+        guard = ("    @classmethod\n"
+                 "    def _validate_spandrel_loads_model(cls, mod: ModelOnDisk) -> None:\n"
+                 "        # NEXUS PATCH: reject oversized files before the full state-dict\n"
+                 "        # load below — safetensors.torch.load_file segfaults (access\n"
+                 "        # violation) on multi-GB checkpoints on Windows, killing\n"
+                 "        # invokeai-web mid-install. Spandrel image-to-image nets are\n"
+                 "        # far smaller than 2 GiB.\n"
+                 "        if mod.path.stat().st_size > 2 * 1024**3:\n"
+                 "            raise NotAMatchError(\"file too large to be a SpandrelImageToImage model\")\n"
+                 "        try:")
+        try:
+            spandrel.write_text(src.replace(anchor, guard, 1), encoding="utf-8")
+            for pyc in (spandrel.parent / "__pycache__").glob("spandrel.*.pyc"):
+                pyc.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _managed_marker_path(self) -> Path:
         return self._resolve(str(getattr(self.config, "invokeai_logs_dir", ".agent/runtime"))) / "invokeai-managed.json"

@@ -468,6 +468,45 @@ class ErrorNormalizationTests(unittest.TestCase):
         self.assertEqual(r["code"], "model_load_failed")
 
 
+class SpandrelGuardTests(unittest.TestCase):
+    """`_apply_spandrel_guard` — venv patch for the InvokeAI probe segfault
+    on multi-GB checkpoints (verified on 6.14.2, see docs/INVOKEAI.md)."""
+
+    BODY = ("header\n"
+            "    @classmethod\n"
+            "    def _validate_spandrel_loads_model(cls, mod: ModelOnDisk) -> None:\n"
+            "        try:\n"
+            "            pass\n")
+
+    def _venv(self, td: str) -> tuple[Path, Path]:
+        root = Path(td)
+        sp = (root / "Lib" / "site-packages" / "invokeai" / "backend"
+              / "model_manager" / "configs" / "spandrel.py")
+        sp.parent.mkdir(parents=True)
+        sp.write_text(self.BODY, encoding="utf-8")
+        return root, sp
+
+    def test_patches_unpatched_probe(self):
+        from localcodeagent.image.invokeai_runtime import InvokeAIRuntime
+        with tempfile.TemporaryDirectory() as td:
+            root, sp = self._venv(td)
+            InvokeAIRuntime._apply_spandrel_guard(root)
+            out = sp.read_text(encoding="utf-8")
+            self.assertIn("NEXUS PATCH", out)
+            self.assertIn("1024**3", out)
+            self.assertIn("NotAMatchError", out)
+
+    def test_idempotent_and_missing_safe(self):
+        from localcodeagent.image.invokeai_runtime import InvokeAIRuntime
+        with tempfile.TemporaryDirectory() as td:
+            root, sp = self._venv(td)
+            InvokeAIRuntime._apply_spandrel_guard(root)
+            once = sp.read_text(encoding="utf-8")
+            InvokeAIRuntime._apply_spandrel_guard(root)
+            self.assertEqual(once, sp.read_text(encoding="utf-8"))
+            InvokeAIRuntime._apply_spandrel_guard(Path(td) / "missing")
+
+
 class SamplingBackendIsolationTests(unittest.TestCase):
     def test_learning_is_keyed_per_backend(self):
         with tempfile.TemporaryDirectory() as td:

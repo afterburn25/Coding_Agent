@@ -137,3 +137,31 @@ unusable. Single-file checkpoints must use the direct
 `https://huggingface.co/<repo>/resolve/main/<file>` URL form, which
 registers as a proper `main` checkpoint. The fleet specs carry the URL
 form; `repo::file` remains valid only for multi-file diffusers repos.
+
+All three fleet models registered `main`/`sdxl` and a real Juggernaut
+generation completed through `InvokeAIBackend.submit` (1024², 20
+steps, ~32 s on the 3080 Ti).
+
+### Upstream bug: spandrel probe segfault on large checkpoints
+
+InvokeAI's model classifier runs *every* candidate config class during
+install, including `Spandrel_Checkpoint_Config`, which fully loads the
+state dict via `safetensors.torch.load_file`. On this box (torch
+2.14.1+cu126, Windows) that segfaults — access violation, no traceback —
+killing `invokeai-web` mid-install for multi-GB files. Observed on all
+three ~7 GB fleet checkpoints; repro standalone:
+
+```text
+ModelConfigFactory.from_model_on_disk(<7GB safetensors>)
+→ spandrel.py:_validate_spandrel_loads_model → access violation
+```
+
+Local workaround applied to `tools/InvokeAI/Lib/site-packages/
+invokeai/backend/model_manager/configs/spandrel.py` (marked
+`NEXUS PATCH`): `_validate_spandrel_loads_model` raises `NotAMatchError`
+for files >2 GiB — spandrel image-to-image nets are far smaller. With
+the patch all three fleet installs register cleanly. **Caveat**: the
+patch lives in the installed venv, so an InvokeAI reinstall or upgrade
+removes it and large-checkpoint installs will crash the server again
+until re-applied or fixed upstream. Serialise model installs — two
+concurrent hash+probe cycles also OOMed this box mid-install.

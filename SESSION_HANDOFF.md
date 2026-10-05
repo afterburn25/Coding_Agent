@@ -66,9 +66,29 @@ New on top of the InvokeAI backend work:
   fleet section, `MODEL_ROUTING.md` fleet routing, `docs/INVOKEAI.md`
   managed-install API.
 
-Dogfood in progress: Juggernaut/CyberRealistic/RealVis installs accepted
-by the live InvokeAI 6.14.2 install API (`repo::file` sources, real
-byte counts) — downloads running at handoff time.
+Dogfood COMPLETE on live InvokeAI 6.14.2 (RTX 3080 Ti):
+all three fleet checkpoints verified SHA-256, registered as
+`main`/`sdxl`, matched by `fleet_for_model_name`, and routing verified
+— Times-Square scene → `juggernaut-xl-v9`, beauty portrait →
+`cyberrealistic-xl-v9`, glamour/boudoir → `realvisxl-v5`. Real
+generation through `InvokeAIBackend.submit` completed (1024², 20
+steps, ~32 s). `98ec4e05` switched `invokeai_source` to direct
+HF `resolve/main` URLs — `repo::file` downloads into a folder the
+model identifier can't classify (registers `unknown`/`tmpinstall_*`).
+
+**Upstream bug found + local workaround**: InvokeAI's model probe runs
+every config class including `Spandrel_Checkpoint_Config`, which
+*fully loads the state dict*; `safetensors.torch.load_file` segfaults
+(access violation → silent `invokeai-web` exit, no traceback) on the
+7 GB fleet files on this box. Patched the venv
+(`tools/InvokeAI/Lib/site-packages/invokeai/backend/model_manager/
+configs/spandrel.py`) — `_validate_spandrel_loads_model` raises
+NotAMatch for files >2 GiB (marked "NEXUS PATCH"). **Caveat**: the
+patch lives in the installed venv — an InvokeAI reinstall wipes it.
+Reinstalling via provisioning will crash the server on multi-GB
+checkpoints until this is re-applied or fixed upstream. Candidate
+classes run even after a match, so the size guard matters for every
+large checkpoint install.
 
 ### Prior milestone — InvokeAI as a first-class image backend
 
