@@ -20,11 +20,14 @@ Image Backend Router  (operation + capability + availability aware)
   graph).
 - **`image/comfyui.py`** — `ComfyUIBackend` (port 8188, `/prompt`,
   `/history`, `/ws` progress).
-- **`image/invokeai.py`** — `InvokeAIBackend` (port 9090, `/api/v1`): health
-  via `/api/v1/app/version`, model discovery via `/api/v1/models/`, uploads
-  via `/api/v1/images/upload`, jobs via `/api/v1/queue/default/enqueue_graph`
-  → `item/{id}` polling → `/api/v1/images/i/{name}/full` download, cancel via
-  queue-item delete.
+- **`image/invokeai.py`** — `InvokeAIBackend` (port 9090): health via
+  `/api/v1/app/version`, model discovery via `/api/v2/models/` (v1
+  fallback), uploads via `/api/v1/images/upload` (multipart file +
+  query params), jobs via `POST /api/v1/queue/default/enqueue_batch`
+  with a nested `{"batch": {graph, runs}}` body, per-item polling at
+  `/i/{item_id}`, cancellation via `PUT /i/{item_id}/cancel`, downloads
+  via `/api/v1/images/i/{name}/full`. Variations submit one batch per
+  seed — `runs` on a single batch would reuse the same seed.
 - **`image/runtime.py` / `invokeai_runtime.py`** — managed process lifecycle
   (discover, start, stop, restart, orphan reclaim, idle eviction) for each
   engine. Both register as `ManagedService` rows in the Process Manager.

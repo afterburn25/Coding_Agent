@@ -15,11 +15,19 @@ capability-aware routing.
   `models()` alongside the existing submit/status/cancel; ComfyUI declares
   the full op vocabulary, InvokeAI advertises what its API can actually run.
 - **InvokeAI adapter** (`image/invokeai.py`) — dependency-free REST client:
-  health via `/api/v1/app/version`, model discovery via `/api/v1/models/`,
-  uploads via `/api/v1/images/upload`, graph submission via
-  `enqueue_graph` (SD1.5/SD2/SDXL), queue-item status polling, image
-  download, and cancellation. Sampler/scheduler names map from the
-  canonical ComfyUI spelling into InvokeAI's enum.
+  health via `/api/v1/app/version`, model discovery via `/api/v2/models/`
+  (v1 fallback), uploads via `/api/v1/images/upload`, graph submission via
+  `enqueue_batch` (SD1.5/SD2/SDXL), per-item status polling + cancel,
+  image download. Sampler/scheduler names map from the canonical ComfyUI
+  spelling into InvokeAI's enum; variations fan out one batch per seed.
+- **Live-verified** against InvokeAI 6.14.2 on this dev box: model
+  install, text-to-image, img2img edit, inpaint, variations, cancel,
+  auto routing, honest pinned-backend errors — real PNG artifacts.
+- **Artifact lineage** — finished image jobs register outputs in the
+  Artifact Manager with the real backend attribution (`invokeai`/
+  `comfyui`); mission image nodes dedupe against the generic path.
+- **Venv installer** honors `install.python_candidates` — InvokeAI needs
+  Python 3.10–3.12 while the ambient interpreter may be newer.
 - **InvokeAI runtime** (`image/invokeai_runtime.py`) — discovery across
   configured dir, `{app}/tools/InvokeAI` venv, managed-python Scripts dir,
   and PATH; managed start/stop/restart with marker-based orphan reclaim
