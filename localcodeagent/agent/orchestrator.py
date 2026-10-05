@@ -159,6 +159,13 @@ class _AgentSession:
     started_at: float = field(default_factory=time.time)
 
 
+# Marker embedded in the visible annotation appended to replies that
+# assert completed actions with zero tool calls. The mission executor
+# matches on this to fail fabricated agent nodes — keep in sync with
+# the notices appended below.
+UNVERIFIED_CLAIMS_MARKER = "Unverified action claims"
+
+
 
 class AgentOrchestrator:
     def __init__(
@@ -3311,7 +3318,7 @@ class AgentOrchestrator:
                     # replay the lie verbatim to similar future questions.
                     session.unverified_claims = True
                     notice = (
-                        "\n\n⚠ **Unverified action claims** — no tools or "
+                        f"\n\n⚠ **{UNVERIFIED_CLAIMS_MARKER}** — no tools or "
                         "commands ran in this reply. Statements asserting "
                         "completed actions above are narrative, not "
                         "confirmed execution.")
@@ -3338,7 +3345,7 @@ class AgentOrchestrator:
                         f"{c['name']} ({c['state']})"
                         for c in cap_contra[:3])
                     notice = (
-                        "\n\n⚠ **Unverified action claims** — statements "
+                        f"\n\n⚠ **{UNVERIFIED_CLAIMS_MARKER}** — statements "
                         "above assert use of capabilities that are not "
                         f"available right now: {names}. They are narrative, "
                         "not confirmed execution.")

@@ -22,7 +22,10 @@ from . import netdiag
 from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
 from .release import SECTIONS as SECTIONS_RC
 from .temp_specialists import DEFAULT_TTL as DEFAULT_SPECIALIST_TTL
-from .agent.orchestrator import AgentOrchestrator
+from .agent.orchestrator import (
+    AgentOrchestrator,
+    UNVERIFIED_CLAIMS_MARKER as _UNVERIFIED_CLAIMS_MARKER,
+)
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
 from .models.router import ModelRouter
@@ -1900,6 +1903,17 @@ class AppState:
                 out["pending_approval"] = (
                     result.pending_approval
                     or task.get("pending_approval") or {"kind": "task"})
+            if (out["ok"] and node.get("kind") == "agent"
+                    and _UNVERIFIED_CLAIMS_MARKER in str(
+                        out.get("output") or "")):
+                # A mission node that asserts completed actions while zero
+                # tools ran is fabrication — the chat path annotates it,
+                # but autonomous work must not advance on a lie. Fail the
+                # node so retries can produce a real tool run.
+                out["ok"] = False
+                out["error"] = (
+                    "unverified action claims — reply asserted completed "
+                    "actions but no tools ran")
             # Feed the cognitive architecture: PFC conflict monitoring
             # (repeated failures/loops) + Hippocampus episodic memory.
             brain = getattr(self, "brain", None)
