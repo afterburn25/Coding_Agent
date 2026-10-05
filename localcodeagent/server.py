@@ -5556,6 +5556,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
+                          "/api/provisioning",
                           "/api/specialists")
 
     _AUDIT_MANIFESTS = ("requirements.txt", "pyproject.toml",
@@ -6689,12 +6690,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     self._json({"error": "text is required"}, 400)
                     return
-                out = voice.speak_text(
-                    text[:20000],
-                    preset_id=body.get("preset_id") or None,
-                    speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                    auto_filter=bool(body.get("auto_filter", True)),
-                )
+                try:
+                    out = voice.speak_text(
+                        text[:20000],
+                        preset_id=body.get("preset_id") or None,
+                        speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        auto_filter=bool(body.get("auto_filter", True)),
+                    )
+                except Exception as exc:
+                    # Disabled engine / missing preset are honest 503s, not
+                    # crashes — the UI calls this opportunistically.
+                    self._json({"error": str(exc)}, 503)
+                    return
                 self._json(out)
                 return
             if path == "/api/voice/preview":

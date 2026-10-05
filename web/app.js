@@ -310,6 +310,14 @@ function _activityInit(){
   const muted=activity.querySelector('.muted');
   if(muted)activity.textContent='';
 }
+function setStatus(text){
+  // Transient status-strip note (e.g. a notification title) — flashes for
+  // a few seconds, then the real status re-renders from /api/status.
+  const el=$('#status');if(!el)return;
+  el.textContent=String(text||'').slice(0,140);
+  clearTimeout(el._noteT);
+  el._noteT=setTimeout(()=>loadStatus(false),8000);
+}
 function appendLiveActivity(text){
   _activityInit();
   const line=document.createElement('div');
