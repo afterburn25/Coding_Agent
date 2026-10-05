@@ -111,6 +111,18 @@ Not dogfooded: GPU/LLM-resident resource contention (no LLM was loaded on
 this dev box) and live ComfyUI fallback (ComfyUI not installed here — the
 fallback path is unit-tested in `tests/test_invokeai.py`).
 
+**Closed 2026-10-05 (live, same box):** both gaps are now verified on real
+processes. With `llama-server` resident (~11 GB VRAM) and a managed
+InvokeAI + managed ComfyUI all running, a ComfyUI Qwen job released the
+coding LLM (llama-server count 0 during the job), parked the managed
+InvokeAI (`resource arbitration: parked Nexus-managed InvokeAI` recorded
+in `job.routing_reasons`), generated real output, and restored the LLM
+(`llama-server` back to 1 after completion). Mid-job InvokeAI death was
+also observed live: the job failed honestly once, and the new bounded
+restart+resubmit path now covers `BackendConnectionError` crashes on both
+engines. External (user-owned) servers are never evicted —
+`evict_if_managed()` only touches Nexus-owned processes.
+
 ## Managed model installs (fleet)
 
 The adapter wraps InvokeAI's model-manager install API (v6 verified):

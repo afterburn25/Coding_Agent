@@ -11,7 +11,59 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.21.0 photoreal fleet + background provisioning
+## 2026-10-05 — Integrated reliability closeout (branch `milestone/integrated-reliability-closeout`, IN PROGRESS)
+
+Live verification on the real install (`D:\Nexus_Core`, RTX 3080 Ti 12GB,
+64GB RAM, InvokeAI 6.14.2, ComfyUI portable). Backend under test:
+current source on this branch via `--config D:\Nexus_Core\config.json`.
+
+### ComfyUI dogfood (P2) — VERIFIED
+
+- `qwen-image-2.1` t2i: managed cold-boot via
+  `comfyui_start_on_image_request`, real 20-step 1024² PNG (147s incl.
+  boot). Workflow `qwen/qwen-image-2.1-t2i-api.json`.
+- `flux2-klein-4b` t2i: finished, real PNG (80s). Workflow
+  `flux/flux2-klein-4b-t2i-api.json`.
+- `juggernaut-x-v10` SDXL t2i through ComfyUI: finished, real PNG.
+- Qwen `remove_background`: real output via
+  `qwen-image-2.1-background-removal-api.json`.
+- Cancel mid-flight: clean `cancelled` state at 29%, zero partial
+  outputs, no phantom success.
+- Outputs land in `data/image/generations/<job>/` + mirrored to
+  `output/images/`; history.json records every finished job;
+  `backend_job_id` + `vram_before/after` persisted per job.
+
+### InvokeAI↔ComfyUI fallback matrix (P3) — VERIFIED LIVE
+
+| Case | Setup | Result |
+|---|---|---|
+| A | auto, both up, SDXL t2i | InvokeAI chosen (RealVisXL fleet route), real output |
+| B | `remove_background`, auto | ComfyUI — "InvokeAI does not support it natively", real output |
+| C | InvokeAI unavailable, auto | ComfyUI fallback, real output, honest routing reasons |
+| D | explicit `invokeai` pin, unavailable | HTTP 400 honest failure — no silent swap |
+| E | ComfyUI down, auto t2i | InvokeAI succeeds |
+
+### GPU arbitration (P4) + crash recovery (P9) — VERIFIED LIVE, `cc702cb2`
+
+- Real defect observed + fixed: managed ComfyUI resident (~11GB)
+  starved an InvokeAI model load → InvokeAI died mid-job (WinError
+  10054), job failed, self-heal's respawn also OOM'd.
+- Fix: `evict_if_managed()` on both runtimes (Nexus-owned only —
+  external user servers untouchable); peer-backend eviction wired into
+  both job paths when memory stays short after LLM release; one bounded
+  restart+resubmit on `BackendConnectionError` for both engines.
+- Live re-verify: `llama-server` resident → Qwen job released it (0
+  procs), evicted managed InvokeAI (reason recorded), generated, LLM
+  restored (1 proc) after completion.
+
+### Remaining milestone work
+
+Clean-install provisioning soak, long autonomy soak, chaos matrix,
+cinematic splash + Isabella narration (P13/P14), docs/version truth
+sweep, release packaging gate. Splash assets are staged untracked in
+`desktop/ChatNexus.Desktop/splash/`.
+
+
 
 New on top of the InvokeAI backend work:
 
@@ -180,6 +232,7 @@ custom-workflow engine and fallback.
   `create_denoise_mask` needs both `image` and `mask` inputs.
 - Not dogfooded: LLM-resident VRAM contention and live ComfyUI fallback
   (ComfyUI not installed on this box; fallback is unit-tested).
+  — **since closed**: see "Integrated reliability closeout" entry below.
 
 ### Deployment to live install (D:/Nexus_Core)
 
