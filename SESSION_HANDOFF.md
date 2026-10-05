@@ -2004,3 +2004,15 @@ the mocked tests missed:
   whisper@deployed=False (honest — not installed there).
 - `backend-new` restaged from `7153c5c3` — ships voice-assets fix,
   permission retry, real verify, and manifest detection.
+
+## Runtime orphan adoption (5e68048d)
+
+Backend restart previously killed healthy llama-server orphans and
+reloaded the same multi-GB checkpoint. `_start_llama_cpp` now probes the
+port listener first: healthy + serving the same model file (`/v1/models`)
++ sufficient context (`/props` n_ctx) → adopted into `_managed` through
+`_OrphanProcess` (pid-backed duck type — poll/terminate/kill/wait all
+act on the real process, so stop/watchdog/eviction work unchanged).
+Wrong model, unhealthy, or too-small ctx falls back to reclaim+spawn.
+Note: the two live orphans run n_ctx=8192 while profiles default 32k —
+they'll correctly be replaced on restart, not adopted.
