@@ -111,7 +111,12 @@ internal sealed class SplashForm : Form
     // init and earns its loader readout only if the WebView2 is taking
     // noticeably long (or failed outright and IS the fallback).
     private readonly Stopwatch _initSw = Stopwatch.StartNew();
-    private bool _fadedIn;
+    private bool _allowShow;
+    private bool _shown;
+    // Tick time the cinematic first reported ready — the reveal waits a
+    // short beat past it so the compositor's first frame is stable, not
+    // mid-swap, when the window appears.
+    private long _webReadyAt = -1;
 
     private Panel? _failurePanel;
     private string? _failureMessage;
@@ -151,12 +156,11 @@ internal sealed class SplashForm : Form
         TopMost = true;
         BackColor = Color.FromArgb(4, 8, 18);
         DoubleBuffered = true;
-        // Invisible until a surface is actually ready — the cinematic
-        // initializes behind a 0-opacity form and fades in already
-        // animating, so the user only ever sees ONE splash. If the
-        // WebView2 is slow (>1.2s) or fails, the static fallback still
-        // fades in and runs the whole boot.
-        Opacity = 0.0;
+        // The initial Show is deferred (SetVisibleCore) until a real
+        // surface is painting — the cinematic on a normal boot, the
+        // static fallback only if WebView2 init runs late or fails.
+        // No opacity animation on the host window: layered-window
+        // transitions flicker against the WebView2 compositor.
         ClientSize = new Size(1024, 576);
         Text = "Nexus Core";
 
@@ -190,13 +194,14 @@ internal sealed class SplashForm : Form
             _progress.Tick();
             PumpCinematic();
             if (!_webReady) Invalidate();
-            // Reveal once a surface exists — the cinematic the moment
-            // it's painting, or the static fallback if init runs late.
-            if (!_fadedIn && (_webReady || _webFailed
-                || _failurePanel is not null
+            // Reveal once a surface exists — the cinematic after a short
+            // compositor settle, or the static fallback if init runs late.
+            if (!_shown && (_webFailed || _failurePanel is not null
+                || (_webReady && _webReadyAt >= 0
+                    && _initSw.ElapsedMilliseconds - _webReadyAt > 120)
                 || _initSw.ElapsedMilliseconds > 1200))
             {
-                FadeFormIn();
+                ShowNow();
             }
         };
         _timer.Start();
@@ -373,10 +378,11 @@ internal sealed class SplashForm : Form
                     {
                         if (_web is not null)
                         {
+                            _webReadyAt = _initSw.ElapsedMilliseconds;
                             _web.Visible = true;
                             if (_failurePanel is null)
                             {
-                                if (_fadedIn)
+                                if (_shown)
                                 {
                                     // Static fallback was visible (slow
                                     // init) — dissolve it into the live
@@ -384,10 +390,9 @@ internal sealed class SplashForm : Form
                                     // of cutting.
                                     BeginRevealDissolve();
                                 }
-                                // else: still hidden — the fade-in below
-                                // reveals the cinematic directly; the
-                                // first splash the user sees IS the
-                                // animated one.
+                                // else: still hidden — the reveal gate
+                                // shows the cinematic directly; the first
+                                // splash the user sees IS the animated one.
                             }
                             else
                             {
@@ -477,28 +482,32 @@ internal sealed class SplashForm : Form
         PostToWeb(new { type = "action-feedback", text });
 
     /// <summary>
-    /// Reveals the form — a ~190ms opacity ramp. Whatever is underneath
-    /// (the cinematic on a normal boot, the static fallback on a slow or
-    /// failed init) arrives as one screen, never a swap.
+    /// The context calls Show() up front, but the window stays suppressed
+    /// until a real surface is painting — the cinematic on a normal boot
+    /// or the static fallback on a slow/failed init. No opacity tricks on
+    /// the host window; an instant reveal of an already-painted surface
+    /// can't flicker or read as a second splash.
     /// </summary>
-    private void FadeFormIn()
+    protected override void SetVisibleCore(bool value)
     {
-        if (_fadedIn) return;
-        _fadedIn = true;
-        var t = new System.Windows.Forms.Timer { Interval = 16 };
-        var steps = 0;
-        t.Tick += (_, _) =>
+        if (value && !_allowShow)
         {
-            steps++;
-            try { Opacity = Math.Min(1.0, steps / 12.0); }
-            catch { }
-            if (steps >= 12)
+            if (!IsHandleCreated)
             {
-                t.Stop();
-                t.Dispose();
+                CreateHandle();
             }
-        };
-        t.Start();
+            return;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    private void ShowNow()
+    {
+        if (_shown) return;
+        _shown = true;
+        _allowShow = true;
+        Show();
+        Activate();
     }
 
     /// <summary>
