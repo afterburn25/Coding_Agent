@@ -20,6 +20,7 @@ models/image/
 data/image/
 ComfyUI/
 tools/InvokeAI/
+tools/.invokeai-*.log
 data/invokeai/
 
 # Kokoro TTS model binaries + build-time asset cache

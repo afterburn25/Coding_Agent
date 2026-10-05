@@ -71,13 +71,15 @@ all three fleet checkpoints verified SHA-256, registered as
 `main`/`sdxl`, matched by `fleet_for_model_name`, and routing verified
 — Times-Square scene → `juggernaut-xl-v9`, beauty portrait →
 `cyberrealistic-xl-v9`, glamour/boudoir → `realvisxl-v5`. Real
-generation through `InvokeAIBackend.submit` completed for
-**Juggernaut** (1024², 20 steps, ~32 s). CyberRealistic/RealVis
-generation attempts repeatedly died at `Executing queue item … on
-cuda:0` — invokeai-web exits silently during checkpoint load while
-llama-server (≈11 GB RAM) + desktop/GPU consumers (~4.7 GB VRAM) are
-resident. Environmental contention, not a code fault — registration
-and standalone probes all pass. `98ec4e05` switched `invokeai_source` to direct
+generation through `InvokeAIBackend.submit` completed for **all
+three**: Juggernaut (1024², ~32 s), CyberRealistic (832×1216, ~60 s),
+RealVisXL (832×1216, ~270 s — fp16 reload under VRAM pressure). Real
+PNGs verified in `data/invokeai/outputs/images/`. Earlier attempts
+died at `Executing queue item … on cuda:0` when a second app held
+~10.8 GB VRAM — once freed (~4.7 GB used by desktop), both models
+generated cleanly. One earlier run surfaced a clean `CUDA out of
+memory` job failure — the honest error path works.
+`98ec4e05` switched `invokeai_source` to direct
 HF `resolve/main` URLs — `repo::file` downloads into a folder the
 model identifier can't classify (registers `unknown`/`tmpinstall_*`).
 
