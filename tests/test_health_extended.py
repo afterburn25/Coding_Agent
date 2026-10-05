@@ -244,6 +244,30 @@ class Phase12HttpTests(unittest.TestCase):
         self.assertEqual(st, 503)
         self.assertIn("error", out)
 
+    def test_tool_job_honors_approval_grant(self):
+        # Regression (mission approval loop, vector 3): a tool-job node
+        # parked on APPROVAL_REQUIRED must run with approved=True after
+        # the user approves — not re-gate into another pending_approval.
+        calls = {}
+
+        class FakeTools:
+            def execute(self, name, args, approved=False):
+                calls["approved"] = approved
+                return "ok"
+
+        orig = self.state.tools
+        self.state.tools = FakeTools()
+        try:
+            node = {"metadata": {"job": "tool", "tool": "demo",
+                                 "approval_granted": {"action": "demo"}}}
+            self.state._mission_job_run({}, node)
+            self.assertTrue(calls["approved"])
+            node2 = {"metadata": {"job": "tool", "tool": "demo"}}
+            self.state._mission_job_run({}, node2)
+            self.assertFalse(calls["approved"])
+        finally:
+            self.state.tools = orig
+
 
 class RoutePrefixCoverageTests(unittest.TestCase):
     """Every /api/* literal handled inside a prefixed dispatch method

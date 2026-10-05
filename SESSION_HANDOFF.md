@@ -56,12 +56,36 @@ current source on this branch via `--config D:\Nexus_Core\config.json`.
   procs), evicted managed InvokeAI (reason recorded), generated, LLM
   restored (1 proc) after completion.
 
+### Closeout pass 2 (P5–P17) — VERIFIED LIVE
+
+- **Soak/selftest**: `selftest --test-timeout` default raised 300→900s
+  (suite now 1948 tests, ~310s on this box); full pass = tests + isolated
+  clean-instance boot, 39 smoke checks. Nightly tier-3 workflow
+  `soak.yml` runs it + autonomy/provisioning/LKG/pipeline suites;
+  hardware tier is self-hosted-GPU gated via `workflow_dispatch` only.
+- **UI sweep** (headless Edge, all 15 pages, real backend): found three
+  live defects — `/api/provisioning` unreachable (missing
+  `_PLATFORM_PREFIXES` entry — Command Center card dead), `voice/speak`
+  500→honest 503, undefined `setStatus` pageerror on notifications.
+  `RoutePrefixCoverageTests` now statically prevents orphan routes.
+- **Autonomy soak + chaos**: mission → plan → executing → **backend
+  hard-killed** → restart → durable resume → watchdog reaped orphaned
+  driver task → replan → `waiting_for_vram` queue (honest) → freed →
+  verify gated `run_tests` → **approval re-ask loop found and fixed**
+  (approve now stamps `metadata.approval_granted`; `_default_verify`
+  honors it; agent nodes resume the parked task via `agent.resume`
+  instead of re-running fresh). Mission completed E2E, 0 pending.
+- **Audited clean**: signing (signtool+`/DWithSign`+secrets, honest
+  unsigned fallback — external cert is the only prerequisite), disk
+  mgmt (5GB detector + managed-scratch-only fixer), sensitive-action
+  gating (always-ask + standing grants + stop/egress/RC gates).
+
 ### Remaining milestone work
 
-Clean-install provisioning soak, long autonomy soak, chaos matrix,
-cinematic splash + Isabella narration (P13/P14), docs/version truth
-sweep, release packaging gate. Splash assets are staged untracked in
-`desktop/ChatNexus.Desktop/splash/`.
+Long multi-hour unattended autonomy soak, real perf benchmark pass, and
+release packaging gate (unsigned unless code-signing secrets are set).
+Cinematic splash + Isabella narration, docs/version truth, and branch
+protection are committed and verified.
 
 
 

@@ -2718,7 +2718,10 @@ class AppState:
                 tool_args = dict(meta.get("tool_args") or {})
                 if not tool_name:
                     return {"ok": False, "output": "tool job: no tool name"}
-                out = self.tools.execute(tool_name, tool_args)
+                granted = (meta.get("approval_granted") or {})
+                out = self.tools.execute(
+                    tool_name, tool_args,
+                    approved=granted.get("action") == tool_name)
                 if str(out).startswith("APPROVAL_REQUIRED"):
                     return {"ok": False,
                             "pending_approval": {
