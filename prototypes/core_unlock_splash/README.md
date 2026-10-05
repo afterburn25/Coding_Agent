@@ -1,8 +1,43 @@
 # Nexus Core — containment protocol
 
 Standalone cinematic startup prototype for .NET 8 / Windows / WinForms.
-**Production startup is not integrated or modified.** Devin's integration guide
+**The current production startup is already integrated on main. This folder is
+an isolated review prototype; the new failure/recovery changes are not wired
+into production yet.** Devin's integration guide
 is [`../../docs/SPLASH_ANIMATION_HANDOFF.md`](../../docs/SPLASH_ANIMATION_HANDOFF.md).
+
+## Current four-sequence handoff — October 5, 2026
+
+Start with [`../../docs/SPLASH_SEQUENCES_DEVIN_HANDOFF.md`](../../docs/SPLASH_SEQUENCES_DEVIN_HANDOFF.md).
+It supersedes the older failure timing/text described below. The package includes
+four actual MP4s in [`review/videos/`](review/videos/), an editable
+[`sequence_manifest.json`](sequence_manifest.json), and portable animation/audio
+export source in [`tools/video_export/`](tools/video_export/README.md).
+
+The startup MP4 is unchanged. Error begins at the startup endpoint, with a full
+flashing red progress bar and four warning captions. Successful recovery uses
+the nine requested messages, restores cyan/blue and white during stability
+recovery, and finishes with a green pulsing online label. Failed recovery
+branches while the core is contained and ends at **USER INTERVENTION · REQUIRED**.
+
+The first failure also ends at **USER INTERVENTION · REQUIRED** with options
+visible, and waits indefinitely. Only clicking **Retry** starts a real recovery
+attempt and the recovery sequence. If that attempt fails, play recovery-failed
+and return to the intervention screen; never automatically retry or autoplay
+recovery when the first error clip ends.
+
+To review all four videos with sound, serve this folder locally:
+
+```powershell
+python -m http.server 8765 --bind 127.0.0.1 --directory prototypes/core_unlock_splash
+```
+
+Run that command from the repository root, then open
+`http://127.0.0.1:8765/review/videos/`.
+These MP4s contain baked captions and a demonstration recovery panel. Devin
+should port the editable presentation into the existing runtime for actual
+progress, accessible controls, readiness holds and backend recovery events.
+The sections below document the original interactive prototype and its APIs.
 
 ## Run
 

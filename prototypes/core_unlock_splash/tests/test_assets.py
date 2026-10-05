@@ -45,9 +45,12 @@ class AssetTests(unittest.TestCase):
         for name, data in report['stems'].items():
             self.assertEqual(hashlib.sha256((ROOT / 'audio' / f'{name}.wav').read_bytes()).hexdigest(), data['sha256'])
 
-    def test_production_art_is_byte_identical(self):
-        production = ROOT.parents[1] / 'desktop/ChatNexus.Desktop/nexus-core-splash.png'
-        self.assertEqual((ROOT / 'assets/nexus-core-splash.png').read_bytes(), production.read_bytes())
+    def test_reference_art_matches_the_approved_video_source(self):
+        # Main now uses a composited locked opening frame. These review videos
+        # retain the original background; layering the iris onto the composited
+        # production image would render the mechanism twice.
+        self.assertEqual(hashlib.sha256((ROOT / 'assets/nexus-core-splash.png').read_bytes()).hexdigest(),
+                         '46e5f31dbe656cf85b3052c05015138e828b43a5b06127f8ebc8814d81bced0c')
 
     def test_host_is_isolated_and_ships_static_fallback(self):
         project = (ROOT / 'CoreUnlockSplash.csproj').read_text()

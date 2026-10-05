@@ -1,6 +1,14 @@
 # Nexus Core splash animation handoff for Devin
 
-**This branch contains a standalone cinematic Nexus Core splash prototype. It has NOT been integrated into production startup.**
+**Current update, October 5, 2026:** normal cinematic startup and the fixed-size
+core glow are already integrated on main. This branch now contains the four
+updated video references and their editable source, ready for Devin to wire the
+new error/recovery presentation. Read
+[SPLASH_SEQUENCES_DEVIN_HANDOFF.md](SPLASH_SEQUENCES_DEVIN_HANDOFF.md) first; it
+supersedes the older timings, labels and integration-status statements below.
+Production files on this branch match the refreshed main baseline `af467e4`.
+
+The remainder is the original standalone prototype's API and design reference.
 
 Branch: `feature/cinematic-core-unlock-splash`.
 Started from latest `main` at `a45c24cfe6f5b21c2cb8a78bce5aacc21377cfd5`.

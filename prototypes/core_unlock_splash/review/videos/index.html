@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nexus Core — four splash sequences</title>
+  <style>
+    :root{color-scheme:dark;font:16px/1.6 system-ui;background:#060d18;color:#d9eafa}
+    body{max-width:1050px;margin:40px auto;padding:0 24px}h1{font-size:30px;letter-spacing:.03em}
+    h2{font-size:21px;margin-top:38px}p{color:#9db8d0}video{display:block;width:100%;background:#000;border:1px solid #27415b;border-radius:8px}a{color:#70d7ff}small{color:#9db8d0}
+  </style>
+</head>
+<body>
+  <h1>Nexus Core — splash sequence review</h1>
+  <p>Four separate MP4s with sound. The videos demonstrate presentation; they do not report live application state. Read <code>docs/SPLASH_SEQUENCES_DEVIN_HANDOFF.md</code> in the repository for integration, or the <a href="../../tools/video_export/README.md">export instructions</a>.</p>
+  <h2>1. Startup · 17 seconds</h2>
+  <p>Original startup, unchanged.</p>
+  <video controls preload="metadata" src="NexusCore-Startup-Glow-Only.mp4"></video>
+  <a download href="NexusCore-Startup-Glow-Only.mp4">Save startup MP4</a>
+  <h2>2. Error · 12 seconds</h2>
+  <p>Starts fully powered, flashes red, then stops at USER INTERVENTION · REQUIRED with recovery options. Wait for Retry; do not automatically continue.</p>
+  <video controls preload="metadata" src="NexusCore-Error-Red-Continuation.mp4"></video>
+  <a download href="NexusCore-Error-Red-Continuation.mp4">Save error MP4</a>
+  <h2>3. Recovery · 27 seconds</h2>
+  <p>Starts only after Retry is clicked. Red fades to cyan/blue and white during stability recovery; confirmed success ends with green online text.</p>
+  <video controls preload="metadata" src="NexusCore-Recovery.mp4"></video>
+  <a download href="NexusCore-Recovery.mp4">Save recovery MP4</a>
+  <h2>4. Recovery failed · 13 seconds</h2>
+  <p>Play if the user-requested retry fails. This reference branches from recovery at 8.8 seconds, stays contained and returns to user intervention without another automatic attempt.</p>
+  <video controls preload="metadata" src="NexusCore-Recovery-Failed.mp4"></video>
+  <a download href="NexusCore-Recovery-Failed.mp4">Save recovery-failed MP4</a>
+</body>
+</html>

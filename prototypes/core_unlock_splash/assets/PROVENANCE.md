@@ -7,6 +7,11 @@
 SHA-256: `46e5f31dbe656cf85b3052c05015138e828b43a5b06127f8ebc8814d81bced0c`.
 Its existing repository ownership/permissions remain unchanged.
 
+The October 5 review videos intentionally retain this approved source image.
+Production main subsequently adopted a composited locked opening frame
+(`813f230`). Do not replace the prototype background with that composite: its
+mechanism would be drawn again underneath the procedural renderer.
+
 The supplied larger original and locked/online reference images informed the
 mechanism and lighting design only. They are not animation frames or runtime assets.
 No image generation or image crossfading is used.
