@@ -217,6 +217,10 @@ class AgentConfig:
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
+    # A model evicted by demand-driven release is not relaunched while the
+    # freed resource is still short — without this two competing lanes
+    # ping-pong the same model through repeated multi-minute loads.
+    demand_eviction_cooldown_s: float = 120.0
     # A resident model launched at an oversized context (a big task grew its
     # window via ensure_ready) is relaunched at the role-recommended window
     # after this many idle seconds (0 disables). This frees the excess KV
@@ -701,6 +705,7 @@ def load_config(path: Path | None) -> AgentConfig:
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
+    cfg.demand_eviction_cooldown_s = max(0.0, float(raw.get("demand_eviction_cooldown_s", cfg.demand_eviction_cooldown_s)))
     cfg.context_shrink_idle_seconds = max(0.0, float(raw.get("context_shrink_idle_seconds", cfg.context_shrink_idle_seconds)))
     cfg.context_shrink_factor = max(1.0, float(raw.get("context_shrink_factor", cfg.context_shrink_factor)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))

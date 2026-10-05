@@ -103,6 +103,7 @@ class RuntimeManager:
         self.model_catalog = CodingModelCatalogManager(self.models_dir)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.hardware: HardwareSnapshot = detect_hardware()
+        self._hw_ts: float = time.time()
         self._managed: dict[str, _ManagedProcess] = {}
         self._status: dict[str, RuntimeStatus] = {}
         self._lock = threading.RLock()
@@ -119,6 +120,13 @@ class RuntimeManager:
         self._launch_tuning: dict[str, list[str]] = {}
         self._pending_rewarm: set[str] = set()
         self._rewarm_lock = threading.Lock()
+        # model_id -> (timestamp, resource) for models stopped by the demand-
+        # driven release path (a queued node needed the memory). Relaunching
+        # such a model while the freed resource is still short just re-evicts
+        # it next tick — the evict/launch ping-pong churns a 14B through
+        # repeated multi-minute loads. ensure_ready defers these launches
+        # until the window lapses or the model would fit again.
+        self._demand_evicted: dict[str, tuple[float, str]] = {}
         # Optional residency observer: called with {"action", "model_id",
         # "reason"} when a managed runtime is reclaimed or rewarmed so the UI
         # timeline can show FREEING VRAM / REWARMING steps.
@@ -198,6 +206,17 @@ class RuntimeManager:
 
     def refresh_hardware(self) -> HardwareSnapshot:
         self.hardware = detect_hardware()
+        self._hw_ts = time.time()
+        return self.hardware
+
+    def fresh_hardware(self, max_age_s: float = 15.0) -> HardwareSnapshot:
+        """Return the hardware snapshot, re-probing when it's older than
+        ``max_age_s``. Callers that gate decisions on live pressure (budget
+        checks, admission) must not read a minutes-old RAM dip forever —
+        but re-probing on every caller tick would spawn nvidia-smi in a
+        loop, so the refresh is TTL-bounded."""
+        if time.time() - getattr(self, "_hw_ts", 0.0) > max_age_s:
+            return self.refresh_hardware()
         return self.hardware
 
     def discover_llama_server(self, profile: ModelProfile | None = None) -> str | None:
@@ -855,6 +874,7 @@ class RuntimeManager:
                     break
                 self._stop_managed(mid)
                 stopped.append(mid)
+                self._demand_evicted[mid] = (time.time(), "vram")
                 self._emit_residency("evict", mid, f"freeing VRAM ({mode})")
                 self.refresh_hardware()
             return stopped
@@ -895,6 +915,7 @@ class RuntimeManager:
                     break
                 self._stop_managed(mid)
                 stopped.append(mid)
+                self._demand_evicted[mid] = (time.time(), "ram")
                 self._emit_residency("evict", mid, "freeing RAM for image job")
                 self.refresh_hardware()
             return stopped
@@ -1442,6 +1463,23 @@ class RuntimeManager:
                 raise RuntimeError(f"Unsupported runtime '{profile.runtime}' for model '{profile.id}'")
             if not self.config.runtime_auto_start:
                 return self._profile_endpoint(profile)
+            evicted = self._demand_evicted.get(profile.id)
+            if evicted:
+                evicted_at, resource = evicted
+                cooldown = float(getattr(
+                    self.config, "demand_eviction_cooldown_s", 120.0))
+                if time.time() - evicted_at < cooldown:
+                    self.refresh_hardware()
+                    short = (
+                        self.hardware.free_vram_gb < float(profile.estimated_vram_gb)
+                        if resource == "vram"
+                        else self.hardware.available_ram_gb < float(profile.estimated_ram_gb)
+                    )
+                    if short:
+                        raise RuntimeError(
+                            f"model '{profile.id}' was evicted to free {resource.upper()} "
+                            f"for queued work and still would not fit — launch deferred "
+                            f"until pressure clears")
             # Single-flight launch: if another thread is already starting
             # this model, wait on the condition (which releases _lock) so
             # status readers keep working during the load — then take the

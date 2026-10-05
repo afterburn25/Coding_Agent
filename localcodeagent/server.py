@@ -1995,7 +1995,9 @@ class AppState:
             permission_manager=self.permission_manager,
             activities=self.activities,
             runtime_hooks=hooks,
-            resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
+            # Budget checks gate auto-resume — a stale snapshot would park a
+            # transient RAM dip forever, so probe with a bounded TTL.
+            resources=lambda: self.runtime.fresh_hardware().as_dict(),
             quiet_hours=quiet_hours,
             enabled=bool(getattr(config, "autonomy_enabled", True)),
             metrics=registry,

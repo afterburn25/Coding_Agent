@@ -236,6 +236,111 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertIn("--jinja", cmd)
             self.assertIn("--chat-template", cmd)
 
+    def test_demand_evicted_model_defers_relaunch_while_resource_short(self):
+        # Regression: the soak audit showed release_managed_models_for_vram
+        # firing for the same model every ~5s — a relaunch re-entered
+        # _managed at Popen, so the next tick re-evicted it mid-load.
+        # Demand evictions now stamp the model; ensure_ready defers the
+        # relaunch while the freed resource is still short.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                keep_loaded=False)
+            (root / "llama-server").write_text("fake", encoding="utf-8")
+            cfg = AgentConfig(models=[victim])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            _attach_fake_managed(manager, victim)
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["victim"])
+
+            with self.assertRaises(RuntimeError) as ctx:
+                manager.ensure_ready(victim)
+            self.assertIn("deferred", str(ctx.exception))
+            self.assertEqual(launches, [])
+
+            # Once VRAM actually frees, the suppression lifts early.
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=10240, used_vram_mb=2048)])
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_demand_eviction_suppression_expires(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0)
+            (root / "llama-server").write_text("fake", encoding="utf-8")
+            cfg = AgentConfig(models=[victim], demand_eviction_cooldown_s=0)
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            _attach_fake_managed(manager, victim)
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["victim"])
+            # cooldown=0 → suppression window is already past; launch proceeds.
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_fresh_hardware_reprobes_stale_snapshot(self):
+        # Regression: budget auto-resume read runtime.hardware — a cached
+        # snapshot taken during a RAM dip stayed stale forever when nothing
+        # else refreshed it, so transient pauses never cleared. The budget
+        # path now uses fresh_hardware with a TTL.
+        import localcodeagent.runtime.manager as mgr_mod
+        with tempfile.TemporaryDirectory() as td:
+            manager = RuntimeManager(AgentConfig(models=[]), base_dir=Path(td))
+            stale = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=1.2,
+                cpu_logical_cores=8)
+            fresh = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=40.0,
+                cpu_logical_cores=8)
+            calls = []
+            orig = mgr_mod.detect_hardware
+            mgr_mod.detect_hardware = lambda: calls.append(1) or fresh
+            try:
+                manager.hardware = stale
+                manager._hw_ts = time.time() - 3600  # long-stale snapshot
+                snap = manager.fresh_hardware()
+                self.assertIs(snap, fresh)
+                self.assertEqual(snap.available_ram_gb, 40.0)
+                self.assertEqual(calls, [1])
+                # Within the TTL the same snapshot is served — no re-probe.
+                snap2 = manager.fresh_hardware()
+                self.assertIs(snap2, fresh)
+                self.assertEqual(calls, [1])
+            finally:
+                mgr_mod.detect_hardware = orig
+
     def test_resource_aware_router_avoids_model_that_does_not_fit(self):
         with tempfile.TemporaryDirectory() as td:
             big = self._profile(id="big", runtime="external", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)
