@@ -32,14 +32,14 @@ reflection, with deeper recessed shadows and metal bevels. These runtime layers
 follow `charge` and remain at full intensity during a delayed readiness hold.
 The original chamber, shield placement and wordmark remain the primary artwork.
 
-The October 5 follow-up makes the glowing sphere grow with `charge` from its
-original 49.28-pixel radius to the full 64-pixel reactor opening. Plasma, internal
-currents and light layers expand together, and the cavity shadow retreats to
-the rim. Full-charge holds retain that size; emergency power loss contracts it
-from the current state. This change is confined to `Renderer.drawCore` in
-`prototypes/core_unlock_splash/web/renderer.mjs`; apply that method change to the
-integrated renderer if production keeps a separate copy. Gates, progress,
-audio, mechanical geometry and the extended failure timing are unchanged.
+The October 5 follow-up expands only the emitted glow with `charge`, filling
+the reactor opening with diffuse cyan/blue light. The sphere, plasma texture,
+surface currents and cavity retain their original dimensions. Full-charge
+holds sustain that light; emergency power loss contracts and dims the glow
+without shrinking the sphere. The renderer adds one cached `coreLight` sprite
+and adjusts only light-layer sizes in `drawCore`. Apply both changes from
+`prototypes/core_unlock_splash/web/renderer.mjs` if production keeps a separate
+copy. Gates, progress, audio, mechanical geometry and failure timing are unchanged.
 
 ## Exact integration surface
 

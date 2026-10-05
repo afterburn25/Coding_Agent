@@ -108,14 +108,17 @@ assets are deleted.
 
 ## Full-core glow follow-up — 2026-10-05
 
-The sphere and its plasma/light layers now expand with charge to fill the
-reactor aperture. Updated captures 05–10 show charging, online, reduced motion,
-full-power hold, instability and power collapse. The other twelve captures
-remain byte-identical, including closed mechanics and contained recovery.
+Only emitted light expands to fill the aperture. The sphere, plasma, surface
+currents, cavity and mechanical geometry keep their original size. Updated
+captures 05–10 show charging, online, reduced motion, full-power hold,
+instability and power collapse; other captures were not replaced.
 
-Validation rerun for this renderer-only change: all 46 Node tests passed;
-Release build and Windows x64 publish succeeded with no warnings or errors;
-native silent normal playback passed 14 checks and native silent failure/recovery
-passed 26 checks. Online and instability captures were visually reviewed. Audio
-sources, timing, gates and host behavior were not edited; audible playback and
-the full fallback matrix were not rerun for this visual change.
+Browser draw measurements confirmed identical sphere/plasma dimensions at zero,
+half and full charge and at three fault stages, with balanced canvas transforms.
+Light bounds grow with charge and contract during power loss. See
+`glow-only-geometry.json`. Online and instability frames were visually reviewed.
+The production Release build and all 33 branding/splash tests passed locally
+(the production build retains its existing WindowsBase warning). Prototype Node
+tests were rerun. Audio sources, timing, gates and host behavior were not edited;
+the earlier native/fallback results above were not rerun for this light-only
+correction. A new video uses the same renderer and synchronized existing stems.
