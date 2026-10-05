@@ -56,7 +56,7 @@ _SCHEDULER_MAP = {
     ("lms", "normal"): "lms",
     ("lms", "karras"): "lms_k",
 }
-_FALLBACK_SCHEDULER = "dpmpp_2m_k" if True else "euler"
+_FALLBACK_SCHEDULER = "dpmpp_2m_k"
 
 # Ops this adapter can execute natively.
 SUPPORTED_OPS = {
@@ -346,8 +346,11 @@ class InvokeAIBackend(ImageBackend):
             edge("noise", "noise", "denoise", "noise")
 
         if mask_image:
+            # create_denoise_mask takes the SOURCE image and the mask as
+            # separate fields — image=what's being masked, mask=the mask.
             nodes["mask"] = {"id": "mask", "type": "create_denoise_mask",
-                             "image": {"image_name": mask_image},
+                             "image": {"image_name": init_image},
+                             "mask": {"image_name": mask_image},
                              "tiled": False, "fp32": True,
                              "is_intermediate": True}
             edge("model_loader", "vae", "mask", "vae")
@@ -376,20 +379,30 @@ class InvokeAIBackend(ImageBackend):
     # -- job lifecycle ---------------------------------------------------
 
     def submit(self, spec: dict[str, Any]) -> str:
-        graph = self.build_spec_graph(spec)
-        runs = max(1, int(spec.get("count") or 1))
-        # v5/v6: POST /queue/{queue_id}/enqueue_batch with a Batch body.
-        # `runs` repeats the graph; the result lists per-run item ids.
-        payload = {"graph": graph, "runs": runs,
-                   "origin": "nexus", "destination": None}
-        response = self._json(f"/api/v1/queue/{QUEUE}/enqueue_batch",
-                              method="POST", payload=payload)
-        item_ids = response.get("item_ids") or []
-        if not item_ids and isinstance(response.get("batch"), dict):
-            item_ids = response["batch"].get("item_ids") or []
-        if not item_ids:
-            raise RuntimeError(f"InvokeAI did not return queue item ids: {response}")
-        # Multiple runs produce multiple items — track them all.
+        """Enqueue one batch per image — `runs` on a single batch reuses
+        the same fixed seed, so real variations need distinct graphs."""
+        count = max(1, int(spec.get("count") or 1))
+        base_seed = spec.get("seed")
+        item_ids: list[int] = []
+        for i in range(count):
+            run_spec = dict(spec)
+            if count > 1:
+                seed = int(base_seed if base_seed is not None
+                           else secrets.randbelow(2**31))
+                run_spec["seed"] = seed + i
+            graph = self.build_spec_graph(run_spec)
+            payload = {"batch": {"graph": graph, "runs": 1,
+                                 "origin": "nexus"},
+                       "prepend": False}
+            response = self._json(f"/api/v1/queue/{QUEUE}/enqueue_batch",
+                                  method="POST", payload=payload)
+            ids = response.get("item_ids") or []
+            if not ids and isinstance(response.get("batch"), dict):
+                ids = response["batch"].get("item_ids") or []
+            if not ids:
+                raise RuntimeError(
+                    f"InvokeAI did not return queue item ids: {response}")
+            item_ids.extend(int(x) for x in ids)
         return ",".join(str(i) for i in item_ids)
 
     @staticmethod

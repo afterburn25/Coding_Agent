@@ -164,8 +164,12 @@ class BackendAdapterTests(_ServerMixin):
                 "guidance": 5.0, "count": 2}
         item_id = self.backend.submit(spec)
         self.assertTrue(item_id)
-        graph = _InvokeStub.enqueued[0]["graph"]
-        self.assertEqual(_InvokeStub.enqueued[0]["runs"], 2)
+        # count=2 fans out into two batches so each gets a distinct seed.
+        self.assertEqual(len(_InvokeStub.enqueued), 2)
+        seeds = [b["batch"]["graph"]["nodes"]["noise"]["seed"]
+                 for b in _InvokeStub.enqueued]
+        self.assertEqual(len(set(seeds)), 2)
+        graph = _InvokeStub.enqueued[0]["batch"]["graph"]
         self.assertEqual(graph["nodes"]["model_loader"]["type"], "sdxl_model_loader")
         self.assertEqual(graph["nodes"]["noise"]["seed"], 7)
         self.assertEqual(graph["nodes"]["denoise"]["steps"], 20)
@@ -174,7 +178,7 @@ class BackendAdapterTests(_ServerMixin):
         spec = {"prompt": "darker bg", "model": _InvokeStub.model_rows[0],
                 "source_image_name": "src.png", "denoise_strength": 0.6}
         self.backend.submit(spec)
-        nodes = _InvokeStub.enqueued[0]["graph"]["nodes"]
+        nodes = _InvokeStub.enqueued[0]["batch"]["graph"]["nodes"]
         self.assertIn("i2l", nodes)
         self.assertAlmostEqual(nodes["denoise"]["denoising_start"], 0.4)
 
@@ -182,14 +186,14 @@ class BackendAdapterTests(_ServerMixin):
         spec = {"prompt": "fix region", "model": _InvokeStub.model_rows[0],
                 "source_image_name": "src.png", "mask_image_name": "mask.png"}
         self.backend.submit(spec)
-        nodes = _InvokeStub.enqueued[0]["graph"]["nodes"]
+        nodes = _InvokeStub.enqueued[0]["batch"]["graph"]["nodes"]
         self.assertEqual(nodes["mask"]["type"], "create_denoise_mask")
 
     def test_submit_with_lora_adds_loader(self):
         spec = {"prompt": "styled", "model": _InvokeStub.model_rows[0],
                 "loras": [{"model": _InvokeStub.model_rows[2], "strength": 0.7}]}
         self.backend.submit(spec)
-        nodes = _InvokeStub.enqueued[0]["graph"]["nodes"]
+        nodes = _InvokeStub.enqueued[0]["batch"]["graph"]["nodes"]
         self.assertEqual(nodes["lora_0"]["type"], "sdxl_lora_loader")
         self.assertAlmostEqual(nodes["lora_0"]["weight"], 0.7)
 

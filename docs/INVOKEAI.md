@@ -88,3 +88,25 @@ through. Explicit user choices always win; unknown names fall back to
 InvokeAI itself is Apache-2.0; model weights carry their own licenses —
 Nexus records license metadata per model but never implies a license that
 wasn't declared.
+
+## Verified dogfood (InvokeAI 6.14.2, real server, RTX 3080 Ti)
+
+Performed against a live `invokeai-web` on this machine (`tools/InvokeAI`
+venv, torch 2.14.1+cu126 — pip defaults to CPU torch on Windows, upgrade
+to the `+cu126` wheel for GPU):
+
+| Operation | Result |
+|---|---|
+| Health/version probe | `InvokeAI 6.14.2` healthy |
+| Model install (`Lykon/dreamshaper-8`, 5.5GB) | completed via `/api/v2/models/install` |
+| Text-to-image (`cinematic futuristic city at night`) | finished — 358KB PNG, ~2s |
+| img2img edit (change lighting/background, denoise 0.6) | finished — real output |
+| Inpaint (bounded mask region) | finished — `create_denoise_mask` needs `image`+`mask` fields |
+| Variation (count=3) | finished — **3 distinct outputs**; submit fans out per-seed batches because `runs` reuses one seed |
+| Cancel mid-flight | items transition to `canceled` |
+| Auto routing | chose InvokeAI; Nexus job persisted output + mirrored copy |
+| Explicit pin + dead endpoint | honest `not installed or running` error — no silent swap |
+
+Not dogfooded: GPU/LLM-resident resource contention (no LLM was loaded on
+this dev box) and live ComfyUI fallback (ComfyUI not installed here — the
+fallback path is unit-tested in `tests/test_invokeai.py`).

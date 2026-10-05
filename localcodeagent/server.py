@@ -294,10 +294,24 @@ class AppState:
         self.jobs.on_change = make_emitter(self.events, "job")
         _image_emit = make_emitter(self.events, "image_job")
         self._image_failures_announced: set[str] = set()
+        self._image_artifacts_done: set[str] = set()
 
         def _on_image_change(payload: dict) -> None:
             _image_emit(payload)
             self._maybe_announce_image_failure(payload)
+            # Finished image jobs (chat or mission) register their outputs
+            # as artifacts once — lineage records the backend that ran.
+            job = payload.get("job") or {}
+            if (job.get("state") == "finished" and job.get("outputs")
+                    and job.get("id") not in self._image_artifacts_done
+                    and getattr(self, "artifacts", None) is not None):
+                self._image_artifacts_done.add(str(job["id"]))
+                for path in job["outputs"]:
+                    try:
+                        self._register_output_artifact(
+                            path, tool=str(job.get("backend") or "image"))
+                    except Exception:
+                        pass
 
         self.images.on_change = _on_image_change
         self.images.on_setup_change = make_emitter(self.events, "image_setup")
@@ -2743,6 +2757,9 @@ class AppState:
                     height=int(meta.get("height", 1024)),
                     count=max(1, min(int(meta.get("count", 1)), 4)))
                 job = self.images.create_job(req)
+                # Mission path registers outputs itself with mission/task
+                # linkage — suppress the generic on_change registration.
+                self._image_artifacts_done.add(str(job.id))
                 deadline = time.time() + float(meta.get("timeout", 600))
                 while time.time() < deadline:
                     cur = self.images.get_job(job.id)
@@ -4986,13 +5003,51 @@ class AppState:
             return {"ok": False, "error": "venv dest escapes the install root"}
         job = self.jobs.submit("install", f"Install {spec.display_name}")
 
+        def _pick_python() -> str:
+            """Honor install.python_candidates (e.g. InvokeAI needs
+            3.10-3.12 — the ambient interpreter may be too new)."""
+            for cand in (install.get("python_candidates") or []):
+                cand = str(cand).strip()
+                if not cand:
+                    continue
+                probe_args = []
+                if os.name == "nt":
+                    launcher = shutil.which("py")
+                    if launcher:
+                        probe_args = [launcher, f"-{cand}"]
+                else:
+                    exe = shutil.which(f"python{cand}")
+                    if exe:
+                        probe_args = [exe]
+                if not probe_args:
+                    continue
+                try:
+                    chk = subprocess.run(probe_args + ["--version"],
+                                         capture_output=True, timeout=30)
+                except Exception:
+                    continue
+                if chk.returncode != 0:
+                    continue
+                # Resolve the concrete executable so `python -m venv` works.
+                if os.name == "nt":
+                    out = subprocess.run(
+                        probe_args + ["-c", "import sys; print(sys.executable)"],
+                        capture_output=True, text=True, timeout=30)
+                    exe = (out.stdout or "").strip()
+                    if exe and Path(exe).is_file():
+                        return exe
+                else:
+                    return probe_args[0]
+            return shutil.which("python") or shutil.which("python3") or sys.executable
+
         def _run() -> None:
-            py = shutil.which("python") or shutil.which("python3") or sys.executable
+            py = _pick_python()
             pip = root / ("Scripts" if os.name == "nt" else "bin") / (
                 "pip.exe" if os.name == "nt" else "pip")
+            pip_args = [str(x) for x in (install.get("pip_args") or [])]
             try:
                 self.jobs.update(job.id, state="running",
-                                 detail=f"creating virtualenv at {root}")
+                                 detail=f"creating virtualenv at {root} (python: {py})")
                 proc = subprocess.run([py, "-m", "venv", str(root)],
                                       capture_output=True, text=True, timeout=600)
                 if proc.returncode != 0:
@@ -5001,7 +5056,7 @@ class AppState:
                     return
                 self.jobs.update(job.id, detail=f"pip install {package}")
                 proc = subprocess.run(
-                    [str(pip), "install", package],
+                    [str(pip), "install"] + pip_args + [package],
                     capture_output=True, text=True, timeout=7200)
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed",

@@ -404,7 +404,7 @@ class ImageLibraryTests(unittest.TestCase):
             )
             config = SimpleNamespace(
                 image_models_dir="models/image", image_data_dir="data/image",
-                image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188",
+                image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9",
                 comfyui_auto_start=False, image_resource_mode="balanced",
             )
             manager = ImageManager(base_dir=root, models=[profile], config=config, workspace=root / "workspace")
@@ -450,7 +450,7 @@ class ImageLibraryTests(unittest.TestCase):
             )
             config = SimpleNamespace(
                 image_models_dir="models/image", image_data_dir="data/image", image_workflows_dir="workflows/image",
-                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
+                comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False, image_resource_mode="balanced",
                 image_auto_run_jobs=False,
             )
             _stub_comfy(root)
@@ -471,7 +471,7 @@ class ImageLibraryTests(unittest.TestCase):
             )
             config = SimpleNamespace(
                 image_models_dir="models/image", image_data_dir="data/image", image_workflows_dir="workflows/image",
-                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False, image_resource_mode="balanced",
+                comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False, image_resource_mode="balanced",
                 image_auto_run_jobs=False,
             )
             _stub_comfy(root)
@@ -718,7 +718,7 @@ class JuggernautDefaultTests(unittest.TestCase):
     def _manager(self, root: Path) -> ImageManager:
         config = SimpleNamespace(
             image_models_dir="models/image", image_data_dir="data/image",
-            image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188",
+            image_workflows_dir="workflows/image", comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9",
             comfyui_auto_start=False, image_resource_mode="balanced",
         )
         return ImageManager(base_dir=root, models=list(self.models.values()), config=config, workspace=root / "workspace")
@@ -796,7 +796,7 @@ class BackendStartingFlagTests(unittest.TestCase):
         config = SimpleNamespace(
             image_models_dir="models/image", image_data_dir="data/image",
             image_workflows_dir="workflows/image",
-            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
             image_resource_mode="balanced", image_auto_run_jobs=False,
         )
         _stub_comfy(root)
@@ -888,7 +888,7 @@ class DedicatedUpscalerTests(unittest.TestCase):
             config = SimpleNamespace(
                 image_models_dir="models/image", image_data_dir="data/image",
                 image_workflows_dir="workflows/image",
-                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+                comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
                 image_resource_mode="balanced", image_auto_run_jobs=False,
             )
             manager = ImageManager(base_dir=root, models=[profile], config=config,
@@ -933,7 +933,7 @@ class DedicatedUpscalerTests(unittest.TestCase):
             config = SimpleNamespace(
                 image_models_dir="models/image", image_data_dir="data/image",
                 image_workflows_dir="workflows/image",
-                comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+                comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
                 image_resource_mode="balanced", image_auto_run_jobs=False,
             )
             _stub_comfy(root)
@@ -964,7 +964,7 @@ class MultiPromptToolTests(unittest.TestCase):
         config = SimpleNamespace(
             image_models_dir="models/image", image_data_dir="data/image",
             image_workflows_dir="workflows/image",
-            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
             image_resource_mode="balanced", image_auto_run_jobs=False,
         )
         return ImageManager(base_dir=root, models=[profile], config=config,
@@ -1010,7 +1010,7 @@ class InterruptedJobResumeTests(unittest.TestCase):
         config = SimpleNamespace(
             image_models_dir="models/image", image_data_dir="data/image",
             image_workflows_dir="workflows/image",
-            comfyui_endpoint="http://127.0.0.1:8188", comfyui_auto_start=False,
+            comfyui_endpoint="http://127.0.0.1:8188", invokeai_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
             image_resource_mode="balanced", image_auto_run_jobs=auto_run,
         )
         return ImageManager(base_dir=root, models=[profile], config=config,
@@ -1125,8 +1125,10 @@ class ImageSetupTests(unittest.TestCase):
         base = dict(
             image_models_dir="models/image", image_data_dir="data/image",
             image_workflows_dir="workflows/image",
-            # Dead endpoint — a real ComfyUI may be listening on 8188 in dev.
+            # Dead endpoints — real ComfyUI/InvokeAI may be listening on
+            # 8188/9090 in dev; tests must never reach them.
             comfyui_endpoint="http://127.0.0.1:9", comfyui_auto_start=False,
+            invokeai_endpoint="http://127.0.0.1:9",
             comfyui_dir="", comfyui_python="", comfyui_logs_dir=".agent/runtime",
             comfyui_extra_args=[], image_resource_mode="balanced",
             image_auto_run_jobs=True, image_max_resumes=1,

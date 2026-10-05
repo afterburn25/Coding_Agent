@@ -16,7 +16,8 @@
     "method": "venv",
     "package": "invokeai",
     "dest": "tools/InvokeAI",
-    "size_bytes": 6000000000
+    "size_bytes": 6000000000,
+    "python_candidates": ["3.12", "3.11", "3.10"]
   },
   "detect": {
     "files": [

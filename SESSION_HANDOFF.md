@@ -11,7 +11,76 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
+## Current milestone — v0.21.0 InvokeAI as a first-class image backend
+
+Commit `c15afaf4` (pushed, CI pending): **InvokeAI is a real
+Nexus-managed image backend** alongside ComfyUI. Auto routing prefers
+InvokeAI for standard generation/editing; ComfyUI stays the advanced
+custom-workflow engine and fallback.
+
+- `localcodeagent/image/invokeai.py` — dependency-free REST adapter:
+  health probe (3s cached, single-flight — a dropping endpoint must not
+  stall `/api/status`), `/api/v2/models` listing, `enqueue_batch` queue
+  lifecycle (multi-item status/cancel/fetch), multipart image upload,
+  Nexus-spec → InvokeAI graph builder (sd-1/sd-2/sdxl bases; flux etc.
+  honestly unsupported → ComfyUI routes).
+- `localcodeagent/image/invokeai_runtime.py` — managed runtime mirroring
+  ComfyUIRuntime: venv/script/PATH discovery, `invokeai.yaml` host/port
+  generation (v6 `invokeai-web` takes only `--root`), managed-PID orphan
+  reclaim, idle eviction, external-vs-managed distinction.
+- `manager.py` — `backends`/`backend_runtimes` dynamic dicts,
+  `_select_backend` (override → configured `image_backend` → auto),
+  `_invokeai_ready`, synthesized `invokeai:<key>` model profiles,
+  `_run_invokeai_job` dispatch, cancel/status/feedback per backend.
+- `ImageRequest.backend_override` (`auto|invokeai|comfyui`),
+  `ImageJob.backend`, `ImageModelProfile.metadata`,
+  `capability_class`/`restriction_status` classification
+  (`adult_capable`, `restricted_by_model`, `restricted_by_provider`,
+  `local_unfiltered_model`, `unknown_capability`).
+- SamplingAdvisor learning keyed per backend (`invokeai|…` keys);
+  ComfyUI recipes never bleed into InvokeAI selection.
+- Config: `image_backend`, `invokeai_endpoint`, `invokeai_auto_start`,
+  `invokeai_start_on_image_request`, `invokeai_dir`,
+  `invokeai_python`, `invokeai_extra_args`, `invokeai_logs_dir`,
+  `invokeai_startup_timeout`, `invokeai_idle_unload_seconds`.
+- Server: `invokeai` managed-process registration (capability
+  `image_generation`), idle evictor, `/api/image/backend/{start,stop,
+  inspect}` accept `backend`, `POST /api/image/preference` persists the
+  choice, `/api/image` summary now returns `backends.{invokeai,comfyui}`.
+- Install: `tools/manifests/invokeai.json` + `venv` install method in
+  `install_tool` (per-tool venv under `tools/InvokeAI`).
+- UI: backend selector (Auto/InvokeAI/ComfyUI) + per-backend status
+  cards + model filter in `web/image.*`; image tools take a `backend`
+  argument.
+- Health probe aggregates both engines; mission image artifacts record
+  the real backend name (`tool=invokeai|comfyui`), not hardcoded.
+- Tests: `tests/test_invokeai.py` (30 tests — adapter, routing,
+  runtime discovery, error normalization, per-backend learning);
+  test configs pin dead endpoints so a live local backend can never
+  contaminate hermetic tests.
+
+### Dogfood status (real, in this environment)
+
+- InvokeAI **6.14.2** pip-installed into `tools/InvokeAI` (venv,
+  Python 3.12 — InvokeAI rejects ≥3.13; also rejects the repo's 3.14
+  launcher default).
+- torch upgraded to `2.14.1+cu126` — pip's default wheel is CPU-only on
+  Windows; InvokeAI otherwise silently runs CPU mode.
+- Dreamshaper 8 (sd-1, 5.5GB) installed via `/api/v2/models/install`.
+- **Verified against the live server**: version probe, model list,
+  text-to-image (real PNG), img2img edit, inpaint (masked region),
+  3-way variation (distinct seeds — `runs` reuse produces identical
+  images, so submit fans out one batch per image), cancel mid-flight,
+  Nexus `create_job` auto-routing to InvokeAI with output persistence,
+  and honest errors for pinned-but-dead backends.
+- API fixes found by dogfooding: v6 mounts the model manager at
+  `/api/v2/models` (not v1), enqueue is `enqueue_batch` with a nested
+  `{"batch": ...}` body, upload params are query-string not form fields,
+  `create_denoise_mask` needs both `image` and `mask` inputs.
+- Not dogfooded: LLM-resident VRAM contention and live ComfyUI fallback
+  (ComfyUI not installed on this box; fallback is unit-tested).
+
+## Earlier milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
 
 (Previous: v0.18.x honesty hardening · v0.16.0 persona depth · v0.15.0
 autonomous workstation layers)
