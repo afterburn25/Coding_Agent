@@ -194,5 +194,77 @@ class SafeModeHttpTests(unittest.TestCase):
         self.assertEqual(st, 400)
 
 
+class SessionMarkerTests(unittest.TestCase):
+    """Per-install session-marker scoping — a foreign backend that shares
+    the data dir (dev/soak runs) must not dirty this install's crash
+    accounting; that once tripped a spurious LKG auto-rollback."""
+
+    def _bare_state(self, marker: Path):
+        from localcodeagent.server import AppState
+        st = AppState.__new__(AppState)
+        st._session_marker = marker
+        st._session_started = 1700000000.0
+        return st
+
+    def test_owner_key_is_stable_and_path_shaped(self):
+        from localcodeagent.server import _session_owner_key
+        k1 = _session_owner_key()
+        self.assertRegex(k1, r"^[0-9a-f]{12}$")
+        self.assertEqual(k1, _session_owner_key())
+
+    def test_legacy_marker_migrated_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td) / "data"
+            data.mkdir(parents=True)
+            scoped = data / "session-aaaa1111bbbb.json"
+            legacy = data / "session.json"
+            legacy.write_text(json.dumps(
+                {"pid": 1, "started": 1.0, "clean_shutdown": False}))
+            st = self._bare_state(scoped)
+            prior = st._read_prior_session()
+            self.assertIsNotNone(prior)
+            self.assertFalse(legacy.exists())
+            # After migration, foreign writes to the legacy file are
+            # ignored entirely — a hard-killed dev backend cannot inject
+            # phantom crashes into this install's accounting.
+            legacy.write_text(json.dumps(
+                {"pid": 2, "started": 2.0, "clean_shutdown": False}))
+            st._write_session_marker(clean=True)
+            st2 = self._bare_state(scoped)
+            self.assertIsNone(st2._read_prior_session())
+
+    def test_foreign_scoped_markers_do_not_interfere(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td) / "data"
+            data.mkdir(parents=True)
+            mine = data / "session-aaaa1111bbbb.json"
+            foreign = data / "session-cccc3333dddd.json"
+            # A foreign install dies dirty — writes only its own file.
+            foreign.write_text(json.dumps(
+                {"pid": 9, "started": 1.0, "clean_shutdown": False}))
+            st = self._bare_state(mine)
+            self.assertIsNone(st._read_prior_session())
+            # And its clean shutdown cannot erase evidence of MY crash.
+            mine.write_text(json.dumps(
+                {"pid": 4, "started": 1.0, "clean_shutdown": False}))
+            foreign.write_text(json.dumps(
+                {"pid": 9, "started": 1.0, "clean_shutdown": True}))
+            self.assertIsNotNone(st._read_prior_session())
+
+    def test_marker_pruning_bounds_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td) / "data"
+            data.mkdir(parents=True)
+            mine = data / "session-aaaa1111bbbb.json"
+            mine.write_text("{}")
+            for i in range(12):
+                (data / f"session-{i:012x}.json").write_text("{}")
+            st = self._bare_state(mine)
+            st._prune_session_markers()
+            leftovers = list(data.glob("session-*.json"))
+            self.assertLessEqual(len(leftovers), 8)
+            self.assertIn(mine, leftovers)
+
+
 if __name__ == "__main__":
     unittest.main()

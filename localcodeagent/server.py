@@ -96,6 +96,26 @@ from .version import version as _canonical_version
 VERSION = _canonical_version()
 
 
+def _session_owner_key() -> str:
+    """Stable identity of this backend install for session-marker scoping.
+
+    Frozen builds key on the exe path; unfrozen runs key on the main
+    module file. Two different installs that share a data directory get
+    different marker files, so crash accounting stays per-install.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            base = sys.executable
+        else:
+            base = getattr(sys.modules.get("__main__"), "__file__", "") \
+                or sys.executable
+        raw = str(Path(base).resolve()).lower()
+    except Exception:
+        raw = "unknown"
+    import hashlib
+    return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
 class _LazyActivity:
     """Resolves AppState.activities at call time (created after tools)."""
 
@@ -496,10 +516,18 @@ class AppState:
         # stop_state. A dirty record on next launch means the previous
         # session ended without a graceful shutdown (kill, power loss, or
         # crash) — surfaced as a startup report and greeting note.
-        self._session_marker = runtime_root / "data" / "session.json"
+        # The marker file is scoped per backend install: a data dir can be
+        # shared by a packaged install plus dev/soak runs pointed at the
+        # same config, and a hard-killed foreign process must not dirty
+        # this install's crash accounting (that once tripped a spurious
+        # LKG auto-rollback on the production build).
+        self._session_marker = (
+            runtime_root / "data"
+            / f"session-{_session_owner_key()}.json")
         self._session_started = time.time()
         self.prior_session_abnormal = self._read_prior_session()
         self._write_session_marker(clean=False)
+        self._prune_session_markers()
         # Safe Mode + golden config — a dirty prior session bumps the
         # consecutive-failure counter; repeated failures surface a
         # Safe Mode offer (never automatic data loss).
@@ -1801,7 +1829,19 @@ class AppState:
             pass
 
     def _read_prior_session(self) -> dict | None:
-        """Return the previous session record when it ended dirty."""
+        """Return the previous session record when it ended dirty.
+
+        A legacy unscoped ``session.json`` (written by builds predating
+        per-install scoping) is adopted once by renaming it onto this
+        install's marker name; afterwards it is never consulted again,
+        so foreign processes can no longer inject phantom crashes.
+        """
+        legacy = self._session_marker.with_name("session.json")
+        if not self._session_marker.exists() and legacy.is_file():
+            try:
+                legacy.replace(self._session_marker)
+            except OSError:
+                pass
         try:
             rec = json.loads(
                 self._session_marker.read_text(encoding="utf-8"))
@@ -1810,6 +1850,21 @@ class AppState:
         except Exception:
             pass
         return None
+
+    def _prune_session_markers(self) -> None:
+        """Bound stale per-install markers — each distinct backend install
+        leaves one file; keep only the most recently touched few."""
+        try:
+            others = [p for p in self._session_marker.parent.glob(
+                "session-*.json") if p != self._session_marker]
+            others.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            for p in others[7:]:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def _write_session_marker(self, *, clean: bool) -> None:
         try:
@@ -4428,20 +4483,24 @@ class AppState:
         except Exception:
             pass
 
-    def speak_greeting(self, profile_id: str, text: str) -> None:
+    def speak_greeting(self, profile_id: str, text: str) -> dict | None:
         """Voice-side greeting — once per process per profile;
-        mute/disabled drop silently in the speech queue."""
+        mute/disabled drop silently. Synchronous so the greeting
+        response can carry the audio URL: the previous queue-only path
+        emitted an ephemeral bus segment that routinely fired before the
+        page's voice EventSource attached, and the greeting was never
+        heard."""
         try:
             v = getattr(self, "voice", None)
             if v is None:
-                return
+                return None
             gid = f"greet-{profile_id}"
             if gid in self._queue_announced:
-                return
+                return None
             self._queue_announced.add(gid)
-            v.enqueue(gid, str(text or ""))
+            return v.speak_greeting(gid, str(text or ""))
         except Exception:
-            pass
+            return None
 
     # -- speech-to-text ----------------------------------------------------
 

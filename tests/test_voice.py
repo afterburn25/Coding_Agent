@@ -472,6 +472,27 @@ class TestVoiceManager(unittest.TestCase):
         self.assertEqual(self.m.status()["queue"], 0)
         self.m.config.voice_enabled = True
 
+    def test_speak_greeting_returns_segment_and_publishes(self):
+        """Synchronous greeting path — the caller needs the URL in hand;
+        relying on the ephemeral bus segment alone let boot-time
+        greetings fire before the page's voice subscription attached."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        out = self.m.speak_greeting("greet-p1", "Welcome back.")
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["url"].endswith(out["segment_id"]))
+        self.assertTrue(self.m.segment_path(out["segment_id"]).exists())
+        segs = [p for p in published if p.get("event") == "segment"]
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0]["segment_id"], out["segment_id"])
+        self.assertEqual(segs[0]["task_id"], "greet-p1")
+        # Same segment id on both paths → client-side dedupe is a noop.
+        self.assertGreater(self.m._greeting_hold_until, 0)
+
+    def test_speak_greeting_respects_mute(self):
+        self.m.set_muted(True)
+        self.assertIsNone(self.m.speak_greeting("greet-p1", "hi"))
+
     def test_voice_tool_registration(self):
         from localcodeagent.voice.tools import register_voice_tools
         from localcodeagent.tools.base import ToolRegistry

@@ -283,11 +283,16 @@ class ProfileAPI:
         if g["kind"] == "intro":
             self.mgr.mark_intro_completed(pid)
         # Speak the greeting once per process per profile — mute and
-        # voice-disabled states drop it silently via enqueue().
+        # voice-disabled states drop it silently. The response carries
+        # the audio URL so the page can play it deterministically; the
+        # bus segment alone raced the page's voice event subscription.
         try:
-            self.state.speak_greeting(pid, str(g.get("text") or ""))
+            spoken = self.state.speak_greeting(pid, str(g.get("text") or ""))
         except Exception:
-            pass
+            spoken = None
+        if spoken and spoken.get("url"):
+            g["voice_url"] = spoken["url"]
+            g["voice_segment_id"] = spoken.get("segment_id") or ""
         h._json(g)
         return True
 

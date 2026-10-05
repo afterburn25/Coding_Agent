@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -1066,20 +1067,47 @@ internal sealed class BackendProcess : IDisposable
                 {
                     var snapBackend = Path.Combine(snap, "backend");
                     var liveBackend = Path.Combine(appDir, "backend");
-                    if (Directory.Exists(snapBackend))
+                    // Honor the snapshot manifest's recorded exe hash — a
+                    // truncated or tampered snapshot must never replace
+                    // the live backend (the backend-side store verifies
+                    // the same hash before it will even stage the flag).
+                    var snapExe = Path.Combine(snapBackend, "ChatNexus.Backend.exe");
+                    var wantSha = "";
+                    try
+                    {
+                        using var md = JsonDocument.Parse(
+                            File.ReadAllText(Path.Combine(snap, "manifest.json")));
+                        wantSha = md.RootElement.TryGetProperty("exe_sha256", out var es)
+                            ? es.GetString() ?? "" : "";
+                    }
+                    catch { wantSha = ""; }
+                    var verified = wantSha.Length == 0
+                        || (File.Exists(snapExe)
+                            && string.Equals(Sha256File(snapExe), wantSha,
+                                             StringComparison.OrdinalIgnoreCase));
+                    if (!verified)
+                    {
+                        AppendHostLog(logPath,
+                            $"LKG rollback refused — snapshot '{name}' failed exe hash verification");
+                    }
+                    else if (Directory.Exists(snapBackend))
                     {
                         var spare = Path.Combine(appDir, "backend-replaced");
                         if (Directory.Exists(spare)) Directory.Delete(spare, true);
                         if (Directory.Exists(liveBackend))
                             Directory.Move(liveBackend, spare);
                         CopyTree(snapBackend, liveBackend);
+                        foreach (var f in new[] { "config.json", "VERSION" })
+                        {
+                            var src = Path.Combine(snap, f);
+                            if (File.Exists(src)) File.Copy(src, Path.Combine(appDir, f), true);
+                        }
+                        AppendHostLog(logPath, $"LKG rollback applied from {name} ({reason})");
                     }
-                    foreach (var f in new[] { "config.json", "VERSION" })
+                    else
                     {
-                        var src = Path.Combine(snap, f);
-                        if (File.Exists(src)) File.Copy(src, Path.Combine(appDir, f), true);
+                        AppendHostLog(logPath, $"rollback snapshot '{name}' has no backend tree — ignored");
                     }
-                    AppendHostLog(logPath, $"LKG rollback applied from {name} ({reason})");
                 }
                 else
                 {
@@ -1129,6 +1157,13 @@ internal sealed class BackendProcess : IDisposable
             // LKG handling must never block the normal launch path.
             AppendHostLog(logPath, $"LKG flag handling failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private static string Sha256File(string path)
+    {
+        using var sha = SHA256.Create();
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(sha.ComputeHash(fs));
     }
 
     private static void CopyTree(string src, string dst)
