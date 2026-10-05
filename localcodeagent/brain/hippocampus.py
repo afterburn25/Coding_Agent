@@ -193,16 +193,38 @@ class Hippocampus(BrainRegion):
             conn.close()
 
     # -- recording ------------------------------------------------------------------
+
+    # Retention — episodic memory is append-only; without a bound it grows
+    # forever under 24/7 autonomy. Keep the newest window; prune at most
+    # hourly so writes stay cheap.
+    _EPISODE_MAX_ROWS = 5000
+    _EPISODE_MAX_AGE_S = 30 * 86400
+
+    def _prune_episodes(self, c) -> None:
+        last = getattr(self, "_last_episode_prune", 0.0)
+        if time.time() - last < 3600.0:
+            return
+        self._last_episode_prune = time.time()
+        c.execute("DELETE FROM episodes WHERE ts < ?",
+                  (time.time() - self._EPISODE_MAX_AGE_S,))
+        c.execute(
+            "DELETE FROM episodes WHERE id NOT IN "
+            "(SELECT id FROM episodes ORDER BY ts DESC LIMIT ?)",
+            (self._EPISODE_MAX_ROWS,))
+
     def record_episode(self, kind: str, summary: str, *, detail: str = "",
                        mission_id: str = "", task_id: str = "",
                        project_id: str = "", confidence: float = 0.5) -> str:
         """Episodic write — what happened. Safe no-op without a DB."""
         eid = uuid.uuid4().hex[:16]
-        self._write(lambda c: c.execute(
-            "INSERT INTO episodes (id,kind,summary,detail,mission_id,task_id,"
-            "project_id,confidence,ts) VALUES (?,?,?,?,?,?,?,?,?)",
-            (eid, kind, summary[:2000], detail[:8000], mission_id, task_id,
-             project_id, confidence, time.time())))
+        def go(c):
+            c.execute(
+                "INSERT INTO episodes (id,kind,summary,detail,mission_id,task_id,"
+                "project_id,confidence,ts) VALUES (?,?,?,?,?,?,?,?,?)",
+                (eid, kind, summary[:2000], detail[:8000], mission_id, task_id,
+                 project_id, confidence, time.time()))
+            self._prune_episodes(c)
+        self._write(go)
         return eid
 
     def record_procedure(self, name: str, steps: list[dict], *,

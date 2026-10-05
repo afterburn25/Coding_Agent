@@ -196,6 +196,35 @@ class HippocampusTests(unittest.TestCase):
         res = h2.recall("persisted restart", kinds={"episodic"}, project_id="p")
         self.assertTrue(res.entries)
 
+    def test_episodes_bounded_under_retention(self):
+        # Episodic memory is append-only — under 24/7 autonomy it must not
+        # grow forever. Age + row caps keep only the recent window.
+        h = self._hipp()
+        h.record_episode("task", "seed schema", project_id="p")
+        import sqlite3
+        old = time.time() - (Hippocampus._EPISODE_MAX_AGE_S + 60)
+        conn = sqlite3.connect(self.db)
+        try:
+            for i in range(50):
+                conn.execute(
+                    "INSERT INTO episodes (id,kind,summary,detail,ts) "
+                    "VALUES (?,?,?,?,?)",
+                    (f"old-{i}", "task", f"stale episode {i}", "", old))
+            conn.commit()
+        finally:
+            conn.close()
+        h._last_episode_prune = 0.0  # force the hourly prune window open
+        h.record_episode("task", "fresh episode", project_id="p")
+        conn = sqlite3.connect(self.db)
+        try:
+            n = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            stale = conn.execute(
+                "SELECT COUNT(*) FROM episodes WHERE ts < ?", (old + 30,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(stale, 0, "aged-out episodes must be pruned")
+        self.assertLessEqual(n, Hippocampus._EPISODE_MAX_ROWS)
+
     def test_procedural_learning_confidence(self):
         h = self._hipp()
         h.record_procedure("rebuild-installer", [{"action": "clean"},
