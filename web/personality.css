@@ -52,7 +52,9 @@ details.pst-sec .sec-body{padding:4px 14px 12px}
 .lab-controls select{background:#0a1626;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px;font-size:12px;min-width:120px}
 .speech-lab{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
 .lab-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#0a1626}
-.lab-act{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--cyan);margin-bottom:6px}
+.lab-act{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--cyan);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.lab-play{background:none;border:1px solid var(--line);border-radius:50%;width:18px;height:18px;padding:0;color:var(--cyan);font-size:8px;line-height:1;cursor:pointer;opacity:.7;flex:none}
+.lab-play:hover{opacity:1;border-color:var(--cyan);box-shadow:0 0 6px #4cf4}
 .lab-line{font-size:12px;line-height:1.5;color:var(--text);margin-bottom:4px}
 .lab-line em{color:var(--muted);font-style:normal;font-size:10px}
 .lab-plan{font-size:9px;color:var(--muted);border-top:1px solid var(--line);padding-top:5px;margin-top:6px;font-variant-numeric:tabular-nums}

@@ -336,6 +336,36 @@
     admit_uncertainty: "Uncertainty", farewell: "Farewell",
   };
 
+  // Per-render audition cache — each lab card stashes its text + delivery
+  // plan so the play button can audition THAT line with THAT plan.
+  const labAudition = [];
+
+  async function auditionLabLine(idx) {
+    const item = labAudition[idx];
+    if (!item) return;
+    const r = await act(pid, { action: "preview",
+                               traits: work.traits, voice: work.voice })
+        .catch(() => null);
+    const v = (r && r.voice) || {};
+    const plan = item.plan || {};
+    const res = await fetch("/api/voice/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: String(item.text || "").slice(0, 500),
+        overlay: { pitch_semitones: v.pitch_semitones, tempo: 1.0,
+                   output_gain_db: v.output_gain_db },
+        // Profile rate × genome pace — same product the queue computes.
+        speed: Math.min(2.0, Math.max(0.5,
+                (v.speed || 1) * (plan.pace || 1))),
+        delivery: plan }),
+    }).then((x) => x.json()).catch(() => null);
+    if (res && res.url) {
+      if (sampleAudio) { try { sampleAudio.pause(); } catch {} }
+      sampleAudio = new Audio(res.url);
+      sampleAudio.play().catch(() => {});
+    }
+  }
+
   function renderLab(d) {
     const out = $("labOut");
     if (!out) return;
@@ -344,9 +374,11 @@
         (d && d.error) || "unknown")}</div>`;
       return;
     }
+    labAudition.length = 0;
     const cards = Object.entries(d.renders || {}).map(([act, rows]) => {
       const first = rows[0] || {};
       const plan = first.plan || {};
+      const pIdx = labAudition.push({ text: first.text || "", plan }) - 1;
       const planBits = [
         `pace ${plan.pace}`, `energy ${Math.round((plan.energy ?? 0) * 100)}%`,
         `warmth ${Math.round((plan.warmth ?? 0) * 100)}%`,
@@ -359,12 +391,16 @@
         plan.sarcasm ? "sarcastic" : "",
       ].filter(Boolean).join(" · ");
       return `<div class="lab-card">
-        <div class="lab-act">${esc(ACT_LABELS[act] || act)}</div>
+        <div class="lab-act">${esc(ACT_LABELS[act] || act)}
+          <button type="button" class="lab-play" data-lplay="${pIdx}"
+                  title="Hear this line with its delivery plan">&#9654;</button></div>
         ${rows.map((r, i) => `<div class="lab-line">${i === 0 ? "" : `<em>↻${i} </em>`}${esc(r.text)}</div>`).join("")}
         <div class="lab-plan">${planBits}</div>
       </div>`;
     }).join("");
     out.innerHTML = cards;
+    out.querySelectorAll("[data-lplay]").forEach((b) =>
+      b.addEventListener("click", () => auditionLabLine(+b.dataset.lplay)));
   }
 
   function bind() {
