@@ -124,7 +124,13 @@ internal sealed class SplashForm : Form
     /// <summary>id — the splash reports audio actually finished playing.</summary>
     public event Action<string>? VoicePlaybackEnded;
     private volatile bool _webFailed;
+    private volatile bool _sequenceComplete;
     private int _lastGateIdx = -1;
+
+    /// <summary>The cinematic posted its online frame — the sequence ran to completion.</summary>
+    public bool SequenceComplete => _sequenceComplete;
+    /// <summary>Cinematic is live and fault-free — its completion is worth waiting for.</summary>
+    public bool CinematicActive => _webReady && !_webFailed;
 
     // Manifest gates released at real startup milestones (StartupProgress
     // ladder anchors) — the timeline can never outrun reality.
@@ -388,6 +394,9 @@ internal sealed class SplashForm : Form
                 case "voice-ended":
                     VoicePlaybackEnded?.Invoke(
                         doc.RootElement.GetProperty("id").GetString() ?? "");
+                    break;
+                case "sequence-complete":
+                    _sequenceComplete = true;
                     break;
                 case "splash-error":
                     _webFailed = true;
@@ -868,18 +877,37 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // then play the brief READY + core-glow completion effect before
             // handing off — still no blank intermediate state.
             _progress.MarkAppReady();
-            // "Core systems online." fires near full charge — truthful
-            // because the interface already posted its ready handshake.
-            _narrator?.NearlyReady(() => _main?.BackendUrl);
             while (!_progress.ReadyToDismiss)
             {
                 await Task.Delay(60);
             }
+
+            // Hold the swap until the cinematic's own timeline reaches its
+            // online state — dismissing at bar=100% cut the sequence off
+            // mid-charge and spoke "online" seconds before the visual
+            // caught up. Bounded so a dead WebView can never hang startup.
+            var splash = _splash;
+            if (splash is not null && splash.CinematicActive)
+            {
+                var seqDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
+                while (!splash.SequenceComplete && DateTimeOffset.Now < seqDeadline)
+                {
+                    await Task.Delay(50);
+                }
+            }
+
+            // "Core systems online." now lands on the visual online moment —
+            // truthful and synchronized instead of early.
+            _narrator?.NearlyReady(() => _main?.BackendUrl);
             _progress.BeginCompletion();
             while (!_progress.CompletionFinished)
             {
                 await Task.Delay(33);
             }
+
+            // Dwell on the fully-loaded state before the swap — a few
+            // seconds at stable online so the completion actually reads.
+            await Task.Delay(TimeSpan.FromSeconds(2));
 
             // Voice gate: the splash stays up until the last startup
             // narration has ACTUALLY finished playing (voice-ended ack, not
