@@ -61,6 +61,17 @@
   },
   "stereo_width": 1.5,
   "synthetic": 0.8,
+  "provenance": "kokoro:bf_isabella + neural/glass/micro DSP layers",
+  "version": "1.0",
+  "cadence": "measured",
+  "energy": "calm, quietly confident",
+  "warmth": "warm with a cool technical edge",
+  "formality": "conversational-professional",
+  "emotion_range": "steady, subtly expressive",
+  "pronunciation_overrides": {
+    "UI": "you eye",
+    "Devin": "dev in"
+  },
   "limiter_ceiling": 0.89,
   "output_gain_db": 0.0,
   "ambience_ms": 0.0,

@@ -5,6 +5,7 @@ and segment ids so stale/dup speech is suppressed across reconnects.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -477,6 +478,14 @@ class VoiceManager:
                 vmap = {}
             if vmap:
                 preset, speed = self._apply_delivery(preset, speed, vmap)
+        overrides = getattr(preset, "pronunciation_overrides", None) or {}
+        if overrides:
+            # Per-preset token rewrites — same expansion style as the
+            # speech filter's acronym table. Longest-first so multi-word
+            # or compound keys match before their prefixes.
+            for src in sorted(overrides, key=len, reverse=True):
+                text = re.sub(rf"\b{re.escape(str(src))}\b",
+                              str(overrides[src]), text)
         engine = self.engine(preset.engine)
         preset_json = preset.to_json()
         key = AudioCache.key(text, preset.engine, engine.version,

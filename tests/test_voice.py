@@ -219,6 +219,31 @@ class TestPresets(unittest.TestCase):
         clone = VoicePreset.from_dict(p.as_dict())
         self.assertEqual(clone.as_dict(), p.as_dict())
 
+    def test_metadata_fields(self):
+        p = self.store.get(OFFICIAL_PRESET_ID)
+        for f in ("provenance", "version", "cadence", "energy", "warmth",
+                  "formality", "emotion_range", "pronunciation_overrides"):
+            self.assertIn(f, p.as_dict())
+        self.assertIn("kokoro:bf_isabella", p.provenance)
+        self.assertIsInstance(p.pronunciation_overrides, dict)
+
+    def test_metadata_survives_roundtrip_and_unknown_keys_tolerated(self):
+        raw = VoicePreset(id="x", name="x").as_dict()
+        raw["cadence"] = "brisk"
+        raw["pronunciation_overrides"] = {"UI": "you eye"}
+        raw["future_unknown_field"] = 42  # forward-compat tolerance
+        p = VoicePreset.from_dict(raw)
+        self.assertEqual(p.cadence, "brisk")
+        self.assertEqual(p.pronunciation_overrides.get("UI"), "you eye")
+
+    def test_official_refreshes_on_boot(self):
+        # Officials are read-only source of truth — a stale/modified
+        # installed copy must be overwritten by the shipped JSON.
+        dest = self.store._official_path(OFFICIAL_PRESET_ID)
+        dest.write_text('{"id": "stale"}', encoding="utf-8")
+        VoicePresetStore(Path(self.tmp.name) / "presets")
+        self.assertIn("kokoro", dest.read_text(encoding="utf-8"))
+
     def test_official_preset_protected(self):
         p = self.store.get(OFFICIAL_PRESET_ID)
         p.name = "Hacked"
@@ -368,6 +393,25 @@ class TestVoiceManager(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             self.m.speak_text("hi")
         self.assertIn("boom", str(ctx.exception))
+
+    def test_pronunciation_overrides_apply_at_synthesis(self):
+        """Per-preset token rewrites reach the engine — 'UI' in the
+        official preset must arrive as its spoken expansion."""
+        captured = []
+
+        class Capture:
+            name, version, sample_rate = "kokoro", "x", 24000
+            def synthesize(self, text, *, voice, speed=1.0, lang="en-us"):
+                captured.append(text)
+                return np.zeros(1200, dtype=np.float32), 24000
+            def voices(self): return [{"id": "bf_isabella"}]
+            def status(self): return {"name": "kokoro", "loaded": True}
+
+        self.m._engines["kokoro"] = Capture()
+        self.m.speak_text("Check the UI now.")
+        self.assertTrue(captured)
+        self.assertIn("you eye", captured[0])
+        self.assertNotIn(" UI ", captured[0])
 
     def test_mute_stops_and_clears_queue(self):
         self.m.enqueue("t1", "first")

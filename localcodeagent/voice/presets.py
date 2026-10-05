@@ -38,13 +38,17 @@ class VoicePresetStore:
 
     # -- official seeding -------------------------------------------------
     def _install_official(self) -> None:
+        # Officials are copy-on-write — users duplicate to customize, the
+        # shipped file stays read-only — so refreshing on every boot is
+        # safe and is how metadata/DSP updates actually reach installs.
         for src in _OFFICIAL_DIR.glob("*.json"):
             dest = self.dir / f"{src.stem}.official.json"
-            if not dest.exists():
-                try:
-                    shutil.copyfile(src, dest)
-                except OSError:
-                    pass
+            try:
+                if dest.exists() and dest.read_bytes() == src.read_bytes():
+                    continue
+                shutil.copyfile(src, dest)
+            except OSError:
+                pass
 
     # -- IO -----------------------------------------------------------------
     def _path(self, preset_id: str) -> Path:
