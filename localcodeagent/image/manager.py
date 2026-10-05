@@ -1051,6 +1051,34 @@ class ImageManager:
                                           "strength": float(lora.get("strength", 1.0))})
         return spec
 
+    @staticmethod
+    def _is_swept_state_error(message: str) -> bool:
+        """The backend's ephemeral state dir (outputs/tensors|conditioning
+        tmp*) was deleted under it — e.g. a second InvokeAI instance on
+        the same root sweeping 'dangling' tempdirs at startup."""
+        return "does not exist" in message and (
+            "Parent directory" in message
+            or "/outputs/" in message.replace("\\", "/"))
+
+    def _await_invokeai_job(self, job: ImageJob) -> None:
+        started = time.monotonic()
+        deadline = started + max(30, int(getattr(self.config, "image_job_timeout", 900)))
+        while time.monotonic() < deadline:
+            if job.state == "cancelled":
+                raise _ImageJobCancelled()
+            state = self.invokeai_backend.status(job.backend_job_id)
+            if state.get("state") == "finished":
+                return
+            if state.get("state") == "failed":
+                raise RuntimeError(str(state.get("error") or "InvokeAI generation failed"))
+            frac = float(state.get("progress") or 0.0)
+            elapsed = time.monotonic() - started
+            job.progress = max(job.progress, min(
+                0.90, 0.20 + 0.70 * max(frac, elapsed / 240.0)))
+            self._save_jobs(job)
+            time.sleep(1.0)
+        raise TimeoutError("Timed out waiting for InvokeAI image generation")
+
     def _run_invokeai_job(self, job: ImageJob) -> None:
         request = ImageRequest(**job.request)
         profile = self.router.get_profile(job.model_id)
@@ -1088,27 +1116,28 @@ class ImageManager:
 
             job.state = "generating"; job.stage = "generating"
             job.progress = max(job.progress, 0.20)
-            job.backend_job_id = self.invokeai_backend.submit(spec)
-            self._save_jobs(job)
 
-            started = time.monotonic()
-            deadline = started + max(30, int(getattr(self.config, "image_job_timeout", 900)))
-            while time.monotonic() < deadline:
-                if job.state == "cancelled":
-                    raise _ImageJobCancelled()
-                state = self.invokeai_backend.status(job.backend_job_id)
-                if state.get("state") == "finished":
-                    break
-                if state.get("state") == "failed":
-                    raise RuntimeError(str(state.get("error") or "InvokeAI generation failed"))
-                frac = float(state.get("progress") or 0.0)
-                elapsed = time.monotonic() - started
-                job.progress = max(job.progress, min(
-                    0.90, 0.20 + 0.70 * max(frac, elapsed / 240.0)))
+            # InvokeAI's ephemeral object store writes tensors into ONE
+            # TemporaryDirectory created at startup; a second InvokeAI
+            # instance on the same root sweeps tmp* dirs on boot and kills
+            # it ("Parent directory ... does not exist" on every save).
+            # That is a recoverable backend fault — restart and resubmit
+            # once before reporting failure.
+            for attempt in range(2):
+                job.backend_job_id = self.invokeai_backend.submit(spec)
                 self._save_jobs(job)
-                time.sleep(1.0)
-            else:
-                raise TimeoutError("Timed out waiting for InvokeAI image generation")
+                try:
+                    self._await_invokeai_job(job)
+                    break
+                except RuntimeError as exc:
+                    if attempt or not self._is_swept_state_error(str(exc)):
+                        raise
+                    job.stage = "restarting InvokeAI"; self._save_jobs(job)
+                    try:
+                        self.invokeai_runtime.stop()
+                    except Exception:
+                        pass
+                    self.invokeai_runtime.ensure_ready()
 
             job.stage = "saving image"; job.progress = max(job.progress, 0.92)
             self._save_jobs(job)

@@ -429,6 +429,73 @@ class BackendSelectionTests(unittest.TestCase):
                 m.create_job(ImageRequest(prompt="x", backend_override="bogus"))
 
 
+class SweptStateRecoveryTests(unittest.TestCase):
+    """A second InvokeAI instance sharing the data root sweeps tmp* dirs
+    at startup and deletes the running server's ephemeral tensor store —
+    every subsequent generation fails with 'Parent directory ... does not
+    exist'. The manager must restart the backend and resubmit once."""
+
+    def _job_manager(self, td, statuses):
+        m = _manager(Path(td))
+        calls = {"ensure": 0, "stop": 0, "submit": 0}
+        m.invokeai_runtime = SimpleNamespace(
+            ensure_ready=lambda: calls.__setitem__("ensure", calls["ensure"] + 1),
+            stop=lambda: calls.__setitem__("stop", calls["stop"] + 1),
+            discover=lambda: (Path(td), ["invokeai-web"]))
+        states = iter(statuses)
+        m.invokeai_backend = SimpleNamespace(
+            health=lambda: (True, "ok"),
+            models=lambda **kw: [{"id": "m1", "key": "k1", "name": "m",
+                                  "type": "main", "base": "sdxl"}],
+            capabilities=lambda: {"text_to_image"},
+            submit=lambda spec: calls.__setitem__("submit", calls["submit"] + 1) or "b1",
+            status=lambda jid: next(states),
+            fetch_outputs=lambda jid, dest: [],
+            endpoint="http://x")
+        m.backend = SimpleNamespace(health=lambda: (False, "down"))
+        m._invokeai_spec = lambda j, r, p: {"model": "m"}
+        m.router.get_profile = lambda mid: ImageModelProfile(
+            id="invokeai:m1", family="sdxl", backend="invokeai",
+            capabilities=["text_to_image"], workflows={})
+        job = m.create_job(ImageRequest(prompt="a cat"))
+        return m, job, calls
+
+    def test_swept_tmpdir_restarts_backend_and_retries(self):
+        with tempfile.TemporaryDirectory() as td:
+            m, job, calls = self._job_manager(td, [
+                {"state": "failed",
+                 "error": "Parent directory D:\\x\\outputs\\tensors\\tmpabc does not exist"},
+                {"state": "finished"},
+            ])
+            m._run_invokeai_job(job)
+            self.assertEqual(job.state, "finished")
+            self.assertEqual(calls["submit"], 2)
+            self.assertEqual(calls["stop"], 1)
+            self.assertEqual(calls["ensure"], 2)
+
+    def test_unrelated_backend_error_does_not_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            m, job, calls = self._job_manager(td, [
+                {"state": "failed", "error": "CUDA out of memory"},
+            ])
+            m._run_invokeai_job(job)
+            self.assertEqual(job.state, "failed")
+            self.assertEqual(calls["submit"], 1)
+            self.assertEqual(calls["stop"], 0)
+
+    def test_repeated_swept_state_fails_honestly(self):
+        with tempfile.TemporaryDirectory() as td:
+            m, job, calls = self._job_manager(td, [
+                {"state": "failed",
+                 "error": "Parent directory D:\\x\\outputs\\tensors\\tmpabc does not exist"},
+                {"state": "failed",
+                 "error": "Parent directory D:\\x\\outputs\\tensors\\tmpabc does not exist"},
+            ])
+            m._run_invokeai_job(job)
+            self.assertEqual(job.state, "failed")
+            self.assertEqual(calls["submit"], 2)
+
+
 class ClassificationTests(unittest.TestCase):
     def test_adult_capable_marker(self):
         r = classify_model("nsfw-realism-xl")
