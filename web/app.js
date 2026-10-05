@@ -864,7 +864,7 @@ connectAgentEvents();
 const _npWait=window.NexusProfile?Promise.resolve(window.NexusProfile.refresh?.()):new Promise(r=>{const t=()=>r(window.NexusProfile?window.NexusProfile.refresh():null);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',t,{once:true});else t();});
 _npWait.catch(()=>{}).finally(()=>{
 loadConversations().then(convos=>{const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});});
-loadStatus().then(async()=>{await Promise.all([loadReadiness(),loadConversationMemory()]);}).finally(()=>{
+Promise.allSettled([loadStatus(),loadReadiness(),loadConversationMemory()]).finally(()=>{
   // Readiness handshake: the desktop host holds the splash screen until the
   // main shell has actually initialized, so the user never sees a blank window.
   try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
