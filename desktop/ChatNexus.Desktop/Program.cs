@@ -438,6 +438,11 @@ internal sealed class SplashForm : Form
     private void RecoveryFeedback(string text) =>
         PostToWeb(new { type = "action-feedback", text });
 
+    /// <summary>The app is ready — tell the cinematic to converge its tail
+    /// onto the online state instead of free-running to its fixed duration.</summary>
+    public void RequestSequenceFinish() =>
+        PostToWeb(new { type = "complete-sequence" });
+
     /// <summary>
     /// Recovery "Rollback" — writes data/lkg/rollback.flag naming the
     /// newest snapshot (latest.txt first, newest snap-* otherwise) and
@@ -877,28 +882,33 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // then play the brief READY + core-glow completion effect before
             // handing off — still no blank intermediate state.
             _progress.MarkAppReady();
-            while (!_progress.ReadyToDismiss)
-            {
-                await Task.Delay(60);
-            }
 
-            // Hold the swap until the cinematic's own timeline reaches its
-            // online state — dismissing at bar=100% cut the sequence off
-            // mid-charge and spoke "online" seconds before the visual
-            // caught up. Bounded so a dead WebView can never hang startup.
+            // The app is genuinely ready — now converge the cinematic's
+            // remaining tail onto its online state instead of letting it
+            // free-run behind. While it converges the bar parks just under
+            // 100% and the status stays "FINALIZING" so the text never
+            // claims online ahead of the visual. Bounded so a dead WebView
+            // can never hang startup.
             var splash = _splash;
-            if (splash is not null && splash.CinematicActive)
+            if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
             {
+                _progress.AwaitingSequence = true;
+                splash.RequestSequenceFinish();
                 var seqDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
                 while (!splash.SequenceComplete && DateTimeOffset.Now < seqDeadline)
                 {
                     await Task.Delay(50);
                 }
+                _progress.AwaitingSequence = false;
             }
 
-            // "Core systems online." now lands on the visual online moment —
+            // "Core systems online." lands on the visual online moment —
             // truthful and synchronized instead of early.
             _narrator?.NearlyReady(() => _main?.BackendUrl);
+            while (!_progress.ReadyToDismiss)
+            {
+                await Task.Delay(60);
+            }
             _progress.BeginCompletion();
             while (!_progress.CompletionFinished)
             {
