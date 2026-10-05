@@ -28,6 +28,30 @@ capability-aware routing.
   `comfyui`); mission image nodes dedupe against the generic path.
 - **Venv installer** honors `install.python_candidates` — InvokeAI needs
   Python 3.10–3.12 while the ambient interpreter may be newer.
+- **Photoreal model fleet** (`image/fleet.py`) — Juggernaut XL v9
+  (`general_photoreal`), CyberRealistic XL (`portrait_photoreal`),
+  RealVisXL V5.0 (`glamour_photoreal`, adult-only routing): verified HF
+  sources with real sizes/SHA-256/licenses; request trait classification
+  (`classify_request_traits`) + weighted scoring pick the right model per
+  prompt with resource-fit fallback; fleet ids work as manual overrides;
+  fleet models carry per-model sampling defaults and per-model
+  (`model_scope`) SamplingAdvisor learning.
+- **Background Provisioning Manager** (`provisioning.py`) — after launch,
+  the declared workstation stack (voice assets, InvokeAI, fleet models,
+  Whisper, ComfyUI) installs progressively in the background: persisted
+  plan resumes across restarts, disk-reserve gating, classified failures
+  with bounded exponential retry, verify-before-complete honesty,
+  `waiting_for_capability` request deferral, deduped spoken error
+  summaries, `/api/provisioning` API, Command Center "Background setup"
+  card, and Settings → Setup toggles.
+- **Frozen-build voice fix** — rebuilt the PyInstaller bundle with the
+  full `--collect-all` set (`kokoro_onnx`, `phonemizer`, `espeakng_loader`,
+  `onnxruntime`): the stale spec had dropped `kokoro_onnx/config.json`,
+  so `/api/voice/speak` 500'd — no greeting, replies dying after the
+  first syllable.
+- **PyInstaller payload scoping** — `--add-data tools` → `tools\manifests`
+  in `build_windows.ps1` and `selfupdate._build_cmd` so tool venvs (the
+  multi-GB InvokeAI env, ComfyUI portable) never get baked into releases.
 - **InvokeAI runtime** (`image/invokeai_runtime.py`) — discovery across
   configured dir, `{app}/tools/InvokeAI` venv, managed-python Scripts dir,
   and PATH; managed start/stop/restart with marker-based orphan reclaim

@@ -30,13 +30,14 @@ function render(data){
   $('#imageBackend').innerHTML=`${renderBackendCard(invoke,'invokeai')}${renderBackendCard(comfy,'comfyui')}<small>Preference: <strong>${esc(pref)}</strong>${pref==='auto'?' — picks the best engine per job':''}</small>`;
   const statusById=Object.fromEntries((data.model_status||[]).map(x=>[x.id,x]));
   const bf=($('#modelBackendFilter')?.value||'');
-  const modelRows=[...(data.models||[]).map(m=>({...m,_backend:m.backend||'comfyui'})),...(invoke?.models||[]).filter(x=>x.type==='main').map(x=>({id:`invokeai:${x.key}`,display_name:x.name,family:x.base||'invokeai',backend:'invokeai',capability_class:x.capability_class,restriction_status:x.restriction_status,_remote:true}))];
+  const modelRows=[...(data.models||[]).map(m=>({...m,_backend:m.backend||'comfyui'})),...(invoke?.models||[]).filter(x=>x.type==='main').map(x=>({id:x.fleet_id||`invokeai:${x.key}`,display_name:x.display_name||x.name,family:x.base||'invokeai',backend:'invokeai',capability_class:x.capability_class,restriction_status:x.restriction_status,fleet_role:x.fleet_role,license:x.license,_remote:true}))];
   $('#imageModels').innerHTML=modelRows.filter(m=>!bf||m._backend===bf||m.backend===bf).map(m=>{
     const engine=m._backend||m.backend||'comfyui';
     const cls=m.capability_class&&m.capability_class!=='unknown'?` · ${esc(m.capability_class.replace(/_/g,' '))}`:'';
     const restr=m.restriction_status&&m.restriction_status!=='unknown_capability'?` · ${esc(m.restriction_status.replace(/_/g,' '))}`:'';
     if(m._remote){
-      return `<div class="model"><strong>${esc(m.display_name||m.id)}</strong><small><span class="backend-chip">${esc(engine)}</span> ${esc(m.family)}${cls}${restr}</small><div class="model-status ok">installed in InvokeAI</div></div>`;
+      const role=m.fleet_role?` · <span class="backend-chip">${esc(m.fleet_role.replace(/_/g,' '))}</span>`:'';const lic=m.license?` · ${esc(m.license)}`:'';
+      return `<div class="model"><strong>${esc(m.display_name||m.id)}</strong><small><span class="backend-chip">${esc(engine)}</span> ${esc(m.family)}${role}${cls}${restr}${lic}</small><div class="model-status ok">installed in InvokeAI</div></div>`;
     }
     const st=statusById[m.id]||{status:'unknown',components:[],workflows:[]};
     const missing=(st.components||[]).filter(c=>c.required&&!c.ok).map(c=>c.key);
@@ -49,7 +50,7 @@ function render(data){
     }).join('');
     return `<div class="model"><strong>${esc(m.display_name||m.id)}</strong><small><span class="backend-chip">${esc(engine)}</span> ${esc(m.tagline||m.family)}${m.tagline?' · '+esc(m.family):''} · ${esc(m.speed_tier)} · ${esc(m.quality_tier)}${cls}${restr}</small><small>${esc((m.capabilities||[]).join(', '))}</small><div class="model-status ${esc(st.status)}">${esc(st.status)}${missing.length?' · missing '+esc(missing.join(', ')):''}${wfMissing?' · '+wfMissing+' workflow(s) missing':''}${wfInvalid?' · '+wfInvalid+' workflow(s) invalid':''}</div><div class="model-actions"><button class="mini-button install-model" data-model="${esc(m.id)}">Install missing</button><button class="mini-button remove-model" data-model="${esc(m.id)}">Remove weights</button></div><details class="workflow-details"><summary>Workflows (${(st.workflows||[]).length})</summary>${workflowRows||'<small>No workflows configured.</small>'}</details></div>`;
   }).join('')||'<span class="muted">No image models configured.</span>';
-  const sel=$('#imageModel');const prev=sel.value;const sortedModels=[...(data.models||[])].sort((a,b)=>(b.priority||0)-(a.priority||0));sel.innerHTML='<option value="auto">Auto</option>'+sortedModels.map(m=>`<option value="${esc(m.id)}"${m.tagline?` title="${esc(m.tagline)}"`:''}>${esc(m.display_name||m.id)}</option>`).join(''); if([...sel.options].some(x=>x.value===prev))sel.value=prev;
+  const sel=$('#imageModel');const prev=sel.value;const sortedModels=[...(data.models||[])].sort((a,b)=>(b.priority||0)-(a.priority||0));const remoteSel=modelRows.filter(m=>m._remote);sel.innerHTML='<option value="auto">Auto</option>'+remoteSel.map(m=>`<option value="${esc(m.id)}"${m.fleet_role?` title="${esc(m.fleet_role.replace(/_/g,' '))}"`:''}>${esc(m.display_name||m.id)}</option>`).join('')+sortedModels.map(m=>`<option value="${esc(m.id)}"${m.tagline?` title="${esc(m.tagline)}"`:''}>${esc(m.display_name||m.id)}</option>`).join(''); if([...sel.options].some(x=>x.value===prev))sel.value=prev;
   $('#imageInventory').innerHTML=(data.inventory||[]).map(x=>`<div>${esc(x.name)}<br><small>${esc(x.family)} · ${esc(x.size_gb)} GB</small></div>`).join('')||'<span class="muted">No local image weights discovered.</span>';
   renderSetup(data);
   $('#imageInstalls').innerHTML=(data.installs||[]).slice(0,8).map(j=>`<div class="install-row"><strong>${esc(j.model_id)}</strong><br><small>${esc(j.state)}${j.current_file?' · '+esc(j.current_file.split(/[\\/]/).pop()):''}${j.error?' · '+esc(j.error):''}</small><div class="bar"><span style="width:${Math.round((j.progress||0)*100)}%"></span></div></div>`).join('')||'<span class="muted">No model installs.</span>';

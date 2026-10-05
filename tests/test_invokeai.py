@@ -5,6 +5,7 @@ import json
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,8 +41,19 @@ class _InvokeStub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    install_jobs: dict[int, dict] = {}
+    _install_next: list[int] = [100]
+
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/api/v2/models/install":
+            self._send(list(self.install_jobs.values()))
+            return
+        if path.startswith("/api/v2/models/install/"):
+            jid = int(path.rsplit("/", 1)[-1])
+            self._send(self.install_jobs.get(jid) or {"error": "gone"},
+                       200 if jid in self.install_jobs else 404)
+            return
         if path == "/api/v1/app/version":
             self._send({"version": "6.5.0"})
             return
@@ -72,6 +84,18 @@ class _InvokeStub(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             self.uploads.append({"length": length})
             self._send({"image_name": "uploaded.png"})
+            return
+        if path == "/api/v2/models/install":
+            length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(length)
+            jid = self._install_next[0]
+            self._install_next[0] += 1
+            source = urllib.parse.parse_qs(
+                urllib.parse.urlsplit(self.path).query).get("source", [""])[0]
+            self.install_jobs[jid] = {
+                "id": jid, "status": "completed", "bytes": 100,
+                "bytes_total": 100, "source": source}
+            self._send(self.install_jobs[jid])
             return
         if path == "/api/v1/queue/default/enqueue_batch":
             length = int(self.headers.get("Content-Length") or 0)
@@ -105,6 +129,13 @@ class _InvokeStub(BaseHTTPRequestHandler):
         self._send({"error": "not found"}, 404)
 
     def do_DELETE(self):
+        path = self.path.split("?")[0]
+        if path.startswith("/api/v2/models/install/"):
+            jid = int(path.rsplit("/", 1)[-1])
+            if jid in self.install_jobs:
+                self.install_jobs[jid]["status"] = "cancelled"
+            self._send({})
+            return
         self._send({"error": "not found"}, 404)
 
 
@@ -127,6 +158,8 @@ class _ServerMixin(unittest.TestCase):
         _InvokeStub.enqueued_items.clear()
         _InvokeStub.items.clear()
         _InvokeStub.cancelled.clear()
+        _InvokeStub.install_jobs.clear()
+        _InvokeStub._install_next[0] = 100
         _InvokeStub.model_rows = [
             {"key": "k1", "hash": "h1", "name": "Juggernaut XL", "base": "sdxl",
              "type": "main", "format": "checkpoint", "path": "main/jugg.safetensors"},
@@ -303,6 +336,29 @@ def _manager(root: Path, *, backend_override: str = "", config_backend: str = "a
     )
     return ImageManager(base_dir=root, models=[profile], config=config,
                         workspace=root / "workspace")
+
+
+class ModelInstallAdapterTests(_ServerMixin):
+    def test_install_model_submits_source(self):
+        b = InvokeAIBackend(endpoint=self.endpoint)
+        job = b.install_model("owner/repo::file.safetensors")
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["source"], "owner/repo::file.safetensors")
+
+    def test_install_job_polling_and_list(self):
+        b = InvokeAIBackend(endpoint=self.endpoint)
+        job = b.install_model("owner/repo")
+        self.assertEqual(b.model_install_job(job["id"])["status"],
+                         "completed")
+        self.assertTrue(any(j["id"] == job["id"]
+                            for j in b.model_install_jobs()))
+
+    def test_cancel_install(self):
+        b = InvokeAIBackend(endpoint=self.endpoint)
+        job = b.install_model("owner/repo")
+        self.assertTrue(b.cancel_model_install(job["id"]))
+        self.assertEqual(b.model_install_job(job["id"])["status"],
+                         "cancelled")
 
 
 class BackendSelectionTests(unittest.TestCase):

@@ -11,7 +11,66 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.21.0 InvokeAI as a first-class image backend
+## Current milestone — v0.21.0 photoreal fleet + background provisioning
+
+New on top of the InvokeAI backend work:
+
+- **`localcodeagent/image/fleet.py`** — declarative photoreal fleet:
+  Juggernaut XL v9 (`general_photoreal`), CyberRealistic XL
+  (`portrait_photoreal`), RealVisXL V5.0 (`glamour_photoreal`,
+  `adult_capable`). Verified HF `repo::file` sources, real byte sizes and
+  SHA-256s, per-model licenses, trait weights, per-model sampling
+  defaults. `fleet_for_model_name` matches installed backend rows;
+  `classify_request_traits` + `score_fleet_model` route prompts.
+- **Router**: `_fleet_pick` scores fleet-tagged InvokeAI profiles before
+  the generic priority sort (fleet ops only: text_to_image/edit/inpaint/
+  variation). Winner unfit → next scored model. `model_override` accepts
+  fleet ids (`juggernaut-xl-v9`) as well as `invokeai:<key>`; wrong-backend
+  pins error honestly.
+- **Manager**: `_refresh_invokeai_models` attaches `fleet_id`/`fleet_role`/
+  license/sampling-defaults metadata; `_invokeai_model_row` exposes them
+  to the UI (role chip + license in model cards, fleet ids in the Model
+  dropdown).
+- **SamplingAdvisor**: `_family_defaults` reads `metadata.sampling` model
+  defaults (fleet steps/guidance/sampler/scheduler) below learned params
+  and explicit request values; `_key` gains `model_scope` so outcomes
+  learn per fleet model per backend.
+- **InvokeAI adapter**: `install_model(source)` /
+  `model_install_jobs()` / `model_install_job(id)` /
+  `cancel_model_install(id)` over `/api/v2/models/install` (v1 fallback).
+- **`localcodeagent/provisioning.py`** — `ProvisioningManager`: versioned
+  declared stack (voice assets → InvokeAI → Juggernaut → Whisper →
+  CyberRealistic → RealVis → ComfyUI), persisted plan at
+  `data/provisioning/plan.json`, mid-flight requeue on restart, disk
+  reserve gating with `blocked_reason`, classified errors
+  (`network_failure`/`disk_full`/`checksum_failed`/`unsupported_python`/
+  `backend_health_failed`/…), bounded exponential retry (3×, 30s×4ⁿ cap
+  10min), one spoken line per incident via `_speak_notice`, capability
+  `provides` → registry invalidation + `wait_for_capability`,
+  `on_capability_ready` drains deferred image requests
+  (`waiting_for_capability` in `/api/image/generate`).
+- **Server/API**: `_start_provisioning` wires manager + notification/
+  voice/SSE hooks; `GET /api/provisioning`, POST `pause|resume|cancel|
+  retry|config`; shutdown stops the scheduler.
+- **UI**: Command Center "Background setup" panel (per-item badges,
+  bytes/speed/ETA, bars, retry/cancel, pause/resume); Settings → Setup
+  section (three toggles persisted via `provisioning/config`).
+- Config: `provisioning_enabled`, `provisioning_parallel`,
+  `provisioning_auto_retry`, `provisioning_voice_notifications`,
+  `provisioning_disk_reserve_bytes` (all default-on sane values).
+- Tests: `tests/test_fleet.py` + `tests/test_provisioning.py`
+  (35 tests — classification, scoring order, fleet pick/fallback/
+  override, per-model learning keys, plan shape, resume, retry, disk
+  gate, capability wake) + 3 adapter install tests.
+- Docs: `docs/BACKGROUND_PROVISIONING.md` (new), `docs/IMAGE_SYSTEM.md`
+  fleet section, `MODEL_ROUTING.md` fleet routing, `docs/INVOKEAI.md`
+  managed-install API.
+
+Dogfood in progress: Juggernaut/CyberRealistic/RealVis installs accepted
+by the live InvokeAI 6.14.2 install API (`repo::file` sources, real
+byte counts) — downloads running at handoff time.
+
+### Prior milestone — InvokeAI as a first-class image backend
 
 Commit `c15afaf4` (pushed, CI pending): **InvokeAI is a real
 Nexus-managed image backend** alongside ComfyUI. Auto routing prefers

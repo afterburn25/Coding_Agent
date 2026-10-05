@@ -295,6 +295,19 @@ class AgentConfig:
     image_job_timeout: int = 900
     image_output_dir: str = "output/images"
 
+    # Background Provisioning Manager — post-install workstation setup.
+    # After Nexus launches, configured components (voice assets, InvokeAI,
+    # photoreal model fleet, ComfyUI, STT) install progressively in the
+    # background while the app stays usable.
+    provisioning_enabled: bool = True
+    # Auto-start only applies to installed (frozen) builds; dev checkouts
+    # opt in via this flag so tests never trigger real multi-GB installs.
+    provisioning_dev_enable: bool = False
+    provisioning_parallel: int = 2
+    provisioning_auto_retry: bool = True
+    provisioning_voice_notifications: bool = True
+    provisioning_disk_reserve_bytes: int = 8 * 1024 ** 3
+
     # Adaptive Worker Manager — absolute safety ceiling only; real
     # concurrency is measured from live hardware, reservations and
     # reserves. worker_ceiling caps worker count even on big machines;

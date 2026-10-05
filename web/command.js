@@ -6,13 +6,14 @@ const api=(p,body)=>fetch(p,body===undefined?{}:{method:'POST',headers:{'Content
 const ago=ts=>{const s=Math.max(0,Date.now()/1000-Number(ts||0));if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago';};
 
 async function refresh(){
-  const [status,workers,missions,queue,lkg,update,servers,caps,activity,safemode]=await Promise.all([
+  const [status,workers,missions,queue,lkg,update,servers,caps,activity,safemode,prov]=await Promise.all([
     api('/api/status').catch(()=>({})),api('/api/workers').catch(()=>({})),
     api('/api/missions').catch(()=>({})),api('/api/queue').catch(()=>({})),
     api('/api/lkg').catch(()=>({})),api('/api/update/status').catch(()=>({})),
     api('/api/devservers').catch(()=>({})),api('/api/capability-states').catch(()=>({})),
     api('/api/activity?recent=30').catch(()=>({})),
-    api('/api/safemode').catch(()=>({}))]);
+    api('/api/safemode').catch(()=>({})),
+    api('/api/provisioning').catch(()=>({}))]);
   const sm=safemode||{};
   const voice=(window.NexusVoice?.status)||{};
   $('#ccHeader').innerHTML=
@@ -71,6 +72,38 @@ async function refresh(){
     return `<div class="hist-row"><span class="cc-badge ${cls}">${esc(st)}</span> ${esc(k)}</div>`;
   }).join('')||'<div class="hist-row">all clear</div>';
 
+  // background provisioning — post-install workstation setup progress
+  const pv=prov||{},items=pv.items||[];
+  if(!pv.enabled){
+    $('#ccSetup').innerHTML='<div class="hist-row">disabled</div>';
+    $('#ccSetupItems').innerHTML='';
+  }else{
+    const gb=b=>(b/1073741824).toFixed(1);
+    const rem=pv.remaining_download_bytes?` · ~${gb(pv.remaining_download_bytes)} GB left`:'';
+    const head=pv.complete?`Setup complete · ${pv.completed}/${pv.total}`
+      :`Finishing setup · ${pv.completed} of ${pv.total} components ready${rem}${pv.paused?' · <b>paused</b>':''}`;
+    $('#ccSetup').innerHTML=`<div class="hist-row">${head}</div>`+
+      (pv.failed?`<div class="hist-row"><span class="cc-badge cc-bad">${pv.failed} failed</span></div>`:'')+
+      `<div class="hist-row"><small>free disk ${gb(pv.free_disk_bytes||0)} GB</small></div>`;
+    $('#ccSetupItems').innerHTML=items.map(it=>{
+      const p=it.progress||{};
+      const frac=(p.bytes_total&&p.bytes_done)?p.bytes_done/p.bytes_total:null;
+      const speed=p.bytes_per_sec?` · ${(p.bytes_per_sec/1048576).toFixed(1)} MB/s`:'';
+      const eta=p.eta_seconds!=null?` · ~${Math.round(p.eta_seconds/60)}m`:'';
+      const badge=it.state==='completed'?'cc-ok':it.state==='failed'?'cc-bad'
+        :['running','verifying','queued'].includes(it.state)?'cc-warn':'cc-ver';
+      const acts=(it.state==='failed'||it.state==='skipped'||it.state==='cancelled')
+        ?` <button class="mini-button" data-pv-retry="${esc(it.id)}">Retry</button>`:'';
+      const cx=(it.state==='waiting'||it.state==='queued'||it.state==='running')
+        ?` <button class="mini-button" data-pv-cancel="${esc(it.id)}">Cancel</button>`:'';
+      const bar=(it.state==='running'&&frac!=null)
+        ?`<div class="bar"><span style="width:${Math.round(frac*100)}%"></span></div>`:'';
+      return `<div class="hist-row"><span class="cc-badge ${badge}">${esc(it.blocked_reason?'blocked':it.state)}</span> `+
+        `${esc(it.label)}`+
+        `<small>${it.detail?' · '+esc(it.detail):''}${speed}${eta}${it.error_code?' · '+esc(it.error_code):''}${it.blocked_reason?' · '+esc(it.blocked_reason):''}</small>${acts}${cx}${bar}</div>`;
+    }).join('')||'<div class="hist-row">nothing to set up</div>';
+  }
+
   // recent activity feed — one row per tracked step, newest first
   const acts=(activity.activities||[]);
   $('#ccActivity').innerHTML=acts.map(a=>
@@ -81,6 +114,13 @@ async function refresh(){
 }
 
 $('#ccRefresh').addEventListener('click',refresh);
+$('#ccSetupPause').addEventListener('click',async()=>{await api('/api/provisioning/pause',{});refresh();});
+$('#ccSetupResume').addEventListener('click',async()=>{await api('/api/provisioning/resume',{});refresh();});
+$('#ccSetupItems').addEventListener('click',async e=>{
+  const r=e.target.closest('[data-pv-retry]'),c=e.target.closest('[data-pv-cancel]');
+  if(r){await api('/api/provisioning/retry',{id:r.dataset.pvRetry});refresh();}
+  if(c){await api('/api/provisioning/cancel',{id:c.dataset.pvCancel});refresh();}
+});
 $('#ccPlan').addEventListener('click',async()=>{
   const m=$('#ccUpdateMsg');if(m)m.textContent='Checking source…';
   const r=await api('/api/update/plan',{}).catch(()=>({}));

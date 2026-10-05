@@ -70,12 +70,53 @@ route to ComfyUI.
 
 - ComfyUI models are the configured `image_models` profiles (weights +
   API workflows + components verified by the asset library).
-- InvokeAI models are discovered live from `/api/v1/models/` and merged
+- InvokeAI models are discovered live from `/api/v2/models/` and merged
   into the router pool as `invokeai:<key>` profiles carrying the
   ModelIdentifier needed to build graph nodes. They dedupe on refresh and
   get the same capability-classification metadata.
 - LoRA name→model resolution for InvokeAI goes through its own registry;
   the shared `list_loras` library path remains ComfyUI's.
+
+### Photoreal fleet
+
+`image/fleet.py` declares the managed photoreal fleet — curated SDXL
+checkpoints with verified Hugging Face sources, real sizes, SHA-256
+digests, per-model licenses, and trait weights:
+
+- **Juggernaut XL v9** (`general_photoreal`) — full scenes, people in
+  environments, architecture with people, outdoor realism; the general
+  photoreal fallback.
+- **CyberRealistic XL** (`portrait_photoreal`) — portraits, close-ups,
+  headshots, beauty/editorial, identity-focused work.
+- **RealVisXL V5.0** (`glamour_photoreal`) — glamour/boudoir-style
+  adult-only imagery, skin detail, body-focused studio photography.
+  `adult_capable`; adult routing only fires on clearly-adult requests —
+  ambiguous-age prompts never land on it.
+
+Fleet specs match installed InvokeAI models by name/source/path markers;
+matched profiles get `fleet_id`, `fleet_role`, license, and per-model
+`sampling` defaults in `metadata` (`steps` 30, `guidance` 5.0,
+`dpmpp_2m_sde`/`karras` for all three).
+
+**Routing**: `classify_request_traits()` maps prompts to traits
+(portrait/face/scene/environment/glamour/adult/…). `ImageRouter` scores
+fleet-tagged pool members (`score_fleet_model`) before generic priority
+sorting; the winner's `fleet_id` and traits land in `routing_reasons`.
+Fallback honors `resource_fit` — a winner that can't run skips to the
+next scored model. No photoreal signal → generic routing unchanged.
+Manual override accepts either the `invokeai:<key>` id or the fleet id
+(e.g. `realvisxl-v5`); a fleet model pinned against the wrong backend
+errors honestly.
+
+**Learning**: `SamplingAdvisor` keys stats per backend **and** per
+`model_scope` (fleet id), so thumbs feedback on Juggernaut never drifts
+CyberRealistic. Model-declared sampling defaults sit below learned
+outcomes and explicit request values.
+
+**Installs**: the provisioning manager drives `/api/v2/models/install`
+with each spec's `invokeai_source` (`repo::file`), polls the install job
+for byte-level progress, and verifies by re-enumerating models — never by
+download completion alone.
 
 ## Safety
 

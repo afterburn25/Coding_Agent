@@ -606,6 +606,7 @@ class AppState:
             register_image_tools(self.tools, self.images)
         # Local-first voice/TTS subsystem (Kokoro ONNX, CPU by default).
         self.voice = None
+        self.provisioning = None
         if getattr(config, "voice_enabled", True):
             try:
                 from .voice.manager import VoiceManager
@@ -849,8 +850,88 @@ class AppState:
         self._start_auto_tune()
         self._start_auto_resume()
         self._start_source_sync()
+        self._start_provisioning()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def _start_provisioning(self) -> None:
+        """BackgroundProvisioningManager — after the app is usable, finish
+        the workstation stack (models, image backends, voice/STT, tools)
+        progressively in the background. Failures isolate: provisioning
+        must never prevent the server from serving chat."""
+        from .provisioning import ProvisioningManager
+        try:
+            self.provisioning = ProvisioningManager(
+                self.runtime_root, self.config,
+                image_manager=self.images,
+                install_tool_hook=self.install_tool,
+                job_lookup=lambda jid: self.jobs.get(jid),
+                capability_registry=self.capability_registry,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("provisioning init failed")
+            self.provisioning = None
+            return
+        self.provisioning.on_change = self._on_provision_change
+        self.provisioning.on_notify = self._on_provision_notify
+        self.provisioning.on_speak = lambda key, text: self._speak_notice(
+            f"provision-{key}", "status", text)
+        self.provisioning.on_capability_ready = self._on_capability_ready
+        self.provisioning.start()
+
+    _CAPABILITY_PENDING_MAX = 20
+
+    def _defer_capability_request(self, capability: str,
+                                  run: Callable[[], None]) -> bool:
+        """Queue work behind a capability that is still installing — the
+        request auto-resumes when provisioning verifies the component.
+        Bounded so a broken setup can't accumulate unbounded deferred work."""
+        pending = getattr(self, "_capability_pending", None)
+        if pending is None:
+            pending = self._capability_pending = {}
+        queue = pending.setdefault(capability, [])
+        if len(queue) >= self._CAPABILITY_PENDING_MAX:
+            return False
+        queue.append(run)
+        return True
+
+    def _on_capability_ready(self, capability: str) -> None:
+        pending = getattr(self, "_capability_pending", {})
+        queue = pending.pop(capability, [])
+        for run in queue:
+            try:
+                run()
+            except Exception:
+                pass
+
+    def _on_provision_change(self, item, kind: str) -> None:
+        try:
+            payload = {"kind": kind,
+                       "item": item.as_dict() if item is not None else None}
+            self.events.publish("provision_update", payload)
+            for sink in list(getattr(self, "_stream_sinks", [])):
+                try:
+                    sink.put({"type": "provision_update", **payload})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_provision_notify(self, note: dict) -> None:
+        try:
+            level = {"provision_failed": "failure",
+                     "provision_partial": "important",
+                     "provision_complete": "completion",
+                     "provision_retry": "info",
+                     "provision_started": "info",
+                     "provision_ready": "info"}.get(
+                         str(note.get("kind") or ""), "info")
+            self.autonomy.notifications.notify(
+                str(note.get("text") or ""), level=level,
+                title="Workstation setup")
+        except Exception:
+            pass
 
     def self_update(self, source_dir: str = "") -> "object":
         """Lazily build the update bootstrapper. Source defaults to the
@@ -5490,6 +5571,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/benchmarks":
             self._json(self.state.benchmarks.summary())
             return True
+        if path == "/api/provisioning":
+            prov = getattr(self.state, "provisioning", None)
+            self._json(prov.status() if prov else {
+                "enabled": False, "items": [], "complete": False})
+            return True
         if path.startswith("/api/benchmarks/"):
             name = unquote(path[len("/api/benchmarks/"):]).strip("/")
             self._json({"name": name,
@@ -5785,6 +5871,49 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/golden/restore":
             out = self.state.golden.restore(str(body.get("name") or ""))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/provisioning/pause":
+            prov = getattr(self.state, "provisioning", None)
+            if prov:
+                prov.pause()
+            self._json({"ok": prov is not None})
+            return True
+        if path == "/api/provisioning/resume":
+            prov = getattr(self.state, "provisioning", None)
+            if prov:
+                prov.resume()
+            self._json({"ok": prov is not None})
+            return True
+        if path == "/api/provisioning/cancel":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.cancel_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
+        if path == "/api/provisioning/retry":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.retry_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
+        if path == "/api/provisioning/config":
+            changed = {}
+            for key in ("provisioning_enabled", "provisioning_auto_retry",
+                        "provisioning_voice_notifications"):
+                if body.get(key) is not None:
+                    changed[key] = bool(body[key])
+            for k, v in changed.items():
+                if hasattr(self.state.config, k):
+                    setattr(self.state.config, k, v)
+            if changed:
+                try:
+                    self.state.persist_config_fields(changed.keys())
+                except Exception:
+                    pass
+            prov = getattr(self.state, "provisioning", None)
+            # Toggling enabled off pauses the scheduler; on resumes it.
+            if prov is not None and "provisioning_enabled" in changed:
+                (prov.resume if changed["provisioning_enabled"]
+                 else prov.pause)()
+            self._json({"ok": True, "changed": sorted(changed)})
             return True
         if path == "/api/lkg/snapshot":
             self._json(self.state.lkg.snapshot(
@@ -8129,7 +8258,32 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 403)
                     return
                 except (ValueError, TypeError, RuntimeError) as exc:
-                    self._json({"error": str(exc)}, 400)
+                    msg = str(exc)
+                    prov = getattr(self.state, "provisioning", None)
+                    offline = any(k in msg.lower() for k in (
+                        "offline", "not installed", "unavailable",
+                        "not running", "no enabled image model"))
+                    if prov and offline and \
+                            prov.capability_state("image_generation") \
+                            in {"installing", "setup_required"} and \
+                            any(i["state"] in {"running", "queued",
+                                               "waiting"}
+                                for i in prov.status().get("items", [])
+                                if i.get("provides") == "image_generation"):
+                        def _deferred(req=request, rp=bool(
+                                body.get("real_person", False))):
+                            self.state.images.create_job(req, real_person=rp)
+                        if self.state._defer_capability_request(
+                                "image_generation", _deferred):
+                            self._json({
+                                "ok": True,
+                                "waiting_for_capability": "image_generation",
+                                "message": "Image generation is still being "
+                                           "installed — this request is queued "
+                                           "and will run automatically once the "
+                                           "backend verifies."})
+                            return
+                    self._json({"error": msg}, 400)
                     return
                 self._json({"ok": True, "job": job.as_dict()})
                 return
@@ -9751,6 +9905,9 @@ class Handler(BaseHTTPRequestHandler):
                     stop = getattr(self.state, "_shutdown", None)
                     if stop is not None:
                         stop.set()
+                    prov = getattr(self.state, "provisioning", None)
+                    if prov is not None:
+                        prov.shutdown()
                     threading.Thread(
                         target=self.server.shutdown, daemon=True).start()
                 except Exception:

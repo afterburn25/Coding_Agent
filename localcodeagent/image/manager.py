@@ -573,7 +573,8 @@ class ImageManager:
         cls = classify_model(name, family=str(m.get("base") or ""),
                              notes=str(m.get("description") or ""),
                              model_type=str(m.get("type") or ""))
-        return {
+        from .fleet import fleet_for_model_name
+        row = {
             "key": m.get("key"), "name": name,
             "base": m.get("base"), "type": m.get("type"),
             "format": m.get("format"), "hash": m.get("hash"),
@@ -581,12 +582,27 @@ class ImageManager:
             "capability_class": cls["capability_class"],
             "restriction_status": cls["restriction_status"],
         }
+        spec = None
+        for cand in (name, str(m.get("source") or ""),
+                     str(m.get("path") or "")):
+            spec = fleet_for_model_name(cand)
+            if spec:
+                break
+        if spec:
+            row["fleet_id"] = spec["id"]
+            row["fleet_role"] = spec["role"]
+            row["display_name"] = spec["display_name"]
+            row["license"] = spec["license_name"]
+            row["adult_capable"] = bool(spec.get("adult_capable"))
+            row["fleet_source"] = spec.get("homepage") or ""
+        return row
 
     def _refresh_invokeai_models(self) -> None:
         """Merge InvokeAI-discovered models into the router pool as
         synthesized profiles (deduped by key; refreshed on each choose)."""
         base = [m for m in self.router.models
                 if not m.id.startswith("invokeai:")]
+        from .fleet import fleet_for_model_name
         for row in self._invokeai_models():
             if str(row.get("type") or "") != "main":
                 continue
@@ -614,6 +630,28 @@ class ImageManager:
             profile.metadata["invokeai_model"] = {k: row.get(k) for k in
                 ("key", "hash", "name", "base", "type", "format", "description")
                 if row.get(k) is not None}
+            # Fleet match: a known managed model (Juggernaut/RealVis/
+            # CyberRealistic) gets role, scoring weights, and its default
+            # sampling profile attached so routing + SamplingAdvisor can
+            # use them.
+            spec = None
+            for candidate in (name, str(row.get("source") or ""),
+                              str(row.get("path") or "")):
+                spec = fleet_for_model_name(candidate)
+                if spec:
+                    break
+            if spec:
+                profile.metadata["fleet_id"] = spec["id"]
+                profile.metadata["fleet_role"] = spec["role"]
+                profile.metadata["fleet_display"] = spec["display_name"]
+                profile.metadata["fleet_source"] = spec["invokeai_source"]
+                profile.metadata["fleet_license"] = spec["license_name"]
+                profile.display_name = spec["display_name"]
+                profile.capability_class = "photoreal"
+                profile.restriction_status = spec["restriction_status"]
+                for k, v in (spec.get("sampling") or {}).items():
+                    profile.metadata.setdefault("sampling", {})[k] = v
+                profile.metadata["sampling"]["model_scope"] = spec["id"]
             base.append(profile)
         self.router.models = [m for m in base if m.enabled]
 

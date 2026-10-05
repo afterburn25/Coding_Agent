@@ -179,6 +179,66 @@ class InvokeAIBackend(ImageBackend):
             return rows
         return data if isinstance(data, list) else []
 
+    # -- model installs -------------------------------------------------
+
+    def install_model(self, source: str) -> dict[str, Any]:
+        """Queue a model install in InvokeAI's own model manager.
+
+        ``source`` accepts a local path, a remote URL, or a HF repo id —
+        including the pinned-file form ``owner/repo::path/to/file.st``.
+        Returns the ModelInstallJob row (numeric ``id``, ``status`` of
+        waiting/downloading/running/paused/completed/error/cancelled)."""
+        query = urllib.parse.urlencode({"source": str(source or "")})
+        for base in ("/api/v2/models/install", "/api/v1/models/install"):
+            try:
+                return self._json(f"{base}?{query}", method="POST",
+                                  payload={})
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and base.startswith("/api/v2"):
+                    continue
+                raise
+        raise BackendConnectionError(f"{self.endpoint}: no model install endpoint")
+
+    def model_install_jobs(self) -> list[dict[str, Any]]:
+        for base in ("/api/v2/models/install", "/api/v1/models/install"):
+            try:
+                data = self._json(base)
+                return data if isinstance(data, list) else []
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and base.startswith("/api/v2"):
+                    continue
+                return []
+            except Exception:
+                return []
+        return []
+
+    def model_install_job(self, job_id: int | str) -> dict[str, Any] | None:
+        for base in ("/api/v2/models/install", "/api/v1/models/install"):
+            try:
+                return self._json(f"{base}/{job_id}")
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    if base.startswith("/api/v2"):
+                        continue
+                    return None
+                return None
+            except Exception:
+                return None
+        return None
+
+    def cancel_model_install(self, job_id: int | str) -> bool:
+        for base in ("/api/v2/models/install", "/api/v1/models/install"):
+            try:
+                self._json(f"{base}/{job_id}", method="DELETE")
+                return True
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404 and base.startswith("/api/v2"):
+                    continue
+                return False
+            except Exception:
+                return False
+        return False
+
     # -- uploads / downloads -------------------------------------------
 
     def upload_image(self, path: Path, **kwargs: Any) -> dict[str, Any]:

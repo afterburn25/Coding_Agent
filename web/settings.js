@@ -12,7 +12,8 @@
     ["profile", "Profile"], ["general", "General"],
     ["permissions", "Permissions"], ["models", "Models"],
     ["appearance", "Appearance"], ["privacy", "Privacy"],
-    ["notifications", "Notifications"], ["advanced", "Advanced"],
+    ["notifications", "Notifications"], ["setup", "Setup"],
+    ["advanced", "Advanced"],
   ];
   let activeProfile = null;   // /api/profiles/active — Creator section
                               // is appended only for is_creator.
@@ -66,6 +67,8 @@
         await renderProfile(host);
       } else if (section === "creator") {
         await renderCreator(host);
+      } else if (section === "setup") {
+        await renderSetup(host);
       } else {
         if (!status) status = await api("/api/status");
         renderPlain(host);
@@ -354,6 +357,40 @@
   }
 
   // --------------------------------------------------------- plain sections
+
+  async function renderSetup(host) {
+    const pv = await api("/api/provisioning").catch(() => ({}));
+    const items = pv.items || [];
+    const gb = (b) => (b / 1073741824).toFixed(1);
+    const toggle = (id, key, on) =>
+      `<label class="autonomy-toggle"><input type="checkbox" data-prov="${key}" ${on ? "checked" : ""}> ${id}</label>`;
+    const cfg = pv.config || {};
+    host.innerHTML =
+      `<div class="settings-title"><div><h2>Background setup</h2>` +
+      `<p>Nexus finishes installing models, image backends, voice, and tools in the background after the app itself is ready. Failed items can be retried from the Command Center.</p></div></div>` +
+      `<div class="settings-section"><div class="kv">` +
+      `<div class="row"><span class="k">Status</span><span class="v">${pv.complete ? "complete" : `${pv.completed || 0} of ${pv.total || 0} ready`}${pv.paused ? " · paused" : ""}</span></div>` +
+      `<div class="row"><span class="k">Remaining download</span><span class="v">~${gb(pv.remaining_download_bytes || 0)} GB</span></div>` +
+      `<div class="row"><span class="k">Free disk</span><span class="v">${gb(pv.free_disk_bytes || 0)} GB</span></div>` +
+      `</div></div>` +
+      `<div class="settings-section">` +
+      toggle("Background setup", "provisioning_enabled", cfg.provisioning_enabled !== false) +
+      toggle("Automatic retry on transient failures", "provisioning_auto_retry", cfg.provisioning_auto_retry !== false) +
+      toggle("Voice setup notifications", "provisioning_voice_notifications", cfg.provisioning_voice_notifications !== false) +
+      `</div>` +
+      `<div class="settings-section"><div class="section-title">Components</div><div class="kv">` +
+      (items.map((it) =>
+        `<div class="row"><span class="k">${esc(it.label)}</span><span class="v">${esc(it.state)}${it.error_code ? ` · ${esc(it.error_code)}` : ""}</span></div>`).join("") ||
+        `<div class="row"><span class="v muted">Nothing to set up.</span></div>`) +
+      `</div></div>` +
+      `<p class="muted small">Live progress and per-item retry/cancel live on the <a href="/command.html" style="color:var(--cyan)">Command Center →</a></p>`;
+    host.querySelectorAll("[data-prov]").forEach((el) =>
+      el.addEventListener("change", async () => {
+        try {
+          await post("/api/provisioning/config", { [el.dataset.prov]: el.checked });
+        } catch (e) { alert(e.message); el.checked = !el.checked; }
+      }));
+  }
 
   function renderPlain(host) {
     const s = status || {};

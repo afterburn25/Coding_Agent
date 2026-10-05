@@ -110,3 +110,25 @@ to the `+cu126` wheel for GPU):
 Not dogfooded: GPU/LLM-resident resource contention (no LLM was loaded on
 this dev box) and live ComfyUI fallback (ComfyUI not installed here — the
 fallback path is unit-tested in `tests/test_invokeai.py`).
+
+## Managed model installs (fleet)
+
+The adapter wraps InvokeAI's model-manager install API (v6 verified):
+
+- `POST /api/v2/models/install?source=<src>` — accepts a HF repo id, a
+  `repo::file.safetensors` pin, a URL, or a local path. Returns a
+  `ModelInstallJob` (`id`, `status`, `bytes`/`total_bytes`).
+- `GET /api/v2/models/install` / `/{id}` — job list / single job polling.
+- `DELETE /api/v2/models/install/{id}` — cancel.
+
+`ProvisioningManager` uses these for the photoreal fleet: submit → poll
+bytes for progress → on `completed`, verify the model is enumerable via
+`GET /api/v2/models/` before marking the item done. InvokeAI itself
+resumes interrupted downloads (huggingface_hub caching) and hash-checks
+upstream metadata, so a 7 GB checkpoint never restarts from zero after a
+restart.
+
+Fleet install dogfood (2026-10-05, live 6.14.2): all three fleet sources
+(`RunDiffusion/Juggernaut-XL-v9`, `cyberdelia/CyberRealisticXL`,
+`SG161222/RealVisXL_V5.0` — `repo::file` form) accepted by the install
+endpoint with real `total_bytes` matching the verified spec sizes.
