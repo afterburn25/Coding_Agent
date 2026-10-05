@@ -491,6 +491,17 @@ class RuntimeManager:
         if qwen14 and not has_reasoning_override:
             cmd.extend(["--reasoning", "off"])
 
+        # Tool calling requires --jinja so llama.cpp renders the request's
+        # `tools` block through the chat template and parses tool_calls back
+        # out. Without it the server silently ignores tool schemas and the
+        # model can only narrate actions it never performs.
+        user_args = [*profile.extra_args, *(extra_args or [])]
+        has_jinja_override = any(
+            str(arg) in ("--jinja", "--no-jinja") for arg in user_args
+        )
+        if getattr(profile, "tool_calling", False) and not has_jinja_override:
+            cmd.append("--jinja")
+
         # Tuned flags: persisted benchmark results or capability-gated
         # heuristics. User-supplied extra_args always win on conflicts.
         try:

@@ -147,6 +147,38 @@ class EndToEndAgentTests(unittest.TestCase):
                    "waiting_approval", "running", "interrupted", ""):
             self.assertFalse(_task_status_succeeded(st), st)
 
+    def test_mission_run_strips_persona_but_keeps_tools(self):
+        # Regression: mission agent nodes inherited the interactive persona
+        # ("Father, I've completed…") — small models narrated work in-character
+        # instead of emitting tool calls, so every soak mission fabricated.
+        # A mission run must drop the persona/personal-memory block yet still
+        # transmit tool schemas.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            state.agent.profile_context = (
+                lambda *a, **k: "You are Isabella. Address the user as Father.")
+            if state.agent.conversation_manager is not None:
+                state.agent.conversation_manager.personality_prompt = (
+                    lambda: "PERSONA_SENTINEL")
+            result = state.agent.run(
+                "create a file named hello.txt containing one line: hi",
+                event_callback=lambda e: None,
+                mission_id="m-persona-test")
+            self.assertTrue(fake.requests)
+            payload = fake.requests[0]
+            system_text = "\n".join(
+                str(m.get("content") or "")
+                for m in payload.get("messages") or []
+                if m.get("role") == "system")
+            self.assertNotIn("PERSONA_SENTINEL", system_text)
+            self.assertNotIn("Isabella", system_text)
+            self.assertNotIn("Father", system_text)
+            # Tools must still be offered — the node was classified onto a
+            # tool-capable lane, so schemas go out in the request.
+            self.assertTrue(payload.get("tools"))
+
     def test_mission_park_does_not_block_lane(self):
         # A mission-attributed waiting_approval row is mission work — its own
         # approval flow resumes it — and must never freeze the agent lane

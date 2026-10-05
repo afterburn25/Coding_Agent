@@ -156,6 +156,86 @@ class RuntimeManagerTests(unittest.TestCase):
             reasoning_index = cmd.index("--reasoning")
             self.assertEqual(cmd[reasoning_index + 1], "auto")
 
+    def test_tool_capable_profile_launches_server_with_jinja(self):
+        """llama.cpp silently ignores the request's `tools` field unless the
+        server was launched with --jinja. Every tool-capable profile must get
+        it or agent missions can only narrate work they never perform."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=[],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--jinja", cmd)
+
+    def test_non_tool_profile_does_not_get_jinja(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=False,
+                extra_args=[],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertNotIn("--jinja", cmd)
+
+    def test_explicit_no_jinja_override_is_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=["--no-jinja"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--no-jinja", cmd)
+            self.assertEqual(cmd.count("--jinja"), 0)
+
+    def test_custom_chat_template_still_gets_jinja(self):
+        # --chat-template supplies template text; jinja remains the engine
+        # that renders the tools block, so tool-capable profiles still need
+        # the flag alongside a custom template.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=["--chat-template", "custom.jinja"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--jinja", cmd)
+            self.assertIn("--chat-template", cmd)
+
     def test_resource_aware_router_avoids_model_that_does_not_fit(self):
         with tempfile.TemporaryDirectory() as td:
             big = self._profile(id="big", runtime="external", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)

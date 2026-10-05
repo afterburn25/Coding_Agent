@@ -4337,6 +4337,12 @@ class AgentOrchestrator:
         if profile_ctx:
             personality_context = (
                 personality_context + "\n\n" + profile_ctx).strip()
+        if mission_id:
+            # Mission nodes run unattended tool work — a companion persona
+            # ("Father, I've completed…") steers small models into narrating
+            # actions in-character instead of emitting tool calls. Strip
+            # persona/personal-memory framing from autonomous executions.
+            personality_context = ""
         intent_context = (
             self.conversation_manager.intent_prompt(conversation_intent)
             if self.conversation_manager is not None
