@@ -23,6 +23,7 @@ IMAGE_EDIT = "image_edit"
 IMAGE_FOLLOWUP = "image_followup"
 TOOL_ACTION = "tool_action"
 GIT_ACTION = "git_action"
+GITHUB_STATUS = "github_status"
 FILE_EDIT = "file_edit"
 CODING = "coding"
 RESEARCH = "research"
@@ -38,7 +39,7 @@ CONVERSATION = "conversation"
 # an explicit action request always outranks small talk.
 ACTION_INTENTS = {
     IMAGE_GENERATION, IMAGE_EDIT, IMAGE_FOLLOWUP, TOOL_ACTION, GIT_ACTION,
-    FILE_EDIT, CODING, RESEARCH, WRITING,
+    GITHUB_STATUS, FILE_EDIT, CODING, RESEARCH, WRITING,
 }
 
 # Confidence at which an explicit intent routes directly — no second gate.
@@ -77,6 +78,17 @@ class IntentEnvelope:
     output_type: str = ""
     followup_prompt: str = ""
     compound: bool = False
+    # Universal-turn fields: topic moves, comparisons, ordinals,
+    # conditionals, alternatives, and honest ambiguity markers.
+    topic_shift: bool = False
+    topic_target: str = ""
+    comparison: bool = False
+    comparison_targets: list[str] = field(default_factory=list)
+    ordinal_reference: int | None = None
+    conditionals: list[dict[str, str]] = field(default_factory=list)
+    alternatives: list[str] = field(default_factory=list)
+    ambiguity: list[str] = field(default_factory=list)
+    implicit: bool = False
 
     def direct_image(self) -> bool:
         """HIGH-confidence direct image intent — authoritative for routing."""
@@ -105,6 +117,13 @@ class IntentEnvelope:
             "correction_of": self.correction_of,
             "continuation_of": self.continuation_of,
             "compound": self.compound,
+            "topic_shift": self.topic_shift,
+            "topic_target": self.topic_target[:120],
+            "comparison": self.comparison,
+            "ordinal": self.ordinal_reference,
+            "conditionals": self.conditionals[:4],
+            "ambiguity": self.ambiguity[:4],
+            "temporal": self.temporal_context[:80],
             "evidence": self.evidence[:8],
         }
 
@@ -145,6 +164,7 @@ _SCAFFOLD_PIECES = [
     r"go\s+ahead\s+and",
     r"let\s+me\s+see",
     r"(?:may|can|could)\s+i\s+see",
+    r"see",
     r"i'?d\s+like\s+to\s+see",
     r"i\s+want\s+to\s+see",
     r"show\s+me",
@@ -161,11 +181,16 @@ _SCAFFOLD_OBJECT_PIECES = [
     r"(?:of|showing|depicting|featuring|with|where|that\s+shows?|of\s+a|"
     r"of\s+an)",
 ]
-_SCAFFOLD_RE = re.compile(
-    r"^(?:" + "|".join(_SCAFFOLD_PIECES) + r"|"
-    + r"(?:" + "|".join(_SCAFFOLD_PIECES) + r")\s*(?:"
-    + "|".join(_SCAFFOLD_OBJECT_PIECES) + r")"
-    + r")\s+",
+_SCAFFOLD_REQ_RE = re.compile(
+    r"^(?:" + "|".join(_SCAFFOLD_PIECES) + r")\b\s*",
+    re.IGNORECASE)
+_SCAFFOLD_OBJ_RE = re.compile(
+    r"^(?:(?:an?|the|some|another|a\s+few|one)\s+)?"
+    r"(?:images?|pictures?|photos?|pics?|photographs?|portraits?|"
+    r"illustrations?|drawings?|renders?|wallpapers?|paintings?|"
+    r"sketches?|artworks?|depictions?|visualizations?|selfies?|"
+    r"avatars?|posters?|banners?|logos?|icons?|concept\s+arts?)\s+"
+    r"(?:of|showing|depicting|featuring|that\s+shows?)\s+",
     re.IGNORECASE)
 
 
@@ -176,7 +201,12 @@ def strip_image_scaffold(text: str) -> str:
     prev = None
     while prev != t:
         prev = t
-        t = _SCAFFOLD_RE.sub("", t, count=1).strip(" ,.:;")
+        t = _SCAFFOLD_REQ_RE.sub("", t, count=1).strip(" ,.:;")
+        t = _SCAFFOLD_OBJ_RE.sub("", t, count=1).strip(" ,.:;")
+    # "what a castle would look like" → "a castle" — hypothetical
+    # phrasing describes the subject, not the prompt.
+    t = re.sub(r"^what\s+(.+?)\s+would\s+look\s+like\b.*$", r"\1",
+               t, flags=re.IGNORECASE).strip(" ,.:;?")
     return t or _norm(text)
 
 
@@ -208,6 +238,18 @@ _VISUAL_ADJ_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(a) for a in _VISUAL_ADJS) + r")\b",
     re.IGNORECASE)
 
+# Person/creature subjects imply a visual artifact under a generation
+# verb — "generate an adult woman in a red dress" needs no visual noun.
+_PERSON_SUBJECT_RE = re.compile(
+    r"\b(?:adult\s+)?(?:woman|women|man|men|girl|boy|person|people|"
+    r"character|portrait\s+of|angel|demon|warrior|knight|witch|elf|"
+    r"princess|prince|queen|king|goddess|god|cyborg|robot|alien|"
+    r"vampire|mermaid|samurai|ninja|pirate|soldier|scientist|"
+    r"superhero|villain|model|actress|actor|singer|dancer|cat|dog|"
+    r"dragon|creature|monster|beast|wolf|fox|horse|lion|tiger|"
+    r"bird|phoenix|unicorn)\b",
+    re.IGNORECASE)
+
 # Objects whose presence means "show me X" is NOT an image request.
 _NON_IMAGE_OUTPUTS = (
     "code", "function", "class", "component", "script", "report",
@@ -221,21 +263,27 @@ _NON_IMAGE_OUTPUTS = (
     "conversation", "chat", "messages", "notification", "notifications",
     "list", "table", "spreadsheet", "chart", "graph of", "terminal",
     "console", "shell", "snippet", "regex", "documentation", "docs",
-    "readme", "manifest", "changelog", "diff", "patch",
+    "readme", "manifest", "changelog", "diff", "patch", "problem",
+    "issue", "menu", "result", "answer", "question", "weather",
+    "price", "definition", "meaning", "reason", "difference",
+    "options", "choice", "score", "news", "time", "date", "repo",
+    "repos", "repositories",
 )
 _NON_IMAGE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(n) for n in _NON_IMAGE_OUTPUTS) + r")\b",
     re.IGNORECASE)
 
 # "show me / let me see / can I see" request verbs — need a visual object.
+# Greeting/politeness prefixes may appear in any order: "hey nexus,
+# please show me…" and "please, hey nexus, show me…" are equivalent.
 _SHOW_VERB_RE = re.compile(
-    r"^(?:please\s+)?(?:hey(?:\s+\w+)?[,!]?\s+)?"
+    r"^(?:(?:hey(?:\s+\w+)?[,!]?\s+)|(?:please\s+)|(?:okay[,!]?\s+))*"
     r"(?:(?:can|could|would|may)\s+i\s+|i\s+(?:wanna|want\s+to|"
     r"would\s+like\s+to|'?d\s+like\s+to|need\s+to)\s+|let\s+me\s+|"
     r"(?:can|could|would|will)\s+you\s+(?:please\s+)?|"
     r"i\s+(?:want|need|would\s+like|'?d\s+like)\s+(?:you\s+to\s+)?)?"
     r"(?:show\s+me|let\s+me\s+see|give\s+me|get\s+me|bring\s+me|"
-    r"fetch\s+me|pull\s+up|display)\b",
+    r"fetch\s+me|pull\s+up|display|see)\b",
     re.IGNORECASE)
 
 _GENERATE_VERB_RE = re.compile(
@@ -290,9 +338,162 @@ _FEEDBACK_RE = re.compile(
     r"forgetting)|wrong\s+(?:image|one|thing)|not\s+what\s+i\s+asked)",
     re.IGNORECASE)
 
+_ACTION_AFTER_COMMA = (
+    r"(?:save|put|copy|move|send|write|run|push|commit|deploy|open|"
+    r"add|remove|delete|rename|create|make|show|list|check|fix|update|"
+    r"install|upload|download|attach|insert|print|export|import|post|"
+    r"share|store|place|set|schedule|email|notify|tell|verify|test|"
+    r"build|compile|document|commit|apply|use|try|upload|sync|clean|"
+    r"rerun|retest|merge|publish)"
+)
 _COMPOUND_SPLIT_RE = re.compile(
-    r"\s*(?:,\s*(?:and\s+then|then|and\s+also)|;\s*|\.\s+(?:then|and\s+then)|"
-    r"\s+and\s+then\s+|\s+then\s+)\s*",
+    r"\s*(?:,\s*(?:and\s+then|then|and\s+also|and)\s+|;\s*|"
+    r"\.\s+(?:then|and\s+then)\s+|\s+and\s+then\s+|\s+then\s+|"
+    r",\s+(?=" + _ACTION_AFTER_COMMA + r"\b))\s*",
+    re.IGNORECASE)
+
+# Whitelisted typo corrections (§16) — vocabulary tokens only; tokens,
+# paths, URLs, hashes and symbols are never touched.
+_TYPO_MAP = {
+    "githib": "github", "gihub": "github", "gitub": "github",
+    "repsoitory": "repository", "repositry": "repository",
+    "invokai": "invokeai", "comfyi": "comfyui",
+    "contex": "context", "picure": "picture", "pictue": "picture",
+    "iamge": "image", "imgae": "image", "imaeg": "image",
+    "brnach": "branch", "comit": "commit", "fucntion": "function",
+    "udpate": "update", "erorr": "error", "teh": "the",
+    "picutre": "picture", "genrate": "generate", "mkae": "make",
+    "wrok": "work", "fixx": "fix", "tes": "test",
+}
+_TYPO_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(k) for k in _TYPO_MAP) + r")\b")
+
+
+def _fix_typos(t: str) -> str:
+    """Correct whitelisted vocabulary typos only — never arbitrary text."""
+    return _TYPO_RE.sub(lambda m: _TYPO_MAP[m.group(0)], t)
+
+
+# Verbs whose output is inherently visual — "draw a dragon" needs no
+# visual noun, unlike "make a function".
+_VISUAL_VERB_RE = re.compile(
+    r"\b(?:draw|paint|illustrate|sketch|depict|visuali[sz]e|imagine|"
+    r"doodle|render)\b",
+    re.IGNORECASE)
+
+# Topic-switch markers (§20) — explicit pivots plus "now <new domain>".
+_TOPIC_SHIFT_RE = re.compile(
+    r"^(?:anyway|ok(?:ay)?[,]?\s+so|so\s+anyway|different\s+question|"
+    r"new\s+topic|changing\s+(?:the\s+)?subject|switching\s+topics|"
+    r"moving\s+on|forget\s+(?:that|it|all\s+that)|never\s*mind|"
+    r"unrelated|on\s+a\s+different\s+note|separately|"
+    r"let'?s\s+(?:work\s+on|move\s+to|switch\s+to))[,.\s]*",
+    re.IGNORECASE)
+
+# Return-to-topic markers (§21) — the target may be anaphoric; the
+# resolver decides what it restores.
+_TOPIC_RETURN_RE = re.compile(
+    r"^(?:back\s+to|let'?s\s+(?:go\s+)?back\s+to|return(?:ing)?\s+to|"
+    r"go\s+back\s+to|get(?:ting)?\s+back\s+to|resume|resuming|"
+    r"continu(?:e|ing)\s+(?:the|that|with))\b[,\s]*(.{0,80})",
+    re.IGNORECASE)
+
+# Conditional requests (§13) — "if tests pass, push it"; "use InvokeAI
+# unless it fails, then try ComfyUI".
+_CONDITIONAL_RE = re.compile(
+    r"^if\s+(.{3,100}?)(?:,\s*then\b|,|\s+then\b)\s*(.{3,160})$",
+    re.IGNORECASE)
+_UNLESS_RE = re.compile(
+    r"^(.{3,160}?)\s+unless\s+(.{3,100}?)(?:,\s*(?:then\s+)?(.{3,120}))?$",
+    re.IGNORECASE)
+
+# Temporal language (§11) — tied to state downstream; marked here so the
+# resolver can bind it instead of inventing history.
+_TEMPORAL_RE = re.compile(
+    r"\b(?:earlier|before|previously|last\s+time|just\s+now|"
+    r"a\s+moment\s+ago|yesterday|overnight|since\s+\w+|"
+    r"after\s+the\s+restart|before\s+the\s+update|the\s+previous\s+run|"
+    r"the\s+latest|the\s+newest|recent(?:ly)?|from\s+earlier|"
+    r"a\s+while\s+ago|last\s+night|this\s+morning)\b",
+    re.IGNORECASE)
+
+# Comparisons (§9) — operands resolved against the active candidate set.
+_COMPARISON_RE = re.compile(
+    r"\b(?:which\s+(?:one|is|version|model|option)\b.{0,40}"
+    r"(?:better|faster|cheaper|bigger|smaller|worse)|"
+    r"compare|comparison|what'?s\s+(?:the\s+)?differen|"
+    r"what\s+changed|how\s+does\s+.{0,30}\s+compare|\bvs\b\.?|versus|"
+    r"(?:better|worse|faster|slower|cheaper)\s+than|"
+    r"or\s+(?:better|would)\b.{0,20}\bbetter)\b",
+    re.IGNORECASE)
+_COMPARISON_OPERAND_RE = re.compile(
+    r"\b(?:than|versus|vs\.?|or)\s+([a-z0-9_.\-/ ]{2,40})",
+    re.IGNORECASE)
+
+# Ordinal / list references (§10) — bound to the recent candidate set.
+_ORDINALS = {
+    "first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3,
+    "fourth": 4, "4th": 4, "fifth": 5, "5th": 5,
+    "last": -1, "latest": -1, "newest": -1, "previous": -2,
+    "earlier": -2, "middle": 0,
+}
+_ORDINAL_RE = re.compile(
+    r"\b(?:the\s+)?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|"
+    r"last|latest|newest|previous|earlier|middle)\s+"
+    r"(?:one|option|version|image|picture|branch|commit|file|model|"
+    r"candidate|choice|result|reply|response|message|approach)\b|"
+    r"\bnumber\s+(\d+)\b|\bthe\s+other\s+one\b|\bthe\s+same\s+one\b|"
+    r"\bthe\s+first\s+one\b|\bthe\s+second\s+one\b",
+    re.IGNORECASE)
+
+# GitHub/repository inspection — natural language over the active repo
+# (§53): "check GitHub", "what did Devin push", "anything new land?".
+_GITHUB_RE = re.compile(
+    r"(?:"
+    r"\b(?:github|repo(?:sitory)?|remote|origin|upstream)\b[^.?!]{0,50}"
+    r"(?:status|commits?|push(?:ed)?|branch|ci|actions?|workflows?|"
+    r"land(?:ed)?|merged?|changed?|new|latest|happening|going\s+on|"
+    r"state|connect|working|sync(?:ed)?|update|activity)|"
+    r"\b(?:check|see|look\s+at|inspect|peek\s+at|open|watch)\b"
+    r"[^.?!]{0,40}\b(?:github|repo|repository|branch|commits?|ci|"
+    r"workflow|actions|remote|origin)\b|"
+    r"\bwhat\s+did\s+\w+\s+(?:just\s+)?(?:push|commit|merge|land)|"
+    r"\banything\s+(?:new\s+)?(?:land|push|merge|commit)|"
+    r"\b(?:latest|recent|new)\s+(?:commits?|push|merge|changes)|"
+    r"\bcurrent\s+branch\b|\brepo\s+status\b|"
+    r"\bwhat'?s\s+(?:happening|going\s+on)\s+(?:with|on|in)\s+"
+    r"(?:the\s+)?(?:repo|github|branch|project)\b|"
+    r"\bwhere\s+(?:are|is)\s+we\s+at\b"
+    r")",
+    re.IGNORECASE)
+
+# Repair/coding requests — natural language over an active error/task.
+_REPAIR_RE = re.compile(
+    r"\b(?:fix|repair|sort\s+(?:that|this|it)\s+out|take\s+care\s+of|"
+    r"get\s+.{0,25}\s+working|make\s+.{0,20}\s+work|unbreak|"
+    r"get\s+.{0,20}\s+running|fix\s+(?:the|that|this|it)\b|"
+    r"solve|resolve|patch|debug|diagnose|investigate)\b",
+    re.IGNORECASE)
+
+# Informal/implied trouble reports (§14/§15) — statements that imply a
+# fix without an imperative verb.
+_IMPLICIT_BROKEN_RE = re.compile(
+    r"\b(?:still\s+(?:broken|not\s+working|failing|doesn'?t\s+work|"
+    r"isn'?t\s+working|not\s+right)|"
+    r"(?:it|that|this)\s*(?:'s|is)?\s+(?:busted|broken|dead|fried|"
+    r"messed\s+up|screwed|hosed)|"
+    r"(?:it|that)\s+(?:blew\s+up|crashed|died|broke|fails?|"
+    r"won'?t\s+(?:work|run|build|compile|start|load)|"
+    r"doesn'?t\s+work|isn'?t\s+working|ain'?t\s+working)|"
+    r"that\s+ain'?t\s+it|looks?\s+like\s+crap|"
+    r"(?:way|far)\s+too\s+(?:slow|fast|close|far|big|small|long|"
+    r"dark|bright|loud|quiet|much|little)|"
+    r"what\s+the\s+hell\s+happened|you\s+lost\s+me|"
+    r"same\s+(?:error|problem|issue|bug)|"
+    r"keeps?\s+(?:failing|crashing|breaking|erroring))\b|"
+    r"\b(?:image|picture|photo|render|output|result|it|that|this|"
+    r"she|he|they|the\s+\w+)\s+(?:is|looks?|seems?|feels?)\s+"
+    r"(?:too|way\s+too|a\s+bit|kinda|sort\s+of)\s+\w+",
     re.IGNORECASE)
 
 
@@ -311,10 +512,33 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
     # Inpainting/outpainting argument-heavy ops stay tool-routed.
     if any(x in t for x in ("inpaint", "outpaint")) and "mask" in t:
         return False, 0.0, []
+    # Literal "edit image <path>" ops stay on the model+tool lane — only
+    # the tools layer can assemble the op arguments. "edit THIS image"
+    # is different: the artifact reference is conversational.
+    if any(x in t for x in ("edit image", "edit photo",
+                            "edit picture")):
+        return False, 0.0, []
+
+    # A question ABOUT images asks for information, not an artifact —
+    # "which model do you generate images with?" is never a job.
+    # Request-forms ("can you draw…") keep their verbs, so only
+    # information-seeking lead words veto.
+    if re.match(r"^(?:which|what|who|whose|whom|how|when|where|why)\b",
+                t) and not _IMAGE_OP_RE.search(t):
+        return False, 0.0, []
 
     visual_noun = bool(_VISUAL_NOUN_RE.search(t))
     visual_adj = bool(_VISUAL_ADJ_RE.search(t))
     non_image = bool(_NON_IMAGE_RE.search(t))
+
+    # Artifact precedence: when the requested output is a non-visual
+    # artifact that merely CONTAINS a visual element ("a website with a
+    # logo", "a report with a picture"), the first-mentioned artifact
+    # decides — the website is being built, not the logo.
+    _vn = _VISUAL_NOUN_RE.search(t)
+    _ni = _NON_IMAGE_RE.search(t)
+    if _vn and _ni and _ni.start() < _vn.start():
+        return False, 0.0, []
 
     # Explicit edit ops on an existing artifact — always image intent
     # (resolved to edit vs generate by attachment/context downstream).
@@ -357,6 +581,29 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
     if visual_adj and (show or gen) and not non_image:
         evidence.append("visual verb + descriptor")
         return True, 0.8, evidence
+    # Generation verb + a person/creature subject — "generate an adult
+    # woman in a red dress", "create a dragon".
+    if gen and _PERSON_SUBJECT_RE.search(t) and not non_image:
+        evidence.append("generation verb + visual subject")
+        return True, 0.85, evidence
+    # Inherently visual verbs need no visual noun — "draw a dragon",
+    # "visualize a castle", "sketch her face".
+    if _VISUAL_VERB_RE.search(t) and not non_image:
+        evidence.append("inherently visual verb")
+        return True, 0.85, evidence
+    # "I want to see what a castle would look like" — hypothetical
+    # visual inspection is an image request.
+    if show and re.search(
+            r"\b(?:would|might|could|will)\s+look\s+like\b", t):
+        evidence.append("see-verb + hypothetical appearance")
+        return True, 0.8, evidence
+    # Show-verb + a concrete requested object that isn't a known
+    # non-visual output — "let me see a castle", "can I see the sunset".
+    # Object semantics decide: "show me the logs" is vetoed upstream.
+    if show and re.search(
+            r"\b(?:a|an|the|some|what)\s+\w", t) and not non_image:
+        evidence.append("see-verb + concrete non-tool object")
+        return True, 0.7, evidence
     return False, 0.0, evidence
 
 
@@ -388,8 +635,54 @@ def _compound_parts(t: str) -> list[str]:
     return [p for p in parts if len(p) > 3]
 
 
+def _inherit_markers(outer: IntentEnvelope, inner: IntentEnvelope) -> None:
+    """Copy contextual annotations discovered on the outer turn onto a
+    recursively-classified clause — conditions/alternatives wrap, not
+    replace, the action's own metadata."""
+    inner.topic_shift = inner.topic_shift or outer.topic_shift
+    inner.topic_target = inner.topic_target or outer.topic_target
+    inner.comparison = inner.comparison or outer.comparison
+    for x in outer.comparison_targets:
+        if x not in inner.comparison_targets:
+            inner.comparison_targets.append(x)
+    if inner.ordinal_reference is None:
+        inner.ordinal_reference = outer.ordinal_reference
+    inner.temporal_context = inner.temporal_context or outer.temporal_context
+    for k, v in outer.references.items():
+        inner.references.setdefault(k, v)
+    for a in outer.ambiguity:
+        if a not in inner.ambiguity:
+            inner.ambiguity.append(a)
+    for e in outer.evidence:
+        if e not in inner.evidence:
+            inner.evidence.append(e)
+
+
 def understand_turn(text: str, *, active: Any = None,
                     has_attachments: bool = False) -> IntentEnvelope:
+    """Classify one turn, then resolve its references against active
+    context. Resolution is post-pass so every lane benefits — a repair
+    verb binds "it" to the active error; a modify verb binds "it" to
+    the active image."""
+    env = _classify_turn(text, active=active,
+                         has_attachments=has_attachments)
+    if active is not None:
+        try:
+            from .references import resolve_with_report
+            report = resolve_with_report(text, active)
+            for term, label in report["resolved"].items():
+                env.references.setdefault(term, label)
+            for term in report["ambiguous"]:
+                note = f"ambiguous reference: {term!r}"
+                if note not in env.ambiguity:
+                    env.ambiguity.append(note)
+        except Exception:
+            pass
+    return env
+
+
+def _classify_turn(text: str, *, active: Any = None,
+                   has_attachments: bool = False) -> IntentEnvelope:
     """Produce the IntentEnvelope for one user turn.
 
     `active` is the conversation's ActiveContext (or None). Detection
@@ -399,7 +692,7 @@ def understand_turn(text: str, *, active: Any = None,
     """
     env = IntentEnvelope()
     raw = _norm(text)
-    t = _low(raw)
+    t = _fix_typos(_low(raw))
     if not t:
         env.confidence = 1.0
         env.evidence.append("empty")
@@ -408,6 +701,94 @@ def understand_turn(text: str, *, active: Any = None,
     image_ctx = bool(
         active is not None
         and getattr(active, "image_active", lambda **k: False)())
+
+    # --- Contextual markers — annotate the envelope without routing.
+    tm = _TEMPORAL_RE.search(t)
+    if tm:
+        env.temporal_context = tm.group(0)
+    om = _ORDINAL_RE.search(t)
+    if om:
+        if om.group(2):
+            env.ordinal_reference = int(om.group(2))
+        elif om.group(1):
+            env.ordinal_reference = _ORDINALS.get(om.group(1).lower(), 0)
+        else:
+            # "the other one" / "the same one" — contrastive reference.
+            env.ordinal_reference = -3 if "other" in om.group(0) else -4
+        env.references["ordinal_phrase"] = om.group(0)
+        env.ambiguity.append("ordinal/contrastive reference needs the "
+                             "recent candidate set")
+    if _COMPARISON_RE.search(t):
+        env.comparison = True
+        for opm in _COMPARISON_OPERAND_RE.finditer(t):
+            operand = opm.group(1).strip(" ,.?!")
+            if operand and operand not in env.comparison_targets:
+                env.comparison_targets.append(operand)
+
+    # --- Topic markers — flag the move, then classify the new subject.
+    rm = _TOPIC_RETURN_RE.match(t)
+    if rm:
+        env.topic_shift = True
+        env.topic_target = (rm.group(1) or "").strip(" ,.?!")
+        env.evidence.append("return-to-topic marker")
+        t2 = env.topic_target or t
+        if not t2:
+            env.primary_intent = CONVERSATION
+            env.confidence = 0.6
+            return env
+        t = _fix_typos(_low(t2))
+    else:
+        sm = _TOPIC_SHIFT_RE.match(t)
+        if sm:
+            env.topic_shift = True
+            env.evidence.append("topic-shift marker")
+            t2 = _TOPIC_SHIFT_RE.sub("", t, count=1).strip()
+            if not t2:
+                env.primary_intent = CONVERSATION
+                env.confidence = 0.6
+                return env
+            t = t2
+        else:
+            # "now check github" — weak pivot marker; strip and let the
+            # intent itself prove the domain move.
+            nm = re.match(r"^now[,.! ]+(\S.{2,})$", t)
+            if nm:
+                t = nm.group(1)
+                env.topic_shift = True
+                env.evidence.append("'now' pivot marker")
+            # "and GitHub?" / "what about the tests?" — fragment that
+            # carries its own topic.
+            fm = re.match(
+                r"^(?:and|what\s+about|how\s+about|but)\s+(\S.{2,80})\??$",
+                t)
+            if fm:
+                t = fm.group(1).rstrip("?")
+                env.evidence.append("fragment topic carrier")
+
+    # --- Conditional requests (§13) — the condition is preserved as
+    # first-class structure; routing still classifies the ACTION clause.
+    cm = _CONDITIONAL_RE.match(t)
+    if cm:
+        cond, act = cm.group(1).strip(" ,."), cm.group(2).strip(" ,.")
+        sub = understand_turn(act, active=active,
+                              has_attachments=has_attachments)
+        _inherit_markers(env, sub)
+        sub.conditionals.append({"condition": cond, "then": act})
+        sub.evidence.append("conditional request — action gated")
+        return sub
+    um = _UNLESS_RE.match(t)
+    if um:
+        prim = um.group(1).strip(" ,.")
+        unless_cond = um.group(2).strip(" ,.")
+        fallback = (um.group(3) or "").strip(" ,.")
+        sub = understand_turn(prim, active=active,
+                              has_attachments=has_attachments)
+        _inherit_markers(env, sub)
+        sub.conditionals.append({"unless": unless_cond, "primary": prim})
+        if fallback:
+            sub.alternatives.append(fallback)
+        sub.evidence.append("conditional request — fallback preserved")
+        return sub
 
     # --- 0. Routing-failure feedback — never treated as a new task.
     if _FEEDBACK_RE.search(t):
@@ -460,6 +841,52 @@ def understand_turn(text: str, *, active: Any = None,
         env.subject = getattr(active, "pending_subject", "") or ""
         return env
 
+    # --- 2.5 Compound multi-intent — BEFORE single-intent lanes so a
+    # clause sequence never collapses into its first action ("make the
+    # image, save it, and put it in the project folder" keeps all
+    # three). Each clause classifies against the same active context.
+    parts = _compound_parts(t)
+    if len(parts) > 1:
+        env.compound = True
+        subs = []
+        first_env: IntentEnvelope | None = None
+        for part in parts:
+            sub = _classify_turn(part, active=active,
+                                 has_attachments=has_attachments)
+            if first_env is None:
+                first_env = sub
+            subs.append({
+                "text": part,
+                "intent": sub.primary_intent,
+                "action": sub.requested_action,
+                "confidence": sub.confidence,
+            })
+        env.secondary_intents = subs
+        # The FIRST clause's intent drives the immediate route; the rest
+        # are retained for sequencing instead of silently dropped.
+        if subs and subs[0]["intent"] not in {CONVERSATION, QUESTION}:
+            env.primary_intent = subs[0]["intent"]
+            env.confidence = subs[0]["confidence"]
+            env.evidence.append("compound request — clauses retained")
+            env.requested_action = subs[0]["action"]
+            if first_env is not None:
+                # The leading clause carries its extracted payload —
+                # subject, prompt, references and constraints all flow
+                # to routing even though the turn is compound.
+                env.subject = first_env.subject
+                env.followup_prompt = first_env.followup_prompt
+                env.followup_of = first_env.followup_of
+                env.output_type = first_env.output_type
+                env.attributes = list(first_env.attributes)
+                env.negative_constraints = list(
+                    first_env.negative_constraints)
+                env.preserve_constraints = list(
+                    first_env.preserve_constraints)
+                env.source_images = list(first_env.source_images)
+                for k, v in first_env.references.items():
+                    env.references.setdefault(k, v)
+            return env
+
     # --- 3. Explicit image intent — authoritative when high-confidence.
     matched, conf, evidence = detect_image_intent(t)
     if matched:
@@ -503,29 +930,90 @@ def understand_turn(text: str, *, active: Any = None,
         env.followup_prompt = t
         return env
 
-    # --- 5. Compound multi-intent — each clause keeps its own intent.
-    parts = _compound_parts(t)
-    if len(parts) > 1:
-        env.compound = True
-        subs = []
-        for part in parts:
-            sub = understand_turn(part, active=None,
-                                  has_attachments=has_attachments)
-            subs.append({
-                "text": part,
-                "intent": sub.primary_intent,
-                "action": sub.requested_action,
-                "confidence": sub.confidence,
-            })
-        env.secondary_intents = subs
-        # The FIRST clause's intent drives the immediate route; the rest
-        # are retained for sequencing instead of silently dropped.
-        if subs and subs[0]["intent"] not in {CONVERSATION, QUESTION}:
-            env.primary_intent = subs[0]["intent"]
-            env.confidence = subs[0]["confidence"]
-            env.evidence.append("compound request — clauses retained")
-            env.requested_action = subs[0]["action"]
-            return env
+    # --- 4.5 Return-to-topic restore — "back to that angel image"
+    # re-activates a parked entity whose label shares words with the
+    # target. No matching entity → stay conversation; never invent one.
+    if env.topic_target and active is not None:
+        stop = {"that", "the", "this", "one", "image", "picture",
+                "photo", "back", "thing", "stuff", "work"}
+        target_words = {w for w in re.findall(
+            r"[a-z]{3,}", env.topic_target.lower()) if w not in stop}
+        if target_words:
+            # Live image subject still active — "back to" is redundant
+            # but still routes there.
+            live_subject = getattr(active, "active_image_subject", "")
+            live_words = set(re.findall(
+                r"[a-z]{3,}", str(live_subject).lower()))
+            if live_subject and (target_words & live_words):
+                env.primary_intent = IMAGE_FOLLOWUP
+                env.requested_action = "resume"
+                env.subject = live_subject
+                env.followup_of = "topic_return"
+                env.followup_prompt = env.topic_target
+                env.confidence = 0.8
+                env.evidence.append("returned topic = active image")
+                return env
+            for ent in getattr(active, "entities", lambda: [])():
+                label_words = set(re.findall(
+                    r"[a-z]{3,}", str(ent.get("label") or "").lower()))
+                if not (target_words & label_words):
+                    continue
+                env.followup_of = "topic_return"
+                env.confidence = 0.75
+                env.evidence.append(
+                    f"returned topic matched {ent.get('kind')} entity")
+                if ent.get("kind") == "image":
+                    env.primary_intent = IMAGE_FOLLOWUP
+                    env.requested_action = "resume"
+                    env.subject = str(ent.get("label") or "")
+                    # Restore the image task — follow-ups apply again.
+                    env.followup_prompt = env.topic_target
+                    if ent.get("job"):
+                        env.source_images.append(str(ent["job"]))
+                else:
+                    env.primary_intent = str(ent.get("kind") or CONVERSATION)
+                return env
+            env.ambiguity.append(
+                f"return target {env.topic_target!r} matched no "
+                "retained entity")
+
+    # --- 5.5 GitHub/repository inspection — natural language over the
+    # active repo ("check GitHub", "what did Devin push", "anything
+    # new land?"). Repo-word-free forms stay lower-confidence.
+    if _GITHUB_RE.search(t):
+        env.primary_intent = GITHUB_STATUS
+        env.requested_action = "inspect_github"
+        has_repo_word = bool(re.search(
+            r"\b(?:github|repo(?:sitory)?|remote|origin|upstream|"
+            r"branch|commit|ci|workflow|actions|push|merge|land)\b",
+            t))
+        env.confidence = 0.85 if has_repo_word else 0.6
+        if not has_repo_word:
+            env.ambiguity.append(
+                "repository reference implied, not explicit")
+        env.evidence.append("repository/GitHub inspection language")
+        return env
+
+    # --- 5.6 Generic continuation — "do it", "try again", "keep going"
+    # against an active task. Without one, the words carry nothing.
+    if re.match(
+        r"^(?:do\s+(?:it|that)|go\s+ahead|try\s+again|retry|"
+        r"keep\s+going|continue|proceed|run\s+it|yes\s+do\s+it)\s*[.!]?$",
+            t) and active is not None:
+        prior = getattr(active, "last_intent", "") or CONVERSATION
+        env.primary_intent = prior if prior != CONVERSATION else CONVERSATION
+        env.continuation_of = prior
+        env.confidence = 0.75 if prior != CONVERSATION else 0.5
+        env.evidence.append("bare continuation phrase + active context")
+        if prior == CONVERSATION:
+            env.ambiguity.append("continuation phrase with no clear task")
+        if image_ctx:
+            env.primary_intent = IMAGE_FOLLOWUP
+            env.requested_action = "modify"
+            env.followup_of = "active_image"
+            env.followup_prompt = t
+            env.confidence = 0.85
+        return env
 
     # --- 6. Tool/git/file actions.
     if re.search(
@@ -539,11 +1027,22 @@ def understand_turn(text: str, *, active: Any = None,
         return env
     if re.search(
         r"^(?:run|open|delete|move|rename|execute|list|restart|stop|"
-        r"start|kill|install|update|deploy)\s+", t):
+        r"start|kill|install|update|deploy|save|copy|export|"
+        r"put|place|attach|insert|upload|download|schedule|post|"
+        r"share|store|verify|apply|clean|sync|publish|merge)\s+", t):
         env.primary_intent = TOOL_ACTION
         env.requested_action = t.split()[0]
         env.confidence = 0.8
         env.evidence.append("imperative tool verb")
+        return env
+    if re.match(
+        r"^(?:use|switch\s+to|try)\s+(invokeai|comfyui|"
+        r"[a-z][\w.\-]*)\b", t):
+        env.primary_intent = TOOL_ACTION
+        env.requested_action = "select_tool"
+        env.subject = t.split(None, 2)[-1] if len(t.split()) > 2 else ""
+        env.confidence = 0.7
+        env.evidence.append("tool/model selection verb")
         return env
     if re.search(r"\b(?:check|show|list|what'?s)\b.{0,40}"
                  r"\b(?:branch|build|ci|actions?|tests?|status|logs?|"
@@ -552,6 +1051,56 @@ def understand_turn(text: str, *, active: Any = None,
         env.requested_action = "inspect"
         env.confidence = 0.7
         env.evidence.append("project-state inspection request")
+        return env
+
+    # --- 6.5 Repair requests — "fix the error", "sort that out", "get
+    # that working". Resolve against the active error when one exists.
+    if _REPAIR_RE.search(t) and re.search(
+        r"\b(?:error|bug|issue|problem|fail(?:ing|ure)?|broken|crash|"
+        r"exception|traceback|warning|test|build|code|it|that|this|"
+        r"thing|the|broke|breaking|went\s+wrong)\b", t):
+        env.primary_intent = CODING
+        env.requested_action = "repair"
+        env.confidence = 0.78 if active is not None else 0.65
+        env.evidence.append("repair verb + failure reference")
+        if re.search(r"\b(?:it|that|this|the)\b", t):
+            env.references["repair_target"] = (
+                getattr(active, "active_error", "")
+                if active is not None else "")
+            if not env.references["repair_target"]:
+                env.ambiguity.append(
+                    "repair target is anaphoric — needs active error")
+        return env
+
+    # --- 6.6 Implicit trouble reports — statements implying a fix
+    # without an imperative ("it's busted", "still not working",
+    # "way too slow"). Confidence stays honest.
+    if _IMPLICIT_BROKEN_RE.search(t):
+        env.implicit = True
+        if image_ctx:
+            env.primary_intent = IMAGE_FOLLOWUP
+            env.requested_action = "modify"
+            env.subject = getattr(active, "active_image_subject", "")
+            env.followup_of = "active_image"
+            env.followup_prompt = t
+            env.confidence = 0.7
+            env.evidence.append(
+                "negative report against active image")
+            return env
+        if active is not None:
+            env.primary_intent = CODING
+            env.requested_action = "diagnose"
+            env.continuation_of = getattr(active, "last_intent", "") or ""
+            env.confidence = 0.6
+            env.evidence.append(
+                "implicit trouble report + active task")
+            env.ambiguity.append(
+                "implied request — inferred from negative report")
+            return env
+        env.primary_intent = FEEDBACK_SIGNAL
+        env.confidence = 0.55
+        env.evidence.append("negative report, no identifiable target")
+        env.ambiguity.append("target of complaint is unclear")
         return env
 
     # --- 7. Research / coding / writing (secondary-confidence lanes).
@@ -600,11 +1149,10 @@ def understand_turn(text: str, *, active: Any = None,
         env.evidence.append("interrogative form")
         return env
     if re.match(r"^(?:what|how|why|when|where|who|which|is|are|can|"
-                r"could|do|does|did|should|would)\b", t) and \
-            t.rstrip("!?.").endswith("?") or t.endswith("?"):
+                r"could|do|does|did|should|would|shall|will)\b", t):
         env.primary_intent = QUESTION
-        env.confidence = 0.55
-        env.evidence.append("question form")
+        env.confidence = 0.6 if t.endswith("?") else 0.5
+        env.evidence.append("interrogative open")
         return env
 
     # --- 9. Bare visual noun phrase as the whole turn.

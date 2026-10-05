@@ -2,6 +2,161 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-05 (late) — Integrated reliability closeout → 0.22.0
+
+**Cycle closed.** `milestone/integrated-reliability-closeout` absorbed
+`origin/main` (splash-tail handshake work preserved), finished the
+Persona Speech Genome, and landed to `main` via PR #3. `main` is again
+the single source of truth.
+
+- **Splash convergence**: main's sequence-complete handshake +
+  FINALIZING dwell + readiness convergence live on top of closeout's
+  video splash (single WebView2 surface, hidden-until-real,
+  `VerifyLoadableAsync` pre-flight, in-place error video on failure).
+- **Persona milestone finished**: `nonverbal_rate` gates
+  `VocalizationEngine` keep-probability (explicit 0.0 suppresses);
+  `pause_hint` inserts one bounded clause-boundary ellipsis into speech
+  text only; `seriousness`/`register` bound pitch/gain/pace;
+  `emphasis_spans` documented honestly as span-protection metadata.
+- **Soak**: 612 renders across 4 personas — 0 fact drift, 0 exact-span
+  corruption, 0 serious-context humor leaks; 120-turn multi-turn
+  session clean; 20× identity ask → 17 unique renders, canonical fact
+  intact throughout.
+- **Full suite**: 2103 tests, green (duckdb `data`-view fix landed; two
+  environment flakes — loopback socket abort, smoke-instance port
+  contention — confirmed transient on isolated rerun).
+- **Dogfood**: frozen backend rebuilt via PyInstaller + desktop
+  published + deployed to `D:\Nexus_Core`; real launch (video splash →
+  verify gate → main window), real TTS WAV (24 kHz stereo), Speech Lab
+  battery live, GitHub connected, graceful shutdown held for narration.
+- **Branches**: `fix/full-core-glow` SUPERSEDED (work byte-identical in
+  main); `voice-concept-isabella` SUPERSEDED_BY_PRODUCTION_VOICE_SYSTEM;
+  `feature/cinematic-core-unlock-splash` SUPERSEDED_BY_PRODUCTION_SPLASH
+  (27 MB prototype left on-branch by design; handoff doc lives in
+  `docs/SPLASH_ANIMATION_HANDOFF.md`).
+- Full matrix: `docs/ROADMAP_CLOSURE.md` → "Persona Speech Genome —
+  completion matrix".
+
+## 2026-10-05 — Persona Speech Genome (LANDED, milestone branch)
+
+Branch: `milestone/integrated-reliability-closeout`. Scope: personas
+stop being "one assistant wearing costumes" — each gets a structured,
+versioned speech identity that drives deterministic surface
+realization. Meaning stays upstream (IntentEnvelope / tools / facts);
+the genome only controls HOW it is said.
+
+### What landed
+
+- `localcodeagent/personality/genome.py` — `SPEECH_GENOME_VERSION`
+  schema: vocabulary/idiolect (per-family acknowledgement, success,
+  error, disagreement, transition, interjection, signature-word
+  pools), syntax shape (sentence length/variance, fragment + one-word
+  rates, dash usage, list preference, answer-first, technical density,
+  elaboration), cadence, opening/closing family weights, 12-category
+  humor genome, disagreement/storytelling/question/repair styles,
+  relationship + address POLICY (""/first/formal/literal-term —
+  preset `address` is a policy token, not a name), language
+  boundaries, vocal biases, micro-reaction pools + cooldowns,
+  per-confidence phrase stems, repetition controls.
+  `derive_genome()` layers neutral defaults → behavior-family genome →
+  trait-slider nudges → explicit `speech_genome` overrides (deep-merge).
+  `migrate_genome()` fills missing/corrupt fields, preserves unknown
+  keys, never destroys persona data on upgrade.
+- `localcodeagent/context/realize.py` — `SemanticResponse` extended
+  (speech_act, confidence, exact_spans, conclusions/uncertainty/
+  evidence, actions_failed, next_steps, register, semantic_id);
+  `RenderContext` (mood, seriousness 0-3, register, relationship,
+  social cue, sarcasm, user energy, address, creator);
+  `SpeechDeliveryPlan` + `RenderedReply`; `classify_speech_act()`
+  (intent + outcome + seriousness + social cue, canned lanes keep
+  their own act); `PhraseCooldowns`; `PersonaRenderer.render_semantic()`
+  — opening/closing families weighted per genome, confidence-stem
+  hedging ONLY for non-verified facts, micro-reactions + address terms
+  with per-category cooldowns, humor suppression in serious acts and
+  non-allowed registers, repeat evolution (idx≥2 reframes, ≥3
+  compresses to the load-bearing fact), `canonical=` lane for
+  pre-composed authoritative bodies (verbatim pass-through + honest
+  repeat acks).
+- Orchestrator: `builtin_semantic()` expresses every canned lane
+  (time/date/identity/greeting/capability/self-learning) as
+  SemanticResponse + canonical text; `_builtin_reply()` renders through
+  the active genome via `speech_context=` resolver. Canned replies are
+  no longer suppressed under an active persona when the genome renders
+  — deterministic in-character answers, no model call. Answer-Memory
+  hits render canonically with repeat evolution keyed on asked
+  text+answer. `AgentResult.delivery` carries the plan;
+  `voice.finish_task(delivery=)` applies `pace` to enqueued speech.
+- Store/API: `speech_genome` flows through `resolve_active`/`resolve`
+  (customs inherit base preset genome or carry their own);
+  `create_custom`/`patch_custom` accept genome overrides via
+  `migrate_genome`; `available()` exposes the derived genome +
+  `genome_summary`; `GET /api/profiles/<id>/personality/speech-preview`
+  renders an 8-act battery through any resolvable persona (the Preview
+  Lab backend). Fixed latent `_profile_get` query-arg bug that 500'd
+  `/personality/effective`.
+- `tests/test_speech_genome.py` — 34 tests: schema/migration,
+  all-preset derivation, family distinctiveness, act classification,
+  register+seriousness gating, address policies, uncertainty
+  calibration, verbatim fact/identifier/identity invariants, delivery
+  plans, cooldowns, repeat evolution, builtin+AM integration, and a
+  ~200-render repetition soak.
+
+### Pipeline
+
+```
+user meaning → IntentEnvelope/ActiveContext → SemanticResponse (WHAT)
+→ speech act → relationship + mood → speech genome
+→ variation/cooldowns → text realization → SpeechDeliveryPlan → voice
+```
+
+### Invariants (verified by tests)
+
+- Facts, tool results, identity facts, numbers, identifiers pass
+  through verbatim — persona colors the envelope only.
+- Verified content never gets a random hedge; uncertainty gets the
+  persona's own stem per level.
+- Serious acts/registers suppress humor, micro-reactions, playful
+  closings; address terms cool down instead of spamming.
+
+### Verified
+
+- `tests.test_speech_genome`: 34 pass. Persona suites: 184 pass.
+- Full suite: 2091 tests — failures were all pre-existing or
+  environmental (splash tests fail identically at e7d228fc — the
+  splash sync work lives on main; two DuckDB data-tool tests fail at
+  baseline; isolated-second-instance selftest is load-flaky, passes
+  standalone). The queue-attribution tests broke on the context WIP's
+  thread-local `lane_mission_id` move — updated to the new mechanism
+  in 432c62ac.
+- Live AppState dogfood: `_speech_context` resolves sassy genome
+  (sarcasm/wit/teasing/deadpan categories), builtin lanes render
+  in-character with per-persona pace, repeat asks get honest framing,
+  persona switch changes surface, speech-preview battery returns
+  8 acts × renders + plans, `finish_task` applies delivery pace.
+- Live HTTP dogfood (real `python -m localcodeagent` server):
+  `POST /api/profiles` → `set_active preset:nerdy` →
+  `GET .../speech-preview?register=coding` returns the nerdy genome
+  summary + per-act renders with delivery plans;
+  `POST /api/chat "what time is it"` → "Acknowledged. The current
+  local time is …" (nerdy ack pool + verbatim fact, model skipped);
+  the same question again → "Still the case — …" honest repeat
+  framing. `POST /api/chat` returns `builtin-local` model attribution.
+
+### Still open
+
+- Web UI landed: Personality Studio **Speech Lab** panel — persona/
+  register/seriousness/turns selectors render the 8-act battery via
+  `/personality/speech-preview` with per-line delivery plan details,
+  plus a genome-summary chip row. `create_custom`/`patch_custom` POST
+  actions accept `speech_genome` overrides.
+- Voice: `pace` → job speed; `energy`/`warmth`/`emphasis_level` map to
+  bounded per-utterance pitch/gain deltas (±1 st / ±3 dB via
+  `VoiceManager._delivery_preset`). emphasis_spans/pause_hint/
+  nonverbal_rate/register remain documented hints until the TTS
+  engine exposes controls.
+- Long-session UI soak + real-voice dogfood on the installed app.
+
+
 ## Canonical product/UI identity
 
 - Product name: **Nexus Core**.
@@ -10,6 +165,147 @@
 - Canonical primary UI: chat-first center pane, slim left navigation, and right **Code Diff / Tasks / Terminal** utility rail.
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
+
+## 2026-10-05 — Universal context intelligence + non-repetitive persona (IN PROGRESS)
+
+Scope: the intent/context overhaul — Nexus understands language by
+meaning across images, GitHub, coding, repair, tools, and multi-turn
+follow-ups, and stops replaying identical canned prose.
+
+### Architecture
+
+- `localcodeagent/context/intent.py` — `IntentEnvelope`, the structured
+  per-turn understanding object (intent, action, subject, constraints,
+  references, corrections, conditionals, alternatives, ordinals,
+  comparisons, temporal markers, topic shifts, ambiguity, confidence).
+  `understand_turn()` = classification + post-pass reference resolution.
+  Deterministic fast paths; confidence drives routing, no model call on
+  the fast lane. `to_trace()` emits developer-visible routing evidence
+  (intent/confidence/references/route) — never chain-of-thought.
+- `localcodeagent/context/active_context.py` — `ActiveContext` persisted
+  on the conversation row (restart survival for free). Active vs
+  retired entities, pending clarifications, `active_error` bound from
+  the task ledger, TTL decay (active 6h / entities 72h), bounded
+  recent-entity list.
+- `localcodeagent/context/references.py` — typed-term + bare-pronoun
+  resolution. Pronouns bind by ACTIVE DOMAIN with verb hints; two live
+  antecedents → ambiguous (ask, never guess).
+- `localcodeagent/context/realize.py` — `PersonaRenderer`,
+  `SemanticResponse`, `ResponseLedger` (rolling fingerprints, opening/
+  closing cooldowns, lexical-similarity near-duplicate guard),
+  `repetition_score` metric. Variant banks for greetings, capabilities,
+  self-learning, identity — facts stable, wording rotates.
+- Routing precedence: newest explicit instruction → corrections →
+  pending clarification → compound/conditional → explicit actions
+  (image/github/tool) → contextual follow-ups → identity/utility →
+  conversation. `env.suppresses_canned()` blocks builtin replies from
+  hijacking action intents; `env.direct_image()` makes image intent
+  authoritative.
+- `identity.response_for` gained an action-request guard ("draw me a
+  picture of your creator" is a task, not an identity question) plus
+  fact-stable phrasing variants.
+- `web/app.js` `builtinClientReply` gained an action/visual-request
+  early-return so client canned replies can't swallow task turns.
+- Answer-Memory replay: canonical answer passes through verbatim; when
+  the SAME asked question replays the same answer, an honest
+  repeat-acknowledgement wrapper varies (keyed on asked text + answer).
+
+### Language coverage (deterministic)
+
+- Image paraphrases: "generate an image of", "show me a picture of",
+  "let me see", "can I see", "give me", "I want to see what X would
+  look like", "visualize", "draw/paint/sketch", "generate an adult
+  woman in a red dress" (person-subject rule). Object semantics veto
+  ("show me the code/logs/diff", "create a website with a logo" → the
+  first-named artifact wins).
+- GitHub paraphrases: "check GitHub", "what did Devin just push",
+  "anything new land", "see what's happening with the repo".
+- Repair paraphrases bind `active_error` from the task ledger:
+  "fix it", "sort that out", "get that working again", "repair what
+  just broke", "it's still broken".
+- Follow-ups/corrections preserve subject + attributes: "make her
+  blonde", "full body", "no, red hair", "that ain't it", "the image is
+  too close".
+- Compound actions retain every clause ("check the repo, fix the
+  failing test, run everything, and push it" → 4 retained intents).
+  Conditionals preserved as structures ("if tests fail, fix them and
+  rerun"; "use InvokeAI unless it fails, then try ComfyUI").
+- Topic shifts ("now check github", "anyway…") + returns ("back to
+  that angel image") resolve against live and retired entities.
+- Whitelisted typo map (githib→github, pictue→picture, …) — arbitrary
+  text, tokens, paths, hashes never touched.
+- Ordinals ("the second one"), comparisons ("which model is faster"),
+  temporal markers ("earlier", "before the update") annotate the
+  envelope for downstream resolution.
+
+### Tests
+
+- `tests/test_context_intent.py` — 42 tests: paraphrase classes,
+  veto semantics, follow-ups, pronouns/ambiguity, compounds,
+  conditionals, topic moves, typos, implicit reports, restart
+  serialization round-trip, TTL decay, bounded growth, renderer
+  variation/fingerprints, identity fact stability, 300-turn
+  bounded-memory run.
+- Regression sweep: `test_answer_memory`, `test_identity`,
+  `test_image`, `test_conversation_policy`, `test_router`,
+  `test_regressions`, `test_fast_lane`, `test_workflow`,
+  `test_conversation_growth` — all green after fixes (see below).
+
+### Regressions found + fixed during integration
+
+- `attach` prepared after the envelope → moved attachment prep earlier.
+- "Which model generates images with?" misrouted to image →
+  interrogative-lead veto added.
+- "create a website with a logo" misrouted → first-named-artifact
+  precedence.
+- "edit image <path>" wrongly direct-routed → literal edit-image ops
+  stay tool-routed.
+- Answer-Memory repeat wrapper keyed on asked-text+answer so different
+  questions sharing an answer aren't marked "same answer as before".
+- Repetition ledger is shared across turns (intended); builtin variant
+  banks carry the required fact phrases so semantic slots never drift.
+- **Mission-lane pollution**: mission/self-repair subtask prompts flow
+  through `agent.run()` and were folding into the user's interactive
+  `ActiveContext` — a mid-dogfood "Work the scoped lane of this
+  mission" turn classified as coding and retired the live image
+  context. `update_active_context` now only folds `auto`/`ask`/`plan`
+  turns. Verified live: mission subtasks no longer disturb the image
+  subject.
+- Follow-up fragment merge on the direct path: "make her hair red"
+  originally queued the bare fragment. `_direct_image_result` now
+  merges the preserved `active_image_subject` — live job prompt:
+  `a photorealistic adult angel with black wings, hair red`.
+
+### Live dogfood evidence (real install, port 5199)
+
+- "draw a photorealistic adult angel with black wings" →
+  `direct_image_route`, job queued, no identity/canned hijack.
+- "make her hair red" → merged prompt above queued against the same
+  job lane; `active_context` on the conversation row shows
+  `active_intent=image_followup` + `active_image_subject` intact.
+- **Restart persistence**: backend hard-restarted; "now make her wings
+  white instead" resolved the persisted angel subject and queued
+  `a photorealistic adult angel with black wings, wings white instead`
+  — context survives restart on disk per spec.
+- An autonomous repair mission (`m-2ae60b5e9d60`, repairing the CI
+  splash-test failure) occupied the lane mid-dogfood — queued chat
+  drained correctly through the mission-subtask path; `_preempt_for_chat`
+  + bounded queue semantics intact.
+- Live image backends: ComfyUI jobs finish; InvokeAI had
+  output-tensor-directory failures (`…\outputs\tensors\tmp* does not
+  exist`) — environment/backend state, unrelated to this change set.
+
+### Known limitations / next
+
+- Compound secondary actions are retained as metadata; full multi-step
+  execution of trailing clauses is scheduler work, not yet wired.
+- Ambiguity surfacing is marked on the envelope; the UI does not yet
+  render a focused clarification prompt for ambiguous references.
+- `web/app.js` builtin replies gained a small variant bank
+  (`CLIENT_REPLY_VARIANTS` rotation); deeper JS-side sharing with the
+  Python `PersonaRenderer` is future work.
+- Frozen backend rebuilt post-change-set and deployed to the live
+  install below.
 
 ## 2026-10-05 — Integrated reliability closeout (branch `milestone/integrated-reliability-closeout`, IN PROGRESS)
 
@@ -1583,7 +1879,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1705 tests` passing (2 environment skips).
+Expected at this checkpoint: `2049 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

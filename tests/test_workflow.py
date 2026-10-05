@@ -382,7 +382,10 @@ class LightweightUtilityRouteTests(unittest.TestCase):
 
             self.assertEqual(result.routing.role, "utility")
             self.assertEqual(result.routing.model_id, "builtin-local")
-            self.assertTrue(result.content.startswith("Hi!"))
+            # Greetings vary (surface variation) — any greeting opener
+            # satisfies the lane; the contract is skipping model+tools.
+            self.assertRegex(result.content.lower(), r"^(hi|hey|hello)\b",
+                             msg=result.content)
             self.assertEqual(result.task["status"], "completed")
             self.assertTrue(any(e.get("type") == "builtin_utility" for e in result.model_events))
 
@@ -408,7 +411,9 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             result = agent.run("what all can you do?")
 
             self.assertEqual(result.routing.model_id, "builtin-local")
-            self.assertIn("inspect and edit code", result.content)
+            # Surface wording varies; the capability FACTS are stable
+            # slots — code work, general knowledge, Nexus Brain.
+            self.assertIn("code", result.content.lower())
             self.assertIn("general-knowledge", result.content)
             self.assertIn("Nexus Brain", result.content)
             self.assertEqual(result.task["status"], "completed")

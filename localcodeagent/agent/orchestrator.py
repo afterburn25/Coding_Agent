@@ -120,6 +120,9 @@ class AgentResult:
     research: dict[str, Any] = field(default_factory=dict)
     response_source: str = ""  # e.g. "answer_memory" when inference was skipped
     memory: dict[str, Any] = field(default_factory=dict)
+    # SpeechDeliveryPlan.as_dict() when the reply was realized through
+    # the persona speech genome — voice layer may consume pace/emphasis.
+    delivery: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -168,6 +171,13 @@ UNVERIFIED_CLAIMS_MARKER = "Unverified action claims"
 
 
 
+# Shared surface renderer for deterministic/builtin replies — the
+# repetition ledger spans turns and conversations so canned lines cool
+# down instead of replaying verbatim (context/realize.py).
+from ..context.realize import PersonaRenderer as _PersonaRenderer
+_BUILTIN_RENDERER = _PersonaRenderer()
+
+
 class AgentOrchestrator:
     def __init__(
         self,
@@ -194,6 +204,7 @@ class AgentOrchestrator:
         skills=None,
         health=None,
         profile_context=None,
+        speech_context=None,
         image_outputs=None,
         capability_registry=None,
     ) -> None:
@@ -227,6 +238,9 @@ class AgentOrchestrator:
         # Zero-arg resolver returning the active profile's personality +
         # personal-memory prompt block (presentation only).
         self.profile_context = profile_context
+        # One-arg resolver user_text -> (speech_genome, RenderContext)
+        # for the active persona; None/absent = no genome lane.
+        self._speech_resolver = speech_context
         # job_id -> output file paths — lets image follow-ups reuse the
         # last generated image as edit source without holding ImageManager.
         self._image_outputs = image_outputs
@@ -355,6 +369,39 @@ class AgentOrchestrator:
         no model is loaded or invoked."""
         answer_row = match.answer or {}
         answer_text = str(answer_row.get("answer_text") or "")
+        delivery_meta: dict = {}
+        # §37 — canonical content passes through untouched. With the
+        # speech genome wired, the reply realizes through it: persona
+        # wrapper + repeat evolution on the SAME ask (keyed on
+        # question+answer — a different question sharing an answer
+        # replays cleanly). Without a genome the legacy ledger wrap
+        # applies.
+        try:
+            from ..context.realize import SemanticResponse, fingerprint
+            pair = str(user_text or "") + "|" + answer_text
+            sp = self._speech(user_text)
+            if sp:
+                genome, ctx = sp
+                out = _BUILTIN_RENDERER.render_semantic(
+                    SemanticResponse(
+                        semantic_id="am:" + fingerprint(pair),
+                        speech_act="answer"),
+                    genome, ctx, intent="answer_memory",
+                    canonical=answer_text)
+                answer_text = out.text
+                delivery_meta = out.plan.as_dict()
+            else:
+                ledger = _BUILTIN_RENDERER.ledger
+                if ledger.repetition_score(
+                        pair, intent="answer_memory")["exact_duplicate"]:
+                    from ..context.realize import REPEAT_ACKS
+                    ack = _BUILTIN_RENDERER.render(
+                        "am_repeat", REPEAT_ACKS, intent="answer_memory")
+                    answer_text = f"{ack} {answer_text}"
+                ledger.record("answer_memory", pair)
+                ledger.record("answer_memory_text", answer_text)
+        except Exception:
+            pass
         memory_meta = {
             "response_source": "answer_memory",
             "memory_match_type": match.kind,
@@ -423,6 +470,7 @@ class AgentOrchestrator:
             task=completed_task.as_dict(),
             response_source="answer_memory",
             memory=memory_meta,
+            delivery=delivery_meta,
         )
 
     def _sync_nexus_brain(self) -> None:
@@ -622,9 +670,44 @@ class AgentOrchestrator:
         )
 
     @classmethod
-    def builtin_utility_response(cls, user_text: str) -> str | None:
+    def _builtin_render(cls, semantic_id: str, variants, *,
+                        intent: str = "") -> str:
+        """Render a canned fact via the shared PersonaRenderer and record
+        its fingerprint — repetition cooldowns span conversations, which
+        is exactly where canned phrasing used to repeat."""
+        text = _BUILTIN_RENDERER.render(semantic_id, variants,
+                                        intent=intent)
+        _BUILTIN_RENDERER.ledger.record(intent or semantic_id, text)
+        return text
+
+    def _speech(self, user_text: str):
+        """Resolve the active persona's (genome, RenderContext) via the
+        server-supplied resolver. None = no genome lane; failures are
+        presentation-only and degrade silently."""
+        try:
+            resolver = self._speech_resolver
+            if callable(resolver):
+                return resolver(user_text)
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def builtin_semantic(cls, user_text: str):
+        """Deterministic local lanes expressed as WHAT-to-say —
+        ``(SemanticResponse, canonical_text) | None``. The persona
+        genome layer renders the surface; callers without one use the
+        canonical text directly."""
+        from ..context.realize import SemanticResponse
         normalized = re.sub(r"\s+", " ", user_text.strip().lower()).strip("!?., ")
         clock = cls.current_time_snapshot()
+
+        def _sem(sid: str, act: str, text: str,
+                 *spans: str) -> tuple:
+            return (SemanticResponse(
+                facts=[text], semantic_id=sid, speech_act=act,
+                exact_spans=[s for s in spans if s]), text)
+
         time_queries = {
             "what time is it", "what is the time", "what's the time",
             "what's the current time", "what is the current time", "current time",
@@ -646,31 +729,42 @@ class AgentOrchestrator:
         if normalized in combined_queries:
             offset = clock["utc_offset"]
             utc = f"UTC{offset}" if offset else "local time"
-            return (
+            return _sem(
+                "datetime", "answer",
                 f"It is {clock['human_date']} at {clock['human_time']} "
-                f"{clock['timezone']} ({utc})."
-            )
+                f"{clock['timezone']} ({utc}).",
+                clock["human_time"], clock["human_date"])
         if normalized in time_queries:
             offset = clock["utc_offset"]
             utc = f"UTC{offset}" if offset else "local time"
-            return f"The current local time is {clock['human_time']} {clock['timezone']} ({utc})."
+            return _sem(
+                "time", "answer",
+                f"The current local time is {clock['human_time']} "
+                f"{clock['timezone']} ({utc}).",
+                clock["human_time"])
         if normalized in date_queries or normalized in day_queries:
-            return f"Today is {clock['human_date']}."
+            return _sem("date", "answer",
+                        f"Today is {clock['human_date']}.",
+                        clock["human_date"])
 
         # Creator-locked identity facts (birthday, age, creator) — answered
         # deterministically so no model output or stored memory can
-        # contradict them.
+        # contradict them. The genome may color the envelope; the fact
+        # text itself passes through verbatim.
         from .. import identity
         identity_answer = identity.response_for(normalized)
         if identity_answer is not None:
-            return identity_answer
+            return _sem(f"identity:{normalized[:40]}", "answer",
+                        identity_answer)
 
         greetings = {
             "hi", "hello", "hey", "hey there", "good morning",
             "good afternoon", "good evening",
         }
         if normalized in greetings:
-            return "Hi! Nexus Core is ready. What would you like to work on?"
+            from ..context import realize as _rz
+            return _sem("greeting", "greet", cls._builtin_render(
+                "greeting", _rz.GREETING_VARIANTS, intent="greeting"))
 
         capability_phrases = (
             "what can you do",
@@ -680,13 +774,10 @@ class AgentOrchestrator:
             "how can you help",
         )
         if any(phrase in normalized for phrase in capability_phrases):
-            return (
-                "I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, "
-                "research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local "
-                "models, use configured local image tools, and learn across conversations through Nexus Brain. That learning "
-                "can include verified general knowledge, facts/preferences you teach me, conversation style, corrections, "
-                "feedback, and approved training examples, depending on the creator-locked Brain subroutines."
-            )
+            from ..context import realize as _rz
+            return _sem("capability", "answer", cls._builtin_render(
+                "capability", _rz.CAPABILITY_VARIANTS,
+                intent="capability"))
 
         self_learning_phrases = (
             "can you be self learning", "can you be self-learning", "can you self learn",
@@ -694,22 +785,41 @@ class AgentOrchestrator:
             "are you self-learning", "can you learn general knowledge", "can you learn conversational skills",
         )
         if any(phrase in normalized for phrase in self_learning_phrases):
-            return (
-                "Yes. With Nexus Brain enabled, I can adapt beyond coding: I can bank verified general knowledge, remember "
-                "facts and preferences, learn conversational patterns from feedback and corrections, retain approved training "
-                "examples, and carry those learned behaviors across model replacements. The creator-locked Brain decides which "
-                "learning channels are enabled; model weights only change through the separate reviewed training pipeline."
-            )
+            from ..context import realize as _rz
+            return _sem("self_learning", "answer", cls._builtin_render(
+                "self_learning", _rz.SELF_LEARNING_VARIANTS,
+                intent="self_learning"))
 
         if normalized in {
             "who are you", "what are you", "what is your name", "what's your name", "are you human",
         }:
-            from .. import identity
-            return (
-                f"I am Nexus Core, a local-first AI coding workstation created by "
-                f"{identity.NEXUS_CREATOR}. I am software, not a person."
-            )
+            from ..context import realize as _rz
+            return _sem("identity", "answer", cls._builtin_render(
+                "identity", _rz.IDENTITY_VARIANTS, intent="identity"))
         return None
+
+    @classmethod
+    def builtin_utility_response(cls, user_text: str) -> str | None:
+        pair = cls.builtin_semantic(user_text)
+        return pair[1] if pair else None
+
+    def _builtin_reply(self, user_text: str):
+        """The instance-level persona path: SemanticResponse through the
+        active persona's speech genome when a resolver is wired; the
+        canonical text untouched otherwise. → RenderedReply | None."""
+        from ..context.realize import RenderedReply
+        pair = self.builtin_semantic(user_text)
+        if pair is None:
+            return None
+        sem, canonical = pair
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical,
+                                 speech_act=sem.speech_act or "answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent=sem.semantic_id or "answer",
+            canonical=canonical)
 
     @staticmethod
     def _norm_for_parrot(text: str) -> str:
@@ -795,7 +905,10 @@ class AgentOrchestrator:
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:
-        return ConversationManager.image_generation_intent(user_text)
+        from ..context.intent import understand_turn
+        env = understand_turn(user_text)
+        return env.primary_intent in {"image_generation", "image_edit"} and \
+            env.confidence >= 0.8
 
     # "do it now" / "that's not what I asked for" carry no image keywords —
     # they only read as image requests against the previous turn. These
@@ -1203,10 +1316,8 @@ class AgentOrchestrator:
     def can_run_without_coding_model(cls, user_text: str) -> bool:
         if cls.can_answer_locally(user_text):
             return True
-        return (
-            ConversationManager.classify_intent(user_text) == "image"
-            and cls.direct_image_generation_intent(user_text)
-        )
+        from ..context.intent import understand_turn
+        return understand_turn(user_text).direct_image()
 
     def has_memory_answer(self, user_text: str) -> bool:
         """A trusted Answer Memory hit or memory command needs no model.
@@ -2393,6 +2504,7 @@ class AgentOrchestrator:
             tls = self.tools.context.get("task_tls")
             if tls is not None:
                 tls.task_id = task_id
+                tls.mission_id = self._mission_by_task.get(task_id) or ""
             # A per-command cancel clicked before this call must not leak into
             # it — the flag targets the command that was running when clicked.
             flags = self.tools.context.get("command_cancel")
@@ -2405,6 +2517,7 @@ class AgentOrchestrator:
             finally:
                 if tls is not None:
                     tls.task_id = ""
+                    tls.mission_id = ""
 
         future = pool.submit(run)
         try:
@@ -3844,6 +3957,70 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else "conversation"
         )
+        attach = self._prepare_attachments(attachments)
+        # Image paths pasted into the message as text ("variation of this
+        # image: C:\...\foo.png") are attachments the user typed rather than
+        # clicked — resolve them to real files or the image lane queues a
+        # job with an empty source and ComfyUI LoadImage opens a directory.
+        for inline_path in self._extract_inline_image_paths(user_text):
+            if inline_path not in attach["image_paths"]:
+                attach["image_paths"].append(inline_path)
+                attach["meta"].append({
+                    "kind": "image",
+                    "name": Path(inline_path).name,
+                    "path": inline_path,
+                })
+        # Universal turn understanding — structured intent/context metadata
+        # resolved BEFORE routing. The newest user instruction is dominant;
+        # persona/memory may shape delivery, never the requested action.
+        from ..context.intent import understand_turn
+        from ..context.references import resolve_references
+        active_ctx = None
+        try:
+            if self.conversation_manager is not None:
+                active_ctx = self.conversation_manager.active_context(
+                    conversation_id)
+        except Exception:
+            active_ctx = None
+        # Bind the latest real failure to active context — "fix that
+        # error" resolves against the task ledger, not a guess.
+        if active_ctx is not None and not getattr(
+                active_ctx, "active_error", ""):
+            try:
+                for _t in self.tasks.recent(limit=5):
+                    if (str(_t.get("status")) == "failed"
+                            and _t.get("error")):
+                        active_ctx.note_error(str(_t["error"]))
+                        break
+            except Exception:
+                pass
+        env = understand_turn(
+            user_text,
+            active=active_ctx,
+            has_attachments=bool(attach["image_paths"]))
+        if env.primary_intent == "clarification_response" and \
+                env.followup_prompt:
+            # A parked clarification resolves into its original request —
+            # the user never repeats the instruction.
+            env.primary_intent = (
+                env.continuation_of or "image_generation")
+            env.subject = env.subject or env.followup_prompt
+            env.requested_action = "create"
+            env.confidence = 0.9
+        for term, resolved in resolve_references(user_text, active_ctx).items():
+            env.references.setdefault(term, resolved)
+        self._safe_emit(event_callback, {
+            "type": "context", "event": env.to_trace()})
+        try:
+            # Only INTERACTIVE turns fold into the user's working context —
+            # mission/self-repair subtask prompts share the agent lane (as
+            # mode="auto" runs carrying mission_id) and must never retire
+            # the user's live image task or rebind "it".
+            if (self.conversation_manager is not None and not mission_id):
+                self.conversation_manager.update_active_context(
+                    env, conversation_id)
+        except Exception:
+            pass
         # Cognitive routing: the Nexus Brain classifies the input, consults
         # memory, and may answer deterministically before any model loads.
         persona_voice = self._persona_active()
@@ -3918,19 +4095,6 @@ class AgentOrchestrator:
                     steps=0,
                     task=completed.as_dict() if completed else {},
                     response_source="brain_fast_path")
-        attach = self._prepare_attachments(attachments)
-        # Image paths pasted into the message as text ("variation of this
-        # image: C:\...\foo.png") are attachments the user typed rather than
-        # clicked — resolve them to real files or the image lane queues a
-        # job with an empty source and ComfyUI LoadImage opens a directory.
-        for inline_path in self._extract_inline_image_paths(user_text):
-            if inline_path not in attach["image_paths"]:
-                attach["image_paths"].append(inline_path)
-                attach["meta"].append({
-                    "kind": "image",
-                    "name": Path(inline_path).name,
-                    "path": inline_path,
-                })
         learned: dict[str, list[Any]] = {"facts": [], "behavior_rules": [], "training_examples": [], "forgotten": []}
         if (
             self.conversation_memory is not None
@@ -3966,10 +4130,14 @@ class AgentOrchestrator:
             except Exception:
                 pass
 
+        # The envelope's HIGH-confidence image intent is authoritative —
+        # it may not be second-guessed by the legacy double-gate
+        # (conversation_intent AND direct_image_generation_intent), which
+        # is how "show me a picture of…" used to fall through to a model
+        # that answered with an identity introduction.
         if (
             mode == "auto"
-            and conversation_intent == "image"
-            and self.direct_image_generation_intent(user_text)
+            and env.direct_image()
             and self._brain_subroutine_enabled("image_generation", True)
         ):
             return self._direct_image_result(
@@ -3985,30 +4153,69 @@ class AgentOrchestrator:
         # would land on a tool-less lane and produce a narrated fake job.
         if (
             mode == "auto"
-            and conversation_intent == "conversation"
+            and env.primary_intent in {"conversation", "image_followup",
+                                       "correction"}
             and self._brain_subroutine_enabled("image_generation", True)
         ):
+            # Envelope follow-up ("make her blonde" against the active
+            # image task) merges the preserved subject with the fragment;
+            # the legacy resolver still supplies source images/job ids.
+            followup_text = (
+                env.followup_prompt or user_text
+                if env.primary_intent == "image_followup" else user_text)
             followup = self._resolve_image_followup(
-                user_text, attach)
+                followup_text, attach)
+            if followup is None and env.primary_intent == "image_followup":
+                followup = {"prompt": env.followup_prompt or user_text,
+                            "source_images": [], "meta": []}
             if followup is not None:
+                effective = followup["prompt"]
+                # Preservation: the fragment modifies the LIVE subject —
+                # "make her hair red" against the angel job queues
+                # "…angel with black wings, hair red", not the bare
+                # fragment. Corrections append the corrected value.
+                frag = re.sub(
+                    r"^(?:please\s+)?(?:make|give|put)\s+"
+                    r"(?:her|him|them|it|the|his|their|its)\s+",
+                    "", str(env.followup_prompt or effective),
+                    flags=re.IGNORECASE).strip(" ,.;")
+                frag = re.sub(r"^(?:add|remove)\s+", "", frag,
+                              flags=re.IGNORECASE).strip(" ,.;")
+                if (env.primary_intent == "image_followup"
+                        and env.subject and frag):
+                    if env.subject.lower() not in frag.lower():
+                        effective = f"{env.subject}, {frag}"
+                    else:
+                        effective = frag
                 return self._direct_image_result(
                     task_id=task.id,
-                    user_text=followup["prompt"],
+                    user_text=effective,
                     event_callback=event_callback,
                     source_images=followup["source_images"],
                     attachments_meta=followup["meta"],
                 )
 
         # Tier 0: deterministic/local handlers — before any hardware probe or
-        # model routing so cheap answers stay cheap.
-        builtin_response = self.builtin_utility_response(user_text) if mode == "auto" else None
-        if builtin_response is not None and self._persona_active():
-            # A named persona is in play — canned small talk ("what can you
-            # do", "hi") would reply flat and break character. Let the model
-            # lane answer; the utility prompt already lists real capabilities.
-            # EXCEPTION: creator-locked identity answers (age/birthday/creator)
-            # are facts, not style — they stay deterministic under a persona
-            # so no model output can contradict them.
+        # model routing so cheap answers stay cheap. When the persona
+        # speech genome is wired the canned lanes render through it — a
+        # deterministic reply can stay in character without a model call.
+        builtin_reply = (
+            self._builtin_reply(user_text)
+            if mode == "auto" and not env.suppresses_canned() else None)
+        builtin_response = (
+            builtin_reply.text if builtin_reply is not None else None)
+        if (
+            builtin_response is not None
+            and self._persona_active()
+            and not builtin_reply.genome_rendered
+        ):
+            # A named persona is in play and no genome lane rendered —
+            # canned small talk ("what can you do", "hi") would reply
+            # flat and break character. Let the model lane answer; the
+            # utility prompt already lists real capabilities.
+            # EXCEPTION: creator-locked identity answers (age/birthday/
+            # creator) are facts, not style — they stay deterministic
+            # under a persona so no model output can contradict them.
             from .. import identity
             if identity.response_for(user_text) is None:
                 builtin_response = None
@@ -4016,8 +4223,7 @@ class AgentOrchestrator:
             "Image generation is disabled by the creator-locked Nexus Brain."
             if (
                 mode == "auto"
-                and conversation_intent == "image"
-                and self.direct_image_generation_intent(user_text)
+                and env.direct_image()
                 and not self._brain_subroutine_enabled("image_generation", True)
             )
             else None
@@ -4081,6 +4287,9 @@ class AgentOrchestrator:
                 model_events=[builtin_event],
                 steps=0,
                 task=completed_task.as_dict(),
+                delivery=(builtin_reply.plan.as_dict()
+                          if builtin_reply is not None
+                          and builtin_reply.genome_rendered else {}),
             )
 
         # Tier 1/2: Nexus Answer Memory. A trusted learned answer bypasses

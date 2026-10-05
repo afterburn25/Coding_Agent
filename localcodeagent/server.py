@@ -887,6 +887,7 @@ class AppState:
             skills=lambda: self.skills,
             health=lambda: self.health,
             profile_context=self._profile_prompt_context,
+            speech_context=self._speech_context,
             image_outputs=self._image_job_outputs,
             capability_registry=self.capability_registry,
         )
@@ -1170,6 +1171,63 @@ class AppState:
             return (text + "\n\n" + overlay).strip() if overlay else text
         except Exception:
             return ""
+
+    # Seriousness labels → RenderContext levels.
+    _SEVERITY = {"casual": 0, "neutral": 0, "focused": 1,
+                 "serious": 2, "critical": 3}
+
+    def _speech_context(self, user_text: str = ""):
+        """(speech_genome, RenderContext) for the active persona —
+        the genome pipeline's situation state. Presentation-only;
+        any failure degrades to None (the caller falls back to the
+        canonical text path)."""
+        try:
+            prof = self.profiles.active()
+            if not prof:
+                return None
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            active = PersonalityStore(pdir).resolve_active(
+                is_adult=bool(prof.get("is_adult")))
+            dyn = PersonaDynamics(pdir)
+            from .personality.genome import derive_genome
+            from .personality.seriousness import (
+                classify_seriousness, classify_topic)
+            from .personality import social as _soc
+            from .personality import continuity as _cont
+            from .context.realize import RenderContext
+            soc_prev = dyn.social()
+            soc_now = _soc.classify_social(
+                user_text,
+                context_failed=(soc_prev.get("last_outcome")
+                                == "failed"))
+            rel = dyn.relationship()
+            st = dyn.state()
+            topic = classify_topic(user_text)
+            ctx = RenderContext(
+                mood=str(dyn.effective_mood(
+                    manual_mood=str(active.get("mood") or ""))
+                    or "relaxed"),
+                mood_intensity=float(
+                    (st.get("mood") or {}).get("intensity") or 0.0),
+                seriousness=self._SEVERITY.get(
+                    classify_seriousness(user_text), 0),
+                register=topic if topic else "casual",
+                relationship_stage=str(rel.get("stage") or "new"),
+                familiarity=float(rel.get("familiarity") or 0.0),
+                social_cue=str(soc_now.get("cue") or ""),
+                sarcasm=bool(soc_now.get("sarcasm")),
+                user_energy=str(_soc.user_energy(
+                    user_text, str(soc_now.get("cue") or ""))
+                    or "neutral"),
+                address=str(st.get("address") or ""),
+                creator=bool(prof.get("is_creator")),
+                saturation=max(_cont.saturation_level(st).get(
+                    "humor", 0.0), _cont.saturation_level(st).get(
+                    "intensity", 0.0)),
+                humor_feedback=dict(st.get("humor_feedback") or {}))
+            return (derive_genome(active), ctx)
+        except Exception:
+            return None
 
     def _persona_notice(self, kind: str, fact_text: str,
                         seq: int | None = None) -> str:
@@ -1479,6 +1537,16 @@ class AppState:
         except Exception:
             return {}
 
+    @staticmethod
+    def _nv_rate(act: dict) -> float:
+        """Genome vocal.nonverbal_rate — explicit 0.0 stays 0.0."""
+        try:
+            v = ((act.get("speech_genome") or {}).get("vocal") or {}) \
+                .get("nonverbal_rate")
+            return 0.3 if v is None else max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.3
+
     def _vocalization_context(self) -> dict:
         """Persona context for the VocalizationEngine: profile id, persona
         family, strength, mood, adult gate and the profile's vocalization
@@ -1503,6 +1571,10 @@ class AppState:
                     and not act.get("adult_gated"),
                     "level": str(act.get("vocalizations") or "natural"),
                     "traits": act.get("traits") or {},
+                    # Speech genome vocal.nonverbal_rate scales the
+                    # keep-probability of detected non-verbals — a real
+                    # gate, not a hint (0 = silent, ~0.3 baseline).
+                    "nonverbal_rate": self._nv_rate(act),
                 })
                 try:
                     from .personality.behavior import (
@@ -2627,7 +2699,7 @@ class AppState:
     def _queue_enrich_mission(self, item: dict) -> dict:
         """Attribute a queue_task call made inside a mission agent run back
         to its owning mission (single agent lane ⇒ one owner at a time)."""
-        mid = getattr(self.autonomy, "_lane_mission", None)
+        mid = getattr(self.autonomy, "lane_mission_id", None)
         if not mid:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}
@@ -4691,12 +4763,14 @@ class AppState:
 
         return tee
 
-    def _voice_finish(self, rid: str, final_text: str = "") -> None:
-        """Flush the streamer tail; speak final_text if nothing streamed."""
+    def _voice_finish(self, rid: str, final_text: str = "",
+                      delivery: dict | None = None) -> None:
+        """Flush the streamer tail; speak final_text if nothing streamed.
+        ``delivery`` carries the speech genome's plan for this reply."""
         voice = self.voice
         if voice is not None:
             try:
-                voice.finish_task(rid, final_text)
+                voice.finish_task(rid, final_text, delivery=delivery)
             except Exception:
                 pass
 
@@ -4761,7 +4835,8 @@ class AppState:
                         mode=str(entry.get("mode") or "auto"),
                         event_callback=self._voice_tee(voice_rid, self._bus_emit),
                     )
-                    self._voice_finish(voice_rid, result.content)
+                    self._voice_finish(voice_rid, result.content,
+                        delivery=getattr(result, "delivery", None))
                     self.history = self.conversation_manager.history(limit=32)
                     task = result.task or {}
                     # Tokens/results stay off the bus by policy — publish an
@@ -6925,7 +7000,8 @@ class Handler(BaseHTTPRequestHandler):
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                        apply_personality=False)
+                        apply_personality=False,
+                        delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",
@@ -6965,7 +7041,8 @@ class Handler(BaseHTTPRequestHandler):
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                        apply_personality=False)
+                        apply_personality=False,
+                        delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
                     self._json({"ok": True, "segment_id": seg_id,
                                 "url": f"/api/voice/audio/{seg_id}",
@@ -6973,7 +7050,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 out = voice.speak_text(
                     text, preset_id=body.get("preset_id") or None,
-                    auto_filter=True)
+                    auto_filter=True, delivery=body.get("delivery"))
                 self._json(out)
                 return
             if path == "/api/voice/config":
@@ -9474,7 +9551,8 @@ class Handler(BaseHTTPRequestHandler):
                             event_callback=self.state._voice_tee(voice_rid, emit),
                             attachments=chat_attachments,
                         )
-                        self.state._voice_finish(voice_rid, result.content)
+                        self.state._voice_finish(voice_rid, result.content,
+                            delivery=getattr(result, "delivery", None))
                         self.state._persona_note_turn(message, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
                         payload = self._agent_payload(result)
@@ -9652,7 +9730,8 @@ class Handler(BaseHTTPRequestHandler):
                     result = self.state.agent.run(message, history=self.state.history, mode=mode,
                                                   event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit),
                                                   attachments=chat_attachments)
-                    self.state._voice_finish(voice_rid, result.content)
+                    self.state._voice_finish(voice_rid, result.content,
+                        delivery=getattr(result, "delivery", None))
                     self.state._persona_note_turn(message, result.content)
                 except Exception:
                     self.state._voice_finish(voice_rid)
@@ -10109,7 +10188,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     result = self.state.agent.resume(task_id, approved=approved,
                                                      event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
-                    self.state._voice_finish(voice_rid, result.content)
+                    self.state._voice_finish(voice_rid, result.content,
+                        delivery=getattr(result, "delivery", None))
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise
@@ -10132,7 +10212,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     result = self.state.agent.recover(task_id,
                                                       event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
-                    self.state._voice_finish(voice_rid, result.content)
+                    self.state._voice_finish(voice_rid, result.content,
+                        delivery=getattr(result, "delivery", None))
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise

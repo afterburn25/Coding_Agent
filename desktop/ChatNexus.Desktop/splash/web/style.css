@@ -10,6 +10,11 @@
 #status.online{color:#59ffa0;animation:nexus-online-pulse 1.4s ease-in-out infinite}
 #detail.online{color:#3dd77f;animation:nexus-online-pulse-dim 1.4s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){#status.online{animation:none}}
+.boot-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;opacity:0;transition:opacity .35s ease}
+.boot-media.live{opacity:1}
+/* The rendered clip carries its own baked readout — once it is the live
+   surface the DOM stand-ins step aside (kept painted for fallback). */
+.video-mode #chamber,.video-mode #scene,.video-mode #shade,.video-mode #readout{visibility:hidden}
 #missing-art{position:absolute;top:64%;width:100%;text-align:center;font-size:32px;letter-spacing:.28em;color:#afdcff}#missing-art span{display:block;font-size:10px;margin-top:8px}
 .no-script{position:absolute;bottom:0;z-index:5;background:#081422;width:100%;text-align:center}
 #recovery{position:absolute;z-index:4;right:2%;top:7%;width:27%;max-height:78%;overflow:auto;padding:20px;background:linear-gradient(140deg,#101e2df5,#070e19f5);border:1px solid #8c714454;border-top:2px solid #bc9657;box-shadow:0 12px 32px #0009;border-radius:3px}

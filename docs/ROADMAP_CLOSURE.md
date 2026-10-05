@@ -17,8 +17,47 @@
 | Branch | Verdict |
 |---|---|
 | `feature/cinematic-core-unlock-splash` (f344901b) | **SUPERSEDED** — standalone `prototypes/core_unlock_splash/` WinForms prototype. Fully ported into production by `ebc816db` as a WebView2 layer: all 23 audio stems carried over byte-identical (prototype `mix_report.json`/`preview.wav` dev artifacts intentionally not shipped), `animation_manifest.json` identical, `docs/SPLASH_ANIMATION_HANDOFF.md` is the prototype's own handoff. Nothing left to port. |
-| `voice-concept-isabella` (f4a457fa) | **SUPERSEDED** — one CI workflow generating ffmpeg-treated audition MP3s from the public Kokoro `bf_isabella` sample. No production code. The production voice is `nexus-synthetic-isabella` (default preset, DSP layers, Voice Studio UI) — landed earlier on main. |
+| `voice-concept-isabella` (f4a457fa) | **SUPERSEDED_BY_PRODUCTION_VOICE_SYSTEM** — one CI workflow generating ffmpeg-treated audition MP3s from the public Kokoro `bf_isabella` sample. No production code. The production voice system (Isabella preset, delivery plans, Speech Genome voice behavior) landed earlier. |
+| `fix/full-core-glow` (147da018) | **SUPERSEDED** — glow renderer work is byte-identical in main (squashed via `e245aa53`); its test fix (`desktop_method_body` helper) is also already in main. Nothing unique remains. |
+| `feature/cinematic-core-unlock-splash` (1374ebc9) | **SUPERSEDED_BY_PRODUCTION_SPLASH** — the 27 MB `prototypes/core_unlock_splash/` WinForms prototype exists only on that branch; curated handoff doc + manifest already live in production. Prototype binaries intentionally not carried into main. |
 | local `feature/production-cinematic-splash-recovery` | Fully contained in this branch (its 3 commits = avatar + InvokeAI fix + handoff). Delete locally after landing. |
+
+## Persona Speech Genome — completion matrix (v0.22.0 closeout)
+
+All rows audited against real code + the soak harness
+(`tests/soak_persona.py`) and the live install dogfood, not commit
+messages.
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Context envelope / ActiveContext / reference resolution / follow-up merge | LANDED_VERIFIED | `context/` package; TEST; orchestrator consumes envelope before lanes |
+| SemanticResponse → PersonaRenderer → RenderedReply pipeline | LANDED_VERIFIED | `context/realize.py`; `_BUILTIN_RENDERER` wired in orchestrator; LIVE dogfood (3× "Who created you?" → 3 distinct in-character renders) |
+| SpeechDeliveryPlan → real TTS | LANDED_VERIFIED | `voice/manager.py`: pace→speed, energy/warmth→bounded pitch/gain, seriousness calms delivery, technical/formal register dampens pace, pause_hint→bounded clause-boundary ellipsis in speech text only; `voice/vocalizations.py`: `nonverbal_rate` scales keep-probability (0 = silent); TEST ×5 |
+| emphasis_spans | PARTIAL (intentional) | Carried as span-protection metadata; Kokoro path has no per-word emphasis — documented honestly, not faked |
+| Answer Memory persona rendering | LANDED_VERIFIED | `render_semantic` + `wrap()` on canonical text; plan carried on `AgentResult.delivery`; TEST |
+| Built-in response variation | LANDED_VERIFIED | ledger fingerprint + cursor rotation + repeat-ack pool (10); LIVE: repeat asks render differently |
+| Identity fact immutability | LANDED_VERIFIED | `identity.py` canonical facts stay deterministic under persona; 20× ask soak → 0 drift, 17 unique surfaces |
+| Repeat evolution | LANDED_VERIFIED | repeat index per semantic_id: rep≥1 adds honest ack, rep≥3 compresses to load-bearing fact; soak output verified |
+| Opening/closing repetition control | LANDED_VERIFIED | `PhraseCooldowns` per-category pools; openings/closings banned-recent selection; soak top-opening share ~7% |
+| Forms of address policy | LANDED_VERIFIED | policy none/formal/first/literal + frequency + act weights + creator boost + 4-turn cooldown; literal persona → 23% use with term rotation; plain personas → 0% |
+| Humor categories affect surface | LANDED_VERIFIED | 12 `_HUMOR_QUIPS` pools; `_humor_bias` feedback multipliers; register + seriousness gates; saturation damp |
+| Emotional continuity | LANDED_VERIFIED | `personality/dynamics.py` mood engine: event→mood transitions, 0.72 decay, intensity floor, persisted `persona_state.json` |
+| Correction / repair style | LANDED_VERIFIED | `correct`/`acknowledge` speech acts + social-cue detection + persona-keyed repair phrasing (`calm`/`sassy`/`rude` families) |
+| Confidence language by evidence | LANDED_VERIFIED | confidence stems emitted ONLY for non-verified; verified facts never hedge |
+| Storytelling/explanation style | LANDED_VERIFIED | `storytell`/`teach`/`explain`/`summarize` acts; result-first vs scene-setting opening families weighted per genome |
+| Question behavior | LANDED_VERIFIED | `question` closing fires only when genome `questions.frequency` > 0.4 and real next_options exist — never fabricated |
+| Relationship speech | LANDED_VERIFIED | stages new/familiar/trusted/long_term + familiarity drive context; creator boost; LIVE Speech Lab showed `long_term` at 82 turns |
+| Relevant memory callbacks | PARTIAL | `context_callback` opening family fires on topic return; irrelevant callbacks structurally impossible (no random-history injection); depth limited to opening phrase |
+| Micro-reactions | LANDED_VERIFIED | act→category map, persona pools, cooldown 6 turns, serious ×0.25, saturation damp; soak: 16.5% rate, 0 serious leaks |
+| Natural-language persona tuning | LANDED_VERIFIED | `personality/commands.py`: overlays ±20, modifiers w/ TTL+scope, modes, address set/stop, voice rate/gain/mute, reset paths — bounded, confirmed in-chat |
+| Speech Lab | LANDED_VERIFIED | persona/register/situation/renders selectors + delivery-plan display + voice preview + genome summary; LIVE battery verified on install |
+| Speech Lab simple/advanced split | INTENTIONALLY_DEFERRED | sliders already sectioned (Social/Humor/Intelligence/Energy/Response/Voice/Vocal); explicit simple-mode toggle is cosmetic |
+| Import/export/migration | LANDED_VERIFIED | `customize.py` export/import packages + provenance; `migrate_genome` fills missing, preserves unknown keys |
+| Frontend canned replies vs backend | PARTIAL | `web/app.js builtinClientReply` keeps a small local pool for the no-persona fast path only (`!personaActive`); backend semantic+renderer is canonical when a persona is on |
+| 500+ render soak | LANDED_VERIFIED | 612 renders / 4 personas / 9 lanes: 0 fact drift, 0 exact-span corruption, 0 serious humor leaks, 0.3% near-dup pairs |
+| 100+ turn multi-turn soak | LANDED_VERIFIED | 120-turn scripted session (chat/debug/success/failure/correction/uncertain/alert): 29 repeats across reused micro-pools, all canned-lane convergent |
+| Real TTS dogfood | LANDED_VERIFIED | `/api/voice/preview` → real 24 kHz stereo WAV (3.61 s) on live install; delivery overlay applied |
+| Windows app dogfood | LANDED_VERIFIED | Frozen backend + desktop host deployed to `D:\Nexus_Core`; launch → video splash → verify gate → "Nexus Core" main window; chat, persona, Speech Lab, GitHub (`afterburn25` connected) all live |
 
 ## Phase 2 — Cinematic splash
 
@@ -102,7 +141,7 @@
 | Brain closure audit (export/sign/update/stale/foreign/model-replacement continuity/backup-restore/audit/paraphrase/plan-eval-learn/multi-hour) | PARTIAL | Docs + tests verify signing/export/stale/foreign/audit-log; **`next_security_upgrade` in project.json still lists creator private-key backup/recovery**; multi-hour unattended dogfood pending |
 | MCP live validation + code-intel dogfood | PARTIAL | `mcp.py` stdio+HTTP clients + `ec55090` "validated/pinned code-intelligence dependencies + MCP interop record"; live real-MCP-server dogfood not recorded |
 | UI cohesion pass on every page | PARTIAL | `b600e60b4` sweep found+fixed 3 defects; systematic all-page polish pending Phase 18 work |
-| Version/release metadata agreement | PENDING | PROJECT_STATUS says 1963 tests; suite is 1965; VERSION 0.21.0; head/test-count fields stale in project.json (1705) |
+| Version/release metadata agreement | LANDED_VERIFIED | VERSION 0.22.0; `sync_version.py --check` passes; all derived surfaces (project.json, csproj, .iss, pyproject, backend_version.txt) agree |
 | Long-run soak (hours; mixed workload) | PARTIAL | `scripts/mission_soak.py` + `scripts/selftest` soak tier + nightly CI workflow; multi-hour run not yet completed |
 
 ## Live incident — packaged LKG rollback (2026-10-05, resolved)

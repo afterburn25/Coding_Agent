@@ -294,6 +294,13 @@ class ConversationManager:
             }
             if image_job_ids:
                 assistant_message["image_job_ids"] = [str(j) for j in image_job_ids if str(j)]
+                try:
+                    from ..context.active_context import ActiveContext
+                    ctx = ActiveContext.from_dict(row.get("active_context"))
+                    ctx.note_image_jobs(list(assistant_message["image_job_ids"]))
+                    row["active_context"] = ctx.to_dict()
+                except Exception:
+                    pass
             if response_source:
                 assistant_message["response_source"] = response_source
             user_message = {"id": uuid.uuid4().hex[:12], "role": "user",
@@ -360,13 +367,11 @@ class ConversationManager:
     @classmethod
     def refine_image_prompt(cls, text: str) -> str:
         """Strip request scaffolding so the image model sees the descriptive
-        core — 'please generate an image of a red cat' → 'a red cat'."""
-        t = re.sub(r"\s+", " ", str(text or "")).strip()
-        prev = None
-        while prev != t:
-            prev = t
-            t = cls._PROMPT_SCAFFOLD_RE.sub("", t, count=1).strip(" ,.:;")
-        return t or re.sub(r"\s+", " ", str(text or "")).strip()
+        core — 'please generate an image of a red cat' → 'a red cat'.
+        Grammar lives in context.intent so detection and refinement can
+        never drift apart."""
+        from ..context.intent import strip_image_scaffold
+        return strip_image_scaffold(text)
 
     @classmethod
     def split_negative_prompt(cls, text: str) -> tuple[str, str]:
@@ -405,8 +410,48 @@ class ConversationManager:
         # the model has — keep it rather than send an empty prompt.
         return (t or str(text or "").strip()), ", ".join(x for x in negative if x)
 
+    # ------------------------------------------------------------------
+    # Active context — compact per-conversation working state persisted
+    # on the row (survives restart, isolated per conversation).
+    # ------------------------------------------------------------------
+    def active_context(self, conversation_id: str | None = None):
+        from ..context.active_context import ActiveContext
+        with self._lock:
+            row = self._get(conversation_id)
+            return ActiveContext.from_dict(row.get("active_context"))
+
+    def update_active_context(self, env, conversation_id: str | None = None):
+        """Fold an IntentEnvelope into the row's ActiveContext — topic
+        shifts, corrections, parked clarifications all handled inside."""
+        from ..context.active_context import ActiveContext
+        with self._lock:
+            row = self._get(conversation_id)
+            ctx = ActiveContext.from_dict(row.get("active_context"))
+            ctx.record_turn(env)
+            row["active_context"] = ctx.to_dict()
+            self._save()
+            return ctx
+
+    def set_context_field(self, conversation_id: str | None = None, **fields):
+        from ..context.active_context import ActiveContext
+        with self._lock:
+            row = self._get(conversation_id)
+            ctx = ActiveContext.from_dict(row.get("active_context"))
+            for k, v in fields.items():
+                if hasattr(ctx, k):
+                    setattr(ctx, k, v)
+            ctx.touch()
+            row["active_context"] = ctx.to_dict()
+            self._save()
+            return ctx
+
     @staticmethod
     def image_generation_intent(text: str) -> bool:
+        from ..context.intent import detect_image_intent
+        matched, _conf, _ev = detect_image_intent(
+            re.sub(r"\s+", " ", str(text or "").lower()).strip())
+        if matched:
+            return True
         t = re.sub(r"\s+", " ", str(text or "").lower()).strip()
         if not t:
             return False
@@ -479,9 +524,37 @@ class ConversationManager:
             and contains_any(visual_terms, plural=True)
         )
 
+    # Envelope intent → the lane labels this classifier has always
+    # produced. The envelope is authoritative; this maps for callers
+    # that still consume the legacy labels (brain thalamus, prompt
+    # selection, activity metadata).
+    _ENV_TO_LABEL = {
+        "image_generation": "image",
+        "image_edit": "image",
+        "image_followup": "conversation",
+        "tool_action": "tool_action",
+        "git_action": "tool_action",
+        "github_status": "tool_action",
+        "file_edit": "coding",
+        "coding": "coding",
+        "research": "research",
+        "writing": "writing",
+        "correction": "conversation",
+        "clarification_response": "conversation",
+        "feedback_signal": "conversation",
+        "identity_query": "conversation",
+        "question": "conversation",
+        "conversation": "conversation",
+    }
+
     @staticmethod
     def classify_intent(text: str) -> str:
         t = str(text or "").lower().strip()
+        from ..context.intent import understand_turn
+        env = understand_turn(t)
+        if env.primary_intent != "conversation" or env.confidence >= 0.7:
+            return ConversationManager._ENV_TO_LABEL.get(
+                env.primary_intent, "conversation")
         image_operation = any(
             x in t for x in (
                 "edit image", "edit photo", "edit picture", "inpaint", "outpaint",

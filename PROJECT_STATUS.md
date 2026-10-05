@@ -1,8 +1,34 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1963 tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.21.0 adds **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **2103 tests** green on `main`. v0.22.0 lands the **Persona Speech Genome milestone closeout** — merged via PR #3 after reconciling all active branches; splash video surface + readiness verify-gate + sequence-complete handoff coexist, and `SpeechDeliveryPlan` fields now reach real TTS (pause/seriousness/register/nonverbal-rate wired; emphasis documented honestly). Full evidence matrix in `docs/ROADMAP_CLOSURE.md`. v0.21.0 added **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
 
-## Active version: 0.21.0 — InvokeAI first-class image backend
+## Active version: 0.22.0 — Integrated reliability closeout + Persona Speech Genome
+
+v0.22.0 closes the persona speech cycle and converges the branch
+divergence: `main` is the single authoritative branch again.
+
+- **Branch reconciliation** — `origin/main` merged into
+  `milestone/integrated-reliability-closeout`; the merge kept both
+  splash feature sets (video surface + hidden-until-real + verify
+  gate AND sequence-complete handshake + FINALIZING dwell).
+- **Persona Speech Genome finished** — `SpeechDeliveryPlan` fields
+  now reach real synthesis: `pause_hint` → bounded clause-boundary
+  pause in speech text, `seriousness`/`register` → calm/pace shaping,
+  `nonverbal_rate` → `VocalizationEngine` keep-probability (0
+  silences); `emphasis_spans` is documented span-protection metadata
+  (Kokoro has no per-word emphasis — not faked).
+- **Verified** — 2103-test suite green; 612-render persona soak (0
+  fact drift, 0 span corruption); 120-turn multi-turn session; real
+  Windows dogfood on the live install (frozen backend, video splash,
+  real TTS WAV, GitHub connected, Speech Lab battery).
+- **Stale branches retired** — `fix/full-core-glow`,
+  `voice-concept-isabella`, `feature/cinematic-core-unlock-splash`
+  marked superseded; useful artifacts preserved in-repo before
+  deletion. See `docs/ROADMAP_CLOSURE.md` for the audit trail.
+- **Fix** — `data_query` duckdb path now creates a `data` view over
+  file sources, matching the sqlite fallback's documented contract.
+
+## Previous: 0.21.0 — InvokeAI first-class image backend
 
 v0.21.0 makes InvokeAI a Nexus-managed image backend alongside ComfyUI —
 dual-backend routing under one `ImageManager`, per-request override,
@@ -216,7 +242,7 @@ v0.15.0 deepens the workstation core:
   endpoint verification and cleanup. API: `/api/regressions`,
   `/api/baselines`, `/api/bisect`. Docs: `docs/REGRESSIONS.md`.
 
-Verified: **1705 tests** (2 environment skips).
+Verified: **2049 tests** (2 environment skips).
 
 ## Previous: 0.14.0 — Adaptive Worker Manager
 
@@ -600,7 +626,7 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 - **Health**: `localcodeagent/health.py` — component probe+recover, bounded attempts, persisted history; autonomy/voice registered.
 - **Two-way voice scaffold**: `localcodeagent/voice/stt.py` — mic capture (sounddevice, optional), Vosk/faster-whisper engines, barge-in interrupt, latency metrics.
 - Server: `/api/health` `/api/twin` `/api/artifacts` `/api/skills` (+ detail/verify/install/update/enable/disable/rollback/remove/health routes) `/api/connectors` `/api/knowledge` `/api/rag` `/api/lsp` `/api/eval/history` `/api/experiments` `/api/backups` `/api/simulate` `/api/requirements` (+ status/evidence writes).
-- Current automated checkpoint: **1705 tests passing** (2 environment skips).
+- Current automated checkpoint: **2049 tests passing** (2 environment skips).
 
 #### v0.7.1 — performance + timeline
 

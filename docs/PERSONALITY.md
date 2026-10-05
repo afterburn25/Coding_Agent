@@ -214,12 +214,99 @@ concise technical explanations").
   packages. Name, base preset, traits, voice, blend metadata, version
   — **never** personal memory or relationship state.
 
-## Versioning
+## Speech genome (`genome.py`)
 
-Every preset carries `behavior_version` (`presets.BEHAVIOR_VERSION`,
-currently 2). Customs and imported packages record the version they
-were created against so future behavior-profile changes can migrate
-rather than silently shifting.
+The Persona Speech Genome is the versioned, structured identity of HOW
+a persona talks — downstream of meaning (intent/tools/facts), upstream
+of surface text. `derive_genome(personality)` layers:
+
+```
+neutral defaults → behavior-family genome → trait-slider nudges
+→ explicit speech_genome overrides (deep-merge)
+```
+
+Sections: `vocabulary` (per-family acknowledgement/success/error/
+disagreement/transition/interjection/signature pools), `syntax`
+(sentence length/variance, fragment + one-word rates, dash usage, list
+preference, answer-first, technical density, elaboration, rhetorical
+rate), `cadence`, `pragmatics` (opening/closing family weights),
+`humor` (12 categories with strength+frequency + allowed registers +
+serious suppression), `disagreement`, `storytelling`, `questions`,
+`repair`, `relationship` (familiarity/teasing/openness/callbacks),
+`address` (policy: none/first/formal/literal-term + context-weighted
+frequency + cooldown), `boundaries` (graded slang/profanity/emoji/
+internet-speak ceilings), `vocal` (pace/energy/warmth/emphasis/
+nonverbal biases), `micro_reactions` (per-context pools + cooldown),
+`confidence` (verified/likely/inferred/uncertain phrase stems from the
+behavior family), `repetition` (opening/closing/phrase cooldowns).
+
+`migrate_genome()` fills missing/corrupt fields from defaults,
+preserves unknown keys (forward-compatible import), and pins
+`speech_genome_version` — old persona files upgrade without data loss.
+Customs inherit their base preset's family genome and can carry a
+`speech_genome` override dict via `create_custom`/`patch_custom`.
+
+### Surface realization (`context/realize.py`)
+
+`SemanticResponse` carries WHAT must be communicated — facts,
+warnings, conclusions, uncertainty, evidence, completed/failed
+actions, next steps, `confidence` (verified/likely/inferred/uncertain
+set upstream), `exact_spans` (identifiers/numbers/canonical text that
+must survive verbatim), `speech_act`, `semantic_id`, `register`.
+`classify_speech_act()` maps intent + outcome + seriousness + social
+cue to one of 34 acts; canned lanes keep their own act.
+
+`PersonaRenderer.render_semantic(sem, genome, ctx)` realizes:
+
+- micro-reaction prefix (genome pools, per-category cooldown,
+  suppressed when serious)
+- opening family (weighted by genome pragmatics, masked by act fit —
+  a failure never opens "reaction"; `result_first` only on outcome
+  acts so success terms never precede a plain answer)
+- address term (policy + context-weighted + cooled — `first` uses the
+  user's preferred name, `formal`/`none` stay name-free)
+- body: facts/conclusions/warnings verbatim + confidence stem ONLY
+  for non-verified content; `canonical=` bodies (built-ins, Answer
+  Memory, identity facts) pass through untouched with honest repeat
+  acknowledgements on re-asks
+- closing family (hard_stop dominates; `next_step` only when
+  next_options exist; `question` respects question frequency;
+  `light_comment` pulls from the persona's own humor-category quips
+  gated by allowed registers)
+- `SpeechDeliveryPlan`: pace (genome vocal bias + tempo − serious
+  slowdown), energy (mirrored user energy), warmth, emphasis_spans
+  (= exact_spans), pause density, seriousness, act, register,
+  nonverbal rate, sarcasm — handed to `voice.finish_task(delivery=)`.
+  The voice layer consumes what the engine can express: `pace` → job
+  speed; `energy`/`warmth`/`emphasis_level` → bounded per-utterance
+  pitch/gain deltas (±1 semitone / ±3 dB around neutral 0.5) so a
+  hyper persona sounds slightly brighter and a warm one slightly
+  softer without wiping the preset signature. `pause_hint` inserts one
+  bounded ellipsis at a strong clause boundary in the *speech* text
+  (display text untouched); `seriousness` calms pitch/gain/pace;
+  `register` technical/formal adds a small pace damp; `nonverbal_rate`
+  scales `VocalizationEngine` keep-probability (0 → silent, ~0.3
+  baseline). `emphasis_spans` remains documented span-protection
+  metadata — the Kokoro path has no per-word emphasis control, so it
+  is reported honestly rather than simulated.
+
+`RenderedReply` reports `opening_family`/`closing_family`/
+`micro_reaction`/`used_address`/`repeat_index`/`genome_rendered` for
+observability. `PhraseCooldowns` keeps per-category recently-used
+pools turn-bounded; the ledger still fingerprints whole replies.
+
+### Wiring
+
+`server._speech_context(user_text)` resolves the active profile's
+`(genome, RenderContext)` — dynamics mood/relationship, seriousness +
+topic classification, social cue + sarcasm + user energy, preferred
+address. The orchestrator's `speech_context=` resolver feeds the
+builtin lanes (`builtin_semantic` → `_builtin_reply`) and the Answer
+Memory path; when a genome renders, canned replies are no longer
+suppressed under an active persona — they answer in character without
+a model call.
+
+## Versioning
 
 ## API
 
@@ -240,6 +327,12 @@ rather than silently shifting.
 
 `GET /api/profiles/<id>/personality/effective?text=...` — the compiled
 debug card (no private memory).
+
+`GET /api/profiles/<id>/personality/speech-preview?target=…&register=…&seriousness=0-3&turns=1-4`
+— renders an 8-act battery (greet, answer, success, failure, disagree,
+warn, uncertainty, farewell) through any resolvable persona's genome:
+text + delivery plan + opening/closing family + genome summary. Backs
+the Personality Studio **Speech Lab** panel.
 
 ## Invariants
 

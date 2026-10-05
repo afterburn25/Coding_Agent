@@ -1,11 +1,11 @@
 {
   "name": "Nexus Core",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 1705,
-  "next_milestone": "P1 workstation: integrated test/build/runtime/preview, coding-agent orchestration, self-modification/update bootstrapper, full LKG rollback/recovery, unified Command Center",
+  "test_checkpoint": 2049,
+  "next_milestone": "Roadmap closure \u2014 canonical matrix in docs/ROADMAP_CLOSURE.md: finish splash recovery wiring, voice-profile metadata, full-stack provisioning, env/secrets UI, file watcher, migrations, Docker, Quality surface, per-page browser E2E + visual regression, autonomous Git/PR/CI loop, clean-install dogfood, long soak",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",
   "default_coding_models": {
@@ -536,9 +536,9 @@
       ]
     }
   },
-  "verified_tests": 1705,
-  "head": "5d1dcd2",
-  "test_count": 1705,
+  "verified_tests": 2049,
+  "head": "dd026e32",
+  "test_count": 2049,
   "branding": {
     "canonical_name": "Nexus Core",
     "full_logo": "web/assets/nexus-core-logo.png",

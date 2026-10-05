@@ -104,8 +104,15 @@ internal sealed class SplashForm : Form
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
-    private readonly Panel _cover;
     private readonly string _appDir;
+    // The window stays hidden until the splash's own DOM has painted —
+    // index.html's static markup IS the opening frame (same engine, same
+    // pixels), so there is no second surface to swap from. The GDI
+    // PaintSurface remains only as the WebView2-failure fallback.
+    private bool _allowShow;
+    private bool _shown;
+    private long _domPaintedAt = -1;
+    private readonly Stopwatch _initSw = Stopwatch.StartNew();
 
     private Panel? _failurePanel;
     private string? _failureMessage;
@@ -166,24 +173,21 @@ internal sealed class SplashForm : Form
             _artwork = Image.FromFile(splashPath);
         }
 
-        // Cover panel: paints the identical static surface, shown on top of
-        // the cinematic during its first ~200ms so the WebView2's late first
-        // frames never read as a black flash over the artwork.
-        _cover = new Panel
-        {
-            Dock = DockStyle.Fill,
-            Visible = false,
-            BackColor = Color.FromArgb(4, 9, 19),
-        };
-        _cover.Paint += (_, pe) => PaintSurface(pe.Graphics, _cover.ClientSize);
-        Controls.Add(_cover);
-
         _timer.Interval = 33;
         _timer.Tick += (_, _) =>
         {
             _progress.Tick();
             PumpCinematic();
             if (!_webReady) Invalidate();
+            // Reveal: the DOM's own first paint becomes the splash — or
+            // the GDI fallback if the WebView2 can't get there.
+            if (!_shown && (_webReady || _webFailed || _failurePanel is not null
+                || (_domPaintedAt >= 0
+                    && _initSw.ElapsedMilliseconds - _domPaintedAt > 150)
+                || _initSw.ElapsedMilliseconds > 2500))
+            {
+                ShowNow();
+            }
         };
         _timer.Start();
 
@@ -263,6 +267,9 @@ internal sealed class SplashForm : Form
             _web = new WebView2
             {
                 Dock = DockStyle.Fill,
+                // Hidden until the page's DOM has actually painted —
+                // an unpainted WebView2 is just its dark placeholder
+                // color and would cover the static fallback on failure.
                 Visible = false,
                 DefaultBackgroundColor = Color.FromArgb(4, 9, 19), // exact #stage bg
             };
@@ -274,11 +281,34 @@ internal sealed class SplashForm : Form
             cwv.SetVirtualHostNameToFolderMapping(
                 "nexus.splash", splashDir, CoreWebView2HostResourceAccessKind.Allow);
             cwv.WebMessageReceived += OnCinematicMessage;
+            // The page's static markup (artwork + shade + readout) paints
+            // with the DOM — long before the JS module boots. First
+            // successful paint IS the opening frame; show the window on
+            // it and the animation layer simply comes alive in place.
+            cwv.NavigationCompleted += (_, nav) =>
+            {
+                if (nav.IsSuccess)
+                {
+                    if (_web is not null) { _web.Visible = true; }
+                    _domPaintedAt = _initSw.ElapsedMilliseconds;
+                }
+                else
+                {
+                    _webFailed = true;
+                }
+            };
 
             var query = new List<string>();
             if (!CfgBool(_appDir, "splash_audio_enabled", true)
                 || CfgBool(_appDir, "silent_startup", false)) query.Add("silent");
             if (CfgBool(_appDir, "reduced_motion", false)) query.Add("reduced");
+            // Seed the bar's current position — the cinematic continues
+            // the progress the warm-up frame already showed instead of
+            // visibly restarting at zero (which read as a second splash).
+            query.Add("p=" + _progress.DisplayedProgress.ToString(
+                "F3", System.Globalization.CultureInfo.InvariantCulture));
+            query.Add("t1=" + Uri.EscapeDataString(_progress.Primary ?? ""));
+            query.Add("t2=" + Uri.EscapeDataString(_progress.Secondary ?? ""));
             var url = "https://nexus.splash/web/index.html"
                 + (query.Count > 0 ? "?" + string.Join("&", query) : "");
             cwv.Navigate(url);
@@ -350,22 +380,6 @@ internal sealed class SplashForm : Form
                     _webReady = true;
                     BeginInvoke(() =>
                     {
-                        if (_web is not null)
-                        {
-                            _web.Visible = true;
-                            // Hide the placeholder's first frames behind an
-                            // identical static frame, then reveal the live
-                            // cinematic once the compositor is painting.
-                            _cover.Visible = true;
-                            _cover.BringToFront();
-                            _cover.Invalidate();
-                            var cover = _cover;
-                            _ = Task.Delay(200).ContinueWith(_ =>
-                            {
-                                try { BeginInvoke(() => cover.Visible = false); }
-                                catch { }
-                            });
-                        }
                         // A fault that fired before the cinematic booted
                         // locked in the static fallback — hand the same
                         // failure to the real containment animation +
@@ -403,7 +417,6 @@ internal sealed class SplashForm : Form
                     BeginInvoke(() =>
                     {
                         if (_web is not null) { _web.Visible = false; }
-                        _cover.Visible = false;
                         Invalidate();
                     });
                     break;
@@ -442,6 +455,35 @@ internal sealed class SplashForm : Form
     /// onto the online state instead of free-running to its fixed duration.</summary>
     public void RequestSequenceFinish() =>
         PostToWeb(new { type = "complete-sequence" });
+
+    /// <summary>
+    /// The context calls Show() up front, but the window stays suppressed
+    /// until the splash page's own DOM is painting — the WebView2's first
+    /// rendered frame IS the splash design, so there is no second surface
+    /// to hand off from at all. The GDI static render only appears if the
+    /// WebView2 fails outright or init drags past ~2.5s.
+    /// </summary>
+    protected override void SetVisibleCore(bool value)
+    {
+        if (value && !_allowShow)
+        {
+            if (!IsHandleCreated)
+            {
+                CreateHandle();
+            }
+            return;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    private void ShowNow()
+    {
+        if (_shown) return;
+        _shown = true;
+        _allowShow = true;
+        Show();
+        Activate();
+    }
 
     /// <summary>
     /// Recovery "Rollback" — writes data/lkg/rollback.flag naming the
@@ -668,6 +710,24 @@ internal sealed class SplashForm : Form
             var w = _artwork.Width * scale;
             var h = _artwork.Height * scale;
             g.DrawImage(_artwork, (size.Width - w) / 2, (size.Height - h) / 2, w, h);
+            // Cinematic's opening-state dim: #shade is a radial vignette at
+            // ~0.72 opacity while charge=0 (splash.mjs paint()). Painting the
+            // same falloff here makes the static frame pixel-match the
+            // WebView2's first frame — one splash, not two.
+            using (var shadePath = new GraphicsPath())
+            {
+                var sx = size.Width * 0.5f;
+                var sy = size.Height * 0.33f;
+                var srx = size.Width * 0.71f;
+                var sry = size.Height * 0.95f;
+                shadePath.AddEllipse(sx - srx, sy - sry, srx * 2, sry * 2);
+                using var shade = new PathGradientBrush(shadePath)
+                {
+                    CenterColor = Color.FromArgb(36, 1, 6, 17),
+                    SurroundColors = new[] { Color.FromArgb(87, 1, 5, 17) },
+                };
+                g.FillRectangle(shade, client);
+            }
         }
         else
         {
@@ -680,33 +740,51 @@ internal sealed class SplashForm : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
-        // Progress bar — covers the artwork's own baked-in bar (x ~390–660,
-        // y ~502–509 on the 1024×576 source). The artwork ships with a static
-        // half-lit grey fill, so this track is fully opaque and slightly
-        // oversized: the baked bar disappears entirely and only the live
-        // gradient fill reads as the progress indicator.
-        var barWidth = (int)(size.Width * 0.284);
-        var barHeight = 7;
-        var barX = (int)(size.Width * 0.372);
-        var barY = (int)(size.Height * 0.873);
-        var track = new Rectangle(barX, barY - 1, barWidth, barHeight + 2);
-        using (var trackBrush = new SolidBrush(Color.FromArgb(255, 6, 12, 26)))
+        // Readout — mirrors the cinematic's #readout surface exactly:
+        // soft dark pill (28% left / 44% width / 3.7% bottom), 5px rounded
+        // #080f22 track with #4e729a edge, #4c6bff→#56edff fill with #4cf
+        // glow, then the two status lines below it in the same colors.
+        var roWidth = size.Width * 0.44f;
+        var roHeight = size.Height * 0.10f;
+        var roBottom = size.Height * 0.963f;
+        using (var pillPath = new GraphicsPath())
         {
-            g.FillRectangle(trackBrush, track);
+            var px = size.Width * 0.5f;
+            var py = roBottom - roHeight * 0.55f;
+            var prx = roWidth * 0.62f;
+            var pry = roHeight * 1.05f;
+            pillPath.AddEllipse(px - prx, py - pry, prx * 2, pry * 2);
+            using var pill = new PathGradientBrush(pillPath)
+            {
+                CenterColor = Color.FromArgb(235, 4, 11, 25),
+                SurroundColors = new[] { Color.FromArgb(0, 4, 11, 25) },
+            };
+            g.FillEllipse(pill, px - prx, py - pry, prx * 2, pry * 2);
         }
-        using (var edge = new Pen(Color.FromArgb(80, 60, 110, 160)))
+        var barWidth = (int)(roWidth * 0.62f);
+        var barHeight = 5;
+        var barX = (int)((size.Width - barWidth) / 2f);
+        var barY = (int)(roBottom - roHeight + size.Height * 0.014f);
+        var track = new RectangleF(barX, barY, barWidth, barHeight);
+        using (var trackPath = RoundedRect(track, barHeight / 2f))
         {
-            g.DrawRectangle(edge, track);
+            using var trackBrush = new SolidBrush(Color.FromArgb(255, 8, 15, 34));
+            g.FillPath(trackBrush, trackPath);
+            using var edge = new Pen(Color.FromArgb(255, 78, 114, 154), 1f);
+            g.DrawPath(edge, trackPath);
         }
         var fillWidth = (int)(barWidth * Math.Clamp(_progress.DisplayedProgress, 0.0, 1.0));
         if (fillWidth > 0)
         {
-            var fill = new Rectangle(barX, barY, fillWidth, barHeight);
-            using var fillBrush = new LinearGradientBrush(fill,
-                Color.FromArgb(0, 160, 255), Color.FromArgb(140, 80, 255), 0f);
-            g.FillRectangle(fillBrush, fill);
-            using var glow = new SolidBrush(Color.FromArgb(60, 80, 180, 255));
-            g.FillRectangle(glow, new Rectangle(barX, barY - 2, fillWidth, barHeight + 4));
+            var fill = new RectangleF(barX, barY, fillWidth, barHeight);
+            using (var fillPath = RoundedRect(fill, barHeight / 2f))
+            using (var fillBrush = new LinearGradientBrush(fill,
+                Color.FromArgb(76, 107, 255), Color.FromArgb(86, 237, 255), 0f))
+            {
+                g.FillPath(fillBrush, fillPath);
+            }
+            using var glow = new SolidBrush(Color.FromArgb(50, 68, 204, 255));
+            g.FillRectangle(glow, new RectangleF(barX, barY - 2, fillWidth, barHeight + 4));
         }
 
         // Brief brightening of the shield's central core on completion —
@@ -729,25 +807,42 @@ internal sealed class SplashForm : Form
             g.FillEllipse(glow, coreX - radius, coreY - radius, radius * 2, radius * 2);
         }
 
-        // Two-line status under the progress bar. The artwork's baked-in
-        // caption sits at ~0.91·H, so both lines live along the bottom edge.
-        using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
-        using var secondaryFont = new Font("Segoe UI", 8.5f);
+        // Two-line status inside the readout — same palette as the
+        // cinematic's #status/#detail so the swap doesn't restyle text.
+        using var primaryFont = new Font("Segoe UI", 8.25f);
+        using var secondaryFont = new Font("Segoe UI", 6f);
         var isReady = _progress.ReadyToDismiss
             || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
-        var primaryRect = new Rectangle(0, size.Height - 46, size.Width, 20);
+        var primaryRect = new Rectangle(0, barY + barHeight + 9, size.Width, 18);
         // Ready state: green + pulsating — the timer already repaints at
         // 33ms cadence, so a clock-driven alpha sine gives the same pulse
         // the cinematic's #status.online keyframes produce.
         var pulse = (float)(0.5 + 0.5 * Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2 / 1.6));
         var readyColor = Color.FromArgb(70 + (int)(185 * pulse), 90, 255, 160);
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
-            isReady ? readyColor : Color.FromArgb(90, 215, 255),
+            isReady ? readyColor : Color.FromArgb(174, 223, 255),
             TextFormatFlags.HorizontalCenter);
-        var secondaryRect = new Rectangle(0, size.Height - 27, size.Width, 18);
+        var secondaryRect = new Rectangle(0, barY + barHeight + 26, size.Width, 16);
         TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
-            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(150, 170, 200),
+            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(118, 144, 174),
             TextFormatFlags.HorizontalCenter);
+    }
+
+    private static GraphicsPath RoundedRect(RectangleF r, float radius)
+    {
+        var path = new GraphicsPath();
+        var d = radius * 2;
+        if (r.Width < d || r.Height < d)
+        {
+            path.AddRectangle(r);
+            return path;
+        }
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     protected override void Dispose(bool disposing)
@@ -877,6 +972,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             _progress.Report(0.15, "services");
             await _main.PrepareAsync(_progress);
 
+            // Core is online — verify the app will genuinely load before
+            // the splash comes down. A dead backend or an unservable UI
+            // throws into the catch → the splash's error sequence takes
+            // over on the SAME surface instead of showing a broken window.
+            await _main.VerifyLoadableAsync();
+
             // The interface posted its ready handshake; the app is genuinely
             // usable. Now hold the splash until the minimum display time too,
             // then play the brief READY + core-glow completion effect before
@@ -994,6 +1095,8 @@ internal sealed class BackendProcess : IDisposable
     /// </summary>
     public int Port => _announcedPort > 0 ? _announcedPort : _requestedPort;
     public string BaseUrl => $"http://127.0.0.1:{Port}/";
+    /// <summary>True while the backend process is still running.</summary>
+    public bool IsAlive => !_process.HasExited;
     public string LogPath { get; }
     public event Action<int>? UnexpectedExit;
     /// <summary>(pct 0-100, primary, secondary) — real backend-internal phase.</summary>
@@ -2295,6 +2398,27 @@ internal sealed class MainForm : Form
     {
         _backend?.Dispose();
         _backend = null;
+    }
+
+    /// <summary>
+    /// Pre-flight before the splash releases: the backend must still be
+    /// alive, every UI route must serve real markup, and the interface
+    /// WebView2 must be initialized. Called after "core online" and before
+    /// the splash→app handoff — a throw here means the window would have
+    /// been broken, so the splash's error sequence owns the failure on the
+    /// same surface instead.
+    /// </summary>
+    public async Task VerifyLoadableAsync()
+    {
+        if (_backend is null || !_backend.IsAlive)
+        {
+            throw new InvalidOperationException("Nexus Core backend is not running.");
+        }
+        await _backend.ProbeUiAsync();
+        if (_webView.CoreWebView2 is null)
+        {
+            throw new InvalidOperationException("Nexus Core interface is not initialized.");
+        }
     }
 
     private void AttachBackend(BackendProcess backend)

@@ -356,11 +356,11 @@ class EndToEndAgentTests(unittest.TestCase):
             # Mission-attributed queue items do NOT count as interactive
             # demand — the supervisor owns them and must keep working.
             state.queue.pop()
-            state.autonomy._lane_mission = "m-test"
+            state.autonomy._lane.mission_id = "m-test"
             try:
                 state.queue.enqueue("mission subtask prompt")
             finally:
-                state.autonomy._lane_mission = None
+                state.autonomy._lane.mission_id = None
             self.assertFalse(state._agent_lane_active())
 
     def test_preempt_for_chat_cancels_mission_task_only(self):
@@ -421,11 +421,11 @@ class EndToEndAgentTests(unittest.TestCase):
         self.addCleanup(fake.close)
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
-            state.autonomy._lane_mission = "m-test"
+            state.autonomy._lane.mission_id = "m-test"
             try:
                 state.queue.enqueue("mission subtask prompt")
             finally:
-                state.autonomy._lane_mission = None
+                state.autonomy._lane.mission_id = None
             state.queue.enqueue("user question")
             state._dequeue_next()
             deadline = time.time() + 30

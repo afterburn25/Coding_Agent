@@ -508,6 +508,66 @@ class TestVoiceManager(unittest.TestCase):
         segs = [p for p in published if p.get("event") == "segment"]
         self.assertEqual([s["seq"] for s in segs], [0, 1])
 
+    # -- speech-genome delivery plan -----------------------------------------
+
+    def test_delivery_plan_maps_energy_warmth_emphasis(self):
+        """Energy/warmth/emphasis become bounded pitch/gain deltas."""
+        preset = self.m.current_preset()
+        base = preset.as_dict()
+        hot = self.m._delivery_preset(
+            preset, {"energy": 1.0, "warmth": 0.0, "emphasis_level": 1.0})
+        self.assertGreater(hot.output_gain_db, base["output_gain_db"])
+        self.assertGreater(hot.pitch_semitones, base["pitch_semitones"])
+        calm = self.m._delivery_preset(
+            preset, {"energy": 0.0, "warmth": 1.0, "emphasis_level": 0.0})
+        self.assertLess(calm.output_gain_db, base["output_gain_db"])
+        self.assertLess(calm.pitch_semitones, base["pitch_semitones"])
+        # Bounds: extreme raw inputs clamp, never runaway deltas.
+        wild = self.m._delivery_preset(
+            preset, {"energy": 99.0, "warmth": -4.0,
+                     "emphasis_level": 99.0})
+        self.assertLessEqual(
+            wild.output_gain_db - base["output_gain_db"], 3.0)
+        self.assertLessEqual(
+            wild.pitch_semitones - base["pitch_semitones"], 1.0)
+
+    def test_delivery_plan_neutral_and_malformed_leave_preset(self):
+        """Neutral-0.5, missing, or garbage values keep the saved voice."""
+        preset = self.m.current_preset()
+        self.assertIs(self.m._delivery_preset(preset, {}), preset)
+        self.assertIs(self.m._delivery_preset(preset, None), preset)
+        for junk in ({"energy": 0.5, "warmth": 0.5, "emphasis_level": 0.0},
+                     {"energy": "loud"}, {"energy": None}):
+            self.assertIs(self.m._delivery_preset(preset, junk), preset)
+
+    def test_finish_task_threads_delivery_into_jobs(self):
+        """The plan from the response lane lands on the queued job."""
+        job = self.m.enqueue("t-del", "spoken words",
+                             delivery={"energy": 0.9})
+        self.assertIsNotNone(job)
+        self.assertEqual(job.delivery["energy"], 0.9)
+
+    def test_delivery_plan_reaches_synthesis_preset(self):
+        """speak_text(delivery=...) reshapes the preset handed to DSP —
+        proves the genome characteristics ride real engine controls."""
+        captured = []
+        orig = dsp.process
+        def spy(audio, sr, preset):
+            captured.append(preset)
+            return orig(audio, sr, preset)
+        dsp.process = spy
+        try:
+            self.m.speak_text("Feel the shift.",
+                              delivery={"energy": 1.0, "warmth": 0.0})
+        finally:
+            dsp.process = orig
+        self.assertTrue(captured)
+        base = self.m.current_preset()
+        self.assertGreater(captured[0].output_gain_db,
+                           base.output_gain_db)
+        self.assertGreater(captured[0].pitch_semitones,
+                           base.pitch_semitones)
+
     def test_no_speech_when_disabled(self):
         self.m.config.voice_enabled = False
         self.m.begin_task("t")

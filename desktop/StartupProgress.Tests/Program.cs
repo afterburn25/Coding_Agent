@@ -366,7 +366,15 @@ Console.WriteLine("ready label");
     Check(r.Progress.Primary == "CORE SYSTEMS · ONLINE" ||
           r.Progress.Primary == "FINALIZING · NEXUS CORE",
         $"ready primary ({r.Progress.Primary})");
-    r.Advance(1.0, 0.05);
+    // ONLINE only resolves once the host's real flow runs: the bar must
+    // finish (ReadyToDismiss) and the completion effect must start —
+    // a bare "ready" flag parks on FINALIZING so the label never claims
+    // online ahead of the visuals.
+    var spins = 0;
+    while (!r.Progress.ReadyToDismiss && spins++ < 400) r.Advance(0.05, 0.05);
+    Check(r.Progress.ReadyToDismiss, "bar completes to ready-to-dismiss");
+    r.Progress.BeginCompletion();
+    r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
     Check(r.Progress.Primary == "CORE SYSTEMS · ONLINE",
         $"ready state resolves to CORE SYSTEMS · ONLINE ({r.Progress.Primary})");
     Check(r.Progress.Secondary == "Nexus Core ready",

@@ -40,6 +40,8 @@ _GB = 1024 ** 3
 #                 waiting/running -> failed (terminal) | cancelled
 #                 waiting -> skipped (unsupported/declined)
 TERMINAL = {"completed", "failed", "cancelled", "skipped"}
+# Install-profile tiers — a profile includes its own tier and below.
+TIER_ORDER = {"core": 0, "recommended": 1, "complete": 2}
 # Failures worth retrying automatically (bounded exponential backoff).
 # permission_denied is included: on Windows, AV on-access scans routinely
 # hold a fresh exe/pyd lock for a few seconds mid-install; a bounded retry
@@ -89,9 +91,12 @@ class ProvisionItem:
     est_bytes: int = 0              # download size
     est_disk_bytes: int = 0         # installed footprint
     heavy: bool = False             # occupies the single heavy slot
+    tier: str = "recommended"       # core | recommended | complete
+    requires_approval: bool = False  # OS-level/heavyweight optional install
     payload: dict[str, Any] = field(default_factory=dict)
     # runtime state (persisted)
     state: str = "waiting"
+    approved: bool = False
     detail: str = ""
     progress: dict[str, Any] = field(default_factory=dict)
     error_code: str = ""
@@ -146,25 +151,58 @@ class ProvisioningManager:
 
     # ------------------------------------------------------------------ plan
 
+    def _tool(self, tid: str, label: str, *, priority: int, tier: str,
+              mb: int, provides: str = "",
+              requires_approval: bool = False) -> ProvisionItem:
+        return ProvisionItem(
+            id=f"tool-{tid}", label=label, kind="tool", priority=priority,
+            tier=tier, provides=provides, heavy=mb >= 400,
+            requires_approval=requires_approval,
+            est_bytes=mb * 1024 ** 2,
+            est_disk_bytes=(mb + 20) * 1024 ** 2,
+            payload={"tool_id": tid})
+
     def _declared_plan(self) -> list[ProvisionItem]:
-        """The versioned workstation stack. Entries reference real tool
-        manifests and fleet specs — sizes come from the manifests/specs
-        themselves, never invented."""
+        """The versioned workstation stack, tiered for install profiles.
+
+        core        — lean always-on essentials the everyday agent
+                      surfaces degrade without (voice, STT, search, media)
+        recommended — core + the full creative/tooling stack
+        complete    — recommended + heavyweight OS-level installs that
+                      need explicit user approval (Docker, Blender)
+
+        Entries reference real tool manifests and fleet specs — sizes
+        come from the manifests/specs themselves, never invented."""
         items: list[ProvisionItem] = []
         items.append(ProvisionItem(
             id="voice-assets", label="Voice (TTS) assets",
-            kind="voice_assets", priority=10, provides="tts",
+            kind="voice_assets", priority=10, provides="tts", tier="core",
             est_bytes=410 * 1024 ** 2, est_disk_bytes=410 * 1024 ** 2))
+        # Lean utility backbone — the agent's everyday surfaces.
+        for tid, label, prio, mb, provides in (
+            ("ripgrep", "ripgrep repository search", 12, 8,
+             "repository_search"),
+            ("ffmpeg", "FFmpeg media toolkit", 13, 90, "media_process"),
+            ("ffprobe", "FFprobe media inspector", 14, 10,
+             "media_inspect"),
+            ("tesseract", "Tesseract OCR", 15, 65, "ocr"),
+            ("pandoc", "Pandoc document conversion", 16, 30,
+             "document_convert"),
+            ("duckdb", "DuckDB data engine", 17, 25, "data_query"),
+        ):
+            items.append(self._tool(tid, label, priority=prio,
+                                    tier="core", mb=mb,
+                                    provides=provides))
+        items.append(ProvisionItem(
+            id="whisper-stt", label="Whisper STT model",
+            kind="tool", priority=35, provides="stt", tier="core",
+            est_bytes=10 * 1024 ** 2, est_disk_bytes=10 * 1024 ** 2,
+            payload={"tool_id": "whisper"}))
         items.append(ProvisionItem(
             id="invokeai", label="InvokeAI image backend",
             kind="tool", priority=20, provides="image_generation",
             est_bytes=2 * _GB, est_disk_bytes=6 * _GB, heavy=True,
             payload={"tool_id": "invokeai"}))
-        items.append(ProvisionItem(
-            id="whisper-stt", label="Whisper STT model",
-            kind="tool", priority=35, provides="stt",
-            est_bytes=10 * 1024 ** 2, est_disk_bytes=10 * 1024 ** 2,
-            payload={"tool_id": "whisper"}))
         # Photoreal fleet — Juggernaut is the general-purpose default and
         # lands first; the specialists follow.
         from .image.fleet import FLEET_BY_ID
@@ -189,6 +227,19 @@ class ProvisioningManager:
             kind="tool", priority=60, provides="image_generation",
             est_bytes=2 * _GB, est_disk_bytes=4 * _GB, heavy=True,
             payload={"tool_id": "comfyui"}))
+        items.append(self._tool("piper", "Piper voice engine",
+                                priority=62, tier="recommended", mb=60,
+                                provides="tts_fallback"))
+        # Heavyweight OS-level installs — explicit consent required;
+        # they sit in `waiting_approval` until the user approves.
+        items.append(self._tool("docker", "Docker Desktop",
+                                priority=80, tier="complete", mb=600,
+                                provides="containers",
+                                requires_approval=True))
+        items.append(self._tool("blender", "Blender 3D suite",
+                                priority=81, tier="complete", mb=350,
+                                provides="render_3d",
+                                requires_approval=True))
         # Configured ComfyUI-side image model profiles — the full set, after
         # the InvokeAI fleet. Pure weight downloads into models/image/.
         try:
@@ -209,6 +260,32 @@ class ProvisioningManager:
                 heavy=True, payload={"model_id": profile.id}))
         return items
 
+    def _profile_includes(self, it: ProvisionItem) -> bool:
+        """Install-profile filter — `core` is always included; larger
+        tiers join as the configured profile widens. `custom` installs
+        exactly provisioning_include (falling back to recommended when
+        the list is empty); provisioning_exclude always subtracts."""
+        try:
+            include = {str(x) for x in getattr(
+                self.config, "provisioning_include", []) or []}
+            exclude = {str(x) for x in getattr(
+                self.config, "provisioning_exclude", []) or []}
+        except Exception:
+            include, exclude = set(), set()
+        if it.id in exclude:
+            return False
+        profile = str(getattr(self.config, "provisioning_profile",
+                              "recommended") or "recommended"
+                      ).strip().lower()
+        if profile == "custom":
+            if not include:
+                return TIER_ORDER.get(it.tier, 1) <= \
+                    TIER_ORDER["recommended"]
+            return it.id in include
+        if profile not in TIER_ORDER:
+            profile = "recommended"
+        return TIER_ORDER.get(it.tier, 1) <= TIER_ORDER[profile]
+
     def _load(self) -> None:
         declared = {it.id: it for it in self._declared_plan()}
         saved: dict[str, dict] = {}
@@ -220,12 +297,14 @@ class ProvisioningManager:
         except Exception:
             saved = {}
         for iid, item in declared.items():
+            if not self._profile_includes(item):
+                continue
             prev = saved.get(iid)
             if prev:
                 keep = {k: prev.get(k) for k in (
                     "state", "detail", "progress", "error_code",
                     "error_message", "attempts", "next_retry_at",
-                    "verified", "started_at", "finished_at")}
+                    "verified", "started_at", "finished_at", "approved")}
                 for k, v in keep.items():
                     if v is not None:
                         setattr(item, k, v)
@@ -234,6 +313,12 @@ class ProvisioningManager:
                 if item.state in {"running", "verifying", "queued"}:
                     item.state = "waiting"
                     item.detail = "resumed after restart"
+            # OS-level installs hold for explicit consent — they are
+            # never dispatched (or auto-retried) unapproved.
+            if item.requires_approval and not item.approved \
+                    and item.state == "waiting":
+                item.state = "waiting_approval"
+                item.detail = "needs approval to install"
             self._items[iid] = item
         # Re-verify cheaply where possible so upgrades never redownload
         # healthy components but uninstalled ones get requeued honestly.
@@ -341,6 +426,22 @@ class ProvisioningManager:
         self._emit(it, "cancelled")
         return True
 
+    def approve_item(self, item_id: str) -> bool:
+        """Grant consent for an OS-level install — moves it from
+        waiting_approval into the dispatch queue."""
+        with self._lock:
+            it = self._items.get(item_id)
+            if it is None or not it.requires_approval:
+                return False
+            it.approved = True
+            if it.state == "waiting_approval":
+                it.state = "waiting"
+                it.detail = "approved — queued"
+            self._save()
+        self._wake.set()
+        self._emit(it, "approved")
+        return True
+
     def retry_item(self, item_id: str) -> bool:
         with self._lock:
             it = self._items.get(item_id)
@@ -383,6 +484,7 @@ class ProvisioningManager:
         done = [i for i in items if i["state"] == "completed"]
         running = [i for i in items if i["state"] in {"running", "verifying"}]
         failed = [i for i in items if i["state"] == "failed"]
+        awaiting = [i for i in items if i["state"] == "waiting_approval"]
         total_bytes = sum(i["est_bytes"] for i in items)
         remaining_bytes = sum(i["est_bytes"] for i in items
                               if i["state"] not in {"completed", "skipped"})
@@ -395,6 +497,7 @@ class ProvisioningManager:
             "paused": self._paused,
             "total": len(items), "completed": len(done),
             "running": len(running), "failed": len(failed),
+            "waiting_approval": len(awaiting),
             "total_download_bytes": total_bytes,
             "remaining_download_bytes": remaining_bytes,
             "free_disk_bytes": free,
@@ -406,6 +509,12 @@ class ProvisioningManager:
                     self.config, "provisioning_auto_retry", True)),
                 "provisioning_voice_notifications": bool(getattr(
                     self.config, "provisioning_voice_notifications", True)),
+                "provisioning_profile": str(getattr(
+                    self.config, "provisioning_profile", "recommended")),
+                "provisioning_include": list(getattr(
+                    self.config, "provisioning_include", []) or []),
+                "provisioning_exclude": list(getattr(
+                    self.config, "provisioning_exclude", []) or []),
             },
             "complete": len(done) + len([i for i in items
                                          if i["state"] == "skipped"]) == len(items),
@@ -891,7 +1000,11 @@ class ProvisioningManager:
     def _check_all_done(self) -> None:
         if self._announced_done or not self._items:
             return
-        terminal = all(it.state in TERMINAL for it in self._items.values())
+        # waiting_approval does not block completion — it is a user
+        # decision, not pending work; approving later resumes the item.
+        terminal = all(it.state in TERMINAL
+                       or it.state == "waiting_approval"
+                       for it in self._items.values())
         if not terminal:
             return
         failed = [it for it in self._items.values() if it.state == "failed"]

@@ -257,6 +257,35 @@ class Policy(unittest.TestCase):
         self.assertEqual(len(eng._history["bob"]), 1)
         self.assertEqual(h_alice, len(eng._history["alice"]))
 
+    def test_nonverbal_rate_is_real_gate(self):
+        # Speech genome vocal.nonverbal_rate scales keep-probability —
+        # 0 silences nonverbals entirely, higher raises the rate.
+        from collections import deque
+        from localcodeagent.voice.vocalizations import Vocalization
+        eng = _engine()
+        voc = Vocalization("amusement", "heh", 0.4, "heh")
+        # strength=50 keeps the probability below the 1.0 clamp so the
+        # rate factor is actually measurable.
+        silent = eng._ctx(_ctx(strength=50, nonverbal_rate=0.0))
+        base = eng._ctx(_ctx(strength=50, nonverbal_rate=0.3))
+        lively = eng._ctx(_ctx(strength=50, nonverbal_rate=0.6))
+        hist = deque()
+        p0 = eng._keep_prob(voc, silent, hist)
+        p1 = eng._keep_prob(voc, base, deque())
+        p2 = eng._keep_prob(voc, lively, deque())
+        self.assertEqual(p0, 0.0)
+        self.assertGreater(p2, p1)
+        self.assertGreater(p1, 0.0)
+
+    def test_nonverbal_rate_zero_voices_nothing(self):
+        eng = _engine()
+        kept = sum(
+            "heh" in eng.resolve(s, task_id="t-nv",
+                                 ctx=_ctx(nonverbal_rate=0.0))
+            .speech_text.lower()
+            for s in ("Heh.", "Heh.", "Heh.", "Heh.", "Heh.", "Heh."))
+        self.assertEqual(kept, 0)
+
 
 class Priming(unittest.TestCase):
     """User-context lead reactions — spoken only, bounded."""

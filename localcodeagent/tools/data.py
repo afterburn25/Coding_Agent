@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -83,11 +84,18 @@ def _rows_to_json(cur: sqlite3.Cursor, limit: int) -> list[dict[str, Any]]:
 def _duckdb_query(workspace: Path, source: Path | None, sql: str, limit: int) -> dict[str, Any]:
     exe = find_duckdb()
     db_arg = str(source) if source and source.suffix.lower() in {".duckdb", ".ddb"} else ":memory:"
+    prefix = ""
     if source and source.suffix.lower() not in {".duckdb", ".ddb"}:
         reader = {".csv": "read_csv_auto", ".parquet": "read_parquet", ".json": "read_json_auto"}.get(source.suffix.lower())
         if reader:
-            sql = sql.replace("{source}", f"{reader}('{str(source).replace(chr(39), chr(39)*2)}')")
-    argv = [exe, db_arg, "-json", "-c", f"{sql} LIMIT {limit}" if "limit" not in sql.lower() else sql]
+            src_expr = f"{reader}('{str(source).replace(chr(39), chr(39)*2)}')"
+            if "{source}" not in sql and re.search(r"\bdata\b", sql):
+                prefix = (f'CREATE OR REPLACE VIEW "data" AS '
+                          f"SELECT * FROM {src_expr}; ")
+            sql = sql.replace("{source}", src_expr)
+    argv = [exe, db_arg, "-json", "-c",
+            f"{prefix}{sql} LIMIT {limit}" if "limit" not in sql.lower()
+            else f"{prefix}{sql}"]
     proc = subprocess.run(argv, cwd=str(workspace), capture_output=True, text=True, timeout=300)
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "duckdb failed")[-500:])

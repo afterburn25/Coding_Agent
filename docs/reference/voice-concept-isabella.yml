@@ -1,0 +1,66 @@
+name: Isabella Nexus Voice Concepts
+
+on:
+  push:
+    branches:
+      - voice-concept-isabella
+    paths:
+      - .github/workflows/voice-concept-isabella.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-voice-concepts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Download public Kokoro Isabella sample
+        run: |
+          mkdir -p voice-concepts
+          curl -L --fail --retry 3             "https://raw.githubusercontent.com/hangry-labs/kokoroTTS/main/examples/kokorotts-bf_isabella.mp3"             -o voice-concepts/isabella-source.mp3
+          ffprobe -v error -show_entries format=duration             -of default=noprint_wrappers=1:nokey=1 voice-concepts/isabella-source.mp3
+
+      - name: Prepare comparable Isabella excerpt
+        run: |
+          ffmpeg -y -loglevel error             -i voice-concepts/isabella-source.mp3             -t 8             -codec:a libmp3lame -b:a 192k             voice-concepts/01-isabella-original.mp3
+
+      - name: Very subtle Nexus treatment
+        run: |
+          ffmpeg -y -loglevel error             -i voice-concepts/01-isabella-original.mp3             -af "highpass=f=65,equalizer=f=240:t=q:w=1:g=-0.5,equalizer=f=3300:t=q:w=1:g=0.7,acompressor=threshold=-20dB:ratio=1.18:attack=8:release=140,alimiter=limit=0.95"             -codec:a libmp3lame -b:a 192k             voice-concepts/02-isabella-very-subtle.mp3
+
+      - name: Nexus target treatment
+        run: |
+          ffmpeg -y -loglevel error             -i voice-concepts/01-isabella-original.mp3             -filter_complex "[0:a]asplit=2[main][sheen];[main]highpass=f=65,equalizer=f=250:t=q:w=1:g=-0.7,equalizer=f=3300:t=q:w=1:g=1.0,acompressor=threshold=-20dB:ratio=1.25:attack=7:release=120,volume=0.995[dry];[sheen]highpass=f=1200,lowpass=f=6500,adelay=10,volume=0.015[tech];[dry][tech]amix=inputs=2:normalize=0,alimiter=limit=0.95[out]"             -map "[out]" -codec:a libmp3lame -b:a 192k             voice-concepts/03-isabella-nexus.mp3
+
+      - name: Slightly more futuristic treatment
+        run: |
+          ffmpeg -y -loglevel error             -i voice-concepts/01-isabella-original.mp3             -filter_complex "[0:a]asplit=3[main][sheen][air];[main]highpass=f=65,equalizer=f=250:t=q:w=1:g=-0.8,equalizer=f=3400:t=q:w=1:g=1.2,acompressor=threshold=-20dB:ratio=1.3:attack=7:release=115,volume=0.99[dry];[sheen]highpass=f=1200,lowpass=f=6500,adelay=11,volume=0.028[tech];[air]highpass=f=1800,lowpass=f=7500,adelay=21,volume=0.008[halo];[dry][tech][halo]amix=inputs=3:normalize=0,alimiter=limit=0.95[out]"             -map "[out]" -codec:a libmp3lame -b:a 192k             voice-concepts/04-isabella-more-futuristic.mp3
+
+      - name: Write concept notes
+        run: |
+          cat > voice-concepts/README.txt <<'EOF'
+          Nexus Core voice concept comparison
+
+          All four files use the real public Kokoro bf_isabella sample as the base.
+
+          01 - Original Isabella
+          02 - Very Subtle: nearly untouched Isabella, light polish only
+          03 - Nexus: target concept; natural Isabella with a faint synthetic sheen
+          04 - More Futuristic: stronger than target, still intentionally human-first
+
+          No vocoder, obvious flanger, or robotic modulation is used.
+          EOF
+
+      - name: Upload voice samples
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-core-isabella-voice-concepts
+          path: voice-concepts/
+          if-no-files-found: error
+          retention-days: 7

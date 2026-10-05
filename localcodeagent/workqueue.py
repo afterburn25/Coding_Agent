@@ -44,7 +44,8 @@ class WorkQueue:
     def _save(self) -> None:
         atomic_write_text(self.path, json.dumps({"version": 1, "items": self._items}, indent=2, ensure_ascii=False))
 
-    def enqueue(self, prompt: str, *, mode: str = "auto") -> dict[str, Any]:
+    def enqueue(self, prompt: str, *, mode: str = "auto",
+                mission_id: str = "") -> dict[str, Any]:
         with self._lock:
             if len(self._items) >= self.MAX_ITEMS:
                 raise ValueError(f"Work queue is full ({self.MAX_ITEMS} items); wait for tasks to finish or cancel queued items")
@@ -55,6 +56,9 @@ class WorkQueue:
                 "status": "queued",
                 "enqueued_at": time.time(),
             }
+            if mission_id:
+                item["mission_id"] = mission_id
+                item["source"] = "mission_subtask"
             if self.enrich is not None:
                 try:
                     extra = self.enrich(item)
