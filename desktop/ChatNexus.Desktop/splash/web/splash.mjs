@@ -61,6 +61,12 @@ function paint() {
     : state.contained ? 'CORE SECURED · RECOVERY CONTROLS AVAILABLE' : 'AUTOMATIC CONTAINMENT · RECOVERY REMAINS AVAILABLE');
   $('fill').style.transform = `scaleX(${(normal ? externalProgress?.value ?? clamp(clock.time / manifest.duration) : clock.progressAtFault).toFixed(3)})`;
   $('stage').classList.toggle('fault', Boolean(state.fault));
+  // Core-online state: green pulsating status — the timeline's stable-online
+  // point OR the host's canonical CORE SYSTEMS · ONLINE label, whichever
+  // reaches first.
+  const online = state.online || externalProgress?.primary === 'CORE SYSTEMS · ONLINE';
+  $('status').classList.toggle('online', online);
+  $('detail').classList.toggle('online', online);
   updateRecovery(state);
   return state;
 }

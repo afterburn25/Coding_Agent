@@ -553,14 +553,20 @@ internal sealed class SplashForm : Form
         // caption sits at ~0.91·H, so both lines live along the bottom edge.
         using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
         using var secondaryFont = new Font("Segoe UI", 8.5f);
-        var isReady = _progress.ReadyToDismiss || completion > 0;
+        var isReady = _progress.ReadyToDismiss || completion > 0
+            || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
         var primaryRect = new Rectangle(0, ClientSize.Height - 46, ClientSize.Width, 20);
+        // Ready state: green + pulsating — the timer already repaints at
+        // 33ms cadence, so a clock-driven alpha sine gives the same pulse
+        // the cinematic's #status.online keyframes produce.
+        var pulse = (float)(0.5 + 0.5 * Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2 / 1.6));
+        var readyColor = Color.FromArgb(120 + (int)(135 * pulse), 90, 255, 160);
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
-            isReady ? Color.FromArgb(140, 240, 200) : Color.FromArgb(90, 215, 255),
+            isReady ? readyColor : Color.FromArgb(90, 215, 255),
             TextFormatFlags.HorizontalCenter);
         var secondaryRect = new Rectangle(0, ClientSize.Height - 27, ClientSize.Width, 18);
         TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
-            Color.FromArgb(150, 170, 200),
+            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(150, 170, 200),
             TextFormatFlags.HorizontalCenter);
 
         base.OnPaint(e);
