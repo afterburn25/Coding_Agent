@@ -28,6 +28,8 @@
     <Content Include="nexus-core.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="nexus-core-splash.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="nexus-core-icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Cinematic splash: manifest + audio stems + web runtime. -->
+    <Content Include="splash\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

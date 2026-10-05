@@ -320,6 +320,12 @@ class AgentConfig:
     # speech never competes with coding models for VRAM).
     voice_enabled: bool = True
     voice_muted: bool = False
+    # Startup narration (Isabella) + cinematic splash presentation.
+    startup_narration: bool = True
+    silent_startup: bool = False           # no splash audio/narration
+    splash_audio_enabled: bool = True
+    splash_volume: float = 0.45
+    reduced_motion: bool = False
     voice_engine: str = "kokoro"
     voice_preset_id: str = "nexus-synthetic-isabella"
     voice_mode: str = "responses"          # off | responses | responses_activity | manual
@@ -742,6 +748,11 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_output_dir = str(raw.get("image_output_dir", cfg.image_output_dir))
     cfg.voice_enabled = bool(raw.get("voice_enabled", cfg.voice_enabled))
     cfg.voice_muted = bool(raw.get("voice_muted", cfg.voice_muted))
+    cfg.startup_narration = bool(raw.get("startup_narration", cfg.startup_narration))
+    cfg.silent_startup = bool(raw.get("silent_startup", cfg.silent_startup))
+    cfg.splash_audio_enabled = bool(raw.get("splash_audio_enabled", cfg.splash_audio_enabled))
+    cfg.splash_volume = float(raw.get("splash_volume", cfg.splash_volume))
+    cfg.reduced_motion = bool(raw.get("reduced_motion", cfg.reduced_motion))
     cfg.voice_engine = str(raw.get("voice_engine", cfg.voice_engine))
     cfg.voice_preset_id = str(raw.get("voice_preset_id", cfg.voice_preset_id))
     cfg.voice_mode = str(raw.get("voice_mode", cfg.voice_mode))

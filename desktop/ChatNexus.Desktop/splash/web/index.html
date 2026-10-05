@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>Nexus Core</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section id="stage" aria-label="Nexus Core startup">
+    <img id="chamber" src="../assets/nexus-core-splash.png" alt="">
+    <div id="shade"></div>
+    <canvas id="scene" width="1024" height="576" aria-label="Nexus Core startup"></canvas>
+    <div id="missing-art" hidden>NEXUS CORE<span>INTELLIGENCE PROTECTED</span></div>
+    <div id="readout">
+      <div id="track"><div id="fill"></div></div>
+      <p id="status" role="status">INITIALIZING NEXUS CORE</p>
+      <p id="detail">CONTAINMENT SEALED</p>
+    </div>
+    <aside id="recovery" aria-labelledby="recovery-title" hidden inert>
+      <span class="recovery-eyebrow">CONTAINMENT SECURED</span>
+      <h2 id="recovery-title" tabindex="-1">Nexus Core startup failure</h2>
+      <p id="recovery-message">Core initialization could not complete.</p>
+      <p id="recovery-state" role="status">ANALYZING STARTUP FAILURE</p>
+      <p id="recovery-description">Diagnostic analysis is beginning.</p>
+      <p id="recovery-attempt" hidden></p>
+      <details><summary>Details</summary><pre id="error-details"></pre></details>
+      <div class="recovery-actions">
+        <button data-recovery-action="retry">Retry</button>
+        <button data-recovery-action="open-log">Open Log</button>
+        <button data-recovery-action="rollback">Rollback</button>
+        <button data-recovery-action="safe-mode">Safe Mode</button>
+        <button data-recovery-action="exit">Exit</button>
+      </div>
+      <p id="action-feedback"></p>
+    </aside>
+    <noscript><p class="no-script">NEXUS CORE · Animation unavailable</p></noscript>
+  </section>
+  <script type="module" src="splash.mjs"></script>
+</body>
+</html>

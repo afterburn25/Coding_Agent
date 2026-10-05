@@ -243,5 +243,94 @@ class UpgradeIdentityTests(unittest.TestCase):
         self.assertIn("UPGRADE_PRESERVE.marker", WORKFLOW)
 
 
+class CinematicSplashTests(unittest.TestCase):
+    """Contract tests for the production cinematic splash integration.
+
+    The web layer under desktop/ChatNexus.Desktop/splash is pure
+    presentation: readiness authority stays in StartupProgress +
+    RunStartupAsync, and the static WinForms render is the fallback.
+    """
+
+    SPLASH_DIR = ROOT / "desktop" / "ChatNexus.Desktop" / "splash"
+    SPLASH_MJS = SPLASH_DIR / "web" / "splash.mjs"
+    NARRATOR = (ROOT / "desktop" / "ChatNexus.Desktop" / "StartupNarrator.cs")
+
+    def test_cinematic_assets_ship_in_build(self):
+        self.assertIn('splash\\**', CSPROJ)
+        self.assertIn('DestDir: "{app}\\splash"', INSTALLER)
+        self.assertTrue((self.SPLASH_DIR / "animation_manifest.json").is_file())
+        self.assertTrue(self.SPLASH_MJS.is_file())
+        self.assertGreater(
+            len(list((self.SPLASH_DIR / "audio").glob("*.wav"))), 10)
+
+    def test_manifest_is_valid_and_gated(self):
+        import json
+        m = json.loads(
+            (self.SPLASH_DIR / "animation_manifest.json").read_text(encoding="utf-8"))
+        gate_ids = {g["id"] for g in m["gates"]}
+        # Host gate map in Program.cs must cover every manifest gate.
+        for gate in ("services", "authorization", "unlock", "open", "charge", "ready"):
+            self.assertIn(gate, gate_ids)
+            self.assertIn(f'"{gate}"', PROGRAM)
+        self.assertIn("failure", m)      # fault/containment sequence defined
+        self.assertIn("recovery", str(m.get("recoveryHooks", "")) + str(m.keys()))
+
+    def test_webview2_cinematic_layer_with_static_fallback(self):
+        self.assertIn("SetVirtualHostNameToFolderMapping", PROGRAM)
+        self.assertIn("nexus.splash", PROGRAM)
+        self.assertIn("splash-ready", PROGRAM)
+        self.assertIn("splash-error", PROGRAM)      # falls back to static art
+        # Static artwork + progress bar still render beneath/instead.
+        self.assertIn("nexus-core-splash.png", PROGRAM)
+
+    def test_host_posts_progress_gates_and_faults(self):
+        self.assertIn('"set-gate"', PROGRAM)
+        self.assertIn('"set-progress"', PROGRAM)
+        self.assertIn('"trigger-fault"', PROGRAM)
+        self.assertIn('"show-recovery"', PROGRAM)
+        self.assertIn("recovery-action", PROGRAM)
+        self.assertIn("RetryRequested", PROGRAM)
+        self.assertIn("ExitRequested", PROGRAM)
+
+    def test_presentation_never_owns_startup(self):
+        # The cinematic is gated by real milestones — PumpCinematic feeds
+        # gates from _progress.RealProgress, not wall-clock time.
+        self.assertIn("_progress.RealProgress", PROGRAM)
+        self.assertIn("PumpCinematic", PROGRAM)
+        # Splash dismissal is still the real readiness handshake.
+        self.assertIn("ReadyToDismiss", DESKTOP)
+
+    def test_narrator_exact_lines(self):
+        text = self.NARRATOR.read_text(encoding="utf-8")
+        self.assertIn("Nexus Core initializing.", text)
+        self.assertIn("Core systems online.", text)
+        # Exact fault line (split across C# string literals in source).
+        self.assertIn("Startup fault detected. Core Destabilization Imminent.", text)
+        self.assertIn("Core containment engaged. Beginning recovery diagnostics.", text)
+        self.assertIn("Welcome to Nexus Core. I", text)
+        # Welcome only persists after playback actually began.
+        self.assertIn("welcome_played", text)
+        self.assertIn("MarkWelcomePlayed", text)
+        # Narration is async and cancellable — never blocks recovery.
+        self.assertIn("Task.Run", text)
+        self.assertIn("Cancel()", text)
+
+    def test_narration_settings_keys(self):
+        text = self.NARRATOR.read_text(encoding="utf-8")
+        for key in ("voice_enabled", "voice_muted", "silent_startup",
+                    "safe_mode", "startup_narration"):
+            self.assertIn(key, text)
+        self.assertIn("splash_volume", text)
+
+    def test_splash_page_is_pure_presentation(self):
+        src = self.SPLASH_MJS.read_text(encoding="utf-8")
+        # No self-driven readiness: state arrives via host postMessage.
+        self.assertIn("chrome?.webview?.postMessage", src)
+        self.assertIn("'set-gate'", src)
+        self.assertIn("'trigger-fault'", src)
+        self.assertIn("'play-voice'", src)
+        self.assertIn("recovery-action", src)
+
+
 if __name__ == "__main__":
     unittest.main()

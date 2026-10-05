@@ -106,6 +106,24 @@ internal sealed class SplashForm : Form
     private Panel? _failurePanel;
     public event Action? RetryRequested;
     public event Action? ExitRequested;
+    /// <summary>Playback channel for narration bytes — web audio with ducking.</summary>
+    public Func<byte[], string, Task>? VoiceSink { get; set; }
+
+    // Cinematic layer — WebView2 hosting splash/web/index.html. Pure
+    // presentation: the static WinForms render below stays the fallback and
+    // readiness authority lives in StartupProgress/RunStartupAsync.
+    private WebView2? _web;
+    private volatile bool _webReady;
+    private volatile bool _webFailed;
+    private int _lastGateIdx = -1;
+
+    // Manifest gates released at real startup milestones (StartupProgress
+    // ladder anchors) — the timeline can never outrun reality.
+    private static readonly (string Gate, double At)[] GateMap =
+    {
+        ("services", 0.15), ("authorization", 0.30), ("unlock", 0.55),
+        ("open", 0.72), ("charge", 0.85), ("ready", 0.93),
+    };
 
     public SplashForm(string appDir, StartupProgress progress)
     {
@@ -137,15 +155,177 @@ internal sealed class SplashForm : Form
         _timer.Tick += (_, _) =>
         {
             _progress.Tick();
-            Invalidate();
+            PumpCinematic();
+            if (!_webReady) Invalidate();
         };
         _timer.Start();
+
+        _ = InitCinematicAsync();
+    }
+
+    private static bool CfgBool(string appDir, string key, bool fallback)
+    {
+        try
+        {
+            var p = Path.Combine(appDir, "config.json");
+            if (!File.Exists(p)) return fallback;
+            using var doc = JsonDocument.Parse(File.ReadAllText(p));
+            if (doc.RootElement.TryGetProperty(key, out var v))
+            {
+                if (v.ValueKind == JsonValueKind.True) return true;
+                if (v.ValueKind == JsonValueKind.False) return false;
+            }
+        }
+        catch { }
+        return fallback;
+    }
+
+    private async Task InitCinematicAsync()
+    {
+        try
+        {
+            var splashDir = Path.Combine(_appDir, "splash");
+            var indexFile = Path.Combine(splashDir, "web", "index.html");
+            var manifestFile = Path.Combine(splashDir, "animation_manifest.json");
+            if (!File.Exists(indexFile) || !File.Exists(manifestFile))
+            {
+                _webFailed = true;
+                return;
+            }
+
+            var env = await CoreWebView2Environment.CreateAsync(
+                userDataFolder: Path.Combine(_appDir, "data", "webview2-splash"));
+            if (IsDisposed) return;
+            _web = new WebView2
+            {
+                Dock = DockStyle.Fill,
+                Visible = false,
+                DefaultBackgroundColor = Color.FromArgb(4, 8, 18),
+            };
+            Controls.Add(_web);
+            _web.BringToFront();
+            await _web.EnsureCoreWebView2Async(env);
+            if (IsDisposed) return;
+            var cwv = _web.CoreWebView2!;
+            cwv.SetVirtualHostNameToFolderMapping(
+                "nexus.splash", splashDir, CoreWebView2HostResourceAccessKind.Allow);
+            cwv.WebMessageReceived += OnCinematicMessage;
+
+            var query = new List<string>();
+            if (!CfgBool(_appDir, "splash_audio_enabled", true)
+                || CfgBool(_appDir, "silent_startup", false)) query.Add("silent");
+            if (CfgBool(_appDir, "reduced_motion", false)) query.Add("reduced");
+            var url = "https://nexus.splash/web/index.html"
+                + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+            cwv.Navigate(url);
+
+            VoiceSink = async (bytes, _key) =>
+            {
+                if (_web?.CoreWebView2 is null || !_webReady) return;
+                var b64 = Convert.ToBase64String(bytes);
+                _web.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "play-voice", id = _key, b64, duck = 0.35 }));
+                await Task.CompletedTask;
+            };
+        }
+        catch
+        {
+            _webFailed = true;
+            try { _web?.Dispose(); } catch { }
+            _web = null;
+        }
+    }
+
+    private void PostToWeb(object message)
+    {
+        try
+        {
+            if (_webReady && _web?.CoreWebView2 is { } cwv)
+                cwv.PostWebMessageAsJson(JsonSerializer.Serialize(message));
+        }
+        catch { }
+    }
+
+    private void PumpCinematic()
+    {
+        if (!_webReady || _webFailed) return;
+        var milestone = _progress.RealProgress;
+        for (var i = _lastGateIdx + 1; i < GateMap.Length; i++)
+        {
+            if (milestone >= GateMap[i].At)
+            {
+                _lastGateIdx = i;
+                PostToWeb(new { type = "set-gate", id = GateMap[i].Gate, released = true });
+            }
+            else break;
+        }
+        PostToWeb(new
+        {
+            type = "set-progress",
+            value = _progress.DisplayedProgress,
+            primary = _progress.Primary,
+            secondary = _progress.Secondary,
+        });
+    }
+
+    private void OnCinematicMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+            var type = doc.RootElement.GetProperty("type").GetString();
+            switch (type)
+            {
+                case "splash-ready":
+                    _webReady = true;
+                    BeginInvoke(() => { if (_web is not null) _web.Visible = true; });
+                    break;
+                case "splash-error":
+                    _webFailed = true;
+                    BeginInvoke(() =>
+                    {
+                        if (_web is not null) { _web.Visible = false; }
+                        Invalidate();
+                    });
+                    break;
+                case "recovery-action":
+                    var action = doc.RootElement.TryGetProperty("action", out var a)
+                        ? a.GetString() : null;
+                    BeginInvoke(() =>
+                    {
+                        if (action == "retry") RetryRequested?.Invoke();
+                        else if (action == "exit") ExitRequested?.Invoke();
+                        else if (action == "open-log")
+                        {
+                            var log = Path.Combine(_appDir, "data", "logs", "backend-host.log");
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo(
+                                    File.Exists(log) ? log : "notepad.exe",
+                                    File.Exists(log) ? "" : Path.Combine(_appDir, "data", "logs"))
+                                { UseShellExecute = true });
+                            }
+                            catch { }
+                        }
+                    });
+                    break;
+            }
+        }
+        catch { }
     }
 
     public void ShowFailure(string message)
     {
         _timer.Stop();
         _progress.MarkFailed();
+        if (_webReady && !_webFailed)
+        {
+            // Cinematic containment + recovery UI own the fault surface;
+            // nothing here blocks the real recovery path.
+            PostToWeb(new { type = "trigger-fault", message });
+            PostToWeb(new { type = "show-recovery" });
+            return;
+        }
         _failurePanel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -329,6 +509,7 @@ internal sealed class SplashForm : Form
         {
             _timer.Dispose();
             _artwork?.Dispose();
+            try { _web?.Dispose(); } catch { }
         }
         base.Dispose(disposing);
     }
@@ -345,6 +526,10 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     private StartupProgress _progress;
     private SplashForm? _splash;
     private MainForm? _main;
+    private StartupNarrator? _narrator;
+
+    /// <summary>Backend URL once launched — narration needs the voice API.</summary>
+    private string BackendUrl => _main?.BackendUrl ?? "http://127.0.0.1:8765/";
 
     public NexusCoreApplicationContext(string appDir)
     {
@@ -353,7 +538,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
+        _narrator = new StartupNarrator(appDir,
+            playBytes: (bytes, key) => _splash?.VoiceSink?.Invoke(bytes, key) ?? Task.CompletedTask);
         _splash.Show();
+        // Narration starts alongside startup — never blocks it. First
+        // launch speaks the welcome; later launches the short line.
+        _narrator.StartupBegan(BackendUrl);
         _ = RunStartupAsync();
     }
 
@@ -401,6 +591,9 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // then play the brief READY + core-glow completion effect before
             // handing off — still no blank intermediate state.
             _progress.MarkAppReady();
+            // "Core systems online." fires near full charge — truthful
+            // because the interface already posted its ready handshake.
+            _narrator?.NearlyReady(BackendUrl);
             while (!_progress.ReadyToDismiss)
             {
                 await Task.Delay(60);
@@ -411,6 +604,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
+            _narrator?.Cancel();
             _splash?.Close();
             _splash?.Dispose();
             _splash = null;
@@ -421,6 +615,9 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
+            // Fault narration supersedes any friendly line immediately —
+            // then recovery diagnostics are already running.
+            _narrator?.Fault(BackendUrl);
             _splash?.ShowFailure(
                 $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");
         }
@@ -1379,6 +1576,9 @@ internal sealed class MainForm : Form
             _backend?.Dispose();
         };
     }
+
+    /// <summary>Backend base URL once the process is up — used by startup narration.</summary>
+    public string? BackendUrl => _backend?.BaseUrl;
 
     /// <summary>
     /// Backend + WebView2 startup that runs while the form is still hidden.
