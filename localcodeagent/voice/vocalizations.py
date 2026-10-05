@@ -756,6 +756,12 @@ class VocalizationEngine:
             # Saturation/long-session dampening from the persona layer.
             "gesture_bias": max(0.0, min(2.0, float(
                 ctx.get("gesture_bias") or 1.0))),
+            # Speech genome delivery plan — the persona's authored
+            # nonverbal density, normalized around the 0.3 baseline.
+            # Explicit 0.0 must stay 0.0 — "or" would erase a real zero.
+            "nonverbal_rate": max(0.0, min(1.0, float(
+                ctx["nonverbal_rate"]
+                if ctx.get("nonverbal_rate") is not None else 0.3))),
             # Hesitation sounds ("hmm", "um") only when the persona
             # layer says real uncertainty is plausible — never a random
             # 'hmm' on a verified answer in a serious context.
@@ -781,7 +787,8 @@ class VocalizationEngine:
                 * c["vocal_bias"]
                 * _LEVEL_BIAS[c["level"]]
                 * _MOOD_BIAS.get(c["mood"], 1.0)
-                * (c["strength"] / 70.0))
+                * (c["strength"] / 70.0)
+                * min(2.0, c["nonverbal_rate"] / 0.3))
         # Repetition suppression — same style last turn or same category
         # very recently pushes probability down hard.
         recent = list(hist)

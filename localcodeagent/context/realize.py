@@ -942,4 +942,9 @@ REPEAT_ACKS = (
     "As before —",
     "No change on that —",
     "Repeating the earlier answer —",
+    "Same result —",
+    "Unchanged from last time —",
+    "The answer's the same —",
+    "Nothing new here —",
+    "Identical to before —",
 )

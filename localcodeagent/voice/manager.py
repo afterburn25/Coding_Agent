@@ -233,15 +233,22 @@ class VoiceManager:
 
         ``delivery`` is a SpeechDeliveryPlan dict from the persona speech
         genome — the voice layer consumes what the engine can express
-        (``pace`` → job speed; ``energy``/``warmth``/``emphasis_level`` →
-        bounded per-utterance pitch/gain deltas); characteristics with no
-        engine control are documented hints, never fabricated."""
+        (``pace`` → job speed + register damp; ``energy``/``warmth``/
+        ``emphasis_level``/``seriousness`` → bounded pitch/gain deltas;
+        ``pause_hint`` → real clause-boundary pause; ``nonverbal_rate``
+        → vocalization keep-probability). ``emphasis_spans`` has no
+        engine control and stays a documented hint, never fabricated."""
         streamer = self._streamers.pop(task_id, None)
         pace = 1.0
         try:
             if isinstance(delivery, dict):
                 pace = max(0.5, min(1.8,
                                     float(delivery.get("pace") or 1.0)))
+                # Register-aware delivery: technical/formal registers read
+                # a touch slower for clarity; casual stays untouched.
+                if str(delivery.get("register") or "") in (
+                        "technical", "formal"):
+                    pace = max(0.5, min(1.8, pace * 0.97))
         except (TypeError, ValueError):
             pace = 1.0
         try:
@@ -291,6 +298,7 @@ class VoiceManager:
             events = []
         if not text.strip():
             return None
+        text = _apply_pause_hint(text, delivery)
         with self._lock:
             seq = self._spoken_tasks.get(task_id, 0)
             self._spoken_tasks[task_id] = seq + 1
@@ -391,6 +399,7 @@ class VoiceManager:
                 ctx=self._persona_ctx()).speech_text
         if not spoken:
             raise VoiceEngineError("nothing speakable in the provided text")
+        spoken = _apply_pause_hint(spoken, delivery)
         pcm, sr, seg = self._synthesize(spoken, preset, speed,
                                       delivery=delivery)
         seg_id = self._register_segment(seg, task_id or "manual")
@@ -496,12 +505,16 @@ class VoiceManager:
         """Fold speech-genome delivery-plan characteristics the engine
         can express into a per-utterance preset variant.
 
-        ``pace`` rides the job's speed (set in ``finish_task``); here
-        ``energy``/``warmth``/``emphasis_level`` become small bounded
-        pitch/gain deltas around neutral 0.5 so the persona voice
-        signature stays intact. ``pause_hint``/``emphasis_spans``/
-        ``nonverbal_rate``/``register``/``seriousness`` have no engine
-        control and remain documented hints — never faked."""
+        ``pace`` rides the job's speed (set in ``finish_task``, with a
+        small register-aware damp for technical/formal); here
+        ``energy``/``warmth``/``emphasis_level``/``seriousness`` become
+        small bounded pitch/gain deltas around neutral so the persona
+        voice signature stays intact. ``pause_hint`` inserts a real
+        clause-boundary pause via ``_apply_pause_hint`` and
+        ``nonverbal_rate`` scales vocalization keep-probability in the
+        VocalizationEngine. ``emphasis_spans`` remains a documented
+        hint (span-protection metadata) — Kokoro has no per-word
+        emphasis control, so it is never faked."""
         if not isinstance(delivery, dict) or not delivery:
             return preset
 
@@ -517,6 +530,14 @@ class VoiceManager:
         d_pitch = ((energy - 0.5) * 1.0 - (warmth - 0.5) * 0.6
                    + emphasis * 0.2)
         d_gain = (energy - 0.5) * 4.0 + emphasis * 1.2
+        # Seriousness-aware delivery: grave contexts soften and flatten
+        # the voice a touch — bounded so the persona signature survives.
+        try:
+            if int(delivery.get("seriousness") or 0) >= 2:
+                d_pitch -= 0.15
+                d_gain -= 0.6
+        except (TypeError, ValueError):
+            pass
         d_pitch = max(-1.0, min(1.0, d_pitch))
         d_gain = max(-3.0, min(3.0, d_gain))
         if abs(d_pitch) < 0.05 and abs(d_gain) < 0.15:
@@ -644,6 +665,38 @@ class _CachedAudio:
     """Lightweight stand-in so callers can read shape[0] on cache hits."""
     def __init__(self, frames: int) -> None:
         self.shape = (frames,)
+
+
+def _apply_pause_hint(text: str, delivery: dict | None) -> str:
+    """pause_hint → one real mid-sentence pause. High pause density marks
+    the strongest clause boundary (em-dash > semicolon > comma, nearest
+    the middle) with an ellipsis the engine renders as an actual beat.
+    Speech text only — display text and code/exact spans are never
+    touched. At most one insertion per sentence."""
+    if not isinstance(delivery, dict):
+        return text
+    try:
+        hint = float(delivery.get("pause_hint") or 0.0)
+    except (TypeError, ValueError):
+        return text
+    if hint < 0.55 or len(text) < 60:
+        return text
+    # Plain prose only — never disturb code-ish or numeric-dense text.
+    if "`" in text or "{" in text or text.count("=") > 2:
+        return text
+    best = None
+    for delim in (" — ", "; ", ", "):
+        mid = len(text) / 2
+        cands = [m.end() - len(delim) + 1 for m in
+                 re.finditer(re.escape(delim), text)]
+        # Only boundaries with a real clause on both sides.
+        cands = [c for c in cands if c > 20 and len(text) - c > 20]
+        if cands:
+            best = min(cands, key=lambda c: abs(c - mid))
+            break
+    if best is None:
+        return text
+    return text[:best] + " …" + text[best:]
 
 
 def _lang_tag(language: str) -> str:

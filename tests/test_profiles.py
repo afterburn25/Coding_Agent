@@ -743,6 +743,61 @@ class TestVoiceDelivery(unittest.TestCase):
             vmap = {}
         self.assertEqual(vmap, {})
 
+    def test_seriousness_softens_delivery(self):
+        # seriousness >= 2 applies a bounded calm: lower gain + pitch.
+        from localcodeagent.voice.types import VoicePreset
+        from localcodeagent.voice.manager import VoiceManager
+        vm = VoiceManager.__new__(VoiceManager)
+        base = VoicePreset(id="x", name="x")
+        neutral = vm._delivery_preset(base, {"seriousness": 0})
+        grave = vm._delivery_preset(base, {"seriousness": 3})
+        self.assertLess(grave.output_gain_db, neutral.output_gain_db)
+        self.assertLess(grave.pitch_semitones, neutral.pitch_semitones)
+        # Bounded — never beyond the documented delta range.
+        self.assertGreaterEqual(grave.output_gain_db, -3.6)
+
+    def test_pause_hint_inserts_real_pause(self):
+        from localcodeagent.voice.manager import _apply_pause_hint
+        text = ("The scheduler stalled on the queue lock, and after the "
+                "retry the worker recovered cleanly without losing state.")
+        out = _apply_pause_hint(text, {"pause_hint": 0.8})
+        self.assertIn("…", out)
+        self.assertEqual(out.count("…"), 1)      # at most one insertion
+        self.assertEqual(_apply_pause_hint(text, {"pause_hint": 0.2}), text)
+        self.assertEqual(_apply_pause_hint(text, None), text)
+        self.assertEqual(_apply_pause_hint(text, {}), text)
+        # Short prose and code-ish text are never touched.
+        self.assertEqual(_apply_pause_hint("short sentence, sure.",
+                                           {"pause_hint": 0.9}),
+                         "short sentence, sure.")
+        codeish = ("the config sets a = 1, b = 2, c = 3 and the map "
+                   "{'x': 1} stays identical across every single run")
+        self.assertEqual(_apply_pause_hint(codeish, {"pause_hint": 0.9}),
+                         codeish)
+
+    def test_register_pace_math(self):
+        # Direct check of the pace fold in finish_task via a streamer.
+        from localcodeagent.voice.manager import VoiceManager
+        vm = VoiceManager.__new__(VoiceManager)
+        vm.config = type("C", (), {"voice_enabled": True,
+                                   "voice_muted": False,
+                                   "voice_mode": "responses"})()
+        vm._streamers = {}
+        vm._spoken_tasks = {}
+        jobs = []
+        vm.enqueue = lambda tid, s, **kw: jobs.append(kw)
+        vm.vocal = type("V", (), {"end_task": lambda self, t: None})()
+
+        class _Streamer:
+            emitted_count = 0
+            def flush(self):
+                return ["hello there, this is a test"]
+
+        vm._streamers["t"] = _Streamer()
+        vm.finish_task("t", delivery={"pace": 1.2, "register": "formal"})
+        self.assertTrue(jobs)
+        self.assertAlmostEqual(jobs[0]["speed"], 1.2 * 0.97, places=3)
+
 
 # ---------------------------------------------------------------- migration
 

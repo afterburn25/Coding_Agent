@@ -1537,6 +1537,16 @@ class AppState:
         except Exception:
             return {}
 
+    @staticmethod
+    def _nv_rate(act: dict) -> float:
+        """Genome vocal.nonverbal_rate — explicit 0.0 stays 0.0."""
+        try:
+            v = ((act.get("speech_genome") or {}).get("vocal") or {}) \
+                .get("nonverbal_rate")
+            return 0.3 if v is None else max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.3
+
     def _vocalization_context(self) -> dict:
         """Persona context for the VocalizationEngine: profile id, persona
         family, strength, mood, adult gate and the profile's vocalization
@@ -1561,6 +1571,10 @@ class AppState:
                     and not act.get("adult_gated"),
                     "level": str(act.get("vocalizations") or "natural"),
                     "traits": act.get("traits") or {},
+                    # Speech genome vocal.nonverbal_rate scales the
+                    # keep-probability of detected non-verbals — a real
+                    # gate, not a hint (0 = silent, ~0.3 baseline).
+                    "nonverbal_rate": self._nv_rate(act),
                 })
                 try:
                     from .personality.behavior import (
