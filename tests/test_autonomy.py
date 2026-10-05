@@ -1070,6 +1070,17 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(classify_failure("AssertionError: 1 != 2 test failed"),
                          FailureClass.TEST_FAILURE)
         self.assertEqual(classify_failure("weirdness"), FailureClass.UNKNOWN)
+        # Demand-eviction deferral and llama.cpp OOM-allocation crashes are
+        # resource pressure, not UNKNOWN — they must take the CUDA_OOM
+        # playbook (evict → wait → retry) instead of generic retries.
+        self.assertEqual(classify_failure(
+            "model 'qwen3-14b' was evicted to free RAM for queued work and "
+            "still would not fit — launch deferred"),
+            FailureClass.CUDA_OOM)
+        self.assertEqual(classify_failure(
+            "llama-server exited with code 1 — failed to allocate CPU "
+            "buffer of size 5234491392"),
+            FailureClass.CUDA_OOM)
 
     def test_playbook_bounded(self):
         with tempfile.TemporaryDirectory() as td:

@@ -37,7 +37,8 @@ class FailureClass(str, Enum):
 
 
 _PATTERNS: list[tuple[FailureClass, tuple[str, ...]]] = [
-    (FailureClass.CUDA_OOM, ("out of memory", "cuda oom", "cublas", "vram", "insufficient memory")),
+    (FailureClass.CUDA_OOM, ("out of memory", "cuda oom", "cublas", "vram", "insufficient memory",
+                            "launch deferred", "still would not fit", "failed to allocate")),
     (FailureClass.DISK_LOW, ("no space left", "disk full", "disk_low", "enosp")),
     (FailureClass.DATABASE_LOCKED, ("database is locked", "sqlite3.operationalerror: database is locked")),
     (FailureClass.DATABASE_CORRUPT, ("database disk image is malformed", "database corruption", "file is not a database")),
