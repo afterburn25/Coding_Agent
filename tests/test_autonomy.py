@@ -1345,7 +1345,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
                 return {"ok": True, "output": "ok"}
 
             sup = make_sup(td, executor=executor,
-                           approval_timeout_seconds=0.01)
+                           approval_timeout_seconds=0.2)
             m = sup.create_mission(
                 objective="x",
                 budgets={"max_approval_retries": 2},
@@ -1353,11 +1353,11 @@ class SupervisorLifecycleTests(unittest.TestCase):
             sup.start_mission(m["id"])
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            time.sleep(0.03)
+            time.sleep(0.25)
             sup.tick()
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            time.sleep(0.03)
+            time.sleep(0.25)
             sup.tick()
             final = sup.missions.get(m["id"])
             self.assertEqual(final["status"], "blocked")
