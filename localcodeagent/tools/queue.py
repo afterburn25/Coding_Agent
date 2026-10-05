@@ -17,7 +17,13 @@ def register_queue_tools(registry: ToolRegistry, queue) -> None:
         if not prompt:
             return "ERROR: prompt is required"
         try:
-            item = queue.enqueue(prompt, mode=str(args.get("mode") or "auto"))
+            # Tools run on a pooled thread, so the mission lane's thread-local
+            # marker can't reach here — the orchestrator stamps the owning
+            # mission into task_tls instead.
+            tls = registry.context.get("task_tls")
+            mid = str(getattr(tls, "mission_id", "") or "") if tls else ""
+            item = queue.enqueue(prompt, mode=str(args.get("mode") or "auto"),
+                                 mission_id=mid)
         except ValueError as exc:
             return f"ERROR: {exc}"
         return json.dumps({"queued": item["id"], "position": len(queue), "prompt": item["prompt"]})

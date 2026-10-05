@@ -19,26 +19,52 @@ REFERENCE_TERMS: dict[str, tuple[str, ...]] = {
     ),
     "image": (
         "the image", "that image", "this image", "the picture",
-        "that picture", "the photo", "that photo", "it", "that one",
+        "that picture", "the photo", "that photo", "that one",
         "the same", "the previous image", "the last image",
         "previous image", "last image", "that render",
+        "what you just made", "the one you just made",
     ),
     "artifact": (
         "the app", "the project", "the repository", "the repo",
         "that repo", "the branch", "that branch", "the build",
         "the function", "that function", "the code", "the file",
-        "that file",
+        "that file", "the model", "that model", "the page",
+        "that page", "the setting", "that setting", "the commit",
+        "that commit", "the response", "that response",
+        "what we were working on",
     ),
     "error": (
         "the error", "that error", "the bug", "that bug", "the failure",
         "that failure", "the issue", "that issue", "it broke",
+        "the problem", "that problem", "what broke", "what just broke",
     ),
     "ordinal": (
         "the first one", "the second one", "the third one",
         "the other one", "the previous one", "the last one",
-        "the next one", "another one",
+        "the next one", "another one", "the earlier one",
+        "the one from earlier", "the one you just mentioned",
+        "the other version", "the rest", "the middle one",
+        "not that one",
     ),
 }
+
+# Bare pronouns resolve by ACTIVE DOMAIN, not by nearest noun — "fix it"
+# binds the active error; "make it darker" binds the active image.
+_BARE_PRONOUN_RE = re.compile(
+    r"\b(it|that|this|them|they|those)\b", re.IGNORECASE)
+
+# Verb hints that disambiguate which domain a bare pronoun points at.
+_VERB_DOMAIN = (
+    (re.compile(r"\b(?:fix|repair|debug|solve|resolve|patch|unbreak|"
+                r"diagnose|investigate)\b", re.I), "error"),
+    (re.compile(r"\b(?:darker|brighter|bigger|smaller|wider|closer|"
+                r"blonde|red|blue|full\s+body|zoom|crop|background|"
+                r"make|change|add|remove|edit|regenerate|redraw|"
+                r"recreate|upscale|enhance)\b", re.I), "image"),
+    (re.compile(r"\b(?:push|commit|deploy|merge|rebase|checkout|"
+                r"delete|rename|move|open|run|restart|stop|start|"
+                r"install|update|revert|undo)\b", re.I), "artifact"),
+)
 
 _TERM_TO_KIND: list[tuple[re.Pattern, str]] = [
     (re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE), kind)
@@ -77,7 +103,8 @@ def resolve_references(text: str, active: Any) -> dict[str, str]:
                     (e for e in recent if e.get("kind") == "image"), None)
                 label = str((img or {}).get("label") or "")
         elif kind == "error":
-            label = getattr(active, "last_error", "") or ""
+            label = getattr(active, "active_error", "") or \
+                getattr(active, "last_error", "") or ""
         elif kind == "artifact":
             label = getattr(active, "active_project", "") or \
                 getattr(active, "active_artifact", "") or ""
@@ -98,3 +125,55 @@ def resolve_references(text: str, active: Any) -> dict[str, str]:
         if label:
             resolved[term] = str(label)[:160]
     return resolved
+
+
+def _domain_label(active: Any, domain: str) -> str:
+    if domain == "image":
+        return getattr(active, "active_image_subject", "") or \
+            getattr(active, "active_image_prompt", "") or ""
+    if domain == "error":
+        return getattr(active, "active_error", "") or \
+            getattr(active, "last_error", "") or ""
+    if domain == "artifact":
+        return getattr(active, "active_project", "") or \
+            getattr(active, "active_artifact", "") or \
+            getattr(active, "active_subject", "") or ""
+    return ""
+
+
+def resolve_with_report(text: str, active: Any) -> dict[str, Any]:
+    """Rich resolution — typed terms plus bare pronouns bound by active
+    domain. Returns {"resolved": {term: label}, "ambiguous": [term]}.
+
+    A bare pronoun only binds when exactly one live domain matches —
+    two plausible antecedents mean ASK, never guess.
+    """
+    report: dict[str, Any] = {"resolved": {}, "ambiguous": []}
+    if active is None:
+        return report
+    report["resolved"] = resolve_references(text, active)
+    already = {t.lower() for t in report["resolved"]}
+    t = str(text or "")
+    pronouns = [m.group(0) for m in _BARE_PRONOUN_RE.finditer(t)
+                if m.group(0).lower() not in already]
+    if not pronouns:
+        return report
+    hint = next((dom for pat, dom in _VERB_DOMAIN if pat.search(t)), "")
+    candidates: dict[str, str] = {}
+    for dom in ("error", "image", "artifact"):
+        label = _domain_label(active, dom)
+        if label:
+            candidates[dom] = label
+    image_live = bool(getattr(active, "image_active", lambda **k: False)())
+    for pron in pronouns:
+        if hint and candidates.get(hint):
+            report["resolved"][pron] = candidates[hint]
+            continue
+        live = {d: l for d, l in candidates.items()
+                if d != "image" or image_live}
+        if len(live) == 1:
+            report["resolved"][pron] = next(iter(live.values()))
+        elif len(live) > 1:
+            report["ambiguous"].append(pron)
+        # zero candidates: unbound, not ambiguous — nothing to bind to
+    return report

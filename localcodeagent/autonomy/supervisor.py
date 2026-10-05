@@ -167,8 +167,16 @@ class AutonomousSupervisor:
         self._started_once = False
         self._gate_lock = threading.RLock()
         self._approval_timeout_seconds = approval_timeout_seconds
-        # WorkQueue attribution hook set by the server wiring.
-        self._lane_mission: str | None = None
+        # WorkQueue attribution hook read by the server wiring. Thread-local:
+        # only enqueues issued ON the mission lane thread (queue_task tool
+        # calls inside the mission's agent run) are attributed — a user chat
+        # enqueued from the request thread while a mission is in-flight must
+        # never be stamped as a mission subtask.
+        self._lane = threading.local()
+
+    @property
+    def lane_mission_id(self) -> str | None:
+        return getattr(self._lane, "mission_id", None)
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -1271,11 +1279,11 @@ class AutonomousSupervisor:
                     return
                 # Mark the mission as owning the agent lane while the run is
                 # in-flight (queue_task enrichment hooks read this).
-                self._lane_mission = mission_id
+                self._lane.mission_id = mission_id
                 try:
                     result = self._executor(m, node, emit)
                 finally:
-                    self._lane_mission = None
+                    self._lane.mission_id = None
             elif kind == "verify":
                 result = self._verify_runner(m, node)
             elif kind == "internal":

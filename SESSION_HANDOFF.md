@@ -11,6 +11,147 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
+## 2026-10-05 — Universal context intelligence + non-repetitive persona (IN PROGRESS)
+
+Scope: the intent/context overhaul — Nexus understands language by
+meaning across images, GitHub, coding, repair, tools, and multi-turn
+follow-ups, and stops replaying identical canned prose.
+
+### Architecture
+
+- `localcodeagent/context/intent.py` — `IntentEnvelope`, the structured
+  per-turn understanding object (intent, action, subject, constraints,
+  references, corrections, conditionals, alternatives, ordinals,
+  comparisons, temporal markers, topic shifts, ambiguity, confidence).
+  `understand_turn()` = classification + post-pass reference resolution.
+  Deterministic fast paths; confidence drives routing, no model call on
+  the fast lane. `to_trace()` emits developer-visible routing evidence
+  (intent/confidence/references/route) — never chain-of-thought.
+- `localcodeagent/context/active_context.py` — `ActiveContext` persisted
+  on the conversation row (restart survival for free). Active vs
+  retired entities, pending clarifications, `active_error` bound from
+  the task ledger, TTL decay (active 6h / entities 72h), bounded
+  recent-entity list.
+- `localcodeagent/context/references.py` — typed-term + bare-pronoun
+  resolution. Pronouns bind by ACTIVE DOMAIN with verb hints; two live
+  antecedents → ambiguous (ask, never guess).
+- `localcodeagent/context/realize.py` — `PersonaRenderer`,
+  `SemanticResponse`, `ResponseLedger` (rolling fingerprints, opening/
+  closing cooldowns, lexical-similarity near-duplicate guard),
+  `repetition_score` metric. Variant banks for greetings, capabilities,
+  self-learning, identity — facts stable, wording rotates.
+- Routing precedence: newest explicit instruction → corrections →
+  pending clarification → compound/conditional → explicit actions
+  (image/github/tool) → contextual follow-ups → identity/utility →
+  conversation. `env.suppresses_canned()` blocks builtin replies from
+  hijacking action intents; `env.direct_image()` makes image intent
+  authoritative.
+- `identity.response_for` gained an action-request guard ("draw me a
+  picture of your creator" is a task, not an identity question) plus
+  fact-stable phrasing variants.
+- `web/app.js` `builtinClientReply` gained an action/visual-request
+  early-return so client canned replies can't swallow task turns.
+- Answer-Memory replay: canonical answer passes through verbatim; when
+  the SAME asked question replays the same answer, an honest
+  repeat-acknowledgement wrapper varies (keyed on asked text + answer).
+
+### Language coverage (deterministic)
+
+- Image paraphrases: "generate an image of", "show me a picture of",
+  "let me see", "can I see", "give me", "I want to see what X would
+  look like", "visualize", "draw/paint/sketch", "generate an adult
+  woman in a red dress" (person-subject rule). Object semantics veto
+  ("show me the code/logs/diff", "create a website with a logo" → the
+  first-named artifact wins).
+- GitHub paraphrases: "check GitHub", "what did Devin just push",
+  "anything new land", "see what's happening with the repo".
+- Repair paraphrases bind `active_error` from the task ledger:
+  "fix it", "sort that out", "get that working again", "repair what
+  just broke", "it's still broken".
+- Follow-ups/corrections preserve subject + attributes: "make her
+  blonde", "full body", "no, red hair", "that ain't it", "the image is
+  too close".
+- Compound actions retain every clause ("check the repo, fix the
+  failing test, run everything, and push it" → 4 retained intents).
+  Conditionals preserved as structures ("if tests fail, fix them and
+  rerun"; "use InvokeAI unless it fails, then try ComfyUI").
+- Topic shifts ("now check github", "anyway…") + returns ("back to
+  that angel image") resolve against live and retired entities.
+- Whitelisted typo map (githib→github, pictue→picture, …) — arbitrary
+  text, tokens, paths, hashes never touched.
+- Ordinals ("the second one"), comparisons ("which model is faster"),
+  temporal markers ("earlier", "before the update") annotate the
+  envelope for downstream resolution.
+
+### Tests
+
+- `tests/test_context_intent.py` — 42 tests: paraphrase classes,
+  veto semantics, follow-ups, pronouns/ambiguity, compounds,
+  conditionals, topic moves, typos, implicit reports, restart
+  serialization round-trip, TTL decay, bounded growth, renderer
+  variation/fingerprints, identity fact stability, 300-turn
+  bounded-memory run.
+- Regression sweep: `test_answer_memory`, `test_identity`,
+  `test_image`, `test_conversation_policy`, `test_router`,
+  `test_regressions`, `test_fast_lane`, `test_workflow`,
+  `test_conversation_growth` — all green after fixes (see below).
+
+### Regressions found + fixed during integration
+
+- `attach` prepared after the envelope → moved attachment prep earlier.
+- "Which model generates images with?" misrouted to image →
+  interrogative-lead veto added.
+- "create a website with a logo" misrouted → first-named-artifact
+  precedence.
+- "edit image <path>" wrongly direct-routed → literal edit-image ops
+  stay tool-routed.
+- Answer-Memory repeat wrapper keyed on asked-text+answer so different
+  questions sharing an answer aren't marked "same answer as before".
+- Repetition ledger is shared across turns (intended); builtin variant
+  banks carry the required fact phrases so semantic slots never drift.
+- **Mission-lane pollution**: mission/self-repair subtask prompts flow
+  through `agent.run()` and were folding into the user's interactive
+  `ActiveContext` — a mid-dogfood "Work the scoped lane of this
+  mission" turn classified as coding and retired the live image
+  context. `update_active_context` now only folds `auto`/`ask`/`plan`
+  turns. Verified live: mission subtasks no longer disturb the image
+  subject.
+- Follow-up fragment merge on the direct path: "make her hair red"
+  originally queued the bare fragment. `_direct_image_result` now
+  merges the preserved `active_image_subject` — live job prompt:
+  `a photorealistic adult angel with black wings, hair red`.
+
+### Live dogfood evidence (real install, port 5199)
+
+- "draw a photorealistic adult angel with black wings" →
+  `direct_image_route`, job queued, no identity/canned hijack.
+- "make her hair red" → merged prompt above queued against the same
+  job lane; `active_context` on the conversation row shows
+  `active_intent=image_followup` + `active_image_subject` intact.
+- **Restart persistence**: backend hard-restarted; "now make her wings
+  white instead" resolved the persisted angel subject and queued
+  `a photorealistic adult angel with black wings, wings white instead`
+  — context survives restart on disk per spec.
+- An autonomous repair mission (`m-2ae60b5e9d60`, repairing the CI
+  splash-test failure) occupied the lane mid-dogfood — queued chat
+  drained correctly through the mission-subtask path; `_preempt_for_chat`
+  + bounded queue semantics intact.
+- Live image backends: ComfyUI jobs finish; InvokeAI had
+  output-tensor-directory failures (`…\outputs\tensors\tmp* does not
+  exist`) — environment/backend state, unrelated to this change set.
+
+### Known limitations / next
+
+- Compound secondary actions are retained as metadata; full multi-step
+  execution of trailing clauses is scheduler work, not yet wired.
+- Ambiguity surfacing is marked on the envelope; the UI does not yet
+  render a focused clarification prompt for ambiguous references.
+- `web/app.js` builtin replies gained a small variant bank
+  (`CLIENT_REPLY_VARIANTS` rotation); deeper JS-side sharing with the
+  Python `PersonaRenderer` is future work.
+- Frozen backend rebuilt post-change-set and deployed to the live
+  install below.
+
 ## 2026-10-05 — Integrated reliability closeout (branch `milestone/integrated-reliability-closeout`, IN PROGRESS)
 
 Live verification on the real install (`D:\Nexus_Core`, RTX 3080 Ti 12GB,
@@ -1583,7 +1724,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `1705 tests` passing (2 environment skips).
+Expected at this checkpoint: `2049 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

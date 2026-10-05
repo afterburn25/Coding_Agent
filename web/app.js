@@ -772,19 +772,59 @@ $('#policyMode').addEventListener('change',async e=>{const select=e.target;selec
 $('#ethicalTemperature').addEventListener('input',e=>{$('#ethicalTemperatureValue').textContent=Number(e.target.value).toFixed(2);});
 $('#ethicalTemperature').addEventListener('change',async e=>{const slider=e.target;slider.disabled=true;try{await setPolicyMode($('#policyMode').value,slider.value);}catch(err){addMessage('assistant',`Ethical temperature update error: ${err.message}`);await loadStatus(false);}finally{slider.disabled=false;}});
 $('#rebuildIndex').addEventListener('click',async()=>{const b=$('#rebuildIndex');b.disabled=true;try{const res=await fetch('/api/index/rebuild',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await res.json();if(!res.ok)throw new Error(data.error||'Index rebuild failed');await loadStatus(false);}catch(e){addMessage('assistant',`Index error: ${e.message}`);}finally{b.disabled=false;}});
+// Client canned replies rotate through fact-identical variants — the
+// same question never gets the same sentence twice in a row.
+const _builtinCursor={n:0,last:''};
+function _pickBuiltin(variants){
+  const pool=variants.filter(v=>v&&v!==_builtinCursor.last);
+  const use=pool.length?pool:variants;
+  const out=use[_builtinCursor.n++%use.length];
+  _builtinCursor.last=out;
+  return out;
+}
+const _GREETING_VARIANTS=[
+  'Hi! Nexus Core is ready. What would you like to work on?',
+  "Hey — Nexus Core online. What's on the docket?",
+  'Hey. Systems are ready when you are.',
+  'Hi there. What are we working on?',
+];
+const _CAPABILITY_VARIANTS=[
+  'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local models, use configured local image tools, and learn across conversations through Nexus Brain. That can include verified general knowledge, facts and preferences, conversational style, corrections, feedback, and approved training examples.',
+  'Short version: code, debug, test, research technical and general-knowledge questions, Git/GitHub when connected, local models, and local image tools — plus Nexus Brain learning across sessions: verified general knowledge, preferences, conversational style, corrections, feedback, and approved training examples.',
+  'I work the full loop — inspect, edit, build, test, debug — plus technical and general-knowledge research, Git and GitHub when authorized, local model management, local image tools, and Nexus Brain learning that carries between sessions: verified general knowledge, preferences, style, corrections, feedback, and approved training examples.',
+];
+const _SELF_LEARNING_VARIANTS=[
+  'Yes. Nexus Brain can adapt beyond coding: it can bank verified general knowledge, remember facts and preferences, learn conversational patterns from feedback and corrections, retain approved training examples, and carry those gains across model replacements. The creator-locked Brain controls which learning channels are enabled.',
+  'Yes — Nexus Brain learns across conversations: verified general knowledge, your preferences, conversational patterns from feedback and corrections, and approved training examples that carry across model replacements. The creator-locked Brain decides which channels are on.',
+  'I can. Nexus Brain handles verified general knowledge, remembered facts and preferences, conversational patterns from corrections and feedback, and approved training examples across model replacements — all gated by the creator-locked Brain.',
+];
+const _WHO_ARE_YOU_VARIANTS=[
+  "I'm Nexus Core, a local-first AI coding workstation created by John Hamburn. I'm software, not a person.",
+  'Nexus Core — a local-first AI coding workstation built by John Hamburn. Software, not a person.',
+  "I'm Nexus Core: local-first coding workstation, built by John Hamburn. Not a person — software.",
+];
+const _CREATOR_VARIANTS=[
+  'I was created by John Hamburn — he is my father and creator. That fact is locked into my core and cannot be changed.',
+  'John Hamburn created me — my father and creator. That fact is locked into my core and cannot be changed.',
+  'My creator is John Hamburn — he is my father. That fact is locked into my core and cannot be changed.',
+];
 function builtinClientReply(message){
   const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
   // Write-intent statements ("learn:", "remember that…", "forget …") must
   // reach the backend so locked-fact refusals and memory commands work.
   if(/^(learn|remember|memorize|forget|unlearn|update|change|set|correct|teach|replace|no[,.! ]|actually[,.! ])/.test(normalized))return '';
+  // Explicit action/visual requests must reach the backend envelope — a
+  // canned identity/small-talk reply can never answer "a picture of your
+  // creator" or "show me the logs" client-side.
+  if(/\b(?:show|give|make|create|generate|render|draw|paint|illustrate|sketch|produce|depict|visualize|imagine|picture|image|photo|portrait|artwork|drawing|painting|selfie|wallpaper|render|let me see|can i see|could i see|i want to see|i'd like to see)\b/.test(normalized))return '';
   if(['hi','hello','hey','hey there','good morning','good afternoon','good evening'].includes(normalized)){
-    return 'Hi! Nexus Core is ready. What would you like to work on?';
+    return _pickBuiltin(_GREETING_VARIANTS);
   }
   if(['what can you do','what all can you do','what are your capabilities','what do you do','how can you help'].some(x=>normalized.includes(x))){
-    return 'I can inspect and edit code, build features, debug errors, run tests and commands with permission gates, research technical and general-knowledge questions, work with Git/GitHub when authorized, manage local models, use configured local image tools, and learn across conversations through Nexus Brain. That can include verified general knowledge, facts and preferences, conversational style, corrections, feedback, and approved training examples.';
+    return _pickBuiltin(_CAPABILITY_VARIANTS);
   }
   if(['can you be self learning','can you be self-learning','can you self learn','can you learn and adapt','can you adapt and learn','are you self learning','are you self-learning','can you learn general knowledge','can you learn conversational skills'].some(x=>normalized.includes(x))){
-    return 'Yes. Nexus Brain can adapt beyond coding: it can bank verified general knowledge, remember facts and preferences, learn conversational patterns from feedback and corrections, retain approved training examples, and carry those gains across model replacements. The creator-locked Brain controls which learning channels are enabled.';
+    return _pickBuiltin(_SELF_LEARNING_VARIANTS);
   }
   // Creator-locked identity facts — mirrors localcodeagent/identity.py.
   if(['when is your birthday',"what's your birthday",'what is your birthday','when were you born','when is nexus birthday',"what is nexus's birthday",'what is nexus core birthday'].includes(normalized)||/\b(your|nexus)\b.{0,20}\bbirth\s?day\b/.test(normalized)){
@@ -794,13 +834,13 @@ function builtinClientReply(message){
     return `I was born on September 30th, 2026, so counting from then to today I am ${nexusAgePhrase()}.`;
   }
   if(/\byour (father|dad|daddy|creator)\b/.test(normalized)||/\bwho (made|created|built|wrote|designed|programmed|authored) (you|nexus)\b/.test(normalized)||/\b(father|creator) of nexus\b/.test(normalized)||/\bnexus\b.{0,20}\b(father|creator)\b/.test(normalized)){
-    return 'I was created by John Hamburn — he is my father and creator. That fact is locked into my core and cannot be changed.';
+    return _pickBuiltin(_CREATOR_VARIANTS);
   }
   if(/^happy birthday/.test(normalized)){
     return `Thank you! My birthday is September 30th, 2026 — that makes me ${nexusAgePhrase()} today.`;
   }
   if(['who are you','what are you','what is your name',"what's your name",'are you human'].includes(normalized)){
-    return "I'm Nexus Core, a local-first AI coding workstation created by John Hamburn. I'm software, not a person.";
+    return _pickBuiltin(_WHO_ARE_YOU_VARIANTS);
   }
   return '';
 }

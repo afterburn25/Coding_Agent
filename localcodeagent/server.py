@@ -2627,7 +2627,7 @@ class AppState:
     def _queue_enrich_mission(self, item: dict) -> dict:
         """Attribute a queue_task call made inside a mission agent run back
         to its owning mission (single agent lane ⇒ one owner at a time)."""
-        mid = getattr(self.autonomy, "_lane_mission", None)
+        mid = getattr(self.autonomy, "lane_mission_id", None)
         if not mid:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}

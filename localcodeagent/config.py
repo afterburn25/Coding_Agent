@@ -311,6 +311,13 @@ class AgentConfig:
     provisioning_auto_retry: bool = True
     provisioning_voice_notifications: bool = True
     provisioning_disk_reserve_bytes: int = 8 * 1024 ** 3
+    # Install profile — core (lean essentials), recommended (full
+    # creative/tooling stack), complete (+ heavyweight OS-level installs
+    # that wait for explicit approval), custom (exactly
+    # provisioning_include, falling back to recommended when empty).
+    provisioning_profile: str = "recommended"
+    provisioning_include: list = field(default_factory=list)
+    provisioning_exclude: list = field(default_factory=list)
 
     # Adaptive Worker Manager — absolute safety ceiling only; real
     # concurrency is measured from live hardware, reservations and

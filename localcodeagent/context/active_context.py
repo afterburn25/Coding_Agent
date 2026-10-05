@@ -41,6 +41,8 @@ class ActiveContext:
     pending_prompt: str = ""
     last_successful_action: str = ""
     last_error: str = ""
+    # The unresolved failure anaphoric repair binds to ("fix that error").
+    active_error: str = ""
     # [{kind, label, job, ts}] — topic-shifted artifacts stay retrievable
     # without driving routing.
     recent_entities: list[dict[str, Any]] = field(default_factory=list)
@@ -48,6 +50,11 @@ class ActiveContext:
     version: int = 1
 
     # -- queries ----------------------------------------------------------
+
+    @property
+    def last_intent(self) -> str:
+        """The task intent still driving this conversation's context."""
+        return self.active_intent
 
     def image_active(self, *, now: float | None = None) -> bool:
         """True when an image task is still the live working context."""
@@ -101,8 +108,8 @@ class ActiveContext:
             self.pending_prompt = ""
         elif intent == "feedback_signal":
             pass  # failure metadata handled by the recorder, not context
-        elif intent in {"tool_action", "git_action", "file_edit",
-                        "coding", "research", "writing"}:
+        elif intent in {"tool_action", "git_action", "github_status",
+                        "file_edit", "coding", "research", "writing"}:
             # Topic shift — the image task retires from routing but its
             # subject stays resolvable as "the last image" (§10, §32.10).
             if self.active_image_subject:
@@ -120,6 +127,17 @@ class ActiveContext:
         if job_ids:
             self.active_image_job = str(job_ids[0])
             self.touch()
+
+    def note_error(self, error: str) -> None:
+        """Bind the latest failure so "fix that error" resolves. Cleared
+        explicitly when a follow-up task succeeds, not by time — a stale
+        error is better than a lost referent."""
+        self.active_error = str(error or "")[:300]
+        self.last_error = self.active_error
+        self.touch()
+
+    def clear_error(self) -> None:
+        self.active_error = ""
 
     def park_clarification(self, kind: str, *, intent: str = "",
                            subject: str = "", prompt: str = "") -> None:
