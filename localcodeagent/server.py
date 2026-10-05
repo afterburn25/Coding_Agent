@@ -305,6 +305,10 @@ class AppState:
             if (job.get("state") == "finished" and job.get("outputs")
                     and job.get("id") not in self._image_artifacts_done
                     and getattr(self, "artifacts", None) is not None):
+                # Dedupe sets bound at 1024 — jobs fall out of the 300-row
+                # ledger long before that, so old ids can never re-emit.
+                if len(self._image_artifacts_done) > 1024:
+                    self._image_artifacts_done.clear()
                 self._image_artifacts_done.add(str(job["id"]))
                 for path in job["outputs"]:
                     try:
@@ -1935,6 +1939,10 @@ class AppState:
 
         hooks = {
             "evict_idle_models": lambda: self.runtime.evict_idle(),
+            "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
+                required_vram_gb=float(gb)),
+            "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
+                required_ram_gb=float(gb)),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_service": lambda: True,   # process watchdog owns restarts
             "health_probe": lambda: bool(self.runtime.summary()),
@@ -4046,6 +4054,8 @@ class AppState:
         job_id = str(job.get("id") or "")
         if not job_id or job_id in self._image_failures_announced:
             return
+        if len(self._image_failures_announced) > 1024:
+            self._image_failures_announced.clear()
         self._image_failures_announced.add(job_id)
         voice = getattr(self, "voice", None)
         if voice is None:

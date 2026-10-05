@@ -712,6 +712,30 @@ class AutonomousSupervisor:
             except Exception:
                 pass  # one mission's fault must not kill the supervisor
 
+    def _on_admission_shortfall(self, est, reason: str) -> None:
+        """Demand-driven eviction: a node that fits only after idle
+        residents move aside shouldn't wait for the idle timer — ask the
+        runtime to release managed models LRU-first. Same contract as
+        image jobs: managed runtimes only, external/user-owned servers
+        are never touched, keep_loaded residents evict last."""
+        hook = self._hooks.get(
+            "release_vram" if reason == "waiting_for_vram"
+            else "release_ram" if reason == "waiting_for_ram" else "")
+        if hook is None:
+            return
+        need_mb = float(getattr(
+            est, "vram_mb" if reason == "waiting_for_vram" else "ram_mb",
+            0) or 0)
+        if need_mb <= 0:
+            return
+        try:
+            released = hook(need_mb / 1024.0)
+            if released:
+                self._audit("admission_eviction", reason=reason,
+                            released=list(released))
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # per-mission step
 
@@ -913,7 +937,8 @@ class AutonomousSupervisor:
                 mission_id=str(m.get("id") or ""),
                 project_id=str(meta.get("project_id") or ""),
                 profile_id=str(m.get("profile_id") or ""),
-                estimate_overrides=meta.get("estimate"))
+                estimate_overrides=meta.get("estimate"),
+                on_shortfall=self._on_admission_shortfall)
             if worker is None:
                 node["queue_reason"] = w_reason
                 node["queue_detail"] = w_detail

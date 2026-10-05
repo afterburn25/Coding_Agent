@@ -459,6 +459,39 @@ class JobNodeTests(unittest.TestCase):
             sup.stop()
 
 
+class AdmissionEvictionTests(unittest.TestCase):
+    def test_shortfall_calls_release_hook(self):
+        """Mission admission gated on VRAM/RAM asks the runtime to
+        release managed models — demand-driven eviction instead of
+        waiting for the idle timer."""
+        with tempfile.TemporaryDirectory() as td:
+            calls = []
+            sup = make_sup(td, runtime_hooks={
+                "release_vram": lambda gb: calls.append(("vram", gb)) or ["qwen3-14b"],
+                "release_ram": lambda gb: calls.append(("ram", gb)),
+            })
+            class _Est:
+                vram_mb = 6144.0
+                ram_mb = 8192.0
+            sup._on_admission_shortfall(_Est(), "waiting_for_vram")
+            self.assertEqual(calls, [("vram", 6.0)])
+            sup._on_admission_shortfall(_Est(), "waiting_for_ram")
+            self.assertEqual(calls[-1], ("ram", 8.0))
+            sup._on_admission_shortfall(_Est(), "waiting_for_cpu")
+            self.assertEqual(len(calls), 2)   # non-memory reasons ignored
+            sup.stop()
+
+    def test_shortfall_noop_without_hooks(self):
+        """Test/embedded supervisors without runtime hooks must not
+        crash on a memory shortfall."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            class _Est:
+                vram_mb = 6144.0
+            sup._on_admission_shortfall(_Est(), "waiting_for_vram")
+            sup.stop()
+
+
 class OperationalStateTests(unittest.TestCase):
     def test_build_state_idle(self):
         from localcodeagent.nexus_state import build_state
