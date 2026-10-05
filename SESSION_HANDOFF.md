@@ -71,8 +71,13 @@ all three fleet checkpoints verified SHA-256, registered as
 `main`/`sdxl`, matched by `fleet_for_model_name`, and routing verified
 — Times-Square scene → `juggernaut-xl-v9`, beauty portrait →
 `cyberrealistic-xl-v9`, glamour/boudoir → `realvisxl-v5`. Real
-generation through `InvokeAIBackend.submit` completed (1024², 20
-steps, ~32 s). `98ec4e05` switched `invokeai_source` to direct
+generation through `InvokeAIBackend.submit` completed for
+**Juggernaut** (1024², 20 steps, ~32 s). CyberRealistic/RealVis
+generation attempts repeatedly died at `Executing queue item … on
+cuda:0` — invokeai-web exits silently during checkpoint load while
+llama-server (≈11 GB RAM) + desktop/GPU consumers (~4.7 GB VRAM) are
+resident. Environmental contention, not a code fault — registration
+and standalone probes all pass. `98ec4e05` switched `invokeai_source` to direct
 HF `resolve/main` URLs — `repo::file` downloads into a folder the
 model identifier can't classify (registers `unknown`/`tmpinstall_*`).
 
@@ -84,11 +89,11 @@ every config class including `Spandrel_Checkpoint_Config`, which
 (`tools/InvokeAI/Lib/site-packages/invokeai/backend/model_manager/
 configs/spandrel.py`) — `_validate_spandrel_loads_model` raises
 NotAMatch for files >2 GiB (marked "NEXUS PATCH"). **Caveat**: the
-patch lives in the installed venv — an InvokeAI reinstall wipes it.
-Reinstalling via provisioning will crash the server on multi-GB
-checkpoints until this is re-applied or fixed upstream. Candidate
-classes run even after a match, so the size guard matters for every
-large checkpoint install.
+patch lives in the installed venv — but `InvokeAIRuntime._command`
+re-applies it idempotently via `_apply_spandrel_guard(root)` on every
+managed start (`4f476f1b`), so reinstalls/upgrades self-heal.
+Candidate classes run even after a match, so the size guard matters
+for every large checkpoint install.
 
 ### Prior milestone — InvokeAI as a first-class image backend
 
