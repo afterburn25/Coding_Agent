@@ -18,7 +18,10 @@ from typing import Any
 # Fleet catalog — each entry is a model *spec*, not an install record.
 # `match` substrings recognize an installed backend row (case-insensitive).
 # `invokeai_source` is the `source=` argument InvokeAI's
-# /api/v2/models/install accepts: "repo::path/in/repo.safetensors".
+# /api/v2/models/install accepts. Direct resolve/main URLs are used —
+# the "repo::file" pin form downloads into a folder that InvokeAI's
+# model identifier cannot classify (registers as type "unknown"),
+# verified on InvokeAI 6.14.2.
 # ---------------------------------------------------------------------------
 
 FLEET: tuple[dict[str, Any], ...] = (
@@ -29,7 +32,8 @@ FLEET: tuple[dict[str, Any], ...] = (
         "base": "sdxl",
         "match": ["juggernaut-xl-v9", "juggernaut_xl", "juggernaut xl",
                   "juggernaut"],
-        "invokeai_source": ("RunDiffusion/Juggernaut-XL-v9::"
+        "invokeai_source": ("https://huggingface.co/RunDiffusion/Juggernaut-XL-v9"
+                            "/resolve/main/"
                             "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"),
         "source_repo": "RunDiffusion/Juggernaut-XL-v9",
         "source_file": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
@@ -68,8 +72,8 @@ FLEET: tuple[dict[str, Any], ...] = (
         "base": "sdxl",
         "match": ["realvisxl_v5", "realvisxl-v5", "realvisxl v5",
                   "realvis"],
-        "invokeai_source": ("SG161222/RealVisXL_V5.0::"
-                            "RealVisXL_V5.0_fp16.safetensors"),
+        "invokeai_source": ("https://huggingface.co/SG161222/RealVisXL_V5.0"
+                            "/resolve/main/RealVisXL_V5.0_fp16.safetensors"),
         "source_repo": "SG161222/RealVisXL_V5.0",
         "source_file": "RealVisXL_V5.0_fp16.safetensors",
         "size_bytes": 6938065488,
@@ -105,7 +109,8 @@ FLEET: tuple[dict[str, Any], ...] = (
         "role": "portrait_photoreal",
         "base": "sdxl",
         "match": ["cyberrealistic", "cyberrealisticxl", "cyber realistic"],
-        "invokeai_source": ("cyberdelia/CyberRealisticXL::"
+        "invokeai_source": ("https://huggingface.co/cyberdelia/"
+                            "CyberRealisticXL/resolve/main/"
                             "CyberRealisticXLPlay_V9.0_FP16.safetensors"),
         "source_repo": "cyberdelia/CyberRealisticXL",
         "source_file": "CyberRealisticXLPlay_V9.0_FP16.safetensors",

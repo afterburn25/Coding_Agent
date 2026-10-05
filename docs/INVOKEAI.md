@@ -129,6 +129,11 @@ upstream metadata, so a 7 GB checkpoint never restarts from zero after a
 restart.
 
 Fleet install dogfood (2026-10-05, live 6.14.2): all three fleet sources
-(`RunDiffusion/Juggernaut-XL-v9`, `cyberdelia/CyberRealisticXL`,
-`SG161222/RealVisXL_V5.0` — `repo::file` form) accepted by the install
-endpoint with real `total_bytes` matching the verified spec sizes.
+downloaded complete (real `total_bytes` matching the verified spec
+sizes). **Correction found by dogfooding:** the `repo::file` pin form
+downloads into a folder that InvokeAI's model identifier cannot classify
+— models registered as `type: unknown` named `tmpinstall_*` and are
+unusable. Single-file checkpoints must use the direct
+`https://huggingface.co/<repo>/resolve/main/<file>` URL form, which
+registers as a proper `main` checkpoint. The fleet specs carry the URL
+form; `repo::file` remains valid only for multi-file diffusers repos.
