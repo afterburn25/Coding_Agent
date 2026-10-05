@@ -1948,3 +1948,17 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   `5af1346`, `fdf0c08`. Latest fixed installer artifact verified at
   `dist/installer/NexusCore-Setup-0.12.1-Windows-x64.exe` (sha256
   `65bf088aff885a21b711232bfd8a9f435b458fea139563f0dd17b3f5ac0c0626`).
+
+## Post-milestone ops notes (858e51a9)
+
+- **C: drive hit 100% (119 MB free)** during this session — supervisor's
+  disk guard correctly paused autonomy test missions ("disk nearly full").
+  Purged `pip cache` (~5.1 GB). If missions mysteriously pause on this box,
+  check `C:` free space first — the guard reads the tempdir drive.
+- **CI flake fixed**: `test_mission_approval_timeouts_are_bounded` /
+  `test_mission_approval_timeout_replans` raced on slow runners (0.2 s
+  wall-clock timeout could fire inside `drive()`'s settle loop). Now
+  deterministic: callable timeout held at 0 during drive, pending row's
+  `created_at` backdated to expire on the next tick. `858e51a9`.
+- **Still pending**: one Nexus Core restart to swap in `backend-new`
+  (voice fix + provisioning hardening + shutil fix, `update.flag` set).
