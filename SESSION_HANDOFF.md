@@ -103,13 +103,49 @@ current source on this branch via `--config D:\Nexus_Core\config.json`.
   image path. Also fixed: SSE stream sinks now detach in a finally
   (orphaned streams leaked before, `c26d673b`).
 
+- **Soak round 1 finished** — 10 cycles: **0 crashes, 3 hard-kills, 4
+  clean recoveries**, all VRAM waits honest. All 10 missions `blocked`:
+  the 4B asserted file writes with zero tool calls — `unverified action
+  claims` fired, `artifact_exists` caught the missing files, missions
+  blocked instead of passing. Honest blocking, but exposed two gaps:
+  fabricated node output recorded `ok=True` (the artifact check was the
+  only line of defense), and retries reran the identical instruction so
+  the model could only repeat the lie.
+- **Fabrication fail-fast** (`6a20f24b`) — agent nodes carrying the
+  `Unverified action claims` marker now report `ok=False`; the marker is
+  a shared constant (orchestrator emits, server matches — can't drift).
+- **Retry feedback** (`25ec078e`) — a retried node gets the recorded
+  failure appended to its instruction ("previous attempt failed:
+  unverified action claims — actually invoke the required tools");
+  `_finish_node` persists `result.error`. Regression tests added
+  (fake-server prose mode + instruction assertion).
+- **Retry-cooldown liveness** (`331c1fb4`) — VERIFIED LIVE: two bugs
+  made the bounded retry dead on arrival. (a) A node parked in
+  `waiting_dependency` on retry cooldown was neither runnable nor
+  "stuck", so the next tick blocked the whole mission before the retry
+  fired — cooldown parks now keep the mission `executing`. (b) `blocked`
+  dependents latched permanently even when the recovery playbook reset
+  the dep and it later completed — `blocked` is now re-derived every
+  refresh. Verified live: dep failed → parked → dependent un-blocked →
+  retried.
+- **Budget-pause auto-resume** (`e2571e22`) — live evidence: a
+  llama-server load spike dropped available RAM to 1.4 GB (< 2 GB floor)
+  and the budget gate paused the mission *permanently* — one transient
+  dip would have ended an unattended run. Budget pauses now carry a
+  marker, re-check every ~15s, and auto-resume to the pre-pause status;
+  explicit user pauses never auto-resume. Full arc then observed live:
+  resume → retry fired with feedback → model fabricated again → bounded
+  block ("same failure repeated 3x").
+
 ### Remaining milestone work
 
-The multi-hour mission soak is *running on this hardware* via
-`scripts/mission_soak.py` (12 cycles, kill every 3rd); it is the honest
-completion of the hardware tier that CI's hosted runners cannot do.
-Release packaging gate still applies (unsigned unless code-signing
-secrets are set).
+Soak round 2 is running (6 cycles) on the fabrication fail-fast + retry
+feedback code — watching whether feedback breaks the fabrication loop.
+The multi-hour *overnight* soak remains the honest completion of the
+hardware tier that CI's hosted runners cannot do — the harness is
+proven (kill→restart→resume verified live, demand eviction verified
+live), it just needs wall-clock hours. Release packaging gate still
+applies (unsigned unless code-signing secrets are set).
 
 
 

@@ -132,12 +132,14 @@ class LineageHttpTests(unittest.TestCase):
     def tearDownClass(cls):
         # A per-operation sqlite connection can still be closing when the
         # server stops — retry briefly so Windows file-lock release wins.
+        # OSError also covers WinError 145: a late store flush can create a
+        # file in an already-emptied directory between rmtree's passes.
         import time
         for _ in range(10):
             try:
                 cls._td.cleanup()
                 return
-            except PermissionError:
+            except OSError:
                 time.sleep(0.2)
         cls._td.cleanup()
 
