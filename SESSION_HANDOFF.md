@@ -79,13 +79,31 @@ current source on this branch via `--config D:\Nexus_Core\config.json`.
   unsigned fallback — external cert is the only prerequisite), disk
   mgmt (5GB detector + managed-scratch-only fixer), sensitive-action
   gating (always-ask + standing grants + stop/egress/RC gates).
+- **Approval-loop closeout** (`ffa7a4b1`, `a68dc631`): three distinct
+  re-ask vectors found and fixed — `_default_verify` gate stamp,
+  agent-node resume of the exact parked task (`agent.resume` not fresh
+  `agent.run`), and `op == "tool"` job nodes passing
+  `approved=approval_granted`. Deny path verified bounded
+  (max_approval_retries=2 → replan → blocked+notify).
+- **Long-run retention sweep** (`8f65a652`): unbounded-growth audit
+  found four leaks — terminal missions never archived (now auto-archive
+  quiet completions/cancels at 30d, failed never), resolved approvals
+  accumulated forever (now 7d/newest-200 prune on append), notifications
+  uncapped (now 500 rows), desktop `backend-host.log`/`crash_history.
+  jsonl` append-forever (now rotate at 8MB/4MB and 1MB/512KB). Task
+  ledger, worker queue/history, image history, conversations, activity
+  JSONL, and audit log were already bounded.
+- **`scripts/mission_soak.py`** — new real mission-loop soak: submit →
+  execute → auto-approve gates → terminal, hard-kill every Nth cycle,
+  JSONL event log + JSON summary. Running against the real install.
 
 ### Remaining milestone work
 
-Long multi-hour unattended autonomy soak, real perf benchmark pass, and
-release packaging gate (unsigned unless code-signing secrets are set).
-Cinematic splash + Isabella narration, docs/version truth, and branch
-protection are committed and verified.
+The multi-hour mission soak is *running on this hardware* via
+`scripts/mission_soak.py` (12 cycles, kill every 3rd); it is the honest
+completion of the hardware tier that CI's hosted runners cannot do.
+Release packaging gate still applies (unsigned unless code-signing
+secrets are set).
 
 
 
