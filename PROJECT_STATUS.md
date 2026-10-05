@@ -1,8 +1,17 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1800+ tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1870 tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.21.0 adds **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
 
-## Active version: 0.20.0 — Workstation P1 + P2 (self-update, Command Center, search)
+## Active version: 0.21.0 — InvokeAI first-class image backend
+
+v0.21.0 makes InvokeAI a Nexus-managed image backend alongside ComfyUI —
+dual-backend routing under one `ImageManager`, per-request override,
+capability-aware model registry, managed `tools/InvokeAI` venv install,
+and live-verified dogfooding on InvokeAI 6.14.2 (text-to-image, img2img,
+inpaint, per-seed variations, cancel). See `docs/INVOKEAI.md` and
+`docs/IMAGE_SYSTEM.md`.
+
+## Previous: 0.20.0 — Workstation P1 + P2 (self-update, Command Center, search)
 
 v0.20.0 completes the P1 layer and lands the first P2 capabilities:
 
