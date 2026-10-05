@@ -2025,3 +2025,19 @@ launch, and tests mocking `_reclaim_orphaned_port` now also mock
 `_adopt_healthy_orphan` (they were reaching real netstat + the live
 :8080 server). `backend-new` restaged from 43de6137 — the prior staged
 build contained the break and has been replaced.
+
+## InvokeAI ephemeral-state sweep + self-heal (d22b8419, ddeb50ee)
+
+- `python -m invokeai.app.run_app` exits code 0 silently (no __main__
+  entry) — the discovery fallback when invokeai-web.exe isn't visible.
+  Fixed: call the console-script entry via -c (run_app / invoke_ai_api).
+- InvokeAI's ephemeral ObjectSerializerDisk uses ONE TemporaryDirectory
+  under outputs/tensors for the process lifetime; ANY second InvokeAI
+  on the same root deletes all tmp* dirs at startup and bricks it
+  ("Parent directory ... does not exist" on every generation). A test
+  spawn sharing the junctioned root (D:\Nexus_Core\data\invokeai →
+  D:\Devin\chat-nexus\data\invokeai) did exactly this live.
+- Manager now detects the signature → restarts backend → resubmits
+  once; repeat failures report honestly (ddeb50ee).
+- Deployed backend updated to 6b8b4f69 at 03:02 restart; backend-new
+  restaged from ddeb50ee + update.flag rewritten for next launch.
