@@ -595,12 +595,14 @@ class ProfileAPI:
             h._json({"ok": True, "custom": store.create_custom(
                 is_adult=adult, name=body.get("name"),
                 base_preset=body.get("base_preset"),
-                traits=body.get("traits"), voice=body.get("voice"))})
+                traits=body.get("traits"), voice=body.get("voice"),
+                speech_genome=body.get("speech_genome"))})
         elif action == "patch_custom":
             h._json({"ok": True, "custom": store.patch_custom(
                 str(body.get("personality_id") or ""), is_adult=adult,
                 name=body.get("name"), traits=body.get("traits"),
-                voice=body.get("voice"))})
+                voice=body.get("voice"),
+                speech_genome=body.get("speech_genome"))})
         elif action == "delete_custom":
             ok = store.delete_custom(str(body.get("personality_id") or ""))
             h._json({"ok": ok}, 404 if not ok else 200)

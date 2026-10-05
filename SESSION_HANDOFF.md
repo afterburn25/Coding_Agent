@@ -101,8 +101,11 @@ user meaning → IntentEnvelope/ActiveContext → SemanticResponse (WHAT)
 
 ### Still open
 
-- Web UI: persona editor fields for genome sections + Preview Lab
-  page calling `/personality/speech-preview` (backend landed).
+- Web UI landed: Personality Studio **Speech Lab** panel — persona/
+  register/seriousness/turns selectors render the 8-act battery via
+  `/personality/speech-preview` with per-line delivery plan details,
+  plus a genome-summary chip row. `create_custom`/`patch_custom` POST
+  actions accept `speech_genome` overrides.
 - Voice: `pace` is applied; emphasis_spans/warmth/energy remain
   documented hints until the TTS engine exposes controls.
 - Long-session UI soak + real-voice dogfood on the installed app.

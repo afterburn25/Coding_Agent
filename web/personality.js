@@ -220,6 +220,45 @@
       </section>
 
       <section class="pst-panel">
+        <h3>Speech Lab</h3>
+        <p class="hint">How this persona actually talks — the same facts
+        rendered through its speech genome. Facts never change; only the
+        wrapper does.</p>
+        <div id="genomeSummary" class="genome-summary"></div>
+        <div class="lab-controls">
+          <label>Persona
+            <select id="labPersona">
+              <option value="active" selected>Active (${esc(t.name || "")})</option>
+              ${(data.presets || []).map((p) =>
+                `<option value="preset:${esc(p.id)}">${esc(p.name)}</option>`).join("")}
+              ${(data.customs || []).map((c) =>
+                `<option value="custom:${esc(c.personality_id)}">${esc(c.name)}</option>`).join("")}
+            </select></label>
+          <label>Register
+            <select id="labRegister">
+              ${["casual", "technical", "coding", "debugging",
+                 "creative", "personal_conversation"].map((r) =>
+                `<option value="${r}">${r.replace(/_/g, " ")}</option>`).join("")}
+            </select></label>
+          <label>Situation
+            <select id="labSeriousness">
+              <option value="0">Casual</option>
+              <option value="1">Focused</option>
+              <option value="2">Serious</option>
+              <option value="3">Critical</option>
+            </select></label>
+          <label>Renders/act
+            <select id="labTurns">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+            </select></label>
+          <button id="labRun" class="mini-button" type="button">Render battery</button>
+        </div>
+        <div id="labOut" class="speech-lab"></div>
+      </section>
+
+      <section class="pst-panel">
         <h3>Custom Personalities</h3>
         <div class="custom-list" id="customList">
           ${(data.customs || []).map((c) => `
@@ -264,7 +303,91 @@
     return v;
   }
 
+  const pct = (v) => `${Math.round((+v || 0) * 100)}%`;
+
+  function fillGenomeSummary() {
+    const el = $("genomeSummary");
+    if (!el) return;
+    const s = (data && data.speech_genome_summary) || {};
+    const chips = [];
+    const push = (label, v) => {
+      if (v !== undefined && v !== null && v !== "") chips.push(
+        `<span class="gchip">${esc(label)} ${esc(String(v))}</span>`);
+    };
+    push("sent-len", pct(s.sentence_length));
+    push("fragments", pct(s.fragment_rate));
+    push("tempo", pct(s.tempo));
+    push("disagree", pct(s.disagreement_directness));
+    push("addr-rate", pct(s.address_frequency));
+    push("questions", pct(s.question_frequency));
+    if (s.repair_style) push("repair", s.repair_style.replace(/_/g, " "));
+    for (const h of (s.humor_categories || []))
+      chips.push(`<span class="gchip humor">${esc(h.replace(/_/g, " "))}</span>`);
+    for (const w of (s.signature_words || []))
+      chips.push(`<span class="gchip sig">“${esc(w)}”</span>`);
+    el.innerHTML = chips.join("") ||
+      `<span class="hint">Genome summary unavailable.</span>`;
+  }
+
+  const ACT_LABELS = {
+    greet: "Greeting", answer: "Answer",
+    report_success: "Success report", report_failure: "Failure report",
+    disagree: "Disagreement", warn: "Warning",
+    admit_uncertainty: "Uncertainty", farewell: "Farewell",
+  };
+
+  function renderLab(d) {
+    const out = $("labOut");
+    if (!out) return;
+    if (!d || !d.ok) {
+      out.innerHTML = `<div class="hint">Preview failed: ${esc(
+        (d && d.error) || "unknown")}</div>`;
+      return;
+    }
+    const cards = Object.entries(d.renders || {}).map(([act, rows]) => {
+      const first = rows[0] || {};
+      const plan = first.plan || {};
+      const planBits = [
+        `pace ${plan.pace}`, `energy ${Math.round((plan.energy ?? 0) * 100)}%`,
+        `warmth ${Math.round((plan.warmth ?? 0) * 100)}%`,
+        plan.seriousness ? `serious ${plan.seriousness}` : "",
+        first.opening_family ? `open:${first.opening_family}` : "",
+        first.closing_family && first.closing_family !== "hard_stop"
+          ? `close:${first.closing_family}` : "",
+        first.micro_reaction ? `micro:"${esc(first.micro_reaction)}"` : "",
+        first.used_address ? "addr" : "",
+        plan.sarcasm ? "sarcastic" : "",
+      ].filter(Boolean).join(" · ");
+      return `<div class="lab-card">
+        <div class="lab-act">${esc(ACT_LABELS[act] || act)}</div>
+        ${rows.map((r, i) => `<div class="lab-line">${i === 0 ? "" : `<em>↻${i} </em>`}${esc(r.text)}</div>`).join("")}
+        <div class="lab-plan">${planBits}</div>
+      </div>`;
+    }).join("");
+    out.innerHTML = cards;
+  }
+
   function bind() {
+    fillGenomeSummary();
+    $("labRun")?.addEventListener("click", async () => {
+      const out = $("labOut");
+      out.innerHTML = `<div class="hint">Rendering…</div>`;
+      try {
+        const q = new URLSearchParams({
+          target: $("labPersona").value,
+          register: $("labRegister").value,
+          seriousness: $("labSeriousness").value,
+          turns: $("labTurns").value });
+        const d = await api(
+          `/api/profiles/${encodeURIComponent(pid)}/personality/speech-preview?${q}`);
+        renderLab(d);
+      } catch (e) {
+        out.innerHTML = `<div class="hint">Preview failed: ${esc(e.message)}</div>`;
+      }
+    });
+    // Lab renders auto-run once so the surface isn't dead on open.
+    setTimeout(() => $("labRun")?.click(), 60);
+
     $("studioBody").querySelectorAll("[data-preset]").forEach((el) =>
       el.addEventListener("click", async () => {
         try {
