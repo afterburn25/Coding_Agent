@@ -92,7 +92,7 @@ Write-Host "Building hidden Python agent backend..."
     --specpath "build" `
     --add-data "$Root\VERSION;." `
     --add-data "$Root\web;web" `
-    --add-data "$Root\tools;tools" `
+    --add-data "$Root\tools\manifests;tools\manifests" `
     --collect-submodules localcodeagent `
     --collect-data localcodeagent `
     --collect-submodules py7zr `

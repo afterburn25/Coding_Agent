@@ -80,6 +80,30 @@ custom-workflow engine and fallback.
 - Not dogfooded: LLM-resident VRAM contention and live ComfyUI fallback
   (ComfyUI not installed on this box; fallback is unit-tested).
 
+### Deployment to live install (D:/Nexus_Core)
+
+- `Source/` synced to `de5064ea`; web assets copied into
+  `backend/_internal/web` (old backend filters unknown request fields,
+  so the new UI is safe against the pre-swap binary).
+- `tools/manifests/*.json` copied to `D:/Nexus_Core/tools/manifests/` —
+  neither the runtime-root dir nor `_internal/tools/manifests` existed,
+  so no manifests (InvokeAI or otherwise) were visible to the install.
+- `config.json` on the install now sets `image_backend=auto`,
+  `invokeai_endpoint`, `invokeai_dir` (points at the dev venv
+  `D:\Devin\chat-nexus\tools\InvokeAI`), `invokeai_auto_start`,
+  `invokeai_start_on_image_request`.
+- `D:/Nexus_Core/data/invokeai` is a junction → the repo's
+  `data/invokeai` (shares the Dreamshaper model store + invokeai.yaml).
+- PyInstaller rebuild staged via the app's own LKG update path:
+  snapshot `snap-1791164241262`, `backend-new/` = fresh 0.21.0 build
+  (verified: `localcodeagent.image.invokeai{,_runtime}` in PYZ,
+  `tools/manifests/invokeai.json` bundled, VERSION 0.21.0), and
+  `update.flag` written — the desktop host swaps on next launch.
+- Build fix: `--add-data tools` → `tools\manifests` in both
+  `packaging/build_windows.ps1` and `selfupdate._build_cmd`; otherwise
+  the next release/self-update build would try to bundle the multi-GB
+  `tools/` install payloads (InvokeAI venv, ComfyUI portable).
+
 ## Earlier milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
 
 (Previous: v0.18.x honesty hardening · v0.16.0 persona depth · v0.15.0
