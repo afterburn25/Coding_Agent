@@ -259,7 +259,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Validate the current Nexus Core working tree in an isolated second instance.")
     parser.add_argument("--workspace", default=".")
     parser.add_argument("--skip-tests", action="store_true", help="Skip the unit-test phase and run only the isolated server smoke test.")
-    parser.add_argument("--test-timeout", type=int, default=300)
+    parser.add_argument("--test-timeout", type=int, default=900,
+                        help="Unit-test phase budget; the full suite is ~1900 tests and exceeds the old 300s default on slower hosts.")
     parser.add_argument("--startup-timeout", type=int, default=30)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

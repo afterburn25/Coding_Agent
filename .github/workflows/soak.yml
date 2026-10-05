@@ -35,7 +35,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check "cryptography==50.0.1" "numpy==2.3.5"
       - name: Isolated selftest (fresh-instance boot + smoke)
-        run: python -m localcodeagent.selftest --workspace . --json
+        run: python -m localcodeagent.selftest --workspace . --json --test-timeout 900
       - name: Restart/recovery + autonomy + provisioning suites
         run: |
           python -m unittest `
