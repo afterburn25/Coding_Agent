@@ -133,9 +133,23 @@ current source on this branch via `--config D:\Nexus_Core\config.json`.
   and the budget gate paused the mission *permanently* — one transient
   dip would have ended an unattended run. Budget pauses now carry a
   marker, re-check every ~15s, and auto-resume to the pre-pause status;
-  explicit user pauses never auto-resume. Full arc then observed live:
-  resume → retry fired with feedback → model fabricated again → bounded
-  block ("same failure repeated 3x").
+  explicit user pauses never auto-resume. Verified live: `paused ->
+  executing · budget clear — auto-resumed`. Follow-up (`61803479`):
+  only *transient* violations (RAM/disk) get the marker — a runtime
+  deadline or exhausted repair cap can never self-clear and would flap.
+- **Unbounded playbook loop** (`ac6f0c1d`) — live evidence: three failure
+  records all stuck at `playbook_step=1` — every retry minted a fresh
+  record, the cursor reset to step 0 (retry) forever, and varied
+  fabrication text defeated the signature-based same-failure bound.
+  `record_failure` now continues the previous record for same
+  task+class (cursor advances retry→inspect→escalate) and a per-record
+  `count` feeds `budgets_exceeded`. Verified live: one record,
+  count=2, step=2 → replan dispatched.
+- **Episodic memory retention** (`f8a9d8c1`) — hippocampus `episodes`
+  was append-only sqlite (≤8KB/node write, forever). Hourly-throttled
+  prune: >30d gone, newest 5000 kept. Procedures/project_facts already
+  upsert-keyed; all autonomy JsonStores have row limits; JsonlLog
+  caps at 4MB→2MB.
 
 ### Remaining milestone work
 
