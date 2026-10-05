@@ -2041,3 +2041,9 @@ build contained the break and has been replaced.
   once; repeat failures report honestly (ddeb50ee).
 - Deployed backend updated to 6b8b4f69 at 03:02 restart; backend-new
   restaged from ddeb50ee + update.flag rewritten for next launch.
+- 05 Oct follow-up: backend-new rebuilt from a789403e (adds InvokeAI
+  installable-flag fix, provisioning reconcile self-heal, comfy
+  imagemodel-* auto-download items, round/face-centered Isabella chat
+  avatar) + update.flag rewritten. NOTE: data/lkg/rollback.flag is also
+  pending ("5 consecutive unclean boots" → snap-1791165159653) — it
+  applies first at next launch, then update.flag swaps in backend-new.
