@@ -1962,3 +1962,30 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   `created_at` backdated to expire on the next tick. `858e51a9`.
 - **Still pending**: one Nexus Core restart to swap in `backend-new`
   (voice fix + provisioning hardening + shutil fix, `update.flag` set).
+
+## Frozen-build first-boot dogfood (9a76557c, ae63f461, 84191c3c)
+
+Booted `dist-fresh2/ChatNexus.Backend.exe` on a scratch workspace with
+provisioning enabled — the real first-run path — and caught two live bugs
+the mocked tests missed:
+
+- **voice-assets crash**: `_run_voice_assets` callback expected
+  `(name, done, total)` but `ensure_assets` calls `progress(name, done)` —
+  the first plan item died with TypeError on every fresh install. Fixed;
+  regression test stubs the real call signature. Verified live: after the
+  fix, voice-assets (353 MB) + whisper-stt downloaded and SHA-verified
+  `completed` in the frozen bundle.
+- **permission_denied was terminal**: InvokeAI venv install hit Errno 13
+  on `Scripts\python.exe` — Defender on-access scan holding a fresh exe.
+  Added to TRANSIENT_ERRORS (bounded to MAX_ATTEMPTS; real ACL problems
+  still report permanently).
+- **Fleet honesty verified**: with the invokeai item failed, all three
+  fleet models went `skipped — dependency did not install` rather than
+  downloading 21 GB to nowhere.
+- **Staged-dir pollution cleaned**: earlier smoke runs of the frozen exe
+  with a relative `--config` wrote runtime state (models/, data/, tools/,
+  .agent/) into `backend-new/` — removed; dir now holds only exe +
+  `_internal`, matching `backend/`. Never run the frozen exe without an
+  absolute `--config`/`--workspace`.
+- `backend-new` rebuilt from `ae63f461` and restaged (full PyInstaller
+  args; `dist-fresh2` removed after staging).
