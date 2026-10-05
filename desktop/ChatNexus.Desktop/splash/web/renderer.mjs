@@ -277,6 +277,11 @@ export class Renderer {
 
   drawCore(c, s) {
     c.fillStyle = '#020a20'; c.fillRect(-64, -64, 128, 128);
+    // Grow the 44px sphere (already scaled by 1.12) to fill the 64px aperture
+    // as it charges. Keep plasma, light and surface currents on the same body.
+    const expansion = clamp(s.charge);
+    const coreScale = 1 + (64 / (44 * 1.12) - 1) * expansion;
+    c.save(); c.scale(coreScale, coreScale);
     c.save(); c.globalAlpha = .35 + .5 * s.brightness; blit(c, this.glow, 186); c.restore();
     c.save(); c.scale(1.12, 1.12);
     c.globalAlpha = .45 + .55 * s.brightness; blit(c, this.sphere, 128); c.restore();
@@ -304,8 +309,9 @@ export class Renderer {
       c.fillRect(Math.cos(angle) * r, Math.sin(angle) * r, .65, .65);
     }
     c.restore();
-    // Cavity occlusion darkens its outside edge while the inner core emits light.
-    const occlusion = c.createRadialGradient(0, 0, 48, 0, 0, 65);
+    c.restore();
+    // The recess shadow retreats to the rim as the glowing core fills the opening.
+    const occlusion = c.createRadialGradient(0, 0, 48 + 12 * expansion, 0, 0, 65);
     occlusion.addColorStop(0, '#00030a00'); occlusion.addColorStop(1, '#00030abb');
     circle(c, 65); c.fillStyle = occlusion; c.fill();
     if (s.pulse > 0) { c.save(); c.globalAlpha = s.pulse * .23; blit(c, this.bloom, 126); c.restore(); }
