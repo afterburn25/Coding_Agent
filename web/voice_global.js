@@ -47,6 +47,7 @@
     if (NV.current) {
       try { NV.current.pause(); NV.current.src = ''; } catch (e) {}
       NV.current = null;
+      NV._lastEnd = Date.now();
     }
     NV._playSeq++;
     NV._emit();
@@ -69,13 +70,24 @@
     NV._emit();
   };
 
+  NV._lastEnd = 0;
+  NV._gapTimer = null;
   NV._playNext = function () {
     if (NV.current || !NV.queue.length) return;
+    // Global rule: clips never overlap — the next one may only start once
+    // 2s have passed since the last clip finished playing.
+    const wait = NV._lastEnd + 2000 - Date.now();
+    if (wait > 0) {
+      if (!NV._gapTimer) {
+        NV._gapTimer = setTimeout(() => { NV._gapTimer = null; NV._playNext(); }, wait);
+      }
+      return;
+    }
     const item = NV.queue.shift();
     const audio = new Audio(item.url);
     audio.volume = Math.min(1, Math.max(0, NV.volume));
     const seq = ++NV._playSeq;
-    audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
+    audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._lastEnd = Date.now(); NV._playNext(); NV._emit(); } };
     audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
     NV.current = audio;
     audio.play().catch(err => {
@@ -116,7 +128,7 @@
       // the previous session's shutdown would otherwise silence whatever
       // is speaking seconds after page load.
       if (e.ts && Date.now() / 1000 - Number(e.ts) > 15) return;
-      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; } } NV.refresh(); }
+      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; NV._lastEnd = Date.now(); } } NV.refresh(); }
     else NV._emit(e);
   };
 

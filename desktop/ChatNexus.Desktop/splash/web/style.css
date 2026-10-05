@@ -5,9 +5,10 @@
 #fill{height:100%;width:100%;transform:scaleX(0);transform-origin:left center;will-change:transform;background:linear-gradient(90deg,#4c6bff,#56edff);box-shadow:0 0 8px #4cf}
 #status{font-size:clamp(7px,1.1vw,12px);letter-spacing:.25em;color:#aedfff;margin:12px 0 5px;font-weight:500}
 #detail{font-size:clamp(6px,.7vw,9px);letter-spacing:.17em;color:#7690ae;margin:0}
-@keyframes nexus-online-pulse{0%,100%{opacity:.7;text-shadow:0 0 8px rgba(80,255,160,.35)}50%{opacity:1;text-shadow:0 0 20px rgba(80,255,160,.8)}}
-#status.online{color:#59ffa0;animation:nexus-online-pulse 1.6s ease-in-out infinite}
-#detail.online{color:#3dd77f}
+@keyframes nexus-online-pulse{0%,100%{opacity:.45;text-shadow:0 0 4px rgba(80,255,160,.18)}50%{opacity:1;text-shadow:0 0 26px rgba(80,255,160,1),0 0 64px rgba(80,255,160,.5)}}
+@keyframes nexus-online-pulse-dim{0%,100%{opacity:.5}50%{opacity:1}}
+#status.online{color:#59ffa0;animation:nexus-online-pulse 1.4s ease-in-out infinite}
+#detail.online{color:#3dd77f;animation:nexus-online-pulse-dim 1.4s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){#status.online{animation:none}}
 #missing-art{position:absolute;top:64%;width:100%;text-align:center;font-size:32px;letter-spacing:.28em;color:#afdcff}#missing-art span{display:block;font-size:10px;margin-top:8px}
 .no-script{position:absolute;bottom:0;z-index:5;background:#081422;width:100%;text-align:center}

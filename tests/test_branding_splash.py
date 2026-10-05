@@ -127,7 +127,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
 
     def test_splash_closes_only_after_main_ready_and_transition_is_atomic(self):
         run_start = PROGRAM.index("private async Task RunStartupAsync()")
-        body = PROGRAM[run_start:run_start + 2200]
+        body = PROGRAM[run_start:run_start + 4200]
         self.assertIn("await _main.PrepareAsync(_progress);", body)
         self.assertIn("_progress.MarkAppReady();", body)
         self.assertLess(body.index("MarkAppReady"), body.index("ReadyToDismiss"))

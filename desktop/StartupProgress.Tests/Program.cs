@@ -462,6 +462,51 @@ Console.WriteLine("narrator gate — fault bypasses the gate");
     blocker.TrySetResult(true);
 }
 
+// ---------------------------------------------------------------- narrator: voice queue
+Console.WriteLine("voice queue — clips serialize, 2s gap between real ends");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var starts = new List<(string Key, long Ms)>();
+    var n = new StartupNarrator(dir,
+        playBytes: (b, k) =>
+        {
+            lock (starts) starts.Add((k, sw.ElapsedMilliseconds));
+            return Task.CompletedTask;
+        });
+    n.QuietBuffer = TimeSpan.FromMilliseconds(300);
+    n.SoundFilePlayer = _ => Task.CompletedTask;
+    var d1 = n.DeliverAsync("a", new byte[] { 1 });
+    await Task.Delay(30);
+    n.NotifyVoiceResult("a", true, 0.01);
+    n.NotifyVoiceEnded("a");           // a's playback ends ~t=30-50ms
+    await d1;
+    var d2 = n.DeliverAsync("b", new byte[] { 2 });
+    await Task.Delay(350);             // past a-end + gap: b is dequeued by now
+    n.NotifyVoiceResult("b", true, 0.01);
+    n.NotifyVoiceEnded("b");
+    await d2;
+    Check(starts.Select(s => s.Key).SequenceEqual(new[] { "a", "b" }),
+        $"queue delivered clips in order: {string.Join(",", starts.Select(s => s.Key))}");
+    var bStart = starts.First(s => s.Key == "b").Ms;
+    Check(bStart >= 280,
+        $"second clip could not start before the quiet gap elapsed ({bStart}ms)");
+}
+
+// ---------------------------------------------------------------- narrator: queue FIFO
+Console.WriteLine("voice queue — FIFO order under concurrent enqueue");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var n = new StartupNarrator(dir);
+    var order = new List<string>();
+    var t1 = n.EnqueueVoiceAsync(async () => { order.Add("a-start"); await Task.Delay(20); order.Add("a-end"); });
+    var t2 = n.EnqueueVoiceAsync(async () => { order.Add("b-start"); await Task.Delay(20); order.Add("b-end"); });
+    var t3 = n.EnqueueVoiceAsync(() => { order.Add("c"); return Task.CompletedTask; });
+    await Task.WhenAll(t1, t2, t3);
+    Check(order.SequenceEqual(new[] { "a-start", "a-end", "b-start", "b-end", "c" }),
+        $"queued plays never overlap: {string.Join(",", order)}");
+}
+
 // ---------------------------------------------------------------- report
 Console.WriteLine();
 if (failures.Count > 0)

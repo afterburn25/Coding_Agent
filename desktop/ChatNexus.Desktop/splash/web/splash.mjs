@@ -64,7 +64,9 @@ function paint() {
   // Core-online state: green pulsating status — the timeline's stable-online
   // point OR the host's canonical CORE SYSTEMS · ONLINE label, whichever
   // reaches first.
-  const online = state.online || externalProgress?.primary === 'CORE SYSTEMS · ONLINE';
+  const online = externalProgress
+    ? externalProgress.primary === 'CORE SYSTEMS · ONLINE'
+    : state.online;
   $('status').classList.toggle('online', online);
   $('detail').classList.toggle('online', online);
   updateRecovery(state);

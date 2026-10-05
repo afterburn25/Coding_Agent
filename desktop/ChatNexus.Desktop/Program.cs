@@ -553,14 +553,14 @@ internal sealed class SplashForm : Form
         // caption sits at ~0.91·H, so both lines live along the bottom edge.
         using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
         using var secondaryFont = new Font("Segoe UI", 8.5f);
-        var isReady = _progress.ReadyToDismiss || completion > 0
+        var isReady = _progress.ReadyToDismiss
             || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
         var primaryRect = new Rectangle(0, ClientSize.Height - 46, ClientSize.Width, 20);
         // Ready state: green + pulsating — the timer already repaints at
         // 33ms cadence, so a clock-driven alpha sine gives the same pulse
         // the cinematic's #status.online keyframes produce.
         var pulse = (float)(0.5 + 0.5 * Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2 / 1.6));
-        var readyColor = Color.FromArgb(120 + (int)(135 * pulse), 90, 255, 160);
+        var readyColor = Color.FromArgb(70 + (int)(185 * pulse), 90, 255, 160);
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
             isReady ? readyColor : Color.FromArgb(90, 215, 255),
             TextFormatFlags.HorizontalCenter);
@@ -1798,20 +1798,43 @@ internal sealed class MainForm : Form
     /// context; null means close normally.
     /// </summary>
     public Func<Task>? FarewellHook { get; set; }
-    private bool _farewellDone;
+    private bool _farewellRunning;
+    private bool _allowClose;
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // Farewell holds ONLY deliberate exits — never a Windows logoff,
-        // a task-manager kill, or an owner-driven close.
+        // Farewell holds for every graceful close request — X button,
+        // CloseMainWindow, Task Manager "End task" (all WM_CLOSE-based).
+        // A hard kill never reaches here. WindowsShutDown stays excluded:
+        // the OS is going away and audio may already be gone.
         var farewellEligible = e.CloseReason is CloseReason.UserClosing
+            or CloseReason.TaskManagerClosing
             or CloseReason.ApplicationExitCall or CloseReason.None
             or CloseReason.FormOwnerClosing or CloseReason.MdiFormClosing;
-        if (!_farewellDone && farewellEligible && FarewellHook is not null)
+        try
         {
+            BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                $"closing: reason={e.CloseReason} eligible={farewellEligible} " +
+                $"hook={(FarewellHook is not null)} running={_farewellRunning} allow={_allowClose}");
+        }
+        catch { }
+        if (_allowClose)
+        {
+            _closing = true;
+            _backend?.Dispose();
+            base.OnFormClosing(e);
+            return;
+        }
+        if (farewellEligible && FarewellHook is not null)
+        {
+            // Swallow every close while the farewell runs — a second X
+            // click must not cut the goodbye short.
             e.Cancel = true;
-            _farewellDone = true;
-            _ = RunFarewellThenCloseAsync();
+            if (!_farewellRunning)
+            {
+                _farewellRunning = true;
+                _ = RunFarewellThenCloseAsync();
+            }
             return;
         }
         _closing = true;
@@ -1823,6 +1846,7 @@ internal sealed class MainForm : Form
     {
         try { if (FarewellHook is not null) await FarewellHook(); }
         catch { /* a failed farewell must never trap the exit */ }
+        _allowClose = true;
         if (!IsDisposed)
         {
             try { BeginInvoke(new Action(Close)); } catch { }

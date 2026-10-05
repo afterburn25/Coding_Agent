@@ -179,6 +179,52 @@ internal sealed class StartupNarrator
 
     // -- playback ------------------------------------------------------------
 
+    /// <summary>
+    /// Global voice rule: clips never overlap. Every host-side playback —
+    /// webview posts and SoundPlayer fallbacks alike — runs through this
+    /// FIFO, and an item may only start once QuietBuffer has passed since
+    /// the previous clip's real end (voice-ended ack or PlaySync return,
+    /// tracked in _lastPlaybackEnd by Play).
+    /// </summary>
+    private readonly ConcurrentQueue<(Func<Task> Run, TaskCompletionSource<bool> Done)> _voiceQueue = new();
+    private int _voiceWorker;
+
+    internal Task EnqueueVoiceAsync(Func<Task> play)
+    {
+        var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _voiceQueue.Enqueue((play, done));
+        if (Interlocked.Exchange(ref _voiceWorker, 1) == 0)
+            _ = DrainVoiceQueueAsync();
+        return done.Task;
+    }
+
+    private async Task DrainVoiceQueueAsync()
+    {
+        try
+        {
+            while (_voiceQueue.TryDequeue(out var item))
+            {
+                var end = _lastPlaybackEnd;
+                if (end is not null)
+                {
+                    var wait = end.Value + QuietBuffer - _now();
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait);
+                }
+                try { await item.Run(); item.Done.TrySetResult(true); }
+                catch (Exception ex) { item.Done.TrySetException(ex); }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _voiceWorker, 0);
+            if (!_voiceQueue.IsEmpty
+                && Interlocked.Exchange(ref _voiceWorker, 1) == 0)
+            {
+                _ = DrainVoiceQueueAsync();
+            }
+        }
+    }
+
     private string CachePath(string key) =>
         Path.Combine(_cacheDir, key + ".wav");
 
@@ -351,7 +397,8 @@ internal sealed class StartupNarrator
         if (_faulted && key != "fault") return;
         _delivering = true;
         NarrationStarted?.Invoke(key);
-        try { await Play(wav, key); } catch (Exception ex) { Log($"play '{key}' failed: {ex.GetType().Name}"); }
+        try { await EnqueueVoiceAsync(() => Play(wav, key)); }
+        catch (Exception ex) { Log($"play '{key}' failed: {ex.GetType().Name}"); }
         finally { _delivering = false; }
         NarrationEnded?.Invoke(key);
         if (key == "welcome") MarkWelcomePlayed();
@@ -448,10 +495,11 @@ internal sealed class StartupNarrator
     /// </summary>
     public async Task FarewellAsync(Func<string?> backendUrl, TimeSpan bound)
     {
-        if (!Enabled) return;
+        if (!Enabled) { Log("farewell skipped: narrator disabled"); return; }
         var deadline = DateTime.UtcNow + bound;
         var url = backendUrl()?.TrimEnd('/');
-        if (string.IsNullOrEmpty(url)) return;
+        if (string.IsNullOrEmpty(url)) { Log("farewell skipped: no backend url"); return; }
+        Log("farewell beginning");
         try
         {
             var wav = await Synthesize(url, ShutdownLine, CancellationToken.None);
@@ -460,38 +508,52 @@ internal sealed class StartupNarrator
                 var tmp = CachePath("shutdown");
                 try { Directory.CreateDirectory(_cacheDir); File.WriteAllBytes(tmp, wav); } catch { }
                 Log("farewell 'shutdown' via SoundPlayer");
-                await SoundFilePlayer(tmp);
+                await EnqueueVoiceAsync(async () =>
+                {
+                    await SoundFilePlayer(tmp);
+                    _lastPlaybackEnd = _now();
+                });
             }
-            if (DateTime.UtcNow >= deadline) return;
+            else Log("farewell 'shutdown' synth returned null");
+            if (DateTime.UtcNow >= deadline) { Log("farewell past deadline after shutdown line"); return; }
 
             // Persona goodbye — the backend renders style-aware text and
             // synthesizes it; the host just needs the wav to play.
             var pid = await ActiveProfileId(url);
-            if (pid is null) return;
+            if (pid is null) { Log("farewell skipped: no active profile"); return; }
             using var resp = await _http.GetAsync($"{url}/api/profiles/{pid}/farewell");
-            if (!resp.IsSuccessStatusCode) return;
+            if (!resp.IsSuccessStatusCode) { Log($"farewell http {(int)resp.StatusCode}"); return; }
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
             var rel = doc.RootElement.TryGetProperty("voice_url", out var u) ? u.GetString() : null;
-            if (string.IsNullOrEmpty(rel)) return;
+            if (string.IsNullOrEmpty(rel)) { Log("farewell response had no voice_url"); return; }
             var audio = await _http.GetByteArrayAsync(url + rel);
-            if (audio.Length <= 100) return;
+            if (audio.Length <= 100) { Log($"farewell audio too small ({audio.Length}B)"); return; }
             var tmp2 = CachePath("farewell");
             try { File.WriteAllBytes(tmp2, audio); } catch { }
             Log("farewell 'goodbye' via SoundPlayer");
-            await SoundFilePlayer(tmp2);
+            await EnqueueVoiceAsync(async () =>
+            {
+                await SoundFilePlayer(tmp2);
+                _lastPlaybackEnd = _now();
+            });
+            Log("farewell complete");
         }
-        catch { /* farewell is best-effort — never traps the exit */ }
+        catch (Exception ex) { Log($"farewell threw: {ex.GetType().Name}: {ex.Message}"); }
     }
 
     private async Task<string?> ActiveProfileId(string baseUrl)
     {
         try
         {
-            using var r = await _http.GetAsync($"{baseUrl}/api/profiles");
+            using var r = await _http.GetAsync($"{baseUrl}/api/profiles/active");
             if (!r.IsSuccessStatusCode) return null;
             using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
-            return doc.RootElement.TryGetProperty("active", out var a)
-                ? a.GetString() : null;
+            if (!doc.RootElement.TryGetProperty("profile", out var p)
+                || p.ValueKind != JsonValueKind.Object) return null;
+            if (p.TryGetProperty("profile_id", out var i)
+                || p.TryGetProperty("id", out i))
+                return i.GetString();
+            return null;
         }
         catch { return null; }
     }
