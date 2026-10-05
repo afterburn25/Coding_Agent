@@ -65,6 +65,25 @@
     } catch (e) { alert("Switch failed: " + e.message); }
   }
 
+  // Resolves when the desktop host releases the startup transition —
+  // resolves immediately in plain browsers/dev where no host exists.
+  function startupGate() {
+    if (!window.__nexusStartupGate) {
+      window.__nexusStartupGate = new Promise((resolve) => {
+        if (!window.chrome || !window.chrome.webview ||
+            !window.chrome.webview.addEventListener) { resolve(); return; }
+        const done = () => resolve();
+        const timer = setTimeout(done, 15000); // host lost → never trap the greeting
+        window.chrome.webview.addEventListener("message", (e) => {
+          if (e.data && e.data.type === "startup-transition-complete") {
+            clearTimeout(timer); done();
+          }
+        });
+      });
+    }
+    return window.__nexusStartupGate;
+  }
+
   function showGreetingToast() {
     let g = null;
     try {
@@ -92,10 +111,29 @@
         if (r.url) new Audio(r.url).play().catch(() => {});
       } catch {}
     };
+    // A greeting the backend already synthesized carries voice_url —
+    // play it through the voice queue (segment_id dedupes against the
+    // same segment arriving on the event bus; the bare Audio fallback
+    // covers pages without voice_global.js).
+    const playGreetingUrl = () => {
+      if (!g.voice_url) return false;
+      try {
+        if (window.NexusVoice && NexusVoice.enqueue) {
+          NexusVoice.enqueue(String(g.voice_url),
+            { segment_id: g.voice_segment_id || "" });
+          return true;
+        }
+      } catch {}
+      try { new Audio(String(g.voice_url)).play().catch(() => {}); return true; }
+      catch { return false; }
+    };
     // First-entry introduction is voice-only — never rendered as text.
     // server_spoken means the /greeting endpoint already enqueued it
     // via speak_greeting — don't speak it a second time.
-    if (g.kind === "intro") { if (!g.server_spoken) playGreeting(); return; }
+    if (g.kind === "intro") {
+      if (!playGreetingUrl() && !g.server_spoken) playGreeting();
+      return;
+    }
     const t = document.createElement("div");
     t.className = "greeting-toast";
     t.innerHTML = `
@@ -110,10 +148,10 @@
     setTimeout(() => { t.classList.remove("show");
       setTimeout(() => t.remove(), 400); }, 12000);
     // Voice greeting on every app open — not just a toast. Greetings the
-    // /greeting endpoint returned were already enqueued server-side
-    // (server_spoken); stashed switch/onboarding greetings were not, so
-    // they play here — through the voice queue, never a bare Audio.
-    if (!g.server_spoken) playGreeting();
+    // /greeting endpoint returned carry voice_url (play it directly);
+    // stashed switch/onboarding greetings were not spoken server-side,
+    // so they play here — through the voice queue, never a bare Audio.
+    if (!playGreetingUrl() && !g.server_spoken) playGreeting();
   }
 
   function injectSwitcher(s) {
@@ -201,15 +239,20 @@
       showGreetingToast();
       if (hadStashed) sessionStorage.setItem("nexus-greeted", "1");
       // Startup greeting once per browser session — the backend owns
-      // once-per-profile intro + returning-greeting rotation.
+      // once-per-profile intro + returning-greeting rotation. The fetch
+      // (and its synthesized audio) waits on the desktop host's
+      // startup-transition-complete signal: while the splash is up,
+      // Isabella's narration + the 2s quiet buffer own the sound stage.
       if (!sessionStorage.getItem("nexus-greeted") && s.active) {
         sessionStorage.setItem("nexus-greeted", "1");
-        api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`)
+        startupGate()
+          .then(() => api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`))
           .then((g) => {
             if (g && g.text) {
-              // The /greeting handler also enqueued this text via
-              // speak_greeting — mark it so the toast never double-speaks.
-              g.server_spoken = true;
+              // voice_url means the backend synthesized the greeting —
+              // the toast plays it directly (server_spoken suppresses
+              // the client-side speak fallback so it never double-says).
+              g.server_spoken = !!g.voice_url;
               try {
                 sessionStorage.setItem("nexus-greeting",
                   JSON.stringify(g));

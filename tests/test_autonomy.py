@@ -110,6 +110,54 @@ class SandboxedVerifyTests(unittest.TestCase):
             self.assertNotIn("[sandboxed]", out["output"])
             sup.stop()
 
+    def test_approved_gate_does_not_reask_on_resume(self):
+        # Regression: approving a gated verify must authorize it — before,
+        # the resumed runner re-checked policy, re-asked, and the mission
+        # parked on a fresh approval forever.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            orig = sup.policy.check
+            sup.policy.check = lambda action, **kw: (
+                "ask" if action == "run_tests" else orig(action, **kw))
+            mission = {"autonomy_profile": "local_autonomous",
+                       "workspace": td}
+            node = {"id": "n1", "instruction": "run checks",
+                    "metadata": {}}
+            out = sup._default_verify(mission, node)
+            self.assertIn("pending_approval", out)
+            node["metadata"]["approval_granted"] = {
+                "action": "run_tests", "approval_id": "ap-x",
+                "at": time.time()}
+            out2 = sup._default_verify(mission, node)
+            self.assertNotIn("pending_approval", out2)
+            self.assertTrue(out2["ok"], out2.get("output"))
+            sup.stop()
+
+    def test_resolve_approval_stamps_node_grant(self):
+        # The stamp is what the resumed verify honors — approve must write
+        # it onto the node, not just flip the state back to ready.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-verify1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Verify work", "verify", kind="verify")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                g.add(n)
+                row["graph"] = g.graph
+            sup.missions.mutate(m["id"], _fn)
+            ap = sup._create_approval(
+                m["id"], nid, {"name": "run_tests", "detail": "x"})
+            out = sup.resolve_approval(ap["id"], approve=True)
+            self.assertEqual(out["state"], "approved")
+            node = TaskGraph(sup.missions.get(m["id"])).get(nid)
+            self.assertEqual(node["state"], "ready")
+            self.assertEqual(
+                node["metadata"]["approval_granted"]["action"], "run_tests")
+            sup.stop()
+
 
 class JobNodeTests(unittest.TestCase):
     def test_job_kind_is_accepted_and_carries_no_default_lock(self):
@@ -408,6 +456,39 @@ class JobNodeTests(unittest.TestCase):
             self.assertTrue(cps)
             self.assertIn("node", cps[-1])
             self.assertIn("plan_version", cps[-1])
+            sup.stop()
+
+
+class AdmissionEvictionTests(unittest.TestCase):
+    def test_shortfall_calls_release_hook(self):
+        """Mission admission gated on VRAM/RAM asks the runtime to
+        release managed models — demand-driven eviction instead of
+        waiting for the idle timer."""
+        with tempfile.TemporaryDirectory() as td:
+            calls = []
+            sup = make_sup(td, runtime_hooks={
+                "release_vram": lambda gb: calls.append(("vram", gb)) or ["qwen3-14b"],
+                "release_ram": lambda gb: calls.append(("ram", gb)),
+            })
+            class _Est:
+                vram_mb = 6144.0
+                ram_mb = 8192.0
+            sup._on_admission_shortfall(_Est(), "waiting_for_vram")
+            self.assertEqual(calls, [("vram", 6.0)])
+            sup._on_admission_shortfall(_Est(), "waiting_for_ram")
+            self.assertEqual(calls[-1], ("ram", 8.0))
+            sup._on_admission_shortfall(_Est(), "waiting_for_cpu")
+            self.assertEqual(len(calls), 2)   # non-memory reasons ignored
+            sup.stop()
+
+    def test_shortfall_noop_without_hooks(self):
+        """Test/embedded supervisors without runtime hooks must not
+        crash on a memory shortfall."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            class _Est:
+                vram_mb = 6144.0
+            sup._on_admission_shortfall(_Est(), "waiting_for_vram")
             sup.stop()
 
 
@@ -847,6 +928,66 @@ class MissionStoreTests(unittest.TestCase):
             self.assertEqual(sup.missions.get(m["id"])["revision"], rev + 1)
             sup.stop()
 
+    def test_terminal_missions_auto_archive(self):
+        """Quiet completions older than retention auto-archive so the
+        resident store stays bounded; failed missions are never
+        auto-archived (they need operator attention)."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            old_done = sup.create_mission(objective="old done")
+            old_fail = sup.create_mission(objective="old fail")
+            past = time.time() - 31 * 86400
+            sup.missions.mutate(old_done["id"], lambda r: r.update(
+                {"status": "completed", "completed_at": past}))
+            sup.missions.mutate(old_fail["id"], lambda r: r.update(
+                {"status": "failed", "completed_at": past}))
+            # Any mission reaching a terminal state runs the sweep.
+            m = sup.create_mission(objective="trigger")
+            sup.missions.transition(m["id"], "ready")
+            sup.missions.transition(m["id"], "cancelled")
+            self.assertEqual(
+                sup.missions.get(old_done["id"])["status"], "archived")
+            self.assertEqual(
+                sup.missions.get(old_fail["id"])["status"], "failed")
+            self.assertEqual(sup.missions.get(m["id"])["status"],
+                             "cancelled")
+            sup.stop()
+
+    def test_notifications_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            data = sup.store.notifications.data.setdefault(
+                "notifications", [])
+            for i in range(505):
+                data.append({"id": f"n-{i}", "ts": time.time(),
+                             "level": "info", "read": True})
+            sup.notifications.notify("newest", level="failure")
+            self.assertLessEqual(len(data), 500)
+            self.assertEqual(data[-1]["message"], "newest")
+            sup.stop()
+
+    def test_approvals_pruned(self):
+        """Resolved approval rows are audit history with a retention
+        bound; pending rows are never pruned."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            rows = sup.store.approvals.data.setdefault("approvals", [])
+            old = time.time() - 30 * 86400
+            for i in range(210):
+                rows.append({"id": f"ap-old-{i}", "mission_id": "m-x",
+                             "state": "approved", "created_at": old,
+                             "resolved_at": old})
+            rows.append({"id": "ap-keep", "mission_id": "m-x",
+                         "state": "pending", "created_at": old})
+            sup._create_approval("m-new", "t-1",
+                                 {"name": "run_tests", "detail": "d"})
+            rows = sup.store.approvals.data["approvals"]
+            states = [r["state"] for r in rows]
+            self.assertEqual(states.count("pending"), 2)
+            self.assertLessEqual(len(rows), 52)
+            self.assertTrue(any(r["id"] == "ap-keep" for r in rows))
+            sup.stop()
+
 
 class TaskGraphTests(unittest.TestCase):
     def _graph(self):
@@ -929,6 +1070,17 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(classify_failure("AssertionError: 1 != 2 test failed"),
                          FailureClass.TEST_FAILURE)
         self.assertEqual(classify_failure("weirdness"), FailureClass.UNKNOWN)
+        # Demand-eviction deferral and llama.cpp OOM-allocation crashes are
+        # resource pressure, not UNKNOWN — they must take the CUDA_OOM
+        # playbook (evict → wait → retry) instead of generic retries.
+        self.assertEqual(classify_failure(
+            "model 'qwen3-14b' was evicted to free RAM for queued work and "
+            "still would not fit — launch deferred"),
+            FailureClass.CUDA_OOM)
+        self.assertEqual(classify_failure(
+            "llama-server exited with code 1 — failed to allocate CPU "
+            "buffer of size 5234491392"),
+            FailureClass.CUDA_OOM)
 
     def test_playbook_bounded(self):
         with tempfile.TemporaryDirectory() as td:
@@ -960,6 +1112,41 @@ class RecoveryTests(unittest.TestCase):
         a = failure_signature("task", "error at offset 123456")
         b = failure_signature("task", "error at offset 999999")
         self.assertEqual(a, b)
+
+    def test_varied_failure_text_still_bounded(self):
+        # Regression (live soak): a fabricated reply differs every attempt,
+        # so each failure minted a fresh record with a new signature —
+        # the playbook cursor reset to "retry" forever and the
+        # same-failure bound never tripped. Same task+class must continue
+        # the record so retries bound even when the text varies.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x",
+                                   budgets={"max_same_failure_retries": 3})
+            for i in range(3):
+                rec = sup.recovery.record_failure(
+                    m, "task", f"unverified claims, variant {i}")
+            self.assertEqual(len(m["failure_history"]), 1)
+            self.assertEqual(rec["count"], 3)
+            self.assertIn("same failure", sup.recovery.budgets_exceeded(m))
+            sup.stop()
+
+    def test_playbook_advances_across_varied_retries(self):
+        # The cursor must advance across repeated same-task failures whose
+        # text differs — otherwise every retry replays step 0.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x")
+            rec = sup.recovery.record_failure(m, "task", "alpha error")
+            s1 = sup.recovery.next_step(m, rec)
+            rec2 = sup.recovery.record_failure(m, "task", "totally different beta")
+            self.assertIs(rec, rec2)
+            s2 = sup.recovery.next_step(m, rec2)
+            actions = [s["action"] for s in (s1, s2)]
+            self.assertEqual(
+                actions, [s["action"] for s in
+                          PLAYBOOKS[FailureClass.UNKNOWN][:2]])
+            sup.stop()
 
 
 class PolicyTests(unittest.TestCase):
@@ -1300,12 +1487,145 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertGreater(len(final["graph"]["nodes"]), 3)
             sup.stop()
 
+    def test_retry_cooldown_does_not_block_mission(self):
+        # Regression: a failed node parks in waiting_dependency on its
+        # bounded retry cooldown — but that state counted as neither
+        # runnable nor stuck, so the very next tick concluded "nothing
+        # left to run" and blocked the mission before the retry fired.
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return {"ok": False, "output": "transient fail"}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            # Drive until the first node has failed once — the recovery
+            # playbook parks it in waiting_dependency on a bounded
+            # cooldown (and resets its retry counter).
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                sup.tick()
+                time.sleep(0.05)
+                row = sup.missions.get(m["id"])
+                parked = [n for n in (row.get("graph") or {}).get("nodes", [])
+                          if n.get("state") == "waiting_dependency"]
+                if parked:
+                    break
+            self.assertTrue(parked, "node never reached retry cooldown")
+            # Ticks while the node is on cooldown must keep the mission
+            # executing — not transition it to blocked/evaluating.
+            for _ in range(3):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "executing",
+                             f"parked retry wrongly left executing: "
+                             f"{row['status']}")
+
+            def _clear_cooldown(r):
+                for n in (r.get("graph") or {}).get("nodes", []):
+                    n["retry_after"] = 0
+            sup.missions.mutate(m["id"], _clear_cooldown)
+            final = drive(sup, m["id"], ticks=30)
+            self.assertEqual(final["status"], "completed")
+            self.assertGreaterEqual(calls["n"], 2)
+            sup.stop()
+
+    def test_budget_pause_auto_resumes_when_clear(self):
+        # Live-soak finding: llama-server load spikes pushed available RAM
+        # under the 2 GB floor and the budget gate paused the mission —
+        # permanently. A transient resource pause must re-check and resume
+        # once pressure clears, or one blip ends the night's work.
+        with tempfile.TemporaryDirectory() as td:
+            hw = {"available_ram_gb": 0.5, "total_ram_gb": 64.0}
+            sup = make_sup(td, resources=lambda: dict(hw))
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            sup.tick()
+            time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            self.assertTrue(row.get("budget_pause"))
+
+            hw["available_ram_gb"] = 32.0
+            sup.tick()
+            time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertNotEqual(row["status"], "paused")
+            self.assertFalse(row.get("budget_pause"))
+            sup.stop()
+
+    def test_permanent_budget_violation_never_auto_resumes(self):
+        # A runtime-deadline pause can't clear on its own — auto-resuming
+        # it would flap pause->resume->pause forever. Only transient
+        # resource pressure gets the marker.
+        with tempfile.TemporaryDirectory() as td:
+            def slow_executor(m, n, cb):
+                time.sleep(0.6)
+                return {"ok": True, "output": "ok"}
+            sup = make_sup(td, executor=slow_executor)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}],
+                budgets={"max_runtime_s": 1})
+            sup.start_mission(m["id"])
+            # runtime_deadline is stamped on activation (the first tick's
+            # planning transition) as now+budget — activate, then let the
+            # 1s budget genuinely elapse before ticking past it.
+            sup.tick()
+            time.sleep(1.3)
+            for _ in range(5):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            self.assertFalse(row.get("budget_pause"),
+                             "permanent violation must not auto-resume")
+            sup.stop()
+
+    def test_user_pause_never_auto_resumes(self):
+        # Only budget-caused pauses may auto-resume — an explicit user
+        # pause must stay parked even with healthy resources.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            sup.pause_mission(m["id"])
+            for _ in range(3):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            sup.stop()
+
+    @staticmethod
+    def _expire_pending_approval(sup: AutonomousSupervisor) -> None:
+        # Deterministic alternative to wall-clock sleeps: the timeout check
+        # compares `now - created_at >= timeout`, so backdating the pending
+        # row makes the *next* tick fire it — immune to CI scheduling jitter.
+        # (0.0 is falsy and falls back to `now`, so use a small nonzero age.)
+        rows = sup.approvals(pending_only=True)
+        assert rows, "expected a pending approval to expire"
+        rows[0]["created_at"] = 1.0
+
     def test_mission_approval_timeout_replans(self):
         # The autonomous approval bound applies to missions too — an
         # unanswered hard gate must not leave the supervisor parked all
         # night. Timeout behaves like denial: mark it, replan, continue.
         with tempfile.TemporaryDirectory() as td:
             calls = {"n": 0}
+            timeout = {"v": 0.0}
 
             def executor(m, n, cb):
                 calls["n"] += 1
@@ -1316,7 +1636,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
                 return {"ok": True, "output": "ok"}
 
             sup = make_sup(td, executor=executor,
-                           approval_timeout_seconds=0.01)
+                           approval_timeout_seconds=lambda: timeout["v"])
             m = sup.create_mission(
                 objective="x",
                 success_criteria=[{"kind": "all_tasks_completed"}])
@@ -1324,8 +1644,10 @@ class SupervisorLifecycleTests(unittest.TestCase):
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
             self.assertEqual(len(sup.approvals(pending_only=True)), 1)
-            time.sleep(0.03)
+            timeout["v"] = 1.0
+            self._expire_pending_approval(sup)
             sup.tick()
+            timeout["v"] = 0.0
             final = drive(sup, m["id"], ticks=30)
             self.assertEqual(final["status"], "completed")
             rows = sup.approvals()
@@ -1335,6 +1657,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
     def test_mission_approval_timeouts_are_bounded(self):
         with tempfile.TemporaryDirectory() as td:
             calls = {"n": 0}
+            timeout = {"v": 0.0}
 
             def executor(m, n, cb):
                 calls["n"] += 1
@@ -1345,7 +1668,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
                 return {"ok": True, "output": "ok"}
 
             sup = make_sup(td, executor=executor,
-                           approval_timeout_seconds=0.01)
+                           approval_timeout_seconds=lambda: timeout["v"])
             m = sup.create_mission(
                 objective="x",
                 budgets={"max_approval_retries": 2},
@@ -1353,11 +1676,14 @@ class SupervisorLifecycleTests(unittest.TestCase):
             sup.start_mission(m["id"])
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            time.sleep(0.03)
+            timeout["v"] = 1.0
+            self._expire_pending_approval(sup)
             sup.tick()
+            timeout["v"] = 0.0
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            time.sleep(0.03)
+            timeout["v"] = 1.0
+            self._expire_pending_approval(sup)
             sup.tick()
             final = sup.missions.get(m["id"])
             self.assertEqual(final["status"], "blocked")

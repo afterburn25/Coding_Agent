@@ -1,13 +1,13 @@
 [project]
 name = "local-code-agent"
-version = "0.19.0"
+version = "0.21.0"
 description = "Chat Nexus: a local-first AI coding workstation with automatic model routing, research/browser tooling, image generation/editing, transactional workflows, and modular tools."
 requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = ["cryptography==50.0.1", "py7zr==1.1.3"]
 
 [project.optional-dependencies]
-browser = ["playwright>=1.50"]
+browser = ["playwright>=1.55"]
 voice-stt = [
     "sounddevice==0.5.6",
     "faster-whisper==1.2.1",

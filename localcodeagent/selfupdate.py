@@ -102,7 +102,7 @@ class SelfUpdate:
                "--specpath", str(src / "build"),
                "--add-data", f"{src / 'VERSION'};.",
                "--add-data", f"{src / 'web'};web",
-               "--add-data", f"{src / 'tools'};tools",
+               "--add-data", f"{src / 'tools' / 'manifests'};tools/manifests",
                "--collect-submodules", "localcodeagent",
                "--collect-data", "localcodeagent",
                "--collect-submodules", "py7zr",

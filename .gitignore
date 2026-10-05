@@ -19,6 +19,9 @@ models/*.gguf
 models/image/
 data/image/
 ComfyUI/
+tools/InvokeAI/
+tools/.invokeai-*.log
+data/invokeai/
 
 # Kokoro TTS model binaries + build-time asset cache
 models/voice/
@@ -29,6 +32,8 @@ packaging/llama-runtime/
 # Local packaging output (PyInstaller/dotnet dist trees)
 build/
 dist/
+dist-*/
+build-*/
 .agent/browser/
 
 .agent/research/

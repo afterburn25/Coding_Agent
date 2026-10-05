@@ -243,6 +243,12 @@ class _StubVoice:
         self.enqueued.append((task_id, text))
         self.last_vocalize = kw.get("vocalize", True)
 
+    def speak_greeting(self, task_id, text, **kw):
+        self.enqueued.append((task_id, text))
+        self.last_vocalize = True
+        return {"ok": True, "segment_id": "seg0001",
+                "url": f"/api/voice/audio/seg0001", "seconds": 1.0}
+
     def set_muted(self, muted):
         self._muted = bool(muted)
 

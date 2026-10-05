@@ -402,12 +402,14 @@ class ToolRegistry:
             "callable": bool(self._plugin_meta.get(name, {}).get("invocable", True)),
             "install": dict(install),
             "installable": (
-                str(install.get("method") or "").strip().lower() == "archive"
+                str(install.get("method") or "").strip().lower()
+                in ("archive", "venv")
                 or install_command(install, install_root=self.install_root)
                 is not None
             ),
             "removable": (
-                str(install.get("method") or "").strip().lower() == "archive"
+                str(install.get("method") or "").strip().lower()
+                in ("archive", "venv")
                 or uninstall_command(install, install_root=self.install_root)
                 is not None
             ),

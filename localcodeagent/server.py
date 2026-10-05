@@ -22,7 +22,10 @@ from . import netdiag
 from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
 from .release import SECTIONS as SECTIONS_RC
 from .temp_specialists import DEFAULT_TTL as DEFAULT_SPECIALIST_TTL
-from .agent.orchestrator import AgentOrchestrator
+from .agent.orchestrator import (
+    AgentOrchestrator,
+    UNVERIFIED_CLAIMS_MARKER as _UNVERIFIED_CLAIMS_MARKER,
+)
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
 from .models.router import ModelRouter
@@ -38,6 +41,8 @@ from .tools.plugins import load_plugin_manifests
 from .tools.downloads import ToolDownloadManager
 from .secrets import SecretVault
 from .tools.api import register_api_tools
+from .tools.audit import register_audit_tools
+from .tools.deploy import register_deploy_tools
 from .tools.buildsys import register_build_tools
 from .tools.codeintel import register_codeintel_tools
 from .tools.data import register_data_tools
@@ -91,6 +96,26 @@ from .version import version as _canonical_version
 VERSION = _canonical_version()
 
 
+def _session_owner_key() -> str:
+    """Stable identity of this backend install for session-marker scoping.
+
+    Frozen builds key on the exe path; unfrozen runs key on the main
+    module file. Two different installs that share a data directory get
+    different marker files, so crash accounting stays per-install.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            base = sys.executable
+        else:
+            base = getattr(sys.modules.get("__main__"), "__file__", "") \
+                or sys.executable
+        raw = str(Path(base).resolve()).lower()
+    except Exception:
+        raw = "unknown"
+    import hashlib
+    return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
 class _LazyActivity:
     """Resolves AppState.activities at call time (created after tools)."""
 
@@ -112,7 +137,7 @@ class AppState:
         self.runtime_root = runtime_root
         self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
-        self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
+        self._boot(12, "CALIBRATING · MODEL RUNTIME", "Detecting models, hardware and available resources")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
         # Autodetect GGUFs on disk before the router exists — profiles are
         # added for unconfigured files and dead ones disabled, so routing
@@ -122,7 +147,7 @@ class AppState:
         hw = self.runtime.hardware
         gpu_label = ", ".join(g.name for g in getattr(hw, "gpus", []) or []) or "CPU only"
         self._boot(
-            14, "INITIALIZING · NEURAL ENGINE",
+            14, "CALIBRATING · MODEL RUNTIME",
             f"Applying {getattr(config, 'performance_mode', 'auto')} runtime profile · {gpu_label}",
         )
         self.model_telemetry = ModelPerformanceTelemetry(
@@ -143,7 +168,7 @@ class AppState:
             config=config, workspace=self.workspace,
             comfy_installer=lambda: self.install_tool("comfyui", approve=True),
             job_lookup=lambda jid: self.jobs.get(jid).as_dict())
-        self._boot(30, "RESTORING · TASK QUEUE", "Recovering queued or interrupted work")
+        self._boot(30, "RESTORING · SYSTEM STATE", "Recovering queued or interrupted work")
         self.tasks = TaskStore(self.workspace)
         from .workqueue import WorkQueue
         self.queue = WorkQueue(self.workspace)
@@ -175,7 +200,7 @@ class AppState:
         # hold per-file copies and would otherwise grow without bound.
         self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
         self.memory = ProjectMemory(self.workspace)
-        self._boot(38, "RESTORING · MEMORY & KNOWLEDGE", "Preparing conversation and learned knowledge continuity")
+        self._boot(38, "SYNCHRONIZING · NEXUS BRAIN", "Preparing conversation and learned knowledge continuity")
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():
             conversation_path = runtime_root / conversation_path
@@ -210,7 +235,7 @@ class AppState:
         self.model_growth = ModelGrowthLab(growth_dir)
         # Protected Nexus Brain state has one canonical location. Mutable
         # config.json cannot redirect an initialized Brain to an unprotected file.
-        self._boot(52, "LOADING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
+        self._boot(52, "SYNCHRONIZING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
         brain_path = (runtime_root / "data" / "nexus_brain.json").resolve()
         brain_auth_path = brain_path.with_name(brain_path.stem + ".auth.json")
         protected_brain_exists = brain_path.is_file() or brain_auth_path.is_file()
@@ -264,10 +289,10 @@ class AppState:
         if not am_path.is_absolute():
             am_path = runtime_root / am_path
         self.answer_memory = self._build_answer_memory(config, am_path)
-        self._boot(64, "PREPARING · WORKSPACE", "Restoring project and repository context")
+        self._boot(64, "LOADING · COMMAND INTERFACE", "Restoring project and repository context")
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
-        self._boot(68, "INITIALIZING · PERMISSION SYSTEM", "Applying Nexus Core authorization policies")
+        self._boot(68, "VERIFYING · CAPABILITIES", "Applying Nexus Core authorization policies")
         self.permission_manager = PermissionManager(
             config.permissions,
             profile=getattr(config, "permission_profile", "custom"),
@@ -292,15 +317,33 @@ class AppState:
         self.jobs.on_change = make_emitter(self.events, "job")
         _image_emit = make_emitter(self.events, "image_job")
         self._image_failures_announced: set[str] = set()
+        self._image_artifacts_done: set[str] = set()
 
         def _on_image_change(payload: dict) -> None:
             _image_emit(payload)
             self._maybe_announce_image_failure(payload)
+            # Finished image jobs (chat or mission) register their outputs
+            # as artifacts once — lineage records the backend that ran.
+            job = payload.get("job") or {}
+            if (job.get("state") == "finished" and job.get("outputs")
+                    and job.get("id") not in self._image_artifacts_done
+                    and getattr(self, "artifacts", None) is not None):
+                # Dedupe sets bound at 1024 — jobs fall out of the 300-row
+                # ledger long before that, so old ids can never re-emit.
+                if len(self._image_artifacts_done) > 1024:
+                    self._image_artifacts_done.clear()
+                self._image_artifacts_done.add(str(job["id"]))
+                for path in job["outputs"]:
+                    try:
+                        self._register_output_artifact(
+                            path, tool=str(job.get("backend") or "image"))
+                    except Exception:
+                        pass
 
         self.images.on_change = _on_image_change
         self.images.on_setup_change = make_emitter(self.events, "image_setup")
         self.images.on_missing_backend = lambda: self._publish_install_offer(
-            ["comfyui"], capability="image_generation")
+            ["invokeai", "comfyui"], capability="image_generation")
         self.tools.on_event = make_emitter(self.events, "tool")
         self.processes = ProcessManager()
         # Adaptive Worker Manager — one shared admission controller for
@@ -354,7 +397,7 @@ class AppState:
         self._register_processes()
         if getattr(config, "process_watchdog", True):
             self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
-        self._boot(74, "REGISTERING · TOOLS & PLUGINS", "Loading installed capabilities and tool manifests")
+        self._boot(74, "VERIFYING · CAPABILITIES", "Loading installed capabilities and tool manifests")
         # Workspace Manager — registered workspaces the user opens beyond
         # the primary root. File/shell tools are bounded to these roots.
         self.workspaces = WorkspaceManager(
@@ -378,6 +421,16 @@ class AppState:
         register_devserver_tools(self.tools, self.devservers)
         register_search_tools(self.tools, self.workspace)
         register_build_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        register_audit_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        register_deploy_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
+        from .tools.debugger import register_debug_tools
+        register_debug_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
         register_project_tools(self.tools, self.workspaces)
@@ -415,6 +468,11 @@ class AppState:
         from .lineage import LineageStore
         self.lineage = LineageStore(runtime_root / "data" / "lineage.json")
         self.artifacts.lineage = self.lineage
+        from .tools.release import register_release_tools
+        register_release_tools(
+            self.tools, self.workspace,
+            artifacts=lambda: self.artifacts,
+            extra_roots=self.workspaces.allowed_roots)
         from .dependencies import DependencyStore
         from .environment import EnvironmentStore
         self.dependencies = DependencyStore(
@@ -458,10 +516,18 @@ class AppState:
         # stop_state. A dirty record on next launch means the previous
         # session ended without a graceful shutdown (kill, power loss, or
         # crash) — surfaced as a startup report and greeting note.
-        self._session_marker = runtime_root / "data" / "session.json"
+        # The marker file is scoped per backend install: a data dir can be
+        # shared by a packaged install plus dev/soak runs pointed at the
+        # same config, and a hard-killed foreign process must not dirty
+        # this install's crash accounting (that once tripped a spurious
+        # LKG auto-rollback on the production build).
+        self._session_marker = (
+            runtime_root / "data"
+            / f"session-{_session_owner_key()}.json")
         self._session_started = time.time()
         self.prior_session_abnormal = self._read_prior_session()
         self._write_session_marker(clean=False)
+        self._prune_session_markers()
         # Safe Mode + golden config — a dirty prior session bumps the
         # consecutive-failure counter; repeated failures surface a
         # Safe Mode offer (never automatic data loss).
@@ -494,17 +560,29 @@ class AppState:
             state_path=runtime_root / "data" / "connectors_audit.json",
             vault=self.secrets,
             permission_check=lambda perm: self.permission_manager.effective(perm))
-        # First-class connector for the repo host — lazy client factory so a
-        # token exported after boot still authenticates; slug resolves from
-        # the workspace git remote.
+        # First-class connector for the repo host — one shared client so a
+        # token stored by /api/github/connect authenticates every surface
+        # immediately; slug resolves from the workspace git remote.
+        from .tools.github import GitHubCodingClient, _repo_slug
+        self.github_client = GitHubCodingClient(config)
         try:
             from .connectors.github import GitHubConnector
-            from .tools.github import GitHubCodingClient, _repo_slug
             self.connectors.register(GitHubConnector(
-                client_factory=lambda: GitHubCodingClient(config),
+                client_factory=lambda: self.github_client,
                 slug=lambda: _repo_slug(self.workspace)))
         except Exception:
             pass
+        # Single account-state surface for API/tools/connector/capability —
+        # status/connect/disconnect/repos/test all live here so a UI
+        # connect needs no agent-tool call and no restart.
+        from .github_account import GitHubAccountService
+        self.github_account = GitHubAccountService(
+            config, self.secrets, client=self.github_client,
+            slug_resolver=lambda: _repo_slug(self.workspace),
+            connectors=self.connectors,
+            permission_check=lambda p: self.permission_manager.effective(p),
+            audit=lambda e, d: self.connectors._audit(
+                "github", e, json.dumps(d)[:200]))
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         self._rag_db = self.workspace / ".agent" / "rag_index.db"
@@ -566,15 +644,19 @@ class AppState:
             register_github_tools(
                 self.tools, self.workspace, config,
                 vault=self.secrets,
-                workspaces=self.workspaces)
+                workspaces=self.workspaces,
+                client=self.github_client,
+                account=self.github_account)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
-        register_web_tools(self.tools, runtime_root=runtime_root)
+        self.browser_runner = register_web_tools(
+            self.tools, runtime_root=runtime_root, artifacts=self.artifacts)
         if config.image_enabled:
             register_image_tools(self.tools, self.images)
         # Local-first voice/TTS subsystem (Kokoro ONNX, CPU by default).
         self.voice = None
+        self.provisioning = None
         if getattr(config, "voice_enabled", True):
             try:
                 from .voice.manager import VoiceManager
@@ -621,14 +703,29 @@ class AppState:
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
-        if not manifests_dir.is_dir():
-            # Packaged builds bundle the manifests inside the backend payload
-            # (PyInstaller _MEIPASS) rather than next to config.json.
-            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "tools" / "manifests"
-            if bundled.is_dir():
-                manifests_dir = bundled
+        # Packaged builds also bundle the manifests inside the backend payload
+        # (PyInstaller _MEIPASS). The on-disk copy under runtime_root is seeded
+        # at install time but never re-synced — a stale copy persists forever
+        # (live evidence: invokeai.json kept the pre-fix `detect.files` shape,
+        # so a working venv reported "not detected on disk"). Load the on-disk
+        # dir first for user-added manifests, then let bundled manifests
+        # overwrite shared ids — the bundle ships with this binary and matches
+        # its code.
+        bundled_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "tools" / "manifests"
+        if not manifests_dir.is_dir() and bundled_dir.is_dir():
+            manifests_dir = bundled_dir
         self.plugin_manifests = load_plugin_manifests(
             manifests_dir, self.tools, workspace=self.workspace, install_root=runtime_root)
+        if bundled_dir.is_dir() and bundled_dir.resolve() != manifests_dir.resolve():
+            overlay = load_plugin_manifests(
+                bundled_dir, self.tools, workspace=self.workspace,
+                install_root=runtime_root)
+            self.plugin_manifests = {
+                "loaded": list(self.plugin_manifests.get("loaded") or [])
+                          + list(overlay.get("loaded") or []),
+                "errors": list(self.plugin_manifests.get("errors") or [])
+                          + list(overlay.get("errors") or []),
+            }
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
         # tool_downloads/jobs exist now — safe to re-enter a setup that was
@@ -649,7 +746,7 @@ class AppState:
         self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])),
                               vault=self.secrets)
         if getattr(config, "mcp_servers", None):
-            self._boot(86, "CONNECTING · MCP SERVICES", "Connecting configured external tool servers")
+            self._boot(86, "VERIFYING · CAPABILITIES", "Connecting configured external tool servers")
         try:
             self.mcp.connect_all()
         except Exception:
@@ -799,12 +896,12 @@ class AppState:
         self._resume_thread: threading.Thread | None = None
         # Autonomous supervisor — persistent missions, triggers, schedules,
         # standing goals. Never widens permissions; interactive lane wins.
-        self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
+        self._boot(90, "RESTORING · SYSTEM STATE", "Restoring missions, triggers, and schedules")
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
         self._report_prior_crash()
         self.queue.enrich = self._queue_enrich_mission
-        self._boot(92, "INITIALIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
+        self._boot(92, "SYNCHRONIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
         try:
             self.brain = self._build_brain(config, runtime_root)
         except Exception:
@@ -813,13 +910,94 @@ class AppState:
             import logging
             logging.getLogger(__name__).exception("Nexus Brain init failed")
             self.brain = None
-        self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
+        self._boot(94, "STARTING · CORE SERVICES", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_tune()
         self._start_auto_resume()
         self._start_source_sync()
+        self._start_provisioning()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+
+    def _start_provisioning(self) -> None:
+        """BackgroundProvisioningManager — after the app is usable, finish
+        the workstation stack (models, image backends, voice/STT, tools)
+        progressively in the background. Failures isolate: provisioning
+        must never prevent the server from serving chat."""
+        from .provisioning import ProvisioningManager
+        try:
+            self.provisioning = ProvisioningManager(
+                self.runtime_root, self.config,
+                image_manager=self.images,
+                install_tool_hook=self.install_tool,
+                tool_installed_hook=self._tool_installed,
+                job_lookup=lambda jid: self.jobs.get(jid),
+                capability_registry=self.capability_registry,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("provisioning init failed")
+            self.provisioning = None
+            return
+        self.provisioning.on_change = self._on_provision_change
+        self.provisioning.on_notify = self._on_provision_notify
+        self.provisioning.on_speak = lambda key, text: self._speak_notice(
+            f"provision-{key}", "status", text)
+        self.provisioning.on_capability_ready = self._on_capability_ready
+        self.provisioning.start()
+
+    _CAPABILITY_PENDING_MAX = 20
+
+    def _defer_capability_request(self, capability: str,
+                                  run: Callable[[], None]) -> bool:
+        """Queue work behind a capability that is still installing — the
+        request auto-resumes when provisioning verifies the component.
+        Bounded so a broken setup can't accumulate unbounded deferred work."""
+        pending = getattr(self, "_capability_pending", None)
+        if pending is None:
+            pending = self._capability_pending = {}
+        queue = pending.setdefault(capability, [])
+        if len(queue) >= self._CAPABILITY_PENDING_MAX:
+            return False
+        queue.append(run)
+        return True
+
+    def _on_capability_ready(self, capability: str) -> None:
+        pending = getattr(self, "_capability_pending", {})
+        queue = pending.pop(capability, [])
+        for run in queue:
+            try:
+                run()
+            except Exception:
+                pass
+
+    def _on_provision_change(self, item, kind: str) -> None:
+        try:
+            payload = {"kind": kind,
+                       "item": item.as_dict() if item is not None else None}
+            self.events.publish("provision_update", payload)
+            for sink in list(getattr(self, "_stream_sinks", [])):
+                try:
+                    sink.put({"type": "provision_update", **payload})
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_provision_notify(self, note: dict) -> None:
+        try:
+            level = {"provision_failed": "failure",
+                     "provision_partial": "important",
+                     "provision_complete": "completion",
+                     "provision_retry": "info",
+                     "provision_started": "info",
+                     "provision_ready": "info"}.get(
+                         str(note.get("kind") or ""), "info")
+            self.autonomy.notifications.notify(
+                str(note.get("text") or ""), level=level,
+                title="Workstation setup")
+        except Exception:
+            pass
 
     def self_update(self, source_dir: str = "") -> "object":
         """Lazily build the update bootstrapper. Source defaults to the
@@ -855,24 +1033,27 @@ class AppState:
                 return None
 
         def _github_authorized() -> bool:
+            # Account service resolves env+vault live — no cached
+            # negative state; connect/disconnect reflect immediately.
             try:
-                from .tools.github import GitHubCodingClient
-                if getattr(GitHubCodingClient(config), "token", ""):
-                    return True
-            except Exception:
-                pass
-            try:
-                return bool(self.secrets.get("github_token"))
+                return bool(self.github_account.authorized())
             except Exception:
                 return False
 
         def _image_state() -> str:
-            rt = getattr(getattr(self, "images", None),
-                         "backend_runtime", None)
-            if rt is None:
+            images = getattr(self, "images", None)
+            if images is None:
                 return ""
-            return str(getattr(getattr(rt, "status", None), "state", "")
-                       or "")
+            states = []
+            for rt in (getattr(images, "invokeai_runtime", None),
+                       getattr(images, "backend_runtime", None)):
+                if rt is None:
+                    continue
+                st = getattr(getattr(rt, "status", None), "state", "") or ""
+                if getattr(getattr(rt, "status", None), "healthy", False):
+                    return "healthy"
+                states.append(st)
+            return next((s for s in states if s), "")
 
         def _stt_state() -> str:
             if getattr(self, "_stt_engine", None) is not None:
@@ -917,8 +1098,25 @@ class AppState:
                 lambda: getattr(self, "voice", None) is not None,
             "voice_ready": _voice_ready,
             "llm_ready": _llm_ready,
+            "browser_state": self._browser_state,
         }
         return CapabilityRegistry(env)
+
+    def _browser_state(self) -> str:
+        """Honest browser-automation state for the capability probe:
+        'verified' only when a browser actually resolves."""
+        runner = getattr(self, "browser_runner", None)
+        if runner is None:
+            return "missing"
+        try:
+            st = runner.status()
+            if st.get("ready"):
+                return "ready"
+            if st.get("playwright"):
+                return "no_browser"
+            return "no_playwright"
+        except Exception:
+            return "error"
 
     def _image_job_outputs(self, job_id: str) -> list[str]:
         """Output file paths for an image job — used by the orchestrator to
@@ -1572,6 +1770,16 @@ class AppState:
             return
         if not (self.workspace / ".git" / "HEAD").exists():
             return
+        # Only ever fast-forward a *bundled reference* checkout. If the
+        # workspace is the tree this code is running from (dev checkout,
+        # CI job, selftest smoke instance), pulling would silently mutate
+        # the very code/tests under execution.
+        code_root = Path(__file__).resolve().parent.parent
+        try:
+            if self.workspace.resolve() == code_root:
+                return
+        except OSError:
+            return
 
         def _sync() -> None:
             import subprocess
@@ -1631,7 +1839,19 @@ class AppState:
             pass
 
     def _read_prior_session(self) -> dict | None:
-        """Return the previous session record when it ended dirty."""
+        """Return the previous session record when it ended dirty.
+
+        A legacy unscoped ``session.json`` (written by builds predating
+        per-install scoping) is adopted once by renaming it onto this
+        install's marker name; afterwards it is never consulted again,
+        so foreign processes can no longer inject phantom crashes.
+        """
+        legacy = self._session_marker.with_name("session.json")
+        if not self._session_marker.exists() and legacy.is_file():
+            try:
+                legacy.replace(self._session_marker)
+            except OSError:
+                pass
         try:
             rec = json.loads(
                 self._session_marker.read_text(encoding="utf-8"))
@@ -1640,6 +1860,21 @@ class AppState:
         except Exception:
             pass
         return None
+
+    def _prune_session_markers(self) -> None:
+        """Bound stale per-install markers — each distinct backend install
+        leaves one file; keep only the most recently touched few."""
+        try:
+            others = [p for p in self._session_marker.parent.glob(
+                "session-*.json") if p != self._session_marker]
+            others.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            for p in others[7:]:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def _write_session_marker(self, *, clean: bool) -> None:
         try:
@@ -1707,12 +1942,48 @@ class AppState:
         def executor(mission: dict, node: dict, emit_cb) -> dict:
             # Background work never opens a voice lane — begin_task would
             # stop_all() any user-facing speech in flight.
+            meta = node.get("metadata") or {}
+            parked_task = str((node.get("result") or {}).get("task_id") or "")
+            if meta.get("approval_granted") and parked_task:
+                # Resumed after a mission approval — replay the exact gated
+                # call that parked instead of starting a fresh run that
+                # would re-derive it and re-gate forever.
+                try:
+                    parked_row = self.tasks.get(parked_task)
+                    parked_state = str(getattr(parked_row, "status", "") or "")
+                except Exception:
+                    parked_state = ""
+                if parked_state == "waiting_approval":
+                    try:
+                        result = self.agent.resume(
+                            parked_task, approved=True,
+                            event_callback=emit_cb)
+                    except Exception:
+                        result = None
+                    if result is not None:
+                        return _mission_node_out(mission, node, result)
+            instruction = str(
+                node.get("instruction") or node.get("title") or "")
+            if int(node.get("retries") or 0) > 0:
+                # A retry reruns the same instruction — without feedback the
+                # model repeats the failure (e.g. asserting a file write it
+                # never invoked). Tell it why the last attempt failed.
+                prev = str(((node.get("result") or {}).get("error"))
+                           or ((node.get("result") or {}).get("output"))
+                           or "")[:400]
+                instruction += (
+                    "\n\nYour previous attempt failed"
+                    + (f": {prev}" if prev else ".")
+                    + " Do not assert completed actions — actually invoke "
+                      "the required tools.")
             result = self.agent.run(
-                str(node.get("instruction") or node.get("title") or ""),
-                history=[], mode="auto",
+                instruction, history=[], mode="auto",
                 event_callback=emit_cb,
                 mission_id=str(mission.get("id") or "") or None,
             )
+            return _mission_node_out(mission, node, result)
+
+        def _mission_node_out(mission: dict, node: dict, result) -> dict:
             task = result.task or {}
             status = str(task.get("status") or "")
             out = {
@@ -1725,6 +1996,17 @@ class AppState:
                 out["pending_approval"] = (
                     result.pending_approval
                     or task.get("pending_approval") or {"kind": "task"})
+            if (out["ok"] and node.get("kind") == "agent"
+                    and _UNVERIFIED_CLAIMS_MARKER in str(
+                        out.get("output") or "")):
+                # A mission node that asserts completed actions while zero
+                # tools ran is fabrication — the chat path annotates it,
+                # but autonomous work must not advance on a lie. Fail the
+                # node so retries can produce a real tool run.
+                out["ok"] = False
+                out["error"] = (
+                    "unverified action claims — reply asserted completed "
+                    "actions but no tools ran")
             # Feed the cognitive architecture: PFC conflict monitoring
             # (repeated failures/loops) + Hippocampus episodic memory.
             brain = getattr(self, "brain", None)
@@ -1764,6 +2046,12 @@ class AppState:
 
         hooks = {
             "evict_idle_models": lambda: self.runtime.evict_idle(),
+            "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
+                required_vram_gb=float(gb),
+                busy_models=self._busy_model_ids()),
+            "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
+                required_ram_gb=float(gb),
+                busy_models=self._busy_model_ids()),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_service": lambda: True,   # process watchdog owns restarts
             "health_probe": lambda: bool(self.runtime.summary()),
@@ -1789,7 +2077,9 @@ class AppState:
             permission_manager=self.permission_manager,
             activities=self.activities,
             runtime_hooks=hooks,
-            resources=lambda: (self.runtime.summary() or {}).get("hardware") or {},
+            # Budget checks gate auto-resume — a stale snapshot would park a
+            # transient RAM dip forever, so probe with a bounded TTL.
+            resources=lambda: self.runtime.fresh_hardware().as_dict(),
             quiet_hours=quiet_hours,
             enabled=bool(getattr(config, "autonomy_enabled", True)),
             metrics=registry,
@@ -2436,15 +2726,22 @@ class AppState:
         return "degraded"
 
     def _probe_image_backend(self) -> str:
-        rt = getattr(getattr(self, "images", None), "backend_runtime", None)
-        if rt is None:
+        """Aggregate health across both managed image backends — the probe
+        is healthy when *either* engine can serve a job."""
+        images = getattr(self, "images", None)
+        if images is None:
             return "stopped"
-        st = getattr(rt.status, "state", "stopped")
-        if st in ("running", "healthy"):
+        runtimes = [getattr(images, "backend_runtime", None),
+                    getattr(images, "invokeai_runtime", None)]
+        states = [getattr(getattr(rt, "status", None), "state", "stopped")
+                  for rt in runtimes if rt is not None]
+        if not states:
+            return "stopped"
+        if any(s in ("running", "healthy") for s in states):
             return "healthy"
-        if st in ("starting", "loading"):
+        if any(s in ("starting", "loading") for s in states):
             return "starting"
-        if st in ("error", "crashed"):
+        if any(s in ("error", "crashed") for s in states):
             return "crashed"
         return "stopped"
 
@@ -2540,7 +2837,10 @@ class AppState:
                 tool_args = dict(meta.get("tool_args") or {})
                 if not tool_name:
                     return {"ok": False, "output": "tool job: no tool name"}
-                out = self.tools.execute(tool_name, tool_args)
+                granted = (meta.get("approval_granted") or {})
+                out = self.tools.execute(
+                    tool_name, tool_args,
+                    approved=granted.get("action") == tool_name)
                 if str(out).startswith("APPROVAL_REQUIRED"):
                     return {"ok": False,
                             "pending_approval": {
@@ -2697,10 +2997,14 @@ class AppState:
                 req = ImageRequest(
                     prompt=str(meta.get("prompt") or node.get("instruction") or ""),
                     operation=str(meta.get("operation") or "auto"),
+                    backend_override=str(meta.get("backend") or "auto"),
                     width=int(meta.get("width", 1024)),
                     height=int(meta.get("height", 1024)),
                     count=max(1, min(int(meta.get("count", 1)), 4)))
                 job = self.images.create_job(req)
+                # Mission path registers outputs itself with mission/task
+                # linkage — suppress the generic on_change registration.
+                self._image_artifacts_done.add(str(job.id))
                 deadline = time.time() + float(meta.get("timeout", 600))
                 while time.time() < deadline:
                     cur = self.images.get_job(job.id)
@@ -2710,7 +3014,7 @@ class AppState:
                             arts = [self._register_output_artifact(
                                 p, mission_id=str(mission.get("id") or ""),
                                 task_id=str(node.get("id") or ""),
-                                tool="comfyui").get("id")
+                                tool=str(getattr(cur, "backend", "") or "image")).get("id")
                                 for p in (getattr(cur, "outputs", []) or [])]
                         return {"ok": cur.state == "finished",
                                 "output": f"image job {cur.state}: {cur.stage}",
@@ -2957,7 +3261,7 @@ class AppState:
             None,
         )
         if utility is not None and utility.runtime == "llama_cpp":
-            self._boot(95, "INITIALIZING · NEURAL ENGINE", "Preparing fast conversational intelligence")
+            self._boot(95, "ACTIVATING · LANGUAGE CORE", "Loading the primary conversational model")
             threading.Thread(
                 target=self._prewarm_with_retry, args=(utility,),
                 name="chat-nexus-utility-prewarm", daemon=True,
@@ -2973,6 +3277,7 @@ class AppState:
         if starter is None or starter.runtime != "llama_cpp":
             return
 
+        self._boot(96, "ACTIVATING · DEVELOPMENT CORE", "Loading coding and reasoning runtime")
         self._prewarm_thread = threading.Thread(
             target=self._prewarm_with_retry, args=(starter,),
             name="chat-nexus-primary-prewarm",
@@ -3548,6 +3853,18 @@ class AppState:
                 restart=lambda: self.images.backend_runtime.recover(),
                 metadata={"auto_restart": True},
             ))
+            invoke_endpoint = str(getattr(self.config, "invokeai_endpoint", ""))
+            self.processes.register(ManagedService(
+                id="invokeai",
+                name="InvokeAI",
+                kind="image_backend",
+                port=self.runtime._port_from_endpoint(invoke_endpoint) or 9090,
+                describe=lambda: self.images.invokeai_runtime.probe(),
+                start=lambda: self.images.invokeai_runtime.ensure_ready(),
+                stop=lambda: self.images.invokeai_runtime.stop(),
+                restart=lambda: self.images.invokeai_runtime.recover(),
+                metadata={"auto_restart": True},
+            ))
 
     def _register_mcp_processes(self) -> None:
         """Expose configured MCP servers as controllable mcp_server services."""
@@ -3849,6 +4166,8 @@ class AppState:
         job_id = str(job.get("id") or "")
         if not job_id or job_id in self._image_failures_announced:
             return
+        if len(self._image_failures_announced) > 1024:
+            self._image_failures_announced.clear()
         self._image_failures_announced.add(job_id)
         voice = getattr(self, "voice", None)
         if voice is None:
@@ -4175,20 +4494,43 @@ class AppState:
         except Exception:
             pass
 
-    def speak_greeting(self, profile_id: str, text: str) -> None:
+    def speak_greeting(self, profile_id: str, text: str) -> dict | None:
         """Voice-side greeting — once per process per profile;
-        mute/disabled drop silently in the speech queue."""
+        mute/disabled drop silently. Synchronous so the greeting
+        response can carry the audio URL: the previous queue-only path
+        emitted an ephemeral bus segment that routinely fired before the
+        page's voice EventSource attached, and the greeting was never
+        heard."""
         try:
             v = getattr(self, "voice", None)
             if v is None:
-                return
+                return None
             gid = f"greet-{profile_id}"
             if gid in self._queue_announced:
-                return
+                return None
             self._queue_announced.add(gid)
-            v.enqueue(gid, str(text or ""))
+            return v.speak_greeting(gid, str(text or ""))
         except Exception:
-            pass
+            return None
+
+    def speak_farewell(self, profile_id: str, text: str) -> dict | None:
+        """Voice-side farewell — once per process per profile, same
+        synchronous url-returning contract as speak_greeting but its own
+        dedupe key so the goodbye isn't swallowed by the hello that
+        already ran this session."""
+        try:
+            v = getattr(self, "voice", None)
+            if v is None:
+                return None
+            bid = f"bye-{profile_id}"
+            if bid in self._queue_announced:
+                return None
+            self._queue_announced.add(bid)
+            # No bus publish — the host plays the returned wav itself;
+            # publishing would double-play it through the still-open page.
+            return v.speak_greeting(bid, str(text or ""), publish=False)
+        except Exception:
+            return None
 
     # -- speech-to-text ----------------------------------------------------
 
@@ -4684,6 +5026,43 @@ class AppState:
         except Exception:
             pass
 
+    def _busy_model_ids(self) -> set[str]:
+        """Model ids pinned by in-flight work — running/verifying/reviewing
+        tasks plus any live drive thread. Demand eviction and idle eviction
+        must never kill one of these mid-request."""
+        busy = {
+            str(t.get("model_id") or "")
+            for t in self.tasks.by_status("running", "verifying", "reviewing")
+        }
+        # A live drive is authoritative even when its task row has aged
+        # out of the recent window — evicting its model mid-drive would
+        # kill the in-flight request.
+        with self.agent._drive_lock:
+            live_ids = [
+                tid for tid, th in self.agent._drive_threads.items()
+                if th.is_alive()
+            ]
+        unknown_model = False
+        for tid in live_ids:
+            try:
+                model_id = str(self.tasks.get(tid).model_id or "")
+            except Exception:
+                model_id = ""
+            if model_id:
+                busy.add(model_id)
+            else:
+                unknown_model = True
+        busy.discard("")
+        if unknown_model:
+            # A live drive with an unattributed model could be serving any
+            # resident runtime — pin them all rather than kill a request
+            # mid-stream under memory pressure.
+            try:
+                busy.update(self.runtime.resident_model_ids())
+            except Exception:
+                pass
+        return busy
+
     def _evict_idle_models(self) -> None:
         """Watchdog tick: reclaim memory from managed models that are not in use.
 
@@ -4692,37 +5071,7 @@ class AppState:
         durable and ensure_ready() restores the runtime on resume.
         """
         try:
-            busy = {
-                str(t.get("model_id") or "")
-                for t in self.tasks.by_status("running", "verifying", "reviewing")
-            }
-            # A live drive is authoritative even when its task row has aged
-            # out of the recent window — evicting its model mid-drive would
-            # kill the in-flight request.
-            with self.agent._drive_lock:
-                live_ids = [
-                    tid for tid, th in self.agent._drive_threads.items()
-                    if th.is_alive()
-                ]
-            unknown_model = False
-            for tid in live_ids:
-                try:
-                    model_id = str(self.tasks.get(tid).model_id or "")
-                except Exception:
-                    model_id = ""
-                if model_id:
-                    busy.add(model_id)
-                else:
-                    unknown_model = True
-            busy.discard("")
-            if unknown_model:
-                # A live drive with an unattributed model could be serving any
-                # resident runtime — pin them all rather than kill a request
-                # mid-stream under memory pressure.
-                try:
-                    busy.update(self.runtime.resident_model_ids())
-                except Exception:
-                    pass
+            busy = self._busy_model_ids()
             stopped = self.runtime.evict_idle(busy_models=busy)
             for model_id in stopped:
                 self.events.publish("model", {"event": {"type": "idle_evicted",
@@ -4732,6 +5081,7 @@ class AppState:
                 self.events.publish("model", {"event": {"type": "context_shrunk",
                                                         "model_id": model_id}})
             self._evict_idle_comfyui()
+            self._evict_idle_invokeai()
         except Exception:
             pass
 
@@ -4760,6 +5110,32 @@ class AppState:
             rt.stop()
             self.events.publish("model", {"event": {"type": "idle_evicted",
                                                     "model_id": "comfyui",
+                                                    "role": "image_backend"}})
+        except Exception:
+            pass
+
+    def _evict_idle_invokeai(self) -> None:
+        """Same idle bound for the managed InvokeAI process — it holds GPU
+        memory between image jobs exactly like ComfyUI does."""
+        timeout = float(getattr(self.config, "invokeai_idle_unload_seconds", 0.0) or 0.0)
+        if timeout <= 0:
+            return
+        try:
+            rt = self.images.invokeai_runtime
+            status = rt.status
+            if not (status.managed and status.state == "running"):
+                return
+            if self.images.has_active_jobs():
+                return
+            idle_since = max(
+                float(getattr(self.images, "last_activity", 0.0)),
+                float(getattr(status, "started_at", 0.0) or 0.0),
+            )
+            if time.time() - idle_since < timeout:
+                return
+            rt.stop()
+            self.events.publish("model", {"event": {"type": "idle_evicted",
+                                                    "model_id": "invokeai",
                                                     "role": "image_backend"}})
         except Exception:
             pass
@@ -4811,6 +5187,25 @@ class AppState:
             except Exception:
                 pass
 
+    def _tool_spec(self, tool_id: str):
+        spec = self.tools.get(tool_id)
+        if spec is None:
+            match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
+            if match is None:
+                raise KeyError(f"unknown tool '{tool_id}'")
+            spec = self.tools.get(match["name"])
+        return spec
+
+    def _tool_installed(self, tool_id: str) -> bool:
+        """Post-install verification for provisioning: re-scan the manifest's
+        executable detection so a no-op install can't mark the item done."""
+        try:
+            self.tools.refresh_install_status()
+            spec = self._tool_spec(tool_id)
+        except Exception:
+            return False
+        return bool(spec and spec.install_status == "installed")
+
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.
 
@@ -4819,12 +5214,7 @@ class AppState:
         """
         from .tools.plugins import install_command
 
-        spec = self.tools.get(tool_id)
-        if spec is None:
-            match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
-            if match is None:
-                raise KeyError(f"unknown tool '{tool_id}'")
-            spec = self.tools.get(match["name"])
+        spec = self._tool_spec(tool_id)
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
         gate = self._permission_gate("packages.install", approve, spec.name)
@@ -4855,6 +5245,8 @@ class AppState:
                 return result
             return self.tool_downloads.install(
                 spec.name, spec.display_name, install, version=spec.version)
+        if str(install.get("method") or "").strip().lower() == "venv":
+            return self._install_venv_tool(spec, install)
         cmd = install_command(install, install_root=self.runtime.base_dir)
         if cmd is None:
             return {"ok": False, "error": "no automated install method — manual install required",
@@ -4880,6 +5272,138 @@ class AppState:
 
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name, "method": str(install.get("method") or "")}
+
+    def _install_venv_tool(self, spec, install: dict) -> dict:
+        """Create a dedicated virtualenv under {app}/tools/{dest} and pip-
+        install the package into it — used for tools (InvokeAI) whose pinned
+        dependencies must not contaminate other embedded Pythons."""
+        import shutil as _shutil
+        import subprocess
+        package = str(install.get("package") or "").strip()
+        dest = str(install.get("dest") or "").strip()
+        if not package or not dest:
+            return {"ok": False, "error": "venv install requires 'package' and 'dest'"}
+        size = int(install.get("size_bytes") or 0)
+        if size:
+            free = _shutil.disk_usage(str(self.runtime.base_dir)).free
+            if free < size:
+                return {"ok": False,
+                        "error": f"not enough disk space — install needs ~"
+                                 f"{size / 1e9:.1f} GB, only {free / 1e9:.1f} GB free"}
+        root = (Path(self.runtime.base_dir) / dest).resolve()
+        if not str(root).startswith(str(Path(self.runtime.base_dir).resolve())):
+            return {"ok": False, "error": "venv dest escapes the install root"}
+        job = self.jobs.submit("install", f"Install {spec.display_name}")
+
+        def _pick_python() -> str:
+            """Honor install.python_candidates (e.g. InvokeAI needs
+            3.10-3.12 — the ambient interpreter may be too new)."""
+            import shutil
+            for cand in (install.get("python_candidates") or []):
+                cand = str(cand).strip()
+                if not cand:
+                    continue
+                probe_args = []
+                if os.name == "nt":
+                    launcher = shutil.which("py")
+                    if launcher:
+                        probe_args = [launcher, f"-{cand}"]
+                else:
+                    exe = shutil.which(f"python{cand}")
+                    if exe:
+                        probe_args = [exe]
+                if not probe_args:
+                    continue
+                try:
+                    chk = subprocess.run(probe_args + ["--version"],
+                                         capture_output=True, timeout=30)
+                except Exception:
+                    continue
+                if chk.returncode != 0:
+                    continue
+                # Resolve the concrete executable so `python -m venv` works.
+                if os.name == "nt":
+                    out = subprocess.run(
+                        probe_args + ["-c", "import sys; print(sys.executable)"],
+                        capture_output=True, text=True, timeout=30)
+                    exe = (out.stdout or "").strip()
+                    if exe and Path(exe).is_file():
+                        return exe
+                else:
+                    return probe_args[0]
+            return shutil.which("python") or shutil.which("python3") or sys.executable
+
+        def _run() -> None:
+            py = _pick_python()
+            pip = root / ("Scripts" if os.name == "nt" else "bin") / (
+                "pip.exe" if os.name == "nt" else "pip")
+            pip_args = [str(x) for x in (install.get("pip_args") or [])]
+            try:
+                self.jobs.update(job.id, state="running",
+                                 detail=f"creating virtualenv at {root} (python: {py})")
+                proc = subprocess.run([py, "-m", "venv", str(root)],
+                                      capture_output=True, text=True, timeout=600)
+                if proc.returncode != 0:
+                    self.jobs.update(job.id, state="failed",
+                                     error=(proc.stderr or "venv creation failed")[-300:])
+                    return
+                self.jobs.update(job.id, detail=f"pip install {package}")
+                proc = subprocess.run(
+                    [str(pip), "install"] + pip_args + [package],
+                    capture_output=True, text=True, timeout=7200)
+                if proc.returncode == 0:
+                    self.jobs.update(job.id, state="completed",
+                                     detail=(proc.stdout or "")[-300:])
+                else:
+                    self.jobs.update(job.id, state="failed",
+                                     error=(proc.stderr or proc.stdout or "pip install failed")[-300:])
+            except FileNotFoundError as exc:
+                self.jobs.update(job.id, state="failed", error=f"installer not found: {exc}")
+            except subprocess.TimeoutExpired:
+                self.jobs.update(job.id, state="failed", error="install timed out")
+            changed = self.tools.refresh_install_status()
+            if changed:
+                self.jobs.update(job.id, detail=f"install status updated: {changed}")
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": job.id, "tool": spec.name, "method": "venv"}
+
+    def install_browser_runtime(self, *, approve: bool = False) -> dict:
+        """Provision the managed Chromium runtime when no system browser
+        channel (Edge) resolves. packages.install-gated tracked job —
+        the browser binary lives under data/, outside the frozen bundle."""
+        gate = self._permission_gate("packages.install", approve, "browser")
+        if gate is not None:
+            return gate
+        runner = getattr(self, "browser_runner", None)
+        if runner is None or not runner.playwright_available():
+            return {"ok": False,
+                    "error": "browser automation package is not available in this build"}
+        ch = runner.channel()
+        if ch:
+            return {"ok": True, "channel": ch, "already_present": True,
+                    "detail": "no download needed — a usable browser is already present"}
+        job = self.jobs.submit("install", "Install browser runtime (Chromium)")
+
+        def _run() -> None:
+            self.jobs.update(job.id, state="running",
+                             detail="playwright install chromium")
+            try:
+                ch = runner.ensure_browser()
+                self.jobs.update(job.id, state="completed",
+                                 detail=f"browser channel: {ch}")
+            except Exception as exc:
+                self.jobs.update(job.id, state="failed",
+                                 error=f"{type(exc).__name__}: {exc}"[:300])
+            try:
+                caps = getattr(self, "capabilities", None)
+                if caps is not None:
+                    caps.invalidate("browser_preview")
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": job.id}
 
     def _permission_gate(self, key: str, approve: bool, label: str = "") -> dict | None:
         """Shared approval gate for gated API actions.
@@ -4910,9 +5434,9 @@ class AppState:
     def uninstall_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Remove a manifest tool (tracked job).
 
-        Archive installs delete their payload directory; package-manager
-        installs run the manager's own remove command. Tools without an
-        automatable removal report manual instructions.
+        Archive and virtualenv installs delete their payload directory;
+        package-manager installs run the manager's own remove command.
+        Tools without an automatable removal report manual instructions.
         """
         from .tools.plugins import uninstall_command
 
@@ -4924,7 +5448,8 @@ class AppState:
             spec = self.tools.get(match["name"])
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
-        is_archive = str(install.get("method") or "").strip().lower() == "archive"
+        is_archive = str(install.get("method") or "").strip().lower() \
+            in ("archive", "venv")
         cmd = None if is_archive else uninstall_command(
             install, install_root=self.runtime.base_dir)
         if not is_archive and cmd is None:
@@ -5204,11 +5729,28 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
-                          "/api/lkg", "/api/update", "/api/rc",
+                          "/api/lkg", "/api/update", "/api/search",
+                          "/api/rc", "/api/audit",
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
+                          "/api/provisioning",
                           "/api/specialists")
+
+    _AUDIT_MANIFESTS = ("requirements.txt", "pyproject.toml",
+                        "package.json", "Cargo.toml")
+
+    def _audit_root(self) -> Path:
+        """Where dependency audits should look: the workspace, or its
+        bundled ``Source/`` checkout when the install root has no
+        manifests (installed layout: workspace=app dir, code in Source)."""
+        ws = self.state.workspace
+        if any((ws / m).is_file() for m in self._AUDIT_MANIFESTS):
+            return ws
+        src = ws / "Source"
+        if any((src / m).is_file() for m in self._AUDIT_MANIFESTS):
+            return src
+        return ws
 
     def _platform_get(self, path: str) -> bool:
         q = parse_qs(urlparse(self.path).query)
@@ -5280,6 +5822,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/benchmarks":
             self._json(self.state.benchmarks.summary())
             return True
+        if path == "/api/provisioning":
+            prov = getattr(self.state, "provisioning", None)
+            self._json(prov.status() if prov else {
+                "enabled": False, "items": [], "complete": False})
+            return True
         if path.startswith("/api/benchmarks/"):
             name = unquote(path[len("/api/benchmarks/"):]).strip("/")
             self._json({"name": name,
@@ -5300,11 +5847,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/lkg":
             self._json(self.state.lkg.status())
             return True
+        if path == "/api/search":
+            gs = getattr(self.state, "_global_search", None)
+            if gs is None:
+                from .search import GlobalSearch
+                gs = self.state._global_search = GlobalSearch(self.state)
+            self._json(gs.query(
+                (q.get("q") or [""])[0],
+                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+            return True
         if path == "/api/update/status":
             # Status is a fast read — no network fetch; apply() plans fresh.
             self._json({"lkg": self.state.lkg.status(),
                         "plan": self.state.self_update(
                             (q.get("source") or [""])[0]).plan(fetch=False)})
+            return True
+        if path == "/api/search":
+            from .search import GlobalSearch
+            self._json(GlobalSearch(self.state).query(
+                (q.get("q") or [""])[0],
+                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
             return True
         if path.startswith("/api/lkg/verify/"):
             name = unquote(path[len("/api/lkg/verify/"):]).strip("/")
@@ -5345,11 +5907,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"available": False})
                 return True
             name = (q.get("q") or [""])[0]
+            entity_id = (q.get("id") or [""])[0]
             payload: dict = {"stats": self.state.knowledge.stats()}
+            if entity_id:
+                ent = self.state.knowledge.get_entity(entity_id)
+                payload["entity"] = ent
+                if ent:
+                    try:
+                        depth = int((q.get("depth") or ["1"])[0])
+                    except ValueError:
+                        depth = 1
+                    payload["graph"] = self.state.knowledge.neighbors(
+                        entity_id, depth=max(1, min(3, depth)))
             if name:
                 payload["entities"] = self.state.knowledge.find_entities(
                     name_like=name)
                 payload["context"] = self.state.knowledge.context_for(name)
+            if not entity_id and not name:
+                payload["entities"] = self.state.knowledge.find_entities(
+                    limit=50)
             self._json(payload)
             return True
         if path == "/api/rag":
@@ -5361,6 +5937,14 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/lsp":
             self._json(self.state.lsp_pool.status())
+            return True
+        if path == "/api/audit/deps":
+            tool = self.state.tools.get("dep_list")
+            if tool is None:
+                self._json({"error": "dep_list unavailable"}, 503)
+                return True
+            self._json(json.loads(tool.handler(
+                {"path": str(self._audit_root())})))
             return True
         if path == "/api/eval/history":
             self._json({"runs": self.state.eval_lab.history(
@@ -5376,6 +5960,14 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _platform_post(self, path: str, body: dict) -> bool:
+        if path == "/api/audit/run":
+            tool = self.state.tools.get("project_audit")
+            if tool is None:
+                self._json({"error": "project_audit unavailable"}, 503)
+                return True
+            self._json(json.loads(tool.handler(
+                {"path": str(self._audit_root())})))
+            return True
         if path == "/api/backups/create":
             self._json(self.state.backups.create(
                 label=str(body.get("label", ""))))
@@ -5530,6 +6122,61 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/golden/restore":
             out = self.state.golden.restore(str(body.get("name") or ""))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/provisioning/pause":
+            prov = getattr(self.state, "provisioning", None)
+            if prov:
+                prov.pause()
+            self._json({"ok": prov is not None})
+            return True
+        if path == "/api/provisioning/resume":
+            prov = getattr(self.state, "provisioning", None)
+            if prov:
+                prov.resume()
+            self._json({"ok": prov is not None})
+            return True
+        if path == "/api/provisioning/cancel":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.cancel_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
+        if path == "/api/provisioning/retry":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.retry_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
+        if path == "/api/provisioning/approve":
+            prov = getattr(self.state, "provisioning", None)
+            ok = prov.approve_item(str(body.get("id") or "")) if prov else False
+            self._json({"ok": ok})
+            return True
+        if path == "/api/provisioning/config":
+            changed = {}
+            for key in ("provisioning_enabled", "provisioning_auto_retry",
+                        "provisioning_voice_notifications"):
+                if body.get(key) is not None:
+                    changed[key] = bool(body[key])
+            if body.get("provisioning_profile") is not None:
+                prof = str(body["provisioning_profile"]).strip().lower()
+                if prof in {"core", "recommended", "complete", "custom"}:
+                    changed["provisioning_profile"] = prof
+            for key in ("provisioning_include", "provisioning_exclude"):
+                if isinstance(body.get(key), list):
+                    changed[key] = [str(x) for x in body[key][:200]]
+            for k, v in changed.items():
+                if hasattr(self.state.config, k):
+                    setattr(self.state.config, k, v)
+            if changed:
+                try:
+                    self.state.persist_config_fields(changed.keys())
+                except Exception:
+                    pass
+            prov = getattr(self.state, "provisioning", None)
+            # Toggling enabled off pauses the scheduler; on resumes it.
+            if prov is not None and "provisioning_enabled" in changed:
+                (prov.resume if changed["provisioning_enabled"]
+                 else prov.pause)()
+            self._json({"ok": True, "changed": sorted(changed)})
             return True
         if path == "/api/lkg/snapshot":
             self._json(self.state.lkg.snapshot(
@@ -6233,12 +6880,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     self._json({"error": "text is required"}, 400)
                     return
-                out = voice.speak_text(
-                    text[:20000],
-                    preset_id=body.get("preset_id") or None,
-                    speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
-                    auto_filter=bool(body.get("auto_filter", True)),
-                )
+                try:
+                    out = voice.speak_text(
+                        text[:20000],
+                        preset_id=body.get("preset_id") or None,
+                        speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        auto_filter=bool(body.get("auto_filter", True)),
+                    )
+                except Exception as exc:
+                    # Disabled engine / missing preset are honest 503s, not
+                    # crashes — the UI calls this opportunistically.
+                    self._json({"error": str(exc)}, 503)
+                    return
                 self._json(out)
                 return
             if path == "/api/voice/preview":
@@ -6549,6 +7202,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"error": "unknown profile route"}, 404)
             return
+        if path == "/api/github/status":
+            q = parse_qs(urlparse(self.path).query)
+            refresh = str((q.get("refresh") or [""])[0]) in {"1", "true", "yes"}
+            self._json(self.state.github_account.status(refresh=refresh))
+            return
+        if path == "/api/github/repos":
+            q = parse_qs(urlparse(self.path).query)
+            self._json(self.state.github_account.list_repos(
+                limit=int((q.get("limit") or ["20"])[0] or 20),
+                visibility=str((q.get("visibility") or ["all"])[0])))
+            return
         if path == "/api/conversation-memory":
             self._json(self.state.conversation_memory.snapshot())
             return
@@ -6813,6 +7477,14 @@ class Handler(BaseHTTPRequestHandler):
                 "disk_free_bytes": shutil.disk_usage(str(self.state.runtime.base_dir)).free,
                 "partials": partials,
             })
+            return
+        if path == "/api/browser/status":
+            runner = getattr(self.state, "browser_runner", None)
+            if runner is None:
+                self._json({"ready": False, "playwright": False,
+                            "channel": "", "detail": "browser subsystem not initialized"})
+            else:
+                self._json(runner.status())
             return
         if path.startswith("/api/tools/health/"):
             tool_id = unquote(path[len("/api/tools/health/"):]).strip("/")
@@ -7217,6 +7889,10 @@ class Handler(BaseHTTPRequestHandler):
             task_id = query.get("task_id", [""])[0]
             mission_id = query.get("mission_id", [""])[0]
             payload: dict = {"task_id": task_id}
+            if query.get("recent"):
+                limit = min(int(query.get("recent", ["40"])[0] or 40), 200)
+                self._json({"activities": self.state.activities.recent(limit)})
+                return
             if mission_id:
                 payload["mission_id"] = mission_id
                 payload["activities"] = self.state.activities.for_mission(mission_id)
@@ -7548,6 +8224,20 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._json({"error": "unknown profile route"}, 404)
                 return
+            if path == "/api/github/connect":
+                # Account setup — credential validation + encrypted vault
+                # store. Not a repo write; no Nexus permission gate beyond
+                # the loopback UI. The token never leaves this method.
+                out = self.state.github_account.connect(
+                    str(body.get("token") or ""))
+                self._json(out, 200 if out.get("connected") else 400)
+                return
+            if path == "/api/github/disconnect":
+                self._json(self.state.github_account.disconnect())
+                return
+            if path == "/api/github/test":
+                self._json(self.state.github_account.test())
+                return
             if path.startswith("/api/voice/"):
                 if self.state.voice is None:
                     self._json({"error": "voice subsystem is disabled"}, 503)
@@ -7870,23 +8560,86 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 403)
                     return
                 except (ValueError, TypeError, RuntimeError) as exc:
-                    self._json({"error": str(exc)}, 400)
+                    msg = str(exc)
+                    prov = getattr(self.state, "provisioning", None)
+                    offline = any(k in msg.lower() for k in (
+                        "offline", "not installed", "unavailable",
+                        "not running", "no enabled image model"))
+                    if prov and offline and \
+                            prov.capability_state("image_generation") \
+                            in {"installing", "setup_required"} and \
+                            any(i["state"] in {"running", "queued",
+                                               "waiting"}
+                                for i in prov.status().get("items", [])
+                                if i.get("provides") == "image_generation"):
+                        def _deferred(req=request, rp=bool(
+                                body.get("real_person", False))):
+                            self.state.images.create_job(req, real_person=rp)
+                        if self.state._defer_capability_request(
+                                "image_generation", _deferred):
+                            self._json({
+                                "ok": True,
+                                "waiting_for_capability": "image_generation",
+                                "message": "Image generation is still being "
+                                           "installed — this request is queued "
+                                           "and will run automatically once the "
+                                           "backend verifies."})
+                            return
+                    self._json({"error": msg}, 400)
                     return
                 self._json({"ok": True, "job": job.as_dict()})
                 return
 
             if path == "/api/image/backend/start":
-                self.state.images.backend_runtime.start()
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                runtime = self.state.images.backend_runtimes.get(name)
+                if runtime is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                runtime.start()
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
             if path == "/api/image/backend/stop":
-                self.state.images.backend_runtime.stop()
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                runtime = self.state.images.backend_runtimes.get(name)
+                if runtime is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                runtime.stop()
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
             if path == "/api/image/backend/inspect":
-                self._json({"ok": True, "backend": self.state.images.backend.inspect()})
+                name = str(body.get("backend", "comfyui") or "comfyui").lower()
+                backend = self.state.images.backends.get(name)
+                if backend is None:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                self._json({"ok": True, "backend": backend.inspect()})
+                return
+
+            if path == "/api/image/backend/install":
+                name = str(body.get("backend", "invokeai") or "invokeai").lower()
+                if name not in {"invokeai", "comfyui"}:
+                    self._json({"error": f"unknown image backend '{name}'"}, 400)
+                    return
+                try:
+                    result = self.state.install_tool(name, approve=bool(body.get("approve", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": bool(result.get("ok")), **result})
+                return
+
+            if path == "/api/image/backend/preference":
+                value = str(body.get("backend", "auto") or "auto").lower()
+                if value not in {"auto", "invokeai", "comfyui"}:
+                    self._json({"error": "backend must be auto, invokeai, or comfyui"}, 400)
+                    return
+                self.state._update_config_file({"image_backend": value})
+                self.state.config.image_backend = value
+                self._json({"ok": True, "image_backend": value})
                 return
 
 
@@ -8780,40 +9533,43 @@ class Handler(BaseHTTPRequestHandler):
                 stream_open = True
                 seen_model_id = ""
                 seen_model_role = ""
-                while stream_open and (not done.is_set() or not events.empty()):
-                    try:
-                        event = events.get(timeout=1.0)
-                    except queue.Empty:
-                        current = self.state.tasks.current()
-                        heartbeat = {
-                            "elapsed_seconds": int(time.monotonic() - started),
-                            "phase": current.phase if current else "starting",
-                            "status": current.status if current else "starting",
-                            "model_id": (current.model_id if current else "") or seen_model_id,
-                            "model_role": (current.model_role if current else "") or seen_model_role,
-                        }
-                        stream_open = self._sse_event("heartbeat", heartbeat)
-                        continue
-
-                    # The task ledger may not stamp model_id until the drive
-                    # loop's first update — remember the selection event so
-                    # heartbeats stop reporting an empty model meanwhile.
-                    if event.get("type") == "model":
-                        inner = event.get("event")
-                        if isinstance(inner, dict):
-                            seen_model_id = str(inner.get("model_id") or inner.get("to") or "") or seen_model_id
-                            seen_model_role = str(inner.get("role") or "") or seen_model_role
-
-                    event_type = str(event.get("type") or "message")
-                    payload = {k: v for k, v in event.items() if k != "type"}
-                    stream_open = self._sse_event(event_type, payload)
-
-                # If the client disappeared, the daemon worker continues the durable
-                # task to completion; reconnect/status UI can inspect the task ledger.
                 try:
-                    self.state._stream_sinks.remove(events)
-                except ValueError:
-                    pass
+                    while stream_open and (not done.is_set() or not events.empty()):
+                        try:
+                            event = events.get(timeout=1.0)
+                        except queue.Empty:
+                            current = self.state.tasks.current()
+                            heartbeat = {
+                                "elapsed_seconds": int(time.monotonic() - started),
+                                "phase": current.phase if current else "starting",
+                                "status": current.status if current else "starting",
+                                "model_id": (current.model_id if current else "") or seen_model_id,
+                                "model_role": (current.model_role if current else "") or seen_model_role,
+                            }
+                            stream_open = self._sse_event("heartbeat", heartbeat)
+                            continue
+
+                        # The task ledger may not stamp model_id until the drive
+                        # loop's first update — remember the selection event so
+                        # heartbeats stop reporting an empty model meanwhile.
+                        if event.get("type") == "model":
+                            inner = event.get("event")
+                            if isinstance(inner, dict):
+                                seen_model_id = str(inner.get("model_id") or inner.get("to") or "") or seen_model_id
+                                seen_model_role = str(inner.get("role") or "") or seen_model_role
+
+                        event_type = str(event.get("type") or "message")
+                        payload = {k: v for k, v in event.items() if k != "type"}
+                        stream_open = self._sse_event(event_type, payload)
+                finally:
+                    # If the client disappeared (or the stream died
+                    # mid-write), the daemon worker continues the durable
+                    # task to completion — but the sink must leave the
+                    # registry either way or every orphaned stream leaks.
+                    try:
+                        self.state._stream_sinks.remove(events)
+                    except ValueError:
+                        pass
                 self.close_connection = True
                 return
             if path == "/api/chat":
@@ -9454,6 +10210,9 @@ class Handler(BaseHTTPRequestHandler):
                     stop = getattr(self.state, "_shutdown", None)
                     if stop is not None:
                         stop.set()
+                    prov = getattr(self.state, "provisioning", None)
+                    if prov is not None:
+                        prov.shutdown()
                     threading.Thread(
                         target=self.server.shutdown, daemon=True).start()
                 except Exception:
@@ -9564,6 +10323,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
                     return
                 self._json(result)
+                return
+
+            if path == "/api/browser/install":
+                try:
+                    result = self.state.install_browser_runtime(
+                        approve=bool(body.get("approve", False)))
+                except Exception as exc:
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+                    return
+                self._json(result, 200 if result.get("ok") else 403
+                           if "denied" in str(result.get("error", "")) else 200)
                 return
 
             if path == "/api/tools/install":
@@ -9758,6 +10528,10 @@ class _NexusHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address) -> None:
         exc = sys.exc_info()[1]
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        # WSAENOTSOCK — a request thread still mid-write when
+        # server_close() tore down the socket; teardown noise, not a fault.
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 10038:
             return
         super().handle_error(request, client_address)
 

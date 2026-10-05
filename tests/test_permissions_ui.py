@@ -303,6 +303,9 @@ class PermissionApiTests(unittest.TestCase):
         by_id = {m["id"]: m for m in manifests}
         if "whisper" in by_id:  # archive install → automatable
             self.assertTrue(by_id["whisper"]["installable"])
+        if "invokeai" in by_id:  # venv install → automatable (server _install_venv_tool)
+            self.assertTrue(by_id["invokeai"]["installable"])
+            self.assertTrue(by_id["invokeai"]["removable"])
         from localcodeagent.tools.plugins import PluginManifest
         manual = PluginManifest.from_dict(
             {"id": "manual", "name": "Manual", "install": {"method": "build"}})

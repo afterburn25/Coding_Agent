@@ -28,6 +28,7 @@ class _FakeModelServer:
         self.tool_name = "system_resources"
         self.tool_args = "{}"
         self.tool_calls: list[tuple[str, str]] | None = None  # multi-call batch
+        self.static_reply: str | None = None  # when set, answer with prose only
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -50,7 +51,10 @@ class _FakeModelServer:
                     or "Recovered pending tool action" in str(m.get("content", ""))
                     for m in messages
                 )
-                if saw_tool:
+                if outer.static_reply is not None:
+                    message = {"role": "assistant", "content": outer.static_reply}
+                    chunks = [outer.static_reply]
+                elif saw_tool:
                     message = {"role": "assistant", "content": "Resource check complete — all healthy."}
                     chunks = ["Resource check complete", " — all healthy."]
                 else:
@@ -142,6 +146,85 @@ class EndToEndAgentTests(unittest.TestCase):
         for st in ("error", "failed", "step_limit", "cancelled",
                    "waiting_approval", "running", "interrupted", ""):
             self.assertFalse(_task_status_succeeded(st), st)
+
+    def test_mission_run_strips_persona_but_keeps_tools(self):
+        # Regression: mission agent nodes inherited the interactive persona
+        # ("Father, I've completed…") — small models narrated work in-character
+        # instead of emitting tool calls, so every soak mission fabricated.
+        # A mission run must drop the persona/personal-memory block yet still
+        # transmit tool schemas.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            state.agent.profile_context = (
+                lambda *a, **k: "You are Isabella. Address the user as Father.")
+            if state.agent.conversation_manager is not None:
+                state.agent.conversation_manager.personality_prompt = (
+                    lambda: "PERSONA_SENTINEL")
+            result = state.agent.run(
+                "create a file named hello.txt containing one line: hi",
+                event_callback=lambda e: None,
+                mission_id="m-persona-test")
+            self.assertTrue(fake.requests)
+            payload = fake.requests[0]
+            system_text = "\n".join(
+                str(m.get("content") or "")
+                for m in payload.get("messages") or []
+                if m.get("role") == "system")
+            self.assertNotIn("PERSONA_SENTINEL", system_text)
+            self.assertNotIn("Isabella", system_text)
+            self.assertNotIn("Father", system_text)
+            # Tools must still be offered — the node was classified onto a
+            # tool-capable lane, so schemas go out in the request.
+            self.assertTrue(payload.get("tools"))
+
+    def test_bundled_manifest_overrides_stale_on_disk_copy(self):
+        # Regression: the install-time copy of tools/manifests under
+        # runtime_root was never re-synced — a stale invokeai.json using
+        # detect.files (all paths must exist, including a POSIX-only path)
+        # reported a working InvokeAI venv as "not detected on disk" forever.
+        # Bundled manifests ship with the binary and must win for shared ids.
+        import sys
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td)
+            runtime_root = root / ".runtime"
+            # Stale on-disk manifest: detect.files requires BOTH paths.
+            disk_dir = runtime_root / "tools" / "manifests"
+            disk_dir.mkdir(parents=True)
+            stale = {
+                "id": "invokeai", "name": "InvokeAI", "version": "6.x",
+                "category": "images", "permissions": ["packages.install"],
+                "install": {"method": "venv", "package": "invokeai",
+                            "dest": "tools/InvokeAI"},
+                "detect": {"files": ["tools/InvokeAI/Scripts/invokeai-web.exe",
+                                     "tools/InvokeAI/bin/invokeai-web"]},
+            }
+            (disk_dir / "invokeai.json").write_text(
+                json.dumps(stale), encoding="utf-8")
+            # Bundled manifest (newer binary): files_any — either path is ok.
+            bundle_dir = root / "bundle" / "tools" / "manifests"
+            bundle_dir.mkdir(parents=True)
+            fresh = dict(stale)
+            fresh["detect"] = {"files_any": ["tools/InvokeAI/Scripts/invokeai-web.exe",
+                                             "tools/InvokeAI/bin/invokeai-web"]}
+            (bundle_dir / "invokeai.json").write_text(
+                json.dumps(fresh), encoding="utf-8")
+            # The venv's Windows entrypoint exists; the POSIX one never will.
+            exe = runtime_root / "tools" / "InvokeAI" / "Scripts" / "invokeai-web.exe"
+            exe.parent.mkdir(parents=True)
+            exe.write_text("exe", encoding="utf-8")
+
+            sys._MEIPASS = str(bundle_dir.parent.parent)
+            try:
+                state = self._state(td, fake.endpoint)
+            finally:
+                del sys._MEIPASS
+            spec = state._tool_spec("invokeai")
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec.install_status, "installed")
 
     def test_mission_park_does_not_block_lane(self):
         # A mission-attributed waiting_approval row is mission work — its own
@@ -405,7 +488,57 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(calls["begin"], 0)
             self.assertEqual(calls["finish"], 0)
 
-    def test_transient_model_failure_recovers(self):
+    def test_mission_agent_node_fails_on_unverified_claims(self):
+        # Regression: an agent node whose reply asserted completed actions
+        # with zero tool calls recorded ok=True — the mission advanced on a
+        # fabrication until the artifact check caught it downstream. The
+        # node itself must fail so retries get a shot at a real tool run.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        fake.static_reply = (
+            "I've completed the work and generated the file for you.")
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            executor = getattr(
+                getattr(state, "autonomy", None), "_executor", None)
+            if executor is None:
+                self.skipTest("autonomy executor unavailable")
+            out = executor(
+                {"id": "m-1", "title": "m"},
+                {"instruction": "create soak.txt", "title": "work",
+                 "kind": "agent"},
+                lambda e: None)
+            self.assertFalse(out.get("ok"), out)
+            self.assertIn("unverified", str(out.get("error") or ""))
+
+    def test_mission_node_retry_feeds_failure_back(self):
+        # A retried node reruns the instruction — the failure reason must
+        # reach the model so it can correct instead of repeating the lie.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            executor = getattr(
+                getattr(state, "autonomy", None), "_executor", None)
+            if executor is None:
+                self.skipTest("autonomy executor unavailable")
+            out = executor(
+                {"id": "m-1", "title": "m"},
+                {"instruction": "create soak.txt", "title": "work",
+                 "kind": "agent", "retries": 1,
+                 "result": {"ok": False,
+                            "error": "unverified action claims"}},
+                lambda e: None)
+            sent = fake.requests[-1]["messages"]
+            user_msgs = [str(m.get("content") or "")
+                         for m in sent if m.get("role") == "user"]
+            self.assertTrue(
+                any("previous attempt failed" in m for m in user_msgs),
+                user_msgs)
+            self.assertTrue(
+                any("unverified action claims" in m for m in user_msgs),
+                user_msgs)
+            self.assertTrue(out.get("ok"), out)
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:

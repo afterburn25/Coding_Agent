@@ -197,6 +197,9 @@ class ProfileAPI:
             if path.endswith("/greeting"):
                 pid = self._pid(path, "/api/profiles/", "/greeting")
                 return self._greeting(h, pid)
+            if path.endswith("/farewell"):
+                pid = self._pid(path, "/api/profiles/", "/farewell")
+                return self._farewell(h, pid)
             if path.endswith("/memory"):
                 pid = self._pid(path, "/api/profiles/", "/memory")
                 if self.mgr.get(pid) is None:
@@ -283,12 +286,40 @@ class ProfileAPI:
         if g["kind"] == "intro":
             self.mgr.mark_intro_completed(pid)
         # Speak the greeting once per process per profile — mute and
-        # voice-disabled states drop it silently via enqueue().
+        # voice-disabled states drop it silently. The response carries
+        # the audio URL so the page can play it deterministically; the
+        # bus segment alone raced the page's voice event subscription.
         try:
-            self.state.speak_greeting(pid, str(g.get("text") or ""))
+            spoken = self.state.speak_greeting(pid, str(g.get("text") or ""))
         except Exception:
-            pass
+            spoken = None
+        if spoken and spoken.get("url"):
+            g["voice_url"] = spoken["url"]
+            g["voice_segment_id"] = spoken.get("segment_id") or ""
         h._json(g)
+        return True
+
+    def _farewell(self, h, pid: str) -> bool:
+        """GET /api/profiles/{pid}/farewell — persona-based goodbye for
+        the desktop shutdown sequence. Same render + synchronous voice
+        contract as /greeting; the host plays the wav itself and waits
+        for real playback completion before exiting."""
+        p = self.mgr.get(pid)
+        if p is None:
+            h._json({"error": "no such profile"}, 404)
+            return True
+        personality = self._personality(pid).resolve_active(
+            is_adult=_is_adult(p))
+        f = self._greetings(pid).farewell(
+            p, personality, is_adult=_is_adult(p))
+        try:
+            spoken = self.state.speak_farewell(pid, str(f.get("text") or ""))
+        except Exception:
+            spoken = None
+        if spoken and spoken.get("url"):
+            f["voice_url"] = spoken["url"]
+            f["voice_segment_id"] = spoken.get("segment_id") or ""
+        h._json(f)
         return True
 
     # -- POST / PATCH -----------------------------------------------------

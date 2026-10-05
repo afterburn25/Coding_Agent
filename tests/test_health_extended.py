@@ -225,6 +225,85 @@ class Phase12HttpTests(unittest.TestCase):
         st, _ = self._post("/api/specialists/retire", {"id": sid})
         self.assertEqual(st, 404)
 
+    def test_provisioning_routes_reachable(self):
+        # Regression: /api/provisioning lived inside _platform_get/post
+        # but its prefix was missing from _PLATFORM_PREFIXES, so every
+        # route 404'd and the Command Center card was dead.
+        out = self._get("/api/provisioning")
+        self.assertIn("enabled", out)
+        self.assertIn("items", out)
+        for sub in ("pause", "resume", "cancel", "retry", "config"):
+            st, _ = self._post(f"/api/provisioning/{sub}", {})
+            self.assertNotEqual(st, 404, f"/api/provisioning/{sub} unreachable")
+
+    def test_voice_speak_failure_is_503_not_500(self):
+        # voice.speak_text raises VoiceEngineError when the engine is
+        # unavailable — the handler must map that to an honest 503 JSON
+        # error, not an unhandled 500.
+        st, out = self._post("/api/voice/speak", {"text": "hello"})
+        self.assertEqual(st, 503)
+        self.assertIn("error", out)
+
+    def test_tool_job_honors_approval_grant(self):
+        # Regression (mission approval loop, vector 3): a tool-job node
+        # parked on APPROVAL_REQUIRED must run with approved=True after
+        # the user approves — not re-gate into another pending_approval.
+        calls = {}
+
+        class FakeTools:
+            def execute(self, name, args, approved=False):
+                calls["approved"] = approved
+                return "ok"
+
+        orig = self.state.tools
+        self.state.tools = FakeTools()
+        try:
+            node = {"metadata": {"job": "tool", "tool": "demo",
+                                 "approval_granted": {"action": "demo"}}}
+            self.state._mission_job_run({}, node)
+            self.assertTrue(calls["approved"])
+            node2 = {"metadata": {"job": "tool", "tool": "demo"}}
+            self.state._mission_job_run({}, node2)
+            self.assertFalse(calls["approved"])
+        finally:
+            self.state.tools = orig
+
+
+class RoutePrefixCoverageTests(unittest.TestCase):
+    """Every /api/* literal handled inside a prefixed dispatch method
+    must be reachable through the matching prefix tuple — otherwise the
+    route silently 404s like /api/provisioning did."""
+
+    def _method_body(self, src: str, name: str) -> str:
+        import re
+        m = re.search(rf"^    def {name}\(.*?\n(.*?)\n    def ",
+                      src, re.S | re.M)
+        return m.group(1) if m else ""
+
+    def _route_literals(self, body: str) -> set[str]:
+        import re
+        found = re.findall(r'path\s*==\s*"(/api/[^"]+)"', body)
+        found += re.findall(r'path\.startswith\(\s*"(/api/[^"]+)"', body)
+        return set(found)
+
+    def test_prefixed_handlers_cover_every_route(self):
+        from localcodeagent import server as srv
+        src = Path(srv.__file__).read_text(encoding="utf-8")
+        cases = (
+            ("_platform_get", srv.Handler._PLATFORM_PREFIXES),
+            ("_platform_post", srv.Handler._PLATFORM_PREFIXES),
+            ("_autonomy_get", srv.Handler._AUTONOMY_PREFIXES),
+            ("_autonomy_post", srv.Handler._AUTONOMY_PREFIXES),
+        )
+        for method, prefixes in cases:
+            body = self._method_body(src, method)
+            self.assertTrue(body, f"{method} not found")
+            for route in sorted(self._route_literals(body)):
+                self.assertTrue(
+                    any(route.startswith(p) for p in prefixes),
+                    f"{route} handled in {method} but the dispatch prefix "
+                    f"tuple does not cover it — the route will 404")
+
 
 if __name__ == "__main__":
     unittest.main()

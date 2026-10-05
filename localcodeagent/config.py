@@ -217,6 +217,10 @@ class AgentConfig:
     # Idle managed models are stopped after this many seconds without a request
     # (0 disables). Busy models currently serving a task are never evicted.
     model_idle_unload_seconds: float = 900.0
+    # A model evicted by demand-driven release is not relaunched while the
+    # freed resource is still short — without this two competing lanes
+    # ping-pong the same model through repeated multi-minute loads.
+    demand_eviction_cooldown_s: float = 120.0
     # A resident model launched at an oversized context (a big task grew its
     # window via ensure_ready) is relaunched at the role-recommended window
     # after this many idle seconds (0 disables). This frees the excess KV
@@ -277,11 +281,36 @@ class AgentConfig:
     comfyui_logs_dir: str = ".agent/runtime"
     comfyui_startup_timeout: int = 300
     comfyui_idle_unload_seconds: float = 900.0
+    # Image backend preference — "auto" lets the router pick the best
+    # engine per request; "invokeai"/"comfyui" pin every job to one engine.
+    image_backend: str = "auto"
+    invokeai_endpoint: str = "http://127.0.0.1:9090"
+    invokeai_auto_start: bool = False
+    invokeai_start_on_image_request: bool = True
+    invokeai_dir: str = ""
+    invokeai_python: str = ""
+    invokeai_extra_args: list[str] = field(default_factory=list)
+    invokeai_logs_dir: str = ".agent/runtime"
+    invokeai_startup_timeout: int = 300
+    invokeai_idle_unload_seconds: float = 900.0
     image_resource_mode: str = "balanced"
     image_restore_chat_model: bool = True
     image_auto_run_jobs: bool = True
     image_job_timeout: int = 900
     image_output_dir: str = "output/images"
+
+    # Background Provisioning Manager — post-install workstation setup.
+    # After Nexus launches, configured components (voice assets, InvokeAI,
+    # photoreal model fleet, ComfyUI, STT) install progressively in the
+    # background while the app stays usable.
+    provisioning_enabled: bool = True
+    # Auto-start only applies to installed (frozen) builds; dev checkouts
+    # opt in via this flag so tests never trigger real multi-GB installs.
+    provisioning_dev_enable: bool = False
+    provisioning_parallel: int = 2
+    provisioning_auto_retry: bool = True
+    provisioning_voice_notifications: bool = True
+    provisioning_disk_reserve_bytes: int = 8 * 1024 ** 3
 
     # Adaptive Worker Manager — absolute safety ceiling only; real
     # concurrency is measured from live hardware, reservations and
@@ -295,6 +324,12 @@ class AgentConfig:
     # speech never competes with coding models for VRAM).
     voice_enabled: bool = True
     voice_muted: bool = False
+    # Startup narration (Isabella) + cinematic splash presentation.
+    startup_narration: bool = True
+    silent_startup: bool = False           # no splash audio/narration
+    splash_audio_enabled: bool = True
+    splash_volume: float = 0.45
+    reduced_motion: bool = False
     voice_engine: str = "kokoro"
     voice_preset_id: str = "nexus-synthetic-isabella"
     voice_mode: str = "responses"          # off | responses | responses_activity | manual
@@ -670,6 +705,7 @@ def load_config(path: Path | None) -> AgentConfig:
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
+    cfg.demand_eviction_cooldown_s = max(0.0, float(raw.get("demand_eviction_cooldown_s", cfg.demand_eviction_cooldown_s)))
     cfg.context_shrink_idle_seconds = max(0.0, float(raw.get("context_shrink_idle_seconds", cfg.context_shrink_idle_seconds)))
     cfg.context_shrink_factor = max(1.0, float(raw.get("context_shrink_factor", cfg.context_shrink_factor)))
     cfg.model_warmup = bool(raw.get("model_warmup", cfg.model_warmup))
@@ -717,6 +753,11 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.image_output_dir = str(raw.get("image_output_dir", cfg.image_output_dir))
     cfg.voice_enabled = bool(raw.get("voice_enabled", cfg.voice_enabled))
     cfg.voice_muted = bool(raw.get("voice_muted", cfg.voice_muted))
+    cfg.startup_narration = bool(raw.get("startup_narration", cfg.startup_narration))
+    cfg.silent_startup = bool(raw.get("silent_startup", cfg.silent_startup))
+    cfg.splash_audio_enabled = bool(raw.get("splash_audio_enabled", cfg.splash_audio_enabled))
+    cfg.splash_volume = float(raw.get("splash_volume", cfg.splash_volume))
+    cfg.reduced_motion = bool(raw.get("reduced_motion", cfg.reduced_motion))
     cfg.voice_engine = str(raw.get("voice_engine", cfg.voice_engine))
     cfg.voice_preset_id = str(raw.get("voice_preset_id", cfg.voice_preset_id))
     cfg.voice_mode = str(raw.get("voice_mode", cfg.voice_mode))

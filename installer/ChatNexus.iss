@@ -1,9 +1,9 @@
 #ifndef AppVersion
-  #define AppVersion "0.19.0"
+  #define AppVersion "0.21.0"
 #endif
 
 #ifndef AppNumericVersion
-  #define AppNumericVersion "0.19.0.0"
+  #define AppNumericVersion "0.21.0.0"
 #endif
 
 #define AppName "Nexus Core"
@@ -115,6 +115,8 @@ Source: "..\dist\ChatNexus\*"; DestDir: "{app}"; Flags: ignoreversion; Excludes:
 ; Payload subtrees are all needed — recursive with no exclusions.
 Source: "..\dist\ChatNexus\backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\dist\ChatNexus\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Cinematic startup splash — manifest, audio stems, web runtime.
+Source: "..\dist\ChatNexus\splash\*"; DestDir: "{app}\splash"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Seed/update default workflows without replacing workflows imported or edited by the user.
 Source: "..\dist\ChatNexus\workflows\*"; DestDir: "{app}\workflows"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist

@@ -5,6 +5,7 @@ and segment ids so stale/dup speech is suppressed across reconnects.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -295,6 +296,59 @@ class VoiceManager:
                                 "seq": seq, "job_id": job.job_id})
         return job
 
+    def speak_greeting(self, task_id: str, text: str, *,
+                       speed: float = 1.0,
+                       publish: bool = True) -> dict[str, Any] | None:
+        """Synchronous greeting synthesis — returns the segment so the
+        caller can hand its URL to the requesting client directly.
+
+        The queued path alone published only an ephemeral bus segment:
+        on app boot the page's voice EventSource was often still
+        connecting when it fired, so the greeting was lost with no
+        replay. Returning the URL makes delivery deterministic while the
+        bus publish (same segment_id) keeps other pages in sync —
+        clients dedupe by segment id.
+        """
+        if not self.enabled() or self.muted():
+            return None
+        preset = self.current_preset()
+        if preset is None:
+            return None
+        spoken = self.filter.filter(text)
+        if not spoken:
+            return None
+        try:
+            vres = self.vocal.resolve(spoken, task_id=task_id,
+                                      ctx=self._persona_ctx())
+        except Exception:
+            vres = None
+        spoken = getattr(vres, "speech_text", "") or spoken
+        if not spoken.strip():
+            return None
+        pcm, sr, seg_path = self._synthesize(spoken, preset, speed)
+        seg_id = self._register_segment(seg_path, task_id)
+        payload = {
+            "event": "segment", "task_id": task_id, "seq": 0,
+            "segment_id": seg_id, "url": f"/api/voice/audio/{seg_id}",
+            "seconds": round(pcm.shape[0] / sr, 2),
+        }
+        events = getattr(vres, "events", None) or []
+        if events:
+            payload["gestures"] = [{**e, "utterance_id": seg_id}
+                                   for e in events]
+        with self._lock:
+            if task_id.startswith("greet-"):
+                # Same hold the queued greeting applies — nothing talks
+                # over her hello.
+                self._greeting_hold_until = (
+                    time.monotonic()
+                    + float(payload["seconds"]) + self._greeting_settle_s)
+            self._last_spoken = (task_id, text)
+        if publish:
+            self._publish("voice", payload)
+        return {"ok": True, "segment_id": seg_id, "url": payload["url"],
+                "seconds": payload["seconds"]}
+
     def speak_text(self, text: str, *, preset_id: str | None = None,
                    speed: float = 1.0, auto_filter: bool = True,
                    task_id: str = "") -> dict[str, Any]:
@@ -424,6 +478,14 @@ class VoiceManager:
                 vmap = {}
             if vmap:
                 preset, speed = self._apply_delivery(preset, speed, vmap)
+        overrides = getattr(preset, "pronunciation_overrides", None) or {}
+        if overrides:
+            # Per-preset token rewrites — same expansion style as the
+            # speech filter's acronym table. Longest-first so multi-word
+            # or compound keys match before their prefixes.
+            for src in sorted(overrides, key=len, reverse=True):
+                text = re.sub(rf"\b{re.escape(str(src))}\b",
+                              str(overrides[src]), text)
         engine = self.engine(preset.engine)
         preset_json = preset.to_json()
         key = AudioCache.key(text, preset.engine, engine.version,

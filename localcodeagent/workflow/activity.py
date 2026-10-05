@@ -240,6 +240,14 @@ class ActivityStore:
     def for_task(self, task_id: str) -> list[dict[str, Any]]:
         return [dict(r) for r in self._by_task.get(str(task_id), [])]
 
+    def recent(self, limit: int = 40) -> list[dict[str, Any]]:
+        """Latest rows across all tasks, newest first — the Command
+        Center's global activity feed."""
+        with self._lock:
+            rows = [r for rs in self._by_task.values() for r in rs]
+        rows.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
+        return [dict(r) for r in rows[:max(1, limit)]]
+
     def for_mission(self, mission_id: str) -> list[dict[str, Any]]:
         return [
             dict(r) for rows in self._by_task.values() for r in rows

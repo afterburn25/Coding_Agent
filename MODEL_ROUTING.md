@@ -110,3 +110,33 @@ Upscale                  → verified Real-ESRGAN x4+ adapter
 ```
 
 Image model profile estimates are advisory. The real workflow/node stack may consume different VRAM depending on quantization, resolution, attention implementation, VAE behavior, reference count, and offload settings. Users can override estimates per installed profile.
+
+## Photoreal fleet routing (v0.21+)
+
+For photorealistic requests on InvokeAI, a curated fleet of SDXL
+checkpoints with distinct roles replaces one-model-for-everything:
+
+| Model | Role | Prefers |
+|---|---|---|
+| Juggernaut XL v9 | `general_photoreal` | full scenes, people+environments, architecture+people, outdoor |
+| CyberRealistic XL | `portrait_photoreal` | portraits, close-ups, headshots, beauty, editorial/fashion |
+| RealVisXL V5.0 | `glamour_photoreal` | glamour/boudoir adult-only, skin detail, body focus, studio |
+
+`classify_request_traits()` extracts request characteristics (portrait vs
+scene vs body vs face emphasis, adult signal, editorial…); each fleet
+spec carries trait weights; `score_fleet_model` produces the winner.
+Examples that route differently:
+
+- "professional close-up beauty portrait" → **CyberRealistic**
+- "realistic woman standing in Times Square at night" → **Juggernaut**
+- "clearly adult glamour/boudoir photo" → **RealVisXL**
+
+Fallbacks: winner unavailable/unfit → next scored fleet model → generic
+pool. Overrides accept fleet ids; pinning a fleet model on the wrong
+backend errors instead of rerouting. Model choice and backend choice are
+independent (`model=RealVisXL, backend=InvokeAI` is the common pairing;
+ComfyUI stays the advanced/fallback engine).
+
+Per-model sampling defaults (steps/guidance/sampler/scheduler) come from
+the fleet spec; SamplingAdvisor learns per `model_scope` so feedback
+improves the right model.

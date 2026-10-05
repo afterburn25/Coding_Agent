@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from .types import ImageModelProfile, ImageRequest, ImageRoutingDecision
+from .fleet import classify_request_traits, score_fleet_model, FLEET_BY_ID
 
 # ComfyUI KSampler vocabulary — friendly spellings users actually type mapped
 # to canonical sampler_name values.
@@ -152,19 +153,60 @@ class ImageRouter:
             caps.append("transparency")
         return caps
 
-    def choose(self, request: ImageRequest) -> ImageRoutingDecision:
+    def choose(self, request: ImageRequest,
+               backend: str | None = None) -> ImageRoutingDecision:
         operation, reasons = self.infer_operation(request)
         required = self.required_capabilities(operation, request)
 
+        pool_models = self.models
+        if backend:
+            pool_models = [m for m in pool_models
+                           if (m.backend or "comfyui") == backend]
+            reasons.append(f"backend pool: {backend}")
+
         if request.model_override and request.model_override != "auto":
-            matches = [m for m in self.models if m.id == request.model_override]
+            matches = [m for m in pool_models if m.id == request.model_override]
+            if not matches:
+                # Fleet ids resolve to whichever installed backend row the
+                # fleet spec matched (e.g. "juggernaut-xl-v9" →
+                # "invokeai:<uuid>").
+                matches = [m for m in pool_models
+                           if (m.metadata or {}).get("fleet_id")
+                           == request.model_override]
+            if not matches:
+                matches = [m for m in self.models
+                           if m.id == request.model_override
+                           or (m.metadata or {}).get("fleet_id")
+                           == request.model_override]
+                if matches and backend and (matches[0].backend or "comfyui") != backend:
+                    raise RuntimeError(
+                        f"Model override '{request.model_override}' runs on "
+                        f"'{matches[0].backend or 'comfyui'}', not '{backend}' — "
+                        "use Auto or pick a model on the selected backend")
             if not matches:
                 raise KeyError(f"Unknown image model override: {request.model_override}")
             chosen = matches[0]
             reasons.append("manual image-model override")
         else:
+            fleet_pick = self._fleet_pick(pool_models, request, operation, reasons)
+            if fleet_pick is not None:
+                chosen = fleet_pick
+                workflow = chosen.workflow_for(operation)
+                if request.quality in {"preview", "fast", "draft"}:
+                    reasons.append("speed-focused image request")
+                elif request.quality in {"high", "max", "quality"}:
+                    reasons.append("quality-focused image request")
+                if request.reference_images:
+                    reasons.append(f"{len(request.reference_images)} reference image(s)")
+                return ImageRoutingDecision(
+                    model_id=chosen.id,
+                    operation=operation,
+                    workflow=workflow,
+                    reasons=reasons,
+                    required_capabilities=required,
+                )
             candidates = []
-            for m in self.models:
+            for m in pool_models:
                 caps = set(m.capabilities)
                 if not all(cap in caps for cap in required if cap not in {"multi_reference", "transparency"}):
                     continue
@@ -182,7 +224,8 @@ class ImageRouter:
                     quality_score += 20 if m.speed_tier == "fast" else 0
                 candidates.append((fits, resource_score + quality_score + m.priority, m, resource_reason))
             if not candidates:
-                raise RuntimeError(f"No enabled image model supports: {', '.join(required)}")
+                scope = f" on backend '{backend}'" if backend else ""
+                raise RuntimeError(f"No enabled image model{scope} supports: {', '.join(required)}")
             fitting = [c for c in candidates if c[0]]
             pool = fitting or candidates
             # Fast/draft requests go to a fast-tier model when one can serve
@@ -212,6 +255,55 @@ class ImageRouter:
             reasons=reasons,
             required_capabilities=required,
         )
+
+    # Fleet-routable operations — SDXL main models only; upscale/background
+    # removal still go through the capability pipeline below.
+    _FLEET_OPS = {"text_to_image", "edit_image", "inpaint", "variation"}
+
+    def _fleet_pick(self, pool: list[ImageModelProfile],
+                    request: ImageRequest, operation: str,
+                    reasons: list[str]) -> ImageModelProfile | None:
+        """Capability-based model selection across the photoreal fleet.
+
+        Scores fleet-tagged profiles against classified request traits.
+        Returns None (generic routing) when no fleet model is installed or
+        the request carries no photoreal signal — never invents a pick."""
+        fleet_models = [m for m in pool if (m.metadata or {}).get("fleet_id")]
+        if not fleet_models or operation not in self._FLEET_OPS:
+            return None
+        info = classify_request_traits(request.prompt)
+        traits = dict(info["traits"])
+        if info["photoreal"]:
+            traits["photoreal"] = max(traits.get("photoreal", 0), 2)
+        if not traits:
+            return None
+        scored: list[tuple[int, ImageModelProfile]] = []
+        for m in fleet_models:
+            spec = FLEET_BY_ID.get(str(m.metadata.get("fleet_id")))
+            if spec is None:
+                continue
+            score = score_fleet_model(spec, traits)
+            if score > 0:
+                scored.append((score + m.priority, m))
+        if not scored:
+            return None
+        scored.sort(key=lambda r: (-r[0], r[1].id))
+        for score, model in scored:
+            fits, _rs, res_reason = (True, 0, "")
+            if self.resource_fit:
+                fits, _rs, res_reason = self.resource_fit(model)
+            if not fits:
+                reasons.append(
+                    f"fleet: {model.id} skipped — {res_reason or 'resource fit'}")
+                continue
+            label = model.metadata.get("fleet_display") or model.id
+            role = model.metadata.get("fleet_role") or "photoreal"
+            top = ", ".join(t for t, _ in sorted(
+                traits.items(), key=lambda kv: -kv[1])[:3])
+            reasons.append(
+                f"fleet routing: {label} ({role}) — request traits: {top}")
+            return model
+        return None
 
     def get_profile(self, model_id: str) -> ImageModelProfile:
         for model in self.models:

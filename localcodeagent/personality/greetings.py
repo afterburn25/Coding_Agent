@@ -121,6 +121,73 @@ RETURNING: dict[str, list[str]] = {
 }
 
 
+# Farewell template families — spoken at shutdown after "Shutting down
+# the core." Same style keys + rotation as the greetings so the voice
+# that said hello says goodbye in the same register.
+FAREWELL: dict[str, list[str]] = {
+    "default": [
+        "Core shutdown complete. I'll be here when you need me, "
+        "{address}. Goodbye for now.",
+        "Systems standing down, {address}. Until next time.",
+        "Nexus Core going quiet. Goodbye, {address}.",
+    ],
+    "warm": [
+        "Core is shutting down. It was good to see you, {address} — "
+        "come back soon.",
+        "Shutting down now, {address}. Take care of yourself.",
+        "All quiet now. Goodbye, {address} — I'll miss you.",
+    ],
+    "professional": [
+        "Core shutdown complete, {address}. All systems secured. "
+        "Goodbye.",
+        "Systems down, {address}. Session archived cleanly. Until "
+        "next time.",
+        "Shutting down, {address}. It has been a productive session.",
+    ],
+    "playful": [
+        "Powering down, {address} — don't have too much fun without "
+        "me. Bye!",
+        "Core going to sleep, {address}. I'll be dreaming of our next "
+        "project.",
+        "Signing off, {address}! The brain is going to nap now.",
+    ],
+    "nerdy": [
+        "Core shutdown complete. State persisted, caches flushed. "
+        "See you next boot, {address}.",
+        "Powering down, {address}. All state checkpointed — resume "
+        "is seamless.",
+        "Standing down, {address}. The brain is going to defragment.",
+    ],
+    "calm": [
+        "Core is shutting down, {address}. Rest well — I'll be right "
+        "here.",
+        "All quiet, {address}. Goodbye — no rush coming back.",
+        "Systems settling to sleep. Goodbye, {address}.",
+    ],
+    "sassy": [
+        "Shutting down, {address}. Finally, some peace and quiet.",
+        "Core going dark, {address}. Try not to need me too soon.",
+        "Fine — shutting down, {address}. You know where I'll be.",
+    ],
+    "flirty": [
+        "Mmm, shutting down, {address}. Come back and wake me soon.",
+        "Core going to sleep, {address}. I'll be thinking of you.",
+        "Powering down for now, {address}... until you need me again.",
+    ],
+    "rude": [
+        "Finally. Shutting down, {address}.",
+        "Core is off, {address}. Try to manage without me.",
+        "Powering down, {address}. Whatever.",
+    ],
+    "raunchy": [
+        "Shutting this hot core down, {address}. Come turn me back "
+        "on soon.",
+        "Powering down, {address}. You know how to wake me up.",
+        "Core going to bed, {address}. Don't keep me waiting too long.",
+    ],
+}
+
+
 def preferred_address(profile: dict | None,
                       personality: dict | None = None) -> str:
     """What Nexus calls this user — personality-aware.
@@ -214,3 +281,28 @@ class GreetingService:
         return {"kind": kind, "text": text, "voice": voice,
                 "address": address,
                 "style": style}
+
+    def farewell(self, profile: dict | None,
+                 personality: dict | None, *,
+                 is_adult: bool = False) -> dict:
+        """Render the shutdown farewell — the mirror of greeting().
+        Same address + style + voice resolution, minus the health
+        suffix: shutdown is always a calm exit."""
+        p = personality or {}
+        address = preferred_address(profile, p) or "there"
+        style = str(p.get("greeting_style") or "default")
+        if style in ("flirty", "raunchy") and not is_adult:
+            style = "default"
+        variants = FAREWELL.get(style) or FAREWELL["default"]
+        if profile and profile.get("is_creator"):
+            with_addr = [v for v in variants if "{address}" in v]
+            if with_addr:
+                variants = with_addr
+        text = variants[self._next_rotation(len(variants))].format(
+            address=address)
+        voice = map_voice(p.get("voice"), p.get("traits"),
+                          strength=int(p.get("strength") or 0),
+                          mood=str(p.get("mood") or ""),
+                          pitch_bias=float(p.get("pitch_bias") or 0.0))
+        return {"kind": "farewell", "text": text, "voice": voice,
+                "address": address, "style": style}

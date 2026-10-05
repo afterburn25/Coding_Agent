@@ -45,6 +45,23 @@
     renderList();
     const d = await api(`/api/projects/${id}?summary`);
     renderDetail(d.id ? d : {});
+    if (d.id) loadProjectKnowledge(d);
+  }
+
+  async function loadProjectKnowledge(p) {
+    const el = document.getElementById("projKnowledge");
+    if (!el) return;
+    const d = await api(`/api/knowledge?q=${encodeURIComponent(p.name)}`);
+    if (selected !== p.id) return;
+    const rows = (d.entities || []).slice(0, 12).map(e => `
+      <li><a href="/knowledge.html" title="open in Knowledge">${esc(e.name)}</a>
+        <span class="pill">${esc(e.kind)}</span></li>`).join("");
+    el.innerHTML = rows || "<li>No linked knowledge entities yet</li>";
+    if (d.context) {
+      const ctx = document.createElement("li");
+      ctx.innerHTML = `<small class="dim-text">${esc(d.context).replace(/\n/g, "<br>")}</small>`;
+      el.appendChild(ctx);
+    }
   }
 
   function bucket(label, rows) {
@@ -91,6 +108,8 @@
         <option value="unresolved">unresolved</option><option value="rejected_approach">rejected</option>
       </select><input id="memText" placeholder="Project memory…" />
         <button id="addMem" class="mini-button" type="button">Remember</button></div>
+      <div class="section-title">Knowledge graph</div>
+      <ul id="projKnowledge" class="kv-list"><li><small>loading…</small></li></ul>
       <div class="section-title">Worker history</div>
       <ul class="kv-list">${tasks || "<li>No tasks yet</li>"}</ul>
       <div class="section-title">Activity</div>

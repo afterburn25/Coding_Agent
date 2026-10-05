@@ -50,6 +50,18 @@
 .dag-node[data-state="failed"]{border-left-color:var(--danger)}
 .dag-node[data-state="blocked"]{border-left-color:var(--warn)}
 .dag-node .nresult{color:var(--muted);font-size:11px;margin-top:4px;white-space:pre-wrap}
+.stage-strip{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.stage-chip{display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--text-dim)}
+.stage-chip .snum{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;background:var(--panel);color:var(--muted);flex:0 0 auto}
+.stage-chip .sname{text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+.stage-chip[data-state="running"]{border-color:var(--cyan);color:var(--text)}
+.stage-chip[data-state="running"] .snum{background:var(--cyan);color:#0a0d14}
+.stage-chip[data-state="completed"]{border-color:var(--good)}
+.stage-chip[data-state="completed"] .snum{background:var(--good);color:#0a0d14}
+.stage-chip[data-state="failed"]{border-color:var(--danger)}
+.stage-chip[data-state="failed"] .snum{background:var(--danger);color:#fff}
+.stage-chip[data-state="blocked"],.stage-chip[data-state="waiting_approval"]{border-color:var(--warn)}
+.stage-chip[data-state="blocked"] .snum,.stage-chip[data-state="waiting_approval"] .snum{background:var(--warn);color:#0a0d14}
 
 .hist-row{font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--panel2)}
 .hist-row b{color:var(--text-dim)}

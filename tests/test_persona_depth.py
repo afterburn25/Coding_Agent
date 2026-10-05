@@ -282,6 +282,26 @@ class TestPromptCard(unittest.TestCase):
             self.assertIn("serious", text.lower())
             self.assertNotIn("vocal reactions are available", text)
 
+    def test_creator_address_direction_is_unambiguous(self):
+        # Regression: 'call them: Father' inverted on small models into
+        # "you call me Father". The title must belong to the user.
+        profile = _profile()
+        profile.update({"is_creator": True,
+                        "creator_address": "Father",
+                        "creator_title_conversation": True})
+        text = prompt_context(profile, {"name": "Isabella", "strength": 85})
+        self.assertIn("your creator", text)
+        self.assertIn('You address the user as "Father"', text)
+        self.assertIn("never to you", text)
+        self.assertNotIn("call them:", text)
+
+    def test_noncreator_address_still_marks_direction(self):
+        text = prompt_context(_profile(), {"name": "Isabella",
+                                         "address": "boss"})
+        self.assertIn('You address the user as "boss"', text)
+        self.assertIn("never to you", text)
+        self.assertNotIn("your creator", text)
+
 
 class TestPersonaCommands(unittest.TestCase):
     def setUp(self):

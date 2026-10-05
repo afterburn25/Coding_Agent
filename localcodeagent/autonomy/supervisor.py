@@ -321,6 +321,11 @@ class AutonomousSupervisor:
         return m
 
     def pause_mission(self, mission_id: str, *, reason: str = "user pause") -> dict | None:
+        # An explicit pause clears any budget-pause marker — the user's
+        # intent wins and the mission must not auto-resume.
+        def _fn(row: dict) -> None:
+            row.pop("budget_pause", None)
+        self.missions.mutate(mission_id, _fn)
         m = self.missions.transition(mission_id, "paused", detail=reason)
         if m is not None:
             self._audit("mission_paused", mission=mission_id, reason=reason)
@@ -704,13 +709,70 @@ class AutonomousSupervisor:
         for m in self.missions.list():
             status = str(m.get("status"))
             if status in TERMINAL_MISSION_STATUSES or status in {
-                    "draft", "paused", "blocked", "waiting_trigger",
+                    "draft", "blocked", "waiting_trigger",
                     "waiting_approval", "archived"}:
+                continue
+            if status == "paused":
+                try:
+                    self._resume_if_budget_clear(m)
+                except Exception:
+                    pass
                 continue
             try:
                 self._step_mission(m["id"])
             except Exception:
                 pass  # one mission's fault must not kill the supervisor
+
+    def _resume_if_budget_clear(self, m: dict) -> None:
+        """Auto-resume a mission paused by the budget gate once resources
+        recover. User pauses (no marker) are never touched."""
+        marker = m.get("budget_pause")
+        if not marker or not isinstance(marker, dict):
+            return
+        now = time.time()
+        if float(marker.get("next_check", 0) or 0) > now:
+            return
+        if not self.budgets.check(m)["ok"]:
+            def _backoff(row: dict) -> None:
+                bp = row.get("budget_pause")
+                if isinstance(bp, dict):
+                    bp["next_check"] = now + 15.0
+            self.missions.mutate(m["id"], _backoff)
+            return
+        resume_to = str(marker.get("resume_to") or "executing")
+        if resume_to not in {"ready", "active", "planning", "executing"}:
+            resume_to = "executing"
+        def _clear(row: dict) -> None:
+            row.pop("budget_pause", None)
+        self.missions.mutate(m["id"], _clear)
+        self.missions.transition(m["id"], resume_to,
+                                 detail="budget clear — auto-resumed")
+        self._audit("mission_budget_resumed", mission=m["id"])
+        self.wake()
+
+    def _on_admission_shortfall(self, est, reason: str) -> None:
+        """Demand-driven eviction: a node that fits only after idle
+        residents move aside shouldn't wait for the idle timer — ask the
+        runtime to release managed models LRU-first. Same contract as
+        image jobs: managed runtimes only, external/user-owned servers
+        are never touched, keep_loaded residents evict last."""
+        hook = self._hooks.get(
+            "release_vram" if reason == "waiting_for_vram"
+            else "release_ram" if reason == "waiting_for_ram" else "")
+        if hook is None:
+            return
+        need_mb = float(getattr(
+            est, "vram_mb" if reason == "waiting_for_vram" else "ram_mb",
+            0) or 0)
+        if need_mb <= 0:
+            return
+        try:
+            released = hook(need_mb / 1024.0)
+            if released:
+                self._audit("admission_eviction", reason=reason,
+                            released=list(released))
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # per-mission step
@@ -724,6 +786,16 @@ class AutonomousSupervisor:
         # Budget gate first — overspend pauses with a notification.
         budget = self.budgets.check(m)
         if not budget["ok"]:
+            # Mark the pause as budget-caused so a transient resource dip
+            # (e.g. a model load starving RAM for a minute) auto-resumes
+            # once pressure clears — a user pause never does, and neither
+            # does a permanent violation (deadline/repair cap), which
+            # would otherwise flap pause->resume->pause every 15s.
+            if budget.get("transient"):
+                def _mark(row: dict) -> None:
+                    row["budget_pause"] = {"resume_to": status,
+                                           "next_check": 0.0}
+                self.missions.mutate(mission_id, _mark)
             self.missions.transition(mission_id, "paused",
                                      detail="; ".join(budget["violations"]))
             self.notifications.notify(
@@ -913,7 +985,8 @@ class AutonomousSupervisor:
                 mission_id=str(m.get("id") or ""),
                 project_id=str(meta.get("project_id") or ""),
                 profile_id=str(m.get("profile_id") or ""),
-                estimate_overrides=meta.get("estimate"))
+                estimate_overrides=meta.get("estimate"),
+                on_shortfall=self._on_admission_shortfall)
             if worker is None:
                 node["queue_reason"] = w_reason
                 node["queue_detail"] = w_detail
@@ -941,7 +1014,13 @@ class AutonomousSupervisor:
                                       "graph": graph.graph})
         elif not runnable and not graph.running():
             # Nothing left to run — evaluate goal progress, or recover
-            # nodes stranded behind a failed dependency.
+            # nodes stranded behind a failed dependency. A node parked in
+            # waiting_dependency is a retry on cooldown (the only writer
+            # of that node state), not a dead end — stay executing and
+            # let the cooldown unpark at the top of the next tick.
+            if any(n.get("state") == "waiting_dependency"
+                   for n in graph.nodes):
+                return
             if graph.is_done():
                 self.missions.transition(mission_id, "evaluating")
             else:
@@ -1311,6 +1390,7 @@ class AutonomousSupervisor:
             node["result"] = {
                 "ok": ok,
                 "output": str(result.get("output") or "")[:4000],
+                "error": str(result.get("error") or "")[:400] or None,
                 "task_id": str(result.get("task_id") or ""),
                 "artifacts": list(result.get("artifacts") or [])[:20],
                 "finished_at": time.time(),
@@ -1622,6 +1702,20 @@ class AutonomousSupervisor:
                     old["state"] = "superseded"
                     old["resolved_at"] = now
             self.store.approvals.data["approvals"].append(row)
+            # Resolved rows are audit history, not working state — keep
+            # 7 days / newest 200 so unattended installs stay bounded.
+            # Pending rows are never pruned.
+            rows = self.store.approvals.data["approvals"]
+            pending = [r for r in rows if r.get("state") == "pending"]
+            resolved = [r for r in rows if r.get("state") != "pending"]
+            resolved.sort(key=lambda r: float(r.get("resolved_at")
+                                                or r.get("created_at") or 0))
+            cutoff = now - 7 * 86400
+            resolved = [r for r in resolved[-200:]
+                        if float(r.get("resolved_at")
+                                 or r.get("created_at") or now) >= cutoff
+                        or r in resolved[-50:]]
+            self.store.approvals.data["approvals"] = resolved + pending
             self.store.approvals.save()
         self.notifications.notify(
             f"Approval needed — {row['action']}: {row['detail'][:200]}",
@@ -1800,6 +1894,14 @@ class AutonomousSupervisor:
                 node = graph.get(node_id)
                 if node is not None and node.get("state") == "waiting_approval":
                     node["state"] = "ready"   # resume exact action
+                    # Stamp the grant so the resumed action's own policy
+                    # check sees it — without this the runner re-gates,
+                    # re-asks, and the mission can never proceed.
+                    meta = node.setdefault("metadata", {})
+                    meta["approval_granted"] = {
+                        "action": str(target.get("action") or ""),
+                        "approval_id": approval_id,
+                        "at": time.time()}
                 row["pending_approval"] = None
                 row["waiting_for"] = ""
             self.missions.mutate(mission_id, _fn)
@@ -1821,9 +1923,15 @@ class AutonomousSupervisor:
         """Run verification — detected project checks, or the node's
         explicit command. Permission-gated via the policy engine."""
         from ..workflow.verify import detect_verification_commands
-        decision = self.policy.check(
-            "run_tests", profile=str(mission.get("autonomy_profile") or "local_autonomous"),
-            scope=str(mission.get("workspace") or ""))
+        granted = (node.get("metadata") or {}).get("approval_granted") or {}
+        if granted.get("action") == "run_tests":
+            # User approved this exact gated action — resume honors it
+            # instead of re-asking forever.
+            decision = "allow"
+        else:
+            decision = self.policy.check(
+                "run_tests", profile=str(mission.get("autonomy_profile") or "local_autonomous"),
+                scope=str(mission.get("workspace") or ""))
         if decision == "deny":
             return {"ok": False, "output": "shell verification denied by policy"}
         if decision == "ask":

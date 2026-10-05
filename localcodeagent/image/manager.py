@@ -9,9 +9,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from .catalog import discover_image_models
+from .catalog import classify_model, discover_image_models
 from .comfyui import ComfyUIBackend
 from .errors import describe_image_error
+from .invokeai import InvokeAIBackend
+from .invokeai_runtime import InvokeAIRuntime
 from .policy import ConsentStore, ImageSafetyPolicy
 from .library import ImageAssetLibrary
 from .profiles import SubjectProfileStore
@@ -58,14 +60,23 @@ class ImageManager:
         self.adult_content_allowed: Callable[[], bool] | None = None
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
         self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
+        # InvokeAI — the preferred primary engine for standard generation/
+        # editing; ComfyUI stays the advanced/custom-workflow fallback. Both
+        # hang off the same contract so jobs/route/history stay uniform.
+        self.invokeai_backend = InvokeAIBackend(
+            getattr(config, "invokeai_endpoint", "http://127.0.0.1:9090"))
+        self.invokeai_runtime = InvokeAIRuntime(
+            base_dir=self.base_dir, backend=self.invokeai_backend, config=config)
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
         from .sampling import SamplingAdvisor
         self.sampling_advisor = SamplingAdvisor(self.data_dir / "sampling_stats.json")
         self._jobs: dict[str, ImageJob] = {}
         self._lock = threading.RLock()
         self._ws_listener = None
-        self._backend_up_ts = 0.0
-        self._backend_up_val = False
+        self._backend_up_ts: dict[str, float] = {}
+        self._backend_up_val: dict[str, bool] = {}
+        self._invokeai_models_ts = 0.0
+        self._invokeai_model_cache: list[dict[str, Any]] = []
         # Optional callback invoked with {"job": job.as_dict()} on each
         # persisted state transition — wired to the server EventBus.
         self.on_change = None
@@ -181,7 +192,7 @@ class ImageManager:
                 self._save_jobs(job)
                 continue
             job.resume_count += 1
-            job.backend_starting = not self._backend_up()
+            job.backend_starting = not self._backend_up(job.backend or "comfyui")
             self._save_jobs(job)
             try:
                 threading.Thread(target=self._run_job, args=(job.id,), daemon=True).start()
@@ -387,9 +398,30 @@ class ImageManager:
         backend_runtime = self.backend_runtime.probe()
         healthy = bool(backend_runtime.get("healthy"))
         detail = str(backend_runtime.get("error") or "")
+        invoke_runtime = self.invokeai_runtime.probe()
+        invoke_models = self._invokeai_models()
         return {
             "enabled": bool(getattr(self.config, "image_enabled", True)),
             "backend": {"type": "comfyui", "endpoint": self.backend.endpoint, "healthy": healthy, "detail": detail[:300], "runtime": backend_runtime},
+            # Multi-backend view for the router/UI; "backend" stays
+            # ComfyUI-shaped for backward compatibility.
+            "backend_preference": str(getattr(self.config, "image_backend", "auto") or "auto"),
+            "backends": {
+                "invokeai": {
+                    "type": "invokeai", "endpoint": self.invokeai_backend.endpoint,
+                    "healthy": bool(invoke_runtime.get("healthy")),
+                    "detail": str(invoke_runtime.get("error") or "")[:300],
+                    "runtime": invoke_runtime,
+                    "capabilities": sorted(self.invokeai_backend.capabilities()),
+                    "models": [self._invokeai_model_row(m) for m in invoke_models],
+                },
+                "comfyui": {
+                    "type": "comfyui", "endpoint": self.backend.endpoint,
+                    "healthy": healthy, "detail": detail[:300],
+                    "runtime": backend_runtime,
+                    "capabilities": sorted(self.backend.capabilities()),
+                },
+            },
             "models": [m.as_dict() for m in self.router.models],
             "inventory": discover_image_models(self.models_dir),
             "model_status": self.library.verify_all(self.router.models),
@@ -479,18 +511,200 @@ class ImageManager:
                     setattr(request,key,defaults[key])
         return subject
 
-    def _backend_up(self) -> bool:
-        """5s-cached health probe — a batch create_job loop must not pay a
-        connection-timeout per job when ComfyUI is down."""
+    @property
+    def backends(self) -> dict[str, Any]:
+        """Live view — resolves attributes each call so stubs/tests that
+        replace ``self.backend`` propagate everywhere."""
+        return {"comfyui": self.backend, "invokeai": self.invokeai_backend}
+
+    @property
+    def backend_runtimes(self) -> dict[str, Any]:
+        return {"comfyui": self.backend_runtime, "invokeai": self.invokeai_runtime}
+
+    def _backend_up(self, name: str = "comfyui") -> bool:
+        """5s-cached per-backend health probe — a batch create_job loop must
+        not pay a connection-timeout per job when a backend is down."""
         now = time.time()
-        if now - self._backend_up_ts < 5.0:
-            return self._backend_up_val
+        if now - self._backend_up_ts.get(name, 0.0) < 5.0:
+            return self._backend_up_val.get(name, False)
         try:
-            self._backend_up_val = bool(self.backend.health()[0])
+            self._backend_up_val[name] = bool(self.backends[name].health()[0])
         except Exception:
-            self._backend_up_val = False
-        self._backend_up_ts = now
-        return self._backend_up_val
+            self._backend_up_val[name] = False
+        self._backend_up_ts[name] = now
+        return self._backend_up_val.get(name, False)
+
+    # -- backend selection -------------------------------------------------
+
+    _INVOKEAI_OPS = {"text_to_image", "edit_image", "inpaint", "variation",
+                     "upscale"}
+
+    def _invokeai_ready(self) -> tuple[bool, str]:
+        """(can-serve, why-not). Healthy OR installed-and-startable counts."""
+        if self._backend_up("invokeai"):
+            return True, ""
+        root, _prefix = self.invokeai_runtime.discover()
+        if root is not None and bool(
+                getattr(self.config, "invokeai_start_on_image_request", True)
+                or getattr(self.config, "invokeai_auto_start", False)):
+            return True, ""
+        if root is None:
+            return False, "InvokeAI is not installed"
+        return False, "InvokeAI is offline"
+
+    def _invokeai_models(self, *, force: bool = False) -> list[dict[str, Any]]:
+        """InvokeAI's own model registry, 30s-cached; empty when offline."""
+        now = time.time()
+        if not force and self._invokeai_models_ts and now - self._invokeai_models_ts < 30.0:
+            return self._invokeai_model_cache
+        rows: list[dict[str, Any]] = []
+        try:
+            if self._backend_up("invokeai"):
+                rows = self.invokeai_backend.models()
+        except Exception:
+            rows = []
+        self._invokeai_model_cache = rows
+        self._invokeai_models_ts = now
+        return rows
+
+    @staticmethod
+    def _invokeai_model_row(m: dict[str, Any]) -> dict[str, Any]:
+        name = str(m.get("name") or m.get("key") or "")
+        cls = classify_model(name, family=str(m.get("base") or ""),
+                             notes=str(m.get("description") or ""),
+                             model_type=str(m.get("type") or ""))
+        from .fleet import fleet_for_model_name
+        row = {
+            "key": m.get("key"), "name": name,
+            "base": m.get("base"), "type": m.get("type"),
+            "format": m.get("format"), "hash": m.get("hash"),
+            "backend": "invokeai",
+            "capability_class": cls["capability_class"],
+            "restriction_status": cls["restriction_status"],
+        }
+        spec = None
+        for cand in (name, str(m.get("source") or ""),
+                     str(m.get("path") or "")):
+            spec = fleet_for_model_name(cand)
+            if spec:
+                break
+        if spec:
+            row["fleet_id"] = spec["id"]
+            row["fleet_role"] = spec["role"]
+            row["display_name"] = spec["display_name"]
+            row["license"] = spec["license_name"]
+            row["adult_capable"] = bool(spec.get("adult_capable"))
+            row["fleet_source"] = spec.get("homepage") or ""
+        return row
+
+    def _refresh_invokeai_models(self) -> None:
+        """Merge InvokeAI-discovered models into the router pool as
+        synthesized profiles (deduped by key; refreshed on each choose)."""
+        base = [m for m in self.router.models
+                if not m.id.startswith("invokeai:")]
+        from .fleet import fleet_for_model_name
+        for row in self._invokeai_models():
+            if str(row.get("type") or "") != "main":
+                continue
+            key = str(row.get("key") or row.get("name") or "")
+            if not key:
+                continue
+            base_name = str(row.get("base") or "sdxl").lower()
+            family = {"sdxl": "stable-diffusion-xl", "sdxl-refiner": "stable-diffusion-xl",
+                      "sd-1": "stable-diffusion", "sd-2": "stable-diffusion",
+                      "flux": "flux", "sd-3": "stable-diffusion-3"}.get(base_name, base_name or "unknown")
+            caps = ["text_to_image", "image_edit", "inpaint"]
+            name = str(row.get("name") or key)
+            cls = classify_model(name, family=family,
+                                 notes=str(row.get("description") or ""))
+            profile = ImageModelProfile(
+                id=f"invokeai:{key}", family=family, backend="invokeai",
+                model_path=str(row.get("path") or row.get("name") or ""),
+                display_name=name, capabilities=caps,
+                speed_tier="balanced", quality_tier="high" if "xl" in family else "balanced",
+                notes=f"InvokeAI {row.get('format','')} model ({base_name})",
+                capability_class=cls["capability_class"],
+                restriction_status=cls["restriction_status"],
+            )
+            profile.metadata = dict(profile.metadata or {})
+            profile.metadata["invokeai_model"] = {k: row.get(k) for k in
+                ("key", "hash", "name", "base", "type", "format", "description")
+                if row.get(k) is not None}
+            # Fleet match: a known managed model (Juggernaut/RealVis/
+            # CyberRealistic) gets role, scoring weights, and its default
+            # sampling profile attached so routing + SamplingAdvisor can
+            # use them.
+            spec = None
+            for candidate in (name, str(row.get("source") or ""),
+                              str(row.get("path") or "")):
+                spec = fleet_for_model_name(candidate)
+                if spec:
+                    break
+            if spec:
+                profile.metadata["fleet_id"] = spec["id"]
+                profile.metadata["fleet_role"] = spec["role"]
+                profile.metadata["fleet_display"] = spec["display_name"]
+                profile.metadata["fleet_source"] = spec["invokeai_source"]
+                profile.metadata["fleet_license"] = spec["license_name"]
+                profile.display_name = spec["display_name"]
+                profile.capability_class = "photoreal"
+                profile.restriction_status = spec["restriction_status"]
+                for k, v in (spec.get("sampling") or {}).items():
+                    profile.metadata.setdefault("sampling", {})[k] = v
+                profile.metadata["sampling"]["model_scope"] = spec["id"]
+            base.append(profile)
+        self.router.models = [m for m in base if m.enabled]
+
+    def _select_backend(self, request: ImageRequest) -> tuple[str, list[str]]:
+        """Pick the engine for this request. Returns (name, reasons).
+
+        Order: explicit request override → configured preference → auto.
+        Auto prefers InvokeAI for standard ops it advertises, ComfyUI for
+        ops that need its specialized/custom workflows, with honest fallback
+        when the preferred engine can't serve."""
+        override = (request.backend_override or "").strip().lower()
+        if override not in {"", "auto", "invokeai", "comfyui"}:
+            raise ValueError(f"unknown image backend '{override}'")
+        configured = str(getattr(self.config, "image_backend", "auto") or "auto").lower()
+        choice = override or configured
+        reasons: list[str] = []
+
+        if choice == "invokeai":
+            return "invokeai", ["manual backend override: invokeai"]
+        if choice == "comfyui":
+            return "comfyui", ["manual backend override: comfyui"]
+
+        operation, op_reasons = self.router.infer_operation(request)
+        reasons.extend(op_reasons)
+
+        invoke_ok, invoke_why = self._invokeai_ready()
+        comfy_ready = (self.backend_runtime.discover()[0] is not None
+                       or self._backend_up("comfyui"))
+
+        # Ops InvokeAI cannot express natively go to ComfyUI when a
+        # configured workflow covers them (e.g. custom background removal,
+        # outpainting, imported node graphs).
+        if operation not in self._INVOKEAI_OPS or request.transparent_background:
+            if comfy_ready:
+                reasons.append(
+                    f"ComfyUI handles '{operation}' via configured workflows"
+                    + (" (InvokeAI does not support it natively)"
+                       if operation not in self._INVOKEAI_OPS else ""))
+                return "comfyui", reasons
+            if invoke_ok:
+                reasons.append(
+                    f"operation '{operation}' unsupported on InvokeAI and ComfyUI "
+                    "is unavailable — trying InvokeAI anyway")
+                return "invokeai", reasons
+            return "comfyui", reasons + ["no backend is currently available"]
+
+        if invoke_ok:
+            reasons.append("auto: InvokeAI preferred for standard generation/editing")
+            return "invokeai", reasons
+        if comfy_ready:
+            reasons.append(f"auto: falling back to ComfyUI — {invoke_why}")
+            return "comfyui", reasons
+        return "invokeai", reasons + ["no image backend is currently available"]
 
     def _validate_request_inputs(self, request: ImageRequest) -> None:
         operation, _ = self.router.infer_operation(request)
@@ -516,29 +730,68 @@ class ImageManager:
         allowed, reason = self.policy.check(request.prompt, real_person=real_person, subject=request.subject_profile)
         if not allowed:
             raise PermissionError(reason)
-        if self.backend_runtime.discover()[0] is None and not self._backend_up():
-            if self.on_missing_backend is not None:
-                try:
-                    self.on_missing_backend()
-                except Exception:
-                    pass
-            raise RuntimeError(
-                "ComfyUI is not installed — image generation cannot run without it. "
-                "Nothing is generating right now. An install offer was shown to you.")
-        decision=self.router.choose(request)
+        backend_name, backend_reasons = self._select_backend(request)
+        runtime = self.backend_runtimes[backend_name]
+        explicit = (request.backend_override or "").strip().lower() in {"invokeai", "comfyui"}
+
+        def _installed_and_up() -> bool:
+            if backend_name == "comfyui":
+                return self.backend_runtime.discover()[0] is not None or self._backend_up("comfyui")
+            return self.invokeai_runtime.discover()[0] is not None or self._backend_up("invokeai")
+
+        if not _installed_and_up():
+            if not explicit:
+                # Auto can fall back to the other engine when it can serve
+                # the operation — never claim it, just reroute with a reason.
+                other = "comfyui" if backend_name == "invokeai" else "invokeai"
+                other_runtime = self.backend_runtimes[other]
+                other_installed = (other_runtime.discover()[0] is not None
+                                   or self._backend_up(other))
+                operation, _ = self.router.infer_operation(request)
+                other_supports = (other == "comfyui") or operation in self._INVOKEAI_OPS
+                if other_installed and other_supports:
+                    backend_name = other
+                    backend_reasons.append(
+                        f"auto fallback: preferred backend unavailable — routed to {other}")
+                    runtime = other_runtime
+                    explicit = False
+            if not _installed_and_up():
+                if self.on_missing_backend is not None:
+                    try:
+                        self.on_missing_backend()
+                    except Exception:
+                        pass
+                label = "InvokeAI" if backend_name == "invokeai" else "ComfyUI"
+                raise RuntimeError(
+                    f"{label} is not installed or running — image generation cannot run without it. "
+                    "Nothing is generating right now. An install/setup offer is available.")
+        if backend_name == "invokeai":
+            self._refresh_invokeai_models()
+        try:
+            decision=self.router.choose(request, backend=backend_name)
+        except RuntimeError:
+            if not explicit and backend_name == "invokeai":
+                # Auto + InvokeAI has no model for this op — ComfyUI may.
+                decision = self.router.choose(request, backend="comfyui")
+                backend_name = "comfyui"
+                backend_reasons.append(
+                    "auto fallback: no InvokeAI model serves this operation — routed to ComfyUI")
+            else:
+                raise
+        decision.reasons = backend_reasons + decision.reasons
         # Best-guess sampling params (and anything learned from prior
         # feedback) fill whatever the caller left unset — explicit user
         # controls like "cfg 4" or "denoise 0.6" always win.
         try:
             guess_notes = self.sampling_advisor.apply(
                 request, self.router.get_profile(decision.model_id),
-                decision.operation)
+                decision.operation, backend=backend_name)
             decision.reasons.extend(guess_notes)
         except Exception:
             pass
-        # Probe once up front so the UI/copy can distinguish "ComfyUI is
+        # Probe once up front so the UI/copy can distinguish "backend is
         # already up" from a cold start that may take minutes.
-        backend_up = self._backend_up()
+        backend_up = self._backend_up(backend_name)
         job=ImageJob(
             id=uuid.uuid4().hex,
             request=request.as_dict(),
@@ -546,6 +799,7 @@ class ImageManager:
             model_id=decision.model_id, operation=decision.operation, workflow=decision.workflow,
             created_at=time.time(), routing_reasons=decision.reasons,
             backend_starting=not backend_up,
+            backend=backend_name,
         )
         with self._lock:
             self._jobs[job.id]=job
@@ -573,7 +827,8 @@ class ImageManager:
             return False
         self.sampling_advisor.record_outcome(
             profile, str(job.operation or "auto"),
-            dict(job.request or {}), rating)
+            dict(job.request or {}), rating,
+            backend=str(job.backend or "comfyui"))
         return True
 
     def _safe_input_path(self, value: str) -> Path:
@@ -753,8 +1008,228 @@ class ImageManager:
         return [str(p) for p in self.backend.fetch_outputs(
             backend_job_id, self.generations_dir / job.id / "upscaled")]
 
+    def _invokeai_spec(self, job: ImageJob, request: ImageRequest,
+                       profile: ImageModelProfile) -> dict[str, Any]:
+        """Normalized generation spec for InvokeAIBackend.submit."""
+        invoke_model = dict((profile.metadata or {}).get("invokeai_model") or {})
+        if not invoke_model and profile.model_path:
+            invoke_model = {"name": Path(profile.model_path).name}
+        spec: dict[str, Any] = {
+            "prompt": request.prompt,
+            "negative_prompt": request.negative_prompt,
+            "width": request.width, "height": request.height,
+            "count": max(1, int(request.count or 1)),
+            "seed": request.seed,
+            "steps": request.steps,
+            "guidance": request.guidance,
+            "denoise_strength": request.denoise_strength
+                if request.denoise_strength is not None else request.image_strength,
+            "sampler_name": request.sampler_name,
+            "scheduler": request.scheduler,
+            "model": invoke_model,
+            "loras": [],
+        }
+        # Upload inputs through InvokeAI's own image endpoint — it tracks
+        # them by image_name, not by filesystem path.
+        if request.source_image:
+            path = self._safe_input_path(request.source_image)
+            uploaded = self.invokeai_backend.upload_image(path)
+            spec["source_image_name"] = str(uploaded.get("image_name") or "")
+        if request.mask_path:
+            path = self._safe_input_path(request.mask_path)
+            uploaded = self.invokeai_backend.upload_image(path)
+            spec["mask_image_name"] = str(uploaded.get("image_name") or "")
+        # LoRAs: resolve to InvokeAI lora model records.
+        if request.loras:
+            available = {str(m.get("name") or ""): m
+                         for m in self._invokeai_models()
+                         if str(m.get("type") or "") == "lora"}
+            for lora in request.loras[:4]:
+                name = str(lora.get("name") or lora.get("id") or "")
+                if name in available:
+                    spec["loras"].append({"model": available[name],
+                                          "strength": float(lora.get("strength", 1.0))})
+        return spec
+
+    @staticmethod
+    def _is_swept_state_error(message: str) -> bool:
+        """The backend's ephemeral state dir (outputs/tensors|conditioning
+        tmp*) was deleted under it — e.g. a second InvokeAI instance on
+        the same root sweeping 'dangling' tempdirs at startup."""
+        return "does not exist" in message and (
+            "Parent directory" in message
+            or "/outputs/" in message.replace("\\", "/"))
+
+    def _await_invokeai_job(self, job: ImageJob) -> None:
+        started = time.monotonic()
+        deadline = started + max(30, int(getattr(self.config, "image_job_timeout", 900)))
+        while time.monotonic() < deadline:
+            if job.state == "cancelled":
+                raise _ImageJobCancelled()
+            state = self.invokeai_backend.status(job.backend_job_id)
+            if state.get("state") == "finished":
+                return
+            if state.get("state") == "failed":
+                raise RuntimeError(str(state.get("error") or "InvokeAI generation failed"))
+            frac = float(state.get("progress") or 0.0)
+            elapsed = time.monotonic() - started
+            job.progress = max(job.progress, min(
+                0.90, 0.20 + 0.70 * max(frac, elapsed / 240.0)))
+            self._save_jobs(job)
+            time.sleep(1.0)
+        raise TimeoutError("Timed out waiting for InvokeAI image generation")
+
+    def _evict_peer_image_backend(self, job: ImageJob, active: str) -> bool:
+        """Park the *other* image backend when it is Nexus-managed.
+
+        Two resident image servers can exhaust VRAM/RAM together — the
+        observed failure was a resident ComfyUI starving InvokeAI's model
+        load until it died mid-job. Only Nexus-owned processes are
+        evicted (evict_if_managed refuses user-owned external servers);
+        the peer returns on its next request via start_on_image_request."""
+        peer = "comfyui" if active == "invokeai" else "invokeai"
+        runtime = self.backend_runtimes.get(peer)
+        if runtime is None:
+            return False
+        try:
+            status = runtime.probe()
+        except Exception:
+            return False
+        if not status.get("healthy"):
+            return False
+        if runtime.evict_if_managed():
+            label = "ComfyUI" if peer == "comfyui" else "InvokeAI"
+            job.routing_reasons.append(
+                f"resource arbitration: parked Nexus-managed {label} — "
+                "free memory was below this job's estimate")
+            return True
+        return False
+
+    def _run_invokeai_job(self, job: ImageJob) -> None:
+        request = ImageRequest(**job.request)
+        profile = self.router.get_profile(job.model_id)
+        stopped = []
+        try:
+            job.started_at = time.time(); job.state = "loading_model"
+            job.stage = "preparing request"; job.progress = 0.03
+            self._save_jobs(job)
+
+            if self.runtime is not None:
+                self.runtime.refresh_hardware()
+                job.vram_before_gb = self.runtime.hardware.free_vram_gb
+                required = max(0.0, profile.estimated_vram_gb)
+                if required and self.runtime.hardware.free_vram_gb < required:
+                    stopped = self.runtime.release_managed_models_for_vram(
+                        required_vram_gb=required,
+                        mode=getattr(self.config, "image_resource_mode", "balanced"))
+                required_ram = max(0.0, profile.estimated_ram_gb)
+                headroom = required_ram * 1.15 + 2.0
+                if required_ram and self.runtime.hardware.available_ram_gb < headroom:
+                    job.stage = "freeing memory"; self._save_jobs(job)
+                    self.runtime.release_managed_models_for_ram(required_ram_gb=headroom)
+                # LLM eviction may not be enough when the *other* image
+                # backend is resident — InvokeAI died mid-job under exactly
+                # this contention. Park a managed ComfyUI before submitting.
+                self.runtime.refresh_hardware()
+                if (required and self.runtime.hardware.free_vram_gb < required) or \
+                        (required_ram and self.runtime.hardware.available_ram_gb < headroom):
+                    job.stage = "freeing memory"; self._save_jobs(job)
+                    self._evict_peer_image_backend(job, "invokeai")
+
+            job.stage = "starting InvokeAI" if job.backend_starting else "connecting to InvokeAI"
+            job.progress = max(job.progress, 0.10); self._save_jobs(job)
+            self.invokeai_runtime.ensure_ready()
+            job.backend_starting = False
+
+            job.stage = "preparing generation"; job.progress = max(job.progress, 0.14)
+            spec = self._invokeai_spec(job, request, profile)
+            if not spec.get("model"):
+                raise RuntimeError(
+                    "model_missing: no InvokeAI model is selected — install/import a "
+                    "model in InvokeAI or pick another image model")
+
+            job.state = "generating"; job.stage = "generating"
+            job.progress = max(job.progress, 0.20)
+
+            # InvokeAI's ephemeral object store writes tensors into ONE
+            # TemporaryDirectory created at startup; a second InvokeAI
+            # instance on the same root sweeps tmp* dirs on boot and kills
+            # it ("Parent directory ... does not exist" on every save).
+            # The same bounded restart-and-resubmit covers transport-level
+            # backend crashes (connection refused/reset mid-job) — one
+            # recovery attempt, never an infinite loop. Timeouts and
+            # cancellations are NOT retried here.
+            from ..netdiag import BackendConnectionError
+            for attempt in range(2):
+                try:
+                    job.backend_job_id = self.invokeai_backend.submit(spec)
+                    self._save_jobs(job)
+                    self._await_invokeai_job(job)
+                    break
+                except RuntimeError as exc:
+                    retryable = self._is_swept_state_error(str(exc)) \
+                        or isinstance(exc, BackendConnectionError)
+                    if attempt or not retryable:
+                        raise
+                    job.stage = "restarting InvokeAI"; self._save_jobs(job)
+                    try:
+                        self.invokeai_runtime.stop()
+                    except Exception:
+                        pass
+                    self.invokeai_runtime.ensure_ready()
+
+            job.stage = "saving image"; job.progress = max(job.progress, 0.92)
+            self._save_jobs(job)
+            destination = self.generations_dir / job.id
+            job.outputs = [str(p) for p in
+                           self.invokeai_backend.fetch_outputs(job.backend_job_id, destination)]
+            try:
+                output_setting = str(getattr(self.config, "image_output_dir", "") or "").strip()
+                if output_setting:
+                    output_dir = self._resolve(output_setting)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    mirrored = []
+                    for p in job.outputs:
+                        src = Path(p)
+                        if src.is_file():
+                            shutil.copy2(src, output_dir / src.name)
+                            mirrored.append(str(output_dir / src.name))
+                    if mirrored:
+                        job.outputs = job.outputs + mirrored
+            except OSError:
+                pass
+            job.state = "finished"; job.stage = "finished"; job.progress = 1.0
+            job.finished_at = time.time()
+            if self.runtime is not None:
+                self.runtime.refresh_hardware()
+                job.vram_after_gb = self.runtime.hardware.free_vram_gb
+            self._append_history(job, profile)
+        except _ImageJobCancelled:
+            pass
+        except Exception as exc:
+            error = describe_image_error(exc)
+            job.state = "failed"; job.stage = "failed"
+            job.error_code = error["code"]; job.error_message = error["message"]
+            job.error = job.error_message
+            job.technical_details = error["technical_details"]
+            job.finished_at = time.time()
+            try:
+                from ..netdiag import is_transport_failure, record_failure
+                if is_transport_failure(exc):
+                    record_failure(exc)
+            except Exception:
+                pass
+        finally:
+            self._save_jobs(job)
+            if stopped and bool(getattr(self.config, "image_restore_chat_model", True)) \
+                    and self.runtime is not None:
+                self.runtime.restore_managed_models(stopped)
+
     def _run_job(self, job_id: str) -> None:
         job=self._jobs[job_id]
+        if job.backend == "invokeai":
+            self._run_invokeai_job(job)
+            return
         request=ImageRequest(**job.request)
         profile=self.router.get_profile(job.model_id)
         stopped=[]
@@ -797,6 +1272,13 @@ class ImageManager:
                 if required_ram and self.runtime.hardware.available_ram_gb < headroom:
                     job.stage="freeing memory"; self._save_jobs(job)
                     self.runtime.release_managed_models_for_ram(required_ram_gb=headroom)
+                # Same cross-backend contention as the InvokeAI path — park
+                # a Nexus-managed InvokeAI if memory is still short.
+                self.runtime.refresh_hardware()
+                if (required and self.runtime.hardware.free_vram_gb < required) or \
+                        (required_ram and self.runtime.hardware.available_ram_gb < headroom):
+                    job.stage="freeing memory"; self._save_jobs(job)
+                    self._evict_peer_image_backend(job, "comfyui")
             self._save_jobs(job)
             job.stage="starting ComfyUI" if job.backend_starting else "connecting to ComfyUI"
             job.progress=max(job.progress,0.10); self._save_jobs(job)
@@ -816,8 +1298,24 @@ class ImageManager:
             unresolved=rendered_status.get("unresolved_tokens",[])
             if unresolved:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
-            self._submit_and_wait(
-                job, workflow, stage="generating", progress_start=0.20, progress_end=0.90)
+            # A ComfyUI crash mid-job surfaces as BackendConnectionError —
+            # restart once and resubmit (bounded; timeouts and cancels are
+            # never retried).
+            from ..netdiag import BackendConnectionError
+            for attempt in range(2):
+                try:
+                    self._submit_and_wait(
+                        job, workflow, stage="generating", progress_start=0.20, progress_end=0.90)
+                    break
+                except BackendConnectionError:
+                    if attempt:
+                        raise
+                    job.stage="restarting ComfyUI"; self._save_jobs(job)
+                    try:
+                        self.backend_runtime.stop()
+                    except Exception:
+                        pass
+                    self.backend_runtime.ensure_ready()
             job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs(job)
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]
@@ -889,7 +1387,8 @@ class ImageManager:
         job=self._jobs[job_id]
         if job.state in {"finished","failed","cancelled"}: return job
         if job.backend_job_id:
-            self.backend.cancel(job.backend_job_id)
+            backend = self.backends.get(job.backend) or self.backend
+            backend.cancel(job.backend_job_id)
         job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(job); return job
 
     def get_job(self, job_id: str) -> ImageJob:

@@ -191,7 +191,7 @@
       "homepage": "https://huggingface.co/RunDiffusion/Juggernaut-X-v10",
       "license_name": "CreativeML OpenRAIL-M",
       "display_name": "Juggernaut X v10",
-      "tagline": "Photorealistic · SDXL · default generation",
+      "tagline": "Photorealistic \u00b7 SDXL \u00b7 default generation",
       "capabilities": [
         "text_to_image"
       ],
@@ -424,8 +424,8 @@
   "answer_memory_semantic_enabled": true,
   "answer_memory_auto_learn": true,
   "answer_memory_auto_promote": true,
-  "answer_memory_semantic_threshold": 0.50,
-  "answer_memory_possible_threshold": 0.30,
+  "answer_memory_semantic_threshold": 0.5,
+  "answer_memory_possible_threshold": 0.3,
   "answer_memory_experience_retention_days": 90,
   "answer_memory_max_experiences": 20000,
   "answer_memory_max_db_mb": 256,
@@ -459,5 +459,15 @@
   "stt_backend": "auto",
   "stt_model": "base",
   "vosk_model_path": "",
-  "stt_auto_submit": false
+  "stt_auto_submit": false,
+  "image_backend": "auto",
+  "invokeai_endpoint": "http://127.0.0.1:9090",
+  "invokeai_auto_start": false,
+  "invokeai_start_on_image_request": true,
+  "invokeai_dir": "",
+  "invokeai_python": "",
+  "invokeai_extra_args": [],
+  "invokeai_logs_dir": ".agent/runtime",
+  "invokeai_startup_timeout": 300,
+  "invokeai_idle_unload_seconds": 900
 }

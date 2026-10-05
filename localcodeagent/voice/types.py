@@ -101,6 +101,19 @@ class VoicePreset:
     # Natural<->Synthetic master blend: 0 = raw base voice, 1 = full preset
     synthetic: float = 0.8
 
+    # Identity + delivery metadata — descriptive fields surfaced by the
+    # API/UI and readable by prompts. pronunciation_overrides is the one
+    # field that actively rewrites tokens pre-synthesis (same expansion
+    # style as the speech filter's acronym table, authored per preset).
+    provenance: str = ""          # e.g. "kokoro:bf_isabella + neural/glass/micro"
+    version: str = "1.0"
+    cadence: str = ""             # e.g. "measured", "brisk"
+    energy: str = ""              # e.g. "calm", "bright"
+    warmth: str = ""              # e.g. "warm", "cool"
+    formality: str = ""           # e.g. "conversational", "formal"
+    emotion_range: str = ""       # e.g. "steady", "expressive"
+    pronunciation_overrides: dict[str, str] = field(default_factory=dict)
+
     # Output
     limiter_ceiling: float = 0.89
     output_gain_db: float = 0.0

@@ -127,13 +127,29 @@ class ConnectorRegistry:
 
     def status(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [{"name": n, "enabled": r["enabled"],
-                     "capabilities": list(r["conn"].capabilities),
-                     "permission": r["conn"].permission,
-                     "authed": r["authed"],
-                     "errors": r["consecutive_errors"],
-                     "last_health": r["last_health"]}
-                    for n, r in sorted(self.connectors.items())]
+            out = []
+            for n, r in sorted(self.connectors.items()):
+                conn = r["conn"]
+                # Live credential state when the connector exposes it —
+                # a vault token stored after boot must show immediately,
+                # not "authed=false forever until first call".
+                auth = {"authed": r["authed"]}
+                probe = getattr(conn, "auth_state", None)
+                if callable(probe):
+                    try:
+                        auth = probe() or auth
+                    except Exception:
+                        pass
+                row = {"name": n, "enabled": r["enabled"],
+                       "capabilities": list(conn.capabilities),
+                       "permission": conn.permission,
+                       "authed": bool(auth.get("authed")),
+                       "errors": r["consecutive_errors"],
+                       "last_health": r["last_health"]}
+                if auth.get("source"):
+                    row["credential_source"] = auth["source"]
+                out.append(row)
+            return out
 
     def set_enabled(self, name: str, enabled: bool) -> bool:
         rec = self.connectors.get(name)

@@ -43,19 +43,36 @@ _WASHED_RE = re.compile(
 def _family_defaults(profile: ImageModelProfile) -> dict[str, Any]:
     family = (profile.family or "").lower()
     if "stable-diffusion" in family:
-        return {"guidance": 6.5, "sampler_name": "dpmpp_2m", "scheduler": "karras",
-                "steps_fast": 18, "steps_balanced": 25, "steps_high": 35}
-    if "qwen" in family:
-        return {"guidance": 4.0, "sampler_name": "euler", "scheduler": "simple",
-                "steps_fast": 16, "steps_balanced": 25, "steps_high": 45}
-    if "flux" in family and "klein" in family:
-        return {"guidance": 1.0, "sampler_name": "euler", "scheduler": "simple",
-                "steps_fast": 4, "steps_balanced": 8, "steps_high": 12}
-    if "z-image" in family or "turbo" in family:
-        return {"guidance": 1.0, "sampler_name": "euler", "scheduler": "simple",
-                "steps_fast": 4, "steps_balanced": 8, "steps_high": 12}
-    return {"guidance": 4.0, "sampler_name": "euler", "scheduler": "simple",
-            "steps_fast": 16, "steps_balanced": 25, "steps_high": 40}
+        defaults = {"guidance": 6.5, "sampler_name": "dpmpp_2m", "scheduler": "karras",
+                    "steps_fast": 18, "steps_balanced": 25, "steps_high": 35}
+    elif "qwen" in family:
+        defaults = {"guidance": 4.0, "sampler_name": "euler", "scheduler": "simple",
+                    "steps_fast": 16, "steps_balanced": 25, "steps_high": 45}
+    elif "flux" in family and "klein" in family:
+        defaults = {"guidance": 1.0, "sampler_name": "euler", "scheduler": "simple",
+                    "steps_fast": 4, "steps_balanced": 8, "steps_high": 12}
+    elif "z-image" in family or "turbo" in family:
+        defaults = {"guidance": 1.0, "sampler_name": "euler", "scheduler": "simple",
+                    "steps_fast": 4, "steps_balanced": 8, "steps_high": 12}
+    else:
+        defaults = {"guidance": 4.0, "sampler_name": "euler", "scheduler": "simple",
+                    "steps_fast": 16, "steps_balanced": 25, "steps_high": 40}
+    # Fleet/managed models ship their own verified sampling defaults
+    # (Juggernaut ≠ RealVis ≠ CyberRealistic) — they override the family
+    # baseline but never explicit request values or learned outcomes.
+    model_defaults = ((profile.metadata or {}).get("sampling") or {})
+    if model_defaults.get("steps"):
+        steps = int(model_defaults["steps"])
+        defaults["steps_balanced"] = steps
+        defaults["steps_high"] = steps + 10
+        defaults["steps_fast"] = max(8, steps - 12)
+    if model_defaults.get("guidance") is not None:
+        defaults["guidance"] = float(model_defaults["guidance"])
+    if model_defaults.get("sampler"):
+        defaults["sampler_name"] = str(model_defaults["sampler"])
+    if model_defaults.get("scheduler"):
+        defaults["scheduler"] = str(model_defaults["scheduler"])
+    return defaults
 
 
 class SamplingAdvisor:
@@ -76,11 +93,23 @@ class SamplingAdvisor:
     # -- learning -----------------------------------------------------
 
     @staticmethod
-    def _key(profile: ImageModelProfile, operation: str) -> str:
-        return f"{(profile.family or 'unknown').lower()}|{operation}"
+    def _key(profile: ImageModelProfile, operation: str,
+             backend: str = "comfyui") -> str:
+        """Learning is keyed per backend — recipes that won on ComfyUI must
+        not leak into InvokeAI guesses (different sampler vocabulary and
+        CFG behavior). Managed fleet models additionally key per model
+        (``model_scope``) so feedback on Juggernaut doesn't drift RealVis.
+        The legacy ``family|op`` key is retained for unscoped models on
+        ComfyUI so previously learned stats keep working."""
+        scope = str(((profile.metadata or {}).get("sampling") or {})
+                    .get("model_scope") or "")
+        family = scope or (profile.family or "unknown").lower()
+        base = f"{family}|{operation}"
+        return base if backend == "comfyui" else f"{backend}|{base}"
 
     def record_outcome(self, profile: ImageModelProfile, operation: str,
-                       request_params: dict, rating: str) -> None:
+                       request_params: dict, rating: str,
+                       backend: str = "comfyui") -> None:
         """Persist a thumbs outcome against the job's effective params."""
         rating = (rating or "").lower()
         if rating not in {"up", "better", "down", "worse"}:
@@ -89,7 +118,7 @@ class SamplingAdvisor:
                   if request_params.get(k) not in (None, "")}
         if not params:
             return
-        key = self._key(profile, operation or "auto")
+        key = self._key(profile, operation or "auto", backend)
         with self._lock:
             row = self._stats.setdefault(
                 key, {"wins": 0, "losses": 0, "best": None, "avoid": []})
@@ -119,12 +148,12 @@ class SamplingAdvisor:
     # -- guessing -----------------------------------------------------
 
     def apply(self, request: ImageRequest, profile: ImageModelProfile,
-              operation: str) -> dict[str, str]:
+              operation: str, *, backend: str = "comfyui") -> dict[str, str]:
         """Fill unset sampling fields. Returns reason notes for routing."""
         notes: list[str] = []
         defaults = _family_defaults(profile)
         quality = (request.quality or "balanced").lower()
-        learned = self._learned_params(profile, operation)
+        learned = self._learned_params(profile, operation, backend)
 
         prompt_text = request.prompt or ""
         if request.steps is None:
@@ -167,9 +196,10 @@ class SamplingAdvisor:
                 learned.get("scheduler", defaults["scheduler"]))
         return notes
 
-    def _learned_params(self, profile: ImageModelProfile, operation: str) -> dict[str, Any]:
+    def _learned_params(self, profile: ImageModelProfile, operation: str,
+                        backend: str = "comfyui") -> dict[str, Any]:
         with self._lock:
-            row = self._stats.get(self._key(profile, operation)) or {}
+            row = self._stats.get(self._key(profile, operation, backend)) or {}
             best = row.get("best")
             if isinstance(best, dict) and best:
                 return dict(best)

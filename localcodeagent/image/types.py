@@ -30,6 +30,15 @@ class ImageModelProfile:
     quality_tier: str = "balanced"
     notes: str = ""
     max_loras: int = 4
+    # Capability classification — descriptive metadata only; it informs
+    # routing/model browsing and never relaxes safety or policy gates.
+    capability_class: str = "general"
+    # Honest restriction status: adult_capable, restricted_by_model,
+    # restricted_by_provider, local_unfiltered_model, unknown_capability.
+    restriction_status: str = "unknown_capability"
+    # Backend-specific extras — e.g. the InvokeAI ModelIdentifier dict used
+    # to build graph nodes.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def workflow_for(self, operation: str) -> str:
         aliases = {"remove_background": "background_removal", "background_removal": "remove_background"}
@@ -57,6 +66,9 @@ class ImageRequest:
     source_image: str = ""
     subject_profile: str = ""
     model_override: str = "auto"
+    # "auto" | "invokeai" | "comfyui" — explicit backend selection. Auto is
+    # the recommended mode; anything else pins execution to that engine.
+    backend_override: str = "auto"
     loras: list[dict[str, Any]] = field(default_factory=list)
     image_strength: float | None = None
     denoise_strength: float | None = None
@@ -106,6 +118,8 @@ class ImageJob:
     vram_before_gb: float = 0.0
     vram_after_gb: float = 0.0
     backend_job_id: str = ""
+    # Which engine actually ran the job — "comfyui" or "invokeai".
+    backend: str = "comfyui"
     # True while the image backend (ComfyUI) is being cold-started for this
     # job — the UI shows a dedicated "starting image generator" indicator.
     backend_starting: bool = False

@@ -330,6 +330,25 @@ class OrchestratorActivityTests(unittest.TestCase):
             self.assertIn("failed", states)
             self.assertTrue(any(r["category"] == "error" for r in rows))
 
+    def test_recent_returns_newest_first_across_tasks(self):
+        import time
+        with tempfile.TemporaryDirectory() as td:
+            store = ActivityStore(Path(td) / "act.jsonl")
+            store.open("t1", "tool", "old step")
+            time.sleep(0.01)
+            store.open("t2", "tool", "new step")
+            rows = store.recent(10)
+            self.assertEqual(rows[0]["title"], "new step")
+            self.assertEqual(rows[1]["title"], "old step")
+            self.assertEqual(len(store.recent(1)), 1)
+
+    def test_recent_survives_reload(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "act.jsonl"
+            ActivityStore(path).open("t1", "command", "dir listing")
+            store = ActivityStore(path)
+            self.assertEqual(store.recent(5)[0]["title"], "dir listing")
+
 
 if __name__ == "__main__":
     unittest.main()

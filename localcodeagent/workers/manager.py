@@ -480,11 +480,14 @@ class AdaptiveWorkerManager:
                    mission_id: str = "", project_id: str = "",
                    profile_id: str = "",
                    estimate_overrides: dict | None = None,
-                   user_initiated: bool = False) -> tuple[WorkerRecord | None, str, str]:
+                   user_initiated: bool = False,
+                   on_shortfall: Any = None) -> tuple[WorkerRecord | None, str, str]:
         """Reserve resources for a mission graph node.
 
         Returns (worker, reason_code, detail). worker is None when the node
-        does not currently fit — reason/detail explain why for the UI."""
+        does not currently fit — reason/detail explain why for the UI.
+        ``on_shortfall(est, reason)`` fires on memory shortfall so callers
+        can reclaim idle managed capacity instead of just waiting."""
         role = classify_role(text or title, kind=kind, hinted=role)
         est = self._estimate(role, estimate_overrides)
         with self._lock:
@@ -502,6 +505,12 @@ class AdaptiveWorkerManager:
             interactive=self._interactive() and not user_initiated)
         ok, reason, detail = self._fits(est, sched, slots)
         if not ok:
+            if on_shortfall is not None and reason in {
+                    "waiting_for_vram", "waiting_for_ram"}:
+                try:
+                    on_shortfall(est, reason)
+                except Exception:
+                    pass
             return None, reason, detail
         worker = WorkerRecord(
             id=f"w-{uuid.uuid4().hex[:10]}", role=role,

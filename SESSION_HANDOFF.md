@@ -11,7 +11,364 @@
 - Do not replace this shell with unrelated dashboard/IDE concepts unless the user explicitly changes direction.
 - UI details are documented in `docs/UI_DIRECTION.md`.
 
-## Current milestone — v0.19.0 autonomous development workstation (P0)
+## 2026-10-05 — Integrated reliability closeout (branch `milestone/integrated-reliability-closeout`, IN PROGRESS)
+
+Live verification on the real install (`D:\Nexus_Core`, RTX 3080 Ti 12GB,
+64GB RAM, InvokeAI 6.14.2, ComfyUI portable). Backend under test:
+current source on this branch via `--config D:\Nexus_Core\config.json`.
+
+### ComfyUI dogfood (P2) — VERIFIED
+
+- `qwen-image-2.1` t2i: managed cold-boot via
+  `comfyui_start_on_image_request`, real 20-step 1024² PNG (147s incl.
+  boot). Workflow `qwen/qwen-image-2.1-t2i-api.json`.
+- `flux2-klein-4b` t2i: finished, real PNG (80s). Workflow
+  `flux/flux2-klein-4b-t2i-api.json`.
+- `juggernaut-x-v10` SDXL t2i through ComfyUI: finished, real PNG.
+- Qwen `remove_background`: real output via
+  `qwen-image-2.1-background-removal-api.json`.
+- Cancel mid-flight: clean `cancelled` state at 29%, zero partial
+  outputs, no phantom success.
+- Outputs land in `data/image/generations/<job>/` + mirrored to
+  `output/images/`; history.json records every finished job;
+  `backend_job_id` + `vram_before/after` persisted per job.
+
+### InvokeAI↔ComfyUI fallback matrix (P3) — VERIFIED LIVE
+
+| Case | Setup | Result |
+|---|---|---|
+| A | auto, both up, SDXL t2i | InvokeAI chosen (RealVisXL fleet route), real output |
+| B | `remove_background`, auto | ComfyUI — "InvokeAI does not support it natively", real output |
+| C | InvokeAI unavailable, auto | ComfyUI fallback, real output, honest routing reasons |
+| D | explicit `invokeai` pin, unavailable | HTTP 400 honest failure — no silent swap |
+| E | ComfyUI down, auto t2i | InvokeAI succeeds |
+
+### GPU arbitration (P4) + crash recovery (P9) — VERIFIED LIVE, `cc702cb2`
+
+- Real defect observed + fixed: managed ComfyUI resident (~11GB)
+  starved an InvokeAI model load → InvokeAI died mid-job (WinError
+  10054), job failed, self-heal's respawn also OOM'd.
+- Fix: `evict_if_managed()` on both runtimes (Nexus-owned only —
+  external user servers untouchable); peer-backend eviction wired into
+  both job paths when memory stays short after LLM release; one bounded
+  restart+resubmit on `BackendConnectionError` for both engines.
+- Live re-verify: `llama-server` resident → Qwen job released it (0
+  procs), evicted managed InvokeAI (reason recorded), generated, LLM
+  restored (1 proc) after completion.
+
+### Closeout pass 2 (P5–P17) — VERIFIED LIVE
+
+- **Soak/selftest**: `selftest --test-timeout` default raised 300→900s
+  (suite now 1948 tests, ~310s on this box); full pass = tests + isolated
+  clean-instance boot, 39 smoke checks. Nightly tier-3 workflow
+  `soak.yml` runs it + autonomy/provisioning/LKG/pipeline suites;
+  hardware tier is self-hosted-GPU gated via `workflow_dispatch` only.
+- **UI sweep** (headless Edge, all 15 pages, real backend): found three
+  live defects — `/api/provisioning` unreachable (missing
+  `_PLATFORM_PREFIXES` entry — Command Center card dead), `voice/speak`
+  500→honest 503, undefined `setStatus` pageerror on notifications.
+  `RoutePrefixCoverageTests` now statically prevents orphan routes.
+- **Autonomy soak + chaos**: mission → plan → executing → **backend
+  hard-killed** → restart → durable resume → watchdog reaped orphaned
+  driver task → replan → `waiting_for_vram` queue (honest) → freed →
+  verify gated `run_tests` → **approval re-ask loop found and fixed**
+  (approve now stamps `metadata.approval_granted`; `_default_verify`
+  honors it; agent nodes resume the parked task via `agent.resume`
+  instead of re-running fresh). Mission completed E2E, 0 pending.
+- **Audited clean**: signing (signtool+`/DWithSign`+secrets, honest
+  unsigned fallback — external cert is the only prerequisite), disk
+  mgmt (5GB detector + managed-scratch-only fixer), sensitive-action
+  gating (always-ask + standing grants + stop/egress/RC gates).
+- **Approval-loop closeout** (`ffa7a4b1`, `a68dc631`): three distinct
+  re-ask vectors found and fixed — `_default_verify` gate stamp,
+  agent-node resume of the exact parked task (`agent.resume` not fresh
+  `agent.run`), and `op == "tool"` job nodes passing
+  `approved=approval_granted`. Deny path verified bounded
+  (max_approval_retries=2 → replan → blocked+notify).
+- **Long-run retention sweep** (`8f65a652`): unbounded-growth audit
+  found four leaks — terminal missions never archived (now auto-archive
+  quiet completions/cancels at 30d, failed never), resolved approvals
+  accumulated forever (now 7d/newest-200 prune on append), notifications
+  uncapped (now 500 rows), desktop `backend-host.log`/`crash_history.
+  jsonl` append-forever (now rotate at 8MB/4MB and 1MB/512KB). Task
+  ledger, worker queue/history, image history, conversations, activity
+  JSONL, and audit log were already bounded.
+- **`scripts/mission_soak.py`** — new real mission-loop soak: submit →
+  execute → auto-approve gates → terminal, hard-kill every Nth cycle,
+  JSONL event log + JSON summary. Running against the real install.
+- **Demand-driven eviction** (`21b7120d`) — VERIFIED LIVE: mission
+  nodes gated `waiting_for_vram` fired `admission_eviction` audit
+  events (`qwen3-8b`, `qwen3-14b` released LRU-first) instead of
+  waiting for the 900s idle timer. Same managed-only contract as the
+  image path. Also fixed: SSE stream sinks now detach in a finally
+  (orphaned streams leaked before, `c26d673b`).
+
+- **Soak round 1 finished** — 10 cycles: **0 crashes, 3 hard-kills, 4
+  clean recoveries**, all VRAM waits honest. All 10 missions `blocked`:
+  the 4B asserted file writes with zero tool calls — `unverified action
+  claims` fired, `artifact_exists` caught the missing files, missions
+  blocked instead of passing. Honest blocking, but exposed two gaps:
+  fabricated node output recorded `ok=True` (the artifact check was the
+  only line of defense), and retries reran the identical instruction so
+  the model could only repeat the lie.
+- **Fabrication fail-fast** (`6a20f24b`) — agent nodes carrying the
+  `Unverified action claims` marker now report `ok=False`; the marker is
+  a shared constant (orchestrator emits, server matches — can't drift).
+- **Retry feedback** (`25ec078e`) — a retried node gets the recorded
+  failure appended to its instruction ("previous attempt failed:
+  unverified action claims — actually invoke the required tools");
+  `_finish_node` persists `result.error`. Regression tests added
+  (fake-server prose mode + instruction assertion).
+- **Retry-cooldown liveness** (`331c1fb4`) — VERIFIED LIVE: two bugs
+  made the bounded retry dead on arrival. (a) A node parked in
+  `waiting_dependency` on retry cooldown was neither runnable nor
+  "stuck", so the next tick blocked the whole mission before the retry
+  fired — cooldown parks now keep the mission `executing`. (b) `blocked`
+  dependents latched permanently even when the recovery playbook reset
+  the dep and it later completed — `blocked` is now re-derived every
+  refresh. Verified live: dep failed → parked → dependent un-blocked →
+  retried.
+- **Budget-pause auto-resume** (`e2571e22`) — live evidence: a
+  llama-server load spike dropped available RAM to 1.4 GB (< 2 GB floor)
+  and the budget gate paused the mission *permanently* — one transient
+  dip would have ended an unattended run. Budget pauses now carry a
+  marker, re-check every ~15s, and auto-resume to the pre-pause status;
+  explicit user pauses never auto-resume. Verified live: `paused ->
+  executing · budget clear — auto-resumed`. Follow-up (`61803479`):
+  only *transient* violations (RAM/disk) get the marker — a runtime
+  deadline or exhausted repair cap can never self-clear and would flap.
+- **Unbounded playbook loop** (`ac6f0c1d`) — live evidence: three failure
+  records all stuck at `playbook_step=1` — every retry minted a fresh
+  record, the cursor reset to step 0 (retry) forever, and varied
+  fabrication text defeated the signature-based same-failure bound.
+  `record_failure` now continues the previous record for same
+  task+class (cursor advances retry→inspect→escalate) and a per-record
+  `count` feeds `budgets_exceeded`. Verified live: one record,
+  count=2, step=2 → replan dispatched.
+- **Episodic memory retention** (`f8a9d8c1`) — hippocampus `episodes`
+  was append-only sqlite (≤8KB/node write, forever). Hourly-throttled
+  prune: >30d gone, newest 5000 kept. Procedures/project_facts already
+  upsert-keyed; all autonomy JsonStores have row limits; JsonlLog
+  caps at 4MB→2MB.
+
+### Remaining milestone work
+
+Soak round 2 is running (6 cycles) on the fabrication fail-fast + retry
+feedback code — watching whether feedback breaks the fabrication loop.
+The multi-hour *overnight* soak remains the honest completion of the
+hardware tier that CI's hosted runners cannot do — the harness is
+proven (kill→restart→resume verified live, demand eviction verified
+live), it just needs wall-clock hours. Release packaging gate still
+applies (unsigned unless code-signing secrets are set).
+
+
+
+New on top of the InvokeAI backend work:
+
+- **`localcodeagent/image/fleet.py`** — declarative photoreal fleet:
+  Juggernaut XL v9 (`general_photoreal`), CyberRealistic XL
+  (`portrait_photoreal`), RealVisXL V5.0 (`glamour_photoreal`,
+  `adult_capable`). Verified HF `repo::file` sources, real byte sizes and
+  SHA-256s, per-model licenses, trait weights, per-model sampling
+  defaults. `fleet_for_model_name` matches installed backend rows;
+  `classify_request_traits` + `score_fleet_model` route prompts.
+- **Router**: `_fleet_pick` scores fleet-tagged InvokeAI profiles before
+  the generic priority sort (fleet ops only: text_to_image/edit/inpaint/
+  variation). Winner unfit → next scored model. `model_override` accepts
+  fleet ids (`juggernaut-xl-v9`) as well as `invokeai:<key>`; wrong-backend
+  pins error honestly.
+- **Manager**: `_refresh_invokeai_models` attaches `fleet_id`/`fleet_role`/
+  license/sampling-defaults metadata; `_invokeai_model_row` exposes them
+  to the UI (role chip + license in model cards, fleet ids in the Model
+  dropdown).
+- **SamplingAdvisor**: `_family_defaults` reads `metadata.sampling` model
+  defaults (fleet steps/guidance/sampler/scheduler) below learned params
+  and explicit request values; `_key` gains `model_scope` so outcomes
+  learn per fleet model per backend.
+- **InvokeAI adapter**: `install_model(source)` /
+  `model_install_jobs()` / `model_install_job(id)` /
+  `cancel_model_install(id)` over `/api/v2/models/install` (v1 fallback).
+- **`localcodeagent/provisioning.py`** — `ProvisioningManager`: versioned
+  declared stack (voice assets → InvokeAI → Juggernaut → Whisper →
+  CyberRealistic → RealVis → ComfyUI), persisted plan at
+  `data/provisioning/plan.json`, mid-flight requeue on restart, disk
+  reserve gating with `blocked_reason`, classified errors
+  (`network_failure`/`disk_full`/`checksum_failed`/`unsupported_python`/
+  `backend_health_failed`/…), bounded exponential retry (3×, 30s×4ⁿ cap
+  10min), one spoken line per incident via `_speak_notice`, capability
+  `provides` → registry invalidation + `wait_for_capability`,
+  `on_capability_ready` drains deferred image requests
+  (`waiting_for_capability` in `/api/image/generate`).
+- **Server/API**: `_start_provisioning` wires manager + notification/
+  voice/SSE hooks; `GET /api/provisioning`, POST `pause|resume|cancel|
+  retry|config`; shutdown stops the scheduler.
+- **UI**: Command Center "Background setup" panel (per-item badges,
+  bytes/speed/ETA, bars, retry/cancel, pause/resume); Settings → Setup
+  section (three toggles persisted via `provisioning/config`).
+- Config: `provisioning_enabled`, `provisioning_parallel`,
+  `provisioning_auto_retry`, `provisioning_voice_notifications`,
+  `provisioning_disk_reserve_bytes` (all default-on sane values).
+- Tests: `tests/test_fleet.py` + `tests/test_provisioning.py`
+  (35 tests — classification, scoring order, fleet pick/fallback/
+  override, per-model learning keys, plan shape, resume, retry, disk
+  gate, capability wake) + 3 adapter install tests.
+- Docs: `docs/BACKGROUND_PROVISIONING.md` (new), `docs/IMAGE_SYSTEM.md`
+  fleet section, `MODEL_ROUTING.md` fleet routing, `docs/INVOKEAI.md`
+  managed-install API.
+
+Dogfood COMPLETE on live InvokeAI 6.14.2 (RTX 3080 Ti):
+all three fleet checkpoints verified SHA-256, registered as
+`main`/`sdxl`, matched by `fleet_for_model_name`, and routing verified
+— Times-Square scene → `juggernaut-xl-v9`, beauty portrait →
+`cyberrealistic-xl-v9`, glamour/boudoir → `realvisxl-v5`. Real
+generation through `InvokeAIBackend.submit` completed for **all
+three**: Juggernaut (1024², ~32 s), CyberRealistic (832×1216, ~60 s),
+RealVisXL (832×1216, ~270 s — fp16 reload under VRAM pressure). Real
+PNGs verified in `data/invokeai/outputs/images/`. Earlier attempts
+died at `Executing queue item … on cuda:0` when a second app held
+~10.8 GB VRAM — once freed (~4.7 GB used by desktop), both models
+generated cleanly. One earlier run surfaced a clean `CUDA out of
+memory` job failure — the honest error path works.
+`98ec4e05` switched `invokeai_source` to direct
+HF `resolve/main` URLs — `repo::file` downloads into a folder the
+model identifier can't classify (registers `unknown`/`tmpinstall_*`).
+
+**Upstream bug found + local workaround**: InvokeAI's model probe runs
+every config class including `Spandrel_Checkpoint_Config`, which
+*fully loads the state dict*; `safetensors.torch.load_file` segfaults
+(access violation → silent `invokeai-web` exit, no traceback) on the
+7 GB fleet files on this box. Patched the venv
+(`tools/InvokeAI/Lib/site-packages/invokeai/backend/model_manager/
+configs/spandrel.py`) — `_validate_spandrel_loads_model` raises
+NotAMatch for files >2 GiB (marked "NEXUS PATCH"). **Caveat**: the
+patch lives in the installed venv — but `InvokeAIRuntime._command`
+re-applies it idempotently via `_apply_spandrel_guard(root)` on every
+managed start (`4f476f1b`), so reinstalls/upgrades self-heal.
+Candidate classes run even after a match, so the size guard matters
+for every large checkpoint install.
+
+**Provisioning hardening (`ac5bea18`)**: `invokeai_model` items now
+enumerate the backend before submitting — a fleet checkpoint already
+registered (upgrade, manual/pre-seeded install) verifies and skips the
+7 GB download. And a vanished install job (invokeai-web restart wipes
+in-memory rows) now raises a retryable failure instead of the poll
+loop waiting on `status=""` forever.
+
+**Deploy build reburned**: `backend-new/` in the live install now
+contains the fleet + provisioning + voice-data + `shutil` fix build
+(`5af83f39` source), staged via `update.flag` — next app launch swaps
+it in. Frozen-build smoke test found and fixed a real NameError:
+`_pick_python` used bare `shutil` while the enclosing scope aliases it
+(`_shutil`) — the venv-install path the provisioner uses for
+`python_candidates` manifests would have crashed.
+
+### Prior milestone — InvokeAI as a first-class image backend
+
+Commit `c15afaf4` (pushed, CI pending): **InvokeAI is a real
+Nexus-managed image backend** alongside ComfyUI. Auto routing prefers
+InvokeAI for standard generation/editing; ComfyUI stays the advanced
+custom-workflow engine and fallback.
+
+- `localcodeagent/image/invokeai.py` — dependency-free REST adapter:
+  health probe (3s cached, single-flight — a dropping endpoint must not
+  stall `/api/status`), `/api/v2/models` listing, `enqueue_batch` queue
+  lifecycle (multi-item status/cancel/fetch), multipart image upload,
+  Nexus-spec → InvokeAI graph builder (sd-1/sd-2/sdxl bases; flux etc.
+  honestly unsupported → ComfyUI routes).
+- `localcodeagent/image/invokeai_runtime.py` — managed runtime mirroring
+  ComfyUIRuntime: venv/script/PATH discovery, `invokeai.yaml` host/port
+  generation (v6 `invokeai-web` takes only `--root`), managed-PID orphan
+  reclaim, idle eviction, external-vs-managed distinction.
+- `manager.py` — `backends`/`backend_runtimes` dynamic dicts,
+  `_select_backend` (override → configured `image_backend` → auto),
+  `_invokeai_ready`, synthesized `invokeai:<key>` model profiles,
+  `_run_invokeai_job` dispatch, cancel/status/feedback per backend.
+- `ImageRequest.backend_override` (`auto|invokeai|comfyui`),
+  `ImageJob.backend`, `ImageModelProfile.metadata`,
+  `capability_class`/`restriction_status` classification
+  (`adult_capable`, `restricted_by_model`, `restricted_by_provider`,
+  `local_unfiltered_model`, `unknown_capability`).
+- SamplingAdvisor learning keyed per backend (`invokeai|…` keys);
+  ComfyUI recipes never bleed into InvokeAI selection.
+- Config: `image_backend`, `invokeai_endpoint`, `invokeai_auto_start`,
+  `invokeai_start_on_image_request`, `invokeai_dir`,
+  `invokeai_python`, `invokeai_extra_args`, `invokeai_logs_dir`,
+  `invokeai_startup_timeout`, `invokeai_idle_unload_seconds`.
+- Server: `invokeai` managed-process registration (capability
+  `image_generation`), idle evictor, `/api/image/backend/{start,stop,
+  inspect}` accept `backend`, `POST /api/image/preference` persists the
+  choice, `/api/image` summary now returns `backends.{invokeai,comfyui}`.
+- Install: `tools/manifests/invokeai.json` + `venv` install method in
+  `install_tool` (per-tool venv under `tools/InvokeAI`).
+- UI: backend selector (Auto/InvokeAI/ComfyUI) + per-backend status
+  cards + model filter in `web/image.*`; image tools take a `backend`
+  argument.
+- Health probe aggregates both engines; mission image artifacts record
+  the real backend name (`tool=invokeai|comfyui`), not hardcoded.
+- Tests: `tests/test_invokeai.py` (30 tests — adapter, routing,
+  runtime discovery, error normalization, per-backend learning);
+  test configs pin dead endpoints so a live local backend can never
+  contaminate hermetic tests.
+
+### Dogfood status (real, in this environment)
+
+- InvokeAI **6.14.2** pip-installed into `tools/InvokeAI` (venv,
+  Python 3.12 — InvokeAI rejects ≥3.13; also rejects the repo's 3.14
+  launcher default).
+- torch upgraded to `2.14.1+cu126` — pip's default wheel is CPU-only on
+  Windows; InvokeAI otherwise silently runs CPU mode.
+- Dreamshaper 8 (sd-1, 5.5GB) installed via `/api/v2/models/install`.
+- **Verified against the live server**: version probe, model list,
+  text-to-image (real PNG), img2img edit, inpaint (masked region),
+  3-way variation (distinct seeds — `runs` reuse produces identical
+  images, so submit fans out one batch per image), cancel mid-flight,
+  Nexus `create_job` auto-routing to InvokeAI with output persistence,
+  and honest errors for pinned-but-dead backends.
+- API fixes found by dogfooding: v6 mounts the model manager at
+  `/api/v2/models` (not v1), enqueue is `enqueue_batch` with a nested
+  `{"batch": ...}` body, upload params are query-string not form fields,
+  `create_denoise_mask` needs both `image` and `mask` inputs.
+- Not dogfooded: LLM-resident VRAM contention and live ComfyUI fallback
+  (ComfyUI not installed on this box; fallback is unit-tested).
+  — **since closed**: see "Integrated reliability closeout" entry below.
+
+### Deployment to live install (D:/Nexus_Core)
+
+- `Source/` synced to `de5064ea`; web assets copied into
+  `backend/_internal/web` (old backend filters unknown request fields,
+  so the new UI is safe against the pre-swap binary).
+- `tools/manifests/*.json` copied to `D:/Nexus_Core/tools/manifests/` —
+  neither the runtime-root dir nor `_internal/tools/manifests` existed,
+  so no manifests (InvokeAI or otherwise) were visible to the install.
+- `config.json` on the install now sets `image_backend=auto`,
+  `invokeai_endpoint`, `invokeai_dir` (points at the dev venv
+  `D:\Devin\chat-nexus\tools\InvokeAI`), `invokeai_auto_start`,
+  `invokeai_start_on_image_request`.
+- `D:/Nexus_Core/data/invokeai` is a junction → the repo's
+  `data/invokeai` (shares the Dreamshaper model store + invokeai.yaml).
+- PyInstaller rebuild staged via the app's own LKG update path:
+  snapshot `snap-1791164241262`, `backend-new/` = fresh 0.21.0 build
+  (verified: `localcodeagent.image.invokeai{,_runtime}` in PYZ,
+  `tools/manifests/invokeai.json` bundled, VERSION 0.21.0), and
+  `update.flag` written — the desktop host swaps on next launch.
+- Build fix: `--add-data tools` → `tools\manifests` in both
+  `packaging/build_windows.ps1` and `selfupdate._build_cmd`; otherwise
+  the next release/self-update build would try to bundle the multi-GB
+  `tools/` install payloads (InvokeAI venv, ComfyUI portable).
+- **Voice regression found in staged build**: the stale
+  `build/ChatNexus.Backend.spec` predated the `--collect-all
+  kokoro_onnx/phonemizer/espeakng_loader` args, so `_internal/kokoro_onnx`
+  shipped only a dist-info — `Kokoro()` failed on
+  `_internal/kokoro_onnx/config.json` → `/api/voice/speak` 500 → no
+  greeting, replies cut out. backend-old (0.20.0) had the same defect.
+  Rebuilt with the full `build_windows.ps1` arg set (fresh spec);
+  verified `config.json` + phonemizer + espeakng_loader + voice presets
+  bundled and `/api/voice/speak` returns a real 3.11s WAV. Re-staged to
+  `backend-new/` (snapshot `snap-1791165159653`, flag rewritten).
+  `piper_onnx`/`llama_cpp` collect lines in the old spec were no-ops —
+  neither package is installed; llama runs as an external binary.
+
+## Earlier milestone — v0.20.0 workstation P1 + P2 (self-update, ops UI, search)
 
 (Previous: v0.18.x honesty hardening · v0.16.0 persona depth · v0.15.0
 autonomous workstation layers)
@@ -96,15 +453,57 @@ Commits `0356e54` (LKG + self-update) and `4a67a14` (Command Center):
   left it returning early (no `agent`/`autonomy`); the full e2e suite
   caught it, method moved to class level, 34/34 green.
 
+### P2 progress — search, quality tools, ops UI depth
+
+- **Global search** — `localcodeagent/search.py` + `GET /api/search`;
+  `web/palette.js` Ctrl+K palette on every page (7 tests).
+- **Dependency audit** — `tools/audit.py`: `dep_list` (offline manifest
+  parse) + `project_audit` (real pip-audit/npm audit/cargo audit,
+  honest `auditor_unavailable`) (5 tests).
+- **Coverage** — `coverage_report` runs the real coverage step per
+  build system; errors honestly when none exists.
+- **Release packaging** — `tools/release.py`: `package_release` zips a
+  workspace dir to `.agent/releases/` with sha256 + artifact registry;
+  `release_verify` re-hashes (4 tests).
+- **Command Center depth** — Recent activity feed via
+  `ActivityStore.recent()` + `/api/activity?recent=N`; mission detail
+  renders a Pipeline stage strip for coding-pipeline missions.
+- **Palette deep-links** — file hits navigate to
+  `/workspace.html?file=<path>` which opens the file in a tab.
+- **Static deployment** — `tools/deploy.py` `deploy_static`: detached
+  worktree → build/copy output → deploy branch → push. Real remote
+  results only; base worktree untouched (4 tests).
+- **Headless debugger** — `tools/debugger.py` `debug_run`: bdb-driver
+  subprocess, breakpoint-local capture + post-mortem frame walk with
+  locals; driver source embedded for frozen builds (5 tests).
+- **Knowledge browser** — `/knowledge.html`: entity search, attrs,
+  relations, neighbor traversal; `/api/knowledge?id=&depth=` returns
+  entity + neighborhood; bare call lists recent entities.
+- **Dependency/security UI** — `/api/audit/deps` (GET) and
+  `/api/audit/run` (POST) + Command Center panel rendering manifests,
+  dep entries, and per-ecosystem audit summaries.
+- **Source-sync safety** — `_start_source_sync` skips when
+  `workspace == code root` (dev/CI/selftest): a smoke instance
+  previously ff-merged the CI checkout mid-suite and flipped VERSION
+  under the test process (`f7130b5`). Smoke config also sets
+  `sync_source_on_start: false`.
+- **Live-install verified** — backend rebuilt and deployed to
+  `D:\Nexus_Core`; `/api/lkg`, `/api/update/status` (source head
+  `b905d8d`, clean), `/api/search` all answer; `Source` synced.
+  The smoke caught a real bug (`self.state.search` never initialized →
+  lazy `_global_search` fix, `276917d`).
+
 ### Workstation program — what remains
 
-- **P1** — dev-server, pipeline, chat priority, LKG, self-update, and
-  Command Center are all landed. Remaining loose ends: preview/runtime
-  polish on the coding-pipeline stage view, then P2.
-- **P2** — canonical identity manager (expression sets/gesture mapping),
-  global search/command (Ctrl+K), richer project/knowledge/activity UI,
-  remaining workstation capabilities (deploy adapters, coverage,
-  debugger, E2E/browser tests, dependency/security scan, etc.).
+- **P2** — search, audit, coverage, release packaging, activity feed,
+  stage strip, static + release deploy adapters, debugger, knowledge
+  browser, per-project knowledge views, and dep/security UI landed.
+  Remaining: browser E2E (needs Playwright bundled into the exe — a
+  packaging decision) and anything newly specified.
+- Identity manager is already richer than listed —
+  `nexus_avatar.py` has expression states, gestures, activity.
+- `version()`/`server.VERSION` are `lru_cached` — any in-process file
+  mutation (self-update swap) requires a restart to observe.
 - Honesty rules that must never regress: no action claims without
   execution; pushes only count when the remote confirms; tests only
   "pass" when they ran; workspace writes stay inside registered roots;
@@ -1700,3 +2099,146 @@ Checkpoint: **346 tests**, head `7acfc8e`.
   `5af1346`, `fdf0c08`. Latest fixed installer artifact verified at
   `dist/installer/NexusCore-Setup-0.12.1-Windows-x64.exe` (sha256
   `65bf088aff885a21b711232bfd8a9f435b458fea139563f0dd17b3f5ac0c0626`).
+
+## Post-milestone ops notes (858e51a9)
+
+- **C: drive hit 100% (119 MB free)** during this session — supervisor's
+  disk guard correctly paused autonomy test missions ("disk nearly full").
+  Purged `pip cache` (~5.1 GB). If missions mysteriously pause on this box,
+  check `C:` free space first — the guard reads the tempdir drive.
+- **CI flake fixed**: `test_mission_approval_timeouts_are_bounded` /
+  `test_mission_approval_timeout_replans` raced on slow runners (0.2 s
+  wall-clock timeout could fire inside `drive()`'s settle loop). Now
+  deterministic: callable timeout held at 0 during drive, pending row's
+  `created_at` backdated to expire on the next tick. `858e51a9`.
+- **Still pending**: one Nexus Core restart to swap in `backend-new`
+  (voice fix + provisioning hardening + shutil fix, `update.flag` set).
+
+## Frozen-build first-boot dogfood (9a76557c, ae63f461, 84191c3c)
+
+Booted `dist-fresh2/ChatNexus.Backend.exe` on a scratch workspace with
+provisioning enabled — the real first-run path — and caught two live bugs
+the mocked tests missed:
+
+- **voice-assets crash**: `_run_voice_assets` callback expected
+  `(name, done, total)` but `ensure_assets` calls `progress(name, done)` —
+  the first plan item died with TypeError on every fresh install. Fixed;
+  regression test stubs the real call signature. Verified live: after the
+  fix, voice-assets (353 MB) + whisper-stt downloaded and SHA-verified
+  `completed` in the frozen bundle.
+- **permission_denied was terminal**: InvokeAI venv install hit Errno 13
+  on `Scripts\python.exe` — Defender on-access scan holding a fresh exe.
+  Added to TRANSIENT_ERRORS (bounded to MAX_ATTEMPTS; real ACL problems
+  still report permanently).
+- **Fleet honesty verified**: with the invokeai item failed, all three
+  fleet models went `skipped — dependency did not install` rather than
+  downloading 21 GB to nowhere.
+- **Staged-dir pollution cleaned**: earlier smoke runs of the frozen exe
+  with a relative `--config` wrote runtime state (models/, data/, tools/,
+  .agent/) into `backend-new/` — removed; dir now holds only exe +
+  `_internal`, matching `backend/`. Never run the frozen exe without an
+  absolute `--config`/`--workspace`.
+- `backend-new` rebuilt from `ae63f461` and restaged (full PyInstaller
+  args; `dist-fresh2` removed after staging).
+
+## Tool-install verification + manifest detection fix (7153c5c3)
+
+- `_verify_tool` was a stub that always passed — now wired through
+  `tool_installed_hook` → `ToolRegistry.refresh_install_status()` so a
+  "successful" job that left nothing on disk fails the item honestly.
+- **Pre-existing manifest bug found**: `detect.files` required ALL listed
+  paths, but `invokeai.json` listed Windows + POSIX alternates — InvokeAI
+  always reported `missing` even when installed. New `detect.files_any`
+  is any-of for platform alternates; `comfyui` keeps all-required
+  (main.py + embedded python.exe both must exist).
+- Verified against real trees: invokeai@dev=True, comfyui@deployed=True,
+  whisper@deployed=False (honest — not installed there).
+- `backend-new` restaged from `7153c5c3` — ships voice-assets fix,
+  permission retry, real verify, and manifest detection.
+
+## Runtime orphan adoption (5e68048d)
+
+Backend restart previously killed healthy llama-server orphans and
+reloaded the same multi-GB checkpoint. `_start_llama_cpp` now probes the
+port listener first: healthy + serving the same model file (`/v1/models`)
++ sufficient context (`/props` n_ctx) → adopted into `_managed` through
+`_OrphanProcess` (pid-backed duck type — poll/terminate/kill/wait all
+act on the real process, so stop/watchdog/eviction work unchanged).
+Wrong model, unhealthy, or too-small ctx falls back to reclaim+spawn.
+Note: the two live orphans run n_ctx=8192 while profiles default 32k —
+they'll correctly be replaced on restart, not adopted.
+
+Amendment (43de6137): the original edit stranded `_listening_pids`'s body
+as dead code — every llama launch on the 5e68048d build would have hit
+AttributeError. Fixed + hardened: managed_pids uses getattr(pid), the
+adoption call site is try/except so a probe bug can never block a
+launch, and tests mocking `_reclaim_orphaned_port` now also mock
+`_adopt_healthy_orphan` (they were reaching real netstat + the live
+:8080 server). `backend-new` restaged from 43de6137 — the prior staged
+build contained the break and has been replaced.
+
+## InvokeAI ephemeral-state sweep + self-heal (d22b8419, ddeb50ee)
+
+- `python -m invokeai.app.run_app` exits code 0 silently (no __main__
+  entry) — the discovery fallback when invokeai-web.exe isn't visible.
+  Fixed: call the console-script entry via -c (run_app / invoke_ai_api).
+- InvokeAI's ephemeral ObjectSerializerDisk uses ONE TemporaryDirectory
+  under outputs/tensors for the process lifetime; ANY second InvokeAI
+  on the same root deletes all tmp* dirs at startup and bricks it
+  ("Parent directory ... does not exist" on every generation). A test
+  spawn sharing the junctioned root (D:\Nexus_Core\data\invokeai →
+  D:\Devin\chat-nexus\data\invokeai) did exactly this live.
+- Manager now detects the signature → restarts backend → resubmits
+  once; repeat failures report honestly (ddeb50ee).
+- Deployed backend updated to 6b8b4f69 at 03:02 restart; backend-new
+  restaged from ddeb50ee + update.flag rewritten for next launch.
+- 05 Oct follow-up: backend-new rebuilt from a789403e (adds InvokeAI
+  installable-flag fix, provisioning reconcile self-heal, comfy
+  imagemodel-* auto-download items, round/face-centered Isabella chat
+  avatar) + update.flag rewritten. NOTE: data/lkg/rollback.flag is also
+  pending ("5 consecutive unclean boots" → snap-1791165159653) — it
+  applies first at next launch, then update.flag swaps in backend-new.
+
+## 2026-10-05 — GitHub account API + voice-drain close + windowing (LIVE dogfooded)
+
+### GitHub account management (commits c3290805, a9ae38d8, 052ad13a)
+- New `localcodeagent/github_account.py` — single account-state surface:
+  env→vault credential resolution, /user validation + scope capture,
+  differentiated states (not_configured/connected/invalid_token/
+  permission_blocked/network_error/vault_error).
+- `/api/github/{status,connect,disconnect,repos,test}` on the frozen backend.
+- Settings → Connections panel (`web/settings.js`).
+- connect/disconnect moved github.write → credentials.use; connector +
+  shared client refresh live without restart.
+- git_push + github_clone: basic base64(x-access-token:token) header auth
+  — 'bearer' is REJECTED by git smart-HTTP for OAuth (gho_) tokens.
+- LIVE EVIDENCE (port 58698/49952 backends):
+  - status→not_configured; connect→`connected as afterburn25`, scopes
+    [repo, workflow, ...]; repos→real repo list; test→ /user + repos +
+    workspace perms (push/admin) + 3 Actions runs — all ok.
+  - Connector status: authed=true credential_source=vault, no restart.
+  - RESTART persistence verified: status still connected after relaunch.
+  - Push: header-auth push of test/nexus-github-dogfood-1791226213 to
+    afterburn25/Coding_Agent succeeded; token count in .git/config = 0;
+    remote branch deleted (204).
+  - disconnect→removed_vault_token=true; status immediately not_configured.
+  - Token never in logs/config/activity (grep-verified).
+- KNOWN DEBT: D:\Nexus_Core\Source checkout is corrupt ('bad tree object
+  HEAD', missing objects) — predates this work; needs a fresh clone.
+- 23 regression tests in tests/test_github_account.py.
+
+### Voice overlap on shutdown + interface handshake (commit 2e91d461)
+- web/voice_global.js reports busy/idle via voice-state webview messages;
+  _draining latch stops new clips on shutdown, in-flight ones finish.
+- Host waits for queue idle before farewell (75s bound). LIVE TRACE:
+  close mid-clip → drain waited 3626ms → busy=False → THEN
+  'shutdown' + 'goodbye' — zero overlap.
+- WebMessageAsJson fix: object posts never matched the old string API —
+  voice-state would've been silent AND nexus-core-ready was falling
+  through to the 15s fallback EVERY boot. interface_ready: 15.2s → 5.4s.
+- Splash: 500ms HWND_TOPMOST re-assert watchdog (Windows can demote
+  borderless windows shown without foreground rights); main-window
+  handoff uses attach-thread-input + SetForegroundWindow.
+- BUILD GOTCHA: PyInstaller must run with repo root as cwd —
+  pathex=[] in the spec relies on it; building from build/ produced an
+  exe missing localcodeagent entirely (ModuleNotFoundError on boot).

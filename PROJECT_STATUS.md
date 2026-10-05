@@ -1,8 +1,47 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1705 tests** (2 environment skips); see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.19.0 lands the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **1963 tests**; see SESSION_HANDOFF.md for the autonomy and local voice checkpoints. v0.21.0 adds **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
 
-## Active version: 0.19.0 — Autonomous development workstation (P0)
+## Active version: 0.21.0 — InvokeAI first-class image backend
+
+v0.21.0 makes InvokeAI a Nexus-managed image backend alongside ComfyUI —
+dual-backend routing under one `ImageManager`, per-request override,
+capability-aware model registry, managed `tools/InvokeAI` venv install,
+and live-verified dogfooding on InvokeAI 6.14.2 (text-to-image, img2img,
+inpaint, per-seed variations, cancel). See `docs/INVOKEAI.md` and
+`docs/IMAGE_SYSTEM.md`.
+
+## Previous: 0.20.0 — Workstation P1 + P2 (self-update, Command Center, search)
+
+v0.20.0 completes the P1 layer and lands the first P2 capabilities:
+
+- **LKG + self-update** — hashed app snapshots, single-consumption
+  rollback/update flags the desktop host executes before backend
+  launch, and a staged apply pipeline (pull → tests → build → LKG →
+  stage → flag) that refuses dirty checkouts.
+- **Command Center** (`/command.html`) — one operational surface for
+  status, named workers, missions, queues, dev servers, capability
+  states, safe mode, LKG, self-update, and a global activity feed.
+- **Ctrl+K palette** — `GET /api/search` aggregates tasks, missions,
+  projects, skills, answers, knowledge, queue, dev servers, and files;
+  results deep-link into their owning pages.
+- **Tooling** — `dep_list`, `project_audit` (real auditors, honest
+  unavailable), `coverage_report`, `package_release`/`release_verify`
+  (sha256-registered archives), `debug_run` (headless bdb breakpoints +
+  post-mortem locals), `deploy_static` (detached-worktree branch
+  deploy) and `deploy_release` (GitHub Releases via `gh`).
+- **Knowledge browser** (`/knowledge.html`) — searchable entities,
+  attrs, relations, neighbor traversal; project detail panels show
+  linked knowledge-graph entities; Command Center gained a
+  Dependencies & security panel over `/api/audit`.
+- **Mission UI** — pipeline stage strip; chat priority, queued-response
+  replacement, voice-lane isolation, and the named worker pool
+  (Molly, Nikki, Kate, …) were verified live in the installed app.
+- **Source-sync safety** — startup fast-forward skips workspaces that
+  are the running source tree; the selftest smoke config disables it
+  (a mid-run CI push once let a smoke instance rewrite the checkout).
+
+## Previous: 0.19.0 — Autonomous development workstation (P0)
 
 v0.19.0 is the first station of the workstation program — the P0
 dependency layer is in place and everything it reports is probed, not
@@ -391,7 +430,27 @@ Docs: `docs/architecture/NEXUS_BRAIN.md`. Trace: `/api/brain/status`,
 
 #### Local images
 
-- Modular `ImageBackend` interface.
+- Dual image backends behind one system: **InvokeAI** (preferred primary for
+  standard generation/editing) and **ComfyUI** (advanced/custom workflows,
+  fallback) — never a duplicated pipeline.
+- Modular `ImageBackend` contract with `capabilities()` + `models()`.
+- `InvokeAIBackend` — REST adapter over `/api/v1` (health, model registry,
+  image upload, `enqueue_graph` jobs, status polling, download, cancel).
+- `InvokeAIRuntime` — managed lifecycle (discovery across configured dir /
+  `{app}/tools/InvokeAI` venv / managed-python Scripts / PATH, orphan
+  reclaim, idle eviction).
+- Backend router — Auto prefers InvokeAI for standard ops, ComfyUI for
+  custom-workflow ops, with honest recorded fallback; `backend_override`
+  pins an engine explicitly; `ImageJob.backend` persists which ran.
+- Unified model registry — InvokeAI's live models merge into the router
+  pool as `invokeai:<key>` profiles; `classify_model()` assigns
+  capability/restriction metadata (adult_capable, local_unfiltered_model,
+  …) that is descriptive only and never weakens safety gates.
+- Per-backend sampling learning (`backend|family|op` keys).
+- `venv` tool-install method for InvokeAI (isolated env, disk check,
+  permission-gated, job-tracked).
+- Image UI — backend selector (Auto/InvokeAI/ComfyUI), dual health cards,
+  per-backend install/start/stop, engine/capability/restriction model tags.
 - ComfyUI HTTP adapter.
 - Optional managed ComfyUI process runtime with health/start/stop/recovery.
 - Image model profiles and local weight discovery.
@@ -642,11 +701,12 @@ regression.
 
 
 - Model files are not bundled and large image models are not silently downloaded.
-- Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported and tested against the chosen local node implementations; the Image workspace now provides a validated Import API workflow action.
-- Image jobs require a configured/running ComfyUI backend or `comfyui_auto_start` with a valid local checkout.
+- ~~Real Qwen/FLUX ComfyUI API workflows still need to be exported/imported~~ **Done 2026-10-05**: bundled API workflows for `qwen-image-2.1` (t2i/edit/inpaint/background-removal), `flux2-klein-4b` (t2i/edit) and `juggernaut-x-v10` (t2i) are exercised end-to-end on the real install — managed boot, submit, progress, cancel, output retrieval, history.
+- ~~Image jobs require a configured/running ComfyUI backend~~ — ComfyUI is provisioned and auto-boots on image request (`comfyui_start_on_image_request`); managed lifecycle verified.
 - Image progress refines the coarse /history poll with a dependency-free ComfyUI `/ws` listener (`image/ws.py`) that reports real per-node/step progress.
+- InvokeAI↔ComfyUI dual-backend routing is live-verified (all five cases A–E in SESSION_HANDOFF) including cross-backend memory arbitration and bounded crash-resubmit (`evict_if_managed`, never touches user-owned servers).
 - LoRA file import and richer version/compatibility metadata editing plus richer comparison controls remain upcoming; dedicated Qwen background-removal and Real-ESRGAN upscaler workflows are now configured.
-- Browser automation is optional and requires Playwright + Chromium.
+- Browser automation: Playwright driver ships in the frozen build with Edge-channel fallback (no required browser download), health/provisioning status, verify path, cancellation, timeouts, and job artifacts — see `docs/BROWSER_E2E.md`.
 
 ## v0.6 UI checkpoint
 

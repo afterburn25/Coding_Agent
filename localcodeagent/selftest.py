@@ -42,6 +42,7 @@ def _smoke_config() -> dict[str, Any]:
         "image_enabled": False,
         "research_enabled": False,
         "profiles_onboarding_gate": False,
+        "sync_source_on_start": False,
         "max_agent_steps": 2,
         "models": [{
             "id": "selftest-model",
@@ -212,6 +213,7 @@ def validate_self_update(
                     ("stt_api", "/api/stt", '"available"'),
                     ("nexus_state_api", "/api/nexus/state", '"focus"'),
                     ("briefing_api", "/api/briefing", '"meaningful"'),
+                    ("browser_api", "/api/browser/status", '"playwright"'),
                 ):
                     try:
                         code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")
@@ -257,7 +259,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Validate the current Nexus Core working tree in an isolated second instance.")
     parser.add_argument("--workspace", default=".")
     parser.add_argument("--skip-tests", action="store_true", help="Skip the unit-test phase and run only the isolated server smoke test.")
-    parser.add_argument("--test-timeout", type=int, default=300)
+    parser.add_argument("--test-timeout", type=int, default=900,
+                        help="Unit-test phase budget; the full suite is ~1900 tests and exceeds the old 300s default on slower hosts.")
     parser.add_argument("--startup-timeout", type=int, default=30)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

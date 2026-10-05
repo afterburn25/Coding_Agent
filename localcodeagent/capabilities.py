@@ -227,6 +227,25 @@ def _probe_testing(env, r: CapabilityReport) -> None:
 
 
 def _probe_browser_preview(env, r: CapabilityReport) -> None:
+    # Real browser state beats manifest presence — a registered tool that
+    # cannot launch a browser is not "available".
+    state = str(_call(env, "browser_state", default="") or "")
+    if state == "ready":
+        r.state, r.detail = "verified", "browser automation ready"
+        r.requirements_met.extend(("playwright", "browser"))
+        return
+    if state == "no_browser":
+        r.state, r.detail = ("setup_required",
+                             "playwright present; browser not provisioned")
+        r.requirements_met.append("playwright")
+        r.requirements_unmet.append("browser")
+        return
+    if state == "no_playwright":
+        r.state, r.detail = ("setup_required",
+                             "browser automation package not in this build")
+        r.requirements_unmet.append("playwright")
+        r.requirements_unmet.append("browser")
+        return
     ok, name = _tool_ok(env, ("browser_run", "browser_preview",
                               "browser_navigate", "webview_open"))
     if ok:

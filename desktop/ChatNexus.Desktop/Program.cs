@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -16,6 +17,7 @@ internal static class Program
     {
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var selfTest = args.Any(a => string.Equals(a, "--self-test", StringComparison.OrdinalIgnoreCase));
+        var testFault = args.Any(a => string.Equals(a, "--test-fault", StringComparison.OrdinalIgnoreCase));
 
         // First-breath marker — if the host ever dies before the backend
         // launch path (splash/WebView2 init), this is the line that tells us
@@ -67,7 +69,7 @@ internal static class Program
             }
 
             ApplicationConfiguration.Initialize();
-            Application.Run(new NexusCoreApplicationContext(appDir));
+            Application.Run(new NexusCoreApplicationContext(appDir, testFault));
             return 0;
         }
         catch (Exception ex)
@@ -100,12 +102,43 @@ internal sealed class SplashForm : Form
 {
     private readonly StartupProgress _progress;
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
+    private readonly Panel _cover;
     private readonly string _appDir;
 
     private Panel? _failurePanel;
+    private string? _failureMessage;
     public event Action? RetryRequested;
     public event Action? ExitRequested;
+    /// <summary>Playback channel for narration bytes — web audio with ducking.</summary>
+    public Func<byte[], string, Task>? VoiceSink { get; set; }
+
+    // Cinematic layer — WebView2 hosting splash/web/index.html. Pure
+    // presentation: the static WinForms render below stays the fallback and
+    // readiness authority lives in StartupProgress/RunStartupAsync.
+    private WebView2? _web;
+    private volatile bool _webReady;
+    /// <summary>id, started, seconds — the splash's real playback-start ack.</summary>
+    public event Action<string, bool, double>? VoicePlaybackResult;
+    /// <summary>id — the splash reports audio actually finished playing.</summary>
+    public event Action<string>? VoicePlaybackEnded;
+    private volatile bool _webFailed;
+    private volatile bool _sequenceComplete;
+    private int _lastGateIdx = -1;
+
+    /// <summary>The cinematic posted its online frame — the sequence ran to completion.</summary>
+    public bool SequenceComplete => _sequenceComplete;
+    /// <summary>Cinematic is live and fault-free — its completion is worth waiting for.</summary>
+    public bool CinematicActive => _webReady && !_webFailed;
+
+    // Manifest gates released at real startup milestones (StartupProgress
+    // ladder anchors) — the timeline can never outrun reality.
+    private static readonly (string Gate, double At)[] GateMap =
+    {
+        ("services", 0.15), ("authorization", 0.30), ("unlock", 0.55),
+        ("open", 0.72), ("charge", 0.85), ("ready", 0.93),
+    };
 
     public SplashForm(string appDir, StartupProgress progress)
     {
@@ -133,19 +166,397 @@ internal sealed class SplashForm : Form
             _artwork = Image.FromFile(splashPath);
         }
 
+        // Cover panel: paints the identical static surface, shown on top of
+        // the cinematic during its first ~200ms so the WebView2's late first
+        // frames never read as a black flash over the artwork.
+        _cover = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Visible = false,
+            BackColor = Color.FromArgb(4, 9, 19),
+        };
+        _cover.Paint += (_, pe) => PaintSurface(pe.Graphics, _cover.ClientSize);
+        Controls.Add(_cover);
+
         _timer.Interval = 33;
         _timer.Tick += (_, _) =>
         {
             _progress.Tick();
-            Invalidate();
+            PumpCinematic();
+            if (!_webReady) Invalidate();
         };
         _timer.Start();
+
+        // The splash must ride the topmost band for its whole life — boot
+        // runs long enough that the user WILL click elsewhere. Windows can
+        // silently demote a window shown without foreground rights, so the
+        // property alone isn't sufficient: a slow watchdog re-asserts
+        // HWND_TOPMOST without ever stealing activation.
+        _topmostTimer.Interval = 500;
+        _topmostTimer.Tick += (_, _) =>
+        {
+            if (IsHandleCreated)
+            {
+                Win32.SetWindowPos(Handle, Win32.HwndTopmost,
+                    0, 0, 0, 0,
+                    Win32.SwpNomove | Win32.SwpNosize | Win32.SwpNoactivate);
+            }
+        };
+        _topmostTimer.Start();
+
+        _ = InitCinematicAsync();
+    }
+
+    /// <summary>
+    /// Will the backend actually build a provisioning plan this launch?
+    /// Mirrors server-side rules: packaged installs honor
+    /// provisioning_enabled (default on); source checkouts stay quiet unless
+    /// provisioning_dev_enable is explicitly set. Drives the workstation
+    /// status text — never a reason to start downloads early.
+    /// </summary>
+    internal static bool ProvisioningPlanned(string appDir)
+    {
+        var frozen = File.Exists(Path.Combine(appDir, "backend", "ChatNexus.Backend.exe"));
+        return CfgBool(appDir, frozen ? "provisioning_enabled" : "provisioning_dev_enable",
+            fallback: frozen);
+    }
+
+    private static bool CfgBool(string appDir, string key, bool fallback)
+    {
+        try
+        {
+            var p = Path.Combine(appDir, "config.json");
+            if (!File.Exists(p)) return fallback;
+            using var doc = JsonDocument.Parse(File.ReadAllText(p));
+            if (doc.RootElement.TryGetProperty(key, out var v))
+            {
+                if (v.ValueKind == JsonValueKind.True) return true;
+                if (v.ValueKind == JsonValueKind.False) return false;
+            }
+        }
+        catch { }
+        return fallback;
+    }
+
+    private async Task InitCinematicAsync()
+    {
+        try
+        {
+            var splashDir = Path.Combine(_appDir, "splash");
+            var indexFile = Path.Combine(splashDir, "web", "index.html");
+            var manifestFile = Path.Combine(splashDir, "animation_manifest.json");
+            if (!File.Exists(indexFile) || !File.Exists(manifestFile))
+            {
+                _webFailed = true;
+                return;
+            }
+
+            // Same autoplay exemption the main WebView2 gets — the
+            // cinematic is unattended, so AudioContext must not start
+            // suspended waiting for a user gesture that never comes.
+            var env = await CoreWebView2Environment.CreateAsync(
+                browserExecutableFolder: null,
+                userDataFolder: Path.Combine(_appDir, "data", "webview2-splash"),
+                options: new CoreWebView2EnvironmentOptions(
+                    additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required"));
+            if (IsDisposed) return;
+            _web = new WebView2
+            {
+                Dock = DockStyle.Fill,
+                Visible = false,
+                DefaultBackgroundColor = Color.FromArgb(4, 9, 19), // exact #stage bg
+            };
+            Controls.Add(_web);
+            _web.BringToFront();
+            await _web.EnsureCoreWebView2Async(env);
+            if (IsDisposed) return;
+            var cwv = _web.CoreWebView2!;
+            cwv.SetVirtualHostNameToFolderMapping(
+                "nexus.splash", splashDir, CoreWebView2HostResourceAccessKind.Allow);
+            cwv.WebMessageReceived += OnCinematicMessage;
+
+            var query = new List<string>();
+            if (!CfgBool(_appDir, "splash_audio_enabled", true)
+                || CfgBool(_appDir, "silent_startup", false)) query.Add("silent");
+            if (CfgBool(_appDir, "reduced_motion", false)) query.Add("reduced");
+            var url = "https://nexus.splash/web/index.html"
+                + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+            cwv.Navigate(url);
+
+            VoiceSink = async (bytes, _key) =>
+            {
+                // Throwing routes the narrator to its SoundPlayer fallback —
+                // a line that arrives as the splash tears down should still
+                // be heard rather than silently dropped.
+                if (_web?.CoreWebView2 is null || !_webReady)
+                    throw new InvalidOperationException("splash channel unavailable");
+                var b64 = Convert.ToBase64String(bytes);
+                _web.CoreWebView2.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "play-voice", id = _key, b64, duck = 0.35 }));
+                BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                    $"splash voice posted {_key} ({bytes.Length}B)");
+                await Task.CompletedTask;
+            };
+        }
+        catch
+        {
+            _webFailed = true;
+            try { _web?.Dispose(); } catch { }
+            _web = null;
+        }
+    }
+
+    private void PostToWeb(object message)
+    {
+        try
+        {
+            if (_webReady && _web?.CoreWebView2 is { } cwv)
+                cwv.PostWebMessageAsJson(JsonSerializer.Serialize(message));
+        }
+        catch { }
+    }
+
+    private void PumpCinematic()
+    {
+        if (!_webReady || _webFailed) return;
+        var milestone = _progress.RealProgress;
+        for (var i = _lastGateIdx + 1; i < GateMap.Length; i++)
+        {
+            if (milestone >= GateMap[i].At)
+            {
+                _lastGateIdx = i;
+                PostToWeb(new { type = "set-gate", id = GateMap[i].Gate, released = true });
+            }
+            else break;
+        }
+        PostToWeb(new
+        {
+            type = "set-progress",
+            value = _progress.DisplayedProgress,
+            primary = _progress.Primary,
+            secondary = _progress.Secondary,
+        });
+    }
+
+    private void OnCinematicMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+            var type = doc.RootElement.GetProperty("type").GetString();
+            switch (type)
+            {
+                case "splash-ready":
+                    _webReady = true;
+                    BeginInvoke(() =>
+                    {
+                        if (_web is not null)
+                        {
+                            _web.Visible = true;
+                            // Hide the placeholder's first frames behind an
+                            // identical static frame, then reveal the live
+                            // cinematic once the compositor is painting.
+                            _cover.Visible = true;
+                            _cover.BringToFront();
+                            _cover.Invalidate();
+                            var cover = _cover;
+                            _ = Task.Delay(200).ContinueWith(_ =>
+                            {
+                                try { BeginInvoke(() => cover.Visible = false); }
+                                catch { }
+                            });
+                        }
+                        // A fault that fired before the cinematic booted
+                        // locked in the static fallback — hand the same
+                        // failure to the real containment animation +
+                        // recovery UI now that the surface exists.
+                        if (_failureMessage is not null && _failurePanel is not null)
+                        {
+                            _failurePanel.Dispose();
+                            _failurePanel = null;
+                            PostToWeb(new { type = "trigger-fault", message = _failureMessage });
+                            PostToWeb(new { type = "show-recovery" });
+                        }
+                    });
+                    break;
+                case "voice-result":
+                    // Narration delivery was previously invisible — a
+                    // dropped play-voice looked identical to a played one.
+                    {
+                        var vid = doc.RootElement.GetProperty("id").GetString() ?? "";
+                        var started = doc.RootElement.TryGetProperty("started", out var s)
+                                      && s.ValueKind == JsonValueKind.True;
+                        var secs = doc.RootElement.TryGetProperty("seconds", out var sec)
+                                   ? sec.GetDouble() : 0.0;
+                        VoicePlaybackResult?.Invoke(vid, started, secs);
+                    }
+                    break;
+                case "voice-ended":
+                    VoicePlaybackEnded?.Invoke(
+                        doc.RootElement.GetProperty("id").GetString() ?? "");
+                    break;
+                case "sequence-complete":
+                    _sequenceComplete = true;
+                    break;
+                case "splash-error":
+                    _webFailed = true;
+                    BeginInvoke(() =>
+                    {
+                        if (_web is not null) { _web.Visible = false; }
+                        _cover.Visible = false;
+                        Invalidate();
+                    });
+                    break;
+                case "recovery-action":
+                    var action = doc.RootElement.TryGetProperty("action", out var a)
+                        ? a.GetString() : null;
+                    BeginInvoke(() =>
+                    {
+                        if (action == "retry") RetryRequested?.Invoke();
+                        else if (action == "exit") ExitRequested?.Invoke();
+                        else if (action == "rollback") ScheduleRecoveryRollback();
+                        else if (action == "safe-mode") EnterSafeModeAndRestart();
+                        else if (action == "open-log")
+                        {
+                            var log = Path.Combine(_appDir, "data", "logs", "backend-host.log");
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo(
+                                    File.Exists(log) ? log : "notepad.exe",
+                                    File.Exists(log) ? "" : Path.Combine(_appDir, "data", "logs"))
+                                { UseShellExecute = true });
+                            }
+                            catch { }
+                        }
+                    });
+                    break;
+            }
+        }
+        catch { }
+    }
+
+    private void RecoveryFeedback(string text) =>
+        PostToWeb(new { type = "action-feedback", text });
+
+    /// <summary>The app is ready — tell the cinematic to converge its tail
+    /// onto the online state instead of free-running to its fixed duration.</summary>
+    public void RequestSequenceFinish() =>
+        PostToWeb(new { type = "complete-sequence" });
+
+    /// <summary>
+    /// Recovery "Rollback" — writes data/lkg/rollback.flag naming the
+    /// newest snapshot (latest.txt first, newest snap-* otherwise) and
+    /// restarts so ApplyLkgFlags restores it on the next boot.
+    /// </summary>
+    private void ScheduleRecoveryRollback()
+    {
+        try
+        {
+            var lkg = Path.Combine(_appDir, "data", "lkg");
+            Directory.CreateDirectory(lkg);
+            var name = "";
+            var latestTxt = Path.Combine(lkg, "latest.txt");
+            if (File.Exists(latestTxt))
+                name = (File.ReadAllText(latestTxt) ?? "").Trim();
+            if (name.Length == 0 || !Directory.Exists(Path.Combine(lkg, name)))
+            {
+                var newest = Directory.GetDirectories(lkg, "snap-*")
+                    .OrderByDescending(d => d, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                name = newest is null ? "" : Path.GetFileName(newest);
+            }
+            if (name.Length == 0)
+            {
+                RecoveryFeedback("No rollback snapshot is available.");
+                return;
+            }
+            File.WriteAllText(Path.Combine(lkg, "rollback.flag"),
+                JsonSerializer.Serialize(new
+                {
+                    name,
+                    reason = "user requested from splash recovery",
+                }));
+            PostToWeb(new { type = "recovery-state", state = "ROLLBACK" });
+            RecoveryFeedback($"Rolling back to {name} — restarting.");
+            _ = Task.Delay(1200).ContinueWith(
+                _ => BeginInvoke(new Action(Application.Restart)));
+        }
+        catch (Exception ex)
+        {
+            RecoveryFeedback($"Rollback could not be scheduled: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Recovery "Safe Mode" — sets data/safe_mode.json active (same
+    /// schema SafeModeStore writes) and restarts so the backend boots
+    /// with heavy startup paths suppressed.
+    /// </summary>
+    private void EnterSafeModeAndRestart()
+    {
+        try
+        {
+            var dataDir = Path.Combine(_appDir, "data");
+            Directory.CreateDirectory(dataDir);
+            var path = Path.Combine(dataDir, "safe_mode.json");
+            var now = (double)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var consec = 0;
+            JsonElement history = default;
+            try
+            {
+                using var d = JsonDocument.Parse(File.ReadAllText(path));
+                if (d.RootElement.TryGetProperty("consecutive_failures", out var c)
+                    && c.ValueKind == JsonValueKind.Number)
+                    consec = c.GetInt32();
+                if (d.RootElement.TryGetProperty("history", out var h)
+                    && h.ValueKind == JsonValueKind.Array)
+                    history = h.Clone();
+            }
+            catch { /* missing/corrupt file — write a clean record */ }
+            var entries = new List<object>();
+            if (history.ValueKind == JsonValueKind.Array)
+                foreach (var el in history.EnumerateArray()) entries.Add(el.Clone());
+            entries.Add(new Dictionary<string, object?>
+            {
+                ["event"] = "enter",
+                ["reason"] = "user requested from splash recovery",
+                ["time"] = now,
+            });
+            File.WriteAllText(path, JsonSerializer.Serialize(
+                new Dictionary<string, object?>
+                {
+                    ["version"] = 1,
+                    ["active"] = true,
+                    ["reason"] = "user requested from splash recovery",
+                    ["since"] = now,
+                    ["consecutive_failures"] = consec,
+                    ["history"] = entries.Count > 50
+                        ? entries[^50..] : entries,
+                }));
+            PostToWeb(new { type = "recovery-state", state = "SAFE_MODE" });
+            RecoveryFeedback("Safe Mode enabled — restarting with essential systems only.");
+            _ = Task.Delay(1200).ContinueWith(
+                _ => BeginInvoke(new Action(Application.Restart)));
+        }
+        catch (Exception ex)
+        {
+            RecoveryFeedback($"Safe Mode could not be enabled: {ex.Message}");
+        }
     }
 
     public void ShowFailure(string message)
     {
         _timer.Stop();
         _progress.MarkFailed();
+        _failureMessage = message;
+        if (_webReady && !_webFailed)
+        {
+            // Cinematic containment + recovery UI own the fault surface;
+            // nothing here blocks the real recovery path.
+            PostToWeb(new { type = "trigger-fault", message });
+            PostToWeb(new { type = "show-recovery" });
+            return;
+        }
         _failurePanel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -234,25 +645,37 @@ internal sealed class SplashForm : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics;
+        PaintSurface(e.Graphics, ClientSize);
+        base.OnPaint(e);
+    }
+
+    /// <summary>
+    /// The full static splash surface — artwork, progress track, status
+    /// lines. Shared by the form's OnPaint and the cover panel that hides
+    /// the cinematic's first composited frames (they arrive ~a frame late
+    /// and would otherwise read as a black flash over the artwork).
+    /// </summary>
+    private void PaintSurface(Graphics g, Size size)
+    {
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        var client = new Rectangle(Point.Empty, size);
 
         if (_artwork is not null)
         {
             // Cover-fit the artwork.
-            var scale = Math.Max((float)ClientSize.Width / _artwork.Width,
-                                 (float)ClientSize.Height / _artwork.Height);
+            var scale = Math.Max((float)size.Width / _artwork.Width,
+                                 (float)size.Height / _artwork.Height);
             var w = _artwork.Width * scale;
             var h = _artwork.Height * scale;
-            g.DrawImage(_artwork, (ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+            g.DrawImage(_artwork, (size.Width - w) / 2, (size.Height - h) / 2, w, h);
         }
         else
         {
-            using var bg = new LinearGradientBrush(ClientRectangle,
+            using var bg = new LinearGradientBrush(client,
                 Color.FromArgb(4, 8, 18), Color.FromArgb(10, 20, 44), 90f);
-            g.FillRectangle(bg, ClientRectangle);
+            g.FillRectangle(bg, client);
             using var font = new Font("Segoe UI", 30f, FontStyle.Bold);
-            TextRenderer.DrawText(g, "NEXUS CORE", font, ClientRectangle,
+            TextRenderer.DrawText(g, "NEXUS CORE", font, client,
                 Color.FromArgb(120, 200, 255),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
@@ -262,10 +685,10 @@ internal sealed class SplashForm : Form
         // half-lit grey fill, so this track is fully opaque and slightly
         // oversized: the baked bar disappears entirely and only the live
         // gradient fill reads as the progress indicator.
-        var barWidth = (int)(ClientSize.Width * 0.284);
+        var barWidth = (int)(size.Width * 0.284);
         var barHeight = 7;
-        var barX = (int)(ClientSize.Width * 0.372);
-        var barY = (int)(ClientSize.Height * 0.873);
+        var barX = (int)(size.Width * 0.372);
+        var barY = (int)(size.Height * 0.873);
         var track = new Rectangle(barX, barY - 1, barWidth, barHeight + 2);
         using (var trackBrush = new SolidBrush(Color.FromArgb(255, 6, 12, 26)))
         {
@@ -292,8 +715,8 @@ internal sealed class SplashForm : Form
         var completion = _progress.CompletionPhase;
         if (completion > 0)
         {
-            var coreX = ClientSize.Width * 0.5f;
-            var coreY = ClientSize.Height * 0.34f;
+            var coreX = size.Width * 0.5f;
+            var coreY = size.Height * 0.34f;
             var radius = 130f * (0.6f + 0.4f * (float)Math.Sin(completion * Math.PI));
             var alpha = (int)(150 * Math.Sin(completion * Math.PI));
             using var glowPath = new GraphicsPath();
@@ -310,17 +733,21 @@ internal sealed class SplashForm : Form
         // caption sits at ~0.91·H, so both lines live along the bottom edge.
         using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
         using var secondaryFont = new Font("Segoe UI", 8.5f);
-        var isReady = _progress.ReadyToDismiss || completion > 0;
-        var primaryRect = new Rectangle(0, ClientSize.Height - 46, ClientSize.Width, 20);
+        var isReady = _progress.ReadyToDismiss
+            || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
+        var primaryRect = new Rectangle(0, size.Height - 46, size.Width, 20);
+        // Ready state: green + pulsating — the timer already repaints at
+        // 33ms cadence, so a clock-driven alpha sine gives the same pulse
+        // the cinematic's #status.online keyframes produce.
+        var pulse = (float)(0.5 + 0.5 * Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2 / 1.6));
+        var readyColor = Color.FromArgb(70 + (int)(185 * pulse), 90, 255, 160);
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
-            isReady ? Color.FromArgb(140, 240, 200) : Color.FromArgb(90, 215, 255),
+            isReady ? readyColor : Color.FromArgb(90, 215, 255),
             TextFormatFlags.HorizontalCenter);
-        var secondaryRect = new Rectangle(0, ClientSize.Height - 27, ClientSize.Width, 18);
+        var secondaryRect = new Rectangle(0, size.Height - 27, size.Width, 18);
         TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
-            Color.FromArgb(150, 170, 200),
+            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(150, 170, 200),
             TextFormatFlags.HorizontalCenter);
-
-        base.OnPaint(e);
     }
 
     protected override void Dispose(bool disposing)
@@ -329,6 +756,7 @@ internal sealed class SplashForm : Form
         {
             _timer.Dispose();
             _artwork?.Dispose();
+            try { _web?.Dispose(); } catch { }
         }
         base.Dispose(disposing);
     }
@@ -345,15 +773,43 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     private StartupProgress _progress;
     private SplashForm? _splash;
     private MainForm? _main;
+    private StartupNarrator? _narrator;
 
-    public NexusCoreApplicationContext(string appDir)
+    /// <summary>Backend URL once launched — narration needs the voice API.</summary>
+    private string BackendUrl => _main?.BackendUrl ?? "http://127.0.0.1:8765/";
+
+    private bool _testFault;
+
+    public NexusCoreApplicationContext(string appDir, bool testFault = false)
     {
         _appDir = appDir;
+        _testFault = testFault;
         _progress = CreateProgress();
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
+        // Throwing (instead of ?? Task.CompletedTask) routes the narrator
+        // to its SoundPlayer fallback when the splash channel isn't wired
+        // yet — a completed no-op task silently swallowed early lines.
+        _narrator = new StartupNarrator(appDir,
+            playBytes: (bytes, key) => _splash?.VoiceSink?.Invoke(bytes, key)
+                ?? throw new InvalidOperationException("voice channel unavailable"),
+            log: line => BackendProcess.NoteStartup(
+                Path.Combine(appDir, "data", "logs"), line));
+        // The splash reports real playback lifecycle back — the narrator's
+        // 2-second transition gate is keyed to audio actually ending, not
+        // to the moment play-voice was posted.
+        _splash.VoicePlaybackResult += (id, started, secs) =>
+            _narrator.NotifyVoiceResult(id, started, secs);
+        _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
         _splash.Show();
+        // Launched from a shell/IDE we may not hold foreground rights —
+        // TopMost keeps the splash above other windows, but it still needs
+        // an explicit Activate or it opens behind the focused app.
+        _splash.Activate();
+        // Narration starts alongside startup — never blocks it. First
+        // launch speaks the welcome; later launches the short line.
+        _narrator.StartupBegan(() => _main?.BackendUrl);
         _ = RunStartupAsync();
     }
 
@@ -379,7 +835,14 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _splash = new SplashForm(_appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
+        if (_narrator is not null)
+        {
+            _splash.VoicePlaybackResult += (id, started, secs) =>
+                _narrator.NotifyVoiceResult(id, started, secs);
+            _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
+        }
         _splash.Show();
+        _splash.Activate();
         _ = RunStartupAsync();
     }
 
@@ -387,13 +850,31 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     {
         try
         {
-            _progress.Report(0.06, "INITIALIZING · NEXUS CORE", "Preparing local application environment");
+            _progress.Report(0.06, "init");
+
+            // --test-fault: one-shot fault for recovery dogfooding — fires
+            // once the cinematic/recovery surface has had time to boot, so
+            // the REAL ShowFailure path (fault narration, containment
+            // animation, recovery panel, host actions) is exercised end to
+            // end. Retry relaunches startup with the flag already spent.
+            if (_testFault)
+            {
+                _testFault = false;
+                await Task.Delay(4000);
+                throw new InvalidOperationException("test fault — recovery dogfood");
+            }
 
             // Build the real main window now, still invisible.
             _main = new MainForm(_appDir);
             _main.CreateControl(); // handle exists without showing the window
+            // Shutdown narration: "Shutting down the core." + the persona
+            // farewell — the window holds until playback actually ends.
+            _main.FarewellHook = () =>
+                _narrator?.FarewellAsync(
+                    () => _main?.BackendUrl, TimeSpan.FromSeconds(45))
+                ?? Task.CompletedTask;
 
-            _progress.Report(0.15, "STARTING · CORE SERVICES", "Launching Nexus Core backend services");
+            _progress.Report(0.15, "services");
             await _main.PrepareAsync(_progress);
 
             // The interface posted its ready handshake; the app is genuinely
@@ -401,6 +882,29 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // then play the brief READY + core-glow completion effect before
             // handing off — still no blank intermediate state.
             _progress.MarkAppReady();
+
+            // The app is genuinely ready — now converge the cinematic's
+            // remaining tail onto its online state instead of letting it
+            // free-run behind. While it converges the bar parks just under
+            // 100% and the status stays "FINALIZING" so the text never
+            // claims online ahead of the visual. Bounded so a dead WebView
+            // can never hang startup.
+            var splash = _splash;
+            if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
+            {
+                _progress.AwaitingSequence = true;
+                splash.RequestSequenceFinish();
+                var seqDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
+                while (!splash.SequenceComplete && DateTimeOffset.Now < seqDeadline)
+                {
+                    await Task.Delay(50);
+                }
+                _progress.AwaitingSequence = false;
+            }
+
+            // "Core systems online." lands on the visual online moment —
+            // truthful and synchronized instead of early.
+            _narrator?.NearlyReady(() => _main?.BackendUrl);
             while (!_progress.ReadyToDismiss)
             {
                 await Task.Delay(60);
@@ -411,16 +915,49 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
+            // Dwell on the fully-loaded state before the swap — a few
+            // seconds at stable online so the completion actually reads.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+
+            // Voice gate: the splash stays up until the last startup
+            // narration has ACTUALLY finished playing (voice-ended ack, not
+            // message-posted) plus a 2-second quiet buffer — then the main
+            // app may greet. Bounded so a lost ack can't hang startup.
+            if (_narrator is not null)
+            {
+                await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
+            }
+            _narrator?.Cancel();
             _splash?.Close();
             _splash?.Dispose();
             _splash = null;
+            // Without foreground rights Show() can leave the window behind
+            // (looks minimized). Attach to the foreground thread's input
+            // queue so SetForegroundWindow is honored, ride it to the top
+            // via a brief TopMost hold, then release so the app isn't
+            // pinned above other windows.
+            _main.WindowState = FormWindowState.Normal;
             _main.Show();
+            _main.TopMost = true;
             _main.Activate();
             _main.BringToFront();
+            Win32.ForceForeground(_main.Handle);
+            _main.TopMost = false;
+            // Release the held startup greeting — the splash owned the
+            // audio stage until narration + quiet buffer finished.
+            _main.SignalStartupTransition();
             MainForm = _main;
         }
         catch (Exception ex)
         {
+            // Fault narration supersedes any friendly line immediately —
+            // then recovery diagnostics are already running. The exception
+            // itself MUST reach the host log — a silent catch leaves a
+            // windowless, unexplained failure.
+            BackendProcess.NoteStartup(
+                Path.Combine(_appDir, "data", "logs"),
+                $"startup failed: {ex.GetType().Name}: {ex.Message}");
+            _narrator?.Fault(() => _main?.BackendUrl);
             _splash?.ShowFailure(
                 $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");
         }
@@ -437,8 +974,14 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
 internal sealed class BackendProcess : IDisposable
 {
     private readonly Process _process;
-    private readonly TextWriter _logWriter;
+    private TextWriter _logWriter;
     private readonly object _logLock = new();
+    private int _logWrites;
+    // Unattended installs run for weeks — bound the host log the same
+    // way the backend bounds its audit stream (trim to a tail, keep the
+    // newest evidence, never grow without limit).
+    private const long LogMaxBytes = 8L * 1024 * 1024;
+    private const long LogKeepBytes = 4L * 1024 * 1024;
     private readonly int _requestedPort;
     private volatile int _announcedPort;
     private volatile bool _disposing;
@@ -461,7 +1004,13 @@ internal sealed class BackendProcess : IDisposable
         _process = process;
         _requestedPort = port;
         LogPath = logPath;
-        _logWriter = TextWriter.Synchronized(new StreamWriter(logPath, append: true) { AutoFlush = true });
+        // FileShare.ReadWrite — AppendHostLog/NoteStartup and the startup
+        // diagnostics append to the SAME file from outside this writer.
+        // The default share mode made every one of those appends throw a
+        // sharing violation that was silently swallowed, hiding narration
+        // delivery and [STARTUP] diagnostics entirely.
+        var logStream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        _logWriter = TextWriter.Synchronized(new StreamWriter(logStream) { AutoFlush = true });
 
         _process.EnableRaisingEvents = true;
         _process.OutputDataReceived += (_, e) =>
@@ -570,9 +1119,18 @@ internal sealed class BackendProcess : IDisposable
             });
             lock (_logLock)
             {
-                File.AppendAllText(
-                    Path.Combine(dataDir, "crash_history.jsonl"),
-                    entry + Environment.NewLine);
+                var crashLog = Path.Combine(dataDir, "crash_history.jsonl");
+                File.AppendAllText(crashLog, entry + Environment.NewLine);
+                // Bounded history — 1 MB cap, keep the newest half.
+                var info = new FileInfo(crashLog);
+                if (info.Length > 1024 * 1024)
+                {
+                    var raw = File.ReadAllBytes(crashLog);
+                    var keep = raw.Skip(raw.Length - 512 * 1024).ToArray();
+                    var nl = Array.IndexOf(keep, (byte)'\n');
+                    File.WriteAllBytes(crashLog,
+                        nl >= 0 ? keep[(nl + 1)..] : Array.Empty<byte>());
+                }
             }
         }
         catch { /* crash history is best-effort — never block restart */ }
@@ -596,11 +1154,51 @@ internal sealed class BackendProcess : IDisposable
             lock (_logLock)
             {
                 _logWriter.WriteLine($"{DateTimeOffset.Now:O} [{stream}] {line}");
+                if (++_logWrites % 200 == 0)
+                {
+                    TrimLogIfOversized();
+                }
             }
         }
         catch
         {
             // Logging must never crash the desktop host.
+        }
+    }
+
+    /// Rotation: caller holds _logLock. When the log exceeds LogMaxBytes,
+    /// drop the writer, keep only the newest LogKeepBytes, reopen.
+    private void TrimLogIfOversized()
+    {
+        try
+        {
+            if (new FileInfo(LogPath).Length <= LogMaxBytes)
+            {
+                return;
+            }
+            _logWriter.Dispose();
+            var raw = File.ReadAllBytes(LogPath);
+            var keep = raw.Skip(Math.Max(0, raw.Length - (int)LogKeepBytes)).ToArray();
+            var nl = Array.IndexOf(keep, (byte)'\n');
+            File.WriteAllBytes(LogPath, nl >= 0 ? keep[(nl + 1)..] : Array.Empty<byte>());
+            File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} [HOST] "
+                + $"log rotated — kept newest {LogKeepBytes / (1024 * 1024)} MB tail"
+                + Environment.NewLine);
+        }
+        catch
+        {
+            // Rotation is best-effort — it must never interrupt logging.
+        }
+        finally
+        {
+            try
+            {
+                var fs = new FileStream(
+                    LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                _logWriter = TextWriter.Synchronized(
+                    new StreamWriter(fs) { AutoFlush = true });
+            }
+            catch { }
         }
     }
 
@@ -611,9 +1209,14 @@ internal sealed class BackendProcess : IDisposable
     {
         try
         {
-            File.AppendAllText(
-                logPath,
-                $"{DateTimeOffset.Now:O} [HOST] {line}{Environment.NewLine}");
+            // ReadWrite share — BackendProcess holds this file open for the
+            // backend stdout writer; a Read-share open here collides with
+            // that Write handle and every line is lost to a sharing
+            // violation (silently, by the catch below).
+            using var fs = new FileStream(
+                logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var sw = new StreamWriter(fs);
+            sw.Write($"{DateTimeOffset.Now:O} [HOST] {line}{Environment.NewLine}");
         }
         catch
         {
@@ -816,20 +1419,47 @@ internal sealed class BackendProcess : IDisposable
                 {
                     var snapBackend = Path.Combine(snap, "backend");
                     var liveBackend = Path.Combine(appDir, "backend");
-                    if (Directory.Exists(snapBackend))
+                    // Honor the snapshot manifest's recorded exe hash — a
+                    // truncated or tampered snapshot must never replace
+                    // the live backend (the backend-side store verifies
+                    // the same hash before it will even stage the flag).
+                    var snapExe = Path.Combine(snapBackend, "ChatNexus.Backend.exe");
+                    var wantSha = "";
+                    try
+                    {
+                        using var md = JsonDocument.Parse(
+                            File.ReadAllText(Path.Combine(snap, "manifest.json")));
+                        wantSha = md.RootElement.TryGetProperty("exe_sha256", out var es)
+                            ? es.GetString() ?? "" : "";
+                    }
+                    catch { wantSha = ""; }
+                    var verified = wantSha.Length == 0
+                        || (File.Exists(snapExe)
+                            && string.Equals(Sha256File(snapExe), wantSha,
+                                             StringComparison.OrdinalIgnoreCase));
+                    if (!verified)
+                    {
+                        AppendHostLog(logPath,
+                            $"LKG rollback refused — snapshot '{name}' failed exe hash verification");
+                    }
+                    else if (Directory.Exists(snapBackend))
                     {
                         var spare = Path.Combine(appDir, "backend-replaced");
                         if (Directory.Exists(spare)) Directory.Delete(spare, true);
                         if (Directory.Exists(liveBackend))
                             Directory.Move(liveBackend, spare);
                         CopyTree(snapBackend, liveBackend);
+                        foreach (var f in new[] { "config.json", "VERSION" })
+                        {
+                            var src = Path.Combine(snap, f);
+                            if (File.Exists(src)) File.Copy(src, Path.Combine(appDir, f), true);
+                        }
+                        AppendHostLog(logPath, $"LKG rollback applied from {name} ({reason})");
                     }
-                    foreach (var f in new[] { "config.json", "VERSION" })
+                    else
                     {
-                        var src = Path.Combine(snap, f);
-                        if (File.Exists(src)) File.Copy(src, Path.Combine(appDir, f), true);
+                        AppendHostLog(logPath, $"rollback snapshot '{name}' has no backend tree — ignored");
                     }
-                    AppendHostLog(logPath, $"LKG rollback applied from {name} ({reason})");
                 }
                 else
                 {
@@ -879,6 +1509,13 @@ internal sealed class BackendProcess : IDisposable
             // LKG handling must never block the normal launch path.
             AppendHostLog(logPath, $"LKG flag handling failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private static string Sha256File(string path)
+    {
+        using var sha = SHA256.Create();
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(sha.ComputeHash(fs));
     }
 
     private static void CopyTree(string src, string dst)
@@ -1373,18 +2010,142 @@ internal sealed class MainForm : Form
         _webView.DefaultBackgroundColor = Color.FromArgb(7, 16, 31);
         Controls.Add(_webView);
 
-        FormClosing += (_, _) =>
+    }
+
+    /// <summary>
+    /// Shutdown narration — runs before the window may close, awaited to
+    /// real playback completion by the host. Set by the application
+    /// context; null means close normally.
+    /// </summary>
+    public Func<Task>? FarewellHook { get; set; }
+    private bool _farewellRunning;
+    private bool _allowClose;
+    // Interface voice-queue state, reported via webview messages. The
+    // farewell drains this before speaking so shutdown never overlaps a
+    // greeting/response already mid-playback.
+    private volatile bool _webVoiceBusy;
+    private TaskCompletionSource<bool> _webVoiceIdleTcs =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        // Farewell holds for every graceful close request — X button,
+        // CloseMainWindow, Task Manager "End task" (all WM_CLOSE-based).
+        // A hard kill never reaches here. WindowsShutDown stays excluded:
+        // the OS is going away and audio may already be gone.
+        var farewellEligible = e.CloseReason is CloseReason.UserClosing
+            or CloseReason.TaskManagerClosing
+            or CloseReason.ApplicationExitCall or CloseReason.None
+            or CloseReason.FormOwnerClosing or CloseReason.MdiFormClosing;
+        try
+        {
+            BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                $"closing: reason={e.CloseReason} eligible={farewellEligible} " +
+                $"hook={(FarewellHook is not null)} running={_farewellRunning} allow={_allowClose}");
+        }
+        catch { }
+        if (_allowClose)
         {
             _closing = true;
             _backend?.Dispose();
-        };
+            base.OnFormClosing(e);
+            return;
+        }
+        if (farewellEligible && FarewellHook is not null)
+        {
+            // Swallow every close while the farewell runs — a second X
+            // click must not cut the goodbye short.
+            e.Cancel = true;
+            if (!_farewellRunning)
+            {
+                _farewellRunning = true;
+                _ = RunFarewellThenCloseAsync();
+            }
+            return;
+        }
+        _closing = true;
+        _backend?.Dispose();
+        base.OnFormClosing(e);
     }
+
+    private async Task RunFarewellThenCloseAsync()
+    {
+        try { await DrainWebVoiceAsync(TimeSpan.FromSeconds(75)); }
+        catch { /* a stuck queue must never trap the exit */ }
+        try { if (FarewellHook is not null) await FarewellHook(); }
+        catch { /* a failed farewell must never trap the exit */ }
+        _allowClose = true;
+        if (!IsDisposed)
+        {
+            try { BeginInvoke(new Action(Close)); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Voice clips already playing in the interface must finish before the
+    /// farewell speaks — the goodbye never talks over an in-flight
+    /// greeting/response. Latch the page's queue so nothing new starts,
+    /// then wait for busy→idle. Bounded so wedged audio can't hang exit.
+    /// </summary>
+    private async Task DrainWebVoiceAsync(TimeSpan budget)
+    {
+        try
+        {
+            if (_webView.CoreWebView2 is not null)
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.NexusVoice&&(NexusVoice._draining=true," +
+                    "NexusVoice._reportState&&NexusVoice._reportState())");
+            }
+        }
+        catch { /* webview may already be gone — nothing to drain */ }
+        if (!_webVoiceBusy)
+        {
+            return;
+        }
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (_webVoiceBusy && deadline.Elapsed < budget)
+        {
+            var remaining = budget - deadline.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                break;
+            }
+            var tcs = _webVoiceIdleTcs;
+            await Task.WhenAny(tcs.Task, Task.Delay(remaining));
+        }
+        try
+        {
+            BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                $"web voice drain done busy={_webVoiceBusy} waited={deadline.ElapsedMilliseconds}ms");
+        }
+        catch { }
+    }
+
+    /// <summary>Backend base URL once the process is up — used by startup narration.</summary>
+    public string? BackendUrl => _backend?.BaseUrl;
 
     /// <summary>
     /// Backend + WebView2 startup that runs while the form is still hidden.
     /// Reports real milestones into the splash progress and only completes
     /// once the interface posts its ready handshake (or a bounded fallback).
     /// </summary>
+    /// <summary>
+    /// Tell the interface the startup transition is complete — the splash
+    /// is gone and startup narration + quiet buffer have fully finished.
+    /// Greeting audio waits on this signal so it can never overlap Isabella
+    /// or start inside the post-narration quiet window.
+    /// </summary>
+    public void SignalStartupTransition()
+    {
+        try
+        {
+            _webView.CoreWebView2?.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "startup-transition-complete" }));
+        }
+        catch { }
+    }
+
     public async Task PrepareAsync(StartupProgress progress)
     {
         AttachBackend(BackendProcess.Start(_appDir));
@@ -1393,12 +2154,12 @@ internal sealed class MainForm : Form
         // host owns between "backend launched" and "backend healthy".
         _backend!.BootPhase += (pct, primary, secondary) =>
             progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
-        progress.Report(0.30, "STARTING · CORE SERVICES", "Waiting for backend health");
+        progress.Report(0.30, "services");
         // Cold starts on machines scanning a fresh unsigned exe (AV) can
         // exceed 60s even when the backend is healthy — the PyInstaller
         // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
         await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
-        progress.Report(0.55, "CONNECTING · LOCAL AI RUNTIME", "Backend healthy — synchronizing runtime state");
+        progress.Report(0.55, "interface");
 
         var userDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1420,12 +2181,20 @@ internal sealed class MainForm : Form
         await _webView.EnsureCoreWebView2Async(environment);
         ConfigureWebView();
         await ClearStaleWebCacheAsync(userDataFolder);
-        progress.Report(0.72, "INITIALIZING · NEXUS INTERFACE", "Initializing WebView2");
+        progress.Report(0.72, "workspace");
 
         var ready = WaitForInterfaceReadyAsync();
         _webView.Source = new Uri(_backend.BaseUrl);
-        progress.Report(0.85, "LOADING · NEXUS INTERFACE", "Rendering the Nexus Core application shell");
-        progress.Report(0.93, "CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake");
+        progress.Report(0.85, "workspace");
+        // First-run workstation messaging only when provisioning is real —
+        // an enabled, frozen install builds and runs its setup plan in the
+        // background; nothing here waits on downloads.
+        if (SplashForm.ProvisioningPlanned(_appDir))
+        {
+            progress.Report(0.87, "workstation");
+            progress.Report(0.90, "bg_setup");
+        }
+        progress.Report(0.93, "interface");
         await ready;
     }
 
@@ -1620,9 +2389,48 @@ internal sealed class MainForm : Form
         {
             try
             {
-                if (args.TryGetWebMessageAsString().Contains("nexus-core-ready", StringComparison.Ordinal))
+                // Pages post structured objects — TryGetWebMessageAsString
+                // only unwraps string posts, so WebMessageAsJson is the
+                // only reliable channel. (The ready handshake previously
+                // waited out its 15s fallback every boot for this reason.)
+                var msg = args.WebMessageAsJson;
+                using var doc = System.Text.Json.JsonDocument.Parse(msg);
+                var type = doc.RootElement.TryGetProperty("type", out var t)
+                    ? t.GetString()
+                    : null;
+                if (type == "nexus-core-ready")
                 {
                     _interfaceReady.TrySetResult(true);
+                }
+                else if (type == "voice-state" &&
+                         doc.RootElement.TryGetProperty("busy", out var busy))
+                {
+                    // The interface's voice queue reports busy/idle so the
+                    // farewell can wait out in-flight speech instead of
+                    // talking over it.
+                    try
+                    {
+                        BackendProcess.NoteStartup(
+                            Path.Combine(_appDir, "data", "logs"),
+                            $"web voice-state busy={busy.GetBoolean()}");
+                    }
+                    catch { }
+                    if (busy.GetBoolean())
+                    {
+                        _webVoiceBusy = true;
+                        if (_webVoiceIdleTcs.Task.IsCompleted)
+                        {
+                            _webVoiceIdleTcs =
+                                new TaskCompletionSource<bool>(
+                                    TaskCreationOptions
+                                        .RunContinuationsAsynchronously);
+                        }
+                    }
+                    else
+                    {
+                        _webVoiceBusy = false;
+                        _webVoiceIdleTcs.TrySetResult(true);
+                    }
                 }
             }
             catch
@@ -1675,6 +2483,77 @@ internal sealed class MainForm : Form
         catch
         {
             // External navigation failure should not crash Nexus Core.
+        }
+    }
+}
+
+/// <summary>
+/// Win32 interop for z-order/foreground control — the pieces WinForms
+/// can't express. Splash uses SetWindowPos(HWND_TOPMOST) as a watchdog
+/// re-assert; the main-window transition uses the attach-thread-input
+/// sequence so SetForegroundWindow is honored even when Nexus was
+/// launched without foreground rights (start menu, scripts, self-update).
+/// </summary>
+internal static class Win32
+{
+    internal static readonly IntPtr HwndTopmost = new(-1);
+
+    internal const uint SwpNomove = 0x0002;
+    internal const uint SwpNosize = 0x0001;
+    internal const uint SwpNoactivate = 0x0010;
+    internal const uint SwpShowwindow = 0x0040;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int x, int y, int cx, int cy, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
+    /// <summary>
+    /// Pull <paramref name="hWnd"/> to the front even when this process
+    /// lacks foreground rights: temporarily share the foreground thread's
+    /// input state so Windows treats the request as user-initiated.
+    /// No-op when nothing is foreground.
+    /// </summary>
+    internal static void ForceForeground(IntPtr hWnd)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            SetForegroundWindow(hWnd);
+            return;
+        }
+        var foregroundThread = GetWindowThreadProcessId(foreground, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != currentThread
+            && AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
         }
     }
 }

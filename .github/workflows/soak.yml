@@ -1,0 +1,61 @@
+name: Nexus Core Soak (Tier 3)
+
+# Scheduled + manual soak harness. Tier 3 tests exercise restart
+# recovery, provisioning idempotence, and the isolated self-update
+# canary — none of the hardware tiers (GPU/LLM/InvokeAI/ComfyUI) run on
+# hosted runners; those require a self-hosted Windows+GPU runner and are
+# gated behind workflow_dispatch with `hardware: true` so their absence
+# is never silently claimed.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # nightly UTC
+  workflow_dispatch:
+    inputs:
+      hardware:
+        description: "Run hardware tier (requires self-hosted GPU runner)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check "cryptography==50.0.1" "numpy==2.3.5"
+      - name: Isolated selftest (fresh-instance boot + smoke)
+        run: python -m localcodeagent.selftest --workspace . --json --test-timeout 900
+      - name: Restart/recovery + autonomy + provisioning suites
+        run: |
+          python -m unittest `
+            tests.test_lkg `
+            tests.test_provisioning `
+            tests.test_autonomy `
+            tests.test_coding_pipeline `
+            -v
+
+  hardware-tier:
+    # Honest gate: this job only runs when a maintainer dispatches with
+    # hardware:true on a self-hosted runner tagged [self-hosted, gpu].
+    # Hosted GitHub runners have no GPU, InvokeAI, or ComfyUI — the tier
+    # is a harness, not a claim of automated GPU verification.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.hardware }}
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Hardware smoke — image backends + LLM arbitration
+        run: |
+          python -m unittest tests.test_image tests.test_invokeai -v

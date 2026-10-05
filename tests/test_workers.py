@@ -72,6 +72,32 @@ class TestAdmission(unittest.TestCase):
         self.assertEqual(b["status"], "queued")
         self.assertEqual(b["reason"], "waiting_for_model")
 
+    def test_admit_node_fires_shortfall_hook_on_vram(self):
+        """A node gated on memory notifies the caller so idle managed
+        runtimes can be evicted on demand rather than waiting for the
+        idle timer."""
+        m = mgr(self.tmp, s=snap(vram_free=2000, ram_free=48000))
+        fired = []
+        worker, reason, detail = m.admit_node(
+            "t-1", "code task", role="coding",
+            on_shortfall=lambda est, r: fired.append((est, r)))
+        self.assertIsNone(worker)
+        self.assertEqual(reason, "waiting_for_vram")
+        self.assertEqual(len(fired), 1)
+        self.assertGreater(fired[0][0].vram_mb, 0)
+
+    def test_admit_node_shortfall_hook_ignores_non_memory(self):
+        """CPU/slot/ceiling shortfalls can't be fixed by evicting a
+        model — the hook must not fire for them."""
+        m = mgr(self.tmp, s=snap(util=0.99, vram_free=11000))
+        fired = []
+        worker, reason, _ = m.admit_node(
+            "t-1", "build", role="build_test",
+            on_shortfall=lambda est, r: fired.append(r))
+        self.assertIsNone(worker)
+        self.assertEqual(reason, "waiting_for_cpu")
+        self.assertEqual(fired, [])
+
     def test_reservation_releases_on_completion(self):
         m = mgr(self.tmp, s=snap(vram_free=10000))
         a = m.submit("code", role="coding")

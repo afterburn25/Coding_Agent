@@ -47,15 +47,32 @@
     if (NV.current) {
       try { NV.current.pause(); NV.current.src = ''; } catch (e) {}
       NV.current = null;
+      NV._lastEnd = Date.now();
     }
     NV._playSeq++;
     NV._emit();
     api('/api/voice/stop', { reason: 'user' });
   };
 
+  // Host visibility: the desktop farewell must not talk over voice
+  // already playing here. Report busy/idle transitions so the host can
+  // wait for the queue to drain before speaking the goodbye.
+  NV._lastReportedBusy = null;
+  NV._draining = false; // latched by the host at shutdown — no new clips
+  NV._reportState = function () {
+    const busy = !!NV.current || NV.queue.length > 0;
+    if (busy === NV._lastReportedBusy) return;
+    NV._lastReportedBusy = busy;
+    try {
+      if (window.chrome && chrome.webview && chrome.webview.postMessage) {
+        chrome.webview.postMessage({ type: 'voice-state', busy: busy });
+      }
+    } catch (e) {}
+  };
+
   NV._seenSegments = new Set();
   NV.enqueue = function (url, meta) {
-    if (NV.muted || !NV.enabled) return;
+    if (NV.muted || !NV.enabled || NV._draining) return;
     const sid = meta && meta.segment_id;
     if (sid && NV._seenSegments.has(sid)) return;  // bus + stream dedupe
     if (sid) {
@@ -69,13 +86,29 @@
     NV._emit();
   };
 
+  NV._lastEnd = 0;
+  NV._lastTaskId = null;
+  NV._gapTimer = null;
   NV._playNext = function () {
     if (NV.current || !NV.queue.length) return;
+    // Rule: voice activities never overlap. Different activities (task_id)
+    // wait 2s after the last clip ends — segments of the SAME activity
+    // (sentence chunks of one response) play back-to-back, no pause.
+    const next = NV.queue[0];
+    const sameActivity = !!(next.meta && next.meta.task_id
+      && next.meta.task_id === NV._lastTaskId);
+    const wait = sameActivity ? 0 : NV._lastEnd + 2000 - Date.now();
+    if (wait > 0) {
+      if (!NV._gapTimer) {
+        NV._gapTimer = setTimeout(() => { NV._gapTimer = null; NV._playNext(); }, wait);
+      }
+      return;
+    }
     const item = NV.queue.shift();
     const audio = new Audio(item.url);
     audio.volume = Math.min(1, Math.max(0, NV.volume));
     const seq = ++NV._playSeq;
-    audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
+    audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._lastEnd = Date.now(); NV._lastTaskId = (item.meta && item.meta.task_id) || null; NV._playNext(); NV._emit(); } };
     audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
     NV.current = audio;
     audio.play().catch(err => {
@@ -116,12 +149,13 @@
       // the previous session's shutdown would otherwise silence whatever
       // is speaking seconds after page load.
       if (e.ts && Date.now() / 1000 - Number(e.ts) > 15) return;
-      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; } } NV.refresh(); }
+      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; NV._lastEnd = Date.now(); } } NV.refresh(); }
     else NV._emit(e);
   };
 
   NV.on = function (fn) { NV.listeners.push(fn); };
   NV._emit = function (evt) {
+    NV._reportState();
     for (const fn of NV.listeners) { try { fn(evt, NV); } catch (e) {} }
     const btn = document.getElementById('voiceToggle');
     if (btn) {

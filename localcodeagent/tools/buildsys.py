@@ -21,6 +21,7 @@ BUILD_SYSTEMS: list[dict[str, Any]] = [
             "configure": "cmake -S . -B build",
             "build": "cmake --build build",
             "test": "ctest --test-dir build --output-on-failure",
+            # Coverage needs a build configured with coverage flags.
             "clean": "cmake --build build --target clean",
         },
     },
@@ -38,7 +39,7 @@ BUILD_SYSTEMS: list[dict[str, Any]] = [
         "id": "cargo",
         "name": "Cargo",
         "markers": ["Cargo.toml"],
-        "commands": {"build": "cargo build", "test": "cargo test", "clean": "cargo clean"},
+        "commands": {"build": "cargo build", "test": "cargo test", "coverage": "cargo tarpaulin --out Stdout", "clean": "cargo clean"},
     },
     {
         "id": "dotnet",
@@ -47,6 +48,7 @@ BUILD_SYSTEMS: list[dict[str, Any]] = [
         "commands": {
             "build": "dotnet build",
             "test": "dotnet test",
+            "coverage": "dotnet test --collect:\"XPlat Code Coverage\"",
             "clean": "dotnet clean",
             "restore": "dotnet restore",
         },
@@ -62,31 +64,31 @@ BUILD_SYSTEMS: list[dict[str, Any]] = [
         "id": "pnpm",
         "name": "pnpm",
         "markers": ["pnpm-lock.yaml"],
-        "commands": {"build": "pnpm build", "test": "pnpm test", "install": "pnpm install"},
+        "commands": {"build": "pnpm build", "test": "pnpm test", "coverage": "pnpm test -- --coverage", "install": "pnpm install"},
     },
     {
         "id": "yarn",
         "name": "Yarn",
         "markers": ["yarn.lock"],
-        "commands": {"build": "yarn build", "test": "yarn test", "install": "yarn install"},
+        "commands": {"build": "yarn build", "test": "yarn test", "coverage": "yarn test --coverage", "install": "yarn install"},
     },
     {
         "id": "npm",
         "name": "npm",
         "markers": ["package.json"],
-        "commands": {"build": "npm run build", "test": "npm test", "install": "npm install"},
+        "commands": {"build": "npm run build", "test": "npm test", "coverage": "npm test -- --coverage", "install": "npm install"},
     },
     {
         "id": "gradle",
         "name": "Gradle",
         "markers": ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
-        "commands": {"build": "gradle build", "test": "gradle test", "clean": "gradle clean"},
+        "commands": {"build": "gradle build", "test": "gradle test", "coverage": "gradle jacocoTestReport", "clean": "gradle clean"},
     },
     {
         "id": "maven",
         "name": "Maven",
         "markers": ["pom.xml"],
-        "commands": {"build": "mvn -q compile", "test": "mvn -q test", "clean": "mvn -q clean"},
+        "commands": {"build": "mvn -q compile", "test": "mvn -q test", "coverage": "mvn -q jacoco:report", "clean": "mvn -q clean"},
     },
     {
         "id": "make",
@@ -101,6 +103,7 @@ BUILD_SYSTEMS: list[dict[str, Any]] = [
         "commands": {
             "build": "python -m compileall -q .",
             "test": "python -m unittest discover -s tests -v",
+            "coverage": "python -m coverage run -m unittest discover -s tests && python -m coverage report",
         },
     },
 ]
@@ -280,6 +283,23 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         lambda a: _run_action(a, "configure"),
         category="coding",
         capabilities=["build_project", "terminal_run"],
+    ))
+    registry.register(ToolSpec(
+        "coverage_report",
+        "Run the detected build system's coverage step and return the report output (coverage.py, cargo tarpaulin, dotnet XPlat, jest/vitest --coverage, jacoco). Errors honestly when the system has no coverage command or the tool isn't installed.",
+        {
+            "type": "object",
+            "properties": {
+                "system": {"type": "string", "default": "auto"},
+                "path": {"type": "string"},
+                "extra_args": {"type": "string"},
+                "timeout_seconds": {"type": "integer", "default": 600},
+            },
+        },
+        "shell.execute",
+        lambda a: _run_action(a, "coverage"),
+        category="coding",
+        capabilities=["coverage_report", "run_tests", "terminal_run"],
     ))
     registry.register(ToolSpec(
         "clean_project",

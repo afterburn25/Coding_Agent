@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -160,8 +161,13 @@ class GitHubCodingClient:
 
 def register_github_tools(registry: ToolRegistry, workspace: Path,
                           config: AgentConfig, *, vault=None,
-                          workspaces=None) -> None:
-    client = GitHubCodingClient(config)
+                          workspaces=None, client=None,
+                          account=None) -> None:
+    # `client`: shared GitHubCodingClient — the account service refreshes
+    # its token on connect/disconnect, so every surface (tools, connector,
+    # API) converges without a restart. Falls back to a private instance
+    # for standalone use.
+    client = client if client is not None else GitHubCodingClient(config)
     remote_default = config.github_default_remote or "origin"
 
     def _ensure_token() -> None:
@@ -207,7 +213,21 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
     def git_push(args: dict) -> str:
         remote = str(args.get("remote") or remote_default).strip()
         branch = str(args.get("branch") or "").strip() or _current_branch(workspace)
-        command = ["push"]
+        _ensure_token()
+        command = []
+        if client.authenticated:
+            # Header-scoped auth — same pattern as github_clone: the
+            # connected credential drives the push without landing in
+            # .git/config or the process-visible remote URL. Basic
+            # base64(x-access-token:token) — the actions/checkout form —
+            # is accepted by git smart-HTTP for every token type;
+            # "bearer" is rejected for OAuth (gho_) tokens.
+            command += ["-c",
+                        "http.extraHeader=AUTHORIZATION: basic "
+                        + base64.b64encode(
+                            f"x-access-token:{client.token}".encode()
+                        ).decode()]
+        command += ["push"]
         if bool(args.get("set_upstream", True)):
             command.extend(["--set-upstream", remote, branch])
         else:
@@ -355,6 +375,10 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         token = str(args.get("token") or "").strip()
         if not token:
             raise ValueError("token is required")
+        if account is not None:
+            # Account service is the single connect path — vault store,
+            # shared-client refresh, connector refresh, classified errors.
+            return json.dumps(account.connect(token), indent=2)
         # Validate against /user before persisting anything.
         probe = GitHubCodingClient(config)
         probe.token = token
@@ -377,6 +401,8 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_disconnect(_: dict) -> str:
+        if account is not None:
+            return json.dumps(account.disconnect(), indent=2)
         removed = False
         if vault is not None:
             try:
@@ -437,9 +463,13 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         argv = ["git"]
         if client.authenticated:
             # Header-scoped auth: the token never lands in .git/config or
-            # the process-visible remote URL.
+            # the process-visible remote URL. Basic base64 form — git
+            # smart-HTTP rejects "bearer" for OAuth (gho_) tokens.
             argv += ["-c",
-                     f"http.extraHeader=AUTHORIZATION: bearer {client.token}"]
+                     "http.extraHeader=AUTHORIZATION: basic "
+                     + base64.b64encode(
+                         f"x-access-token:{client.token}".encode()
+                     ).decode()]
         argv += ["clone", url, str(dest)]
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=600)
@@ -671,12 +701,12 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         "type": "object",
         "properties": {"token": {"type": "string"}},
         "required": ["token"],
-    }, "github.write", github_connect, category="github",
+    }, "credentials.use", github_connect, category="github",
         capabilities=["github_auth", "connect_account"]))
 
     registry.register(ToolSpec("github_disconnect", "Disconnect GitHub: remove the stored vault token (env-var credentials are untouched).", {
         "type": "object", "properties": {}
-    }, "github.write", github_disconnect, category="github",
+    }, "credentials.use", github_disconnect, category="github",
         capabilities=["github_auth", "disconnect_account"]))
 
     registry.register(ToolSpec("github_list_repos", "List the connected account's repositories (requires github_connect or env token).", {

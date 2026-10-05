@@ -156,6 +156,224 @@ class RuntimeManagerTests(unittest.TestCase):
             reasoning_index = cmd.index("--reasoning")
             self.assertEqual(cmd[reasoning_index + 1], "auto")
 
+    def test_tool_capable_profile_launches_server_with_jinja(self):
+        """llama.cpp silently ignores the request's `tools` field unless the
+        server was launched with --jinja. Every tool-capable profile must get
+        it or agent missions can only narrate work they never perform."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=[],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--jinja", cmd)
+
+    def test_non_tool_profile_does_not_get_jinja(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=False,
+                extra_args=[],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertNotIn("--jinja", cmd)
+
+    def test_explicit_no_jinja_override_is_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=["--no-jinja"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--no-jinja", cmd)
+            self.assertEqual(cmd.count("--jinja"), 0)
+
+    def test_custom_chat_template_still_gets_jinja(self):
+        # --chat-template supplies template text; jinja remains the engine
+        # that renders the tools block, so tool-capable profiles still need
+        # the flag alongside a custom template.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server"
+            fake_server.write_text("fake", encoding="utf-8")
+            profile = self._profile(
+                model_path="models/coder.gguf",
+                executable=str(fake_server),
+                tool_calling=True,
+                extra_args=["--chat-template", "custom.jinja"],
+            )
+            manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=root)
+            cmd = manager._build_command(profile, 8081)
+            self.assertIn("--jinja", cmd)
+            self.assertIn("--chat-template", cmd)
+
+    def test_demand_evicted_model_defers_relaunch_while_resource_short(self):
+        # Regression: the soak audit showed release_managed_models_for_vram
+        # firing for the same model every ~5s — a relaunch re-entered
+        # _managed at Popen, so the next tick re-evicted it mid-load.
+        # Demand evictions now stamp the model; ensure_ready defers the
+        # relaunch while the freed resource is still short.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                keep_loaded=False)
+            (root / "llama-server").write_text("fake", encoding="utf-8")
+            cfg = AgentConfig(models=[victim])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            _attach_fake_managed(manager, victim)
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["victim"])
+
+            with self.assertRaises(RuntimeError) as ctx:
+                manager.ensure_ready(victim)
+            self.assertIn("deferred", str(ctx.exception))
+            self.assertEqual(launches, [])
+
+            # Once VRAM actually frees, the suppression lifts early.
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=10240, used_vram_mb=2048)])
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_demand_eviction_suppression_expires(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0)
+            (root / "llama-server").write_text("fake", encoding="utf-8")
+            cfg = AgentConfig(models=[victim], demand_eviction_cooldown_s=0)
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            _attach_fake_managed(manager, victim)
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["victim"])
+            # cooldown=0 → suppression window is already past; launch proceeds.
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_demand_release_never_evicts_busy_model(self):
+        # Regression: the supervisor's release hooks didn't pass busy_models —
+        # a node gated on RAM evicted the model that was mid-stream serving
+        # another node (live evidence: connection reset on :8084).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "serving.gguf").write_bytes(b"GGUF")
+            (root / "models" / "idle.gguf").write_bytes(b"GGUF")
+            serving = self._profile(id="serving", model_path="models/serving.gguf")
+            idle = self._profile(id="idle", model_path="models/idle.gguf")
+            cfg = AgentConfig(models=[serving, idle])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=2.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc_s = _attach_fake_managed(manager, serving, last_used=time.time())
+            proc_i = _attach_fake_managed(manager, idle, last_used=time.time() - 600)
+
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, busy_models={"serving"})
+            self.assertEqual(stopped, ["idle"])
+            self.assertFalse(proc_s.terminated)
+            self.assertTrue(proc_i.terminated)
+
+            # Busy model alone cannot satisfy the request — stop nothing.
+            stopped2 = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, busy_models={"serving", "idle"})
+            self.assertEqual(stopped2, [])
+
+    def test_fresh_hardware_reprobes_stale_snapshot(self):
+        # Regression: budget auto-resume read runtime.hardware — a cached
+        # snapshot taken during a RAM dip stayed stale forever when nothing
+        # else refreshed it, so transient pauses never cleared. The budget
+        # path now uses fresh_hardware with a TTL.
+        import localcodeagent.runtime.manager as mgr_mod
+        with tempfile.TemporaryDirectory() as td:
+            manager = RuntimeManager(AgentConfig(models=[]), base_dir=Path(td))
+            stale = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=1.2,
+                cpu_logical_cores=8)
+            fresh = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=40.0,
+                cpu_logical_cores=8)
+            calls = []
+            orig = mgr_mod.detect_hardware
+            mgr_mod.detect_hardware = lambda: calls.append(1) or fresh
+            try:
+                manager.hardware = stale
+                manager._hw_ts = time.time() - 3600  # long-stale snapshot
+                snap = manager.fresh_hardware()
+                self.assertIs(snap, fresh)
+                self.assertEqual(snap.available_ram_gb, 40.0)
+                self.assertEqual(calls, [1])
+                # Within the TTL the same snapshot is served — no re-probe.
+                snap2 = manager.fresh_hardware()
+                self.assertIs(snap2, fresh)
+                self.assertEqual(calls, [1])
+            finally:
+                mgr_mod.detect_hardware = orig
+
     def test_resource_aware_router_avoids_model_that_does_not_fit(self):
         with tempfile.TemporaryDirectory() as td:
             big = self._profile(id="big", runtime="external", priority=100, estimated_vram_gb=24, estimated_ram_gb=70)
@@ -482,6 +700,82 @@ class RuntimeManagerTests(unittest.TestCase):
 
             self.assertEqual(killed, [7777])
 
+    def test_healthy_orphan_is_adopted_not_reloaded(self):
+        # A backend restart orphans a still-healthy llama-server holding
+        # the same model — killing it forces a pointless multi-GB reload.
+        # Adoption keeps the server, registers it as managed, and skips
+        # spawn entirely.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            killed: list[int] = []
+            manager._kill_pid = killed.append
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: True
+            manager._orphan_context = lambda ep: 32768
+            manager._spawn_and_wait = lambda *a, **k: (
+                _ for _ in ()).throw(AssertionError("must not spawn"))
+
+            ep = manager._start_llama_cpp(profile)
+
+            self.assertEqual(killed, [])
+            self.assertEqual(ep, "http://127.0.0.1:8080/v1")
+            status = manager._status[profile.id]
+            self.assertEqual(status.state, "running")
+            self.assertTrue(status.managed)
+            self.assertEqual(status.pid, 7777)
+            item = manager._managed[profile.id]
+            self.assertIsNone(item.process.poll())  # adopted pid is alive
+
+    def test_unhealthy_or_wrong_model_orphan_is_killed(self):
+        # Adoption must never silently keep a server running a different
+        # model or one that isn't healthy — those fall back to reclaim+spawn.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            spawned: list[str] = []
+            manager._enforce_residency = lambda p: None
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: False
+            manager._kill_pid = lambda pid: None
+            manager._spawn_and_wait = (
+                lambda p, port, ep, **kw: spawned.append(ep) or ep)
+
+            ep = manager._start_llama_cpp(profile)
+            self.assertEqual(spawned, ["http://127.0.0.1:8080/v1"])
+            self.assertEqual(ep, "http://127.0.0.1:8080/v1")
+
+    def test_orphan_with_small_ctx_not_adopted_for_big_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            spawned: list[str] = []
+            manager._enforce_residency = lambda p: None
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: True
+            manager._orphan_context = lambda ep: 8192  # too small for 32k
+            manager._kill_pid = lambda pid: None
+            manager._spawn_and_wait = (
+                lambda p, port, ep, **kw: spawned.append(ep) or ep)
+
+            manager._start_llama_cpp(profile, ctx_override=32768)
+            self.assertEqual(spawned, ["http://127.0.0.1:8080/v1"])
+
     def test_prewarm_retries_until_model_fits(self):
         # A failed resource_fit at boot must not leave the app cold — VRAM is
         # often still draining the previous session's models for the first
@@ -599,6 +893,7 @@ class RuntimeManagerTests(unittest.TestCase):
             spawns: list[int | None] = []
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
 
             def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
                 spawns.append(ctx_override)
@@ -631,6 +926,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             release = threading.Event()
 
             def slow_spawn(p, port, endpoint, **kwargs):
@@ -697,6 +993,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager._health = lambda ep, timeout=1.5: (True, "ok")
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             spawns: list[int | None] = []
 
             def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
@@ -727,6 +1024,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager._health = lambda ep, timeout=1.5: (True, "ok")
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             manager._spawn_and_wait = lambda p, port, endpoint, **k: endpoint
             shrunk = manager.shrink_oversized_context(busy_models={"busy"})
             self.assertEqual(shrunk, ["big"])

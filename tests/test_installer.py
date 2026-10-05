@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -344,9 +345,18 @@ class InstallerContractTests(unittest.TestCase):
             "cryptography==50.0.1", "py7zr==1.1.3",
             "onnxruntime==1.30.0", "phonemizer==3.4.0",
             "espeakng-loader==0.2.4", "numpy==2.3.5",
+            "playwright==",
         ):
             self.assertIn(dep, self.build)
         self.assertNotIn("numpy>=", self.build)
+
+    def test_windows_build_bundles_playwright_driver(self):
+        # Browser E2E must work from the frozen install: the playwright
+        # package + its node driver ship in the backend bundle; the browser
+        # binary resolves at runtime (system Edge channel or managed
+        # Chromium under data/) so no hidden dev-machine dependency.
+        self.assertIn("--collect-all playwright", self.build)
+        self.assertIn("--collect-all greenlet", self.build)
 
     def test_update_uses_installer_owned_process_shutdown(self):
         self.assertIn("CloseApplications=no", self.installer)
@@ -404,6 +414,49 @@ class InstallerContractTests(unittest.TestCase):
 
     def test_legacy_duplicate_installer_definition_is_removed(self):
         self.assertFalse((ROOT / "packaging" / "ChatNexus.iss").exists())
+
+
+class DocsVersionTruthTests(unittest.TestCase):
+    """Docs that name the *current* version must agree with canonical VERSION.
+
+    Historical release notes (CHANGELOG, per-version paragraphs) may keep
+    old numbers — only the "current version" declarations are checked.
+    """
+
+    def setUp(self):
+        self.version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+    def _current_version_lines(self, path: Path) -> list[str]:
+        return [
+            ln for ln in path.read_text(encoding="utf-8").splitlines()
+            if "current" in ln.lower() and "version" in ln.lower()
+        ]
+
+    def test_readme_current_version_matches(self):
+        readme = ROOT / "README.md"
+        for ln in self._current_version_lines(readme):
+            if "## " in ln or "development version" in ln.lower():
+                continue  # headings introduce the section, not the value
+            for num in re.findall(r"\d+\.\d+\.\d+", ln):
+                self.assertEqual(num, self.version,
+                                 f"README.md stale version reference: {ln!r}")
+        # The version value line right under the heading.
+        lines = readme.read_text(encoding="utf-8").splitlines()
+        for i, ln in enumerate(lines):
+            if ln.strip().lower() == "## current development version":
+                self.assertEqual(lines[i + 2].strip().strip("`"), self.version)
+
+    def test_devin_start_here_current_version_matches(self):
+        for ln in self._current_version_lines(ROOT / "DEVIN_START_HERE.md"):
+            for num in re.findall(r"\d+\.\d+\.\d+", ln):
+                self.assertEqual(num, self.version,
+                                 f"DEVIN_START_HERE.md stale version: {ln!r}")
+
+    def test_sync_version_artifacts_agree(self):
+        # .NET csproj Version must equal canonical VERSION.
+        csproj = (ROOT / "desktop" / "ChatNexus.Desktop" /
+                  "ChatNexus.Desktop.csproj").read_text(encoding="utf-8")
+        self.assertIn(f"<Version>{self.version}</Version>", csproj)
 
 
 if __name__ == "__main__":
