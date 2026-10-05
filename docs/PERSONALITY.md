@@ -281,9 +281,14 @@ cue to one of 34 acts; canned lanes keep their own act.
   speed; `energy`/`warmth`/`emphasis_level` → bounded per-utterance
   pitch/gain deltas (±1 semitone / ±3 dB around neutral 0.5) so a
   hyper persona sounds slightly brighter and a warm one slightly
-  softer without wiping the preset signature. `emphasis_spans`,
-  `pause_hint`, `nonverbal_rate`, `register`, `seriousness` remain
-  documented hints until the engine exposes controls.
+  softer without wiping the preset signature. `pause_hint` inserts one
+  bounded ellipsis at a strong clause boundary in the *speech* text
+  (display text untouched); `seriousness` calms pitch/gain/pace;
+  `register` technical/formal adds a small pace damp; `nonverbal_rate`
+  scales `VocalizationEngine` keep-probability (0 → silent, ~0.3
+  baseline). `emphasis_spans` remains documented span-protection
+  metadata — the Kokoro path has no per-word emphasis control, so it
+  is reported honestly rather than simulated.
 
 `RenderedReply` reports `opening_family`/`closing_family`/
 `micro_reaction`/`used_address`/`repeat_index`/`genome_rendered` for
