@@ -212,7 +212,15 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
     def git_push(args: dict) -> str:
         remote = str(args.get("remote") or remote_default).strip()
         branch = str(args.get("branch") or "").strip() or _current_branch(workspace)
-        command = ["push"]
+        _ensure_token()
+        command = []
+        if client.authenticated:
+            # Header-scoped auth — same pattern as github_clone: the
+            # connected credential drives the push without landing in
+            # .git/config or the process-visible remote URL.
+            command += ["-c",
+                        f"http.extraHeader=AUTHORIZATION: bearer {client.token}"]
+        command += ["push"]
         if bool(args.get("set_upstream", True)):
             command.extend(["--set-upstream", remote, branch])
         else:
