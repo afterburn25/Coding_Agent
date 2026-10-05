@@ -179,6 +179,53 @@ class EndToEndAgentTests(unittest.TestCase):
             # tool-capable lane, so schemas go out in the request.
             self.assertTrue(payload.get("tools"))
 
+    def test_bundled_manifest_overrides_stale_on_disk_copy(self):
+        # Regression: the install-time copy of tools/manifests under
+        # runtime_root was never re-synced — a stale invokeai.json using
+        # detect.files (all paths must exist, including a POSIX-only path)
+        # reported a working InvokeAI venv as "not detected on disk" forever.
+        # Bundled manifests ship with the binary and must win for shared ids.
+        import sys
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td)
+            runtime_root = root / ".runtime"
+            # Stale on-disk manifest: detect.files requires BOTH paths.
+            disk_dir = runtime_root / "tools" / "manifests"
+            disk_dir.mkdir(parents=True)
+            stale = {
+                "id": "invokeai", "name": "InvokeAI", "version": "6.x",
+                "category": "images", "permissions": ["packages.install"],
+                "install": {"method": "venv", "package": "invokeai",
+                            "dest": "tools/InvokeAI"},
+                "detect": {"files": ["tools/InvokeAI/Scripts/invokeai-web.exe",
+                                     "tools/InvokeAI/bin/invokeai-web"]},
+            }
+            (disk_dir / "invokeai.json").write_text(
+                json.dumps(stale), encoding="utf-8")
+            # Bundled manifest (newer binary): files_any — either path is ok.
+            bundle_dir = root / "bundle" / "tools" / "manifests"
+            bundle_dir.mkdir(parents=True)
+            fresh = dict(stale)
+            fresh["detect"] = {"files_any": ["tools/InvokeAI/Scripts/invokeai-web.exe",
+                                             "tools/InvokeAI/bin/invokeai-web"]}
+            (bundle_dir / "invokeai.json").write_text(
+                json.dumps(fresh), encoding="utf-8")
+            # The venv's Windows entrypoint exists; the POSIX one never will.
+            exe = runtime_root / "tools" / "InvokeAI" / "Scripts" / "invokeai-web.exe"
+            exe.parent.mkdir(parents=True)
+            exe.write_text("exe", encoding="utf-8")
+
+            sys._MEIPASS = str(bundle_dir.parent.parent)
+            try:
+                state = self._state(td, fake.endpoint)
+            finally:
+                del sys._MEIPASS
+            spec = state._tool_spec("invokeai")
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec.install_status, "installed")
+
     def test_mission_park_does_not_block_lane(self):
         # A mission-attributed waiting_approval row is mission work — its own
         # approval flow resumes it — and must never freeze the agent lane

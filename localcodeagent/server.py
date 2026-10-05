@@ -661,14 +661,29 @@ class AppState:
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
-        if not manifests_dir.is_dir():
-            # Packaged builds bundle the manifests inside the backend payload
-            # (PyInstaller _MEIPASS) rather than next to config.json.
-            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "tools" / "manifests"
-            if bundled.is_dir():
-                manifests_dir = bundled
+        # Packaged builds also bundle the manifests inside the backend payload
+        # (PyInstaller _MEIPASS). The on-disk copy under runtime_root is seeded
+        # at install time but never re-synced — a stale copy persists forever
+        # (live evidence: invokeai.json kept the pre-fix `detect.files` shape,
+        # so a working venv reported "not detected on disk"). Load the on-disk
+        # dir first for user-added manifests, then let bundled manifests
+        # overwrite shared ids — the bundle ships with this binary and matches
+        # its code.
+        bundled_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "tools" / "manifests"
+        if not manifests_dir.is_dir() and bundled_dir.is_dir():
+            manifests_dir = bundled_dir
         self.plugin_manifests = load_plugin_manifests(
             manifests_dir, self.tools, workspace=self.workspace, install_root=runtime_root)
+        if bundled_dir.is_dir() and bundled_dir.resolve() != manifests_dir.resolve():
+            overlay = load_plugin_manifests(
+                bundled_dir, self.tools, workspace=self.workspace,
+                install_root=runtime_root)
+            self.plugin_manifests = {
+                "loaded": list(self.plugin_manifests.get("loaded") or [])
+                          + list(overlay.get("loaded") or []),
+                "errors": list(self.plugin_manifests.get("errors") or [])
+                          + list(overlay.get("errors") or []),
+            }
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
         # tool_downloads/jobs exist now — safe to re-enter a setup that was
