@@ -1982,6 +1982,12 @@ internal sealed class MainForm : Form
     public Func<Task>? FarewellHook { get; set; }
     private bool _farewellRunning;
     private bool _allowClose;
+    // Interface voice-queue state, reported via webview messages. The
+    // farewell drains this before speaking so shutdown never overlaps a
+    // greeting/response already mid-playback.
+    private volatile bool _webVoiceBusy;
+    private TaskCompletionSource<bool> _webVoiceIdleTcs =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -2026,6 +2032,8 @@ internal sealed class MainForm : Form
 
     private async Task RunFarewellThenCloseAsync()
     {
+        try { await DrainWebVoiceAsync(TimeSpan.FromSeconds(75)); }
+        catch { /* a stuck queue must never trap the exit */ }
         try { if (FarewellHook is not null) await FarewellHook(); }
         catch { /* a failed farewell must never trap the exit */ }
         _allowClose = true;
@@ -2033,6 +2041,47 @@ internal sealed class MainForm : Form
         {
             try { BeginInvoke(new Action(Close)); } catch { }
         }
+    }
+
+    /// <summary>
+    /// Voice clips already playing in the interface must finish before the
+    /// farewell speaks — the goodbye never talks over an in-flight
+    /// greeting/response. Latch the page's queue so nothing new starts,
+    /// then wait for busy→idle. Bounded so wedged audio can't hang exit.
+    /// </summary>
+    private async Task DrainWebVoiceAsync(TimeSpan budget)
+    {
+        try
+        {
+            if (_webView.CoreWebView2 is not null)
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.NexusVoice&&(NexusVoice._draining=true," +
+                    "NexusVoice._reportState&&NexusVoice._reportState())");
+            }
+        }
+        catch { /* webview may already be gone — nothing to drain */ }
+        if (!_webVoiceBusy)
+        {
+            return;
+        }
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (_webVoiceBusy && deadline.Elapsed < budget)
+        {
+            var remaining = budget - deadline.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                break;
+            }
+            var tcs = _webVoiceIdleTcs;
+            await Task.WhenAny(tcs.Task, Task.Delay(remaining));
+        }
+        try
+        {
+            BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                $"web voice drain done busy={_webVoiceBusy} waited={deadline.ElapsedMilliseconds}ms");
+        }
+        catch { }
     }
 
     /// <summary>Backend base URL once the process is up — used by startup narration.</summary>
@@ -2302,9 +2351,48 @@ internal sealed class MainForm : Form
         {
             try
             {
-                if (args.TryGetWebMessageAsString().Contains("nexus-core-ready", StringComparison.Ordinal))
+                // Pages post structured objects — TryGetWebMessageAsString
+                // only unwraps string posts, so WebMessageAsJson is the
+                // only reliable channel. (The ready handshake previously
+                // waited out its 15s fallback every boot for this reason.)
+                var msg = args.WebMessageAsJson;
+                using var doc = System.Text.Json.JsonDocument.Parse(msg);
+                var type = doc.RootElement.TryGetProperty("type", out var t)
+                    ? t.GetString()
+                    : null;
+                if (type == "nexus-core-ready")
                 {
                     _interfaceReady.TrySetResult(true);
+                }
+                else if (type == "voice-state" &&
+                         doc.RootElement.TryGetProperty("busy", out var busy))
+                {
+                    // The interface's voice queue reports busy/idle so the
+                    // farewell can wait out in-flight speech instead of
+                    // talking over it.
+                    try
+                    {
+                        BackendProcess.NoteStartup(
+                            Path.Combine(_appDir, "data", "logs"),
+                            $"web voice-state busy={busy.GetBoolean()}");
+                    }
+                    catch { }
+                    if (busy.GetBoolean())
+                    {
+                        _webVoiceBusy = true;
+                        if (_webVoiceIdleTcs.Task.IsCompleted)
+                        {
+                            _webVoiceIdleTcs =
+                                new TaskCompletionSource<bool>(
+                                    TaskCreationOptions
+                                        .RunContinuationsAsynchronously);
+                        }
+                    }
+                    else
+                    {
+                        _webVoiceBusy = false;
+                        _webVoiceIdleTcs.TrySetResult(true);
+                    }
                 }
             }
             catch

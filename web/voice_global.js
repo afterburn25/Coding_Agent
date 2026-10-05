@@ -54,9 +54,25 @@
     api('/api/voice/stop', { reason: 'user' });
   };
 
+  // Host visibility: the desktop farewell must not talk over voice
+  // already playing here. Report busy/idle transitions so the host can
+  // wait for the queue to drain before speaking the goodbye.
+  NV._lastReportedBusy = null;
+  NV._draining = false; // latched by the host at shutdown — no new clips
+  NV._reportState = function () {
+    const busy = !!NV.current || NV.queue.length > 0;
+    if (busy === NV._lastReportedBusy) return;
+    NV._lastReportedBusy = busy;
+    try {
+      if (window.chrome && chrome.webview && chrome.webview.postMessage) {
+        chrome.webview.postMessage({ type: 'voice-state', busy: busy });
+      }
+    } catch (e) {}
+  };
+
   NV._seenSegments = new Set();
   NV.enqueue = function (url, meta) {
-    if (NV.muted || !NV.enabled) return;
+    if (NV.muted || !NV.enabled || NV._draining) return;
     const sid = meta && meta.segment_id;
     if (sid && NV._seenSegments.has(sid)) return;  // bus + stream dedupe
     if (sid) {
@@ -139,6 +155,7 @@
 
   NV.on = function (fn) { NV.listeners.push(fn); };
   NV._emit = function (evt) {
+    NV._reportState();
     for (const fn of NV.listeners) { try { fn(evt, NV); } catch (e) {} }
     const btn = document.getElementById('voiceToggle');
     if (btn) {
