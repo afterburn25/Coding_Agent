@@ -98,6 +98,14 @@ user meaning → IntentEnvelope/ActiveContext → SemanticResponse (WHAT)
   in-character with per-persona pace, repeat asks get honest framing,
   persona switch changes surface, speech-preview battery returns
   8 acts × renders + plans, `finish_task` applies delivery pace.
+- Live HTTP dogfood (real `python -m localcodeagent` server):
+  `POST /api/profiles` → `set_active preset:nerdy` →
+  `GET .../speech-preview?register=coding` returns the nerdy genome
+  summary + per-act renders with delivery plans;
+  `POST /api/chat "what time is it"` → "Acknowledged. The current
+  local time is …" (nerdy ack pool + verbatim fact, model skipped);
+  the same question again → "Still the case — …" honest repeat
+  framing. `POST /api/chat` returns `builtin-local` model attribution.
 
 ### Still open
 
