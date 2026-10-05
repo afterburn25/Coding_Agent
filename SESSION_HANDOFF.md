@@ -2,6 +2,112 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-05 — Persona Speech Genome (LANDED, milestone branch)
+
+Branch: `milestone/integrated-reliability-closeout`. Scope: personas
+stop being "one assistant wearing costumes" — each gets a structured,
+versioned speech identity that drives deterministic surface
+realization. Meaning stays upstream (IntentEnvelope / tools / facts);
+the genome only controls HOW it is said.
+
+### What landed
+
+- `localcodeagent/personality/genome.py` — `SPEECH_GENOME_VERSION`
+  schema: vocabulary/idiolect (per-family acknowledgement, success,
+  error, disagreement, transition, interjection, signature-word
+  pools), syntax shape (sentence length/variance, fragment + one-word
+  rates, dash usage, list preference, answer-first, technical density,
+  elaboration), cadence, opening/closing family weights, 12-category
+  humor genome, disagreement/storytelling/question/repair styles,
+  relationship + address POLICY (""/first/formal/literal-term —
+  preset `address` is a policy token, not a name), language
+  boundaries, vocal biases, micro-reaction pools + cooldowns,
+  per-confidence phrase stems, repetition controls.
+  `derive_genome()` layers neutral defaults → behavior-family genome →
+  trait-slider nudges → explicit `speech_genome` overrides (deep-merge).
+  `migrate_genome()` fills missing/corrupt fields, preserves unknown
+  keys, never destroys persona data on upgrade.
+- `localcodeagent/context/realize.py` — `SemanticResponse` extended
+  (speech_act, confidence, exact_spans, conclusions/uncertainty/
+  evidence, actions_failed, next_steps, register, semantic_id);
+  `RenderContext` (mood, seriousness 0-3, register, relationship,
+  social cue, sarcasm, user energy, address, creator);
+  `SpeechDeliveryPlan` + `RenderedReply`; `classify_speech_act()`
+  (intent + outcome + seriousness + social cue, canned lanes keep
+  their own act); `PhraseCooldowns`; `PersonaRenderer.render_semantic()`
+  — opening/closing families weighted per genome, confidence-stem
+  hedging ONLY for non-verified facts, micro-reactions + address terms
+  with per-category cooldowns, humor suppression in serious acts and
+  non-allowed registers, repeat evolution (idx≥2 reframes, ≥3
+  compresses to the load-bearing fact), `canonical=` lane for
+  pre-composed authoritative bodies (verbatim pass-through + honest
+  repeat acks).
+- Orchestrator: `builtin_semantic()` expresses every canned lane
+  (time/date/identity/greeting/capability/self-learning) as
+  SemanticResponse + canonical text; `_builtin_reply()` renders through
+  the active genome via `speech_context=` resolver. Canned replies are
+  no longer suppressed under an active persona when the genome renders
+  — deterministic in-character answers, no model call. Answer-Memory
+  hits render canonically with repeat evolution keyed on asked
+  text+answer. `AgentResult.delivery` carries the plan;
+  `voice.finish_task(delivery=)` applies `pace` to enqueued speech.
+- Store/API: `speech_genome` flows through `resolve_active`/`resolve`
+  (customs inherit base preset genome or carry their own);
+  `create_custom`/`patch_custom` accept genome overrides via
+  `migrate_genome`; `available()` exposes the derived genome +
+  `genome_summary`; `GET /api/profiles/<id>/personality/speech-preview`
+  renders an 8-act battery through any resolvable persona (the Preview
+  Lab backend). Fixed latent `_profile_get` query-arg bug that 500'd
+  `/personality/effective`.
+- `tests/test_speech_genome.py` — 34 tests: schema/migration,
+  all-preset derivation, family distinctiveness, act classification,
+  register+seriousness gating, address policies, uncertainty
+  calibration, verbatim fact/identifier/identity invariants, delivery
+  plans, cooldowns, repeat evolution, builtin+AM integration, and a
+  ~200-render repetition soak.
+
+### Pipeline
+
+```
+user meaning → IntentEnvelope/ActiveContext → SemanticResponse (WHAT)
+→ speech act → relationship + mood → speech genome
+→ variation/cooldowns → text realization → SpeechDeliveryPlan → voice
+```
+
+### Invariants (verified by tests)
+
+- Facts, tool results, identity facts, numbers, identifiers pass
+  through verbatim — persona colors the envelope only.
+- Verified content never gets a random hedge; uncertainty gets the
+  persona's own stem per level.
+- Serious acts/registers suppress humor, micro-reactions, playful
+  closings; address terms cool down instead of spamming.
+
+### Verified
+
+- `tests.test_speech_genome`: 34 pass. Persona suites: 184 pass.
+- Full suite: 2091 tests — failures were all pre-existing or
+  environmental (splash tests fail identically at e7d228fc — the
+  splash sync work lives on main; two DuckDB data-tool tests fail at
+  baseline; isolated-second-instance selftest is load-flaky, passes
+  standalone). The queue-attribution tests broke on the context WIP's
+  thread-local `lane_mission_id` move — updated to the new mechanism
+  in 432c62ac.
+- Live AppState dogfood: `_speech_context` resolves sassy genome
+  (sarcasm/wit/teasing/deadpan categories), builtin lanes render
+  in-character with per-persona pace, repeat asks get honest framing,
+  persona switch changes surface, speech-preview battery returns
+  8 acts × renders + plans, `finish_task` applies delivery pace.
+
+### Still open
+
+- Web UI: persona editor fields for genome sections + Preview Lab
+  page calling `/personality/speech-preview` (backend landed).
+- Voice: `pace` is applied; emphasis_spans/warmth/energy remain
+  documented hints until the TTS engine exposes controls.
+- Long-session UI soak + real-voice dogfood on the installed app.
+
+
 ## Canonical product/UI identity
 
 - Product name: **Nexus Core**.

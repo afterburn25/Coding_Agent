@@ -480,8 +480,11 @@ class PersonaRenderer:
         "request_clarification": ("direct_answer", "acknowledgement"),
         "ask_question": ("direct_answer", "observation"),
     }
+    # "result_first" is deliberately absent: success/error terms only
+    # fit outcome acts — "Done — you're welcome." before a plain answer
+    # reads as a non sequitur.
     _DEFAULT_OPENINGS = ("direct_answer", "acknowledgement",
-                         "observation", "result_first", "reaction",
+                         "observation", "reaction",
                          "brief_confirmation", "context_callback",
                          "technical_summary")
 
@@ -511,7 +514,11 @@ class PersonaRenderer:
         if fam == "result_first":
             if act == "report_failure":
                 return list(vocab.get("error_terms") or ["It failed."])
-            return list(vocab.get("success_terms") or ["Done."])
+            if act in ("report_success", "celebrate", "congratulate"):
+                return list(vocab.get("success_terms") or ["Done."])
+            # Non-outcome acts that still landed here get a neutral
+            # result-shaped stem, never a success term.
+            return ["Short version —", "The gist —", "Straight up —"]
         if fam == "reaction":
             return list(vocab.get("interjections") or
                         self._OPENING_STEMS["reaction"])
