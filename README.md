@@ -10,7 +10,15 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 ## Current development version
 
-`0.8.0`
+`0.21.0`
+
+Canonical version lives in `VERSION`; `scripts/sync_version.py` derives
+every downstream artifact (pyproject, installer defaults, .NET project,
+PyInstaller resource, `.agent/project.json`) — `--check` verifies parity.
+
+The paragraphs below are **historical release highlights**, not the
+current state — `PROJECT_STATUS.md` and `SESSION_HANDOFF.md` are
+authoritative for what is actually live.
 
 v0.8 gives Nexus Core a modular **cognitive architecture** — the *Nexus Brain* coordinates seven functional regions (Prefrontal Cortex, Hippocampus, Thalamus, Basal Ganglia, Motor Cortex, Cerebellum, Brain Stem) over a typed cognitive event bus, the *Corpus Callosum*. The LLM is not the brain: models are interchangeable inference resources routed by capability, while memory, plans, learned procedures, health, and action history persist in Nexus itself. See [`docs/architecture/NEXUS_BRAIN.md`](docs/architecture/NEXUS_BRAIN.md).
 
