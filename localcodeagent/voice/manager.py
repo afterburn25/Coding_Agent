@@ -225,23 +225,37 @@ class VoiceManager:
             n += 1
         return n
 
-    def finish_task(self, task_id: str, final_text: str | None = None) -> None:
+    def finish_task(self, task_id: str, final_text: str | None = None,
+                    delivery: dict | None = None) -> None:
         """Flush the streamer tail; if nothing was emitted (non-streamed or
-        fully skipped), fall back to a filtered one-shot of final_text."""
+        fully skipped), fall back to a filtered one-shot of final_text.
+
+        ``delivery`` is a SpeechDeliveryPlan dict from the persona speech
+        genome — the voice layer consumes what it supports (``pace`` →
+        job speed); unsupported characteristics are documented hints,
+        never fabricated."""
         streamer = self._streamers.pop(task_id, None)
+        pace = 1.0
+        try:
+            if isinstance(delivery, dict):
+                pace = max(0.5, min(1.8,
+                                    float(delivery.get("pace") or 1.0)))
+        except (TypeError, ValueError):
+            pace = 1.0
         try:
             if self.enabled() and not self.muted():
                 n_emitted = streamer.emitted_count if streamer else 0
                 if streamer:
                     for sent in streamer.flush():
-                        self.enqueue(task_id, sent)
+                        self.enqueue(task_id, sent, speed=pace)
                 if n_emitted == 0 and final_text and self.mode() in {
                         "responses", "responses_activity"}:
                     spoken = self.filter.filter(final_text)
                     if spoken:
                         for sent in _split_sentences(spoken):
                             for part in split_for_speech(sent):
-                                self.enqueue(task_id, part)
+                                self.enqueue(task_id, part,
+                                             speed=pace)
         finally:
             try:
                 self.vocal.end_task(task_id)

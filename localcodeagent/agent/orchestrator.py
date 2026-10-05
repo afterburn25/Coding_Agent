@@ -120,6 +120,9 @@ class AgentResult:
     research: dict[str, Any] = field(default_factory=dict)
     response_source: str = ""  # e.g. "answer_memory" when inference was skipped
     memory: dict[str, Any] = field(default_factory=dict)
+    # SpeechDeliveryPlan.as_dict() when the reply was realized through
+    # the persona speech genome — voice layer may consume pace/emphasis.
+    delivery: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -201,6 +204,7 @@ class AgentOrchestrator:
         skills=None,
         health=None,
         profile_context=None,
+        speech_context=None,
         image_outputs=None,
         capability_registry=None,
     ) -> None:
@@ -234,6 +238,9 @@ class AgentOrchestrator:
         # Zero-arg resolver returning the active profile's personality +
         # personal-memory prompt block (presentation only).
         self.profile_context = profile_context
+        # One-arg resolver user_text -> (speech_genome, RenderContext)
+        # for the active persona; None/absent = no genome lane.
+        self._speech_resolver = speech_context
         # job_id -> output file paths — lets image follow-ups reuse the
         # last generated image as edit source without holding ImageManager.
         self._image_outputs = image_outputs
@@ -362,24 +369,37 @@ class AgentOrchestrator:
         no model is loaded or invoked."""
         answer_row = match.answer or {}
         answer_text = str(answer_row.get("answer_text") or "")
-        # §37 — canonical content passes through untouched. The repeat
-        # fingerprint keys on question+answer: asking the SAME question
-        # again gets an honest "same answer as before" wrapper; a
-        # different question that happens to share an answer replays
-        # cleanly — "before" only counts when it's actually the same ask.
+        delivery_meta: dict = {}
+        # §37 — canonical content passes through untouched. With the
+        # speech genome wired, the reply realizes through it: persona
+        # wrapper + repeat evolution on the SAME ask (keyed on
+        # question+answer — a different question sharing an answer
+        # replays cleanly). Without a genome the legacy ledger wrap
+        # applies.
         try:
-            ledger = _BUILTIN_RENDERER.ledger
-            # Key on the ASKED text — two different questions that share
-            # a stored row aren't a repeat, even when the answer is.
+            from ..context.realize import SemanticResponse, fingerprint
             pair = str(user_text or "") + "|" + answer_text
-            if ledger.repetition_score(
-                    pair, intent="answer_memory")["exact_duplicate"]:
-                from ..context.realize import REPEAT_ACKS
-                ack = _BUILTIN_RENDERER.render(
-                    "am_repeat", REPEAT_ACKS, intent="answer_memory")
-                answer_text = f"{ack} {answer_text}"
-            ledger.record("answer_memory", pair)
-            ledger.record("answer_memory_text", answer_text)
+            sp = self._speech(user_text)
+            if sp:
+                genome, ctx = sp
+                out = _BUILTIN_RENDERER.render_semantic(
+                    SemanticResponse(
+                        semantic_id="am:" + fingerprint(pair),
+                        speech_act="answer"),
+                    genome, ctx, intent="answer_memory",
+                    canonical=answer_text)
+                answer_text = out.text
+                delivery_meta = out.plan.as_dict()
+            else:
+                ledger = _BUILTIN_RENDERER.ledger
+                if ledger.repetition_score(
+                        pair, intent="answer_memory")["exact_duplicate"]:
+                    from ..context.realize import REPEAT_ACKS
+                    ack = _BUILTIN_RENDERER.render(
+                        "am_repeat", REPEAT_ACKS, intent="answer_memory")
+                    answer_text = f"{ack} {answer_text}"
+                ledger.record("answer_memory", pair)
+                ledger.record("answer_memory_text", answer_text)
         except Exception:
             pass
         memory_meta = {
@@ -450,6 +470,7 @@ class AgentOrchestrator:
             task=completed_task.as_dict(),
             response_source="answer_memory",
             memory=memory_meta,
+            delivery=delivery_meta,
         )
 
     def _sync_nexus_brain(self) -> None:
@@ -659,10 +680,34 @@ class AgentOrchestrator:
         _BUILTIN_RENDERER.ledger.record(intent or semantic_id, text)
         return text
 
+    def _speech(self, user_text: str):
+        """Resolve the active persona's (genome, RenderContext) via the
+        server-supplied resolver. None = no genome lane; failures are
+        presentation-only and degrade silently."""
+        try:
+            resolver = self._speech_resolver
+            if callable(resolver):
+                return resolver(user_text)
+        except Exception:
+            pass
+        return None
+
     @classmethod
-    def builtin_utility_response(cls, user_text: str) -> str | None:
+    def builtin_semantic(cls, user_text: str):
+        """Deterministic local lanes expressed as WHAT-to-say —
+        ``(SemanticResponse, canonical_text) | None``. The persona
+        genome layer renders the surface; callers without one use the
+        canonical text directly."""
+        from ..context.realize import SemanticResponse
         normalized = re.sub(r"\s+", " ", user_text.strip().lower()).strip("!?., ")
         clock = cls.current_time_snapshot()
+
+        def _sem(sid: str, act: str, text: str,
+                 *spans: str) -> tuple:
+            return (SemanticResponse(
+                facts=[text], semantic_id=sid, speech_act=act,
+                exact_spans=[s for s in spans if s]), text)
+
         time_queries = {
             "what time is it", "what is the time", "what's the time",
             "what's the current time", "what is the current time", "current time",
@@ -684,24 +729,33 @@ class AgentOrchestrator:
         if normalized in combined_queries:
             offset = clock["utc_offset"]
             utc = f"UTC{offset}" if offset else "local time"
-            return (
+            return _sem(
+                "datetime", "answer",
                 f"It is {clock['human_date']} at {clock['human_time']} "
-                f"{clock['timezone']} ({utc})."
-            )
+                f"{clock['timezone']} ({utc}).",
+                clock["human_time"], clock["human_date"])
         if normalized in time_queries:
             offset = clock["utc_offset"]
             utc = f"UTC{offset}" if offset else "local time"
-            return f"The current local time is {clock['human_time']} {clock['timezone']} ({utc})."
+            return _sem(
+                "time", "answer",
+                f"The current local time is {clock['human_time']} "
+                f"{clock['timezone']} ({utc}).",
+                clock["human_time"])
         if normalized in date_queries or normalized in day_queries:
-            return f"Today is {clock['human_date']}."
+            return _sem("date", "answer",
+                        f"Today is {clock['human_date']}.",
+                        clock["human_date"])
 
         # Creator-locked identity facts (birthday, age, creator) — answered
         # deterministically so no model output or stored memory can
-        # contradict them.
+        # contradict them. The genome may color the envelope; the fact
+        # text itself passes through verbatim.
         from .. import identity
         identity_answer = identity.response_for(normalized)
         if identity_answer is not None:
-            return identity_answer
+            return _sem(f"identity:{normalized[:40]}", "answer",
+                        identity_answer)
 
         greetings = {
             "hi", "hello", "hey", "hey there", "good morning",
@@ -709,8 +763,8 @@ class AgentOrchestrator:
         }
         if normalized in greetings:
             from ..context import realize as _rz
-            return cls._builtin_render(
-                "greeting", _rz.GREETING_VARIANTS, intent="greeting")
+            return _sem("greeting", "greet", cls._builtin_render(
+                "greeting", _rz.GREETING_VARIANTS, intent="greeting"))
 
         capability_phrases = (
             "what can you do",
@@ -721,8 +775,9 @@ class AgentOrchestrator:
         )
         if any(phrase in normalized for phrase in capability_phrases):
             from ..context import realize as _rz
-            return cls._builtin_render(
-                "capability", _rz.CAPABILITY_VARIANTS, intent="capability")
+            return _sem("capability", "answer", cls._builtin_render(
+                "capability", _rz.CAPABILITY_VARIANTS,
+                intent="capability"))
 
         self_learning_phrases = (
             "can you be self learning", "can you be self-learning", "can you self learn",
@@ -731,17 +786,40 @@ class AgentOrchestrator:
         )
         if any(phrase in normalized for phrase in self_learning_phrases):
             from ..context import realize as _rz
-            return cls._builtin_render(
+            return _sem("self_learning", "answer", cls._builtin_render(
                 "self_learning", _rz.SELF_LEARNING_VARIANTS,
-                intent="self_learning")
+                intent="self_learning"))
 
         if normalized in {
             "who are you", "what are you", "what is your name", "what's your name", "are you human",
         }:
             from ..context import realize as _rz
-            return cls._builtin_render(
-                "identity", _rz.IDENTITY_VARIANTS, intent="identity")
+            return _sem("identity", "answer", cls._builtin_render(
+                "identity", _rz.IDENTITY_VARIANTS, intent="identity"))
         return None
+
+    @classmethod
+    def builtin_utility_response(cls, user_text: str) -> str | None:
+        pair = cls.builtin_semantic(user_text)
+        return pair[1] if pair else None
+
+    def _builtin_reply(self, user_text: str):
+        """The instance-level persona path: SemanticResponse through the
+        active persona's speech genome when a resolver is wired; the
+        canonical text untouched otherwise. → RenderedReply | None."""
+        from ..context.realize import RenderedReply
+        pair = self.builtin_semantic(user_text)
+        if pair is None:
+            return None
+        sem, canonical = pair
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical,
+                                 speech_act=sem.speech_act or "answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent=sem.semantic_id or "answer",
+            canonical=canonical)
 
     @staticmethod
     def _norm_for_parrot(text: str) -> str:
@@ -4118,17 +4196,26 @@ class AgentOrchestrator:
                 )
 
         # Tier 0: deterministic/local handlers — before any hardware probe or
-        # model routing so cheap answers stay cheap.
-        builtin_response = (
-            self.builtin_utility_response(user_text)
+        # model routing so cheap answers stay cheap. When the persona
+        # speech genome is wired the canned lanes render through it — a
+        # deterministic reply can stay in character without a model call.
+        builtin_reply = (
+            self._builtin_reply(user_text)
             if mode == "auto" and not env.suppresses_canned() else None)
-        if builtin_response is not None and self._persona_active():
-            # A named persona is in play — canned small talk ("what can you
-            # do", "hi") would reply flat and break character. Let the model
-            # lane answer; the utility prompt already lists real capabilities.
-            # EXCEPTION: creator-locked identity answers (age/birthday/creator)
-            # are facts, not style — they stay deterministic under a persona
-            # so no model output can contradict them.
+        builtin_response = (
+            builtin_reply.text if builtin_reply is not None else None)
+        if (
+            builtin_response is not None
+            and self._persona_active()
+            and not builtin_reply.genome_rendered
+        ):
+            # A named persona is in play and no genome lane rendered —
+            # canned small talk ("what can you do", "hi") would reply
+            # flat and break character. Let the model lane answer; the
+            # utility prompt already lists real capabilities.
+            # EXCEPTION: creator-locked identity answers (age/birthday/
+            # creator) are facts, not style — they stay deterministic
+            # under a persona so no model output can contradict them.
             from .. import identity
             if identity.response_for(user_text) is None:
                 builtin_response = None
@@ -4200,6 +4287,9 @@ class AgentOrchestrator:
                 model_events=[builtin_event],
                 steps=0,
                 task=completed_task.as_dict(),
+                delivery=(builtin_reply.plan.as_dict()
+                          if builtin_reply is not None
+                          and builtin_reply.genome_rendered else {}),
             )
 
         # Tier 1/2: Nexus Answer Memory. A trusted learned answer bypasses
