@@ -2016,3 +2016,12 @@ act on the real process, so stop/watchdog/eviction work unchanged).
 Wrong model, unhealthy, or too-small ctx falls back to reclaim+spawn.
 Note: the two live orphans run n_ctx=8192 while profiles default 32k —
 they'll correctly be replaced on restart, not adopted.
+
+Amendment (43de6137): the original edit stranded `_listening_pids`'s body
+as dead code — every llama launch on the 5e68048d build would have hit
+AttributeError. Fixed + hardened: managed_pids uses getattr(pid), the
+adoption call site is try/except so a probe bug can never block a
+launch, and tests mocking `_reclaim_orphaned_port` now also mock
+`_adopt_healthy_orphan` (they were reaching real netstat + the live
+:8080 server). `backend-new` restaged from 43de6137 — the prior staged
+build contained the break and has been replaced.
