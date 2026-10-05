@@ -1553,6 +1553,34 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertFalse(row.get("budget_pause"))
             sup.stop()
 
+    def test_permanent_budget_violation_never_auto_resumes(self):
+        # A runtime-deadline pause can't clear on its own — auto-resuming
+        # it would flap pause->resume->pause forever. Only transient
+        # resource pressure gets the marker.
+        with tempfile.TemporaryDirectory() as td:
+            def slow_executor(m, n, cb):
+                time.sleep(0.6)
+                return {"ok": True, "output": "ok"}
+            sup = make_sup(td, executor=slow_executor)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}],
+                budgets={"max_runtime_s": 1})
+            sup.start_mission(m["id"])
+            # runtime_deadline is stamped on activation (the first tick's
+            # planning transition) as now+budget — activate, then let the
+            # 1s budget genuinely elapse before ticking past it.
+            sup.tick()
+            time.sleep(1.3)
+            for _ in range(5):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            self.assertFalse(row.get("budget_pause"),
+                             "permanent violation must not auto-resume")
+            sup.stop()
+
     def test_user_pause_never_auto_resumes(self):
         # Only budget-caused pauses may auto-resume — an explicit user
         # pause must stay parked even with healthy resources.

@@ -788,11 +788,14 @@ class AutonomousSupervisor:
         if not budget["ok"]:
             # Mark the pause as budget-caused so a transient resource dip
             # (e.g. a model load starving RAM for a minute) auto-resumes
-            # once pressure clears — a user pause never does.
-            def _mark(row: dict) -> None:
-                row["budget_pause"] = {"resume_to": status,
-                                       "next_check": 0.0}
-            self.missions.mutate(mission_id, _mark)
+            # once pressure clears — a user pause never does, and neither
+            # does a permanent violation (deadline/repair cap), which
+            # would otherwise flap pause->resume->pause every 15s.
+            if budget.get("transient"):
+                def _mark(row: dict) -> None:
+                    row["budget_pause"] = {"resume_to": status,
+                                           "next_check": 0.0}
+                self.missions.mutate(mission_id, _mark)
             self.missions.transition(mission_id, "paused",
                                      detail="; ".join(budget["violations"]))
             self.notifications.notify(
