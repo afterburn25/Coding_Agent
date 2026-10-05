@@ -19,6 +19,10 @@ let failed = false, reduced = false, externalProgress = null;
 let shownFill = 0;
 let lastDraw = -Infinity, lastRevision = 0, lastPanel = false;
 let previousHeld = false, completePosted = false, lastPhaseId = '';
+// Rendered scene clips are the primary surface once decoded; the DOM
+// layers beneath stay live as the fallback if playback never starts.
+const bootvid = $('bootvid'), errvid = $('errvid');
+let videoMode = false;
 
 function fail(error) {
   if (failed) return;
@@ -82,6 +86,21 @@ function paint() {
   shownFill += (fillTarget - shownFill) * .09;   // ~60Hz ease; no snap on host updates
   if (Math.abs(fillTarget - shownFill) < .003) shownFill = fillTarget;
   $('fill').style.transform = `scaleX(${shownFill.toFixed(3)})`;
+  // The clip's baked bar must track REAL progress: rate-correct playback
+  // so the scene never outruns the backend — it slows to a near-hold when
+  // progress stalls and speeds up (max 2.5x) to catch up. When progress
+  // completes, the remaining tail plays out fast into the online glow.
+  if (videoMode && !clock.activeFault && bootvid) {
+    const dur = bootvid.duration || 17;
+    const target = Math.min(fillTarget, .985) * dur;
+    const drift = target - bootvid.currentTime;
+    if (drift <= -.6) { if (!bootvid.paused) bootvid.pause(); }
+    else {
+      if (bootvid.paused && !bootvid.ended) void bootvid.play().catch(() => {});
+      const rate = clamp(.35, 1 + drift * .9, 2.5);
+      if (!bootvid.paused && Math.abs(bootvid.playbackRate - rate) > .04) bootvid.playbackRate = rate;
+    }
+  }
   $('stage').classList.toggle('fault', Boolean(state.fault));
   // Core-online state: green pulsating status — the timeline's stable-online
   // point OR the host's canonical CORE SYSTEMS · ONLINE label, whichever
@@ -124,6 +143,16 @@ function changed(fade = .008) {
 function triggerFault(details = {}) {
   const started = clock.triggerFault(details, reduced, externalProgress?.value ?? clamp(clock.time / manifest.duration));
   host({ type: 'startup-fault', message: clock.diagnostics.message });
+  // The error sequence plays on the SAME surface — crossfade the startup
+  // clip into the error clip; the recovery panel stays DOM on top.
+  if (errvid) {
+    errvid.hidden = false;
+    errvid.loop = true;
+    void errvid.play().catch(() => {});
+    void errvid.offsetWidth;           // flush style so the fade runs
+    errvid.classList.add('live');
+    if (bootvid) setTimeout(() => bootvid.pause(), 400);
+  }
   if (started) changed(.16); else if (!failed) paint();
   return started;
 }
@@ -165,7 +194,7 @@ function handleHost(msg) {
       case 'set-reduced': reduced = Boolean(msg.value); paint(); break;
       case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
       case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); break;
-      case 'dispose': clock.pause(); cancelAnimationFrame(raf); void audio.dispose(); void voice.dispose(); break;
+      case 'dispose': clock.pause(); cancelAnimationFrame(raf); bootvid?.pause(); errvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
   } catch (error) { fail(error); }
 }
@@ -205,6 +234,23 @@ async function boot() {
     },
     triggerFault,
   };
+  // The rendered scene clip takes over as the surface the moment its first
+  // frame decodes — the DOM beneath already shows the same artwork, so the
+  // takeover is a fade over identical pixels, not a surface swap.
+  if (bootvid) {
+    const activateVideo = () => {
+      if (videoMode) return;
+      videoMode = true;
+      document.body.classList.add('video-mode');
+      bootvid.classList.add('live');
+      void bootvid.play().catch(() => {});
+    };
+    if (bootvid.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) activateVideo();
+    else {
+      bootvid.addEventListener('loadeddata', activateVideo, { once: true });
+      bootvid.addEventListener('error', () => bootvid.classList.remove('live'), { once: true });
+    }
+  }
   clock.play();
   paint();
   raf = requestAnimationFrame(frame);

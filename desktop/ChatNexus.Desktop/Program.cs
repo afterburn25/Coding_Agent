@@ -958,6 +958,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             _progress.Report(0.15, "services");
             await _main.PrepareAsync(_progress);
 
+            // Core is online — verify the app will genuinely load before
+            // the splash comes down. A dead backend or an unservable UI
+            // throws into the catch → the splash's error sequence takes
+            // over on the SAME surface instead of showing a broken window.
+            await _main.VerifyLoadableAsync();
+
             // The interface posted its ready handshake; the app is genuinely
             // usable. Now hold the splash until the minimum display time too,
             // then play the brief READY + core-glow completion effect before
@@ -1056,6 +1062,8 @@ internal sealed class BackendProcess : IDisposable
     /// </summary>
     public int Port => _announcedPort > 0 ? _announcedPort : _requestedPort;
     public string BaseUrl => $"http://127.0.0.1:{Port}/";
+    /// <summary>True while the backend process is still running.</summary>
+    public bool IsAlive => !_process.HasExited;
     public string LogPath { get; }
     public event Action<int>? UnexpectedExit;
     /// <summary>(pct 0-100, primary, secondary) — real backend-internal phase.</summary>
@@ -2357,6 +2365,27 @@ internal sealed class MainForm : Form
     {
         _backend?.Dispose();
         _backend = null;
+    }
+
+    /// <summary>
+    /// Pre-flight before the splash releases: the backend must still be
+    /// alive, every UI route must serve real markup, and the interface
+    /// WebView2 must be initialized. Called after "core online" and before
+    /// the splash→app handoff — a throw here means the window would have
+    /// been broken, so the splash's error sequence owns the failure on the
+    /// same surface instead.
+    /// </summary>
+    public async Task VerifyLoadableAsync()
+    {
+        if (_backend is null || !_backend.IsAlive)
+        {
+            throw new InvalidOperationException("Nexus Core backend is not running.");
+        }
+        await _backend.ProbeUiAsync();
+        if (_webView.CoreWebView2 is null)
+        {
+            throw new InvalidOperationException("Nexus Core interface is not initialized.");
+        }
     }
 
     private void AttachBackend(BackendProcess backend)

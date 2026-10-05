@@ -12,6 +12,13 @@
     <img id="chamber" src="../assets/nexus-core-splash.png" alt="">
     <div id="shade"></div>
     <canvas id="scene" width="1024" height="576" aria-label="Nexus Core startup"></canvas>
+    <!-- The rendered startup scene is the primary surface: playback rate is
+         driven by real backend progress so the baked readout stays honest,
+         and a fault crossfades to the error sequence in place — same
+         element stack, no surface swap. The canvas/chamber/readout DOM
+         beneath remains the automatic fallback if the clips can't play. -->
+    <video id="bootvid" class="boot-media" src="../assets/NexusCore-Startup-Glow-Only.mp4" muted playsinline preload="auto"></video>
+    <video id="errvid" class="boot-media" src="../assets/NexusCore-Error-Glow-Only.mp4" muted playsinline preload="auto" hidden></video>
     <div id="missing-art" hidden>NEXUS CORE<span>INTELLIGENCE PROTECTED</span></div>
     <div id="readout">
       <div id="track"><div id="fill"></div></div>
