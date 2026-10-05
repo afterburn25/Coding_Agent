@@ -111,6 +111,7 @@ internal sealed class SplashForm : Form
     // init and earns its loader readout only if the WebView2 is taking
     // noticeably long (or failed outright and IS the fallback).
     private readonly Stopwatch _initSw = Stopwatch.StartNew();
+    private bool _fadedIn;
 
     private Panel? _failurePanel;
     private string? _failureMessage;
@@ -150,6 +151,12 @@ internal sealed class SplashForm : Form
         TopMost = true;
         BackColor = Color.FromArgb(4, 8, 18);
         DoubleBuffered = true;
+        // Invisible until a surface is actually ready — the cinematic
+        // initializes behind a 0-opacity form and fades in already
+        // animating, so the user only ever sees ONE splash. If the
+        // WebView2 is slow (>1.2s) or fails, the static fallback still
+        // fades in and runs the whole boot.
+        Opacity = 0.0;
         ClientSize = new Size(1024, 576);
         Text = "Nexus Core";
 
@@ -183,6 +190,14 @@ internal sealed class SplashForm : Form
             _progress.Tick();
             PumpCinematic();
             if (!_webReady) Invalidate();
+            // Reveal once a surface exists — the cinematic the moment
+            // it's painting, or the static fallback if init runs late.
+            if (!_fadedIn && (_webReady || _webFailed
+                || _failurePanel is not null
+                || _initSw.ElapsedMilliseconds > 1200))
+            {
+                FadeFormIn();
+            }
         };
         _timer.Start();
 
@@ -361,14 +376,18 @@ internal sealed class SplashForm : Form
                             _web.Visible = true;
                             if (_failurePanel is null)
                             {
-                                // Dissolve, not a hard cut: an identical
-                                // static frame lives in a borderless overlay
-                                // with real per-window alpha and fades out
-                                // over the live cinematic. Residual GDI-vs-
-                                // Chromium differences (font AA, vignette
-                                // edges, readout geometry) blend instead of
-                                // popping — one splash, not two.
-                                BeginRevealDissolve();
+                                if (_fadedIn)
+                                {
+                                    // Static fallback was visible (slow
+                                    // init) — dissolve it into the live
+                                    // cinematic so the swap blends instead
+                                    // of cutting.
+                                    BeginRevealDissolve();
+                                }
+                                // else: still hidden — the fade-in below
+                                // reveals the cinematic directly; the
+                                // first splash the user sees IS the
+                                // animated one.
                             }
                             else
                             {
@@ -456,6 +475,31 @@ internal sealed class SplashForm : Form
 
     private void RecoveryFeedback(string text) =>
         PostToWeb(new { type = "action-feedback", text });
+
+    /// <summary>
+    /// Reveals the form — a ~190ms opacity ramp. Whatever is underneath
+    /// (the cinematic on a normal boot, the static fallback on a slow or
+    /// failed init) arrives as one screen, never a swap.
+    /// </summary>
+    private void FadeFormIn()
+    {
+        if (_fadedIn) return;
+        _fadedIn = true;
+        var t = new System.Windows.Forms.Timer { Interval = 16 };
+        var steps = 0;
+        t.Tick += (_, _) =>
+        {
+            steps++;
+            try { Opacity = Math.Min(1.0, steps / 12.0); }
+            catch { }
+            if (steps >= 12)
+            {
+                t.Stop();
+                t.Dispose();
+            }
+        };
+        t.Start();
+    }
 
     /// <summary>
     /// Crossfades the static frame into the live cinematic. A borderless
