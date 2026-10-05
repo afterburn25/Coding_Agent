@@ -33,6 +33,7 @@ packaging/llama-runtime/
 build/
 dist/
 dist-*/
+build-*/
 .agent/browser/
 
 .agent/research/
