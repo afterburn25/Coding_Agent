@@ -140,6 +140,10 @@ class PluginManifest:
     docs: str = ""
     install: dict[str, Any] = field(default_factory=dict)
     detect_files: list[str] = field(default_factory=list)
+    # Files where ANY hit proves install — for platform-specific alternates
+    # (e.g. Scripts/foo.exe on Windows vs bin/foo on POSIX) where requiring
+    # every listed path would make detection impossible on one OS.
+    detect_files_any: list[str] = field(default_factory=list)
     health_check: dict[str, Any] = field(default_factory=dict)
     invoke: dict[str, Any] | None = None
     config: dict[str, Any] = field(default_factory=dict)
@@ -173,6 +177,9 @@ class PluginManifest:
             install=dict(raw.get("install") or {}),
             detect_files=[
                 str(x) for x in (raw.get("detect") or {}).get("files") or []
+            ],
+            detect_files_any=[
+                str(x) for x in (raw.get("detect") or {}).get("files_any") or []
             ],
             health_check=dict(raw.get("health_check") or {}),
             invoke=raw.get("invoke") if isinstance(raw.get("invoke"), dict) else None,
@@ -222,13 +229,21 @@ class PluginManifest:
         return found, missing
 
     def is_installed(self, install_root: Path | None = None) -> bool:
-        if self.executables or not self.detect_files:
+        if self.executables or not (self.detect_files or self.detect_files_any):
             _, missing_exe = self.executables_found(install_root)
             if missing_exe:
                 return False
         if self.detect_files:
             _, missing_files = self.detect_files_found(install_root)
             if missing_files:
+                return False
+        if self.detect_files_any:
+            root = Path(install_root).resolve() if install_root else None
+            if not any(
+                    (Path(rel).expanduser() if Path(rel).is_absolute()
+                     else (root / rel if root is not None else Path(rel))
+                     ).exists()
+                    for rel in self.detect_files_any):
                 return False
         return True
 
@@ -463,6 +478,7 @@ def load_plugin_manifests(
                        "manifest_path": manifest.source_path, "process": manifest.process,
                        "dependencies": list(manifest.dependencies),
                        "detect_files": list(manifest.detect_files),
+                       "detect_files_any": list(manifest.detect_files_any),
                        "executables": list(manifest.executables)}
         registry.register(spec)
         registry._plugin_meta[spec.name] = spec_fields  # noqa: SLF001 - registry-owned metadata

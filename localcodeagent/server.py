@@ -865,6 +865,7 @@ class AppState:
                 self.runtime_root, self.config,
                 image_manager=self.images,
                 install_tool_hook=self.install_tool,
+                tool_installed_hook=self._tool_installed,
                 job_lookup=lambda jid: self.jobs.get(jid),
                 capability_registry=self.capability_registry,
             )
@@ -4990,6 +4991,25 @@ class AppState:
             except Exception:
                 pass
 
+    def _tool_spec(self, tool_id: str):
+        spec = self.tools.get(tool_id)
+        if spec is None:
+            match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
+            if match is None:
+                raise KeyError(f"unknown tool '{tool_id}'")
+            spec = self.tools.get(match["name"])
+        return spec
+
+    def _tool_installed(self, tool_id: str) -> bool:
+        """Post-install verification for provisioning: re-scan the manifest's
+        executable detection so a no-op install can't mark the item done."""
+        try:
+            self.tools.refresh_install_status()
+            spec = self._tool_spec(tool_id)
+        except Exception:
+            return False
+        return bool(spec and spec.install_status == "installed")
+
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.
 
@@ -4998,12 +5018,7 @@ class AppState:
         """
         from .tools.plugins import install_command
 
-        spec = self.tools.get(tool_id)
-        if spec is None:
-            match = next((m for m in self.tools.manifests() if m["id"] == tool_id), None)
-            if match is None:
-                raise KeyError(f"unknown tool '{tool_id}'")
-            spec = self.tools.get(match["name"])
+        spec = self._tool_spec(tool_id)
         manifest = self.tools.manifest(spec.name)
         install = manifest.get("install") or {}
         gate = self._permission_gate("packages.install", approve, spec.name)

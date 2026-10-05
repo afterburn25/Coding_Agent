@@ -186,6 +186,20 @@ class DispatchTests(unittest.TestCase):
             m._run_item("t1")
             self.assertEqual(it.state, "completed")
 
+    def test_tool_verify_rejects_undetected_install(self):
+        # A job that reports success but leaves nothing on disk must not
+        # mark the item completed — verification is the honesty boundary.
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td),
+                         install_tool_hook=lambda t, approve=False:
+                             {"ok": True},
+                         tool_installed_hook=lambda tid: False)
+            it = _item("t1", payload={"tool_id": "t1"})
+            m._items = {"t1": it}
+            m._run_item("t1")
+            self.assertNotEqual(it.state, "completed")
+            self.assertIn("not detected", it.error_message)
+
     def test_capability_ready_fires(self):
         ready = []
 

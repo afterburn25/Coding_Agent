@@ -113,12 +113,14 @@ class ProvisioningManager:
     def __init__(self, runtime_root: Path, config: Any, *,
                  image_manager: Any = None,
                  install_tool_hook: Callable[..., dict] | None = None,
+                 tool_installed_hook: Callable[[str], bool] | None = None,
                  job_lookup: Callable[[str], Any] | None = None,
                  capability_registry: Any = None) -> None:
         self.runtime_root = Path(runtime_root)
         self.config = config
         self.image_manager = image_manager
         self._install_tool = install_tool_hook
+        self._tool_installed = tool_installed_hook
         self._job_lookup = job_lookup
         self.capabilities = capability_registry
         self._state_path = self.runtime_root / "data" / "provisioning" / "plan.json"
@@ -533,10 +535,20 @@ class ProvisioningManager:
             time.sleep(1.5)
 
     def _verify_tool(self, it: ProvisionItem) -> None:
-        """Tool installs verify via the manifest's own detect/health check
-        where the registry exposes one — at minimum the install job must
-        have completed without error."""
+        """Tool installs verify via the manifest's own detect check — a
+        job that "completed" but produced nothing on disk must fail the
+        item honestly, not mark a broken install as usable."""
         self._set(it, "verifying", detail="verifying installation")
+        if self._tool_installed is not None:
+            tool_id = str(it.payload.get("tool_id") or it.id)
+            try:
+                ok = bool(self._tool_installed(tool_id))
+            except Exception:
+                ok = False
+            if not ok:
+                raise RuntimeError(
+                    f"{it.label} install finished but the tool was not "
+                    "detected on disk")
 
     def _run_invokeai_model(self, it: ProvisionItem) -> None:
         runtime = getattr(self.image_manager, "invokeai_runtime", None)
