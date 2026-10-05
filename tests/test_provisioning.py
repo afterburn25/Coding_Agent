@@ -189,6 +189,89 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(m._items["invokeai"].state, "waiting")
 
 
+class InvokeAIModelItemTests(unittest.TestCase):
+    """Fleet-model items: healthy installs are never re-downloaded, and a
+    backend crash mid-install surfaces instead of hanging (both learned
+    from live dogfood on InvokeAI 6.14.2)."""
+
+    class _FakeBackend:
+        def __init__(self, rows=(), jobs=None, job_id=0):
+            self._rows = list(rows)
+            self._jobs = jobs if jobs is not None else {}
+            self._job_id = job_id
+            self.installs = []
+
+        def models(self):
+            return list(self._rows)
+
+        def install_model(self, source):
+            self.installs.append(source)
+            return {"id": self._job_id}
+
+        def model_install_job(self, job_id):
+            return self._jobs.get(job_id)
+
+    def _manager_with_backend(self, root, backend):
+        return _manager(root, image_manager=SimpleNamespace(
+            invokeai_runtime=SimpleNamespace(ensure_ready=lambda: None),
+            invokeai_backend=backend))
+
+    def _fleet_item(self):
+        return _item("model-juggernaut-xl-v9",
+                     kind="invokeai_model", provides="image_model",
+                     payload={"fleet_id": "juggernaut-xl-v9",
+                              "source": "https://huggingface.co/x/y",
+                              "sha256": "0" * 64, "license": "test"})
+
+    def test_already_registered_skips_download(self):
+        backend = self._FakeBackend(rows=[{
+            "name": "Juggernaut-XL_v9_RunDiffusionPhoto_v2",
+            "type": "main", "base": "sdxl"}])
+        with tempfile.TemporaryDirectory() as td:
+            m = self._manager_with_backend(Path(td), backend)
+            it = self._fleet_item()
+            m._items = {it.id: it}
+            m._run_item(it.id)
+            self.assertEqual(backend.installs, [])
+            self.assertEqual(it.state, "completed")
+            self.assertTrue(it.verified)
+
+    def test_vanished_job_fails_not_hangs(self):
+        # invokeai-web crash/restart wipes in-memory job rows — polling a
+        # vanished job must raise (retryable) instead of looping forever.
+        backend = self._FakeBackend(jobs={})
+        with tempfile.TemporaryDirectory() as td:
+            m = self._manager_with_backend(Path(td), backend)
+            it = self._fleet_item()
+            m._items = {it.id: it}
+            m._run_item(it.id)
+            self.assertEqual(backend.installs, ["https://huggingface.co/x/y"])
+            self.assertNotEqual(it.state, "running")
+            self.assertIn("disappeared", it.error_message or "")
+
+    def test_completed_job_verifies_registration(self):
+        backend = self._FakeBackend(
+            rows=[{"name": "Juggernaut-XL_v9_RunDiffusionPhoto_v2",
+                   "type": "main", "base": "sdxl"}],
+            jobs={0: {"status": "completed", "bytes": 10,
+                      "bytes_total": 10}})
+        # For the completed path we need models() to MISS the fleet row
+        # pre-install (forces a submit) then present it at verify time.
+        calls = {"n": 0}
+        orig_models = backend.models
+        def models():
+            calls["n"] += 1
+            return [] if calls["n"] == 1 else orig_models()
+        backend.models = models
+        with tempfile.TemporaryDirectory() as td:
+            m = self._manager_with_backend(Path(td), backend)
+            it = self._fleet_item()
+            m._items = {it.id: it}
+            m._run_item(it.id)
+            self.assertEqual(backend.installs, ["https://huggingface.co/x/y"])
+            self.assertEqual(it.state, "completed")
+
+
 class PersistenceTests(unittest.TestCase):
     def test_state_persists_and_midflight_requeues(self):
         with tempfile.TemporaryDirectory() as td:

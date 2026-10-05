@@ -544,6 +544,11 @@ class ProvisioningManager:
         # a descriptive error (offline/no install) that classifies into a
         # setup failure code.
         runtime.ensure_ready()
+        # Upgrades / pre-seeded installs: if the backend already knows the
+        # model, verify and finish — never re-download a healthy checkpoint.
+        if self._fleet_model_present(backend, it):
+            self._verify_model(it)
+            return
         job = backend.install_model(str(it.payload["source"]))
         job_id = job.get("id")
         if job_id is None:
@@ -551,7 +556,14 @@ class ProvisioningManager:
         self._set(it, "running", detail="downloading model")
         while not self._stop.is_set():
             self._check_cancel(it)
-            row = backend.model_install_job(job_id) or {}
+            row = backend.model_install_job(job_id)
+            if row is None:
+                # invokeai-web restarts wipe in-memory job rows; a
+                # vanished job mid-install means the backend crashed or
+                # the job was cancelled — treat as a retryable failure
+                # rather than waiting forever.
+                raise RuntimeError("model install job disappeared "
+                                   "(backend restart/crash)")
             status = str(row.get("status") or "").lower()
             total = int(row.get("bytes_total") or it.est_bytes or 0)
             done = int(row.get("bytes") or 0)
@@ -569,24 +581,40 @@ class ProvisioningManager:
             raise _ProvisionCancelled()
         self._verify_model(it)
 
+    @staticmethod
+    def _row_matches_fleet(row: dict, fleet_id: str) -> bool:
+        from .image.fleet import fleet_for_model_name
+        for cand in (str(row.get("name") or ""), str(row.get("source") or ""),
+                     str(row.get("path") or "")):
+            spec = fleet_for_model_name(cand)
+            if spec and spec["id"] == fleet_id:
+                return True
+        return False
+
+    def _fleet_model_present(self, backend, it: ProvisionItem) -> bool:
+        """One-shot enumeration check — True when the backend already
+        registers this fleet model (upgrade/pre-seeded install)."""
+        fid = str(it.payload.get("fleet_id") or "")
+        try:
+            rows = backend.models()
+        except Exception:
+            return False
+        return any(self._row_matches_fleet(r, fid) for r in rows)
+
     def _verify_model(self, it: ProvisionItem) -> None:
         """A model is 'verified' only when the backend can enumerate it —
         never trust the download job alone."""
         self._set(it, "verifying", detail="verifying model registration")
         backend = getattr(self.image_manager, "invokeai_backend", None)
-        from .image.fleet import fleet_for_model_name
+        fid = str(it.payload.get("fleet_id") or "")
         deadline = time.time() + 60
         while time.time() < deadline:
-            for row in (backend.models() if backend else []):
-                spec = None
-                for cand in (str(row.get("name") or ""),
-                             str(row.get("source") or ""),
-                             str(row.get("path") or "")):
-                    spec = fleet_for_model_name(cand)
-                    if spec:
-                        break
-                if spec and spec["id"] == it.payload.get("fleet_id"):
-                    return
+            try:
+                rows = backend.models() if backend else []
+            except Exception:
+                rows = []
+            if any(self._row_matches_fleet(r, fid) for r in rows):
+                return
             time.sleep(2.0)
         raise RuntimeError("model installed but not enumerable by backend")
 
