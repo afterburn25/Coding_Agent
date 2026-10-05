@@ -113,6 +113,110 @@ class ProfileAPI:
         view["recent_closers"] = dyn.recent_phrases()["closers"][-4:]
         return {"ok": True, "effective": view}
 
+    # -- speech genome preview (Preview Lab backend) ----------------------
+
+    def _speech_preview(self, pid: str, p: dict, query: dict) -> dict:
+        """Render a battery of speech acts through a persona's genome —
+        the Preview Lab surface (§ UI). Query params: ``target``
+        ('preset:<id>' / 'custom:<id>' / 'active'), ``register``,
+        ``seriousness`` (0-3), ``turns`` (renders per act, 1-4)."""
+        from ..context.realize import (
+            PersonaRenderer, RenderContext, SemanticResponse)
+        from ..personality.dynamics import PersonaDynamics
+        from ..personality.genome import derive_genome, genome_summary
+        adult = _is_adult(p)
+        store = self._personality(pid)
+        target = str((query.get("target") or ["active"])[0])
+        personality = store.resolve(target, is_adult=adult)
+        if personality is None:
+            return {"ok": False, "error": "no such persona"}
+        genome = derive_genome(personality)
+        dyn = PersonaDynamics(self.mgr.profile_dir(pid))
+        rel = dyn.relationship()
+        register = str((query.get("register") or ["casual"])[0])
+        try:
+            seriousness = max(0, min(3, int(
+                (query.get("seriousness") or ["0"])[0])))
+        except (TypeError, ValueError):
+            seriousness = 0
+        try:
+            turns = max(1, min(4, int((query.get("turns") or ["2"])[0])))
+        except (TypeError, ValueError):
+            turns = 2
+
+        ctx = RenderContext(
+            mood=str(dyn.effective_mood(
+                manual_mood=str(personality.get("mood") or ""))
+                or "relaxed"),
+            seriousness=seriousness, register=register,
+            relationship_stage=str(rel.get("stage") or "new"),
+            familiarity=float(rel.get("familiarity") or 0.0),
+            address=str(dyn.state().get("address") or ""))
+
+        # One semantic per act — the same WHAT across personas is what
+        # makes the HOW differences legible.
+        samples = {
+            "greet": SemanticResponse(
+                semantic_id="pv_greet", speech_act="greet"),
+            "answer": SemanticResponse(
+                semantic_id="pv_answer", speech_act="answer",
+                facts=["The answer is 42.",
+                       "Douglas Adams documented it in 1979."],
+                exact_spans=["42", "1979"]),
+            "report_success": SemanticResponse(
+                semantic_id="pv_success", speech_act="report_success",
+                facts=["The build finished cleanly.",
+                       "All 12 tests passed in 0.8s."],
+                actions_completed=["ran the build", "ran the test suite"],
+                exact_spans=["12 tests", "0.8s"]),
+            "report_failure": SemanticResponse(
+                semantic_id="pv_failure", speech_act="report_failure",
+                facts=["The migration failed at step 3.",
+                       "The error was a duplicate key on users.id."],
+                exact_spans=["step 3", "users.id"],
+                next_steps=["inspect the migration log"]),
+            "disagree": SemanticResponse(
+                semantic_id="pv_disagree", speech_act="disagree",
+                facts=["Dropping the index would slow every lookup.",
+                       "A partial index covers the hot path instead."],
+                confidence="likely",
+                exact_spans=["users.id"]),
+            "warn": SemanticResponse(
+                semantic_id="pv_warn", speech_act="warn",
+                facts=["This deletes the local history permanently."],
+                warnings=["This cannot be undone."],
+                exact_spans=["permanently"]),
+            "admit_uncertainty": SemanticResponse(
+                semantic_id="pv_uncertain",
+                speech_act="admit_uncertainty",
+                confidence="uncertain",
+                facts=["The remote may still be syncing."],
+                uncertainty=["The last fetch timestamp is stale."]),
+            "farewell": SemanticResponse(
+                semantic_id="pv_farewell", speech_act="farewell"),
+        }
+
+        import random
+        renderer = PersonaRenderer(rng=random.Random())
+        renders: dict[str, list] = {}
+        for act, sem in samples.items():
+            rows = []
+            for _ in range(turns):
+                out = renderer.render_semantic(sem, genome, ctx)
+                rows.append(out.as_dict())
+            renders[act] = rows
+
+        return {
+            "ok": True,
+            "persona": {"name": personality.get("name"),
+                        "id": personality.get("personality_id"),
+                        "base_preset": personality.get("base_preset")},
+            "register": register, "seriousness": seriousness,
+            "relationship": rel,
+            "genome_summary": genome_summary(genome),
+            "renders": renders,
+        }
+
     def _err(self, h, exc: Exception) -> bool:
         if isinstance(exc, ProfileError):
             h._json({"ok": False, "error": str(exc)}, 400)
@@ -167,14 +271,24 @@ class ProfileAPI:
                      "locked_until": self.mgr.creator_auth.locked_until()})
             return True
         if path.startswith("/api/profiles/"):
-            return self._profile_get(h, path)
+            return self._profile_get(h, path, query)
         return False
 
-    def _profile_get(self, h, path: str) -> bool:
+    def _profile_get(self, h, path: str, query: dict | None = None) -> bool:
+        query = query or {}
         try:
             if path.endswith("/avatar"):
                 pid = self._pid(path, "/api/profiles/", "/avatar")
                 return self._serve_avatar(h, pid)
+            if path.endswith("/personality/speech-preview"):
+                pid = self._pid(path, "/api/profiles/",
+                                "/personality/speech-preview")
+                p = self.mgr.get(pid)
+                if p is None:
+                    h._json({"error": "no such profile"}, 404)
+                    return True
+                h._json(self._speech_preview(pid, p, query))
+                return True
             if path.endswith("/personality/effective"):
                 pid = self._pid(path, "/api/profiles/",
                                 "/personality/effective")

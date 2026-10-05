@@ -89,10 +89,22 @@ class PersonalityStore:
 
     def available(self, *, is_adult: bool) -> dict:
         """Everything the UI needs: visible presets, customs, sliders,
-        voice controls, active record, strength, mood."""
+        voice controls, active record, strength, mood, speech genome."""
         st = self._load()
+        active = self.resolve_active(is_adult=is_adult)
+        try:
+            from .genome import derive_genome, genome_summary
+            genome = derive_genome(active)
+            genome_view = {
+                "speech_genome": genome,
+                "speech_genome_summary": genome_summary(genome),
+            }
+        except Exception:
+            genome_view = {"speech_genome": {},
+                           "speech_genome_summary": {}}
         return {
-            "active": self.resolve_active(is_adult=is_adult),
+            "active": active,
+            **genome_view,
             "strength": st["strength"],
             "mood": st["mood"],
             "presets": list_presets(include_adult=is_adult),
@@ -113,7 +125,8 @@ class PersonalityStore:
     def _public_custom(self, c: dict) -> dict:
         return {k: c[k] for k in
                 ("personality_id", "name", "base_preset", "traits",
-                 "voice", "blend", "behavior_version", "imported")
+                 "voice", "blend", "behavior_version", "imported",
+                 "speech_genome")
                 if k in c}
 
     def resolve_active(self, *, is_adult: bool) -> dict:
@@ -140,6 +153,10 @@ class PersonalityStore:
                     address=(
                         "" if adult_blocked else str(
                             c.get("address") or base.get("address") or "")),
+                    speech_genome=(
+                        {} if adult_blocked else dict(
+                            c.get("speech_genome")
+                            or base.get("speech_genome") or {})),
                     pitch_bias=float(
                         base.get("pitch_bias") or 0.0),
                     is_adult=is_adult)
@@ -156,6 +173,8 @@ class PersonalityStore:
                             else p.get("greeting_style") or "default"),
             address=("" if adult_blocked
                      else str(p.get("address") or "")),
+            speech_genome=({} if adult_blocked
+                           else dict(p.get("speech_genome") or {})),
             pitch_bias=float(p.get("pitch_bias") or 0.0),
             is_adult=is_adult)
 
@@ -185,6 +204,10 @@ class PersonalityStore:
                 greeting_style=(
                     "default" if adult_blocked else str(
                         base.get("greeting_style") or "default")),
+                speech_genome=(
+                    {} if adult_blocked else dict(
+                        c.get("speech_genome")
+                        or base.get("speech_genome") or {})),
                 pitch_bias=float(base.get("pitch_bias") or 0.0),
                 is_adult=is_adult)
         p = get_preset(pid)
@@ -198,6 +221,8 @@ class PersonalityStore:
             is_custom=False, personality_id=f"preset:{p['id']}",
             greeting_style=("default" if adult_blocked
                             else p.get("greeting_style") or "default"),
+            speech_genome=({} if adult_blocked
+                           else dict(p.get("speech_genome") or {})),
             pitch_bias=float(p.get("pitch_bias") or 0.0),
             is_adult=is_adult)
 
@@ -258,7 +283,8 @@ class PersonalityStore:
     def create_custom(self, *, is_adult: bool, name: str | None = None,
                       base_preset: str | None = None,
                       traits: dict | None = None,
-                      voice: dict | None = None) -> dict:
+                      voice: dict | None = None,
+                      speech_genome: dict | None = None) -> dict:
         """Save a custom personality — optionally duplicated from a
         preset ('Custom based on <preset>')."""
         st = self._load()
@@ -286,13 +312,17 @@ class PersonalityStore:
                                           is_adult=is_adult),
             "voice": schema.clean_voice(merged_voice),
         }
+        if isinstance(speech_genome, dict):
+            from .genome import migrate_genome
+            custom["speech_genome"] = migrate_genome(speech_genome)
         st["customs"].append(custom)
         self._save(st)
         return self._public_custom(custom)
 
     def patch_custom(self, cid: str, *, is_adult: bool,
                      name: Any = None, traits: dict | None = None,
-                     voice: dict | None = None) -> dict:
+                     voice: dict | None = None,
+                     speech_genome: dict | None = None) -> dict:
         st = self._load()
         c = self._custom(st, cid)
         if c is None:
@@ -307,6 +337,13 @@ class PersonalityStore:
             merged = dict(c.get("voice") or {})
             merged.update(voice)
             c["voice"] = schema.clean_voice(merged)
+        if speech_genome is not None:
+            from .genome import migrate_genome
+            merged_g = dict(c.get("speech_genome") or {})
+            if isinstance(speech_genome, dict):
+                from .genome import _deep_merge
+                merged_g = _deep_merge(merged_g, speech_genome)
+            c["speech_genome"] = migrate_genome(merged_g)
         self._save(st)
         return self._public_custom(c)
 
