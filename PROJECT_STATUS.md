@@ -18,10 +18,19 @@ v0.20.0 completes the P1 layer and lands the first P2 capabilities:
   results deep-link into their owning pages.
 - **Tooling** — `dep_list`, `project_audit` (real auditors, honest
   unavailable), `coverage_report`, `package_release`/`release_verify`
-  (sha256-registered archives).
+  (sha256-registered archives), `debug_run` (headless bdb breakpoints +
+  post-mortem locals), `deploy_static` (detached-worktree branch
+  deploy) and `deploy_release` (GitHub Releases via `gh`).
+- **Knowledge browser** (`/knowledge.html`) — searchable entities,
+  attrs, relations, neighbor traversal; project detail panels show
+  linked knowledge-graph entities; Command Center gained a
+  Dependencies & security panel over `/api/audit`.
 - **Mission UI** — pipeline stage strip; chat priority, queued-response
   replacement, voice-lane isolation, and the named worker pool
   (Molly, Nikki, Kate, …) were verified live in the installed app.
+- **Source-sync safety** — startup fast-forward skips workspaces that
+  are the running source tree; the selftest smoke config disables it
+  (a mid-run CI push once let a smoke instance rewrite the checkout).
 
 ## Previous: 0.19.0 — Autonomous development workstation (P0)
 
