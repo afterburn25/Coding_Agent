@@ -400,5 +400,98 @@ class CinematicSplashTests(unittest.TestCase):
         self.assertIn("chrome.webview", profile_js)
 
 
+class RecoverySequenceTests(unittest.TestCase):
+    """Contract tests for the fault → intervention → retry → recovery and
+    recovery-failed flows ported from prototypes/core_unlock_splash.
+
+    The sequence clips are presentation references: stage captions may only
+    ever display a milestone the host confirmed, the intervention state owns
+    the real buttons, and every attempt is explicit-user-driven.
+    """
+
+    SPLASH = ROOT / "desktop" / "ChatNexus.Desktop" / "splash"
+    PAGE = SPLASH / "web" / "splash.mjs"
+    CONTROLLER = SPLASH / "web" / "controller.mjs"
+    INDEX = SPLASH / "web" / "index.html"
+
+    def test_sequence_clips_ship_and_wire(self):
+        html = self.INDEX.read_text(encoding="utf-8")
+        for clip in ("NexusCore-Startup-Glow-Only.mp4",
+                     "NexusCore-Error-Red-Continuation.mp4",
+                     "NexusCore-Recovery.mp4",
+                     "NexusCore-Recovery-Failed.mp4"):
+            self.assertTrue((self.SPLASH / "assets" / clip).is_file(), clip)
+        for vid in ("bootvid", "errvid", "recvid", "failvid"):
+            self.assertIn(vid, html)
+
+    def test_recovery_stage_captions_single_source(self):
+        src = self.CONTROLLER.read_text(encoding="utf-8")
+        for label in (
+            "EMERGENCY CONTAINMENT · ENGAGED", "NONESSENTIAL SYSTEMS · ISOLATED",
+            "RECOVERY MATRIX · INITIALIZING", "FAULT SOURCE · LOCATED",
+            "CORE RECONSTRUCTION · IN PROGRESS", "STABILITY THRESHOLD · RECOVERING",
+            "CONTAINMENT · RELEASED", "CORE INTEGRITY · VERIFIED",
+            "CORE SYSTEMS · ONLINE",
+        ):
+            self.assertIn(label, src, label)
+        # Caption-entry gates inside the recovery clip.
+        self.assertIn("RECOVERY_STAGE_TIMES", src)
+        for label in (
+            "RECOVERY ATTEMPT · FAILED", "AUTOMATIC RECOVERY · HALTED",
+            "CORE CONTAINMENT · MAINTAINED", "USER INTERVENTION · REQUIRED",
+        ):
+            self.assertIn(label, src, label)
+
+    def test_page_gates_recovery_on_confirmed_milestones(self):
+        src = self.PAGE.read_text(encoding="utf-8")
+        # Host messages that drive the attempt lifecycle.
+        for msg in ("'recovery-begin'", "'recovery-stage'", "'recovery-failed'"):
+            self.assertIn(msg, src, msg)
+        # A stage may never display ahead of host confirmation.
+        self.assertIn("confirmedStage + 1 < RECOVERY_STAGE_TIMES.length", src)
+        self.assertIn("RECOVERY_STAGE_TIMES[confirmedStage + 1]", src)
+        # One in-flight attempt; duplicate Retry coalesces.
+        self.assertIn("attemptInFlight", src)
+        self.assertIn("if (attemptInFlight || !clock.activeFault) return", src)
+        # Intervention panel is suppressed while a clip owns the surface,
+        # and returns when it ends contained.
+        self.assertIn("overlay === null", src)
+        self.assertIn("showIntervention", src)
+        # Green online never survives into a fault/failed surface.
+        self.assertIn("classList.remove('online')", src)
+        # Early faults keep real partial geometry — DOM containment path.
+        self.assertIn("useErrorClip", src)
+        self.assertIn("videoMode = false", src)
+
+    def test_host_runs_single_flight_real_attempt(self):
+        # Retry coalescing on the host, not just the page.
+        self.assertIn("Interlocked.CompareExchange(ref _recoveryInFlight", PROGRAM)
+        self.assertIn("_recoveryInFlight", PROGRAM)
+        # The attempt re-runs the REAL startup pipeline, posting stages only
+        # after milestones actually complete.
+        self.assertIn("RunRecoveryAttemptAsync", PROGRAM)
+        self.assertIn('"recovery-begin"', PROGRAM)
+        self.assertIn('"recovery-stage"', PROGRAM)
+        self.assertIn('"recovery-failed"', PROGRAM)
+        attempt = PROGRAM.split("RunRecoveryAttemptAsync()", 1)[1]
+        self.assertLess(attempt.index("PrepareAsync"), attempt.index("VerifyLoadableAsync"))
+        self.assertLess(attempt.index("VerifyLoadableAsync"), attempt.index("MarkAppReady"))
+        self.assertLess(attempt.index("MarkAppReady"), attempt.index("ReadyToDismiss"))
+        self.assertIn("RecoveryStage(8)", PROGRAM)   # online only after verified
+        # Failure path: interrupted recovery, intervention again, no loop.
+        self.assertIn("recovery-failed", attempt)
+        # Native fallback panel still narrates attempts.
+        self.assertIn("_failureDetail", PROGRAM)
+        # The old splash-rebuild retry is gone — the same surface owns the flow.
+        self.assertNotIn("_splash = new SplashForm(_appDir, _progress);", PROGRAM)
+
+    def test_prototype_package_reference_present(self):
+        pkg = ROOT / "prototypes" / "core_unlock_splash"
+        self.assertTrue((pkg / "sequence_manifest.json").is_file())
+        self.assertTrue((pkg / "tools" / "video_export" / "verify_package.py").is_file())
+        self.assertTrue(
+            (ROOT / "docs" / "SPLASH_SEQUENCES_DEVIN_HANDOFF.md").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 import { sample, clamp, validateManifest } from './timeline.mjs';
-import { SplashController, RECOVERY_STATES } from './controller.mjs';
+import { SplashController, RECOVERY_STATES, RECOVERY_STAGES, RECOVERY_STAGE_TIMES, RECOVERY_FAILED_STAGES } from './controller.mjs';
 import { Renderer } from './renderer.mjs';
 import { AudioEngine } from './audio.mjs';
 import { VoiceChannel } from './voice.mjs';
@@ -21,8 +21,22 @@ let lastDraw = -Infinity, lastRevision = 0, lastPanel = false;
 let previousHeld = false, completePosted = false, lastPhaseId = '';
 // Rendered scene clips are the primary surface once decoded; the DOM
 // layers beneath stay live as the fallback if playback never starts.
-const bootvid = $('bootvid'), errvid = $('errvid');
+const bootvid = $('bootvid'), errvid = $('errvid'), recvid = $('recvid'), failvid = $('failvid');
 let videoMode = false;
+// A sequence clip that owns the whole surface right now: 'error' (fault
+// continuation), 'recovery' (user-requested attempt), 'recovery-failed'.
+// While set, the DOM recovery panel stays hidden — the clip ends contained
+// and THEN the real controls reappear.
+let overlay = null;
+// The last recovery milestone the HOST confirmed. The recovery clip may not
+// cross RECOVERY_STAGE_TIMES[i] until confirmedStage >= i — a caption can
+// never claim a milestone ahead of the real attempt.
+let confirmedStage = -1;
+// One in-flight user-requested attempt at a time — duplicate Retry clicks
+// coalesce (button disabled here, single-flight guard on the host).
+let attemptInFlight = false;
+let recoveryAttempt = 0;
+let failCaptionTimer = null;
 
 function fail(error) {
   if (failed) return;
@@ -50,8 +64,19 @@ function armRecoveryWatchdog() {
   }, ms);
 }
 
+function retryButton() {
+  return document.querySelector('[data-recovery-action="retry"]');
+}
+
+function syncRetryButton() {
+  const b = retryButton();
+  if (b) b.disabled = attemptInFlight;
+}
+
 function updateRecovery(state) {
-  const visible = (state.panel ?? 0) > 0;
+  // A sequence clip owns the surface — the intervention panel appears when
+  // the clip ends contained, never mid-animation.
+  const visible = (state.panel ?? 0) > 0 && overlay === null;
   $('recovery').hidden = !visible;
   $('recovery').style.opacity = String(state.panel ?? 0);
   $('recovery').inert = !visible;
@@ -59,14 +84,21 @@ function updateRecovery(state) {
   if (state.panel >= .99 && !lastPanel) host({ type: 'recovery-visible' });
   const mode = clock.recoveryState;
   setText('recovery-title', mode === 'SAFE_MODE' ? 'Nexus Core Safe Mode' : 'Nexus Core startup failure');
-  setText('recovery-state', clock.mode === 'repair' ? 'REPAIR COMPLETE · REAUTHORIZING' : RECOVERY_STATES[mode][0]);
+  // During a user-requested attempt the stage line shows the last
+  // host-confirmed milestone — held, never predicted.
+  const stageLabel = attemptInFlight && confirmedStage >= 0 ? RECOVERY_STAGES[confirmedStage] : null;
+  setText('recovery-state', stageLabel
+    ?? (clock.mode === 'repair' ? 'REPAIR COMPLETE · REAUTHORIZING'
+      : mode === 'HUMAN_INTERVENTION_REQUIRED' ? 'USER INTERVENTION · REQUIRED'
+      : RECOVERY_STATES[mode][0]));
   setText('recovery-message', clock.diagnostics.message);
   setText('recovery-description', RECOVERY_STATES[mode][1]);
-  setText('recovery-attempt', clock.attempt ? `RECOVERY ATTEMPT ${clock.attempt.attempt} OF ${clock.attempt.total}` : '');
-  $('recovery-attempt').hidden = !clock.attempt;
+  setText('recovery-attempt', attemptInFlight ? `RECOVERY ATTEMPT ${recoveryAttempt}` : (clock.attempt ? `RECOVERY ATTEMPT ${clock.attempt.attempt} OF ${clock.attempt.total}` : ''));
+  $('recovery-attempt').hidden = !(attemptInFlight || clock.attempt);
   setText('error-details', clock.diagnostics.detail || 'No additional details supplied.');
   if (!lastPanel) $('recovery-title').focus({ preventScroll: true });
   lastPanel = true;
+  syncRetryButton();
 }
 
 function paint() {
@@ -102,12 +134,20 @@ function paint() {
     }
   }
   $('stage').classList.toggle('fault', Boolean(state.fault));
+  // STABILITY THRESHOLD · RECOVERING fades the bar/status back toward the
+  // normal palette (mirrors the clip's ~1.8s red→cyan transition).
+  const recovering = attemptInFlight && confirmedStage >= 5;
+  $('status').classList.toggle('recovering', recovering);
+  $('detail').classList.toggle('recovering', recovering);
+  $('fill').classList.toggle('recovering', recovering);
   // Core-online state: green pulsating status — the timeline's stable-online
-  // point OR the host's canonical CORE SYSTEMS · ONLINE label, whichever
-  // reaches first.
-  const online = externalProgress
-    ? externalProgress.primary === 'CORE SYSTEMS · ONLINE'
-    : state.online;
+  // point, the host's canonical CORE SYSTEMS · ONLINE label, or the final
+  // confirmed recovery stage, whichever applies. Never on a fault surface:
+  // a frozen ONLINE label must not stay green through containment.
+  const online = (attemptInFlight && confirmedStage >= 8)
+    || (!clock.activeFault && overlay !== 'recovery-failed' && (externalProgress
+      ? externalProgress.primary === 'CORE SYSTEMS · ONLINE'
+      : state.online));
   $('status').classList.toggle('online', online);
   $('detail').classList.toggle('online', online);
   updateRecovery(state);
@@ -124,6 +164,15 @@ function frame(now) {
       if (clock.revision !== lastRevision) { lastRevision = clock.revision; void audio.sync(clock, { fade: .16 }); }
       if (previousHeld !== clock.held) { previousHeld = clock.held; void audio.sync(clock); }
       lastDraw = now;
+      // Recovery milestone gate: the clip may not cross a stage's caption
+      // until the host confirmed that stage. Held frames keep the hum via
+      // the fault-mode audio loop — a stalled attempt looks stalled, never
+      // falsely ahead.
+      if (overlay === 'recovery' && recvid && !recvid.paused && !recvid.ended
+          && confirmedStage + 1 < RECOVERY_STAGE_TIMES.length
+          && recvid.currentTime >= RECOVERY_STAGE_TIMES[confirmedStage + 1] - .1) {
+        recvid.pause();
+      }
       if (clock.playing) {
         const state = paint();
         if (state.phase.id !== lastPhaseId) { lastPhaseId = state.phase.id; host({ type: 'phase', id: state.phase.id }); }
@@ -140,21 +189,159 @@ function changed(fade = .008) {
   catch (error) { fail(error); }
 }
 
+// The error continuation clip branches from the fully powered startup frame —
+// it only matches reality when the fault landed at/after full power. An early
+// fault falls back to the DOM containment animation so partial geometry and
+// partial progress are the actual state, not a jumped-to final frame.
+function useErrorClip(progress) {
+  return !reduced && videoMode && errvid
+    && (bootvid?.ended || clock.held || progress >= .9);
+}
+
 function triggerFault(details = {}) {
-  const started = clock.triggerFault(details, reduced, externalProgress?.value ?? clamp(clock.time / manifest.duration));
+  const progress = externalProgress?.value ?? clamp(clock.time / manifest.duration);
+  const started = clock.triggerFault(details, reduced, progress);
   host({ type: 'startup-fault', message: clock.diagnostics.message });
-  // The error sequence plays on the SAME surface — crossfade the startup
-  // clip into the error clip; the recovery panel stays DOM on top.
-  if (errvid) {
+  // Fault is a new surface truth — any stale green online styling clears.
+  $('status').classList.remove('online');
+  $('detail').classList.remove('online');
+  if (started && useErrorClip(progress)) {
+    overlay = 'error';
     errvid.hidden = false;
-    errvid.loop = true;
-    void errvid.play().catch(() => {});
+    errvid.loop = false;
+    errvid.currentTime = 0;
+    // Clip ends contained — hold the last frame, then hand the surface
+    // back so the intervention panel appears over the contained core.
+    errvid.onended = () => { overlay = null; changed(.16); };
+    errvid.onerror = () => { overlay = null; errvid.hidden = true; changed(.16); };
     void errvid.offsetWidth;           // flush style so the fade runs
     errvid.classList.add('live');
+    void errvid.play().catch(() => { overlay = null; errvid.hidden = true; changed(.16); });
     if (bootvid) setTimeout(() => bootvid.pause(), 400);
+  } else if (started && videoMode && bootvid) {
+    // Early/mid fault while the clip ruled the surface: hand back to the
+    // canvas so containment plays from the real partial geometry.
+    videoMode = false;
+    document.body.classList.remove('video-mode');
+    bootvid.classList.remove('live');
+    bootvid.pause();
   }
   if (started) changed(.16); else if (!failed) paint();
   return started;
+}
+
+// --- User-requested recovery attempt -------------------------------------
+// The host owns the real attempt; this page owns the honest presentation of
+// it. The recovery clip gates on confirmed stages; the DOM fallback cycles
+// the same stage labels on the intervention panel.
+
+// hold=true keeps the clip's last frame owning the surface after 'ended' —
+// used by the recovery clip whose online-green tail runs while the host
+// finishes its own readiness/voice gates before dismissing the splash.
+function playClip(vid, name, onEnded, hold = false) {
+  overlay = name;
+  vid.hidden = false;
+  vid.loop = false;
+  vid.currentTime = 0;
+  vid.onended = () => { if (overlay === name && !hold) { overlay = null; changed(.16); } onEnded?.(); };
+  vid.onerror = () => { if (overlay === name) { overlay = null; } vid.hidden = true; changed(.16); };
+  void vid.offsetWidth;
+  vid.classList.add('live');
+  return vid.play().then(() => true).catch(() => {
+    if (overlay === name) overlay = null;
+    vid.hidden = true; changed(.16); return false;
+  });
+}
+
+// The successful green tail — real audio cue once the host confirms ONLINE.
+function recoveryOnlineAudio() {
+  try {
+    audio.stop(.18);
+    if (audio.disabled) return;
+    void audio.initialize().then(ok => {
+      if (!ok) return;
+      void audio.context.resume();
+      audio.schedule({ id: 'online_pulse', sound: 'core_online', at: 0, gain: .78 }, 0, 1, Infinity);
+      audio.schedule({ id: 'stable_online', sound: 'stable_hum', at: 0, gain: .48, loop: true, fadeIn: .3 }, 0, 1, Infinity);
+    });
+  } catch { /* cues are decorative — the stage labels carry the truth */ }
+}
+
+function beginRecovery(msg = {}) {
+  if (attemptInFlight || !clock.activeFault) return;   // one attempt at a time
+  attemptInFlight = true;
+  recoveryAttempt = Number.isInteger(msg.attempt) ? msg.attempt : recoveryAttempt + 1;
+  confirmedStage = 0;                                  // containment engaged IS stage 0
+  clearTimeout(recoveryWatchdog);                      // attempt supersedes the guard
+  clearTimeout(failCaptionTimer);                      // a pending fail-caption chain must not clear this attempt
+  clock.setRecoveryState('REPAIR_ATTEMPT', { attempt: recoveryAttempt, total: recoveryAttempt });
+  syncRetryButton();
+  changed(.16);
+  // Video path when the clip can actually play; otherwise the DOM panel
+  // stays up and narrates the same confirmed stages.
+  if (!reduced && recvid) {
+    void playClip(recvid, 'recovery',
+      () => { /* success tail holds last frame; host dismisses */ }, /* hold */ true);
+  }
+  host({ type: 'recovery-attempt-started', attempt: recoveryAttempt });
+}
+
+function confirmStage(stage) {
+  if (!attemptInFlight || !Number.isFinite(stage)) return;
+  const next = Math.min(Math.trunc(stage), RECOVERY_STAGES.length - 1);
+  if (next <= confirmedStage) return;
+  confirmedStage = next;
+  if (overlay === 'recovery' && recvid?.paused && !recvid.ended) {
+    void recvid.play().catch(() => {});
+  }
+  if (confirmedStage === RECOVERY_STAGES.length - 1) recoveryOnlineAudio();
+  changed(.16);
+}
+
+function recoveryFailed(msg = {}) {
+  if (!clock.activeFault) return;
+  const wasRecovering = overlay === 'recovery';
+  attemptInFlight = false;
+  confirmedStage = -1;
+  if (msg.message !== undefined) clock.diagnostics.message = String(msg.message).slice(0, 500);
+  clock.setRecoveryState('HUMAN_INTERVENTION_REQUIRED');
+  syncRetryButton();
+  if (wasRecovering && recvid) {
+    recvid.pause(); recvid.hidden = true; recvid.classList.remove('live');
+  }
+  if (overlay === 'recovery-failed') { changed(.16); return; }  // already told — no replay
+  if (wasRecovering && !reduced && failvid) {
+    // Interrupted-recovery clip: branches from the contained recovery state,
+    // never from a successful green ending.
+    void playClip(failvid, 'recovery-failed', () => showIntervention());
+  } else {
+    // DOM fallback: pace the four failure captions over the contained end
+    // state, then intervention.
+    clock.showRecoveryImmediately();
+    showFailedCaptions(0);
+  }
+  changed(.16);
+}
+
+function showFailedCaptions(i) {
+  clearTimeout(failCaptionTimer);
+  if (i < RECOVERY_FAILED_STAGES.length - 1) {
+    setText('recovery-state', RECOVERY_FAILED_STAGES[i]);
+    $('recovery').hidden = false; $('recovery').inert = false;
+    $('recovery').style.opacity = '1';
+    syncRetryButton();
+    failCaptionTimer = setTimeout(() => showFailedCaptions(i + 1), 2700);
+  } else showIntervention();
+}
+
+function showIntervention() {
+  overlay = null;
+  attemptInFlight = false;
+  // Guarantee the contained end-state — the panel renders even if the real
+  // fault timeline had not finished playing out when the attempt failed.
+  clock.showRecoveryImmediately();
+  syncRetryButton();
+  if (!failed) paint();
 }
 
 // b64 → playback through the voice channel; host is told whether audio
@@ -185,6 +372,9 @@ function handleHost(msg) {
       case 'recovery-state': clock.setRecoveryState(msg.state, { attempt: msg.attempt, total: msg.total, message: msg.message }); changed(.16); break;
       case 'repair-success': clock.repairSuccess(reduced); changed(.16); break;
       case 'show-recovery': clock.showRecoveryImmediately(); armRecoveryWatchdog(); changed(.16); break;
+      case 'recovery-begin': beginRecovery(msg); break;
+      case 'recovery-stage': confirmStage(msg.stage); break;
+      case 'recovery-failed': recoveryFailed(msg); break;
       case 'action-feedback': setText('action-feedback', String(msg.text ?? '')); break;
       case 'set-volume': audio.setVolume(clamp(msg.value ?? audio.volume)); break;
       case 'set-audio':
@@ -205,7 +395,7 @@ function handleHost(msg) {
       }
       case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
       case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); break;
-      case 'dispose': clock.pause(); cancelAnimationFrame(raf); bootvid?.pause(); errvid?.pause(); void audio.dispose(); void voice.dispose(); break;
+      case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootvid?.pause(); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
   } catch (error) { fail(error); }
 }
@@ -244,6 +434,10 @@ async function boot() {
         recoveryState: clock.recoveryState, progress: externalProgress?.value ?? null };
     },
     triggerFault,
+    beginRecovery,
+    confirmStage,
+    recoveryFailed,
+    recovery() { return { overlay, confirmedStage, attemptInFlight, attempt: recoveryAttempt }; },
   };
   // The rendered scene clip takes over as the surface the moment its first
   // frame decodes — the DOM beneath already shows the same artwork, so the

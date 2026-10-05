@@ -18,7 +18,15 @@
          element stack, no surface swap. The canvas/chamber/readout DOM
          beneath remains the automatic fallback if the clips can't play. -->
     <video id="bootvid" class="boot-media" src="../assets/NexusCore-Startup-Glow-Only.mp4" muted playsinline preload="auto"></video>
-    <video id="errvid" class="boot-media" src="../assets/NexusCore-Error-Glow-Only.mp4" muted playsinline preload="auto" hidden></video>
+    <!-- Sequence clips (prototypes/core_unlock_splash references): the error
+         continuation branches from the fully powered frame, the recovery clip
+         plays only on explicit Retry and is gated by real milestones, and the
+         failed clip plays only when that attempt actually fails. Captions in
+         the footage are illustrative — DOM readout/panel remains the editable,
+         truthful surface. -->
+    <video id="errvid" class="boot-media" src="../assets/NexusCore-Error-Red-Continuation.mp4" muted playsinline preload="auto" hidden></video>
+    <video id="recvid" class="boot-media" src="../assets/NexusCore-Recovery.mp4" muted playsinline preload="auto" hidden></video>
+    <video id="failvid" class="boot-media" src="../assets/NexusCore-Recovery-Failed.mp4" muted playsinline preload="auto" hidden></video>
     <div id="missing-art" hidden>NEXUS CORE<span>INTELLIGENCE PROTECTED</span></div>
     <div id="readout">
       <div id="track"><div id="fill"></div></div>

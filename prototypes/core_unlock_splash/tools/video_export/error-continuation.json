@@ -1,0 +1,15 @@
+{
+  "fps": 30,
+  "startupSeconds": 17,
+  "onlineLeadSeconds": 0.5,
+  "extraInstabilitySeconds": 3.8,
+  "seconds": 12,
+  "terminalStatus": "USER INTERVENTION · REQUIRED",
+  "waitForAction": "retry",
+  "messages": [
+    { "at": 0, "text": "WARNING · SYSTEM INSTABILITY" },
+    { "at": 1.8, "text": "CORE SYNCHRONIZATION · FAILING" },
+    { "at": 3.6, "text": "DESTABILIZATION CASCADE · DETECTED" },
+    { "at": 5.4, "text": "CORE DESTABILIZATION · IMMINENT" }
+  ]
+}

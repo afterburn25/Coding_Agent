@@ -1,0 +1,4 @@
+bin/
+obj/
+verification-local/
+__pycache__/

@@ -100,7 +100,7 @@ internal static class Program
 /// </summary>
 internal sealed class SplashForm : Form
 {
-    private readonly StartupProgress _progress;
+    private StartupProgress _progress;
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
@@ -115,6 +115,7 @@ internal sealed class SplashForm : Form
     private readonly Stopwatch _initSw = Stopwatch.StartNew();
 
     private Panel? _failurePanel;
+    private Label? _failureDetail;
     private string? _failureMessage;
     public event Action? RetryRequested;
     public event Action? ExitRequested;
@@ -336,7 +337,7 @@ internal sealed class SplashForm : Form
         }
     }
 
-    private void PostToWeb(object message)
+    internal void PostToWeb(object message)
     {
         try
         {
@@ -388,6 +389,7 @@ internal sealed class SplashForm : Form
                         {
                             _failurePanel.Dispose();
                             _failurePanel = null;
+                            _failureDetail = null;
                             PostToWeb(new { type = "trigger-fault", message = _failureMessage });
                             PostToWeb(new { type = "show-recovery" });
                         }
@@ -448,13 +450,33 @@ internal sealed class SplashForm : Form
         catch { }
     }
 
-    private void RecoveryFeedback(string text) =>
+    internal void RecoveryFeedback(string text)
+    {
         PostToWeb(new { type = "action-feedback", text });
+        // Native fallback panel carries the same feedback line — recovery
+        // attempts must narrate even when the cinematic surface is gone.
+        if (_failureDetail is not null && !IsDisposed)
+        {
+            try { _failureDetail.Text = text; } catch { }
+        }
+    }
 
     /// <summary>The app is ready — tell the cinematic to converge its tail
     /// onto the online state instead of free-running to its fixed duration.</summary>
     public void RequestSequenceFinish() =>
         PostToWeb(new { type = "complete-sequence" });
+
+    /// <summary>
+    /// A user-requested recovery attempt owns a fresh progress model — the
+    /// fault-stopped pump resumes and milestone gates re-release against the
+    /// new attempt's real progress.
+    /// </summary>
+    internal void ResetProgress(StartupProgress progress)
+    {
+        _progress = progress;
+        _lastGateIdx = -1;
+        _timer.Start();
+    }
 
     /// <summary>
     /// The context calls Show() up front, but the window stays suppressed
@@ -625,6 +647,7 @@ internal sealed class SplashForm : Form
             Dock = DockStyle.Top,
             Height = 120,
         };
+        _failureDetail = detail;
         var buttons = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -920,25 +943,121 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         return new StartupProgress(profile, Path.Combine(dataDir, "logs"));
     }
 
+    // Retry = exactly one real in-place recovery attempt per explicit user
+    // action. Duplicate clicks coalesce on this guard; the splash keeps its
+    // surface so the recovery sequence continues from the contained frame.
+    private int _recoveryInFlight;
+    private int _recoveryAttemptCount;
+
     private void OnRetry()
     {
-        _splash?.Dispose();
-        _main?.DisposeBackend();
-        _main?.Dispose();
-        _main = null;
-        _progress = CreateProgress();
-        _splash = new SplashForm(_appDir, _progress);
-        _splash.RetryRequested += OnRetry;
-        _splash.ExitRequested += () => Application.Exit();
-        if (_narrator is not null)
+        if (Interlocked.CompareExchange(ref _recoveryInFlight, 1, 0) != 0) return;
+        _ = RunRecoveryAttemptAsync();
+    }
+
+    /// <summary>
+    /// One honest recovery attempt on the SAME splash surface. Every stage
+    /// caption the cinematic shows is gated on a milestone posted here —
+    /// the page can never claim fault-located/verified/online ahead of the
+    /// real work. A throw interrupts the sequence into recovery-failed and
+    /// returns control to the user; nothing retries automatically.
+    /// </summary>
+    private async Task RunRecoveryAttemptAsync()
+    {
+        var attempt = ++_recoveryAttemptCount;
+        try
         {
-            _splash.VoicePlaybackResult += (id, started, secs) =>
-                _narrator.NotifyVoiceResult(id, started, secs);
-            _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
+            _splash?.PostToWeb(new { type = "recovery-begin", attempt });
+            _splash?.RecoveryFeedback($"Recovery attempt {attempt} started.");
+            RecoveryStage(0);   // EMERGENCY CONTAINMENT · ENGAGED
+
+            // Tear down the failed app/backend before relaunch — the
+            // "isolated" stage is true only once the old core is gone.
+            _main?.DisposeBackend();
+            _main?.Dispose();
+            _main = null;
+            RecoveryStage(1);   // NONESSENTIAL SYSTEMS · ISOLATED
+
+            _progress = CreateProgress();
+            _splash?.ResetProgress(_progress);   // progress pump feeds the recovery surface again
+
+            RecoveryStage(2);   // RECOVERY MATRIX · INITIALIZING — relaunch begins
+            _main = new MainForm(_appDir);
+            _main.CreateControl();
+            _main.FarewellHook = () =>
+                _narrator?.FarewellAsync(
+                    () => _main?.BackendUrl, TimeSpan.FromSeconds(45))
+                ?? Task.CompletedTask;
+            await _main.PrepareAsync(_progress);
+            RecoveryStage(3);   // FAULT SOURCE · LOCATED — backend came up healthy
+
+            RecoveryStage(4);   // CORE RECONSTRUCTION · IN PROGRESS — verify the UI
+            await _main.VerifyLoadableAsync();
+            RecoveryStage(5);   // STABILITY THRESHOLD · RECOVERING — interface loads
+
+            _progress.MarkAppReady();
+            RecoveryStage(6);   // CONTAINMENT · RELEASED
+            while (!_progress.ReadyToDismiss)
+            {
+                await Task.Delay(60);
+            }
+            RecoveryStage(7);   // CORE INTEGRITY · VERIFIED — readiness gates true
+            _progress.BeginCompletion();
+            while (!_progress.CompletionFinished)
+            {
+                await Task.Delay(33);
+            }
+            RecoveryStage(8);   // CORE SYSTEMS · ONLINE — the green tail earns itself
+            _narrator?.NearlyReady(() => _main?.BackendUrl);
+
+            // Dwell so the online state actually reads, then the same
+            // voice-gated handoff the normal startup path uses.
+            await Task.Delay(TimeSpan.FromSeconds(1.6));
+            if (_narrator is not null)
+            {
+                await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
+            }
+            _narrator?.Cancel();
+            var splash = _splash;
+            _splash = null;
+            splash?.Close();
+            splash?.Dispose();
+            _main.WindowState = FormWindowState.Normal;
+            _main.Show();
+            _main.TopMost = true;
+            _main.Activate();
+            _main.BringToFront();
+            Win32.ForceForeground(_main.Handle);
+            _main.TopMost = false;
+            _main.SignalStartupTransition();
+            MainForm = _main;
         }
-        _splash.Show();
-        _splash.Activate();
-        _ = RunStartupAsync();
+        catch (Exception ex)
+        {
+            BackendProcess.NoteStartup(
+                Path.Combine(_appDir, "data", "logs"),
+                $"recovery attempt {attempt} failed: {ex.GetType().Name}: {ex.Message}");
+            // The fresh model is marked failed — the pump may keep ticking;
+            // Tick() is a no-op on a Failed model and the fault surface
+            // ignores progress posts anyway.
+            _progress?.MarkFailed();
+            _main?.DisposeBackend();
+            _main?.Dispose();
+            _main = null;
+            _splash?.PostToWeb(new { type = "recovery-failed", message = ex.Message });
+            _splash?.RecoveryFeedback($"Recovery attempt {attempt} failed: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _recoveryInFlight, 0);
+        }
+    }
+
+    /// <summary>Confirm a recovery milestone — the cinematic may not show a
+    /// stage until this posts. Monotonic; duplicates are ignored.</summary>
+    private void RecoveryStage(int stage)
+    {
+        _splash?.PostToWeb(new { type = "recovery-stage", stage });
     }
 
     private async Task RunStartupAsync()

@@ -1,40 +1,13 @@
 import { Timeline, sample, clamp, ramp } from './timeline.mjs';
 
 export const RECOVERY_STATES = Object.freeze({
-  RECOVERY_ANALYZING: ['RECOVERY · ANALYZING', 'Diagnosing startup failure.'],
-  REPAIR_ATTEMPT: ['REPAIR · IN PROGRESS', 'Attempting automatic recovery.'],
+  RECOVERY_ANALYZING: ['ANALYZING STARTUP FAILURE', 'Diagnostic analysis is beginning.'],
+  REPAIR_ATTEMPT: ['ATTEMPTING AUTOMATIC REPAIR', 'The core remains safely contained.'],
   RESTARTING: ['PREPARING TO RESTART', 'Containment remains secured.'],
-  ROLLBACK: ['RESTORING · LAST KNOWN GOOD', 'Rolling back to a verified system state.'],
-  SAFE_MODE: ['SAFE MODE · INITIALIZING', 'Starting essential systems only.'],
-  HUMAN_INTERVENTION_REQUIRED: ['NEXUS CORE · COULD NOT START', 'Automatic recovery was unable to restore core services.']
+  ROLLBACK: ['RESTORING LAST KNOWN GOOD', 'Restoring a known working configuration.'],
+  SAFE_MODE: ['NEXUS CORE SAFE MODE', 'Diagnostics available.'],
+  HUMAN_INTERVENTION_REQUIRED: ['YOUR ATTENTION IS REQUIRED', 'Review the details or choose a recovery action.']
 });
-// User-requested recovery attempt milestones — single source for the exact
-// captions the recovery clip bakes in AND the text the DOM fallback shows.
-// Each index is a host-confirmed stage; the page may never claim a stage the
-// host has not confirmed (see splash.mjs recovery gating).
-export const RECOVERY_STAGES = Object.freeze([
-  'EMERGENCY CONTAINMENT · ENGAGED',
-  'NONESSENTIAL SYSTEMS · ISOLATED',
-  'RECOVERY MATRIX · INITIALIZING',
-  'FAULT SOURCE · LOCATED',
-  'CORE RECONSTRUCTION · IN PROGRESS',
-  'STABILITY THRESHOLD · RECOVERING',
-  'CONTAINMENT · RELEASED',
-  'CORE INTEGRITY · VERIFIED',
-  'CORE SYSTEMS · ONLINE'
-]);
-// Caption-entry times (seconds) inside NexusCore-Recovery.mp4 — the clip may
-// not cross index i's time until the host has confirmed stage i. Index 0
-// plays immediately when the attempt begins.
-export const RECOVERY_STAGE_TIMES = Object.freeze([0, 2.2, 4.4, 6.6, 8.8, 12.6, 15.8, 18.6, 21.4]);
-// Interrupted-attempt captions (NexusCore-Recovery-Failed.mp4), shown on the
-// DOM fallback path with the same pacing as the footage (~2.7s apart).
-export const RECOVERY_FAILED_STAGES = Object.freeze([
-  'RECOVERY ATTEMPT · FAILED',
-  'AUTOMATIC RECOVERY · HALTED',
-  'CORE CONTAINMENT · MAINTAINED',
-  'USER INTERVENTION · REQUIRED'
-]);
 const mix = (a, b, t) => a + (b - a) * t;
 const closed = s => s.iris.every(v => v === 0) && s.pins.every(v => v === 0) && s.cylinder === 0;
 
