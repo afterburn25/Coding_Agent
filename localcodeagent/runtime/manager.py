@@ -63,6 +63,34 @@ class _ManagedProcess:
     status: RuntimeStatus
 
 
+class _OrphanProcess:
+    """Duck-typed stand-in for a llama-server this manager didn't spawn —
+    lets a healthy survivor of a previous backend be adopted into
+    ``_managed`` (poll/terminate/kill/wait all act on the real pid)."""
+
+    __slots__ = ("pid", "_mgr")
+
+    def __init__(self, pid: int, mgr: "RuntimeManager") -> None:
+        self.pid = pid
+        self._mgr = mgr
+
+    def poll(self) -> int | None:
+        return None if self._mgr._pid_alive(self.pid) else 1
+
+    def terminate(self) -> None:
+        self._mgr._kill_pid(self.pid)
+
+    kill = terminate
+
+    def wait(self, timeout: float | None = None) -> int:
+        deadline = time.time() + (timeout if timeout is not None else 0)
+        while self.poll() is None:
+            if timeout is not None and time.time() > deadline:
+                raise subprocess.TimeoutExpired("orphan", timeout)
+            time.sleep(0.05)
+        return 1
+
+
 class RuntimeManager:
     """Owns local inference server lifecycles and exposes effective endpoints to the agent."""
 
@@ -554,7 +582,88 @@ class RuntimeManager:
             if name and "llama" in name.lower():
                 self._kill_pid(pid)
 
-    def _listening_pids(self, port: int) -> set[int]:
+    def _pid_alive(self, pid: int) -> bool:
+        try:
+            return bool(self._process_image_name(pid))
+        except Exception:
+            return False
+
+    def _orphan_serves_model(self, endpoint: str, profile: ModelProfile) -> bool:
+        """True when the server on ``endpoint`` has this profile's model file
+        loaded — adoption must never silently serve a different checkpoint."""
+        want = Path(profile.model_path).name.lower() if profile.model_path else ""
+        try:
+            req = urllib.request.Request(f"{endpoint.rstrip('/')}/v1/models")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception:
+            return False
+        names = [str(m.get("name") or m.get("id") or "")
+                 for m in (payload.get("data") or payload.get("models") or [])]
+        if not names:
+            return False
+        if not want:
+            return True
+        return any(want == Path(n).name.lower() for n in names)
+
+    def _orphan_context(self, endpoint: str) -> int:
+        """Best-effort read of the orphan's configured context window."""
+        try:
+            req = urllib.request.Request(f"{endpoint.rstrip('/')}/props")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                props = json.loads(resp.read().decode("utf-8", errors="replace"))
+            dgs = props.get("default_generation_settings") or {}
+            return int(dgs.get("n_ctx") or props.get("n_ctx") or 0)
+        except Exception:
+            return 0
+
+    def _adopt_healthy_orphan(self, profile: ModelProfile, port: int,
+                              endpoint: str, ctx_override: int | None) -> bool:
+        """Adopt a surviving llama-server on the target port instead of
+        killing it and reloading multi-GB weights.
+
+        A backend crash/restart orphans the server process — killing a
+        *healthy* orphan just to reload the same checkpoint wastes tens of
+        seconds and churns VRAM. Adopt only when the orphan is healthy,
+        serves this profile's model file, and (when a bigger window was
+        requested) already runs enough context. Otherwise the caller's
+        reclaim path kills it and launches fresh as before.
+        """
+        needed_ctx = max(int(ctx_override or 0),
+                         int(getattr(profile, "context_window", 0) or 0))
+        try:
+            listeners = self._listening_pids(port)
+        except Exception:
+            return False
+        with self._lock:
+            managed_pids = {item.process.pid
+                            for item in self._managed.values()}
+        for pid in listeners - managed_pids:
+            name = self._process_image_name(pid)
+            if not name or "llama" not in name.lower():
+                continue
+            healthy, _ = self._health(endpoint)
+            if not healthy or not self._orphan_serves_model(endpoint, profile):
+                continue
+            orphan_ctx = self._orphan_context(endpoint)
+            if needed_ctx and (not orphan_ctx or orphan_ctx < needed_ctx):
+                continue
+            with self._lock:
+                status = self._status[profile.id]
+                status.state = "running"
+                status.endpoint = endpoint
+                status.healthy = True
+                status.managed = True
+                status.pid = pid
+                status.error = ""
+                status.started_at = time.time()
+                self._managed[profile.id] = _ManagedProcess(
+                    profile, _OrphanProcess(pid, self), endpoint, None, status)
+            self._emit_residency(
+                "adopted", profile.id,
+                f"adopted surviving llama-server (pid {pid}) — no reload needed")
+            return True
+        return False
         """PIDs holding a TCP LISTEN on ``port`` — best-effort, empty on
         failure so callers never block a launch on a probe hiccup."""
         pids: set[int] = set()
@@ -1010,10 +1119,12 @@ class RuntimeManager:
         with self._lock:
             self._enforce_residency(profile)
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
-        with self._lock:
-            self._reclaim_orphaned_port(port)
         endpoint = self._profile_endpoint(profile, port)
-        return self._launch_with_fallback(profile, port, endpoint, ctx_override)
+        if not self._adopt_healthy_orphan(profile, port, endpoint, ctx_override):
+            with self._lock:
+                self._reclaim_orphaned_port(port)
+            return self._launch_with_fallback(profile, port, endpoint, ctx_override)
+        return endpoint
 
     def _launch_with_fallback(
         self, profile: ModelProfile, port: int, endpoint: str,

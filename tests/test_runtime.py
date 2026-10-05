@@ -482,6 +482,82 @@ class RuntimeManagerTests(unittest.TestCase):
 
             self.assertEqual(killed, [7777])
 
+    def test_healthy_orphan_is_adopted_not_reloaded(self):
+        # A backend restart orphans a still-healthy llama-server holding
+        # the same model — killing it forces a pointless multi-GB reload.
+        # Adoption keeps the server, registers it as managed, and skips
+        # spawn entirely.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            killed: list[int] = []
+            manager._kill_pid = killed.append
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: True
+            manager._orphan_context = lambda ep: 32768
+            manager._spawn_and_wait = lambda *a, **k: (
+                _ for _ in ()).throw(AssertionError("must not spawn"))
+
+            ep = manager._start_llama_cpp(profile)
+
+            self.assertEqual(killed, [])
+            self.assertEqual(ep, "http://127.0.0.1:8080/v1")
+            status = manager._status[profile.id]
+            self.assertEqual(status.state, "running")
+            self.assertTrue(status.managed)
+            self.assertEqual(status.pid, 7777)
+            item = manager._managed[profile.id]
+            self.assertIsNone(item.process.poll())  # adopted pid is alive
+
+    def test_unhealthy_or_wrong_model_orphan_is_killed(self):
+        # Adoption must never silently keep a server running a different
+        # model or one that isn't healthy — those fall back to reclaim+spawn.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            spawned: list[str] = []
+            manager._enforce_residency = lambda p: None
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: False
+            manager._kill_pid = lambda pid: None
+            manager._spawn_and_wait = (
+                lambda p, port, ep, **kw: spawned.append(ep) or ep)
+
+            ep = manager._start_llama_cpp(profile)
+            self.assertEqual(spawned, ["http://127.0.0.1:8080/v1"])
+            self.assertEqual(ep, "http://127.0.0.1:8080/v1")
+
+    def test_orphan_with_small_ctx_not_adopted_for_big_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile(port=8080)
+            cfg = AgentConfig(models=[profile])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+
+            spawned: list[str] = []
+            manager._enforce_residency = lambda p: None
+            manager._listening_pids = lambda port: {7777}
+            manager._process_image_name = lambda pid: "llama-server.exe"
+            manager._pid_alive = lambda pid: True
+            manager._health = lambda ep, timeout=1.5: (True, "ok")
+            manager._orphan_serves_model = lambda ep, p: True
+            manager._orphan_context = lambda ep: 8192  # too small for 32k
+            manager._kill_pid = lambda pid: None
+            manager._spawn_and_wait = (
+                lambda p, port, ep, **kw: spawned.append(ep) or ep)
+
+            manager._start_llama_cpp(profile, ctx_override=32768)
+            self.assertEqual(spawned, ["http://127.0.0.1:8080/v1"])
+
     def test_prewarm_retries_until_model_fits(self):
         # A failed resource_fit at boot must not leave the app cold — VRAM is
         # often still draining the previous session's models for the first
