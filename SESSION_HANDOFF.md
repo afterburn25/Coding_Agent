@@ -97,6 +97,21 @@ managed start (`4f476f1b`), so reinstalls/upgrades self-heal.
 Candidate classes run even after a match, so the size guard matters
 for every large checkpoint install.
 
+**Provisioning hardening (`ac5bea18`)**: `invokeai_model` items now
+enumerate the backend before submitting — a fleet checkpoint already
+registered (upgrade, manual/pre-seeded install) verifies and skips the
+7 GB download. And a vanished install job (invokeai-web restart wipes
+in-memory rows) now raises a retryable failure instead of the poll
+loop waiting on `status=""` forever.
+
+**Deploy build reburned**: `backend-new/` in the live install now
+contains the fleet + provisioning + voice-data + `shutil` fix build
+(`5af83f39` source), staged via `update.flag` — next app launch swaps
+it in. Frozen-build smoke test found and fixed a real NameError:
+`_pick_python` used bare `shutil` while the enclosing scope aliases it
+(`_shutil`) — the venv-install path the provisioner uses for
+`python_candidates` manifests would have crashed.
+
 ### Prior milestone — InvokeAI as a first-class image backend
 
 Commit `c15afaf4` (pushed, CI pending): **InvokeAI is a real
