@@ -1193,6 +1193,7 @@ class AppState:
             from .personality.seriousness import (
                 classify_seriousness, classify_topic)
             from .personality import social as _soc
+            from .personality import continuity as _cont
             from .context.realize import RenderContext
             soc_prev = dyn.social()
             soc_now = _soc.classify_social(
@@ -1219,7 +1220,11 @@ class AppState:
                     user_text, str(soc_now.get("cue") or ""))
                     or "neutral"),
                 address=str(st.get("address") or ""),
-                creator=bool(prof.get("is_creator")))
+                creator=bool(prof.get("is_creator")),
+                saturation=max(_cont.saturation_level(st).get(
+                    "humor", 0.0), _cont.saturation_level(st).get(
+                    "intensity", 0.0)),
+                humor_feedback=dict(st.get("humor_feedback") or {}))
             return (derive_genome(active), ctx)
         except Exception:
             return None

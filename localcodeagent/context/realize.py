@@ -105,6 +105,15 @@ class RenderContext:
     user_energy: str = "neutral"      # low | neutral | high
     address: str = ""                 # preferred form of address or ""
     creator: bool = False             # speaker is the verified creator
+    # Expression fatigue (0..1) from the dynamics saturation ledger —
+    # heavy recent humor/gesture output eases quips and micro-reactions
+    # off so strong personas get neutral moments instead of caricaturing.
+    saturation: float = 0.0
+    # Per-style humor ledger {style: {pos, neg}} — the same data the
+    # prompt card renders as adaptation notes; the renderer consumes it
+    # structurally to down-weight categories this user dislikes and
+    # lean into the ones that land.
+    humor_feedback: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -662,6 +671,53 @@ class PersonaRenderer:
         "dark_humor": ("It lives. For now.", "No casualties today."),
     }
 
+    # Card-level humor_type → genome categories that style expresses.
+    # Category names also map to themselves so callers may record
+    # either namespace into the feedback ledger.
+    _HUMOR_TYPE_CATS = {
+        "dry": ("dry_humor", "deadpan"),
+        "deadpan": ("deadpan", "dry_humor"),
+        "sarcastic": ("sarcasm",),
+        "sarcasm": ("sarcasm",),
+        "teasing": ("playful_teasing",),
+        "mischievous": ("playful_teasing", "absurdity"),
+        "nerdy": ("nerd_humor", "wordplay"),
+        "playful": ("goofy_humor", "playful_teasing"),
+        "warm": ("self_deprecation", "observational_humor"),
+        "witty": ("wit", "wordplay"),
+        "absurd": ("absurdity", "goofy_humor"),
+    }
+
+    def _humor_bias(self, category: str, ctx: RenderContext) -> float:
+        """Learned preference multiplier for one humor category —
+        same thresholds as continuity.humor_adaptation (neg≥3 and
+        neg>2·pos → rare; pos≥3 and pos>2·neg → favored)."""
+        fb = ctx.humor_feedback or {}
+        bias = 1.0
+        for style, cats in self._HUMOR_TYPE_CATS.items():
+            if category not in cats:
+                continue
+            row = fb.get(style) or {}
+            try:
+                neg, pos = int(row.get("neg") or 0), int(row.get("pos") or 0)
+            except (TypeError, ValueError):
+                continue
+            if neg >= 3 and neg > pos * 2:
+                bias = min(bias, 0.25)
+            elif pos >= 3 and pos > neg * 2:
+                bias = max(bias, 1.5)
+        # Category names also count as their own style entry.
+        row = fb.get(category) or {}
+        try:
+            neg, pos = int(row.get("neg") or 0), int(row.get("pos") or 0)
+            if neg >= 3 and neg > pos * 2:
+                bias = min(bias, 0.25)
+            elif pos >= 3 and pos > neg * 2:
+                bias = max(bias, 1.5)
+        except (TypeError, ValueError):
+            pass
+        return bias
+
     def _humor_quip(self, g: dict, ctx: RenderContext) -> str:
         humor = g.get("humor") or {}
         if humor.get("suppress_in_serious", True) and ctx.seriousness:
@@ -669,13 +725,17 @@ class PersonaRenderer:
         allowed = set(humor.get("allowed_registers") or ["casual"])
         if ctx.register not in allowed:
             return ""
+        damp = 1.0 - 0.5 * max(0.0, min(1.0, ctx.saturation))
         cats = [(k, v) for k, v in
                 (humor.get("categories") or {}).items()
                 if v.get("strength", 0) > 0 and
-                self._rng.random() < v.get("frequency", 0)]
+                self._rng.random() < (v.get("frequency", 0)
+                                      * self._humor_bias(k, ctx)
+                                      * damp)]
         if not cats:
             return ""
-        cats.sort(key=lambda kv: kv[1].get("strength", 0),
+        cats.sort(key=lambda kv: kv[1].get("strength", 0)
+                  * self._humor_bias(kv[0], ctx),
                   reverse=True)
         pool = self._HUMOR_QUIPS.get(cats[0][0], ())
         return self._choose(pool, "closing", g) if pool else ""
@@ -702,6 +762,7 @@ class PersonaRenderer:
         rate = float(mr.get("rate", 0.12))
         if serious or ctx.seriousness >= 2:
             rate *= 0.25
+        rate *= 1.0 - 0.4 * max(0.0, min(1.0, ctx.saturation))
         if self._rng.random() >= rate:
             return ""
         cooldown = int(mr.get("cooldown_turns", 6))

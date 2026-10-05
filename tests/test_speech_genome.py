@@ -252,6 +252,78 @@ class TestRendering(unittest.TestCase):
                 quips += 1
         self.assertEqual(quips, 0)
 
+    def test_humor_feedback_bias(self):
+        """Negative feedback on a humor style starves its genome
+        categories; positive favors them — the same ledger the prompt
+        card narrates."""
+        r = PersonaRenderer(rng=random.Random(3))
+        disliked = RenderContext(
+            register="casual",
+            humor_feedback={"deadpan": {"neg": 5, "pos": 0}})
+        favored = RenderContext(
+            register="casual",
+            humor_feedback={"deadpan": {"neg": 0, "pos": 5}})
+        self.assertEqual(
+            r._humor_bias("deadpan", disliked), 0.25)
+        self.assertEqual(
+            r._humor_bias("deadpan", favored), 1.5)
+        # Unrelated categories are untouched.
+        self.assertEqual(
+            r._humor_bias("sarcasm", disliked), 1.0)
+        # Sparse or mixed feedback doesn't move the needle.
+        mixed = RenderContext(
+            register="casual",
+            humor_feedback={"deadpan": {"neg": 2, "pos": 2}})
+        self.assertEqual(r._humor_bias("deadpan", mixed), 1.0)
+
+    def test_humor_feedback_reduces_quips(self):
+        g = derive_genome(personality_for("deadpan"))
+        # Suppress every category the deadpan genome carries — style
+        # names AND category names both land in the ledger.
+        fb = {k: {"neg": 6, "pos": 0}
+              for k, v in g["humor"]["categories"].items()
+              if v.get("strength")}
+        quips, baseline = 0, 0
+        for seed in range(6):
+            r = PersonaRenderer(rng=random.Random(seed))
+            for _ in range(30):
+                if r.render_semantic(
+                        SUCCESS_SEM, g,
+                        RenderContext(register="casual",
+                                      humor_feedback=fb)
+                ).closing_family == "light_comment":
+                    quips += 1
+            r2 = PersonaRenderer(rng=random.Random(seed))
+            for _ in range(30):
+                if r2.render_semantic(
+                        SUCCESS_SEM, g,
+                        RenderContext(register="casual")
+                ).closing_family == "light_comment":
+                    baseline += 1
+        self.assertGreater(baseline, 0)
+        self.assertLess(quips, baseline // 2)
+
+    def test_saturation_damps_humor(self):
+        g = derive_genome(personality_for("deadpan"))
+        quips, baseline = 0, 0
+        for seed in range(6):
+            r = PersonaRenderer(rng=random.Random(seed))
+            for _ in range(30):
+                if r.render_semantic(
+                        SUCCESS_SEM, g,
+                        RenderContext(register="casual", saturation=1.0)
+                ).closing_family == "light_comment":
+                    quips += 1
+            r2 = PersonaRenderer(rng=random.Random(seed))
+            for _ in range(30):
+                if r2.render_semantic(
+                        SUCCESS_SEM, g,
+                        RenderContext(register="casual")
+                ).closing_family == "light_comment":
+                    baseline += 1
+        self.assertGreater(baseline, 0)
+        self.assertLess(quips, baseline)
+
     def test_address_policy(self):
         g_none = derive_genome(personality_for("professional"))  # formal
         g_first = dict(g_none)

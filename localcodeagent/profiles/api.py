@@ -144,6 +144,12 @@ class ProfileAPI:
         except (TypeError, ValueError):
             turns = 2
 
+        st = dyn.state()
+        try:
+            from ..personality import continuity as _cont
+            _sat = _cont.saturation_level(st)
+        except Exception:
+            _sat = {}
         ctx = RenderContext(
             mood=str(dyn.effective_mood(
                 manual_mood=str(personality.get("mood") or ""))
@@ -151,7 +157,10 @@ class ProfileAPI:
             seriousness=seriousness, register=register,
             relationship_stage=str(rel.get("stage") or "new"),
             familiarity=float(rel.get("familiarity") or 0.0),
-            address=str(dyn.state().get("address") or ""))
+            address=str(st.get("address") or ""),
+            saturation=float(max(_sat.get("humor", 0.0),
+                                 _sat.get("intensity", 0.0))),
+            humor_feedback=dict(st.get("humor_feedback") or {}))
 
         # One semantic per act — the same WHAT across personas is what
         # makes the HOW differences legible.
