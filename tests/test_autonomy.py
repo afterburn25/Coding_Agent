@@ -110,6 +110,54 @@ class SandboxedVerifyTests(unittest.TestCase):
             self.assertNotIn("[sandboxed]", out["output"])
             sup.stop()
 
+    def test_approved_gate_does_not_reask_on_resume(self):
+        # Regression: approving a gated verify must authorize it — before,
+        # the resumed runner re-checked policy, re-asked, and the mission
+        # parked on a fresh approval forever.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            orig = sup.policy.check
+            sup.policy.check = lambda action, **kw: (
+                "ask" if action == "run_tests" else orig(action, **kw))
+            mission = {"autonomy_profile": "local_autonomous",
+                       "workspace": td}
+            node = {"id": "n1", "instruction": "run checks",
+                    "metadata": {}}
+            out = sup._default_verify(mission, node)
+            self.assertIn("pending_approval", out)
+            node["metadata"]["approval_granted"] = {
+                "action": "run_tests", "approval_id": "ap-x",
+                "at": time.time()}
+            out2 = sup._default_verify(mission, node)
+            self.assertNotIn("pending_approval", out2)
+            self.assertTrue(out2["ok"], out2.get("output"))
+            sup.stop()
+
+    def test_resolve_approval_stamps_node_grant(self):
+        # The stamp is what the resumed verify honors — approve must write
+        # it onto the node, not just flip the state back to ready.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-verify1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Verify work", "verify", kind="verify")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                g.add(n)
+                row["graph"] = g.graph
+            sup.missions.mutate(m["id"], _fn)
+            ap = sup._create_approval(
+                m["id"], nid, {"name": "run_tests", "detail": "x"})
+            out = sup.resolve_approval(ap["id"], approve=True)
+            self.assertEqual(out["state"], "approved")
+            node = TaskGraph(sup.missions.get(m["id"])).get(nid)
+            self.assertEqual(node["state"], "ready")
+            self.assertEqual(
+                node["metadata"]["approval_granted"]["action"], "run_tests")
+            sup.stop()
+
 
 class JobNodeTests(unittest.TestCase):
     def test_job_kind_is_accepted_and_carries_no_default_lock(self):

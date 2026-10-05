@@ -1800,6 +1800,14 @@ class AutonomousSupervisor:
                 node = graph.get(node_id)
                 if node is not None and node.get("state") == "waiting_approval":
                     node["state"] = "ready"   # resume exact action
+                    # Stamp the grant so the resumed action's own policy
+                    # check sees it — without this the runner re-gates,
+                    # re-asks, and the mission can never proceed.
+                    meta = node.setdefault("metadata", {})
+                    meta["approval_granted"] = {
+                        "action": str(target.get("action") or ""),
+                        "approval_id": approval_id,
+                        "at": time.time()}
                 row["pending_approval"] = None
                 row["waiting_for"] = ""
             self.missions.mutate(mission_id, _fn)
@@ -1821,9 +1829,15 @@ class AutonomousSupervisor:
         """Run verification — detected project checks, or the node's
         explicit command. Permission-gated via the policy engine."""
         from ..workflow.verify import detect_verification_commands
-        decision = self.policy.check(
-            "run_tests", profile=str(mission.get("autonomy_profile") or "local_autonomous"),
-            scope=str(mission.get("workspace") or ""))
+        granted = (node.get("metadata") or {}).get("approval_granted") or {}
+        if granted.get("action") == "run_tests":
+            # User approved this exact gated action — resume honors it
+            # instead of re-asking forever.
+            decision = "allow"
+        else:
+            decision = self.policy.check(
+                "run_tests", profile=str(mission.get("autonomy_profile") or "local_autonomous"),
+                scope=str(mission.get("workspace") or ""))
         if decision == "deny":
             return {"ok": False, "output": "shell verification denied by policy"}
         if decision == "ask":
