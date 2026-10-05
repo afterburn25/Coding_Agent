@@ -2,6 +2,41 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-05 (late) — Integrated reliability closeout → 0.22.0
+
+**Cycle closed.** `milestone/integrated-reliability-closeout` absorbed
+`origin/main` (splash-tail handshake work preserved), finished the
+Persona Speech Genome, and landed to `main` via PR #3. `main` is again
+the single source of truth.
+
+- **Splash convergence**: main's sequence-complete handshake +
+  FINALIZING dwell + readiness convergence live on top of closeout's
+  video splash (single WebView2 surface, hidden-until-real,
+  `VerifyLoadableAsync` pre-flight, in-place error video on failure).
+- **Persona milestone finished**: `nonverbal_rate` gates
+  `VocalizationEngine` keep-probability (explicit 0.0 suppresses);
+  `pause_hint` inserts one bounded clause-boundary ellipsis into speech
+  text only; `seriousness`/`register` bound pitch/gain/pace;
+  `emphasis_spans` documented honestly as span-protection metadata.
+- **Soak**: 612 renders across 4 personas — 0 fact drift, 0 exact-span
+  corruption, 0 serious-context humor leaks; 120-turn multi-turn
+  session clean; 20× identity ask → 17 unique renders, canonical fact
+  intact throughout.
+- **Full suite**: 2103 tests, green (duckdb `data`-view fix landed; two
+  environment flakes — loopback socket abort, smoke-instance port
+  contention — confirmed transient on isolated rerun).
+- **Dogfood**: frozen backend rebuilt via PyInstaller + desktop
+  published + deployed to `D:\Nexus_Core`; real launch (video splash →
+  verify gate → main window), real TTS WAV (24 kHz stereo), Speech Lab
+  battery live, GitHub connected, graceful shutdown held for narration.
+- **Branches**: `fix/full-core-glow` SUPERSEDED (work byte-identical in
+  main); `voice-concept-isabella` SUPERSEDED_BY_PRODUCTION_VOICE_SYSTEM;
+  `feature/cinematic-core-unlock-splash` SUPERSEDED_BY_PRODUCTION_SPLASH
+  (27 MB prototype left on-branch by design; handoff doc lives in
+  `docs/SPLASH_ANIMATION_HANDOFF.md`).
+- Full matrix: `docs/ROADMAP_CLOSURE.md` → "Persona Speech Genome —
+  completion matrix".
+
 ## 2026-10-05 — Persona Speech Genome (LANDED, milestone branch)
 
 Branch: `milestone/integrated-reliability-closeout`. Scope: personas
