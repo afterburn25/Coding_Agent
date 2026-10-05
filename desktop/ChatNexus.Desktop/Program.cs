@@ -654,6 +654,24 @@ internal sealed class SplashForm : Form
             var w = _artwork.Width * scale;
             var h = _artwork.Height * scale;
             g.DrawImage(_artwork, (size.Width - w) / 2, (size.Height - h) / 2, w, h);
+            // Cinematic's opening-state dim: #shade is a radial vignette at
+            // ~0.72 opacity while charge=0 (splash.mjs paint()). Painting the
+            // same falloff here makes the static frame pixel-match the
+            // WebView2's first frame — one splash, not two.
+            using (var shadePath = new GraphicsPath())
+            {
+                var sx = size.Width * 0.5f;
+                var sy = size.Height * 0.33f;
+                var srx = size.Width * 0.71f;
+                var sry = size.Height * 0.95f;
+                shadePath.AddEllipse(sx - srx, sy - sry, srx * 2, sry * 2);
+                using var shade = new PathGradientBrush(shadePath)
+                {
+                    CenterColor = Color.FromArgb(36, 1, 6, 17),
+                    SurroundColors = new[] { Color.FromArgb(87, 1, 5, 17) },
+                };
+                g.FillRectangle(shade, client);
+            }
         }
         else
         {
@@ -666,33 +684,51 @@ internal sealed class SplashForm : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
-        // Progress bar — covers the artwork's own baked-in bar (x ~390–660,
-        // y ~502–509 on the 1024×576 source). The artwork ships with a static
-        // half-lit grey fill, so this track is fully opaque and slightly
-        // oversized: the baked bar disappears entirely and only the live
-        // gradient fill reads as the progress indicator.
-        var barWidth = (int)(size.Width * 0.284);
-        var barHeight = 7;
-        var barX = (int)(size.Width * 0.372);
-        var barY = (int)(size.Height * 0.873);
-        var track = new Rectangle(barX, barY - 1, barWidth, barHeight + 2);
-        using (var trackBrush = new SolidBrush(Color.FromArgb(255, 6, 12, 26)))
+        // Readout — mirrors the cinematic's #readout surface exactly:
+        // soft dark pill (28% left / 44% width / 3.7% bottom), 5px rounded
+        // #080f22 track with #4e729a edge, #4c6bff→#56edff fill with #4cf
+        // glow, then the two status lines below it in the same colors.
+        var roWidth = size.Width * 0.44f;
+        var roHeight = size.Height * 0.10f;
+        var roBottom = size.Height * 0.963f;
+        using (var pillPath = new GraphicsPath())
         {
-            g.FillRectangle(trackBrush, track);
+            var px = size.Width * 0.5f;
+            var py = roBottom - roHeight * 0.55f;
+            var prx = roWidth * 0.62f;
+            var pry = roHeight * 1.05f;
+            pillPath.AddEllipse(px - prx, py - pry, prx * 2, pry * 2);
+            using var pill = new PathGradientBrush(pillPath)
+            {
+                CenterColor = Color.FromArgb(235, 4, 11, 25),
+                SurroundColors = new[] { Color.FromArgb(0, 4, 11, 25) },
+            };
+            g.FillEllipse(pill, px - prx, py - pry, prx * 2, pry * 2);
         }
-        using (var edge = new Pen(Color.FromArgb(80, 60, 110, 160)))
+        var barWidth = (int)(roWidth * 0.62f);
+        var barHeight = 5;
+        var barX = (int)((size.Width - barWidth) / 2f);
+        var barY = (int)(roBottom - roHeight + size.Height * 0.014f);
+        var track = new RectangleF(barX, barY, barWidth, barHeight);
+        using (var trackPath = RoundedRect(track, barHeight / 2f))
         {
-            g.DrawRectangle(edge, track);
+            using var trackBrush = new SolidBrush(Color.FromArgb(255, 8, 15, 34));
+            g.FillPath(trackBrush, trackPath);
+            using var edge = new Pen(Color.FromArgb(255, 78, 114, 154), 1f);
+            g.DrawPath(edge, trackPath);
         }
         var fillWidth = (int)(barWidth * Math.Clamp(_progress.DisplayedProgress, 0.0, 1.0));
         if (fillWidth > 0)
         {
-            var fill = new Rectangle(barX, barY, fillWidth, barHeight);
-            using var fillBrush = new LinearGradientBrush(fill,
-                Color.FromArgb(0, 160, 255), Color.FromArgb(140, 80, 255), 0f);
-            g.FillRectangle(fillBrush, fill);
-            using var glow = new SolidBrush(Color.FromArgb(60, 80, 180, 255));
-            g.FillRectangle(glow, new Rectangle(barX, barY - 2, fillWidth, barHeight + 4));
+            var fill = new RectangleF(barX, barY, fillWidth, barHeight);
+            using (var fillPath = RoundedRect(fill, barHeight / 2f))
+            using (var fillBrush = new LinearGradientBrush(fill,
+                Color.FromArgb(76, 107, 255), Color.FromArgb(86, 237, 255), 0f))
+            {
+                g.FillPath(fillBrush, fillPath);
+            }
+            using var glow = new SolidBrush(Color.FromArgb(50, 68, 204, 255));
+            g.FillRectangle(glow, new RectangleF(barX, barY - 2, fillWidth, barHeight + 4));
         }
 
         // Brief brightening of the shield's central core on completion —
@@ -715,25 +751,42 @@ internal sealed class SplashForm : Form
             g.FillEllipse(glow, coreX - radius, coreY - radius, radius * 2, radius * 2);
         }
 
-        // Two-line status under the progress bar. The artwork's baked-in
-        // caption sits at ~0.91·H, so both lines live along the bottom edge.
-        using var primaryFont = new Font("Segoe UI", 10f, FontStyle.Bold);
-        using var secondaryFont = new Font("Segoe UI", 8.5f);
+        // Two-line status inside the readout — same palette as the
+        // cinematic's #status/#detail so the swap doesn't restyle text.
+        using var primaryFont = new Font("Segoe UI", 8.25f);
+        using var secondaryFont = new Font("Segoe UI", 6f);
         var isReady = _progress.ReadyToDismiss
             || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
-        var primaryRect = new Rectangle(0, size.Height - 46, size.Width, 20);
+        var primaryRect = new Rectangle(0, barY + barHeight + 9, size.Width, 18);
         // Ready state: green + pulsating — the timer already repaints at
         // 33ms cadence, so a clock-driven alpha sine gives the same pulse
         // the cinematic's #status.online keyframes produce.
         var pulse = (float)(0.5 + 0.5 * Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2 / 1.6));
         var readyColor = Color.FromArgb(70 + (int)(185 * pulse), 90, 255, 160);
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
-            isReady ? readyColor : Color.FromArgb(90, 215, 255),
+            isReady ? readyColor : Color.FromArgb(174, 223, 255),
             TextFormatFlags.HorizontalCenter);
-        var secondaryRect = new Rectangle(0, size.Height - 27, size.Width, 18);
+        var secondaryRect = new Rectangle(0, barY + barHeight + 26, size.Width, 16);
         TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
-            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(150, 170, 200),
+            isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(118, 144, 174),
             TextFormatFlags.HorizontalCenter);
+    }
+
+    private static GraphicsPath RoundedRect(RectangleF r, float radius)
+    {
+        var path = new GraphicsPath();
+        var d = radius * 2;
+        if (r.Width < d || r.Height < d)
+        {
+            path.AddRectangle(r);
+            return path;
+        }
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     protected override void Dispose(bool disposing)

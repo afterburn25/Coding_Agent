@@ -104,7 +104,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
     """Contract tests for the real startup splash state machine."""
 
     def test_splash_launches_before_main_window(self):
-        context_start = PROGRAM.index("NexusCoreApplicationContext(string appDir)")
+        context_start = PROGRAM.index("NexusCoreApplicationContext(string appDir, bool testFault")
         ctor = PROGRAM[context_start:context_start + 2600]
         self.assertLess(ctor.index("_splash.Show()"), ctor.index("RunStartupAsync()"))
         # The main window is only created inside the async startup run.
@@ -187,7 +187,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         self.assertIn("CompletionPhase", PROGRESS)
         self.assertIn("PathGradientBrush", PROGRAM)  # core glow bloom
         body = PROGRAM[PROGRAM.index("private async Task RunStartupAsync()"):]
-        body = body[:2500]
+        body = body[:4200]
         self.assertLess(body.index("BeginCompletion"), body.index("_splash?.Close()"))
         self.assertLess(body.index("_splash?.Close()"), body.index("_main.Show()"))
 
