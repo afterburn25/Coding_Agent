@@ -1989,3 +1989,18 @@ the mocked tests missed:
   absolute `--config`/`--workspace`.
 - `backend-new` rebuilt from `ae63f461` and restaged (full PyInstaller
   args; `dist-fresh2` removed after staging).
+
+## Tool-install verification + manifest detection fix (7153c5c3)
+
+- `_verify_tool` was a stub that always passed — now wired through
+  `tool_installed_hook` → `ToolRegistry.refresh_install_status()` so a
+  "successful" job that left nothing on disk fails the item honestly.
+- **Pre-existing manifest bug found**: `detect.files` required ALL listed
+  paths, but `invokeai.json` listed Windows + POSIX alternates — InvokeAI
+  always reported `missing` even when installed. New `detect.files_any`
+  is any-of for platform alternates; `comfyui` keeps all-required
+  (main.py + embedded python.exe both must exist).
+- Verified against real trees: invokeai@dev=True, comfyui@deployed=True,
+  whisper@deployed=False (honest — not installed there).
+- `backend-new` restaged from `7153c5c3` — ships voice-assets fix,
+  permission retry, real verify, and manifest detection.
