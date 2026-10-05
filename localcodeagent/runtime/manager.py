@@ -636,8 +636,8 @@ class RuntimeManager:
         except Exception:
             return False
         with self._lock:
-            managed_pids = {item.process.pid
-                            for item in self._managed.values()}
+            managed_pids = {getattr(item.process, "pid", None)
+                            for item in self._managed.values()} - {None}
         for pid in listeners - managed_pids:
             name = self._process_image_name(pid)
             if not name or "llama" not in name.lower():
@@ -664,6 +664,8 @@ class RuntimeManager:
                 f"adopted surviving llama-server (pid {pid}) — no reload needed")
             return True
         return False
+
+    def _listening_pids(self, port: int) -> set[int]:
         """PIDs holding a TCP LISTEN on ``port`` — best-effort, empty on
         failure so callers never block a launch on a probe hiccup."""
         pids: set[int] = set()
@@ -1120,7 +1122,12 @@ class RuntimeManager:
             self._enforce_residency(profile)
         port = profile.port or self._port_from_endpoint(profile.endpoint) or self._find_free_port(profile.host)
         endpoint = self._profile_endpoint(profile, port)
-        if not self._adopt_healthy_orphan(profile, port, endpoint, ctx_override):
+        try:
+            adopted = self._adopt_healthy_orphan(
+                profile, port, endpoint, ctx_override)
+        except Exception:
+            adopted = False
+        if not adopted:
             with self._lock:
                 self._reclaim_orphaned_port(port)
             return self._launch_with_fallback(profile, port, endpoint, ctx_override)

@@ -675,6 +675,7 @@ class RuntimeManagerTests(unittest.TestCase):
             spawns: list[int | None] = []
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
 
             def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
                 spawns.append(ctx_override)
@@ -707,6 +708,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager = RuntimeManager(AgentConfig(models=[profile]), base_dir=Path(td))
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             release = threading.Event()
 
             def slow_spawn(p, port, endpoint, **kwargs):
@@ -773,6 +775,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager._health = lambda ep, timeout=1.5: (True, "ok")
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             spawns: list[int | None] = []
 
             def spawn(p, port, endpoint, *, apply_tuning, extra_args, ctx_override):
@@ -803,6 +806,7 @@ class RuntimeManagerTests(unittest.TestCase):
             manager._health = lambda ep, timeout=1.5: (True, "ok")
             manager._enforce_residency = lambda p: None
             manager._reclaim_orphaned_port = lambda port: None
+            manager._adopt_healthy_orphan = lambda *a, **k: False
             manager._spawn_and_wait = lambda p, port, endpoint, **k: endpoint
             shrunk = manager.shrink_oversized_context(busy_models={"busy"})
             self.assertEqual(shrunk, ["big"])
