@@ -203,9 +203,31 @@ class RecoveryManager:
             "task": task_title[:200],
             "error": str(error)[:800],
             "playbook_step": 0,
+            "count": 1,
         }
-        mission.setdefault("failure_history", []).append(rec)
-        mission["failure_history"] = mission["failure_history"][-100:]
+        history = mission.setdefault("failure_history", [])
+        prev = history[-1] if history else None
+        if prev is not None and prev.get("task") == rec["task"] \
+                and prev.get("class") == rec["class"]:
+            steps = PLAYBOOKS.get(
+                FailureClass(prev.get("class") or FailureClass.UNKNOWN.value),
+                PLAYBOOKS[FailureClass.UNKNOWN])
+            prev_exhausted = int(prev.get("playbook_step") or 0) >= len(steps)
+        else:
+            prev_exhausted = True
+        if not prev_exhausted:
+            # Same logical failure on the same task — continue the
+            # playbook cursor instead of restarting it. A model that
+            # fabricates differently each attempt produces a fresh
+            # signature; without reuse the cursor resets to step 0
+            # ("retry") forever and never reaches escalate.
+            prev["ts"] = rec["ts"]
+            prev["error"] = rec["error"]
+            prev["signature"] = rec["signature"]
+            prev["count"] = int(prev.get("count") or 1) + 1
+            return prev
+        history.append(rec)
+        mission["failure_history"] = history[-100:]
         return rec
 
     def same_failure_count(self, mission: dict, signature: str) -> int:
@@ -231,8 +253,14 @@ class RecoveryManager:
             return f"repair-loop budget exhausted ({max_repairs})"
         max_same = int(budgets.get("max_same_failure_retries", 3))
         if failures:
-            latest = failures[-1].get("signature")
-            if latest and self.same_failure_count(mission, latest) >= max_same:
+            latest = failures[-1]
+            sig = latest.get("signature")
+            # Count both ways: identical signatures across records, or the
+            # same task+class record's repetition count — a failure whose
+            # text varies every time (e.g. fabricated prose) must still
+            # trip the bound.
+            if ((sig and self.same_failure_count(mission, sig) >= max_same)
+                    or int(latest.get("count") or 1) >= max_same):
                 return f"same failure repeated {max_same}x without progress"
         max_tools = int(budgets.get("max_tool_failures", 8))
         tool_failures = sum(1 for f in failures

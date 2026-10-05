@@ -1102,6 +1102,41 @@ class RecoveryTests(unittest.TestCase):
         b = failure_signature("task", "error at offset 999999")
         self.assertEqual(a, b)
 
+    def test_varied_failure_text_still_bounded(self):
+        # Regression (live soak): a fabricated reply differs every attempt,
+        # so each failure minted a fresh record with a new signature —
+        # the playbook cursor reset to "retry" forever and the
+        # same-failure bound never tripped. Same task+class must continue
+        # the record so retries bound even when the text varies.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x",
+                                   budgets={"max_same_failure_retries": 3})
+            for i in range(3):
+                rec = sup.recovery.record_failure(
+                    m, "task", f"unverified claims, variant {i}")
+            self.assertEqual(len(m["failure_history"]), 1)
+            self.assertEqual(rec["count"], 3)
+            self.assertIn("same failure", sup.recovery.budgets_exceeded(m))
+            sup.stop()
+
+    def test_playbook_advances_across_varied_retries(self):
+        # The cursor must advance across repeated same-task failures whose
+        # text differs — otherwise every retry replays step 0.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x")
+            rec = sup.recovery.record_failure(m, "task", "alpha error")
+            s1 = sup.recovery.next_step(m, rec)
+            rec2 = sup.recovery.record_failure(m, "task", "totally different beta")
+            self.assertIs(rec, rec2)
+            s2 = sup.recovery.next_step(m, rec2)
+            actions = [s["action"] for s in (s1, s2)]
+            self.assertEqual(
+                actions, [s["action"] for s in
+                          PLAYBOOKS[FailureClass.UNKNOWN][:2]])
+            sup.stop()
+
 
 class PolicyTests(unittest.TestCase):
     def test_profiles_gate_actions(self):
