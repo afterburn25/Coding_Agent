@@ -28,6 +28,7 @@ class _FakeModelServer:
         self.tool_name = "system_resources"
         self.tool_args = "{}"
         self.tool_calls: list[tuple[str, str]] | None = None  # multi-call batch
+        self.static_reply: str | None = None  # when set, answer with prose only
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -50,7 +51,10 @@ class _FakeModelServer:
                     or "Recovered pending tool action" in str(m.get("content", ""))
                     for m in messages
                 )
-                if saw_tool:
+                if outer.static_reply is not None:
+                    message = {"role": "assistant", "content": outer.static_reply}
+                    chunks = [outer.static_reply]
+                elif saw_tool:
                     message = {"role": "assistant", "content": "Resource check complete — all healthy."}
                     chunks = ["Resource check complete", " — all healthy."]
                 else:
@@ -405,7 +409,57 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(calls["begin"], 0)
             self.assertEqual(calls["finish"], 0)
 
-    def test_transient_model_failure_recovers(self):
+    def test_mission_agent_node_fails_on_unverified_claims(self):
+        # Regression: an agent node whose reply asserted completed actions
+        # with zero tool calls recorded ok=True — the mission advanced on a
+        # fabrication until the artifact check caught it downstream. The
+        # node itself must fail so retries get a shot at a real tool run.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        fake.static_reply = (
+            "I've completed the work and generated the file for you.")
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            executor = getattr(
+                getattr(state, "autonomy", None), "_executor", None)
+            if executor is None:
+                self.skipTest("autonomy executor unavailable")
+            out = executor(
+                {"id": "m-1", "title": "m"},
+                {"instruction": "create soak.txt", "title": "work",
+                 "kind": "agent"},
+                lambda e: None)
+            self.assertFalse(out.get("ok"), out)
+            self.assertIn("unverified", str(out.get("error") or ""))
+
+    def test_mission_node_retry_feeds_failure_back(self):
+        # A retried node reruns the instruction — the failure reason must
+        # reach the model so it can correct instead of repeating the lie.
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            executor = getattr(
+                getattr(state, "autonomy", None), "_executor", None)
+            if executor is None:
+                self.skipTest("autonomy executor unavailable")
+            out = executor(
+                {"id": "m-1", "title": "m"},
+                {"instruction": "create soak.txt", "title": "work",
+                 "kind": "agent", "retries": 1,
+                 "result": {"ok": False,
+                            "error": "unverified action claims"}},
+                lambda e: None)
+            sent = fake.requests[-1]["messages"]
+            user_msgs = [str(m.get("content") or "")
+                         for m in sent if m.get("role") == "user"]
+            self.assertTrue(
+                any("previous attempt failed" in m for m in user_msgs),
+                user_msgs)
+            self.assertTrue(
+                any("unverified action claims" in m for m in user_msgs),
+                user_msgs)
+            self.assertTrue(out.get("ok"), out)
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:

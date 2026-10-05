@@ -1336,6 +1336,7 @@ class AutonomousSupervisor:
             node["result"] = {
                 "ok": ok,
                 "output": str(result.get("output") or "")[:4000],
+                "error": str(result.get("error") or "")[:400] or None,
                 "task_id": str(result.get("task_id") or ""),
                 "artifacts": list(result.get("artifacts") or [])[:20],
                 "finished_at": time.time(),

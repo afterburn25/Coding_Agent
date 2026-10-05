@@ -1882,9 +1882,22 @@ class AppState:
                         result = None
                     if result is not None:
                         return _mission_node_out(mission, node, result)
+            instruction = str(
+                node.get("instruction") or node.get("title") or "")
+            if int(node.get("retries") or 0) > 0:
+                # A retry reruns the same instruction — without feedback the
+                # model repeats the failure (e.g. asserting a file write it
+                # never invoked). Tell it why the last attempt failed.
+                prev = str(((node.get("result") or {}).get("error"))
+                           or ((node.get("result") or {}).get("output"))
+                           or "")[:400]
+                instruction += (
+                    "\n\nYour previous attempt failed"
+                    + (f": {prev}" if prev else ".")
+                    + " Do not assert completed actions — actually invoke "
+                      "the required tools.")
             result = self.agent.run(
-                str(node.get("instruction") or node.get("title") or ""),
-                history=[], mode="auto",
+                instruction, history=[], mode="auto",
                 event_callback=emit_cb,
                 mission_id=str(mission.get("id") or "") or None,
             )
