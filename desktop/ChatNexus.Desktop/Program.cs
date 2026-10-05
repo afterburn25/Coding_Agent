@@ -105,6 +105,7 @@ internal sealed class SplashForm : Form
     private readonly string _appDir;
 
     private Panel? _failurePanel;
+    private string? _failureMessage;
     public event Action? RetryRequested;
     public event Action? ExitRequested;
     /// <summary>Playback channel for narration bytes — web audio with ducking.</summary>
@@ -309,7 +310,21 @@ internal sealed class SplashForm : Form
             {
                 case "splash-ready":
                     _webReady = true;
-                    BeginInvoke(() => { if (_web is not null) _web.Visible = true; });
+                    BeginInvoke(() =>
+                    {
+                        if (_web is not null) _web.Visible = true;
+                        // A fault that fired before the cinematic booted
+                        // locked in the static fallback — hand the same
+                        // failure to the real containment animation +
+                        // recovery UI now that the surface exists.
+                        if (_failureMessage is not null && _failurePanel is not null)
+                        {
+                            _failurePanel.Dispose();
+                            _failurePanel = null;
+                            PostToWeb(new { type = "trigger-fault", message = _failureMessage });
+                            PostToWeb(new { type = "show-recovery" });
+                        }
+                    });
                     break;
                 case "voice-result":
                     // Narration delivery was previously invisible — a
@@ -365,6 +380,7 @@ internal sealed class SplashForm : Form
     {
         _timer.Stop();
         _progress.MarkFailed();
+        _failureMessage = message;
         if (_webReady && !_webFailed)
         {
             // Cinematic containment + recovery UI own the fault surface;
@@ -703,7 +719,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         catch (Exception ex)
         {
             // Fault narration supersedes any friendly line immediately —
-            // then recovery diagnostics are already running.
+            // then recovery diagnostics are already running. The exception
+            // itself MUST reach the host log — a silent catch leaves a
+            // windowless, unexplained failure.
+            BackendProcess.NoteStartup(
+                Path.Combine(_appDir, "data", "logs"),
+                $"startup failed: {ex.GetType().Name}: {ex.Message}");
             _narrator?.Fault(() => _main?.BackendUrl);
             _splash?.ShowFailure(
                 $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");

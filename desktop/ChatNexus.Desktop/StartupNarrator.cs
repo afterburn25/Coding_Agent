@@ -346,8 +346,9 @@ internal sealed class StartupNarrator
     {
         // A synthesized friendly line still deserves delivery after the
         // ordinary completion cancel — the SoundPlayer fallback covers a
-        // splash that's already gone. Only a declared fault silences it.
-        if (_faulted) return;
+        // splash that's already gone. A declared fault silences friendly
+        // lines — but the fault line itself must still be heard.
+        if (_faulted && key != "fault") return;
         _delivering = true;
         NarrationStarted?.Invoke(key);
         try { await Play(wav, key); } catch (Exception ex) { Log($"play '{key}' failed: {ex.GetType().Name}"); }
