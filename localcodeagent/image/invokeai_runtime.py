@@ -111,19 +111,23 @@ class InvokeAIRuntime:
                         continue
                     try:
                         # v5/v6 expose invokeai.app.run_app; v4 used
-                        # invokeai.app.run. Probe either, launch via the
-                        # console-script-equivalent module.
+                        # invokeai.app.run. Neither module is runnable
+                        # with -m (no __main__ entry — exits 0 silently),
+                        # so call the console-script function directly:
+                        # invokeai-web → invokeai.app.run_app:run_app.
                         probe = subprocess.run(
                             [str(py), "-c",
-                             "import invokeai.app.run_app"],
+                             "from invokeai.app.run_app import run_app"],
                             capture_output=True, timeout=30)
                         if probe.returncode == 0:
-                            return home.resolve(), [str(py.resolve()), "-m", "invokeai.app.run_app"]
+                            return home.resolve(), [str(py.resolve()), "-c",
+                                                    "from invokeai.app.run_app import run_app; run_app()"]
                         probe = subprocess.run(
-                            [str(py), "-c", "import invokeai.app.run"],
+                            [str(py), "-c", "from invokeai.app.run import invoke_ai_api"],
                             capture_output=True, timeout=30)
                         if probe.returncode == 0:
-                            return home.resolve(), [str(py.resolve()), "-m", "invokeai.app.run"]
+                            return home.resolve(), [str(py.resolve()), "-c",
+                                                    "from invokeai.app.run import invoke_ai_api; invoke_ai_api()"]
                     except (OSError, subprocess.TimeoutExpired):
                         continue
         configured_python = str(getattr(self.config, "invokeai_python", "")).strip()
@@ -139,10 +143,17 @@ class InvokeAIRuntime:
                     return scripts.parent.resolve(), [str(exe.resolve())]
             try:
                 probe = subprocess.run(
-                    [py, "-c", "import invokeai.app.run"],
+                    [py, "-c", "from invokeai.app.run_app import run_app"],
                     capture_output=True, timeout=30)
                 if probe.returncode == 0:
-                    return scripts.parent.resolve(), [py, "-m", "invokeai.app.run"]
+                    return scripts.parent.resolve(), [py, "-c",
+                                                      "from invokeai.app.run_app import run_app; run_app()"]
+                probe = subprocess.run(
+                    [py, "-c", "from invokeai.app.run import invoke_ai_api"],
+                    capture_output=True, timeout=30)
+                if probe.returncode == 0:
+                    return scripts.parent.resolve(), [py, "-c",
+                                                      "from invokeai.app.run import invoke_ai_api; invoke_ai_api()"]
             except (OSError, subprocess.TimeoutExpired):
                 pass
         exe = shutil.which("invokeai-web")
