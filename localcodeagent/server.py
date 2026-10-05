@@ -5087,6 +5087,7 @@ class AppState:
         def _pick_python() -> str:
             """Honor install.python_candidates (e.g. InvokeAI needs
             3.10-3.12 — the ambient interpreter may be too new)."""
+            import shutil
             for cand in (install.get("python_candidates") or []):
                 cand = str(cand).strip()
                 if not cand:
