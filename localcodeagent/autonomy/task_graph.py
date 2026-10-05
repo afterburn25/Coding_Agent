@@ -130,7 +130,11 @@ class TaskGraph:
 
     def _refresh_ready(self) -> None:
         for n in self.nodes:
-            if n.get("state") != "planned":
+            # "blocked" is derived, not latched: a dep that failed may be
+            # reset to ready by the recovery playbook's retry step, so a
+            # blocked node must be re-evaluated every refresh — otherwise
+            # a transient dep failure permanently bricks its dependents.
+            if n.get("state") not in {"planned", "blocked"}:
                 continue
             deps = [self.get(d) for d in n.get("deps", [])]
             if all(d is not None and d.get("state") == "completed" for d in deps):
@@ -142,6 +146,10 @@ class TaskGraph:
                 # too, not left planned forever (it could never become ready
                 # and would hold all_tasks_completed permanently).
                 n["state"] = "skipped"
+            else:
+                # Dep is parked on a retry cooldown or otherwise still
+                # live — the node is merely waiting, not dead-ended.
+                n["state"] = "planned"
 
     def refresh(self) -> None:
         self._refresh_ready()

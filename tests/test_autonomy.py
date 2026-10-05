@@ -1441,6 +1441,57 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertGreater(len(final["graph"]["nodes"]), 3)
             sup.stop()
 
+    def test_retry_cooldown_does_not_block_mission(self):
+        # Regression: a failed node parks in waiting_dependency on its
+        # bounded retry cooldown — but that state counted as neither
+        # runnable nor stuck, so the very next tick concluded "nothing
+        # left to run" and blocked the mission before the retry fired.
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return {"ok": False, "output": "transient fail"}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            # Drive until the first node has failed once — the recovery
+            # playbook parks it in waiting_dependency on a bounded
+            # cooldown (and resets its retry counter).
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                sup.tick()
+                time.sleep(0.05)
+                row = sup.missions.get(m["id"])
+                parked = [n for n in (row.get("graph") or {}).get("nodes", [])
+                          if n.get("state") == "waiting_dependency"]
+                if parked:
+                    break
+            self.assertTrue(parked, "node never reached retry cooldown")
+            # Ticks while the node is on cooldown must keep the mission
+            # executing — not transition it to blocked/evaluating.
+            for _ in range(3):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "executing",
+                             f"parked retry wrongly left executing: "
+                             f"{row['status']}")
+
+            def _clear_cooldown(r):
+                for n in (r.get("graph") or {}).get("nodes", []):
+                    n["retry_after"] = 0
+            sup.missions.mutate(m["id"], _clear_cooldown)
+            final = drive(sup, m["id"], ticks=30)
+            self.assertEqual(final["status"], "completed")
+            self.assertGreaterEqual(calls["n"], 2)
+            sup.stop()
+
     @staticmethod
     def _expire_pending_approval(sup: AutonomousSupervisor) -> None:
         # Deterministic alternative to wall-clock sleeps: the timeout check

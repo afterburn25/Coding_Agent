@@ -966,7 +966,13 @@ class AutonomousSupervisor:
                                       "graph": graph.graph})
         elif not runnable and not graph.running():
             # Nothing left to run — evaluate goal progress, or recover
-            # nodes stranded behind a failed dependency.
+            # nodes stranded behind a failed dependency. A node parked in
+            # waiting_dependency is a retry on cooldown (the only writer
+            # of that node state), not a dead end — stay executing and
+            # let the cooldown unpark at the top of the next tick.
+            if any(n.get("state") == "waiting_dependency"
+                   for n in graph.nodes):
+                return
             if graph.is_done():
                 self.missions.transition(mission_id, "evaluating")
             else:
