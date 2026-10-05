@@ -321,6 +321,11 @@ class AutonomousSupervisor:
         return m
 
     def pause_mission(self, mission_id: str, *, reason: str = "user pause") -> dict | None:
+        # An explicit pause clears any budget-pause marker — the user's
+        # intent wins and the mission must not auto-resume.
+        def _fn(row: dict) -> None:
+            row.pop("budget_pause", None)
+        self.missions.mutate(mission_id, _fn)
         m = self.missions.transition(mission_id, "paused", detail=reason)
         if m is not None:
             self._audit("mission_paused", mission=mission_id, reason=reason)
@@ -704,13 +709,46 @@ class AutonomousSupervisor:
         for m in self.missions.list():
             status = str(m.get("status"))
             if status in TERMINAL_MISSION_STATUSES or status in {
-                    "draft", "paused", "blocked", "waiting_trigger",
+                    "draft", "blocked", "waiting_trigger",
                     "waiting_approval", "archived"}:
+                continue
+            if status == "paused":
+                try:
+                    self._resume_if_budget_clear(m)
+                except Exception:
+                    pass
                 continue
             try:
                 self._step_mission(m["id"])
             except Exception:
                 pass  # one mission's fault must not kill the supervisor
+
+    def _resume_if_budget_clear(self, m: dict) -> None:
+        """Auto-resume a mission paused by the budget gate once resources
+        recover. User pauses (no marker) are never touched."""
+        marker = m.get("budget_pause")
+        if not marker or not isinstance(marker, dict):
+            return
+        now = time.time()
+        if float(marker.get("next_check", 0) or 0) > now:
+            return
+        if not self.budgets.check(m)["ok"]:
+            def _backoff(row: dict) -> None:
+                bp = row.get("budget_pause")
+                if isinstance(bp, dict):
+                    bp["next_check"] = now + 15.0
+            self.missions.mutate(m["id"], _backoff)
+            return
+        resume_to = str(marker.get("resume_to") or "executing")
+        if resume_to not in {"ready", "active", "planning", "executing"}:
+            resume_to = "executing"
+        def _clear(row: dict) -> None:
+            row.pop("budget_pause", None)
+        self.missions.mutate(m["id"], _clear)
+        self.missions.transition(m["id"], resume_to,
+                                 detail="budget clear — auto-resumed")
+        self._audit("mission_budget_resumed", mission=m["id"])
+        self.wake()
 
     def _on_admission_shortfall(self, est, reason: str) -> None:
         """Demand-driven eviction: a node that fits only after idle
@@ -748,6 +786,13 @@ class AutonomousSupervisor:
         # Budget gate first — overspend pauses with a notification.
         budget = self.budgets.check(m)
         if not budget["ok"]:
+            # Mark the pause as budget-caused so a transient resource dip
+            # (e.g. a model load starving RAM for a minute) auto-resumes
+            # once pressure clears — a user pause never does.
+            def _mark(row: dict) -> None:
+                row["budget_pause"] = {"resume_to": status,
+                                       "next_check": 0.0}
+            self.missions.mutate(mission_id, _mark)
             self.missions.transition(mission_id, "paused",
                                      detail="; ".join(budget["violations"]))
             self.notifications.notify(

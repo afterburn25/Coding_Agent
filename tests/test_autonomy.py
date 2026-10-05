@@ -1492,6 +1492,49 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(calls["n"], 2)
             sup.stop()
 
+    def test_budget_pause_auto_resumes_when_clear(self):
+        # Live-soak finding: llama-server load spikes pushed available RAM
+        # under the 2 GB floor and the budget gate paused the mission —
+        # permanently. A transient resource pause must re-check and resume
+        # once pressure clears, or one blip ends the night's work.
+        with tempfile.TemporaryDirectory() as td:
+            hw = {"available_ram_gb": 0.5, "total_ram_gb": 64.0}
+            sup = make_sup(td, resources=lambda: dict(hw))
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            sup.tick()
+            time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            self.assertTrue(row.get("budget_pause"))
+
+            hw["available_ram_gb"] = 32.0
+            sup.tick()
+            time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertNotEqual(row["status"], "paused")
+            self.assertFalse(row.get("budget_pause"))
+            sup.stop()
+
+    def test_user_pause_never_auto_resumes(self):
+        # Only budget-caused pauses may auto-resume — an explicit user
+        # pause must stay parked even with healthy resources.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="x",
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            sup.pause_mission(m["id"])
+            for _ in range(3):
+                sup.tick()
+                time.sleep(0.05)
+            row = sup.missions.get(m["id"])
+            self.assertEqual(row["status"], "paused")
+            sup.stop()
+
     @staticmethod
     def _expire_pending_approval(sup: AutonomousSupervisor) -> None:
         # Deterministic alternative to wall-clock sleeps: the timeout check
