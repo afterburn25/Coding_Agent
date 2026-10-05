@@ -296,7 +296,8 @@ class VoiceManager:
         return job
 
     def speak_greeting(self, task_id: str, text: str, *,
-                       speed: float = 1.0) -> dict[str, Any] | None:
+                       speed: float = 1.0,
+                       publish: bool = True) -> dict[str, Any] | None:
         """Synchronous greeting synthesis — returns the segment so the
         caller can hand its URL to the requesting client directly.
 
@@ -342,7 +343,8 @@ class VoiceManager:
                     time.monotonic()
                     + float(payload["seconds"]) + self._greeting_settle_s)
             self._last_spoken = (task_id, text)
-        self._publish("voice", payload)
+        if publish:
+            self._publish("voice", payload)
         return {"ok": True, "segment_id": seg_id, "url": payload["url"],
                 "seconds": payload["seconds"]}
 

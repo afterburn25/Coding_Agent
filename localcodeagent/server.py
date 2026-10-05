@@ -4516,7 +4516,9 @@ class AppState:
             if bid in self._queue_announced:
                 return None
             self._queue_announced.add(bid)
-            return v.speak_greeting(bid, str(text or ""))
+            # No bus publish — the host plays the returned wav itself;
+            # publishing would double-play it through the still-open page.
+            return v.speak_greeting(bid, str(text or ""), publish=False)
         except Exception:
             return None
 

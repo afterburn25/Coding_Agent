@@ -27,6 +27,22 @@ function fail(error) {
   host({ type: 'splash-error', reason: String(error?.message ?? error), startupFault: Boolean(clock?.activeFault) });
 }
 
+// recoveryWatchdogMs: if the host never escalates the recovery state
+// past ANALYZING, the honest terminal state is "needs a human" — the
+// panel's actions are what remain. Any real recovery-state lands first
+// and the guard below makes the timer a no-op.
+let recoveryWatchdog = null;
+function armRecoveryWatchdog() {
+  clearTimeout(recoveryWatchdog);
+  const ms = Number(manifest?.failure?.recoveryWatchdogMs) || 6000;
+  recoveryWatchdog = setTimeout(() => {
+    if (clock && clock.recoveryState === 'RECOVERY_ANALYZING') {
+      clock.setRecoveryState('HUMAN_INTERVENTION_REQUIRED');
+      changed(.16);
+    }
+  }, ms);
+}
+
 function updateRecovery(state) {
   const visible = (state.panel ?? 0) > 0;
   $('recovery').hidden = !visible;
@@ -130,10 +146,11 @@ function handleHost(msg) {
         paint();
         break;
       case 'set-gate': clock.setGate(msg.id, Boolean(msg.released)); changed(); break;
-      case 'trigger-fault': triggerFault({ message: msg.message, detail: msg.detail }); break;
+      case 'trigger-fault': triggerFault({ message: msg.message, detail: msg.detail }); armRecoveryWatchdog(); break;
       case 'recovery-state': clock.setRecoveryState(msg.state, { attempt: msg.attempt, total: msg.total, message: msg.message }); changed(.16); break;
       case 'repair-success': clock.repairSuccess(reduced); changed(.16); break;
-      case 'show-recovery': clock.showRecoveryImmediately(); changed(.16); break;
+      case 'show-recovery': clock.showRecoveryImmediately(); armRecoveryWatchdog(); changed(.16); break;
+      case 'action-feedback': setText('action-feedback', String(msg.text ?? '')); break;
       case 'set-volume': audio.setVolume(clamp(msg.value ?? audio.volume)); break;
       case 'set-audio':
         if (!msg.enabled) { audio.disabled = true; audio.stop(); }

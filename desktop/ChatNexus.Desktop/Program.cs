@@ -102,6 +102,7 @@ internal sealed class SplashForm : Form
     private readonly StartupProgress _progress;
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly Image? _artwork;
+    private readonly Panel _cover;
     private readonly string _appDir;
 
     private Panel? _failurePanel;
@@ -156,6 +157,18 @@ internal sealed class SplashForm : Form
         {
             _artwork = Image.FromFile(splashPath);
         }
+
+        // Cover panel: paints the identical static surface, shown on top of
+        // the cinematic during its first ~200ms so the WebView2's late first
+        // frames never read as a black flash over the artwork.
+        _cover = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Visible = false,
+            BackColor = Color.FromArgb(4, 9, 19),
+        };
+        _cover.Paint += (_, pe) => PaintSurface(pe.Graphics, _cover.ClientSize);
+        Controls.Add(_cover);
 
         _timer.Interval = 33;
         _timer.Tick += (_, _) =>
@@ -226,7 +239,7 @@ internal sealed class SplashForm : Form
             {
                 Dock = DockStyle.Fill,
                 Visible = false,
-                DefaultBackgroundColor = Color.FromArgb(4, 8, 18),
+                DefaultBackgroundColor = Color.FromArgb(4, 9, 19), // exact #stage bg
             };
             Controls.Add(_web);
             _web.BringToFront();
@@ -312,7 +325,22 @@ internal sealed class SplashForm : Form
                     _webReady = true;
                     BeginInvoke(() =>
                     {
-                        if (_web is not null) _web.Visible = true;
+                        if (_web is not null)
+                        {
+                            _web.Visible = true;
+                            // Hide the placeholder's first frames behind an
+                            // identical static frame, then reveal the live
+                            // cinematic once the compositor is painting.
+                            _cover.Visible = true;
+                            _cover.BringToFront();
+                            _cover.Invalidate();
+                            var cover = _cover;
+                            _ = Task.Delay(200).ContinueWith(_ =>
+                            {
+                                try { BeginInvoke(() => cover.Visible = false); }
+                                catch { }
+                            });
+                        }
                         // A fault that fired before the cinematic booted
                         // locked in the static fallback — hand the same
                         // failure to the real containment animation +
@@ -347,6 +375,7 @@ internal sealed class SplashForm : Form
                     BeginInvoke(() =>
                     {
                         if (_web is not null) { _web.Visible = false; }
+                        _cover.Visible = false;
                         Invalidate();
                     });
                     break;
@@ -357,6 +386,8 @@ internal sealed class SplashForm : Form
                     {
                         if (action == "retry") RetryRequested?.Invoke();
                         else if (action == "exit") ExitRequested?.Invoke();
+                        else if (action == "rollback") ScheduleRecoveryRollback();
+                        else if (action == "safe-mode") EnterSafeModeAndRestart();
                         else if (action == "open-log")
                         {
                             var log = Path.Combine(_appDir, "data", "logs", "backend-host.log");
@@ -374,6 +405,110 @@ internal sealed class SplashForm : Form
             }
         }
         catch { }
+    }
+
+    private void RecoveryFeedback(string text) =>
+        PostToWeb(new { type = "action-feedback", text });
+
+    /// <summary>
+    /// Recovery "Rollback" — writes data/lkg/rollback.flag naming the
+    /// newest snapshot (latest.txt first, newest snap-* otherwise) and
+    /// restarts so ApplyLkgFlags restores it on the next boot.
+    /// </summary>
+    private void ScheduleRecoveryRollback()
+    {
+        try
+        {
+            var lkg = Path.Combine(_appDir, "data", "lkg");
+            Directory.CreateDirectory(lkg);
+            var name = "";
+            var latestTxt = Path.Combine(lkg, "latest.txt");
+            if (File.Exists(latestTxt))
+                name = (File.ReadAllText(latestTxt) ?? "").Trim();
+            if (name.Length == 0 || !Directory.Exists(Path.Combine(lkg, name)))
+            {
+                var newest = Directory.GetDirectories(lkg, "snap-*")
+                    .OrderByDescending(d => d, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                name = newest is null ? "" : Path.GetFileName(newest);
+            }
+            if (name.Length == 0)
+            {
+                RecoveryFeedback("No rollback snapshot is available.");
+                return;
+            }
+            File.WriteAllText(Path.Combine(lkg, "rollback.flag"),
+                JsonSerializer.Serialize(new
+                {
+                    name,
+                    reason = "user requested from splash recovery",
+                }));
+            PostToWeb(new { type = "recovery-state", state = "ROLLBACK" });
+            RecoveryFeedback($"Rolling back to {name} — restarting.");
+            _ = Task.Delay(1200).ContinueWith(
+                _ => BeginInvoke(new Action(Application.Restart)));
+        }
+        catch (Exception ex)
+        {
+            RecoveryFeedback($"Rollback could not be scheduled: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Recovery "Safe Mode" — sets data/safe_mode.json active (same
+    /// schema SafeModeStore writes) and restarts so the backend boots
+    /// with heavy startup paths suppressed.
+    /// </summary>
+    private void EnterSafeModeAndRestart()
+    {
+        try
+        {
+            var dataDir = Path.Combine(_appDir, "data");
+            Directory.CreateDirectory(dataDir);
+            var path = Path.Combine(dataDir, "safe_mode.json");
+            var now = (double)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var consec = 0;
+            JsonElement history = default;
+            try
+            {
+                using var d = JsonDocument.Parse(File.ReadAllText(path));
+                if (d.RootElement.TryGetProperty("consecutive_failures", out var c)
+                    && c.ValueKind == JsonValueKind.Number)
+                    consec = c.GetInt32();
+                if (d.RootElement.TryGetProperty("history", out var h)
+                    && h.ValueKind == JsonValueKind.Array)
+                    history = h.Clone();
+            }
+            catch { /* missing/corrupt file — write a clean record */ }
+            var entries = new List<object>();
+            if (history.ValueKind == JsonValueKind.Array)
+                foreach (var el in history.EnumerateArray()) entries.Add(el.Clone());
+            entries.Add(new Dictionary<string, object?>
+            {
+                ["event"] = "enter",
+                ["reason"] = "user requested from splash recovery",
+                ["time"] = now,
+            });
+            File.WriteAllText(path, JsonSerializer.Serialize(
+                new Dictionary<string, object?>
+                {
+                    ["version"] = 1,
+                    ["active"] = true,
+                    ["reason"] = "user requested from splash recovery",
+                    ["since"] = now,
+                    ["consecutive_failures"] = consec,
+                    ["history"] = entries.Count > 50
+                        ? entries[^50..] : entries,
+                }));
+            PostToWeb(new { type = "recovery-state", state = "SAFE_MODE" });
+            RecoveryFeedback("Safe Mode enabled — restarting with essential systems only.");
+            _ = Task.Delay(1200).ContinueWith(
+                _ => BeginInvoke(new Action(Application.Restart)));
+        }
+        catch (Exception ex)
+        {
+            RecoveryFeedback($"Safe Mode could not be enabled: {ex.Message}");
+        }
     }
 
     public void ShowFailure(string message)
@@ -477,25 +612,37 @@ internal sealed class SplashForm : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics;
+        PaintSurface(e.Graphics, ClientSize);
+        base.OnPaint(e);
+    }
+
+    /// <summary>
+    /// The full static splash surface — artwork, progress track, status
+    /// lines. Shared by the form's OnPaint and the cover panel that hides
+    /// the cinematic's first composited frames (they arrive ~a frame late
+    /// and would otherwise read as a black flash over the artwork).
+    /// </summary>
+    private void PaintSurface(Graphics g, Size size)
+    {
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        var client = new Rectangle(Point.Empty, size);
 
         if (_artwork is not null)
         {
             // Cover-fit the artwork.
-            var scale = Math.Max((float)ClientSize.Width / _artwork.Width,
-                                 (float)ClientSize.Height / _artwork.Height);
+            var scale = Math.Max((float)size.Width / _artwork.Width,
+                                 (float)size.Height / _artwork.Height);
             var w = _artwork.Width * scale;
             var h = _artwork.Height * scale;
-            g.DrawImage(_artwork, (ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+            g.DrawImage(_artwork, (size.Width - w) / 2, (size.Height - h) / 2, w, h);
         }
         else
         {
-            using var bg = new LinearGradientBrush(ClientRectangle,
+            using var bg = new LinearGradientBrush(client,
                 Color.FromArgb(4, 8, 18), Color.FromArgb(10, 20, 44), 90f);
-            g.FillRectangle(bg, ClientRectangle);
+            g.FillRectangle(bg, client);
             using var font = new Font("Segoe UI", 30f, FontStyle.Bold);
-            TextRenderer.DrawText(g, "NEXUS CORE", font, ClientRectangle,
+            TextRenderer.DrawText(g, "NEXUS CORE", font, client,
                 Color.FromArgb(120, 200, 255),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
@@ -505,10 +652,10 @@ internal sealed class SplashForm : Form
         // half-lit grey fill, so this track is fully opaque and slightly
         // oversized: the baked bar disappears entirely and only the live
         // gradient fill reads as the progress indicator.
-        var barWidth = (int)(ClientSize.Width * 0.284);
+        var barWidth = (int)(size.Width * 0.284);
         var barHeight = 7;
-        var barX = (int)(ClientSize.Width * 0.372);
-        var barY = (int)(ClientSize.Height * 0.873);
+        var barX = (int)(size.Width * 0.372);
+        var barY = (int)(size.Height * 0.873);
         var track = new Rectangle(barX, barY - 1, barWidth, barHeight + 2);
         using (var trackBrush = new SolidBrush(Color.FromArgb(255, 6, 12, 26)))
         {
@@ -535,8 +682,8 @@ internal sealed class SplashForm : Form
         var completion = _progress.CompletionPhase;
         if (completion > 0)
         {
-            var coreX = ClientSize.Width * 0.5f;
-            var coreY = ClientSize.Height * 0.34f;
+            var coreX = size.Width * 0.5f;
+            var coreY = size.Height * 0.34f;
             var radius = 130f * (0.6f + 0.4f * (float)Math.Sin(completion * Math.PI));
             var alpha = (int)(150 * Math.Sin(completion * Math.PI));
             using var glowPath = new GraphicsPath();
@@ -555,7 +702,7 @@ internal sealed class SplashForm : Form
         using var secondaryFont = new Font("Segoe UI", 8.5f);
         var isReady = _progress.ReadyToDismiss
             || string.Equals(_progress.Primary, "CORE SYSTEMS · ONLINE", StringComparison.Ordinal);
-        var primaryRect = new Rectangle(0, ClientSize.Height - 46, ClientSize.Width, 20);
+        var primaryRect = new Rectangle(0, size.Height - 46, size.Width, 20);
         // Ready state: green + pulsating — the timer already repaints at
         // 33ms cadence, so a clock-driven alpha sine gives the same pulse
         // the cinematic's #status.online keyframes produce.
@@ -564,12 +711,10 @@ internal sealed class SplashForm : Form
         TextRenderer.DrawText(g, _progress.Primary, primaryFont, primaryRect,
             isReady ? readyColor : Color.FromArgb(90, 215, 255),
             TextFormatFlags.HorizontalCenter);
-        var secondaryRect = new Rectangle(0, ClientSize.Height - 27, ClientSize.Width, 18);
+        var secondaryRect = new Rectangle(0, size.Height - 27, size.Width, 18);
         TextRenderer.DrawText(g, _progress.Secondary, secondaryFont, secondaryRect,
             isReady ? Color.FromArgb(61, 215, 127) : Color.FromArgb(150, 170, 200),
             TextFormatFlags.HorizontalCenter);
-
-        base.OnPaint(e);
     }
 
     protected override void Dispose(bool disposing)
