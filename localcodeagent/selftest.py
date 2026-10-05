@@ -213,6 +213,7 @@ def validate_self_update(
                     ("stt_api", "/api/stt", '"available"'),
                     ("nexus_state_api", "/api/nexus/state", '"focus"'),
                     ("briefing_api", "/api/briefing", '"meaningful"'),
+                    ("browser_api", "/api/browser/status", '"playwright"'),
                 ):
                     try:
                         code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")

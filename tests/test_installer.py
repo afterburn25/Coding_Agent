@@ -344,9 +344,18 @@ class InstallerContractTests(unittest.TestCase):
             "cryptography==50.0.1", "py7zr==1.1.3",
             "onnxruntime==1.30.0", "phonemizer==3.4.0",
             "espeakng-loader==0.2.4", "numpy==2.3.5",
+            "playwright==",
         ):
             self.assertIn(dep, self.build)
         self.assertNotIn("numpy>=", self.build)
+
+    def test_windows_build_bundles_playwright_driver(self):
+        # Browser E2E must work from the frozen install: the playwright
+        # package + its node driver ship in the backend bundle; the browser
+        # binary resolves at runtime (system Edge channel or managed
+        # Chromium under data/) so no hidden dev-machine dependency.
+        self.assertIn("--collect-all playwright", self.build)
+        self.assertIn("--collect-all greenlet", self.build)
 
     def test_update_uses_installer_owned_process_shutdown(self):
         self.assertIn("CloseApplications=no", self.installer)

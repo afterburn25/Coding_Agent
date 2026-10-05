@@ -92,6 +92,7 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "fetch_url": {"category": "research", "capabilities": ["fetch_url", "research"], "requires_network": True},
     # -- browser ------------------------------------------------------------------
     "browser_run": {"category": "browsers", "capabilities": ["browser_run", "browser_automation"], "requires_network": True, "provider": "playwright"},
+    "browser_verify": {"category": "browsers", "capabilities": ["browser_verify", "browser_automation", "e2e_verify"], "requires_network": True, "provider": "playwright"},
     # -- images ------------------------------------------------------------------
     "generate_image": {"category": "images", "capabilities": ["generate_image", "text_to_image"], "requires_gpu": True, "provider": "nexus-images"},
     "edit_image": {"category": "images", "capabilities": ["edit_image", "image_edit"], "requires_gpu": True, "provider": "nexus-images"},

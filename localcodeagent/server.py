@@ -601,7 +601,8 @@ class AppState:
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
-        register_web_tools(self.tools, runtime_root=runtime_root)
+        self.browser_runner = register_web_tools(
+            self.tools, runtime_root=runtime_root, artifacts=self.artifacts)
         if config.image_enabled:
             register_image_tools(self.tools, self.images)
         # Local-first voice/TTS subsystem (Kokoro ONNX, CPU by default).
@@ -1037,8 +1038,25 @@ class AppState:
                 lambda: getattr(self, "voice", None) is not None,
             "voice_ready": _voice_ready,
             "llm_ready": _llm_ready,
+            "browser_state": self._browser_state,
         }
         return CapabilityRegistry(env)
+
+    def _browser_state(self) -> str:
+        """Honest browser-automation state for the capability probe:
+        'verified' only when a browser actually resolves."""
+        runner = getattr(self, "browser_runner", None)
+        if runner is None:
+            return "missing"
+        try:
+            st = runner.status()
+            if st.get("ready"):
+                return "ready"
+            if st.get("playwright"):
+                return "no_browser"
+            return "no_playwright"
+        except Exception:
+            return "error"
 
     def _image_job_outputs(self, job_id: str) -> list[str]:
         """Output file paths for an image job — used by the orchestrator to
@@ -5172,6 +5190,43 @@ class AppState:
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "job_id": job.id, "tool": spec.name, "method": "venv"}
 
+    def install_browser_runtime(self, *, approve: bool = False) -> dict:
+        """Provision the managed Chromium runtime when no system browser
+        channel (Edge) resolves. packages.install-gated tracked job —
+        the browser binary lives under data/, outside the frozen bundle."""
+        gate = self._permission_gate("packages.install", approve, "browser")
+        if gate is not None:
+            return gate
+        runner = getattr(self, "browser_runner", None)
+        if runner is None or not runner.playwright_available():
+            return {"ok": False,
+                    "error": "browser automation package is not available in this build"}
+        ch = runner.channel()
+        if ch:
+            return {"ok": True, "channel": ch, "already_present": True,
+                    "detail": "no download needed — a usable browser is already present"}
+        job = self.jobs.submit("install", "Install browser runtime (Chromium)")
+
+        def _run() -> None:
+            self.jobs.update(job.id, state="running",
+                             detail="playwright install chromium")
+            try:
+                ch = runner.ensure_browser()
+                self.jobs.update(job.id, state="completed",
+                                 detail=f"browser channel: {ch}")
+            except Exception as exc:
+                self.jobs.update(job.id, state="failed",
+                                 error=f"{type(exc).__name__}: {exc}"[:300])
+            try:
+                caps = getattr(self, "capabilities", None)
+                if caps is not None:
+                    caps.invalidate("browser_preview")
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "job_id": job.id}
+
     def _permission_gate(self, key: str, approve: bool, label: str = "") -> dict | None:
         """Shared approval gate for gated API actions.
 
@@ -7214,6 +7269,14 @@ class Handler(BaseHTTPRequestHandler):
                 "disk_free_bytes": shutil.disk_usage(str(self.state.runtime.base_dir)).free,
                 "partials": partials,
             })
+            return
+        if path == "/api/browser/status":
+            runner = getattr(self.state, "browser_runner", None)
+            if runner is None:
+                self._json({"ready": False, "playwright": False,
+                            "channel": "", "detail": "browser subsystem not initialized"})
+            else:
+                self._json(runner.status())
             return
         if path.startswith("/api/tools/health/"):
             tool_id = unquote(path[len("/api/tools/health/"):]).strip("/")
@@ -10035,6 +10098,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
                     return
                 self._json(result)
+                return
+
+            if path == "/api/browser/install":
+                try:
+                    result = self.state.install_browser_runtime(
+                        approve=bool(body.get("approve", False)))
+                except Exception as exc:
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+                    return
+                self._json(result, 200 if result.get("ok") else 403
+                           if "denied" in str(result.get("error", "")) else 200)
                 return
 
             if path == "/api/tools/install":

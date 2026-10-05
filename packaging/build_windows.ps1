@@ -67,7 +67,7 @@ Remove-Item -Recurse -Force "build","dist",$RuntimeExtract -ErrorAction Silently
 New-Item -ItemType Directory -Force -Path "build","dist" | Out-Null
 
 Write-Host "Ensuring pinned build and local voice dependencies..."
-& $Python -m pip install --quiet --disable-pip-version-check "pyinstaller==6.22.3" "pillow==12.3.0" "cryptography==50.0.1" "py7zr==1.1.3" "onnxruntime==1.30.0" "phonemizer==3.4.0" "espeakng-loader==0.2.4" "numpy==2.3.5"
+& $Python -m pip install --quiet --disable-pip-version-check "pyinstaller==6.22.3" "pillow==12.3.0" "cryptography==50.0.1" "py7zr==1.1.3" "onnxruntime==1.30.0" "phonemizer==3.4.0" "espeakng-loader==0.2.4" "numpy==2.3.5" "playwright==1.55.0" "greenlet==3.5.6"
 if ($LASTEXITCODE -ne 0) { throw "build/voice dependency install failed" }
 # kokoro-onnx declares Python <3.14; verified working on 3.14 locally.
 & $Python -m pip install --quiet --disable-pip-version-check --ignore-requires-python "kokoro-onnx==0.6.1"
@@ -102,6 +102,8 @@ Write-Host "Building hidden Python agent backend..."
     --collect-all phonemizer `
     --collect-all espeakng_loader `
     --collect-all numpy `
+    --collect-all playwright `
+    --collect-all greenlet `
     --add-data "$Root\localcodeagent\voice\official;localcodeagent/voice/official" `
     --hidden-import pybcj --hidden-import pyppmd --hidden-import pyzstd `
     --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `

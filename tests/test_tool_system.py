@@ -927,7 +927,11 @@ class BrowserRunnerTests(unittest.TestCase):
             runner = BrowserRunner(artifacts_dir=Path(td))
             h = runner.health()
             self.assertIn("ok", h)
-            self.assertEqual(h["ok"], runner.available())
+            # Honest contract: healthy only when playwright imports AND a
+            # browser channel resolves (Edge or provisioned Chromium).
+            self.assertEqual(h["ok"], runner.status()["ready"])
+            st = runner.status()
+            self.assertEqual(st["playwright"], runner.playwright_available())
 
 
 class SecretVaultTests(unittest.TestCase):

@@ -435,7 +435,8 @@ class AgentOrchestrator:
             return "BRAIN_SUBROUTINE_DISABLED: image_generation is disabled by the creator-locked Nexus Brain."
         research_tools = {
             "research_topic", "search_documentation", "search_github", "search_errors",
-            "lookup_api", "read_release_notes", "web_search", "fetch_url", "browser_run",
+            "lookup_api", "read_release_notes", "web_search", "fetch_url",
+            "browser_run", "browser_verify",
         }
         if name in research_tools and not self._brain_subroutine_enabled("web_research", True):
             return "BRAIN_SUBROUTINE_DISABLED: web_research is disabled by the creator-locked Nexus Brain."
