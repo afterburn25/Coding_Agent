@@ -475,9 +475,9 @@ class ProvisioningManager:
 
     def _run_voice_assets(self, it: ProvisionItem) -> None:
         from .voice.assets import ensure_assets
-        def _progress(name: str, done: int, total: int) -> None:
+        def _progress(name: str, done: int) -> None:
             it.progress = {"current_file": name, "bytes_done": done,
-                           "bytes_total": total}
+                           "bytes_total": None}
             self._emit(it, "progress")
         ensure_assets(self._voice_asset_dir(), progress=_progress)
         self._set(it, "verifying", detail="verifying voice assets")

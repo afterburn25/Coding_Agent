@@ -299,6 +299,27 @@ class PersistenceTests(unittest.TestCase):
             m2 = _manager(root)
             self.assertEqual(m2._items["voice-assets"].state, "waiting")
 
+    def test_voice_progress_contract_matches_ensure_assets(self):
+        # Regression: the real ensure_assets calls progress(name, done) —
+        # two args. A provisioning callback expecting (name, done, total)
+        # crashed on first download with a TypeError ("missing 'total'").
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            it = m._items["voice-assets"]
+
+            def fake_ensure(asset_dir, progress=None):
+                if progress:
+                    progress("kokoro-v1.0.onnx", 1024)
+                return {}
+
+            with patch("localcodeagent.voice.assets.ensure_assets",
+                       fake_ensure), \
+                 patch("localcodeagent.voice.assets.asset_status",
+                       return_value={"a": {"verified": True}}):
+                m._run_voice_assets(it)
+            self.assertEqual(it.progress["bytes_done"], 1024)
+            self.assertEqual(it.progress["current_file"], "kokoro-v1.0.onnx")
+
 
 class DiskGateTests(unittest.TestCase):
     def test_low_disk_blocks_item(self):
