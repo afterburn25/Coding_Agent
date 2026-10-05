@@ -1079,6 +1079,32 @@ class ImageManager:
             time.sleep(1.0)
         raise TimeoutError("Timed out waiting for InvokeAI image generation")
 
+    def _evict_peer_image_backend(self, job: ImageJob, active: str) -> bool:
+        """Park the *other* image backend when it is Nexus-managed.
+
+        Two resident image servers can exhaust VRAM/RAM together — the
+        observed failure was a resident ComfyUI starving InvokeAI's model
+        load until it died mid-job. Only Nexus-owned processes are
+        evicted (evict_if_managed refuses user-owned external servers);
+        the peer returns on its next request via start_on_image_request."""
+        peer = "comfyui" if active == "invokeai" else "invokeai"
+        runtime = self.backend_runtimes.get(peer)
+        if runtime is None:
+            return False
+        try:
+            status = runtime.probe()
+        except Exception:
+            return False
+        if not status.get("healthy"):
+            return False
+        if runtime.evict_if_managed():
+            label = "ComfyUI" if peer == "comfyui" else "InvokeAI"
+            job.routing_reasons.append(
+                f"resource arbitration: parked Nexus-managed {label} — "
+                "free memory was below this job's estimate")
+            return True
+        return False
+
     def _run_invokeai_job(self, job: ImageJob) -> None:
         request = ImageRequest(**job.request)
         profile = self.router.get_profile(job.model_id)
@@ -1101,6 +1127,14 @@ class ImageManager:
                 if required_ram and self.runtime.hardware.available_ram_gb < headroom:
                     job.stage = "freeing memory"; self._save_jobs(job)
                     self.runtime.release_managed_models_for_ram(required_ram_gb=headroom)
+                # LLM eviction may not be enough when the *other* image
+                # backend is resident — InvokeAI died mid-job under exactly
+                # this contention. Park a managed ComfyUI before submitting.
+                self.runtime.refresh_hardware()
+                if (required and self.runtime.hardware.free_vram_gb < required) or \
+                        (required_ram and self.runtime.hardware.available_ram_gb < headroom):
+                    job.stage = "freeing memory"; self._save_jobs(job)
+                    self._evict_peer_image_backend(job, "invokeai")
 
             job.stage = "starting InvokeAI" if job.backend_starting else "connecting to InvokeAI"
             job.progress = max(job.progress, 0.10); self._save_jobs(job)
@@ -1121,16 +1155,21 @@ class ImageManager:
             # TemporaryDirectory created at startup; a second InvokeAI
             # instance on the same root sweeps tmp* dirs on boot and kills
             # it ("Parent directory ... does not exist" on every save).
-            # That is a recoverable backend fault — restart and resubmit
-            # once before reporting failure.
+            # The same bounded restart-and-resubmit covers transport-level
+            # backend crashes (connection refused/reset mid-job) — one
+            # recovery attempt, never an infinite loop. Timeouts and
+            # cancellations are NOT retried here.
+            from ..netdiag import BackendConnectionError
             for attempt in range(2):
-                job.backend_job_id = self.invokeai_backend.submit(spec)
-                self._save_jobs(job)
                 try:
+                    job.backend_job_id = self.invokeai_backend.submit(spec)
+                    self._save_jobs(job)
                     self._await_invokeai_job(job)
                     break
                 except RuntimeError as exc:
-                    if attempt or not self._is_swept_state_error(str(exc)):
+                    retryable = self._is_swept_state_error(str(exc)) \
+                        or isinstance(exc, BackendConnectionError)
+                    if attempt or not retryable:
                         raise
                     job.stage = "restarting InvokeAI"; self._save_jobs(job)
                     try:
@@ -1233,6 +1272,13 @@ class ImageManager:
                 if required_ram and self.runtime.hardware.available_ram_gb < headroom:
                     job.stage="freeing memory"; self._save_jobs(job)
                     self.runtime.release_managed_models_for_ram(required_ram_gb=headroom)
+                # Same cross-backend contention as the InvokeAI path — park
+                # a Nexus-managed InvokeAI if memory is still short.
+                self.runtime.refresh_hardware()
+                if (required and self.runtime.hardware.free_vram_gb < required) or \
+                        (required_ram and self.runtime.hardware.available_ram_gb < headroom):
+                    job.stage="freeing memory"; self._save_jobs(job)
+                    self._evict_peer_image_backend(job, "comfyui")
             self._save_jobs(job)
             job.stage="starting ComfyUI" if job.backend_starting else "connecting to ComfyUI"
             job.progress=max(job.progress,0.10); self._save_jobs(job)
@@ -1252,8 +1298,24 @@ class ImageManager:
             unresolved=rendered_status.get("unresolved_tokens",[])
             if unresolved:
                 raise RuntimeError("Rendered ComfyUI workflow still contains unresolved variable(s): " + ", ".join(unresolved))
-            self._submit_and_wait(
-                job, workflow, stage="generating", progress_start=0.20, progress_end=0.90)
+            # A ComfyUI crash mid-job surfaces as BackendConnectionError —
+            # restart once and resubmit (bounded; timeouts and cancels are
+            # never retried).
+            from ..netdiag import BackendConnectionError
+            for attempt in range(2):
+                try:
+                    self._submit_and_wait(
+                        job, workflow, stage="generating", progress_start=0.20, progress_end=0.90)
+                    break
+                except BackendConnectionError:
+                    if attempt:
+                        raise
+                    job.stage="restarting ComfyUI"; self._save_jobs(job)
+                    try:
+                        self.backend_runtime.stop()
+                    except Exception:
+                        pass
+                    self.backend_runtime.ensure_ready()
             job.state="generating"; job.stage="saving image"; job.progress=max(job.progress,0.92); self._save_jobs(job)
             destination=self.generations_dir / job.id
             job.outputs=[str(p) for p in self.backend.fetch_outputs(job.backend_job_id, destination)]

@@ -411,6 +411,31 @@ class InvokeAIRuntime:
             self.status.healthy = False
             self.status.pid = None
 
+    def evict_if_managed(self) -> bool:
+        """Stop this backend only when Nexus owns the resident process.
+
+        Two resident image servers can exhaust VRAM/RAM together, so a
+        Nexus-managed backend is eligible for arbitration eviction — the
+        next request brings it back via start_on_image_request. A
+        user-owned external InvokeAI is never touched.
+        Returns True when a Nexus-owned process was stopped."""
+        with self._lock:
+            if self._process is not None and self._process.poll() is None:
+                self.stop()
+                return True
+            orphan = self._orphaned_managed_pid()
+            if orphan is None:
+                return False
+            self._kill_orphan(orphan)
+            try:
+                self._managed_marker_path().unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.status.state = "stopped"
+            self.status.healthy = False
+            self.status.pid = None
+            return True
+
     def recover(self) -> None:
         with self._lock:
             self.status.restarts += 1
