@@ -10229,6 +10229,10 @@ class _NexusHTTPServer(ThreadingHTTPServer):
         exc = sys.exc_info()[1]
         if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
             return
+        # WSAENOTSOCK — a request thread still mid-write when
+        # server_close() tore down the socket; teardown noise, not a fault.
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 10038:
+            return
         super().handle_error(request, client_address)
 
 
