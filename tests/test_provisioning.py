@@ -161,6 +161,31 @@ class DispatchTests(unittest.TestCase):
             m._run_item("t1")
             self.assertEqual(it.state, "completed")
 
+    def test_permission_denied_retries_then_clears(self):
+        # Windows AV on-access scans transiently lock freshly-extracted
+        # exes mid-install — the failure must retry, not fail terminal.
+        calls = []
+
+        def hook(tid, approve=False):
+            calls.append(tid)
+            if len(calls) < 2:
+                raise PermissionError(
+                    13, "Permission denied", "tools/x/Scripts/python.exe")
+            return {"ok": True}
+
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td), install_tool_hook=hook)
+            it = _item("t1", payload={"tool_id": "t1"})
+            m._items = {"t1": it}
+            m._run_item("t1")
+            self.assertEqual(it.state, "waiting")
+            self.assertEqual(it.error_code, "permission_denied")
+            self.assertGreater(it.next_retry_at, time.time())
+            it.next_retry_at = 0
+            it.attempts += 1
+            m._run_item("t1")
+            self.assertEqual(it.state, "completed")
+
     def test_capability_ready_fires(self):
         ready = []
 

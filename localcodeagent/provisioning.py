@@ -41,8 +41,11 @@ _GB = 1024 ** 3
 #                 waiting -> skipped (unsupported/declined)
 TERMINAL = {"completed", "failed", "cancelled", "skipped"}
 # Failures worth retrying automatically (bounded exponential backoff).
+# permission_denied is included: on Windows, AV on-access scans routinely
+# hold a fresh exe/pyd lock for a few seconds mid-install; a bounded retry
+# clears it, while a real ACL problem still exhausts attempts and reports.
 TRANSIENT_ERRORS = {"network_failure", "connection_reset", "server_busy",
-                    "backend_health_failed"}
+                    "backend_health_failed", "permission_denied"}
 MAX_ATTEMPTS = 3
 
 
