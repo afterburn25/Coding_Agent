@@ -65,6 +65,25 @@
     } catch (e) { alert("Switch failed: " + e.message); }
   }
 
+  // Resolves when the desktop host releases the startup transition —
+  // resolves immediately in plain browsers/dev where no host exists.
+  function startupGate() {
+    if (!window.__nexusStartupGate) {
+      window.__nexusStartupGate = new Promise((resolve) => {
+        if (!window.chrome || !window.chrome.webview ||
+            !window.chrome.webview.addEventListener) { resolve(); return; }
+        const done = () => resolve();
+        const timer = setTimeout(done, 15000); // host lost → never trap the greeting
+        window.chrome.webview.addEventListener("message", (e) => {
+          if (e.data && e.data.type === "startup-transition-complete") {
+            clearTimeout(timer); done();
+          }
+        });
+      });
+    }
+    return window.__nexusStartupGate;
+  }
+
   function showGreetingToast() {
     let g = null;
     try {
@@ -220,10 +239,14 @@
       showGreetingToast();
       if (hadStashed) sessionStorage.setItem("nexus-greeted", "1");
       // Startup greeting once per browser session — the backend owns
-      // once-per-profile intro + returning-greeting rotation.
+      // once-per-profile intro + returning-greeting rotation. The fetch
+      // (and its synthesized audio) waits on the desktop host's
+      // startup-transition-complete signal: while the splash is up,
+      // Isabella's narration + the 2s quiet buffer own the sound stage.
       if (!sessionStorage.getItem("nexus-greeted") && s.active) {
         sessionStorage.setItem("nexus-greeted", "1");
-        api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`)
+        startupGate()
+          .then(() => api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`))
           .then((g) => {
             if (g && g.text) {
               // voice_url means the backend synthesized the greeting —

@@ -105,7 +105,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
 
     def test_splash_launches_before_main_window(self):
         context_start = PROGRAM.index("NexusCoreApplicationContext(string appDir)")
-        ctor = PROGRAM[context_start:context_start + 1200]
+        ctor = PROGRAM[context_start:context_start + 2600]
         self.assertLess(ctor.index("_splash.Show()"), ctor.index("RunStartupAsync()"))
         # The main window is only created inside the async startup run.
         self.assertIn("_main = new MainForm(_appDir);", PROGRAM)
@@ -136,13 +136,11 @@ class StartupSplashLifecycleTests(unittest.TestCase):
 
     def test_splash_shows_real_milestone_progress(self):
         for primary, secondary in (
-            ("INITIALIZING · NEXUS CORE", "Preparing local application environment"),
-            ("STARTING · CORE SERVICES", "Waiting for backend health"),
-            ("CONNECTING · LOCAL AI RUNTIME", "Backend healthy"),
-            ("INITIALIZING · NEXUS INTERFACE", "Initializing WebView2"),
-            ("LOADING · NEXUS INTERFACE", "Rendering the Nexus Core application shell"),
-            ("CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake"),
-            ("READY · NEXUS CORE", "All startup-critical systems online"),
+            ("INITIALIZING · NEXUS CORE", "Starting native host and loading configuration"),
+            ("STARTING · CORE SERVICES", "Launching Nexus agent and service runtime"),
+            ("SYNCHRONIZING · INTERFACE", "Connecting interface to core services"),
+            ("LOADING · COMMAND INTERFACE", "Starting the Nexus workspace"),
+            ("CORE SYSTEMS · ONLINE", "Nexus Core ready"),
         ):
             self.assertIn(primary, DESKTOP)
             self.assertIn(secondary, DESKTOP)
@@ -180,7 +178,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         # Ready-but-before-7s holds on FINALIZING, never READY.
         self.assertIn('"FINALIZING · NEXUS CORE"', PROGRESS)
         self.assertIn('"Preparing interface"', PROGRESS)
-        self.assertIn('"READY · NEXUS CORE"', PROGRESS)
+        self.assertIn('"CORE SYSTEMS · ONLINE"', PROGRESS)
 
     def test_completion_effect_and_immediate_transition(self):
         # READY + core glow plays briefly, then splash closes and main shows.
@@ -330,6 +328,64 @@ class CinematicSplashTests(unittest.TestCase):
         self.assertIn("'trigger-fault'", src)
         self.assertIn("'play-voice'", src)
         self.assertIn("recovery-action", src)
+
+    def test_status_vocabulary_is_single_source_and_approved(self):
+        # The canonical two-line status vocabulary lives in one map —
+        # cinematic and WinForms fallback both render _progress.Primary/
+        # Secondary, so neither surface can drift to different wording.
+        self.assertIn("StartupStatus", DESKTOP)
+        for label in (
+            "INITIALIZING · NEXUS CORE", "RESTORING · SYSTEM STATE",
+            "SYNCHRONIZING · NEXUS BRAIN", "STARTING · CORE SERVICES",
+            "CALIBRATING · MODEL RUNTIME", "VERIFYING · CAPABILITIES",
+            "INITIALIZING · VOICE SYSTEM", "CHECKING · VISUAL SYSTEMS",
+            "LOADING · COMMAND INTERFACE", "SYNCHRONIZING · INTERFACE",
+            "CORE SYSTEMS · ONLINE", "ACTIVATING · LANGUAGE CORE",
+            "ACTIVATING · DEVELOPMENT CORE", "CALIBRATING · MODEL MEMORY",
+            "PREPARING · WORKSTATION", "BACKGROUND SETUP · SCHEDULED",
+            "NEXUS CORE · COULD NOT START", "SAFE MODE · INITIALIZING",
+            "RESTORING · LAST KNOWN GOOD", "RECOVERY · ANALYZING",
+            "REPAIR · IN PROGRESS", "CONTAINMENT · ENGAGED",
+            "ANOMALY DETECTED · CORE SERVICES",
+        ):
+            self.assertIn(label, DESKTOP, label)
+        # Same status source on both surfaces.
+        self.assertIn("_progress.Primary", DESKTOP)
+        self.assertIn("_progress.Secondary", DESKTOP)
+        # Provisioning text only appears behind a real enablement check.
+        self.assertIn("ProvisioningPlanned", PROGRAM)
+        self.assertIn("provisioning_dev_enable", PROGRAM)
+        # Status coalescing exists so fast milestones can't flash text.
+        self.assertIn("StatusHold", DESKTOP)
+
+    def test_startup_voice_completion_gate(self):
+        text = self.NARRATOR.read_text(encoding="utf-8")
+        # The gate keys on real playback lifecycle, never post/queue time.
+        self.assertIn("VoiceGateAsync", text)
+        self.assertIn("NotifyVoiceResult", text)
+        self.assertIn("NotifyVoiceEnded", text)
+        self.assertIn("_lastPlaybackEnd", text)
+        # 2000 ms quiet buffer after final playback end.
+        self.assertRegex(text, r"QuietBuffer\s*=\s*TimeSpan\.FromSeconds\(2\)")
+        # Bounded failsafes: lost started/ended acks can't hang startup.
+        self.assertIn("StartedAckTimeout", text)
+        self.assertIn("LostEndWatchdogSlack", text)
+        # Voice-off and fault paths bypass the buffer entirely.
+        self.assertIn("_faulted", text)
+        # Host holds the splash on the gate before tearing down.
+        self.assertIn("VoiceGateAsync", PROGRAM)
+        self.assertIn("VoicePlaybackResult", PROGRAM)
+        self.assertIn("VoicePlaybackEnded", PROGRAM)
+
+    def test_greeting_waits_for_startup_transition_release(self):
+        # The desktop releases the interface greeting only after the
+        # splash's voice gate completes — never under narration/buffer.
+        self.assertIn("startup-transition-complete", PROGRAM)
+        self.assertIn("SignalStartupTransition", PROGRAM)
+        profile_js = (ROOT / "web" / "profile.js").read_text(encoding="utf-8")
+        self.assertIn("startup-transition-complete", profile_js)
+        self.assertIn("__nexusStartupGate", profile_js)
+        self.assertIn("chrome.webview", profile_js)
 
 
 if __name__ == "__main__":

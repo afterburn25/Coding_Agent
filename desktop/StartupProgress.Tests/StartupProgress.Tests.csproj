@@ -13,6 +13,12 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\ChatNexus.Desktop\StartupProgress.cs" Link="StartupProgress.cs" />
+    <Compile Include="..\ChatNexus.Desktop\StartupNarrator.cs" Link="StartupNarrator.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SoundPlayer lives in the WindowsDesktop shared framework. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
 
 </Project>

@@ -220,6 +220,49 @@ internal sealed class StartupProfile
 }
 
 /// <summary>
+/// Canonical startup status vocabulary — the single source of truth for the
+/// two-line (PRIMARY / SECONDARY) text shown on BOTH the cinematic splash and
+/// the WinForms fallback (both render <see cref="StartupProgress.Primary"/>/
+/// <see cref="StartupProgress.Secondary"/>, which is what these keys resolve
+/// to). Labels only ever describe work that is actually happening — a key may
+/// legitimately never be reported on a given launch.
+/// </summary>
+internal static class StartupStatus
+{
+    public static readonly IReadOnlyDictionary<string, (string Primary, string Secondary)> Map =
+        new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+    {
+        ["init"]          = ("INITIALIZING · NEXUS CORE",    "Starting native host and loading configuration"),
+        ["restore"]       = ("RESTORING · SYSTEM STATE",     "Loading profiles, settings and protected state"),
+        ["brain"]         = ("SYNCHRONIZING · NEXUS BRAIN",  "Restoring memory, knowledge and continuity"),
+        ["services"]      = ("STARTING · CORE SERVICES",     "Launching Nexus agent and service runtime"),
+        ["models"]        = ("CALIBRATING · MODEL RUNTIME",  "Detecting models, hardware and available resources"),
+        ["capabilities"]  = ("VERIFYING · CAPABILITIES",     "Checking tools, permissions and managed services"),
+        ["voice"]         = ("INITIALIZING · VOICE SYSTEM",  "Preparing speech and audio services"),
+        ["visual"]        = ("CHECKING · VISUAL SYSTEMS",    "Verifying image backends and model availability"),
+        ["workspace"]     = ("LOADING · COMMAND INTERFACE",  "Starting the Nexus workspace"),
+        ["interface"]     = ("SYNCHRONIZING · INTERFACE",    "Connecting interface to core services"),
+        ["online"]        = ("CORE SYSTEMS · ONLINE",        "Nexus Core ready"),
+        ["language_core"] = ("ACTIVATING · LANGUAGE CORE",   "Loading the primary conversational model"),
+        ["dev_core"]      = ("ACTIVATING · DEVELOPMENT CORE","Loading coding and reasoning runtime"),
+        ["model_memory"]  = ("CALIBRATING · MODEL MEMORY",   "Optimizing RAM and VRAM allocation"),
+        ["workstation"]   = ("PREPARING · WORKSTATION",      "Building the background tool and model setup plan"),
+        ["bg_setup"]      = ("BACKGROUND SETUP · SCHEDULED", "Additional tools and models will continue installing after launch"),
+        ["anomaly"]       = ("ANOMALY DETECTED · CORE SERVICES", "Startup verification did not complete"),
+        ["containment"]   = ("CONTAINMENT · ENGAGED",        "Isolating the failed subsystem"),
+        ["analyzing"]     = ("RECOVERY · ANALYZING",         "Diagnosing startup failure"),
+        ["repair"]        = ("REPAIR · IN PROGRESS",         "Attempting automatic recovery"),
+        ["lkg"]           = ("RESTORING · LAST KNOWN GOOD",  "Rolling back to a verified system state"),
+        ["safemode"]      = ("SAFE MODE · INITIALIZING",     "Starting essential systems only"),
+        ["fatal"]         = ("NEXUS CORE · COULD NOT START", "Automatic recovery was unable to restore core services"),
+    };
+
+    /// <summary>Resolve a status key; unknown keys pass through as primary text.</summary>
+    public static (string Primary, string Secondary) Get(string key) =>
+        Map.TryGetValue(key, out var v) ? v : (key, string.Empty);
+}
+
+/// <summary>
 /// Three-layer startup progress model:
 ///
 ///   RealProgress      — last milestone reported by the real system (never
@@ -341,35 +384,57 @@ internal sealed class StartupProgress
         }
     }
 
-    /// <summary>PRIMARY · SUBSYSTEM line.</summary>
-    public string Primary =>
-        _completionStarted is not null || (AppReady && MinimumElapsed) ? "READY · NEXUS CORE" :
-        AppReady ? "FINALIZING · NEXUS CORE" : _primary;
+    /// <summary>
+    /// Presentation minimum per status — real milestones can land within
+    /// milliseconds of each other and flashing a label nobody can read is
+    /// worse than coalescing to the latest one. The newest status always
+    /// wins once the hold elapses; readiness/failure overrides still apply.
+    /// </summary>
+    internal static TimeSpan StatusHold = TimeSpan.FromMilliseconds(350);
 
-    /// <summary>Dim secondary explanation line — factual, stall-aware.</summary>
-    public string Secondary
+    private (string Primary, string Secondary) _shown;
+    private TimeSpan _shownAt;
+
+    private (string Primary, string Secondary) RawStatus()
     {
-        get
+        if (_completionStarted is not null || (AppReady && MinimumElapsed))
         {
-            if (_completionStarted is not null || (AppReady && MinimumElapsed))
+            return StartupStatus.Map["online"];
+        }
+        if (AppReady)
+        {
+            return ("FINALIZING · NEXUS CORE", "Preparing interface");
+        }
+        lock (_sync)
+        {
+            var secondary = StalledLevel() switch
             {
-                return "All startup-critical systems online";
-            }
-            if (AppReady)
-            {
-                return "Preparing interface";
-            }
-            lock (_sync)
-            {
-                return StalledLevel() switch
-                {
-                    >= 2 => SecondStallText(),
-                    1 => StallText.TryGetValue(PhaseKey, out var t) ? t : "Startup is taking longer than usual",
-                    _ => _phaseSecondary,
-                };
-            }
+                >= 2 => SecondStallText(),
+                1 => StallText.TryGetValue(PhaseKey, out var t) ? t : "Startup is taking longer than usual",
+                _ => _phaseSecondary,
+            };
+            return (_primary, secondary);
         }
     }
+
+    private (string Primary, string Secondary) Status()
+    {
+        var raw = RawStatus();
+        lock (_sync)
+        {
+            if (raw == _shown) return _shown;
+            if (_now() - _shownAt < StatusHold) return _shown;
+            _shown = raw;
+            _shownAt = _now();
+            return _shown;
+        }
+    }
+
+    /// <summary>PRIMARY · SUBSYSTEM line.</summary>
+    public string Primary => Status().Primary;
+
+    /// <summary>Dim secondary explanation line — factual, stall-aware.</summary>
+    public string Secondary => Status().Secondary;
 
     private string SecondStallText()
     {
@@ -400,6 +465,15 @@ internal sealed class StartupProgress
         }
         _phaseStart = _now();
         _lastTick = _phaseStart;
+        _shown = (_primary, _phaseSecondary);
+        _shownAt = _phaseStart;
+    }
+
+    /// <summary>Report a milestone using a canonical <see cref="StartupStatus"/> key.</summary>
+    public void Report(double fraction, string statusKey)
+    {
+        var (primary, secondary) = StartupStatus.Get(statusKey);
+        Report(fraction, primary, secondary);
     }
 
     public void Report(double fraction, string primary, string secondary)

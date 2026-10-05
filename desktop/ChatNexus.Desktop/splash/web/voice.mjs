@@ -33,6 +33,9 @@ export class VoiceChannel {
       const buffer = await ctx.decodeAudioData(bytes.slice(0));
       if (this.disposed) return { started: false, seconds: 0 };
       const shared = ctx === this.audio.context;
+      // Serialization: a new line (e.g. fault narration) replaces whatever
+      // is still playing instead of overlapping it.
+      this.stop(.05);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       const gain = ctx.createGain();

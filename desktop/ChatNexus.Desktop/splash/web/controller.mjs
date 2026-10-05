@@ -1,12 +1,12 @@
 import { Timeline, sample, clamp, ramp } from './timeline.mjs';
 
 export const RECOVERY_STATES = Object.freeze({
-  RECOVERY_ANALYZING: ['ANALYZING STARTUP FAILURE', 'Diagnostic analysis is beginning.'],
-  REPAIR_ATTEMPT: ['ATTEMPTING AUTOMATIC REPAIR', 'The core remains safely contained.'],
+  RECOVERY_ANALYZING: ['RECOVERY · ANALYZING', 'Diagnosing startup failure.'],
+  REPAIR_ATTEMPT: ['REPAIR · IN PROGRESS', 'Attempting automatic recovery.'],
   RESTARTING: ['PREPARING TO RESTART', 'Containment remains secured.'],
-  ROLLBACK: ['RESTORING LAST KNOWN GOOD', 'Restoring a known working configuration.'],
-  SAFE_MODE: ['NEXUS CORE SAFE MODE', 'Diagnostics available.'],
-  HUMAN_INTERVENTION_REQUIRED: ['YOUR ATTENTION IS REQUIRED', 'Review the details or choose a recovery action.']
+  ROLLBACK: ['RESTORING · LAST KNOWN GOOD', 'Rolling back to a verified system state.'],
+  SAFE_MODE: ['SAFE MODE · INITIALIZING', 'Starting essential systems only.'],
+  HUMAN_INTERVENTION_REQUIRED: ['NEXUS CORE · COULD NOT START', 'Automatic recovery was unable to restore core services.']
 });
 const mix = (a, b, t) => a + (b - a) * t;
 const closed = s => s.iris.every(v => v === 0) && s.pins.every(v => v === 0) && s.cylinder === 0;

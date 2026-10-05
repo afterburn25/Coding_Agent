@@ -137,7 +137,7 @@ class AppState:
         self.runtime_root = runtime_root
         self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
-        self._boot(12, "CHECKING · GPU & SYSTEM RESOURCES", "Detecting CPU, RAM, VRAM, and available compute")
+        self._boot(12, "CALIBRATING · MODEL RUNTIME", "Detecting models, hardware and available resources")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
         # Autodetect GGUFs on disk before the router exists — profiles are
         # added for unconfigured files and dead ones disabled, so routing
@@ -147,7 +147,7 @@ class AppState:
         hw = self.runtime.hardware
         gpu_label = ", ".join(g.name for g in getattr(hw, "gpus", []) or []) or "CPU only"
         self._boot(
-            14, "INITIALIZING · NEURAL ENGINE",
+            14, "CALIBRATING · MODEL RUNTIME",
             f"Applying {getattr(config, 'performance_mode', 'auto')} runtime profile · {gpu_label}",
         )
         self.model_telemetry = ModelPerformanceTelemetry(
@@ -168,7 +168,7 @@ class AppState:
             config=config, workspace=self.workspace,
             comfy_installer=lambda: self.install_tool("comfyui", approve=True),
             job_lookup=lambda jid: self.jobs.get(jid).as_dict())
-        self._boot(30, "RESTORING · TASK QUEUE", "Recovering queued or interrupted work")
+        self._boot(30, "RESTORING · SYSTEM STATE", "Recovering queued or interrupted work")
         self.tasks = TaskStore(self.workspace)
         from .workqueue import WorkQueue
         self.queue = WorkQueue(self.workspace)
@@ -200,7 +200,7 @@ class AppState:
         # hold per-file copies and would otherwise grow without bound.
         self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
         self.memory = ProjectMemory(self.workspace)
-        self._boot(38, "RESTORING · MEMORY & KNOWLEDGE", "Preparing conversation and learned knowledge continuity")
+        self._boot(38, "SYNCHRONIZING · NEXUS BRAIN", "Preparing conversation and learned knowledge continuity")
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():
             conversation_path = runtime_root / conversation_path
@@ -235,7 +235,7 @@ class AppState:
         self.model_growth = ModelGrowthLab(growth_dir)
         # Protected Nexus Brain state has one canonical location. Mutable
         # config.json cannot redirect an initialized Brain to an unprotected file.
-        self._boot(52, "LOADING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
+        self._boot(52, "SYNCHRONIZING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
         brain_path = (runtime_root / "data" / "nexus_brain.json").resolve()
         brain_auth_path = brain_path.with_name(brain_path.stem + ".auth.json")
         protected_brain_exists = brain_path.is_file() or brain_auth_path.is_file()
@@ -289,10 +289,10 @@ class AppState:
         if not am_path.is_absolute():
             am_path = runtime_root / am_path
         self.answer_memory = self._build_answer_memory(config, am_path)
-        self._boot(64, "PREPARING · WORKSPACE", "Restoring project and repository context")
+        self._boot(64, "LOADING · COMMAND INTERFACE", "Restoring project and repository context")
         self.repository_index = RepositoryIndex(self.workspace)
         self.research = ResearchCoordinator(self.workspace, self.repository_index, config)
-        self._boot(68, "INITIALIZING · PERMISSION SYSTEM", "Applying Nexus Core authorization policies")
+        self._boot(68, "VERIFYING · CAPABILITIES", "Applying Nexus Core authorization policies")
         self.permission_manager = PermissionManager(
             config.permissions,
             profile=getattr(config, "permission_profile", "custom"),
@@ -397,7 +397,7 @@ class AppState:
         self._register_processes()
         if getattr(config, "process_watchdog", True):
             self.processes.start_watchdog(on_tick=self._watchdog_maintenance)
-        self._boot(74, "REGISTERING · TOOLS & PLUGINS", "Loading installed capabilities and tool manifests")
+        self._boot(74, "VERIFYING · CAPABILITIES", "Loading installed capabilities and tool manifests")
         # Workspace Manager — registered workspaces the user opens beyond
         # the primary root. File/shell tools are bounded to these roots.
         self.workspaces = WorkspaceManager(
@@ -732,7 +732,7 @@ class AppState:
         self.mcp = MCPManager(self.tools, load_mcp_configs(getattr(config, "mcp_servers", [])),
                               vault=self.secrets)
         if getattr(config, "mcp_servers", None):
-            self._boot(86, "CONNECTING · MCP SERVICES", "Connecting configured external tool servers")
+            self._boot(86, "VERIFYING · CAPABILITIES", "Connecting configured external tool servers")
         try:
             self.mcp.connect_all()
         except Exception:
@@ -882,12 +882,12 @@ class AppState:
         self._resume_thread: threading.Thread | None = None
         # Autonomous supervisor — persistent missions, triggers, schedules,
         # standing goals. Never widens permissions; interactive lane wins.
-        self._boot(90, "INITIALIZING · AUTONOMY", "Restoring missions, triggers, and schedules")
+        self._boot(90, "RESTORING · SYSTEM STATE", "Restoring missions, triggers, and schedules")
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
         self._report_prior_crash()
         self.queue.enrich = self._queue_enrich_mission
-        self._boot(92, "INITIALIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
+        self._boot(92, "SYNCHRONIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
         try:
             self.brain = self._build_brain(config, runtime_root)
         except Exception:
@@ -896,7 +896,7 @@ class AppState:
             import logging
             logging.getLogger(__name__).exception("Nexus Brain init failed")
             self.brain = None
-        self._boot(94, "SYNCHRONIZING · RUNTIME STATE", "Synchronizing running services and task state")
+        self._boot(94, "STARTING · CORE SERVICES", "Synchronizing running services and task state")
         self._start_primary_prewarm()
         self._start_auto_tune()
         self._start_auto_resume()
@@ -3251,7 +3251,7 @@ class AppState:
             None,
         )
         if utility is not None and utility.runtime == "llama_cpp":
-            self._boot(95, "INITIALIZING · NEURAL ENGINE", "Preparing fast conversational intelligence")
+            self._boot(95, "ACTIVATING · LANGUAGE CORE", "Loading the primary conversational model")
             threading.Thread(
                 target=self._prewarm_with_retry, args=(utility,),
                 name="chat-nexus-utility-prewarm", daemon=True,
@@ -3267,6 +3267,7 @@ class AppState:
         if starter is None or starter.runtime != "llama_cpp":
             return
 
+        self._boot(96, "ACTIVATING · DEVELOPMENT CORE", "Loading coding and reasoning runtime")
         self._prewarm_thread = threading.Thread(
             target=self._prewarm_with_retry, args=(starter,),
             name="chat-nexus-primary-prewarm",

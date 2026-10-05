@@ -115,6 +115,10 @@ internal sealed class SplashForm : Form
     // readiness authority lives in StartupProgress/RunStartupAsync.
     private WebView2? _web;
     private volatile bool _webReady;
+    /// <summary>id, started, seconds — the splash's real playback-start ack.</summary>
+    public event Action<string, bool, double>? VoicePlaybackResult;
+    /// <summary>id — the splash reports audio actually finished playing.</summary>
+    public event Action<string>? VoicePlaybackEnded;
     private volatile bool _webFailed;
     private int _lastGateIdx = -1;
 
@@ -164,6 +168,20 @@ internal sealed class SplashForm : Form
         _ = InitCinematicAsync();
     }
 
+    /// <summary>
+    /// Will the backend actually build a provisioning plan this launch?
+    /// Mirrors server-side rules: packaged installs honor
+    /// provisioning_enabled (default on); source checkouts stay quiet unless
+    /// provisioning_dev_enable is explicitly set. Drives the workstation
+    /// status text — never a reason to start downloads early.
+    /// </summary>
+    internal static bool ProvisioningPlanned(string appDir)
+    {
+        var frozen = File.Exists(Path.Combine(appDir, "backend", "ChatNexus.Backend.exe"));
+        return CfgBool(appDir, frozen ? "provisioning_enabled" : "provisioning_dev_enable",
+            fallback: frozen);
+    }
+
     private static bool CfgBool(string appDir, string key, bool fallback)
     {
         try
@@ -194,8 +212,14 @@ internal sealed class SplashForm : Form
                 return;
             }
 
+            // Same autoplay exemption the main WebView2 gets — the
+            // cinematic is unattended, so AudioContext must not start
+            // suspended waiting for a user gesture that never comes.
             var env = await CoreWebView2Environment.CreateAsync(
-                userDataFolder: Path.Combine(_appDir, "data", "webview2-splash"));
+                browserExecutableFolder: null,
+                userDataFolder: Path.Combine(_appDir, "data", "webview2-splash"),
+                options: new CoreWebView2EnvironmentOptions(
+                    additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required"));
             if (IsDisposed) return;
             _web = new WebView2
             {
@@ -222,10 +246,16 @@ internal sealed class SplashForm : Form
 
             VoiceSink = async (bytes, _key) =>
             {
-                if (_web?.CoreWebView2 is null || !_webReady) return;
+                // Throwing routes the narrator to its SoundPlayer fallback —
+                // a line that arrives as the splash tears down should still
+                // be heard rather than silently dropped.
+                if (_web?.CoreWebView2 is null || !_webReady)
+                    throw new InvalidOperationException("splash channel unavailable");
                 var b64 = Convert.ToBase64String(bytes);
                 _web.CoreWebView2.PostWebMessageAsJson(
                     JsonSerializer.Serialize(new { type = "play-voice", id = _key, b64, duck = 0.35 }));
+                BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
+                    $"splash voice posted {_key} ({bytes.Length}B)");
                 await Task.CompletedTask;
             };
         }
@@ -280,6 +310,22 @@ internal sealed class SplashForm : Form
                 case "splash-ready":
                     _webReady = true;
                     BeginInvoke(() => { if (_web is not null) _web.Visible = true; });
+                    break;
+                case "voice-result":
+                    // Narration delivery was previously invisible — a
+                    // dropped play-voice looked identical to a played one.
+                    {
+                        var vid = doc.RootElement.GetProperty("id").GetString() ?? "";
+                        var started = doc.RootElement.TryGetProperty("started", out var s)
+                                      && s.ValueKind == JsonValueKind.True;
+                        var secs = doc.RootElement.TryGetProperty("seconds", out var sec)
+                                   ? sec.GetDouble() : 0.0;
+                        VoicePlaybackResult?.Invoke(vid, started, secs);
+                    }
+                    break;
+                case "voice-ended":
+                    VoicePlaybackEnded?.Invoke(
+                        doc.RootElement.GetProperty("id").GetString() ?? "");
                     break;
                 case "splash-error":
                     _webFailed = true;
@@ -539,12 +585,28 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
+        // Throwing (instead of ?? Task.CompletedTask) routes the narrator
+        // to its SoundPlayer fallback when the splash channel isn't wired
+        // yet — a completed no-op task silently swallowed early lines.
         _narrator = new StartupNarrator(appDir,
-            playBytes: (bytes, key) => _splash?.VoiceSink?.Invoke(bytes, key) ?? Task.CompletedTask);
+            playBytes: (bytes, key) => _splash?.VoiceSink?.Invoke(bytes, key)
+                ?? throw new InvalidOperationException("voice channel unavailable"),
+            log: line => BackendProcess.NoteStartup(
+                Path.Combine(appDir, "data", "logs"), line));
+        // The splash reports real playback lifecycle back — the narrator's
+        // 2-second transition gate is keyed to audio actually ending, not
+        // to the moment play-voice was posted.
+        _splash.VoicePlaybackResult += (id, started, secs) =>
+            _narrator.NotifyVoiceResult(id, started, secs);
+        _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
         _splash.Show();
+        // Launched from a shell/IDE we may not hold foreground rights —
+        // TopMost keeps the splash above other windows, but it still needs
+        // an explicit Activate or it opens behind the focused app.
+        _splash.Activate();
         // Narration starts alongside startup — never blocks it. First
         // launch speaks the welcome; later launches the short line.
-        _narrator.StartupBegan(BackendUrl);
+        _narrator.StartupBegan(() => _main?.BackendUrl);
         _ = RunStartupAsync();
     }
 
@@ -570,7 +632,14 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _splash = new SplashForm(_appDir, _progress);
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
+        if (_narrator is not null)
+        {
+            _splash.VoicePlaybackResult += (id, started, secs) =>
+                _narrator.NotifyVoiceResult(id, started, secs);
+            _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
+        }
         _splash.Show();
+        _splash.Activate();
         _ = RunStartupAsync();
     }
 
@@ -578,13 +647,13 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     {
         try
         {
-            _progress.Report(0.06, "INITIALIZING · NEXUS CORE", "Preparing local application environment");
+            _progress.Report(0.06, "init");
 
             // Build the real main window now, still invisible.
             _main = new MainForm(_appDir);
             _main.CreateControl(); // handle exists without showing the window
 
-            _progress.Report(0.15, "STARTING · CORE SERVICES", "Launching Nexus Core backend services");
+            _progress.Report(0.15, "services");
             await _main.PrepareAsync(_progress);
 
             // The interface posted its ready handshake; the app is genuinely
@@ -594,7 +663,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             _progress.MarkAppReady();
             // "Core systems online." fires near full charge — truthful
             // because the interface already posted its ready handshake.
-            _narrator?.NearlyReady(BackendUrl);
+            _narrator?.NearlyReady(() => _main?.BackendUrl);
             while (!_progress.ReadyToDismiss)
             {
                 await Task.Delay(60);
@@ -605,20 +674,37 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
+            // Voice gate: the splash stays up until the last startup
+            // narration has ACTUALLY finished playing (voice-ended ack, not
+            // message-posted) plus a 2-second quiet buffer — then the main
+            // app may greet. Bounded so a lost ack can't hang startup.
+            if (_narrator is not null)
+            {
+                await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
+            }
             _narrator?.Cancel();
             _splash?.Close();
             _splash?.Dispose();
             _splash = null;
+            // Without foreground rights Show() can leave the window behind
+            // (looks minimized). The brief TopMost toggle forces it to the
+            // top of the z-order, then releases so the app isn't pinned.
+            _main.WindowState = FormWindowState.Normal;
             _main.Show();
+            _main.TopMost = true;
             _main.Activate();
             _main.BringToFront();
+            _main.TopMost = false;
+            // Release the held startup greeting — the splash owned the
+            // audio stage until narration + quiet buffer finished.
+            _main.SignalStartupTransition();
             MainForm = _main;
         }
         catch (Exception ex)
         {
             // Fault narration supersedes any friendly line immediately —
             // then recovery diagnostics are already running.
-            _narrator?.Fault(BackendUrl);
+            _narrator?.Fault(() => _main?.BackendUrl);
             _splash?.ShowFailure(
                 $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");
         }
@@ -1673,6 +1759,22 @@ internal sealed class MainForm : Form
     /// Reports real milestones into the splash progress and only completes
     /// once the interface posts its ready handshake (or a bounded fallback).
     /// </summary>
+    /// <summary>
+    /// Tell the interface the startup transition is complete — the splash
+    /// is gone and startup narration + quiet buffer have fully finished.
+    /// Greeting audio waits on this signal so it can never overlap Isabella
+    /// or start inside the post-narration quiet window.
+    /// </summary>
+    public void SignalStartupTransition()
+    {
+        try
+        {
+            _webView.CoreWebView2?.PostWebMessageAsJson(
+                JsonSerializer.Serialize(new { type = "startup-transition-complete" }));
+        }
+        catch { }
+    }
+
     public async Task PrepareAsync(StartupProgress progress)
     {
         AttachBackend(BackendProcess.Start(_appDir));
@@ -1681,12 +1783,12 @@ internal sealed class MainForm : Form
         // host owns between "backend launched" and "backend healthy".
         _backend!.BootPhase += (pct, primary, secondary) =>
             progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
-        progress.Report(0.30, "STARTING · CORE SERVICES", "Waiting for backend health");
+        progress.Report(0.30, "services");
         // Cold starts on machines scanning a fresh unsigned exe (AV) can
         // exceed 60s even when the backend is healthy — the PyInstaller
         // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
         await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
-        progress.Report(0.55, "CONNECTING · LOCAL AI RUNTIME", "Backend healthy — synchronizing runtime state");
+        progress.Report(0.55, "interface");
 
         var userDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1708,12 +1810,20 @@ internal sealed class MainForm : Form
         await _webView.EnsureCoreWebView2Async(environment);
         ConfigureWebView();
         await ClearStaleWebCacheAsync(userDataFolder);
-        progress.Report(0.72, "INITIALIZING · NEXUS INTERFACE", "Initializing WebView2");
+        progress.Report(0.72, "workspace");
 
         var ready = WaitForInterfaceReadyAsync();
         _webView.Source = new Uri(_backend.BaseUrl);
-        progress.Report(0.85, "LOADING · NEXUS INTERFACE", "Rendering the Nexus Core application shell");
-        progress.Report(0.93, "CONNECTING · INTERFACE TO CORE", "Waiting for application readiness handshake");
+        progress.Report(0.85, "workspace");
+        // First-run workstation messaging only when provisioning is real —
+        // an enabled, frozen install builds and runs its setup plan in the
+        // background; nothing here waits on downloads.
+        if (SplashForm.ProvisioningPlanned(_appDir))
+        {
+            progress.Report(0.87, "workstation");
+            progress.Report(0.90, "bg_setup");
+        }
+        progress.Report(0.93, "interface");
         await ready;
     }
 

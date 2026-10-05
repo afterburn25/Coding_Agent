@@ -282,6 +282,186 @@ Console.WriteLine("failure freezes the bar");
     Check(r.Progress.DisplayedProgress == d, "failed progress does not crawl");
 }
 
+// ---------------------------------------------------------------- status vocabulary
+Console.WriteLine("canonical startup status vocabulary");
+{
+    var required = new[]
+    {
+        "init", "restore", "brain", "services", "models", "capabilities",
+        "voice", "visual", "workspace", "interface", "online",
+        "language_core", "dev_core", "model_memory", "workstation",
+        "bg_setup", "anomaly", "containment", "analyzing", "repair",
+        "lkg", "safemode", "fatal",
+    };
+    foreach (var key in required)
+    {
+        Check(StartupStatus.Map.ContainsKey(key), $"status key '{key}' exists");
+        var (p, s) = StartupStatus.Get(key);
+        Check(p.Length > 0 && s.Length > 0, $"status '{key}' has both lines");
+    }
+    Check(StartupStatus.Map["online"].Primary == "CORE SYSTEMS · ONLINE",
+        "ready state is CORE SYSTEMS · ONLINE");
+    Check(StartupStatus.Map["online"].Secondary == "Nexus Core ready",
+        "ready secondary is plain-English");
+    Check(StartupStatus.Map["fatal"].Primary == "NEXUS CORE · COULD NOT START",
+        "fatal state approved label");
+    // Truth audit: no status may claim a heavy service/model is starting
+    // or downloading — startup only *checks* those.
+    var banned = new[] { "INVOKEAI", "COMFYUI", "DOWNLOAD",
+        "STARTING INVOKE", "LOADING MODEL WEIGHTS" };
+    foreach (var kv in StartupStatus.Map)
+    {
+        var text = (kv.Value.Primary + " " + kv.Value.Secondary).ToUpperInvariant();
+        foreach (var b in banned)
+        {
+            Check(!text.Contains(b), $"status '{kv.Key}' does not claim '{b}'");
+        }
+    }
+    // Provisioning text exists but only via explicit workstation keys.
+    Check(StartupStatus.Map["workstation"].Primary == "PREPARING · WORKSTATION",
+        "workstation label present");
+    Check(StartupStatus.Map["bg_setup"].Secondary.Contains("continue installing"),
+        "background-setup secondary is truthful about post-launch work");
+}
+
+// ---------------------------------------------------------------- status key report
+Console.WriteLine("status key resolution");
+{
+    var r = new Rig();
+    r.Progress.Report(0.15, "services");
+    Check(r.Progress.Primary == "STARTING · CORE SERVICES"
+          || r.Progress.Primary == "INITIALIZING · NEXUS CORE",
+        $"key-resolved primary ({r.Progress.Primary})");
+    r.Advance(1.0, 0.1); // past the coalescing hold
+    Check(r.Progress.Primary == "STARTING · CORE SERVICES",
+        $"canonical primary after hold ({r.Progress.Primary})");
+    Check(r.Progress.Secondary == "Launching Nexus agent and service runtime",
+        $"canonical secondary ({r.Progress.Secondary})");
+}
+
+// ---------------------------------------------------------------- status coalescing
+Console.WriteLine("status coalescing hold");
+{
+    var r = new Rig();
+    r.Progress.Report(0.06, "init");
+    r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
+    Check(r.Progress.Primary == "INITIALIZING · NEXUS CORE", "first status shown");
+    r.Progress.Report(0.15, "services");
+    r.Advance(0.05, 0.05); // inside the hold — rapid milestone
+    Check(r.Progress.Primary == "INITIALIZING · NEXUS CORE",
+        "rapid status change is held");
+    r.Progress.Report(0.30, "capabilities");
+    r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
+    Check(r.Progress.Primary == "VERIFYING · CAPABILITIES",
+        $"newest status wins after hold ({r.Progress.Primary})");
+}
+
+// ---------------------------------------------------------------- ready label
+Console.WriteLine("ready label");
+{
+    var r = new Rig();
+    r.Progress.Report(0.93, "a", "b");
+    r.Advance(StartupProgress.MinimumDisplayTime.TotalSeconds + 1, 0.1);
+    r.Progress.MarkAppReady();
+    Check(r.Progress.Primary == "CORE SYSTEMS · ONLINE" ||
+          r.Progress.Primary == "FINALIZING · NEXUS CORE",
+        $"ready primary ({r.Progress.Primary})");
+    r.Advance(1.0, 0.05);
+    Check(r.Progress.Primary == "CORE SYSTEMS · ONLINE",
+        $"ready state resolves to CORE SYSTEMS · ONLINE ({r.Progress.Primary})");
+    Check(r.Progress.Secondary == "Nexus Core ready",
+        $"ready secondary ({r.Progress.Secondary})");
+}
+
+// ---------------------------------------------------------------- narrator: voice-off gate
+Console.WriteLine("narrator gate — no narration means no wait");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var n = new StartupNarrator(dir);
+    n.QuietBuffer = TimeSpan.FromMilliseconds(100);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    await n.VoiceGateAsync(TimeSpan.FromSeconds(3));
+    Check(sw.ElapsedMilliseconds < 1500,
+        $"gate passes instantly with no narration ({sw.ElapsedMilliseconds}ms)");
+}
+
+// ---------------------------------------------------------------- narrator: end + buffer
+Console.WriteLine("narrator gate — holds quiet buffer after real playback end");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var n = new StartupNarrator(dir, playBytes: (b, k) => Task.CompletedTask);
+    n.QuietBuffer = TimeSpan.FromMilliseconds(200);
+    n.SoundFilePlayer = _ => Task.CompletedTask;
+    // Simulate a posted line that starts and ends ~now.
+    var play = n.Play(new byte[] { 1, 2, 3 }, "online");
+    await Task.Delay(30);
+    n.NotifyVoiceResult("online", true, 0.05);
+    n.NotifyVoiceEnded("online");
+    await play;
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    await n.VoiceGateAsync(TimeSpan.FromSeconds(5));
+    Check(sw.ElapsedMilliseconds >= 150,
+        $"gate holds the quiet buffer after playback end ({sw.ElapsedMilliseconds}ms)");
+    Check(sw.ElapsedMilliseconds < 2000,
+        $"gate does not overstay ({sw.ElapsedMilliseconds}ms)");
+}
+
+// ---------------------------------------------------------------- narrator: in-flight delivery
+Console.WriteLine("narrator gate — waits for a line still playing");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var n = new StartupNarrator(dir, playBytes: (b, k) => Task.CompletedTask);
+    n.QuietBuffer = TimeSpan.FromMilliseconds(80);
+    n.SoundFilePlayer = _ => Task.CompletedTask;
+    var deliver = n.DeliverAsync("welcome", new byte[] { 9, 9 });
+    await Task.Delay(30);
+    n.NotifyVoiceResult("welcome", true, 0.2); // started; ended deliberately delayed
+    var gate = n.VoiceGateAsync(TimeSpan.FromSeconds(5));
+    await Task.Delay(150);
+    Check(!gate.IsCompleted, "gate waits while playback is unfinished");
+    n.NotifyVoiceEnded("welcome");
+    await deliver;
+    await gate;
+    Check(gate.IsCompletedSuccessfully, "gate releases after playback end + buffer");
+}
+
+// ---------------------------------------------------------------- narrator: lost ended ack
+Console.WriteLine("narrator gate — lost playback-ended ack is bounded");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var logs = new List<string>();
+    var n = new StartupNarrator(dir, playBytes: (b, k) => Task.CompletedTask, log: logs.Add);
+    n.LostEndWatchdogSlack = TimeSpan.FromMilliseconds(60);
+    n.SoundFilePlayer = _ => Task.CompletedTask;
+    var play = n.Play(new byte[] { 1 }, "initializing");
+    await Task.Delay(30);
+    n.NotifyVoiceResult("initializing", true, 0.02); // started; no 'ended' ever
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    await play; // must return via watchdog, not hang
+    Check(sw.ElapsedMilliseconds < 2000,
+        $"lost end ack does not hang playback ({sw.ElapsedMilliseconds}ms)");
+    Check(logs.Any(l => l.Contains("timed out")), "lost end ack is logged");
+}
+
+// ---------------------------------------------------------------- narrator: fault bypass
+Console.WriteLine("narrator gate — fault bypasses the gate");
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"nexus-narr-{Guid.NewGuid():N}");
+    var blocker = new TaskCompletionSource<bool>();
+    var n = new StartupNarrator(dir,
+        playBytes: (b, k) => Task.CompletedTask,
+        log: _ => { });
+    n.SoundFilePlayer = _ => blocker.Task; // delivery never finishes
+    var deliver = n.DeliverAsync("welcome", new byte[] { 5 });
+    await Task.Delay(50); // mid-delivery
+    n.Fault(() => null);  // startup failure — gate must not wait on friendly audio
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    await n.VoiceGateAsync(TimeSpan.FromSeconds(5));
+    Check(sw.ElapsedMilliseconds < 1500,
+        $"faulted gate returns immediately even mid-delivery ({sw.ElapsedMilliseconds}ms)");
+    blocker.TrySetResult(true);
+}
+
 // ---------------------------------------------------------------- report
 Console.WriteLine();
 if (failures.Count > 0)
