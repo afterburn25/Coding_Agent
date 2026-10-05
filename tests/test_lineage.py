@@ -130,6 +130,15 @@ class LineageHttpTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # A per-operation sqlite connection can still be closing when the
+        # server stops — retry briefly so Windows file-lock release wins.
+        import time
+        for _ in range(10):
+            try:
+                cls._td.cleanup()
+                return
+            except PermissionError:
+                time.sleep(0.2)
         cls._td.cleanup()
 
     def _get(self, path):

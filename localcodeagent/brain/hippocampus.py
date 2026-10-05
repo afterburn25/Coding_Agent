@@ -135,13 +135,14 @@ class Hippocampus(BrainRegion):
         self._lock = threading.RLock()
         self.db_path = Path(db_path) if db_path else None
         self._migrated = False
+        self._closed = False
 
     # -- connections -------------------------------------------------------------
     # Short-lived connections per operation — same convention as
     # answer_memory.store and knowledge.graph. Holding a persistent handle
     # would lock the file for the process lifetime (Windows).
     def _conn(self) -> sqlite3.Connection | None:
-        if self.db_path is None:
+        if self.db_path is None or self._closed:
             return None
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +164,11 @@ class Hippocampus(BrainRegion):
         conn.commit()
 
     def close(self) -> None:
-        """Nothing persistent to close — connections are per-operation."""
+        # Connections are per-operation, but late event subscribers can
+        # open a fresh one mid-teardown and hold the file past rmtree on
+        # Windows — refuse new connections once closed.
+        with self._lock:
+            self._closed = True
 
     def _write(self, fn) -> Any:
         conn = self._conn()
