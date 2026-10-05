@@ -104,9 +104,15 @@ internal sealed class SplashForm : Form
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
-    private readonly Panel _cover;
-    private Form? _revealFade;
     private readonly string _appDir;
+    // The window stays hidden until the splash's own DOM has painted —
+    // index.html's static markup IS the opening frame (same engine, same
+    // pixels), so there is no second surface to swap from. The GDI
+    // PaintSurface remains only as the WebView2-failure fallback.
+    private bool _allowShow;
+    private bool _shown;
+    private long _domPaintedAt = -1;
+    private readonly Stopwatch _initSw = Stopwatch.StartNew();
 
     private Panel? _failurePanel;
     private string? _failureMessage;
@@ -161,24 +167,21 @@ internal sealed class SplashForm : Form
             _artwork = Image.FromFile(splashPath);
         }
 
-        // Cover panel: paints the identical static surface, shown on top of
-        // the cinematic during its first ~200ms so the WebView2's late first
-        // frames never read as a black flash over the artwork.
-        _cover = new Panel
-        {
-            Dock = DockStyle.Fill,
-            Visible = false,
-            BackColor = Color.FromArgb(4, 9, 19),
-        };
-        _cover.Paint += (_, pe) => PaintSurface(pe.Graphics, _cover.ClientSize);
-        Controls.Add(_cover);
-
         _timer.Interval = 33;
         _timer.Tick += (_, _) =>
         {
             _progress.Tick();
             PumpCinematic();
             if (!_webReady) Invalidate();
+            // Reveal: the DOM's own first paint becomes the splash — or
+            // the GDI fallback if the WebView2 can't get there.
+            if (!_shown && (_webReady || _webFailed || _failurePanel is not null
+                || (_domPaintedAt >= 0
+                    && _initSw.ElapsedMilliseconds - _domPaintedAt > 150)
+                || _initSw.ElapsedMilliseconds > 2500))
+            {
+                ShowNow();
+            }
         };
         _timer.Start();
 
@@ -258,6 +261,9 @@ internal sealed class SplashForm : Form
             _web = new WebView2
             {
                 Dock = DockStyle.Fill,
+                // Hidden until the page's DOM has actually painted —
+                // an unpainted WebView2 is just its dark placeholder
+                // color and would cover the static fallback on failure.
                 Visible = false,
                 DefaultBackgroundColor = Color.FromArgb(4, 9, 19), // exact #stage bg
             };
@@ -269,6 +275,22 @@ internal sealed class SplashForm : Form
             cwv.SetVirtualHostNameToFolderMapping(
                 "nexus.splash", splashDir, CoreWebView2HostResourceAccessKind.Allow);
             cwv.WebMessageReceived += OnCinematicMessage;
+            // The page's static markup (artwork + shade + readout) paints
+            // with the DOM — long before the JS module boots. First
+            // successful paint IS the opening frame; show the window on
+            // it and the animation layer simply comes alive in place.
+            cwv.NavigationCompleted += (_, nav) =>
+            {
+                if (nav.IsSuccess)
+                {
+                    if (_web is not null) { _web.Visible = true; }
+                    _domPaintedAt = _initSw.ElapsedMilliseconds;
+                }
+                else
+                {
+                    _webFailed = true;
+                }
+            };
 
             var query = new List<string>();
             if (!CfgBool(_appDir, "splash_audio_enabled", true)
@@ -352,36 +374,6 @@ internal sealed class SplashForm : Form
                     _webReady = true;
                     BeginInvoke(() =>
                     {
-                        if (_web is not null)
-                        {
-                            _web.Visible = true;
-                            if (_failurePanel is null)
-                            {
-                                // Dissolve, not a hard cut: an identical
-                                // static frame lives in a borderless overlay
-                                // with real per-window alpha and fades out
-                                // over the live cinematic. Residual GDI-vs-
-                                // Chromium differences (font AA, vignette
-                                // edges, readout geometry) blend instead of
-                                // popping — one splash, not two.
-                                BeginRevealDissolve();
-                            }
-                            else
-                            {
-                                // Failure panel owns the static surface —
-                                // keep the plain cover handoff so it isn't
-                                // painted over mid-dissolve.
-                                _cover.Visible = true;
-                                _cover.BringToFront();
-                                _cover.Invalidate();
-                                var cover = _cover;
-                                _ = Task.Delay(200).ContinueWith(_ =>
-                                {
-                                    try { BeginInvoke(() => cover.Visible = false); }
-                                    catch { }
-                                });
-                            }
-                        }
                         // A fault that fired before the cinematic booted
                         // locked in the static fallback — hand the same
                         // failure to the real containment animation +
@@ -416,9 +408,6 @@ internal sealed class SplashForm : Form
                     BeginInvoke(() =>
                     {
                         if (_web is not null) { _web.Visible = false; }
-                        _cover.Visible = false;
-                        try { _revealFade?.Dispose(); } catch { }
-                        _revealFade = null;
                         Invalidate();
                     });
                     break;
@@ -454,65 +443,34 @@ internal sealed class SplashForm : Form
         PostToWeb(new { type = "action-feedback", text });
 
     /// <summary>
-    /// Crossfades the static frame into the live cinematic. A borderless
-    /// topmost overlay Form — the only WinForms surface with true
-    /// per-window alpha — repaints the identical static surface and fades
-    /// out over ~256ms. The WebView2 beneath gets the whole fade to
-    /// stabilize its compositor; any pixel difference between GDI and
-    /// Chromium blends through the dissolve instead of cutting.
+    /// The context calls Show() up front, but the window stays suppressed
+    /// until the splash page's own DOM is painting — the WebView2's first
+    /// rendered frame IS the splash design, so there is no second surface
+    /// to hand off from at all. The GDI static render only appears if the
+    /// WebView2 fails outright or init drags past ~2.5s.
     /// </summary>
-    private void BeginRevealDissolve()
+    protected override void SetVisibleCore(bool value)
     {
-        try
+        if (value && !_allowShow)
         {
-            var fade = new Form
+            if (!IsHandleCreated)
             {
-                FormBorderStyle = FormBorderStyle.None,
-                StartPosition = FormStartPosition.Manual,
-                ShowInTaskbar = false,
-                TopMost = true,
-                Enabled = false,          // overlay — never takes focus/clicks
-                Bounds = RectangleToScreen(ClientRectangle),
-                BackColor = BackColor,
-                AutoScaleMode = AutoScaleMode.None,
-            };
-            var splash = this;
-            fade.Paint += (_, pe) =>
-                splash.PaintSurface(pe.Graphics, fade.ClientSize);
-            fade.Show(this);
-            _revealFade = fade;
-            // Hand the static surface from the cover panel to the overlay
-            // — identical pixels, so this swap is invisible too. Under the
-            // overlay, the live cinematic is already painting.
-            _cover.Visible = false;
-            var t = new System.Windows.Forms.Timer { Interval = 16 };
-            var steps = 0;
-            t.Tick += (_, _) =>
-            {
-                steps++;
-                try { fade.Opacity = Math.Max(0.0, 1.0 - steps / 16.0); }
-                catch { }
-                if (steps >= 16)
-                {
-                    t.Stop();
-                    t.Dispose();
-                    try { fade.Dispose(); } catch { }
-                    if (ReferenceEquals(_revealFade, fade))
-                    {
-                        _revealFade = null;
-                    }
-                }
-            };
-            t.Start();
+                CreateHandle();
+            }
+            return;
         }
-        catch
-        {
-            // Any overlay failure degrades to the previous instant handoff.
-            _cover.Visible = false;
-        }
+        base.SetVisibleCore(value);
     }
 
-    /// <summary>
+    private void ShowNow()
+    {
+        if (_shown) return;
+        _shown = true;
+        _allowShow = true;
+        Show();
+        Activate();
+    }
+
     /// <summary>
     /// Recovery "Rollback" — writes data/lkg/rollback.flag naming the
     /// newest snapshot (latest.txt first, newest snap-* otherwise) and
@@ -879,7 +837,6 @@ internal sealed class SplashForm : Form
         {
             _timer.Dispose();
             _artwork?.Dispose();
-            try { _revealFade?.Dispose(); } catch { }
             try { _web?.Dispose(); } catch { }
         }
         base.Dispose(disposing);
