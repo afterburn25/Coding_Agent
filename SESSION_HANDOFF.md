@@ -96,6 +96,12 @@ current source on this branch via `--config D:\Nexus_Core\config.json`.
 - **`scripts/mission_soak.py`** — new real mission-loop soak: submit →
   execute → auto-approve gates → terminal, hard-kill every Nth cycle,
   JSONL event log + JSON summary. Running against the real install.
+- **Demand-driven eviction** (`21b7120d`) — VERIFIED LIVE: mission
+  nodes gated `waiting_for_vram` fired `admission_eviction` audit
+  events (`qwen3-8b`, `qwen3-14b` released LRU-first) instead of
+  waiting for the 900s idle timer. Same managed-only contract as the
+  image path. Also fixed: SSE stream sinks now detach in a finally
+  (orphaned streams leaked before, `c26d673b`).
 
 ### Remaining milestone work
 
