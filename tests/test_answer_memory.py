@@ -57,11 +57,11 @@ class StoreAndSchemaTests(unittest.TestCase):
     def test_existing_db_survives_upgrade(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
-            am.learn("What is Nexus?", "A local AI workstation.")
+            am.learn("What is the widget?", "A local AI workstation.")
             am.store.close()
             am2 = _mem(td)  # reopen — migrations must not destroy data
             self.assertTrue(am2.available)
-            m = am2.lookup("What is Nexus?")
+            m = am2.lookup("What is the widget?")
             self.assertTrue(m.hit)
             am2.store.close()
 
@@ -531,7 +531,7 @@ class AdminTests(unittest.TestCase):
     def test_export_import_roundtrip(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td, tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td2:
             am = _mem(td)
-            am.learn("What is Nexus?", "A workstation.")
+            am.learn("What is the widget?", "A workstation.")
             payload = am.export()
             self.assertEqual(payload["version"], 1)
             self.assertEqual(len(payload["answers"]), 1)
@@ -540,20 +540,20 @@ class AdminTests(unittest.TestCase):
             am2 = _mem(td2)
             r = am2.import_(payload)
             self.assertTrue(r["ok"] and r["imported"] == 1)
-            self.assertTrue(am2.lookup("What is Nexus?").hit)
+            self.assertTrue(am2.lookup("What is the widget?").hit)
             am2.store.close()
 
     def test_import_conflict_keeps_stronger(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
-            am.learn("What is Nexus?", "Current trusted answer.")
+            am.learn("What is the widget?", "Current trusted answer.")
             payload = {"version": 1, "answers": [{
-                "canonical_question": "What is Nexus?", "answer_text": "Stale import",
-                "trust_state": "observed", "normalized_question": "what is nexus",
+                "canonical_question": "What is the widget?", "answer_text": "Stale import",
+                "trust_state": "observed", "normalized_question": "what is the widget",
             }]}
             r = am.import_(payload)
             self.assertEqual(r["conflicts"], 1)
-            m = am.lookup("What is Nexus?")
+            m = am.lookup("What is the widget?")
             self.assertIn("Current", m.answer["answer_text"])
             am.store.close()
 
@@ -580,7 +580,7 @@ class AdminTests(unittest.TestCase):
     def test_rebuild_index(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
-            am.learn("What is Nexus?", "A workstation.")
+            am.learn("What is the widget?", "A workstation.")
             am.store.execute("UPDATE answers SET embedding=NULL")
             r = am.rebuild_index()
             self.assertTrue(r["ok"] and r["reembedded"] == 1)
@@ -589,8 +589,8 @@ class AdminTests(unittest.TestCase):
     def test_stats(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
-            am.learn("What is Nexus?", "A workstation.")
-            am.lookup("What is Nexus?")
+            am.learn("What is the widget?", "A workstation.")
+            am.lookup("What is the widget?")
             s = am.stats()
             self.assertEqual(s["trusted"], 1)
             self.assertEqual(s["exact_hits"], 1)

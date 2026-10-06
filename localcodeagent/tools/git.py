@@ -19,7 +19,21 @@ def _run(workspace: Path, argv: list[str], timeout: int = 60) -> tuple[int, str]
 
 
 def register_git_tools(registry: ToolRegistry, workspace: Path,
-                       extra_roots=None) -> None:
+                       extra_roots=None, journal=None) -> None:
+    def _journal(action_type: str, subject: str, **fields: Any) -> None:
+        if journal is None:
+            return
+        try:
+            tls = registry.context.get("task_tls")
+            journal.record(
+                action_type, subject, actor="nexus",
+                task_id=str(getattr(tls, "task_id", "")
+                          or registry.context.get("task_id", "") or ""),
+                mission_id=str(registry.context.get("mission_id", "")
+                               or ""),
+                **fields)
+        except Exception:
+            pass
     def _roots() -> list[Path]:
         roots = [workspace.resolve()]
         if extra_roots:
@@ -137,9 +151,18 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         root = _root_for(args)
         argv = ["switch", "-c", branch] if args.get("create") \
             else ["switch", branch]
+        prev = _run(root, ["rev-parse", "--abbrev-ref", "HEAD"]
+                    )[1].strip() if args.get("create") else ""
         code, out = _run(root, argv)
         if code != 0:
             return f"ERROR: git switch failed: {out}"
+        if args.get("create"):
+            _journal("git_branch_create", f"branch '{branch}'",
+                     before=prev, after=branch, reversible=True,
+                     undo={"kind": "git_branch_delete", "branch": branch,
+                           "previous_branch": prev, "root": str(root)},
+                     risk="medium",
+                     description=f"Created and switched to '{branch}'")
         return json.dumps({"branch": branch, "switched": True,
                            "created": bool(args.get("create"))}, indent=2)
 
@@ -297,6 +320,13 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         if code != 0:
             return f"ERROR: git commit failed: {out}"
         _, sha = _run(root, ["rev-parse", "HEAD"])
+        _journal("git_commit", f"commit {sha.strip()[:8]}",
+                 after=sha.strip(), files=staged.splitlines(),
+                 reversible=True,
+                 undo={"kind": "git_reset_soft", "sha": sha.strip(),
+                       "root": str(root)},
+                 risk="medium",
+                 description=message[:200])
         return json.dumps({"committed": True, "sha": sha.strip(),
                            "files": staged.splitlines(),
                            "output": out}, indent=2)

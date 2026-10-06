@@ -199,6 +199,19 @@ class AppState:
         # Drop snapshots whose task aged out of the ledger — checkpoints
         # hold per-file copies and would otherwise grow without bound.
         self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
+        # Universal change journal — every meaningful mutation leaves a
+        # reversible record so "undo that"/"what did you change?" have
+        # real data. Undo dispatch is injected lazily so handlers can
+        # resolve the managers built later in __init__.
+        from .changes import ChangeJournal
+        self.changes = ChangeJournal(
+            runtime_root / "data" / "changes.jsonl",
+            undo_handlers={
+                "checkpoint_restore": self._undo_checkpoint_restore,
+                "setting": self._undo_setting,
+                "git_branch_delete": self._undo_git_branch_delete,
+                "git_reset_soft": self._undo_git_reset_soft,
+            })
         self.memory = ProjectMemory(self.workspace)
         self._boot(38, "SYNCHRONIZING · NEXUS BRAIN", "Preparing conversation and learned knowledge continuity")
         conversation_path = Path(config.conversation_memory_path).expanduser()
@@ -314,6 +327,9 @@ class AppState:
         self.events = EventBus()
         self._shutdown = threading.Event()  # set by stop_state — long-lived workers check this
         self._stream_sinks: list = []  # live chat SSE queues that also want voice events
+        # Self-knowledge service — built lazily at the end of __init__ once
+        # autonomy/voice/etc exist; the agent resolves it through a callable.
+        self.self_knowledge = None
         self.jobs.on_change = make_emitter(self.events, "job")
         _image_emit = make_emitter(self.events, "image_job")
         self._image_failures_announced: set[str] = set()
@@ -404,7 +420,8 @@ class AppState:
             runtime_root / "data" / "workspaces.json", self.workspace)
         register_filesystem_tools(
             self.tools, self.workspace, checkpoints=self.checkpoints,
-            tasks=self.tasks, extra_roots=self.workspaces.allowed_roots)
+            tasks=self.tasks, extra_roots=self.workspaces.allowed_roots,
+            journal=self.changes)
         register_shell_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
@@ -637,7 +654,8 @@ class AppState:
         register_blender_tools(self.tools, self.workspace, jobs=self.jobs)
         register_docker_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace,
-                           extra_roots=self.workspaces.allowed_roots)
+                           extra_roots=self.workspaces.allowed_roots,
+                           journal=self.changes)
         from .tools.queue import register_queue_tools
         register_queue_tools(self.tools, self.queue)
         if config.github_enabled:
@@ -646,7 +664,8 @@ class AppState:
                 vault=self.secrets,
                 workspaces=self.workspaces,
                 client=self.github_client,
-                account=self.github_account)
+                account=self.github_account,
+                journal=self.changes)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
@@ -890,6 +909,7 @@ class AppState:
             speech_context=self._speech_context,
             image_outputs=self._image_job_outputs,
             capability_registry=self.capability_registry,
+            self_knowledge=lambda: self.self_knowledge,
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -919,6 +939,598 @@ class AppState:
         self._start_provisioning()
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+        # Conversational control plane — built last so every subsystem the
+        # probes reference exists. A build failure must never break boot.
+        try:
+            self.self_knowledge = self._build_self_knowledge()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("self-knowledge init failed")
+            self.self_knowledge = None
+
+    # -- change-journal undo handlers ------------------------------------
+
+    def _undo_checkpoint_restore(self, record: dict) -> dict:
+        """Restore the task checkpoint files this change touched, then
+        verify: the post-restore diff against the snapshot must be empty."""
+        task_id = str((record.get("undo") or {}).get("task_id")
+                      or record.get("checkpoint_id") or "")
+        if not task_id:
+            return {"ok": False, "message": "the change has no checkpoint"}
+        restored = self.checkpoints.restore(task_id)
+        remaining = self.checkpoints.diff(task_id)
+        verified = not remaining.strip()
+        return {"ok": True, "verified": verified,
+                "message": f"Restored {len(restored)} file(s)"
+                           + ("" if verified else " — verify diff still shows changes"),
+                "detail": remaining[:2000] if not verified else ""}
+
+    def _undo_setting(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        key = str(spec.get("key") or "")
+        if not key:
+            return {"ok": False, "message": "the record has no setting key"}
+        before = spec.get("value")
+        svc = getattr(self, "self_knowledge", None)
+        reg = getattr(svc, "settings", None)
+        if reg is None or reg.get(key) is None:
+            return {"ok": False, "message": f"setting '{key}' is not reversible"}
+        res = reg.set(key, before)
+        return {"ok": bool(res.get("ok")),
+                "verified": bool(res.get("verified")),
+                "message": f"Reverted {key} to {res.get('value', before)!r}"}
+
+    def _undo_git_branch_delete(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        branch = str(spec.get("branch") or "")
+        if not branch:
+            return {"ok": False, "message": "the record has no branch name"}
+        from .tools.github import _run_git
+        root = Path(spec.get("root") or self.workspace)
+        head = _run_git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+        if head.strip() == branch:
+            prev = str(spec.get("previous_branch") or "")
+            if not prev or prev == branch:
+                return {"ok": False,
+                        "message": f"'{branch}' is checked out — switch off "
+                                   "it first"}
+            code_out = _run_git(root, ["switch", prev], check=False)
+            if _run_git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).strip() \
+                    != prev:
+                return {"ok": False,
+                        "message": f"couldn't switch back to '{prev}' — "
+                                   f"{code_out[:300]}"}
+        _run_git(root, ["branch", "-D", branch])
+        still = _run_git(root,
+                         ["rev-parse", "--verify", f"refs/heads/{branch}"],
+                         check=False)
+        verified = not still.strip()
+        return {"ok": True, "verified": verified,
+                "message": f"Deleted local branch '{branch}'"}
+
+    def _undo_git_reset_soft(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        sha = str(spec.get("sha") or "")
+        from .tools.github import _run_git
+        root = Path(spec.get("root") or self.workspace)
+        head = _run_git(root, ["rev-parse", "HEAD"]).strip()
+        if sha and head != sha:
+            return {"ok": False,
+                    "message": "HEAD moved since that commit — refusing "
+                               "automatic reset. Restore manually or make a "
+                               "checkpoint first."}
+        _run_git(root, ["reset", "--soft", "HEAD~1"])
+        new_head = _run_git(root, ["rev-parse", "HEAD"]).strip()
+        verified = bool(new_head) and new_head != head
+        return {"ok": True, "verified": verified,
+                "message": "Commit undone — changes kept staged "
+                           f"(HEAD now {new_head[:8]})"}
+
+    def _build_self_knowledge(self):
+        """SelfKnowledgeService env — every callable is lazy and
+        exception-safe so a probe failing never breaks a chat turn.
+        Mutations go through the same config/persist/service paths the
+        settings pages use; nothing here bypasses the permission
+        manager."""
+        from .self_knowledge import SelfKnowledgeService
+        config = self.config
+
+        def _get(key: str):
+            return getattr(config, key, None)
+
+        def _set(key: str, value) -> None:
+            if key == "voice_muted" and getattr(self, "voice", None) is not None:
+                # VoiceManager.set_muted also stops live playback + publishes
+                # the event — the settings page goes through the same path.
+                self.voice.set_muted(bool(value))
+                return
+            setattr(config, key, value)
+            if key == "worker_ceiling":
+                # The admission ceiling is read from max_workers at
+                # construction; push the new cap into the live manager so
+                # chat changes take effect without a restart.
+                w = getattr(self, "workers", None)
+                if w is not None:
+                    try:
+                        w.max_workers = max(1, int(value))
+                        w._ceiling = min(w._ceiling, w.max_workers)
+                    except Exception:
+                        pass
+            if key == "invokeai_dir":
+                # Path change → drop the 60s discovery cache so the next
+                # probe re-scans instead of routing around a stale result.
+                rt = getattr(getattr(self, "image_manager", None),
+                             "invokeai_runtime", None)
+                if rt is not None:
+                    try:
+                        rt.invalidate_discovery()
+                    except Exception:
+                        pass
+            self.persist_config_fields([key])
+            try:
+                self.events.publish("settings",
+                                    {"key": key, "value": value})
+            except Exception:
+                pass
+
+        def _choices(key: str) -> list:
+            if key == "voice_preset_id":
+                v = getattr(self, "voice", None)
+                if v is not None:
+                    try:
+                        return [p.id for p in v.presets.list()]
+                    except Exception:
+                        return []
+            return []
+
+        def _capability(cid: str, force: bool = False):
+            try:
+                return self.capability_registry.evaluate_one(
+                    cid, force=force)
+            except Exception:
+                return None
+
+        def _capabilities_all() -> list:
+            try:
+                reps = self.capability_registry.evaluate()
+                return list(reps.values()) if isinstance(reps, dict) \
+                    else list(reps or [])
+            except Exception:
+                return []
+
+        def _probe(name: str) -> dict:
+            try:
+                if name == "research":
+                    if not getattr(config, "research_enabled", True):
+                        return {"state": "disabled",
+                                "detail": "research_enabled is off"}
+                    mode = str(getattr(config, "research_mode", "auto"))
+                    if mode in ("off", "none", "offline"):
+                        return {"state": "disabled",
+                                "detail": f"research mode '{mode}'"}
+                    return {"state": "available",
+                            "detail": f"mode {mode}"}
+                if name == "vision":
+                    ready = bool(self.runtime.readiness(
+                        probe_external=False).get("vision_ready",
+                                                  self.runtime.readiness(
+                                                      probe_external=False)
+                                                  .get("ready_to_code")))
+                    return {"state": "available" if ready else
+                            "setup_required"}
+                if name == "models":
+                    ready = bool(self.runtime.readiness(
+                        probe_external=False).get("ready_to_code"))
+                    return {"state": "available" if ready else
+                            "setup_required",
+                            "detail": "" if ready else
+                            "no coding model ready"}
+                if name == "model_growth":
+                    mg = getattr(self, "model_growth", None)
+                    return {"state": "available" if mg is not None else
+                            "unavailable"}
+                if name == "missions":
+                    ms = getattr(getattr(self, "autonomy", None),
+                                 "missions", None)
+                    try:
+                        rows = ms.list() if ms is not None else []
+                    except Exception:
+                        rows = []
+                    return {"state": "available",
+                            "detail": f"{len(rows)} mission(s)"}
+                if name == "autonomy":
+                    sup = getattr(self, "autonomy", None)
+                    if sup is None:
+                        return {"state": "unavailable"}
+                    if not getattr(config, "autonomy_enabled", True):
+                        return {"state": "disabled",
+                                "detail": "autonomy_enabled is off"}
+                    st = sup.status()
+                    running = bool(st.get("running", True))
+                    return {"state": "available" if running else
+                            "degraded",
+                            "detail": f"workers {st.get('workers', '?')}"}
+                if name == "workers":
+                    w = getattr(self, "workers", None)
+                    if w is None:
+                        return {"state": "unavailable"}
+                    st = w.status()
+                    cap = st.get("capacity") or {}
+                    return {"state": "available",
+                            "detail": f"{cap.get('active', 0)} active / "
+                                      f"{cap.get('ceiling', cap.get('max_workers', '?'))} ceiling"}
+                if name == "queue":
+                    q = getattr(self, "queue", None)
+                    try:
+                        rows = q.list() if q is not None else []
+                    except Exception:
+                        rows = []
+                    pending = sum(1 for r in rows
+                                  if r.get("status") == "pending")
+                    return {"state": "available",
+                            "detail": f"{pending} pending"}
+                if name == "nexus_brain":
+                    b = getattr(self, "brain", None)
+                    if b is None:
+                        return {"state": "unavailable",
+                                "detail": "brain not initialized"}
+                    if not getattr(config, "nexus_brain_enabled", True):
+                        return {"state": "disabled",
+                                "detail": "nexus_brain_enabled is off"}
+                    return {"state": "available"}
+                if name == "answer_memory":
+                    am = getattr(self, "answer_memory", None)
+                    if am is None:
+                        return {"state": "unavailable"}
+                    if not getattr(config, "answer_memory_enabled", True):
+                        return {"state": "disabled"}
+                    return {"state": "available" if getattr(
+                        am, "available", True) else "degraded"}
+                if name == "conversation_memory":
+                    cm = getattr(self, "conversation_memory", None)
+                    if cm is None:
+                        return {"state": "unavailable"}
+                    if not getattr(config, "conversation_memory_enabled",
+                                   True):
+                        return {"state": "disabled"}
+                    return {"state": "available"}
+                if name == "knowledge_memory":
+                    km = getattr(self, "knowledge_memory", None)
+                    if km is None:
+                        return {"state": "unavailable"}
+                    if not getattr(config, "knowledge_memory_enabled",
+                                   True):
+                        return {"state": "disabled"}
+                    return {"state": "available"}
+                if name == "persona":
+                    prof = self.profiles.active()
+                    if not prof:
+                        return {"state": "setup_required",
+                                "detail": "no active profile"}
+                    return {"state": "available",
+                            "detail": str(prof.get("name") or "")}
+                if name == "connectors":
+                    conn = getattr(self, "connectors", None)
+                    try:
+                        rows = conn.status() if conn is not None else []
+                    except Exception:
+                        rows = []
+                    linked = sum(1 for r in rows
+                                 if r.get("connected") or
+                                 r.get("authorized"))
+                    return {"state": "available",
+                            "detail": f"{linked}/{len(rows)} connected"}
+                if name == "tools":
+                    try:
+                        n = len(self.tools.names())
+                    except Exception:
+                        n = 0
+                    return {"state": "available",
+                            "detail": f"{n} tools"}
+                if name == "health":
+                    h = getattr(self, "health", None)
+                    if h is None:
+                        return {"state": "unavailable"}
+                    try:
+                        st = h.summary()
+                        sev = str(st.get("overall") or "ok")
+                    except Exception:
+                        sev = "ok"
+                    return {"state": "available" if sev in ("ok",
+                            "healthy", "") else "degraded",
+                            "detail": sev}
+                if name == "safe_mode":
+                    sm = getattr(self, "safemode", None)
+                    active = bool(sm and sm.is_active())
+                    return {"state": "degraded" if active else
+                            "available",
+                            "detail": "safe mode active" if active else ""}
+                if name == "lkg":
+                    lkg = getattr(self, "lkg", None)
+                    if lkg is None:
+                        return {"state": "unavailable"}
+                    try:
+                        snap = lkg.latest()
+                        return {"state": "available",
+                                "detail": f"snapshot {snap}" if snap else
+                                "no snapshot yet"}
+                    except Exception:
+                        return {"state": "available"}
+                if name == "self_update":
+                    return {"state": "available",
+                            "detail": "host-staged update at next launch"}
+                if name == "self_repair":
+                    sup = getattr(self, "autonomy", None)
+                    rep = getattr(sup, "repair", None) if sup else None
+                    return {"state": "available" if rep is not None else
+                            "unavailable"}
+                if name == "backups":
+                    b = getattr(self, "backups", None)
+                    return {"state": "available" if b is not None else
+                            "unavailable"}
+                if name == "appearance":
+                    return {"state": "available"}
+                if name == "projects":
+                    ps = getattr(self, "projects", None)
+                    try:
+                        rows = ps.list() if ps is not None else []
+                    except Exception:
+                        rows = []
+                    return {"state": "available",
+                            "detail": f"{len(rows)} project(s)"}
+                if name == "provisioning":
+                    p = getattr(self, "provisioning", None)
+                    if p is None:
+                        return {"state": "unavailable"}
+                    try:
+                        st = p.status()
+                        running = st.get("active", 0) if isinstance(
+                            st, dict) else 0
+                    except Exception:
+                        running = 0
+                    return {"state": "available",
+                            "detail": f"{running} item(s) in progress"}
+            except Exception as exc:
+                return {"state": "degraded", "detail": str(exc)}
+            return {"state": "not_applicable"}
+
+        # -- action bodies ----------------------------------------------------
+
+        def _persona_set(target: str) -> bool:
+            prof = self.profiles.active()
+            if not prof:
+                return False
+            from .personality import PersonalityStore
+            from .personality.presets import list_presets
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            store = PersonalityStore(pdir)
+            target = str(target or "").strip().lower()
+            if target and ":" not in target:
+                # 'isabella' / 'playful' → resolve to preset:<id>
+                for p in list_presets():
+                    pid = str(p.get("id") or "")
+                    name = str(p.get("name") or "").lower()
+                    if target in name or target in pid.lower():
+                        target = f"preset:{pid}"
+                        break
+                else:
+                    return False
+            try:
+                store.set_active(target,
+                                 is_adult=bool(prof.get("is_adult")))
+                return True
+            except Exception:
+                return False
+
+        def _persona_strength(value) -> bool:
+            prof = self.profiles.active()
+            if not prof:
+                return False
+            from .personality import PersonalityStore
+            pdir = self.profiles.profile_dir(str(prof["profile_id"]))
+            store = PersonalityStore(pdir)
+            try:
+                store.set_strength(int(float(value)))
+                return True
+            except Exception:
+                return False
+
+        def _image_install() -> bool:
+            prov = getattr(self, "provisioning", None)
+            if prov is None:
+                images = getattr(self, "images", None)
+                try:
+                    images.resume_setup()
+                    return True
+                except Exception:
+                    return False
+            try:
+                prov.resume()
+                # Retry anything failed/cancelled that provides the
+                # image capability — the real install path.
+                items = getattr(prov, "_items", {})
+                for it in list(items.values()):
+                    if getattr(it, "provides", "") in (
+                            "image_generation", "image_model") and \
+                            getattr(it, "state", "") in (
+                            "failed", "cancelled", "skipped"):
+                        prov.retry_item(it.id)
+                return True
+            except Exception:
+                return False
+
+        def _image_start() -> bool:
+            images = getattr(self, "images", None)
+            rt = getattr(images, "backend_runtime", None) or \
+                getattr(images, "invokeai_runtime", None)
+            if rt is None:
+                return False
+            try:
+                rt.ensure_ready()
+                return True
+            except Exception:
+                return False
+
+        def _image_stop() -> bool:
+            images = getattr(self, "images", None)
+            rt = getattr(images, "backend_runtime", None) or \
+                getattr(images, "invokeai_runtime", None)
+            if rt is None:
+                return False
+            try:
+                rt.stop()
+                return True
+            except Exception:
+                return False
+
+        def _autonomy_pause() -> bool:
+            sup = getattr(self, "autonomy", None)
+            try:
+                sup.stop_autonomy()
+                return True
+            except Exception:
+                return False
+
+        def _autonomy_resume() -> bool:
+            sup = getattr(self, "autonomy", None)
+            try:
+                sup.resume_autonomy()
+                return True
+            except Exception:
+                return False
+
+        def _autonomy_stop() -> bool:
+            return _autonomy_pause()
+
+        def _prov_pause() -> bool:
+            prov = getattr(self, "provisioning", None)
+            try:
+                prov.pause()
+                return True
+            except Exception:
+                return False
+
+        def _prov_resume() -> bool:
+            prov = getattr(self, "provisioning", None)
+            try:
+                prov.resume()
+                return True
+            except Exception:
+                return False
+
+        def _provision_models() -> bool:
+            prov = getattr(self, "provisioning", None)
+            if prov is None:
+                return False
+            try:
+                prov.resume()
+                items = getattr(prov, "_items", {})
+                for it in list(items.values()):
+                    if getattr(it, "kind", "") == "model" and \
+                            getattr(it, "state", "") in (
+                            "failed", "cancelled", "skipped"):
+                        prov.retry_item(it.id)
+                return True
+            except Exception:
+                return False
+
+        def _github_disconnect() -> bool:
+            try:
+                return bool(self.github_account.disconnect().get(
+                    "disconnected"))
+            except Exception:
+                return False
+
+        def _github_test() -> dict:
+            try:
+                out = self.github_account.test()
+                return {"connected": bool(out.get("ok")),
+                        "detail": str(out.get("detail") or
+                                      out.get("warning") or
+                                      out.get("state") or "")}
+            except Exception as exc:
+                return {"connected": False, "detail": str(exc)}
+
+        def _safe_mode_exit() -> bool:
+            sm = getattr(self, "safemode", None)
+            if sm is None:
+                return False
+            try:
+                sm.exit()
+                return True
+            except Exception:
+                return False
+
+        def _self_repair_apply() -> bool:
+            sup = getattr(self, "autonomy", None)
+            rep = getattr(sup, "repair", None) if sup else None
+            if rep is None:
+                return False
+            try:
+                fn = getattr(rep, "promote_pending", None) or \
+                    getattr(rep, "apply_pending", None)
+                return bool(fn()) if callable(fn) else False
+            except Exception:
+                return False
+
+        env = {
+            "capability": _capability,
+            "capabilities_all": _capabilities_all,
+            "probe": _probe,
+            "get": _get,
+            "set": _set,
+            "choices": _choices,
+            "permitted": lambda key: self.permission_manager.effective(key),
+            "version": lambda: VERSION,
+            "voice_stop": lambda: bool(
+                getattr(self, "voice", None) and
+                self.voice.stop_all(reason="chat").get("ok")),
+            "persona_set": _persona_set,
+            "persona_strength": _persona_strength,
+            "image_install": _image_install,
+            "image_start": _image_start,
+            "image_stop": _image_stop,
+            "autonomy_pause": _autonomy_pause,
+            "autonomy_resume": _autonomy_resume,
+            "autonomy_stop": _autonomy_stop,
+            "provisioning_pause": _prov_pause,
+            "provisioning_resume": _prov_resume,
+            "provision_models": _provision_models,
+            "github_disconnect": _github_disconnect,
+            "github_test": _github_test,
+            "safe_mode_exit": _safe_mode_exit,
+            "self_repair_apply": _self_repair_apply,
+            # Universal change journal — lets the control plane fall back
+            # to the durable ledger for "undo that" and record every
+            # registry-mediated settings write.
+            "change_journal": lambda: getattr(self, "changes", None),
+            "on_change": self._journal_setting,
+        }
+        return SelfKnowledgeService(env)
+
+    def _journal_setting(self, spec=None, previous=None, value=None) -> None:
+        """Record a SettingsRegistry write into the change journal —
+        fired by the registry's on_change hook so every lane that mutates
+        through the canonical setter (chat, actions, inline controls) is
+        journaled once."""
+        try:
+            key = getattr(spec, "key", "") or ""
+            name = getattr(spec, "name", "") or key
+            journal = getattr(self, "changes", None)
+            if journal is None or not key:
+                return
+            undoable = previous is not None and previous != value
+            journal.record(
+                "setting", name, actor="user",
+                before=previous, after=value,
+                reversible=undoable,
+                undo={"kind": "setting", "key": key, "value": previous}
+                     if undoable else None,
+                risk="low",
+                verification={"kind": "readback", "key": key},
+                description=f"{key} = {value!r}")
+        except Exception:
+            pass
 
     def _start_provisioning(self) -> None:
         """BackgroundProvisioningManager — after the app is usable, finish
@@ -5805,7 +6417,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
                           "/api/lkg", "/api/update", "/api/search",
-                          "/api/rc", "/api/audit",
+                          "/api/rc", "/api/audit", "/api/changes",
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
@@ -5918,6 +6530,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/golden/verify/"):
             name = unquote(path[len("/api/golden/verify/"):]).strip("/")
             self._json(self.state.golden.verify(name))
+            return True
+        if path == "/api/changes":
+            journal = getattr(self.state, "changes", None)
+            limit = int((q.get("limit") or ["40"])[0] or 40)
+            self._json({"changes": journal.recent(limit)
+                        if journal is not None else []})
             return True
         if path == "/api/lkg":
             self._json(self.state.lkg.status())
@@ -6052,6 +6670,15 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/changes/undo":
+            journal = getattr(self.state, "changes", None)
+            if journal is None:
+                self._json({"ok": False,
+                            "message": "change journal unavailable"}, 503)
+                return True
+            out = journal.undo(str(body.get("id") or "") or None)
+            self._json(out, 200 if out.get("ok") else 400)
             return True
         if path == "/api/dependencies/track":
             row = self.state.dependencies.track(
@@ -7361,6 +7988,40 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(self.state.capabilities.summary())
             return
+        # Self-knowledge + control plane — the same registries the chat
+        # lane resolves against. Read-only surfaces for the capability
+        # browser; mutation goes through POST /api/actions/execute.
+        if path == "/api/features":
+            svc = getattr(self.state, "self_knowledge", None)
+            if svc is None:
+                self._json({"error": "self-knowledge unavailable"}, 503)
+            else:
+                self._json(svc.features_payload())
+            return
+        if path.startswith("/api/features/"):
+            svc = getattr(self.state, "self_knowledge", None)
+            fid = path.rsplit("/", 1)[-1]
+            feat = svc.catalog.get(fid) if svc else None
+            if feat is None:
+                self._json({"error": "unknown feature"}, 404)
+            else:
+                self._json({**feat.as_dict(),
+                            "state": svc.catalog.feature_state(
+                                fid, svc._env)})
+            return
+        if path == "/api/pages":
+            svc = getattr(self.state, "self_knowledge", None)
+            self._json(svc.pages_payload() if svc else {"pages": []})
+            return
+        if path == "/api/actions":
+            svc = getattr(self.state, "self_knowledge", None)
+            self._json(svc.actions_payload() if svc else {"actions": []})
+            return
+        if path == "/api/settings/registry":
+            svc = getattr(self.state, "self_knowledge", None)
+            self._json(svc.settings_payload() if svc
+                       else {"settings": []})
+            return
         if path == "/api/regressions":
             q = parse_qs(urlparse(self.path).query)
             behavior = str((q.get("behavior") or [""])[0])
@@ -8252,6 +8913,7 @@ class Handler(BaseHTTPRequestHandler):
             "research": result.research,
             "response_source": getattr(result, "response_source", ""),
             "memory": getattr(result, "memory", {}),
+            "ui": getattr(result, "ui", {}),
             "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         }
@@ -8314,6 +8976,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/github/test":
                 self._json(self.state.github_account.test())
+                return
+            if path == "/api/actions/execute":
+                # Chat action cards and inline controls land here — the
+                # action id is validated against the registry, risk-class
+                # confirmation enforced inside, and every mutation is
+                # verified by read-back before 'ok' is reported.
+                svc = getattr(self.state, "self_knowledge", None)
+                if svc is None:
+                    self._json({"error": "self-knowledge unavailable"},
+                               503)
+                    return
+                out = svc.execute_action(
+                    str(body.get("id") or ""),
+                    params=body.get("params") or {},
+                    confirmed=bool(body.get("confirmed")))
+                self._json(out, 200 if out.get("ok") else 400)
                 return
             if path.startswith("/api/voice/"):
                 if self.state.voice is None:
@@ -9482,6 +10160,7 @@ class Handler(BaseHTTPRequestHandler):
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
+                        or self.state.agent.can_answer_self_knowledge(message)
                         or (
                             getattr(self.state, "brain", None) is not None
                             and self.state.brain.answers_without_model(
@@ -9704,6 +10383,7 @@ class Handler(BaseHTTPRequestHandler):
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
+                        or self.state.agent.can_answer_self_knowledge(message)
                         or (
                             getattr(self.state, "brain", None) is not None
                             and self.state.brain.answers_without_model(

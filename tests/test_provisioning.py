@@ -327,6 +327,47 @@ class PersistenceTests(unittest.TestCase):
                              "resumed after restart")
             self.assertEqual(m2._items["comfyui"].state, "completed")
 
+    def test_completed_tool_reverified_requeues_missing(self):
+        """A persisted 'completed' tool whose payload vanished must be
+        requeued — the plan never overrides ground truth forever."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            present = {"invokeai"}
+            hook = lambda tid: tid in present
+            m1 = _manager(root, tool_installed_hook=hook)
+            m1._items["invokeai"].state = "completed"
+            m1._items["invokeai"].verified = True
+            m1._save()
+            m2 = _manager(root, tool_installed_hook=hook)
+            self.assertEqual(m2._items["invokeai"].state, "completed")
+            # Payload disappears between runs → honest requeue.
+            present.clear()
+            m2._save()
+            m3 = _manager(root, tool_installed_hook=hook)
+            self.assertEqual(m3._items["invokeai"].state, "waiting")
+            self.assertFalse(m3._items["invokeai"].verified)
+
+    def test_invokeai_model_reverified_via_offline_registry(self):
+        """A completed invokeai_model item is re-checked against
+        InvokeAI's SQLite registry — no live backend needed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rt = SimpleNamespace(
+                ensure_ready=lambda: None,
+                discover=lambda: (root / "tools" / "InvokeAI", ["x"]),
+                registry_models=lambda: [],  # installed but empty registry
+                invalidate_discovery=lambda: None)
+            kw = dict(image_manager=SimpleNamespace(
+                invokeai_runtime=rt, invokeai_backend=None),
+                tool_installed_hook=lambda tid: True)
+            m1 = _manager(root, **kw)
+            it = m1._items["model-juggernaut-xl-v9"]
+            it.state = "completed"; it.verified = True
+            m1._save()
+            m2 = _manager(root, **kw)
+            self.assertEqual(m2._items["model-juggernaut-xl-v9"].state,
+                             "waiting")
+
     def test_voice_reverify_requeues_missing(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -124,6 +124,9 @@ class AgentResult:
     # SpeechDeliveryPlan.as_dict() when the reply was realized through
     # the persona speech genome — voice layer may consume pace/emphasis.
     delivery: dict[str, Any] = field(default_factory=dict)
+    # Self-knowledge lane UI payload — action cards, deep links, and
+    # inline controls for the chat renderer.
+    ui: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -208,6 +211,7 @@ class AgentOrchestrator:
         speech_context=None,
         image_outputs=None,
         capability_registry=None,
+        self_knowledge=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -250,6 +254,10 @@ class AgentOrchestrator:
         # truth gate (claims contradicting a hard-negative capability are
         # fabrication even when unrelated tools ran).
         self.capabilities = capability_registry
+        # SelfKnowledgeService — the conversational control plane. May be a
+        # service instance or a zero-arg resolver returning one (lazy so
+        # AppState wiring order doesn't matter).
+        self._self_knowledge = self_knowledge
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -889,6 +897,81 @@ class AgentOrchestrator:
         genome, ctx = sp
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent="github_status", canonical=canonical)
+
+    def _self_knowledge_service(self):
+        """Resolve the SelfKnowledgeService — the server may pass the
+        instance or a lazy resolver."""
+        svc = self._self_knowledge
+        try:
+            return svc() if callable(svc) and not hasattr(svc, "respond") \
+                else svc
+        except Exception:
+            return None
+
+    def can_answer_self_knowledge(self, user_text: str) -> bool:
+        """True when the self-knowledge lane claims this turn — used by
+        the no-model gate so 'turn voice off' doesn't 409 when no coding
+        model is resident. Runs the resolver read-only: respond() is
+        deterministic and cheap; control resolutions mutate on the real
+        run below — this gate only checks the resolver would fire."""
+        svc = self._self_knowledge_service()
+        if svc is None:
+            return False
+        try:
+            # Peek only — a control resolution here must NOT mutate, so
+            # we ask the service whether it would claim the turn without
+            # executing. Read-only probes are safe; mutations are
+            # deferred to the actual lane run in ``run()``.
+            probe = getattr(svc, "would_answer", None)
+            if callable(probe):
+                return bool(probe(user_text))
+            res = svc.respond(user_text)
+            return res is not None
+        except Exception:
+            return False
+
+    def _self_knowledge_reply(self, user_text: str):
+        """The conversational control plane — 'turn voice off', 'what
+        can you do', 'where is the speech lab', 'do it'. Resolves
+        against the live registries; the reply text is a factual draft
+        rendered through the persona genome, and the structured payload
+        (actions/links/controls) rides along as ``ui`` for the chat
+        renderer. → RenderedReply | None."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        svc = self._self_knowledge_service()
+        if svc is None:
+            return None
+        try:
+            res = svc.respond(user_text)
+        except Exception:
+            return None
+        if res is None or not res.text:
+            return None
+        canonical = res.text
+        ui: dict[str, Any] = {}
+        if res.actions:
+            ui["actions"] = list(res.actions)
+        if res.links:
+            ui["links"] = list(res.links)
+        if res.controls:
+            ui["controls"] = list(res.controls)
+        if res.undo:
+            ui["undo"] = dict(res.undo)
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id=f"self_knowledge:{res.intent or res.kind}",
+            speech_act="answer")
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer",
+                                 ui=ui)
+        genome, ctx = sp
+        reply = _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx,
+            intent=f"self_knowledge_{res.intent or res.kind}",
+            canonical=canonical)
+        reply.ui = ui
+        return reply
 
     def _builtin_reply(self, user_text: str):
         """The instance-level persona path: SemanticResponse through the
@@ -4299,7 +4382,15 @@ class AgentOrchestrator:
         github_reply = (
             self._github_status_reply(user_text)
             if mode == "auto" else None)
-        builtin_reply = github_reply or (
+        # Self-knowledge lane — 'turn voice off', 'what can you do',
+        # 'where is the speech lab', 'do it'. Exempt from the canned
+        # suppression gate like the GitHub lane: control requests are
+        # ACTION_INTENT-shaped but resolved locally against the live
+        # registries. Only claimed when the resolver recognizes the turn.
+        sk_reply = (
+            self._self_knowledge_reply(user_text)
+            if mode == "auto" else None)
+        builtin_reply = github_reply or sk_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and not env.suppresses_canned() else None)
         builtin_response = (
@@ -4307,6 +4398,7 @@ class AgentOrchestrator:
         if (
             builtin_response is not None
             and github_reply is None
+            and sk_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):
@@ -4392,6 +4484,8 @@ class AgentOrchestrator:
                 delivery=(builtin_reply.plan.as_dict()
                           if builtin_reply is not None
                           and builtin_reply.genome_rendered else {}),
+                ui=(builtin_reply.ui
+                    if builtin_reply is not None else {}),
             )
 
         # Tier 1/2: Nexus Answer Memory. A trusted learned answer bypasses

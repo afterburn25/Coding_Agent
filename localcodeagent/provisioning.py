@@ -342,11 +342,28 @@ class ProvisioningManager:
     def _inventory(self) -> None:
         """Cheap completeness probes — requeue 'completed' items whose
         payload is actually missing (e.g. files deleted out from under a
-        previous run)."""
+        previous run). A persisted plan must never override ground truth
+        forever."""
         for it in self._items.values():
             if it.state != "completed":
                 continue
-            if it.kind == "voice_assets":
+            if it.kind == "tool":
+                # Re-run the manifest's own detection — a plan that says
+                # "completed/verified" while the payload is gone requeues
+                # instead of lying forever.
+                tool_id = str(it.payload.get("tool_id") or it.id)
+                if self._tool_installed is None:
+                    continue  # no detector wired — don't churn state
+                try:
+                    ok = bool(self._tool_installed(tool_id))
+                except Exception:
+                    ok = True  # detection errored — don't churn state
+                if not ok:
+                    it.state, it.verified = "waiting", False
+                    it.detail = "payload missing — requeued"
+                    if tool_id == "invokeai":
+                        self._invalidate_invokeai_discovery()
+            elif it.kind == "voice_assets":
                 try:
                     from .voice.assets import asset_status
                     status = asset_status(self._voice_asset_dir())
@@ -356,9 +373,28 @@ class ProvisioningManager:
                 except Exception:
                     pass
             elif it.kind == "invokeai_model":
-                # Verified at install time; re-checking requires a live
-                # backend, so trust the persisted verification.
-                pass
+                # InvokeAI's model registry is a local SQLite file — it
+                # can be re-verified while the backend is stopped. When
+                # InvokeAI itself isn't installed, depends_on ordering
+                # handles the item; nothing to re-check here.
+                try:
+                    rt = getattr(getattr(self, "image_manager", None),
+                                 "invokeai_runtime", None)
+                    if rt is None or rt.discover()[0] is None:
+                        continue
+                    fid = str(it.payload.get("fleet_id") or "")
+                    if not fid:
+                        continue
+                    from .image.fleet import fleet_for_model_name
+                    present = any(
+                        (fleet_for_model_name(str(m.get("name") or ""))
+                         or {}).get("id") == fid
+                        for m in rt.registry_models())
+                    if not present:
+                        it.state, it.verified = "waiting", False
+                        it.detail = "model missing from InvokeAI registry — requeued"
+                except Exception:
+                    pass
             elif it.kind == "image_model":
                 # Weight files only — a cheap disk existence re-check.
                 try:
@@ -370,6 +406,17 @@ class ProvisioningManager:
                         it.detail = "components missing — requeued"
                 except Exception:
                     pass
+
+    def _invalidate_invokeai_discovery(self) -> None:
+        """Drop the runtime's 60s discovery cache after install/repair so
+        the next image request doesn't route around a stale miss."""
+        try:
+            rt = getattr(getattr(self, "image_manager", None),
+                         "invokeai_runtime", None)
+            if rt is not None:
+                rt.invalidate_discovery()
+        except Exception:
+            pass
 
     def _voice_asset_dir(self) -> Path:
         configured = Path(str(getattr(
@@ -574,6 +621,8 @@ class ProvisioningManager:
                         it.finished_at = now
                         completed.append(it)
                         changed = True
+                        if tool_id == "invokeai":
+                            self._invalidate_invokeai_discovery()
             for it in self._items.values():
                 if it.state != "skipped":
                     continue
@@ -753,6 +802,8 @@ class ProvisioningManager:
                 raise RuntimeError(
                     f"{it.label} install finished but the tool was not "
                     "detected on disk")
+            if tool_id == "invokeai":
+                self._invalidate_invokeai_discovery()
 
     def _run_invokeai_model(self, it: ProvisionItem) -> None:
         runtime = getattr(self.image_manager, "invokeai_runtime", None)

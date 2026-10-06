@@ -257,7 +257,67 @@ function paintImageJob(el,job){
 }
 async function pollImageJob(id){const el=imageJobEls.get(id);if(!el)return;try{const res=await fetch(`/api/image/job/${encodeURIComponent(id)}`);const data=await res.json();if(!res.ok)throw new Error(data.error||'Image job lookup failed');paintImageJob(el,data.job);if(IMAGE_ACTIVE(data.job))setTimeout(()=>pollImageJob(id),1000);}catch(e){el.classList.add('failed');const t=el.querySelector('.gallery-thumb em');if(t)t.textContent=e.message;}}
 function renderImageJobs(jobs=[],afterEl=null){let appended=false;for(const job of jobs){let el=imageJobEls.get(job.id);if(!el){const gal=imageGalleryFor(afterEl);el=document.createElement('div');el.className='gallery-slot';gal.querySelector('.gallery-thumbs').appendChild(el);imageJobEls.set(job.id,el);appended=true;}paintImageJob(el,job);if(IMAGE_ACTIVE(job))setTimeout(()=>pollImageJob(job.id),500);}scrollChat(appended);}
-function renderAgentResult(data,{addAssistant=true}={}){if(addAssistant)addMessage('assistant',data.content);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
+// Self-knowledge lane UI — action cards, deep links, and inline controls
+// rendered under the assistant bubble. Every action id is backend-
+// validated (POST /api/actions/execute); navigation uses the page
+// registry's canonical routes.
+function renderChatUI(ui,host){
+  if(!ui||!host)return;
+  const wrap=document.createElement('div');wrap.className='chat-ui';
+  (ui.actions||[]).forEach(a=>{
+    const b=document.createElement('button');b.type='button';
+    b.className='mini-button chat-action';b.textContent=a.label||a.id;
+    b.onclick=async()=>{b.disabled=true;try{
+      if(a.kind==='navigate'&&a.route){location.href=a.route;return;}
+      const res=await fetch('/api/actions/execute',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id:a.id,params:a.params||{},confirmed:true})});
+      const out=await res.json();
+      b.textContent=out.ok?'✓ Done':(out.message||out.detail||'Failed');
+      if(out.links)renderChatUI({links:out.links},host);
+    }catch(e){b.textContent='Failed';}finally{setTimeout(()=>{b.disabled=false;},800);}};
+    wrap.appendChild(b);
+  });
+  (ui.links||[]).forEach(l=>{
+    const a=document.createElement('a');a.className='chat-link';
+    a.href=l.route||'#';a.textContent=l.label||l.route;wrap.appendChild(a);
+  });
+  (ui.controls||[]).forEach(c=>{
+    const row=document.createElement('div');row.className='chat-control';
+    const label=document.createElement('span');label.className='muted';
+    label.textContent=c.label||c.key;row.appendChild(label);
+    const apply=async(value)=>{try{await fetch('/api/actions/execute',
+      {method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({id:'_set',params:{key:c.key,value},
+                            confirmed:true})});}catch{}};
+    if(c.kind==='toggle'){
+      const b=document.createElement('button');b.type='button';
+      b.className='mini-button'+(c.value?' active':'');
+      b.textContent=c.value?'On':'Off';
+      b.onclick=()=>{apply(!c.value);c.value=!c.value;
+        b.textContent=c.value?'On':'Off';
+        b.classList.toggle('active',!!c.value);};
+      row.appendChild(b);
+    }else if(c.kind==='select'){
+      const s=document.createElement('select');
+      (c.options||[]).forEach(o=>{const op=document.createElement('option');
+        op.value=o;op.textContent=o;if(o===c.value)op.selected=true;
+        s.appendChild(op);});
+      s.onchange=()=>apply(s.value);row.appendChild(s);
+    }else if(c.kind==='slider'){
+      const s=document.createElement('input');s.type='range';
+      s.min=c.min??0;s.max=c.max??1;s.step=c.step??1;
+      s.value=c.value??0;
+      const out=document.createElement('span');out.className='muted';
+      out.textContent=c.value;
+      s.onchange=()=>{apply(parseFloat(s.value));out.textContent=s.value;};
+      row.appendChild(s);row.appendChild(out);
+    }
+    wrap.appendChild(row);
+  });
+  if(wrap.childNodes.length)host.appendChild(wrap);
+}
+function renderAgentResult(data,{addAssistant=true}={}){let msgEl=null;if(addAssistant){addMessage('assistant',data.content);msgEl=chat.lastElementChild;}if(data.ui&&msgEl)renderChatUI(data.ui,msgEl);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
 async function resumeTask(approved){if(!lastTask)return;send.disabled=true;try{const res=await fetch('/api/tasks/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:lastTask.id,approved})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not resume task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Resume error: ${err.message}`);}finally{send.disabled=false;}}
 async function recoverTask(taskId){send.disabled=true;try{addMessage('assistant','Recovering the interrupted task from its saved workspace/checkpoint state…');const res=await fetch('/api/tasks/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not recover task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Recovery error: ${err.message}`);}finally{send.disabled=false;}}
 const nexusPhaseCopy={
@@ -540,7 +600,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({offer_id:'imgjob:'+String(data.job.id||''),ts:data.job.finished_at||data.job.created_at||0,tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
   if(name==='install_offer'){renderInstallOffer(data,state);return;}
-  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
+  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.ui)renderChatUI(data.ui,state.wrap);if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
   if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
 }
 function attachRetry(state){

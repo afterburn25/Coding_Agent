@@ -58,6 +58,7 @@ def register_filesystem_tools(
     checkpoints: CheckpointManager | None = None,
     tasks: TaskStore | None = None,
     extra_roots=None,
+    journal=None,
 ) -> None:
     root = workspace.resolve()
 
@@ -82,6 +83,14 @@ def register_filesystem_tools(
             checkpoints.snapshot(task_id, path)
         if tasks:
             tasks.add_changed_file(task_id, display_path(path))
+        if journal is not None:
+            try:
+                journal.record_file_mutation(
+                    task_id, display_path(path),
+                    mission_id=str(registry.context.get("mission_id", "")
+                                   or ""))
+            except Exception:
+                pass
 
     def list_files(args: dict) -> str:
         path = safe(args.get("path", "."))

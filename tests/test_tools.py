@@ -94,13 +94,13 @@ class GitHubCodingToolTests(unittest.TestCase):
 
     def test_remote_push_requires_explicit_approval(self):
         with tempfile.TemporaryDirectory() as td:
-            permissions = {"github.write": "ask"}
+            permissions = {"git.push": "ask"}
             config = AgentConfig(permissions=permissions)
             reg = ToolRegistry(permissions)
             register_github_tools(reg, Path(td), config)
             result = reg.execute("git_push", {"remote": "origin", "branch": "main"})
             self.assertTrue(result.startswith("APPROVAL_REQUIRED"))
-            self.assertIn("github.write", result)
+            self.assertIn("git.push", result)
 
 
 class ProcessStreamingTests(unittest.TestCase):

@@ -34,6 +34,8 @@ build/
 dist/
 dist-*/
 build-*/
+**/publish/
+**/publish-rid/
 .agent/browser/
 
 .agent/research/
@@ -52,6 +54,7 @@ build-*/
 
 # Dev-server runtime state (chat history, charts, image outputs at repo root)
 data/
+output/
 desktop/**/bin/
 desktop/**/obj/
 
