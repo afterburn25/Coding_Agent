@@ -8,7 +8,9 @@ Statuses: `WORKING_VERIFIED` | `WORKING_WITH_POLISH_NEEDED` |
 `PARTIALLY_WIRED` | `BROKEN` | `NOT_INSTALLED` | `NOT_TESTED` |
 `INTENTIONALLY_UNAVAILABLE`
 
-Last updated: after commit `244af60` (GitHub vault-credential hydration).
+Last updated: after packaged-backend dogfood on the `244af60`+ build
+(deployed to `D:\Nexus_Core\backend`, served on port 58341 with
+`--workspace D:\Nexus_Core\Source`).
 
 ## Verified dogfood evidence (this milestone)
 
@@ -16,9 +18,13 @@ Last updated: after commit `244af60` (GitHub vault-credential hydration).
 |---|---|
 | InvokeAI 6.14.2 discovered at `tools/InvokeAI`, `invokeai-web.exe` found, health green on :9090 | `localcodeagent/image/invokeai_runtime.py`, live probe |
 | InvokeAI auto-route generated real 1024x1024 PNG; `job.backend == invokeai` | `data/image/generations/878199cb…png` |
+| **Packaged app**: POST `/api/image/generate` (auto) → job `81408629` finished, `backend=invokeai`, `backend_job_id=34`, real PNG, routing reasons recorded | packaged backend :58341 |
 | Stale completed-tool provisioning plan self-heals (tool re-verified on disk) | `localcodeagent/provisioning.py::_inventory` |
 | GitHub: connected as `afterburn25` (vault token), repo list, branch → commit → header-auth push → remote verify → PR #6 created → read → closed → deleted | `localcodeagent/tools/github.py` |
+| **Packaged app**: `/api/github/status` → `state=connected`, `workspace_repo=afterburn25/Coding_Agent` resolves | packaged backend :58341 |
 | GitHub write bug found + fixed: `_ensure_token()` missing on issue/PR/read endpoints | commit `244af60` |
+| **Packaged app**: TTS speak → real 173KB WAV; `/api/profiles/{id}/farewell` → `voice_url` + real 503KB WAV (earlier farewell failure was stale deploy) | packaged backend :58341 |
+| Image job cards now render `routing_reasons` (fallback reason visible) | `web/image.js` |
 | Chat control plane live-verified on packaged backend 0.23.0: voice toggle, undo, worker ceiling, backend status | port-58333 live probe |
 | Worker ceiling propagates to live `AdaptiveWorkerManager` | `self_knowledge` setter |
 | `VERSION` bundled in packaged backend (was `0.0.0-dev` regression) | `packaging/build_windows.ps1` |
@@ -35,7 +41,7 @@ Last updated: after commit `244af60` (GitHub vault-credential hydration).
 | Permission | `github.read` (allow), `github.write` (ask), `git.push` (ask) |
 | Verification | Real dogfood: connect state, repo list, branch/commit/push to `devin-stabilization-check`, remote verify, PR #6 create/read/close/delete |
 | Dogfood result | PASS — full write cycle green; scopes returned: `gist notifications read:gpg_key read:org repo user workflow write:public_key` |
-| Known residue | `github_repository` reported `authenticated:false` when called before token hydration — fixed via `_ensure_token()`; workspace-remote resolution via account service returns `null` and needs follow-up verification |
+| Known residue | `github_repository` reported `authenticated:false` before token hydration — fixed via `_ensure_token()`; workspace remote **verified** on packaged app (`workspace_repo` resolves when `--workspace` points at the git repo, which the desktop host does via `Source/`) |
 
 ## Git — `WORKING_VERIFIED`
 
@@ -81,12 +87,15 @@ Ground-truth re-verification now covers completed `tool`,
 `completed/verified` plans self-heal to `waiting`. Remaining: clean-install
 and upgrade-migration dogfood still outstanding.
 
-## Voice / TTS / STT / Speech Lab — `PARTIALLY_WIRED`
+## Voice / TTS / Speech Lab — `WORKING_VERIFIED`
 
-Settings mutations verified live (`turn voice off`, undo). Farewell voice
-delivery was investigated earlier; inconsistent `voice_url` on deployed
-build — suspected stale deployment, needs re-verification on the rebuilt
-0.23.0 backend.
+Settings mutations verified live (`turn voice off`, undo). Packaged-app
+dogfood: `voice.status` reports kokoro 0.6.1 with both assets present +
+verified; `/api/voice/speak` returned a real 173KB WAV; the desktop
+farewell chain (`/api/profiles/{id}/farewell` → `voice_url`) returned a
+real 503KB persona-styled WAV. The earlier "farewell isn't firing" report
+was a stale deployed backend — resolved by the rebuilt 0.23.0 deployment.
+STT itself still `NOT_TESTED` (no mic dogfood yet).
 
 ## Everything else — audit status
 
