@@ -276,6 +276,22 @@ class ConsolidationTests(unittest.TestCase):
         # procedure candidate got promoted after 3 repeats
         self.assertEqual(len(self.procs.list()), 1)
 
+    def test_similar_phrasings_cluster(self):
+        # Same problem, different words — consolidation must still find
+        # the repetition (the "17 InvokeAI incidents" case).
+        goals = [
+            "debugging:invokeai cold start fails",
+            "debugging:invokeai cold start broken",
+            "debugging:invokeai cold start crash",
+        ]
+        for g in goals:
+            self.lessons.add({"problem_class": "debugging",
+                              "signature": g, "outcome": "success",
+                              "successful_strategy": "inspect-registry"})
+        report = self.eng.run()
+        self.assertGreaterEqual(report.clustered, 3)
+        self.assertEqual(len(self.procs.list()), 1)
+
     def test_mixed_outcomes_mark_conflicted_not_erased(self):
         for oc in ("success", "success", "failure"):
             self.lessons.add({"problem_class": "debugging",
@@ -374,6 +390,116 @@ class MasteryTests(unittest.TestCase):
         self.assertEqual(row["verified_successes"], 1)
 
 
+class SkillPromotionTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        root = Path(self.td.name)
+        self.procs = ProceduralMemory(root / "procs.json")
+        from localcodeagent.learning import SkillPromotionEngine
+        self.eng = SkillPromotionEngine(root / "scands.json",
+                                        procedures=self.procs)
+
+    def _verified_proc(self, successes=5):
+        p = self.procs.add("cmake-linker-v1",
+                           problem_signature="debugging:cmake linker",
+                           steps=["identify", "link", "rebuild"])
+        for _ in range(successes):
+            p = self.procs.record_outcome(p["id"], "success")
+        return p
+
+    def test_propose_requires_verified_and_repetition(self):
+        p = self.procs.add("p", problem_signature="x", steps=["a"])
+        self.assertIsNone(self.eng.propose(p["id"]))  # not verified
+        proc = self._verified_proc(successes=5)
+        prop = self.eng.propose(proc["id"])
+        self.assertIsNotNone(prop)
+        self.assertEqual(prop["status"], "pending")
+        self.assertIn("cmake", prop["spec"]["name"])
+        self.assertEqual(prop["spec"]["permissions"], [])
+
+    def test_reject_keeps_history(self):
+        proc = self._verified_proc()
+        prop = self.eng.propose(proc["id"])
+        self.eng.reject(prop["id"])
+        self.assertEqual(len(self.eng.pending()), 0)
+        self.assertEqual(self.eng.summary()["proposals"], 1)
+
+
+class TrainingGateTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        from localcodeagent.training.model_growth import ModelGrowthLab
+        from localcodeagent.learning import TrainingCandidateGate
+        self.growth = ModelGrowthLab(Path(self.td.name) / "growth")
+        self.gate = TrainingCandidateGate(self.growth)
+
+    def test_unverified_model_output_rejected(self):
+        out = self.gate.submit(
+            instruction="what is x", response="x is y",
+            source_type=t.SOURCE_MODEL, verification=t.VERIFY_MODEL_ASSERTED)
+        self.assertIsNone(out)
+        self.assertEqual(len(self.growth.candidates()), 0)
+
+    def test_verified_row_auto_approved(self):
+        out = self.gate.submit(
+            instruction="fix linker error", response="steps…",
+            source_type=t.SOURCE_TEST, verification=t.VERIFY_TESTED,
+            confidence=0.85,
+            provenance={"task": "t1"})
+        self.assertIsNotNone(out)
+        self.assertEqual(out["status"], "approved")
+        self.assertEqual(out["metadata"]["quality"], "verified")
+        self.assertEqual(out["metadata"]["provenance"]["task"], "t1")
+
+    def test_exportable_defaults_to_high_quality(self):
+        self.gate.submit(instruction="a", response="b",
+                         source_type=t.SOURCE_TEST,
+                         verification=t.VERIFY_TESTED, confidence=0.9)
+        self.growth.collect(kind="x", instruction="raw", response="raw",
+                            source="conversation")  # ungated, pending
+        rows = self.gate.exportable()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["metadata"]["quality"], "verified")
+
+
+class TeacherStudentTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        root = Path(self.td.name)
+        from localcodeagent.training.model_growth import ModelGrowthLab
+        from localcodeagent.learning import (TeacherStudentPipeline,
+                                             TrainingCandidateGate)
+        self.map = CompetencyMap(root / "comp.json")
+        self.gate = TrainingCandidateGate(ModelGrowthLab(root / "g"))
+        self.pipe = TeacherStudentPipeline(gate=self.gate,
+                                           competencies=self.map)
+
+    def test_verified_teacher_produces_candidate(self):
+        res = self.pipe.run(
+            "hard problem",
+            competency="programming.debugging",
+            teacher_fn=lambda p: "verified solution",
+            verify_fn=lambda p, s: True,
+            review_fn=lambda p, s: "looks right",
+            student_fn=lambda p: "wrong answer")
+        # student fails verify via verify_fn=True? we pass verify always
+        # True here; check stage list
+        stages = [s["stage"] for s in res["stages"]]
+        self.assertEqual(stages, ["teacher", "verify", "review", "student"])
+        self.assertTrue(res["training_candidate"])
+
+    def test_unverified_teacher_no_candidate(self):
+        res = self.pipe.run(
+            "hard problem",
+            teacher_fn=lambda p: "guess",
+            verify_fn=lambda p, s: False)
+        self.assertFalse(res["teacher_ok"])
+        self.assertFalse(res["training_candidate"])
+
+
 class GovernorTests(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
@@ -388,6 +514,19 @@ class GovernorTests(unittest.TestCase):
         row = self.gov.competencies.present("programming.debugging")
         self.assertEqual(row["verified_successes"], 1)
         self.assertTrue(self.gov.strategies.for_problem("debugging"))
+
+    def test_command_turns_teach_nothing(self):
+        # Deterministic/builtin turns aren't learning experiences —
+        # otherwise "/study stop" becomes a "lesson".
+        for src in ("command", "research_followup", "brain_fast_path",
+                    "answer_memory"):
+            self.assertIsNone(self.gov.observe_task({
+                "id": "c1", "goal": "x", "status": "completed",
+                "response_source": src}))
+        self.assertIsNone(self.gov.observe_task({
+            "id": "c2", "goal": "x", "status": "completed",
+            "model_id": "builtin-local"}))
+        self.assertEqual(self.gov.lessons.summary()["total"], 0)
 
     def test_observe_correction_penalizes(self):
         task = {"id": "t2", "goal": "explain widgets", "status": "completed"}

@@ -8194,6 +8194,20 @@ class Handler(BaseHTTPRequestHandler):
             payload["candidates"] = self.state.model_growth.candidates(status=status, limit=500)
             self._json(payload)
             return
+
+        if path == "/api/learning":
+            # Learning dashboard data (Part 50): knowledge, procedures,
+            # competencies, study, model trends — one organized payload.
+            gov = getattr(self.state, "learning", None)
+            if gov is None:
+                self._json({"error": "learning unavailable"}, 503)
+                return
+            payload = gov.summary()
+            payload["weaknesses"] = gov.weaknesses(limit=8)
+            payload["skill_proposals"] = gov.skill_promotion.pending()
+            payload["retention_due"] = gov.mastery.due_for_retention()
+            self._json(payload)
+            return
         if path.startswith("/api/model-growth/job/"):
             job_id = unquote(path[len("/api/model-growth/job/"):]).strip("/")
             try:

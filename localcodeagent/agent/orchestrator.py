@@ -657,6 +657,7 @@ class AgentOrchestrator:
             task.id, status="completed", phase="done",
             model_id="builtin-local", model_role="utility",
             summary=text, final_content=text, steps=0, error="",
+            response_source="research_followup",
         )
         evt = {"type": "builtin_utility", "model_id": "builtin-local",
                "role": "utility", "reason": "research follow-up"}
@@ -890,6 +891,7 @@ class AgentOrchestrator:
             task.id, status="completed", phase="done",
             model_id="builtin-local", model_role="utility",
             summary=text, final_content=text, steps=0, error="",
+            response_source="command",
         )
         evt = {"type": "builtin_utility", "model_id": "builtin-local",
                "role": "utility", "reason": f"command /{parsed.name}"}

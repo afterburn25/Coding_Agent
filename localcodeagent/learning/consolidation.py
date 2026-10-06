@@ -74,25 +74,59 @@ class ConsolidationEngine:
                     or report.writes >= budget.writes
                     or time.time() - started >= budget.seconds)
 
-        # 1) Gather + cluster lessons by signature.
-        clusters: dict[str, list[dict]] = {}
+        # 1) Gather + cluster lessons. Exact-signature match is too
+        # strict — the same problem phrased differently ("cmake link
+        # error" vs "unresolved symbol again") still one experience.
+        # Greedy Jaccard clustering on signature words within the same
+        # problem class.
+        clusters: list[list[dict]] = []
+        sigs: list[set[str]] = []
+
+        def words(rec: dict) -> set[str]:
+            import re as _re
+            sig = str(rec.get("signature") or "")
+            return {w for w in _re.split(r"[^a-z0-9]+", sig.lower())
+                    if len(w) > 3 and w not in
+                    ("with", "does", "this", "that", "what", "have",
+                     "from", "when", "where", "which", "another", "again")}
+
         for rec in self.lessons.recent(budget.records):
             report.examined += 1
             if over_budget():
                 report.stopped_by_budget = True
                 break
-            sig = rec.get("signature") or rec.get("problem_class") or "?"
-            clusters.setdefault(sig, []).append(rec)
+            rec_words = words(rec)
+            placed = False
+            for i, cluster in enumerate(clusters):
+                if (cluster[0].get("problem_class")
+                        != rec.get("problem_class")):
+                    continue
+                union = rec_words | sigs[i]
+                jacc = (len(rec_words & sigs[i]) / len(union)
+                        if union else 0.0)
+                if jacc >= 0.4 or not rec_words:
+                    cluster.append(rec)
+                    sigs[i] |= rec_words
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([rec])
+                sigs.append(set(rec_words))
 
         # 2) Per cluster: repeated outcomes consolidate. Successes that
         #    recur feed procedure candidates; failures feed strategy
         #    demotion; mixed outcomes become CONFLICTED.
-        for sig, recs in clusters.items():
+        for ci, recs in enumerate(clusters):
             if over_budget():
                 report.stopped_by_budget = True
                 break
             if len(recs) < 2:
                 continue
+            # Canonical signature for the cluster: problem class + the
+            # words shared by most members — keeps procedure signatures
+            # stable across phrasings.
+            sig = str(recs[0].get("problem_class") or "general") + ":" + \
+                " ".join(sorted(sigs[ci])[:6])
             report.clustered += len(recs)
             succ = [r for r in recs if r.get("outcome") == "success"]
             fail = [r for r in recs if r.get("outcome") == "failure"]

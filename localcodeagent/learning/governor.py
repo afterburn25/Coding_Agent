@@ -104,9 +104,21 @@ class LearningGovernor:
             return cid
         return _CLASS_COMPETENCY["general"]
 
-    def observe_task(self, task: dict, *, user_feedback: str = "") -> dict:
+    # Turns that never teach anything: deterministic command executions,
+    # builtin fast paths, answer-memory replays, research follow-up text.
+    _SKIP_SOURCES = frozenset({
+        "command", "builtin", "brain_fast_path", "answer_memory",
+        "research_followup",
+    })
+
+    def observe_task(self, task: dict, *, user_feedback: str = "") -> dict | None:
         """Post-task hook: extract a lesson + update competency/strategy
-        bookkeeping. Only structured fields are stored — no transcripts."""
+        bookkeeping. Only structured fields are stored — no transcripts.
+        Deterministic no-model turns teach nothing and are skipped."""
+        src = str(task.get("response_source") or "")
+        if src in self._SKIP_SOURCES or (
+                not src and str(task.get("model_id") or "") == "builtin-local"):
+            return None
         lesson = self.extractor.extract(task, user_feedback=user_feedback)
         self.lessons.add(lesson)
         pclass = lesson["problem_class"]
