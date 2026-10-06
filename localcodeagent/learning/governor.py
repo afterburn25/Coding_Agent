@@ -216,7 +216,9 @@ class LearningGovernor:
                     })
             ev = session.get("evidence") or {}
             for cl in list(ev.get("claims") or [])[:10]:
-                txt = str(cl.get("claim") or cl).strip()[:240]
+                txt = str(cl.get("claim") or cl.get("claim_text")
+                          or cl).strip()[:240] if isinstance(cl, dict) \
+                    else str(cl).strip()[:240]
                 if txt:
                     added["concepts"].append({
                         "concept": txt,
