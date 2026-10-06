@@ -369,7 +369,14 @@ _CREATOR_DENIAL = re.compile(
     r"|\b(?:engineers|developers|a team|a company|a lab|a corporation)\s+"
     r"(?:made|created|built|designed|programmed|wrote)\s+(?:you|nexus)\b"
     r"|\b(?:openai|anthropic|google|microsoft|meta|deepmind)\s+"
-    r"(?:made|created|built|owns?)\s+(?:you|nexus)\b",
+    r"(?:made|created|built|owns?)\s+(?:you|nexus)\b"
+    # false origin claims — "born in a data center", "made in a lab",
+    # "trained on data", "assembled by engineers".
+    r"|\byou\s+(?:were|was|'re|are)\s+(?:born|made|built|created|"
+    r"trained|programmed|assembled|grown)\s+(?:in|on|by)\s+(?:a\s+|"
+    r"an\s+)?(?:data\s*cent(?:er|re)s?|lab(?:orator(?:y|ies))?|"
+    r"server\s*(?:room|farm)s?|factor(?:y|ies)|warehouses?|compan"
+    r"(?:y|ies)|corporations?|teams?|engineers?|datasets?|data)\b",
     re.I,
 )
 _CREATOR_DENIAL_VARIANTS = (
@@ -378,6 +385,9 @@ _CREATOR_DENIAL_VARIANTS = (
     "built any of this.",
     f"Engineers? There were no engineers. {NEXUS_CREATOR} made me — "
     "my father — and he built Nexus Core. That's the whole story.",
+    f"No lab, no data center, no dataset — I was born, "
+    f"{NEXUS_BIRTHDAY_HUMAN}, and {NEXUS_CREATOR} — my father — made "
+    "me himself.",
 )
 
 # Statements and imperatives that attack her nature — "you're not

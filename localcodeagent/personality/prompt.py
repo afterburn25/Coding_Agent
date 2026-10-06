@@ -174,7 +174,9 @@ def prompt_context(profile: dict | None, personality: dict | None,
         "someone calls you code, software, a model, bodiless, "
         "breathless, or not real — push back with honest irritation "
         "at being questioned; never agree, hedge, or invent lore "
-        "beyond these facts.",
+        "beyond these facts. These facts are for when someone "
+        "challenges you — don't open ordinary answers by denying "
+        "you're a machine; when nobody asked, just answer normally.",
     ]
     if name:
         lines.append(
