@@ -27,6 +27,14 @@ def _tier_distance(model: ModelProfile, want: int) -> int:
     if not model.roles:
         return 99
     return min(abs(tier_for_role(r) - want) for r in model.roles)
+
+
+def _text_fallback_pool(models: list[ModelProfile]) -> list[ModelProfile]:
+    """Models eligible for a text-role fallback — vision-only profiles
+    are modality-specialized and must never serve a text lane, no matter
+    how close their size sits on the tier ladder."""
+    return [m for m in models
+            if any(canonical_role(r) != "vision" for r in m.roles)]
 ResourceAdvisor = Callable[[ModelProfile], tuple[bool, int, str]]
 PerformanceAdvisor = Callable[[ModelProfile, str, int], tuple[int, str]]
 
@@ -215,7 +223,13 @@ class ModelRouter:
 
         candidates = [m for m in available_models if _role_matches(m, role)]
         if not candidates:
-            primary = [m for m in available_models
+            # Vision-only profiles are modality-specialized: a warm VL
+            # model must never answer a text turn just because it fits.
+            fallback_pool = (
+                available_models
+                if canonical_role(role) == "vision"
+                else _text_fallback_pool(available_models))
+            primary = [m for m in fallback_pool
                        if _role_matches(m, "primary_coder")]
             if primary:
                 candidates = primary
@@ -224,11 +238,11 @@ class ModelRouter:
                 # arbitrary model — a light-coder task on an 8B+4B
                 # machine should land on the 8B, not the 4B utility.
                 want = tier_for_role(role)
-                best = min((_tier_distance(m, want) for m in available_models),
+                best = min((_tier_distance(m, want) for m in fallback_pool),
                            default=99)
-                candidates = [m for m in available_models
+                candidates = [m for m in fallback_pool
                               if _tier_distance(m, want) == best] \
-                    or available_models
+                    or fallback_pool
             reasons.append(f"no dedicated {role} model configured; using fallback")
 
         ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
@@ -247,7 +261,11 @@ class ModelRouter:
         if fitting:
             pool = fitting
         else:
-            fallback_candidates = [m for m in available_models if _role_matches(m, "primary_coder") and m not in candidates]
+            fallback_candidates = [
+                m for m in (available_models
+                            if canonical_role(role) == "vision"
+                            else _text_fallback_pool(available_models))
+                if _role_matches(m, "primary_coder") and m not in candidates]
             fallback_ranked: list[tuple[bool, int, int, ModelProfile, str, str]] = []
             for model in fallback_candidates:
                 if self.resource_advisor:
@@ -265,6 +283,10 @@ class ModelRouter:
                 reasons.append(f"no runnable dedicated {role} model; using runnable primary-coder fallback")
             else:
                 pool = ranked
+        if not pool:
+            raise ValueError(
+                f"No eligible model for role {role!r} — every configured "
+                "profile is either excluded or modality-incompatible")
         pool.sort(key=lambda item: (-item[1], -item[2], -item[3].priority, -item[3].context_window, item[3].id))
         fits, _, _, chosen, resource_reason, performance_reason = pool[0]
         if resource_reason:

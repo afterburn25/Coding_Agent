@@ -117,5 +117,39 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(d.model_id, "lite")
 
 
+    def test_vision_only_model_never_serves_text(self):
+        """A vision-role model is modality-specialized: warm or not, it
+        must never answer a text turn through the tier fallback — this is
+        how qwen3-vl-4b once answered 'are you happy right now'."""
+        router = ModelRouter([
+            ModelProfile(id="vl", endpoint="http://x", model="vl",
+                         roles=["vision"], priority=10),
+            ModelProfile(id="big", endpoint="http://x", model="big",
+                         roles=["primary_coder"], priority=10),
+        ])
+        # No utility model configured — the fallback must land on the
+        # primary coder, not the vision model.
+        d = router.choose("are you happy right now")
+        self.assertEqual(d.model_id, "big")
+        # Even with no primary either, a text turn degrades to an empty
+        # candidate pool, never to vision.
+        router2 = ModelRouter([
+            ModelProfile(id="vl", endpoint="http://x", model="vl",
+                         roles=["vision"], priority=10),
+        ])
+        self.assertRaises(ValueError, router2.choose,
+                          "are you happy right now")
+
+    def test_vision_role_still_selectable_for_vision(self):
+        router = ModelRouter([
+            ModelProfile(id="vl", endpoint="http://x", model="vl",
+                         roles=["vision"], priority=10),
+            ModelProfile(id="big", endpoint="http://x", model="big",
+                         roles=["primary_coder"], priority=10),
+        ])
+        d = router.choose("x", override="vision")
+        self.assertEqual(d.model_id, "vl")
+
+
 if __name__ == "__main__":
     unittest.main()

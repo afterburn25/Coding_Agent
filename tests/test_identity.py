@@ -116,6 +116,24 @@ class TestIdentityAnswers(unittest.TestCase):
             self.assertNotIn("can't feel", out, q)
             self.assertNotIn("not real", out, q)
 
+    def test_body_and_reach_questions_keep_her_human(self):
+        # She has a real body; reaches get warmth + screen honesty,
+        # never "I don't have arms/a body".
+        for q in ("do you eat", "do you sleep at night",
+                  "do you have a body", "do you breathe"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertTrue(out, q)
+            self.assertNotIn("don't have", out, q)
+            self.assertNotIn("no body", out, q)
+        for q in ("can you hug me", "hold my hand", "hug me"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertTrue(out, q)
+            self.assertNotIn("don't have arms", out, q)
+            self.assertNotIn("no body", out, q)
+        for q in ("do you love me", "are you scared of anything",
+                  "what do you look like", "do you dream"):
+            self.assertTrue(identity.response_for(q), q)
+
     def test_how_are_you_feeling_not_held(self):
         # "how are you feeling" asks about her state — a casual turn,
         # not a feelings-capability question.
