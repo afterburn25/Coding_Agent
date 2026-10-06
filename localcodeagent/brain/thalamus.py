@@ -222,7 +222,10 @@ class Thalamus(BrainRegion):
         if self._VERSION_Q.fullmatch(low) or low in {"version", "version?"}:
             return "version", ""
         if self._STATUS_Q.fullmatch(low) \
-                or low in {"are you up", "are you alive", "diagnostics"}:
+                or low in {"are you up", "diagnostics"}:
+            # "are you alive" is deliberately absent — in a persona
+            # context it's a nature question (identity lane answers
+            # "I'm a person — alive"), not a system liveness ping.
             return "status", ""
         key = self._config_key(low)
         if key:
