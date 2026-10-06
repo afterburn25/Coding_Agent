@@ -92,13 +92,15 @@ function reportClipCaption(v) {
 // Hand the online tail to the idle copy of the clip: it starts at the loop
 // point and fades in over the outgoing clip, which keeps its baked audio
 // until the swap settles — picture and hum both cross the seam cleanly.
+// The idle copy is always parked on the loop frame (pre-seeked while
+// hidden) so the reveal is an already-decoded frame, never a live seek —
+// a live seek can paint frame 0/black for a beat and reads as a blink.
 function startBootSwap() {
   const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
+  const loopStart = bootLoopStart > 0 ? bootLoopStart : Math.max(0, cur.duration - 4);
   bootTailReached = true; bootSwapping = true; bootMutedIncoming = nxt;
-  // Timeline-less fallback: loop the last ~4s (the settled tail of either
-  // master) rather than restarting the whole cinematic at 0.
-  nxt.currentTime = bootLoopStart > 0 ? bootLoopStart : Math.max(0, cur.duration - 4);
-  nxt.playbackRate = 1;   // release-path catch-up must not leak into the loop
+  nxt.currentTime = loopStart;
+  nxt.playbackRate = 1;
   nxt.hidden = false;
   nxt.style.zIndex = 3; cur.style.zIndex = 2;
   void nxt.play().catch(() => {});
@@ -107,6 +109,9 @@ function startBootSwap() {
   bootIdx = 1 - bootIdx;
   setTimeout(() => {
     cur.pause(); cur.hidden = true; cur.classList.remove('live');
+    // Park the now-idle copy on the loop frame too — the next swap is a
+    // reveal, not a seek.
+    try { cur.currentTime = loopStart; } catch { /* seek denied */ }
     bootMutedIncoming = null; applyMediaAudio(); bootSwapping = false;
   }, BOOT_LOOP_XFADE_MS);
 }
@@ -674,16 +679,29 @@ async function boot() {
     const activateVideo = () => {
       if (videoMode) return;
       videoMode = true;
-      document.body.classList.add('video-mode');
       bootvid.classList.add('live');
       applyMediaAudio();
       void bootvid.play().catch(() => {});
+      // Keep the DOM stand-ins painted until the clip is fully opaque —
+      // hiding them while it fades in dips the screen to the page
+      // background for the fade duration, which reads as a blink.
+      const hideDom = () => document.body.classList.add('video-mode');
+      bootvid.addEventListener('transitionend', hideDom, { once: true });
+      setTimeout(hideDom, BOOT_LOOP_XFADE_MS + 150);
     };
     if (bootvid.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) activateVideo();
     else {
       bootvid.addEventListener('loadeddata', activateVideo, { once: true });
       bootvid.addEventListener('error', () => bootvid.classList.remove('live'), { once: true });
     }
+  }
+  // Park the idle tail-loop copy on the loop frame while it is still
+  // hidden — when the online-tail swap fires, the reveal is a decoded
+  // frame rather than a live seek (which can flash frame 0/black).
+  if (bootvid2 && bootLoopStart > 0) {
+    const park = () => { try { bootvid2.currentTime = bootLoopStart; } catch { /* denied */ } };
+    if (bootvid2.readyState >= HTMLMediaElement.HAVE_METADATA) park();
+    else bootvid2.addEventListener('loadedmetadata', park, { once: true });
   }
   clock.play();
   paint();

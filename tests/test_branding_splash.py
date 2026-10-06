@@ -582,11 +582,13 @@ class StartupCaptionTimelineTests(unittest.TestCase):
         self.assertNotIn("clipTargetFor", src)
         self.assertNotIn("MAX_CATCHUP", src)
         self.assertNotIn("const drift", src)
-        # The boot clip's position is never seeked — the only seek in the
-        # module is the tail-loop handoff onto the idle copy (plus the
-        # fault/recovery clip resets, which are separate elements).
+        # The visible boot clip's position is never seeked — the only
+        # seeks are the tail-loop handoff onto the hidden idle copy and
+        # parking the just-hidden copy back on the loop frame for the
+        # next pass (plus the fault/recovery clip resets, which are
+        # separate elements).
         self.assertEqual(len(re.findall(r"nxt\.currentTime\s*=", src)), 1)
-        self.assertNotIn("cur.currentTime =", src)
+        self.assertEqual(len(re.findall(r"cur\.currentTime\s*=", src)), 1)
         self.assertNotIn("bootvid.currentTime =", src)
 
     def test_tail_loops_until_dismissal(self):
@@ -596,7 +598,7 @@ class StartupCaptionTimelineTests(unittest.TestCase):
         self.assertIn("startBootSwap", src)
         self.assertIn("bootLoopStart", src)
         self.assertIn("bootLoopEnd", src)
-        self.assertIn("nxt.currentTime = bootLoopStart", src)
+        self.assertIn("nxt.currentTime = loopStart", src)
 
     def test_online_boundary_requires_true_completion(self):
         src = self.src
