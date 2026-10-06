@@ -164,8 +164,15 @@ export class SplashController {
       if (e.id.startsWith('pin_')) return this.faultFrom.pins[Number(e.id[4]) - 1] > .01;
       if (e.id === 'iris_close_start') return this.faultFrom.iris.some(v => v > .01);
       return true;
-    }).map(e => ['instability_start', 'electrical_instability', 'power_drop_start'].includes(e.id)
-      ? { ...e, gain: e.gain * (.15 + .85 * this.faultFrom.reveal * this.faultFrom.brightness) } : e);
+    }).map(e => {
+      if (e.id === 'emergency_idle')
+        // The idle hum must die out once containment seals — a contained
+        // dead core does not drone on under the intervention panel.
+        return { ...e, loop: false, until: e.at + 4.5, fadeOut: 1.2 };
+      if (['instability_start', 'electrical_instability', 'power_drop_start'].includes(e.id))
+        return { ...e, gain: e.gain * (.15 + .85 * this.faultFrom.reveal * this.faultFrom.brightness) };
+      return e;
+    });
   }
   play() { if (this.recoveryState !== 'SAFE_MODE' || !this.activeFault) this.transport.play(); }
   pause() { this.transport.pause(); }

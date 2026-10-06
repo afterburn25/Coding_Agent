@@ -32,11 +32,85 @@ let overlay = null;
 // cross RECOVERY_STAGE_TIMES[i] until confirmedStage >= i — a caption can
 // never claim a milestone ahead of the real attempt.
 let confirmedStage = -1;
+// Stages whose caption the clip has actually crossed — voice is requested
+// at the visual boundary, not when the host confirms, so narration and
+// footage stay in sync.
+let shownStage = -1;
+// Narration beats as clip-time triggers — the numbers come from the
+// authored footage: iris opens ≈14.2s, power-up arc begins ≈16s, the green
+// CORE SYSTEMS · ONLINE caption appears at 21.4s (past the honesty gate's
+// hold point, so it cannot fire before the backend is confirmed back).
+const RECOVERY_NARRATION = [
+  { at: .1,   stage: 0 },   // clip start — "Attempting to reinitialize the core."
+  { at: 12.0, stage: 6 },   // ends just as the iris opens (~14.2) — "Releasing containment."
+  { at: 15.4, stage: 7 },   // core surges bright ~15.8 — "…Powering the core."
+  { at: 21.35, stage: 8 },  // green caption — "The core is back online."
+];
+let narratedUpTo = -1;
 // One in-flight user-requested attempt at a time — duplicate Retry clicks
 // coalesce (button disabled here, single-flight guard on the host).
 let attemptInFlight = false;
 let recoveryAttempt = 0;
 let failCaptionTimer = null;
+// Media audio ownership: the sequence clips carry baked, picture-synced
+// audio (produced by tools/video_export/mix_*.py). While a clip audibly
+// plays it owns the mix and the stem engine must stay silent — otherwise
+// the DOM-clock stems double/drift against the rate-corrected footage.
+// When a clip pauses (progress hold, milestone gate) the stem engine's
+// sustained hum comes back so a stall never goes mute.
+let mediaWasLive = false;
+let mediaDuck = 1;
+let mediaHandoffT = null;
+
+function clipOf(name) {
+  return name === 'error' ? errvid : name === 'recovery' ? recvid
+    : name === 'recovery-failed' ? failvid : bootvid;
+}
+function activeMedia() {
+  return overlay ? clipOf(overlay) : (videoMode ? bootvid : null);
+}
+function mediaOwnsMix() {
+  const v = activeMedia();
+  return Boolean(v && !v.paused && !v.ended);
+}
+function applyMediaAudio() {
+  for (const v of [bootvid, errvid, recvid, failvid]) {
+    if (!v) continue;
+    v.muted = audio.disabled;
+    v.volume = clamp(audio.volume * mediaDuck);
+  }
+}
+function syncMediaAudio() {
+  const live = mediaOwnsMix();
+  applyMediaAudio();
+  if (live === mediaWasLive) return;
+  if (live) {
+    // Clip is audibly playing — the stem engine hands the mix over.
+    clearTimeout(mediaHandoffT);
+    mediaWasLive = true;
+    audio.stop(.12);
+  } else {
+    // Debounce the hand-back: rate-correction micro-pauses must not churn
+    // the stem scheduler, or stems burst on top of the clip's own track.
+    // Only a SUSTAINED pause (hold/gate) brings the hum back.
+    clearTimeout(mediaHandoffT);
+    mediaHandoffT = setTimeout(() => {
+      if (mediaOwnsMix()) return;
+      mediaWasLive = false;
+      // Coverage for pauses the normal sync would leave silent:
+      // a recovery clip held at a milestone gate gets a quiet ambient hum;
+      // an ended clip still awaiting real readiness sustains the online hum;
+      // a contained fault stays dead — its idle hum decays on its own.
+      if (overlay === 'recovery') {
+        void audio.initialize().then(ok => ok && audio.context.resume().then(() =>
+          audio.schedule({ id: 'recovery_hold_hum', sound: 'ambient_hum', at: 0, gain: .16, loop: true, fadeIn: .5 }, 0, 1, Infinity)));
+      } else if (!clock.playing && !clock.activeFault) {
+        void audio.initialize().then(ok => ok && audio.context.resume().then(() =>
+          audio.schedule({ id: 'sustain_online_hum', sound: 'stable_hum', at: 0, gain: .42, loop: true, fadeIn: .6 }, 0, 1, Infinity)));
+      } else void audio.sync(clock, { fade: .12 });
+    }, 300);
+  }
+}
 
 function fail(error) {
   if (failed) return;
@@ -118,22 +192,21 @@ function paint() {
   shownFill += (fillTarget - shownFill) * .09;   // ~60Hz ease; no snap on host updates
   if (Math.abs(fillTarget - shownFill) < .003) shownFill = fillTarget;
   $('fill').style.transform = `scaleX(${shownFill.toFixed(3)})`;
-  // The clip's baked bar must track REAL progress: rate-correct playback
-  // so the scene never outruns the backend — it slows to a near-hold when
-  // progress stalls and speeds up (max 2.5x) to catch up. When progress
-  // completes, the remaining tail plays out fast into the online glow.
+  // The clip is a fixed cinematic — it plays at natural speed, always.
+  // A fast backend never compresses the footage; a stalled backend pauses
+  // the picture (and its baked audio) rather than letting the scene claim
+  // progress reality hasn't made. The final frame holds while readiness
+  // catches up — the host owns dismissal.
   if (videoMode && !clock.activeFault && bootvid) {
     const dur = bootvid.duration || 17;
     const target = Math.min(fillTarget, .985) * dur;
     const drift = target - bootvid.currentTime;
     if (drift <= -.6) { if (!bootvid.paused) bootvid.pause(); }
-    else {
-      if (bootvid.paused && !bootvid.ended) void bootvid.play().catch(() => {});
-      const rate = clamp(.35, 1 + drift * .9, 2.5);
-      if (!bootvid.paused && Math.abs(bootvid.playbackRate - rate) > .04) bootvid.playbackRate = rate;
-    }
+    else if (bootvid.paused && !bootvid.ended) void bootvid.play().catch(() => {});
+    if (!bootvid.paused && bootvid.playbackRate !== 1) bootvid.playbackRate = 1;
   }
   $('stage').classList.toggle('fault', Boolean(state.fault));
+  document.body.classList.toggle('overlay-clip', overlay !== null);
   // STABILITY THRESHOLD · RECOVERING fades the bar/status back toward the
   // normal palette (mirrors the clip's ~1.8s red→cyan transition).
   const recovering = attemptInFlight && confirmedStage >= 5;
@@ -161,22 +234,43 @@ function frame(now) {
     const fps = clock.activeFault && clock.time >= clock.duration ? 15 : 60;
     if (now - lastDraw >= 1000 / fps - .75) {
       clock.update(reduced);
-      if (clock.revision !== lastRevision) { lastRevision = clock.revision; void audio.sync(clock, { fade: .16 }); }
-      if (previousHeld !== clock.held) { previousHeld = clock.held; void audio.sync(clock); }
+      if (clock.revision !== lastRevision) { lastRevision = clock.revision; if (!mediaOwnsMix()) void audio.sync(clock, { fade: .16 }); }
+      if (previousHeld !== clock.held) { previousHeld = clock.held; if (!mediaOwnsMix()) void audio.sync(clock); }
       lastDraw = now;
-      // Recovery milestone gate: the clip may not cross a stage's caption
-      // until the host confirmed that stage. Held frames keep the hum via
-      // the fault-mode audio loop — a stalled attempt looks stalled, never
-      // falsely ahead.
+      // Audio ownership follows whichever surface is actually playing —
+      // baked clip audio while a clip runs, stem engine during holds/DOM.
+      syncMediaAudio();
+      // Recovery honesty gate: the clip runs at its authored pace through
+      // the attempt — it may only be held at the ONLINE boundary, the one
+      // claim that must be true. The footage pauses just before the green
+      // caption until the host confirms the backend actually came back.
       if (overlay === 'recovery' && recvid && !recvid.paused && !recvid.ended
-          && confirmedStage + 1 < RECOVERY_STAGE_TIMES.length
-          && recvid.currentTime >= RECOVERY_STAGE_TIMES[confirmedStage + 1] - .1) {
+          && confirmedStage < RECOVERY_STAGE_TIMES.length - 1
+          && recvid.currentTime >= RECOVERY_STAGE_TIMES[RECOVERY_STAGE_TIMES.length - 1] - .1) {
         recvid.pause();
+      }
+      // Narration schedule — keyed to the footage's own visual beats, not
+      // caption boundaries: the iris opens ~14.2s, the power-up arc starts
+      // ~16s, the green online caption appears at 21.4s. The online beat
+      // sits past the honesty gate's hold point, so it can only fire once
+      // the backend is genuinely confirmed back.
+      while (overlay === 'recovery' && recvid && !recvid.ended
+             && narratedUpTo + 1 < RECOVERY_NARRATION.length
+             && recvid.currentTime >= RECOVERY_NARRATION[narratedUpTo + 1].at) {
+        narratedUpTo++;
+        host({ type: 'recovery-stage-shown', stage: RECOVERY_NARRATION[narratedUpTo].stage });
       }
       if (clock.playing) {
         const state = paint();
         if (state.phase.id !== lastPhaseId) { lastPhaseId = state.phase.id; host({ type: 'phase', id: state.phase.id }); }
-        if (!completePosted && clock.mode === 'normal' && state.online) { completePosted = true; host({ type: 'sequence-complete' }); }
+        // sequence-complete means the visible sequence actually finished:
+        // in video mode that's the clip's final online frame, not the DOM
+        // clock underneath it.
+        if (!completePosted && clock.mode === 'normal' && state.online
+            && (!videoMode || !bootvid || bootvid.ended)) {
+          completePosted = true;
+          host({ type: 'sequence-complete' });
+        }
       }
     }
     raf = requestAnimationFrame(frame);
@@ -185,7 +279,10 @@ function frame(now) {
 
 function changed(fade = .008) {
   if (failed) { if (clock?.activeFault) updateRecovery({ panel: 1, contained: true }); return; }
-  try { previousHeld = clock.held; lastRevision = clock.revision; paint(); void audio.sync(clock, { fade }); }
+  try {
+    previousHeld = clock.held; lastRevision = clock.revision; paint();
+    if (mediaOwnsMix()) applyMediaAudio(); else void audio.sync(clock, { fade });
+  }
   catch (error) { fail(error); }
 }
 
@@ -253,8 +350,12 @@ function playClip(vid, name, onEnded, hold = false) {
   });
 }
 
-// The successful green tail — real audio cue once the host confirms ONLINE.
+// The successful green tail — a real stem cue once the host confirms
+// ONLINE, for the DOM fallback path only. When the recovery clip owns the
+// surface its baked audio already carries the online score; doubling it
+// would be exactly the desync this design removed.
 function recoveryOnlineAudio() {
+  if (overlay === 'recovery') return;
   try {
     audio.stop(.18);
     if (audio.disabled) return;
@@ -271,7 +372,8 @@ function beginRecovery(msg = {}) {
   if (attemptInFlight || !clock.activeFault) return;   // one attempt at a time
   attemptInFlight = true;
   recoveryAttempt = Number.isInteger(msg.attempt) ? msg.attempt : recoveryAttempt + 1;
-  confirmedStage = 0;                                  // containment engaged IS stage 0
+  confirmedStage = 0; shownStage = -1;                 // containment engaged IS stage 0
+  narratedUpTo = -1;                                 // narration schedule restarts
   clearTimeout(recoveryWatchdog);                      // attempt supersedes the guard
   clearTimeout(failCaptionTimer);                      // a pending fail-caption chain must not clear this attempt
   clock.setRecoveryState('REPAIR_ATTEMPT', { attempt: recoveryAttempt, total: recoveryAttempt });
@@ -280,8 +382,19 @@ function beginRecovery(msg = {}) {
   // Video path when the clip can actually play; otherwise the DOM panel
   // stays up and narrates the same confirmed stages.
   if (!reduced && recvid) {
-    void playClip(recvid, 'recovery',
-      () => { /* success tail holds last frame; host dismisses */ }, /* hold */ true);
+    // Pre-buffer the failure clip while the attempt runs — a failure then
+    // swaps footage without a cold-decode stall on a dead surface.
+    try { failvid?.load(); } catch { }
+    void playClip(recvid, 'recovery', () => {
+      // Success tail (stage 8 confirmed): hold the final green frame and
+      // tell the host the authored sequence finished — the app shows only
+      // after this plus the host's own dwell/voice gates. An ending before
+      // full confirmation means the host stopped driving — fall back to
+      // the intervention panel rather than a dead surface.
+      if (confirmedStage >= RECOVERY_STAGES.length - 1) {
+        host({ type: 'recovery-sequence-complete' });
+      } else { overlay = null; changed(.16); }
+    }, /* hold */ true);
   }
   host({ type: 'recovery-attempt-started', attempt: recoveryAttempt });
 }
@@ -291,10 +404,25 @@ function confirmStage(stage) {
   const next = Math.min(Math.trunc(stage), RECOVERY_STAGES.length - 1);
   if (next <= confirmedStage) return;
   confirmedStage = next;
-  if (overlay === 'recovery' && recvid?.paused && !recvid.ended) {
+  // DOM fallback shows the stage label immediately — the shown moment IS
+  // the confirm moment there.
+  if (overlay !== 'recovery' && confirmedStage > shownStage) {
+    shownStage = confirmedStage;
+    host({ type: 'recovery-stage-shown', stage: shownStage });
+  }
+  // The only pause the clip can be sitting in is the online gate — release
+  // it solely when the final stage itself is confirmed.
+  if (overlay === 'recovery' && recvid?.paused && !recvid.ended
+      && confirmedStage >= RECOVERY_STAGES.length - 1) {
     void recvid.play().catch(() => {});
   }
-  if (confirmedStage === RECOVERY_STAGES.length - 1) recoveryOnlineAudio();
+  if (confirmedStage === RECOVERY_STAGES.length - 1) {
+    recoveryOnlineAudio();
+    // DOM fallback has no clip to wait on — the online fade is the
+    // sequence's natural end, so report completion after it settles.
+    if (overlay !== 'recovery')
+      setTimeout(() => host({ type: 'recovery-sequence-complete' }), 1900);
+  }
   changed(.16);
 }
 
@@ -304,15 +432,17 @@ function recoveryFailed(msg = {}) {
   attemptInFlight = false;
   confirmedStage = -1;
   if (msg.message !== undefined) clock.diagnostics.message = String(msg.message).slice(0, 500);
+  if (msg.detail !== undefined) clock.diagnostics.detail = String(msg.detail).slice(0, 12000);
   clock.setRecoveryState('HUMAN_INTERVENTION_REQUIRED');
   syncRetryButton();
   if (wasRecovering && recvid) {
     recvid.pause(); recvid.hidden = true; recvid.classList.remove('live');
   }
   if (overlay === 'recovery-failed') { changed(.16); return; }  // already told — no replay
-  if (wasRecovering && !reduced && failvid) {
-    // Interrupted-recovery clip: branches from the contained recovery state,
-    // never from a successful green ending.
+  // The failure clip also covers a preflight failure — the host may declare
+  // the attempt unrecoverable before the recovery clip ever starts, and the
+  // footage still plays rather than jumping straight to the panel.
+  if (!reduced && failvid) {
     void playClip(failvid, 'recovery-failed', () => showIntervention());
   } else {
     // DOM fallback: pace the four failure captions over the contained end
@@ -346,14 +476,23 @@ function showIntervention() {
 
 // b64 → playback through the voice channel; host is told whether audio
 // actually started (durable "user heard it" signal) and when it ends.
+let voiceSeq = 0;
 async function playVoice(id, b64, duckLevel) {
+  const seq = ++voiceSeq;
   try {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    mediaDuck = duckLevel ?? .6; applyMediaAudio();      // duck clip audio too
     const res = await voice.play(bytes, { duckLevel: duckLevel ?? .6 });
     host({ type: 'voice-result', id, started: res.started, seconds: res.seconds ?? 0 });
-    if (res.started && res.done) res.done.then(() => host({ type: 'voice-ended', id }));
-    else host({ type: 'voice-ended', id });
+    if (res.started && res.done) res.done.then(() => {
+      // A preempted clip still resolves done — only the latest playback may
+      // lift the duck, or an interrupted line would un-duck its replacement.
+      if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); }
+      host({ type: 'voice-ended', id });
+    });
+    else { if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); } host({ type: 'voice-ended', id }); }
   } catch (error) {
+    if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); }
     host({ type: 'voice-result', id, started: false, seconds: 0, error: String(error?.message ?? error) });
   }
 }
@@ -376,10 +515,11 @@ function handleHost(msg) {
       case 'recovery-stage': confirmStage(msg.stage); break;
       case 'recovery-failed': recoveryFailed(msg); break;
       case 'action-feedback': setText('action-feedback', String(msg.text ?? '')); break;
-      case 'set-volume': audio.setVolume(clamp(msg.value ?? audio.volume)); break;
+      case 'set-volume': audio.setVolume(clamp(msg.value ?? audio.volume)); applyMediaAudio(); break;
       case 'set-audio':
         if (!msg.enabled) { audio.disabled = true; audio.stop(); }
         else { audio.disabled = false; void audio.sync(clock); }
+        applyMediaAudio();
         break;
       case 'set-reduced': reduced = Boolean(msg.value); paint(); break;
       case 'complete-sequence': {
@@ -394,7 +534,7 @@ function handleHost(msg) {
         break;
       }
       case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
-      case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); break;
+      case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); mediaDuck = 1; applyMediaAudio(); break;
       case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootvid?.pause(); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
   } catch (error) { fail(error); }
@@ -448,6 +588,7 @@ async function boot() {
       videoMode = true;
       document.body.classList.add('video-mode');
       bootvid.classList.add('live');
+      applyMediaAudio();
       void bootvid.play().catch(() => {});
     };
     if (bootvid.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) activateVideo();
@@ -459,8 +600,22 @@ async function boot() {
   clock.play();
   paint();
   raf = requestAnimationFrame(frame);
-  host({ type: 'splash-ready' });
-  void audio.initialize().then(() => changed(.16));
+  // splash-ready means the surface can actually show frame one — the host
+  // holds real startup work on it so the bar starts at a true cold 0%
+  // instead of appearing mid-flight. Missing/broken media still reports
+  // ready (the DOM fallback is a valid surface); the bound below is the
+  // last resort for a wedged decoder.
+  if (!reduced && bootvid) {
+    let signaled = false;
+    const ready = () => { if (!signaled) { signaled = true; host({ type: 'splash-ready' }); } };
+    if (videoMode) ready();
+    else {
+      bootvid.addEventListener('loadeddata', ready, { once: true });
+      bootvid.addEventListener('error', ready, { once: true });
+      setTimeout(ready, 2500);
+    }
+  } else host({ type: 'splash-ready' });
+  void audio.initialize().then(() => { applyMediaAudio(); changed(.16); });
 }
 
 window.addEventListener('error', e => fail(e.error ?? new Error(e.message)));

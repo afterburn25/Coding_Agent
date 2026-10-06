@@ -42,14 +42,14 @@ export class VoiceChannel {
       gain.gain.value = 1;
       source.connect(gain);
       gain.connect(shared ? this.audio.master : ctx.destination);
-      const token = this.active = { source, gain, shared };
-      const done = new Promise(resolve => {
-        source.onended = () => {
-          if (this.active === token) this.active = null;
-          if (shared) this.audio.unduck();
-          resolve();
-        };
-      });
+      let resolveDone;
+      const done = new Promise(resolve => { resolveDone = resolve; });
+      const token = this.active = { source, gain, shared, resolveDone };
+      source.onended = () => {
+        if (this.active === token) this.active = null;
+        if (shared) this.audio.unduck();
+        resolveDone();
+      };
       if (shared) this.audio.duck(clamp(duckLevel, .05, 1));
       try {
         source.start(ctx.currentTime + .01);
@@ -65,6 +65,8 @@ export class VoiceChannel {
   }
 
   // Fast fade-out so a friendly startup line never plays over a visible fault.
+  // Resolves the stopped clip's done promise — a preempted line still owes the
+  // host its voice-ended ack or the narrator's queue hangs on the watchdog.
   stop(fade = .18) {
     const token = this.active;
     if (!token) return;
@@ -78,6 +80,7 @@ export class VoiceChannel {
       token.source.onended = () => { token.source.disconnect(); token.gain.disconnect(); };
     } catch { /* already stopped */ }
     if (token.shared) this.audio.unduck();
+    token.resolveDone?.();
   }
 
   async dispose() {
