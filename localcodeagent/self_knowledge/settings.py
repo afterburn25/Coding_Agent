@@ -457,8 +457,16 @@ class SettingsRegistry:
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         verify = self.current(key)
+        ok = verify == value or verify is not None
+        if ok:
+            hook = self._env.get("on_change")
+            if callable(hook):
+                try:
+                    hook(spec=spec, previous=previous, value=verify)
+                except Exception:
+                    pass
         return {
-            "ok": verify == value or verify is not None,
+            "ok": ok,
             "key": key, "value": verify, "previous": previous,
             "verified": verify == value,
             "requires_restart": spec.requires_restart,

@@ -93,3 +93,40 @@ confirmed the target state. A 200 from the call alone is never enough.
 - A question containing an imperative verb (`push`, `run`, `edit`, …)
   that isn't a resolved control falls through to the tools/model lane
   untouched.
+
+## Universal change journal
+
+`localcodeagent/changes.py` — a bounded (500-row) durable JSONL ledger at
+`data/changes.jsonl`. Every significant mutation lane records a typed
+ChangeRecord: id, ts, task/mission/conversation, actor, action_type,
+subject, before, after, files, reversible, undo descriptor, risk,
+verification, checkpoint_id, undone.
+
+Currently journaled:
+
+- **File writes** — `write_file`/`apply_patch` record per task via
+  `record_file_mutation` (upserts one record per task); undo restores
+  the task checkpoint (`checkpoint_restore`) and verifies the diff is
+  clean.
+- **Settings** — `SettingsRegistry.set` fires an `on_change` hook, so
+  every registry-mediated write (chat commands, action bodies, inline
+  controls) lands once; undo sets the previous value back through the
+  same verified path.
+- **Git** — `git switch -c`/`git_create_branch` journal
+  `git_branch_create` (undo switches back then deletes the branch);
+  `git_commit` journals `git_reset_soft` (soft reset, work kept staged,
+  refuses if HEAD moved); `git_push` journals an explicitly
+  **irreversible** record — remote side effects are never silently
+  claimed undoable.
+
+Undo dispatch is injected (`kind → handler`) so the ledger never imports
+the subsystems it orchestrates. `undo()` marks the record undone and
+refuses repeats; irreversible records answer honestly instead of
+pretending remote effects can be recalled.
+
+Chat surface: when a turn has no session-scoped `last_executed` undo,
+`"undo that"` falls back to `journal.undo()` — file/git/setting changes
+from tools, missions, and earlier sessions are all reachable.
+`"what did you change"` / `"what have you done"` list the newest
+records with undo state. API: `GET /api/changes?limit=N`,
+`POST /api/changes/undo {id?}`.

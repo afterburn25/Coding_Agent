@@ -136,34 +136,78 @@ class SelfKnowledgeService:
                 return None
             return self._run(spec, dict(proposed.get("params") or {}),
                              confirmed=True)
-        if re.search(r"\bundo\b|\bundo that\b|\bput it back\b|"
-                     r"\brevert\b|\bchange it back\b|"
-                     r"\b(turn|switch|set|put)\b.{0,15}\bback\b.{0,5}"
-                     r"\bon\b|\bback to (normal|before|how it was)\b|"
-                     r"\bturn it back\b", t) and last:
-            undo = last.get("undo")
-            if not undo:
+        # Explicit undo requests ("undo that", "put it back", "revert")
+        # may fall back to the durable journal; vaguer domain phrasing
+        # ("turn it back on", "back to normal") only applies to the
+        # session-scoped last_executed — it must never silently revert
+        # an unrelated journaled change.
+        m_undo = re.search(r"\bundo\b|\bundo that\b|\bput it back\b|"
+                           r"\brevert\b|\bchange it back\b", t)
+        m_back = re.search(r"\b(turn|switch|set|put)\b.{0,15}\bback\b"
+                           r".{0,5}\bon\b|\bback to (normal|before|"
+                           r"how it was)\b|\bturn it back\b", t)
+        if m_undo or (m_back and last):
+            undo = (last or {}).get("undo")
+            if undo:
+                if undo.get("action") == "_set":
+                    spec_s = self.settings.get(undo["params"]["key"])
+                    if spec_s is None:
+                        return None
+                    return self._apply_setting(
+                        spec_s, undo["params"].get("value"),
+                        confirmed=True, undoing=True)
+                spec = self.actions.get(undo.get("action", ""))
+                if spec is None:
+                    return Resolution("answer", "undo",
+                        text="The last change can't be undone from chat.")
+                return self._run(spec, dict(undo.get("params") or {}),
+                                 confirmed=True, undoing=True)
+            if m_back:
                 return Resolution("answer", "undo",
                     text="The last change can't be undone from chat.")
-            if undo.get("action") == "_set":
-                spec_s = self.settings.get(undo["params"]["key"])
-                if spec_s is None:
-                    return None
-                return self._apply_setting(
-                    spec_s, undo["params"].get("value"),
-                    confirmed=True, undoing=True)
-            spec = self.actions.get(undo.get("action", ""))
-            if spec is None:
-                return Resolution("answer", "undo",
-                    text="The last change can't be undone from chat.")
-            return self._run(spec, dict(undo.get("params") or {}),
-                             confirmed=True, undoing=True)
+            return self._journal_undo()
         if re.search(r"\bopen it\b|\bopen that\b|\btake me\b", t):
             route = (proposed or {}).get("route") or \
                     (last or {}).get("route")
             if route:
                 return self._navigate(route)
         return None
+
+    def _journal(self):
+        fn = self._env.get("change_journal")
+        try:
+            return fn() if callable(fn) else None
+        except Exception:
+            return None
+
+    def _journal_undo(self) -> Resolution:
+        cj = self._journal()
+        if cj is None:
+            return Resolution("answer", "undo",
+                text="The last change can't be undone from chat.")
+        if not getattr(self, "_execute", True):
+            # Dry-run gate (would_answer) — never mutate; just resolve.
+            return Resolution("confirm", "undo",
+                text="The last journaled change would be reverted.",
+                truth={"kind": "journal", "dry_run": True})
+        try:
+            res = cj.undo()
+        except Exception as exc:
+            return Resolution("answer", "undo",
+                text=f"Undo failed: {exc}")
+        if res.get("ok"):
+            return Resolution(
+                "execute", "undo",
+                text=str(res.get("message") or "Undone."),
+                result=ActionResult(
+                    True, verified=bool(res.get("verified")),
+                    detail=str(res.get("detail") or "")),
+                truth={"kind": "journal",
+                       "subject": res.get("subject")})
+        return Resolution(
+            "answer", "undo",
+            text=str(res.get("message") or "I couldn't undo that."),
+            truth={"kind": "journal", "subject": res.get("subject")})
 
     # -- diagnostics -----------------------------------------------------
 
@@ -233,6 +277,28 @@ class SelfKnowledgeService:
                 "answer", "diagnose",
                 text=(f"Partial or unfinished right now: {lines}."),
                 truth={"kind": "dev_status"})
+        if re.search(r"\bwhat did (you|u) (change|do|modify|touch|"
+                     r"break)\b|\bwhat have you (changed|done|modified|"
+                     r"touched)\b|\bwhat('ve| has) changed\b|"
+                     r"\brecent (changes|activity)\b|\bwhat was (the )?"
+                     r"last (change|thing)\b", t):
+            cj = self._journal()
+            rows = cj.recent(6) if cj is not None else []
+            if not rows:
+                return Resolution("answer", "diagnose",
+                    text="I haven't recorded any changes yet.",
+                    truth={"kind": "changes"})
+            parts = []
+            for r in rows:
+                when = time.strftime(
+                    "%H:%M", time.localtime(r.get("ts") or 0))
+                tag = " (undone)" if r.get("undone") else ""
+                parts.append(f"{r.get('subject', 'a change')}{tag} "
+                             f"at {when}")
+            return Resolution(
+                "answer", "diagnose",
+                text="Recent changes: " + "; ".join(parts) + ".",
+                truth={"kind": "changes"})
         if re.search(r"\bversion\b|\bwhat changed\b|\bchangelog\b|"
                      r"\bwhat's new\b", t):
             fn = self._env.get("version")

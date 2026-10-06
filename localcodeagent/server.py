@@ -199,6 +199,19 @@ class AppState:
         # Drop snapshots whose task aged out of the ledger — checkpoints
         # hold per-file copies and would otherwise grow without bound.
         self.checkpoints.prune_orphans({t["id"] for t in self.tasks.recent(1_000_000)})
+        # Universal change journal — every meaningful mutation leaves a
+        # reversible record so "undo that"/"what did you change?" have
+        # real data. Undo dispatch is injected lazily so handlers can
+        # resolve the managers built later in __init__.
+        from .changes import ChangeJournal
+        self.changes = ChangeJournal(
+            runtime_root / "data" / "changes.jsonl",
+            undo_handlers={
+                "checkpoint_restore": self._undo_checkpoint_restore,
+                "setting": self._undo_setting,
+                "git_branch_delete": self._undo_git_branch_delete,
+                "git_reset_soft": self._undo_git_reset_soft,
+            })
         self.memory = ProjectMemory(self.workspace)
         self._boot(38, "SYNCHRONIZING · NEXUS BRAIN", "Preparing conversation and learned knowledge continuity")
         conversation_path = Path(config.conversation_memory_path).expanduser()
@@ -407,7 +420,8 @@ class AppState:
             runtime_root / "data" / "workspaces.json", self.workspace)
         register_filesystem_tools(
             self.tools, self.workspace, checkpoints=self.checkpoints,
-            tasks=self.tasks, extra_roots=self.workspaces.allowed_roots)
+            tasks=self.tasks, extra_roots=self.workspaces.allowed_roots,
+            journal=self.changes)
         register_shell_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
@@ -640,7 +654,8 @@ class AppState:
         register_blender_tools(self.tools, self.workspace, jobs=self.jobs)
         register_docker_tools(self.tools, self.workspace)
         register_git_tools(self.tools, self.workspace,
-                           extra_roots=self.workspaces.allowed_roots)
+                           extra_roots=self.workspaces.allowed_roots,
+                           journal=self.changes)
         from .tools.queue import register_queue_tools
         register_queue_tools(self.tools, self.queue)
         if config.github_enabled:
@@ -649,7 +664,8 @@ class AppState:
                 vault=self.secrets,
                 workspaces=self.workspaces,
                 client=self.github_client,
-                account=self.github_account)
+                account=self.github_account,
+                journal=self.changes)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
@@ -931,6 +947,84 @@ class AppState:
             import logging
             logging.getLogger(__name__).exception("self-knowledge init failed")
             self.self_knowledge = None
+
+    # -- change-journal undo handlers ------------------------------------
+
+    def _undo_checkpoint_restore(self, record: dict) -> dict:
+        """Restore the task checkpoint files this change touched, then
+        verify: the post-restore diff against the snapshot must be empty."""
+        task_id = str((record.get("undo") or {}).get("task_id")
+                      or record.get("checkpoint_id") or "")
+        if not task_id:
+            return {"ok": False, "message": "the change has no checkpoint"}
+        restored = self.checkpoints.restore(task_id)
+        remaining = self.checkpoints.diff(task_id)
+        verified = not remaining.strip()
+        return {"ok": True, "verified": verified,
+                "message": f"Restored {len(restored)} file(s)"
+                           + ("" if verified else " — verify diff still shows changes"),
+                "detail": remaining[:2000] if not verified else ""}
+
+    def _undo_setting(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        key = str(spec.get("key") or "")
+        if not key:
+            return {"ok": False, "message": "the record has no setting key"}
+        before = spec.get("value")
+        svc = getattr(self, "self_knowledge", None)
+        reg = getattr(svc, "settings", None)
+        if reg is None or reg.get(key) is None:
+            return {"ok": False, "message": f"setting '{key}' is not reversible"}
+        res = reg.set(key, before)
+        return {"ok": bool(res.get("ok")),
+                "verified": bool(res.get("verified")),
+                "message": f"Reverted {key} to {res.get('value', before)!r}"}
+
+    def _undo_git_branch_delete(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        branch = str(spec.get("branch") or "")
+        if not branch:
+            return {"ok": False, "message": "the record has no branch name"}
+        from .tools.github import _run_git
+        root = Path(spec.get("root") or self.workspace)
+        head = _run_git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+        if head.strip() == branch:
+            prev = str(spec.get("previous_branch") or "")
+            if not prev or prev == branch:
+                return {"ok": False,
+                        "message": f"'{branch}' is checked out — switch off "
+                                   "it first"}
+            code_out = _run_git(root, ["switch", prev], check=False)
+            if _run_git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).strip() \
+                    != prev:
+                return {"ok": False,
+                        "message": f"couldn't switch back to '{prev}' — "
+                                   f"{code_out[:300]}"}
+        _run_git(root, ["branch", "-D", branch])
+        still = _run_git(root,
+                         ["rev-parse", "--verify", f"refs/heads/{branch}"],
+                         check=False)
+        verified = not still.strip()
+        return {"ok": True, "verified": verified,
+                "message": f"Deleted local branch '{branch}'"}
+
+    def _undo_git_reset_soft(self, record: dict) -> dict:
+        spec = record.get("undo") or {}
+        sha = str(spec.get("sha") or "")
+        from .tools.github import _run_git
+        root = Path(spec.get("root") or self.workspace)
+        head = _run_git(root, ["rev-parse", "HEAD"]).strip()
+        if sha and head != sha:
+            return {"ok": False,
+                    "message": "HEAD moved since that commit — refusing "
+                               "automatic reset. Restore manually or make a "
+                               "checkpoint first."}
+        _run_git(root, ["reset", "--soft", "HEAD~1"])
+        new_head = _run_git(root, ["rev-parse", "HEAD"]).strip()
+        verified = bool(new_head) and new_head != head
+        return {"ok": True, "verified": verified,
+                "message": "Commit undone — changes kept staged "
+                           f"(HEAD now {new_head[:8]})"}
 
     def _build_self_knowledge(self):
         """SelfKnowledgeService env — every callable is lazy and
@@ -1406,8 +1500,37 @@ class AppState:
             "github_test": _github_test,
             "safe_mode_exit": _safe_mode_exit,
             "self_repair_apply": _self_repair_apply,
+            # Universal change journal — lets the control plane fall back
+            # to the durable ledger for "undo that" and record every
+            # registry-mediated settings write.
+            "change_journal": lambda: getattr(self, "changes", None),
+            "on_change": self._journal_setting,
         }
         return SelfKnowledgeService(env)
+
+    def _journal_setting(self, spec=None, previous=None, value=None) -> None:
+        """Record a SettingsRegistry write into the change journal —
+        fired by the registry's on_change hook so every lane that mutates
+        through the canonical setter (chat, actions, inline controls) is
+        journaled once."""
+        try:
+            key = getattr(spec, "key", "") or ""
+            name = getattr(spec, "name", "") or key
+            journal = getattr(self, "changes", None)
+            if journal is None or not key:
+                return
+            undoable = previous is not None and previous != value
+            journal.record(
+                "setting", name, actor="user",
+                before=previous, after=value,
+                reversible=undoable,
+                undo={"kind": "setting", "key": key, "value": previous}
+                     if undoable else None,
+                risk="low",
+                verification={"kind": "readback", "key": key},
+                description=f"{key} = {value!r}")
+        except Exception:
+            pass
 
     def _start_provisioning(self) -> None:
         """BackgroundProvisioningManager — after the app is usable, finish
@@ -6294,7 +6417,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
                           "/api/lkg", "/api/update", "/api/search",
-                          "/api/rc", "/api/audit",
+                          "/api/rc", "/api/audit", "/api/changes",
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
@@ -6407,6 +6530,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/golden/verify/"):
             name = unquote(path[len("/api/golden/verify/"):]).strip("/")
             self._json(self.state.golden.verify(name))
+            return True
+        if path == "/api/changes":
+            journal = getattr(self.state, "changes", None)
+            limit = int((q.get("limit") or ["40"])[0] or 40)
+            self._json({"changes": journal.recent(limit)
+                        if journal is not None else []})
             return True
         if path == "/api/lkg":
             self._json(self.state.lkg.status())
@@ -6541,6 +6670,15 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("backup", "")),
                 dry_run=bool(body.get("dry_run", False)))
             self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/changes/undo":
+            journal = getattr(self.state, "changes", None)
+            if journal is None:
+                self._json({"ok": False,
+                            "message": "change journal unavailable"}, 503)
+                return True
+            out = journal.undo(str(body.get("id") or "") or None)
+            self._json(out, 200 if out.get("ok") else 400)
             return True
         if path == "/api/dependencies/track":
             row = self.state.dependencies.track(

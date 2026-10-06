@@ -162,7 +162,7 @@ class GitHubCodingClient:
 def register_github_tools(registry: ToolRegistry, workspace: Path,
                           config: AgentConfig, *, vault=None,
                           workspaces=None, client=None,
-                          account=None) -> None:
+                          account=None, journal=None) -> None:
     # `client`: shared GitHubCodingClient — the account service refreshes
     # its token on connect/disconnect, so every surface (tools, connector,
     # API) converges without a restart. Falls back to a private instance
@@ -179,6 +179,21 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             except Exception:
                 pass
 
+    def _journal(action_type: str, subject: str, **fields) -> None:
+        if journal is None:
+            return
+        try:
+            tls = registry.context.get("task_tls")
+            journal.record(
+                action_type, subject, actor="nexus",
+                task_id=str(getattr(tls, "task_id", "")
+                          or registry.context.get("task_id", "") or ""),
+                mission_id=str(registry.context.get("mission_id", "")
+                               or ""),
+                **fields)
+        except Exception:
+            pass
+
     def git_current_branch(_: dict) -> str:
         return _current_branch(workspace)
 
@@ -186,8 +201,15 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         branch = str(args.get("branch", "")).strip()
         if not branch:
             raise ValueError("branch is required")
+        prev = _current_branch(workspace)
         _run_git(workspace, ["check-ref-format", "--branch", branch])
         _run_git(workspace, ["switch", "-c", branch])
+        _journal("git_branch_create", f"branch '{branch}'",
+                 before=prev, after=branch, reversible=True,
+                 undo={"kind": "git_branch_delete", "branch": branch,
+                       "previous_branch": prev, "root": str(workspace)},
+                 risk="medium",
+                 description=f"Created and switched to '{branch}'")
         return json.dumps({"branch": branch, "status": "created"}, indent=2)
 
     def git_commit(args: dict) -> str:
@@ -208,6 +230,11 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             raise RuntimeError((staged.stdout + staged.stderr).strip() or "git diff --cached failed")
         output = _run_git(workspace, ["commit", "-m", message], timeout=120)
         sha = _run_git(workspace, ["rev-parse", "HEAD"])
+        _journal("git_commit", f"commit {str(sha).strip()[:8]}",
+                 after=str(sha).strip(), files=paths, reversible=True,
+                 undo={"kind": "git_reset_soft", "sha": str(sha).strip(),
+                       "root": str(workspace)},
+                 risk="medium", description=message[:200])
         return json.dumps({"commit": sha, "message": message, "output": output[-8000:]}, indent=2)
 
     def git_push(args: dict) -> str:
@@ -233,6 +260,13 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         else:
             command.extend([remote, branch])
         output = _run_git(workspace, command, timeout=180)
+        _journal("git_push", f"push '{branch}' to {remote}",
+                 after={"remote": remote, "branch": branch},
+                 reversible=False,
+                 irreversible_reason="remote refs can't be safely "
+                                     "rewritten by automatic undo",
+                 risk="high",
+                 description=f"Pushed {branch} to {remote}")
         return json.dumps({"remote": remote, "branch": branch, "output": output[-8000:]}, indent=2)
 
     def github_repository(args: dict) -> str:
