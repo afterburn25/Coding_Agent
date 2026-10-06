@@ -11282,6 +11282,12 @@ class Handler(BaseHTTPRequestHandler):
 
             self.send_error(HTTPStatus.NOT_FOUND)
         except KeyError as exc:
+            # Legit not-found KeyErrors are handled by inner routes; an
+            # escape reaching here is a latent bug — print the traceback
+            # to stderr (host captures it into backend-host.log) so the
+            # intermittent 'id' failures can be identified post-mortem.
+            import traceback
+            traceback.print_exc()
             self._json({"error": f"Not found: {exc}"}, 404)
         except PermissionError as exc:
             # Creator-session gates (e.g. Nexus Brain sync/lock) raise
