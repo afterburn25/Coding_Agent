@@ -499,6 +499,76 @@ class TestBuiltinIntegration(unittest.TestCase):
         self.assertIsNone(agent._github_status_reply("open a github pr"))
         self.assertIsNone(agent._github_status_reply("who are you"))
 
+    def _github_target_agent(self, prior_invite: bool = True,
+                             repos=None, tool_error: bool = False,
+                             current: str = "afterburn25"):
+        import json as _json
+        from types import SimpleNamespace
+        agent = self._agent()
+        assistant = (
+            "GitHub's already connected — I'm authorized. "
+            "Point me at a repo and I'll get to work."
+            if prior_invite else "Sure, sounds good.")
+        agent.conversation_manager = SimpleNamespace(
+            active=lambda: {"messages": [
+                {"role": "user", "content": "connect to github"},
+                {"role": "assistant", "content": assistant},
+                # The in-flight turn is already in history at lane time.
+                {"role": "user", "content": current},
+            ]})
+        repos = repos if repos is not None else [
+            {"full_name": "afterburn25/Coding_Agent"},
+            {"full_name": "afterburn25/Notes"},
+            {"full_name": "other/Shared"}]
+        if tool_error:
+            agent.tools = SimpleNamespace(
+                execute=lambda name, args: "ERROR: no token")
+        else:
+            agent.tools = SimpleNamespace(
+                execute=lambda name, args: _json.dumps(
+                    {"repositories": repos}))
+        return agent
+
+    def test_github_target_lane_owner(self):
+        agent = self._github_target_agent()
+        out = agent._github_target_reply("afterburn25")
+        self.assertIsNotNone(out)
+        self.assertIn("Coding_Agent", out.text)
+        self.assertIn("afterburn25", out.text)
+
+    def test_github_target_lane_exact_repo(self):
+        agent = self._github_target_agent(current="coding_agent")
+        out = agent._github_target_reply("coding_agent")
+        self.assertIsNotNone(out)
+        self.assertIn("afterburn25/Coding_Agent", out.text)
+        agent2 = self._github_target_agent(current="afterburn25/Notes")
+        out2 = agent2._github_target_reply("afterburn25/Notes")
+        self.assertIsNotNone(out2)
+        self.assertIn("afterburn25/Notes", out2.text)
+
+    def test_github_target_lane_unknown_lists_repos(self):
+        agent = self._github_target_agent(current="not-a-repo")
+        out = agent._github_target_reply("not-a-repo")
+        self.assertIsNotNone(out)
+        self.assertIn("don't see", out.text)
+        self.assertIn("Coding_Agent", out.text)
+
+    def test_github_target_lane_requires_invite(self):
+        # The same bare token WITHOUT the repo invite falls through —
+        # no context, no call.
+        agent = self._github_target_agent(prior_invite=False)
+        self.assertIsNone(agent._github_target_reply("afterburn25"))
+
+    def test_github_target_lane_rejects_non_tokens(self):
+        agent = self._github_target_agent()
+        self.assertIsNone(agent._github_target_reply("what is github"))
+        self.assertIsNone(agent._github_target_reply("please list my repos"))
+        self.assertIsNone(agent._github_target_reply("hello world"))
+
+    def test_github_target_lane_tool_failure_falls_through(self):
+        agent = self._github_target_agent(tool_error=True)
+        self.assertIsNone(agent._github_target_reply("afterburn25"))
+
     def test_genome_reply_vs_plain(self):
         plain = self._agent()._builtin_reply("hi")
         self.assertFalse(plain.genome_rendered)

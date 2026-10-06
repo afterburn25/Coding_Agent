@@ -898,6 +898,90 @@ class AgentOrchestrator:
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent="github_status", canonical=canonical)
 
+    # A bare identifier — "afterburn25", "Coding_Agent", "owner/repo" —
+    # nothing else counts as a repo target.
+    _GITHUB_TARGET_RE = re.compile(
+        r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,98}(?:/[A-Za-z0-9_.-]{1,99})?$")
+
+    def _github_target_reply(self, user_text: str):
+        """Follow-up to the GitHub status invite: when the previous turn
+        pointed the user at a repo and they answer with a bare name, resolve
+        it against the connected account with a REAL github_list_repos call —
+        never a narrated 'let me check'. → RenderedReply | None."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        text = str(user_text or "").strip().rstrip(".,!?")
+        if not self._GITHUB_TARGET_RE.match(text):
+            return None
+        messages = []
+        try:
+            messages = (self.conversation_manager.active() or {}) \
+                .get("messages") or []
+        except Exception:
+            pass
+        invited = False
+        for msg in reversed(messages[-6:]):
+            role = msg.get("role")
+            if role == "assistant":
+                body = str(msg.get("content") or "").lower()
+                invited = "repo" in body and (
+                    "github" in body or "authorized" in body
+                    or "connected" in body or "point me" in body)
+                break
+            if role == "user":
+                # Skip the in-flight turn itself if it's already been
+                # appended to history; any OTHER user turn means the
+                # invite is stale.
+                if str(msg.get("content") or "").strip().rstrip(".,!?") \
+                        == text:
+                    continue
+                break
+        if not invited:
+            return None
+        try:
+            result = self.tools.execute("github_list_repos", {})
+        except Exception:
+            return None
+        if not isinstance(result, str) or result.startswith(
+                ("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
+            return None
+        try:
+            repos = (json.loads(result) or {}).get("repositories") or []
+        except Exception:
+            return None
+        names = [str(r.get("full_name") or "") for r in repos
+                 if r.get("full_name")]
+        if not names:
+            return None
+        low = text.lower()
+        exact = [n for n in names if n.lower() == low]
+        named = [n for n in names if n.rsplit("/", 1)[-1].lower() == low]
+        owned = [n for n in names if n.split("/", 1)[0].lower() == low]
+        if exact or named:
+            match = (exact or named)[0]
+            canonical = (f"That's `{match}` on the connected account. "
+                         "Say the word — clone it, read it, check its "
+                         "issues, or open a PR against it.")
+        elif owned:
+            top = ", ".join(f"`{n}`" for n in owned[:6])
+            more = f" (+{len(owned) - 6} more)" if len(owned) > 6 else ""
+            canonical = (f"{text}'s repos — most recently active: {top}"
+                         f"{more}. Which one do you want?")
+        else:
+            top = ", ".join(f"`{n}`" for n in names[:6])
+            canonical = (f"I don't see `{text}` on the connected account. "
+                         f"Most recently active repos: {top}. "
+                         "Which of these — or give me owner/repo.")
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id="capability:github:target",
+            speech_act="answer")
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="github_target", canonical=canonical)
+
     def _self_knowledge_service(self):
         """Resolve the SelfKnowledgeService — the server may pass the
         instance or a lazy resolver."""
@@ -981,7 +1065,8 @@ class AgentOrchestrator:
         rephrase = self._rephrase_reply(user_text)
         if rephrase is not None:
             return rephrase
-        github_lane = self._github_status_reply(user_text)
+        github_lane = (self._github_status_reply(user_text)
+                       or self._github_target_reply(user_text))
         if github_lane is not None:
             return github_lane
         pair = self.builtin_semantic(user_text)
@@ -4380,7 +4465,8 @@ class AgentOrchestrator:
         # but pure connection questions are answered from the live
         # capability probe — the lane self-filters real action requests.
         github_reply = (
-            self._github_status_reply(user_text)
+            (self._github_status_reply(user_text)
+             or self._github_target_reply(user_text))
             if mode == "auto" else None)
         # Self-knowledge lane — 'turn voice off', 'what can you do',
         # 'where is the speech lab', 'do it'. Exempt from the canned
