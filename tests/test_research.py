@@ -48,7 +48,7 @@ class ResearchRankingTests(unittest.TestCase):
         ranked = ranker.rank([mismatch, exact], "python api")
         self.assertIs(ranked[0], exact)
         self.assertGreater(exact.score, mismatch.score)
-        self.assertIn(exact.reliability, {"Strong", "Confirmed"})
+        self.assertIn(exact.reliability, {"Strong", "Confirmed", "Primary Confirmed"})
 
 
     def test_generic_github_result_is_not_assumed_official_upstream(self):

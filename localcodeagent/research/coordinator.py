@@ -4,17 +4,20 @@ import json
 import re
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
 from ..workflow.repository import RepositoryIndex
 from .cache import ResearchCache
 from .environment import EnvironmentInspector
-from .official import domains_for, host_for, looks_official
+from . import evidence as evidence_mod
+from .official import domains_for, github_hints_for, host_for, looks_official, package_official_domains
 from .planner import KnowledgeGapDetector
 from .providers import GitHubApiResearchProvider, GitHubResearchProvider, LocalDocumentationProvider, PackageMetadataProvider, RepositoryResearchProvider, WebSearchProvider
 from .github_api import GitHubApiClient, GitHubApiError
 from .ranking import SourceRanker
+from .trust import SourceTrustRegistry, TopicClassifier
 from .types import ResearchPlan, ResearchSession, ResearchSource
 
 
@@ -23,6 +26,13 @@ SECRET_PATTERNS = [
     re.compile(r"https?://[^\s/@]+:[^\s/@]+@[^\s]+"),
     re.compile(r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_\-]{12,}\b"),
 ]
+
+
+def _is_root_url(url: str) -> bool:
+    """True when a result URL is a bare domain root — homepage junk, not an
+    article/doc page that could address a query."""
+    path = urllib.parse.urlparse(str(url or "")).path
+    return path in ("", "/")
 
 
 class ResearchCoordinator:
@@ -49,9 +59,14 @@ class ResearchCoordinator:
                 token_env=str(getattr(config, "research_github_token_env", "GITHUB_TOKEN")),
                 timeout=int(getattr(config, "research_github_timeout", 15)),
             ))
+        self.registry = SourceTrustRegistry()
+        self.topic_classifier = TopicClassifier()
+        self.independence = evidence_mod.IndependenceAnalyzer()
+        self.conflict_detector = evidence_mod.ConflictDetector()
         self.ranker = SourceRanker(
             trusted_domains=list(getattr(config, "research_trusted_domains", []) or []),
             blocked_domains=list(getattr(config, "research_blocked_domains", []) or []),
+            registry=self.registry,
         )
         self._last_plan: dict[str, Any] | None = None
         self._stats_path = data_dir / "provider_stats.json"
@@ -153,10 +168,37 @@ class ResearchCoordinator:
         self.cache.put(key_provider, query, [x.as_dict() for x in rows], version)
         return rows
 
-    def _fetch_top(self, sources: list[ResearchSource], query: str, max_pages: int) -> list[ResearchSource]:
+    @staticmethod
+    def _emit(event, type_: str, **kw: Any) -> None:
+        if event is None:
+            return
+        try:
+            event({"type": type_, **kw})
+        except Exception:
+            pass
+
+    @staticmethod
+    def _cancelled(is_cancelled) -> bool:
+        try:
+            return bool(is_cancelled and is_cancelled())
+        except Exception:
+            return False
+
+    def _fetch_top(
+        self,
+        sources: list[ResearchSource],
+        query: str,
+        max_pages: int,
+        *,
+        event=None,
+        is_cancelled=None,
+        topics: list[str] | None = None,
+    ) -> list[ResearchSource]:
         fetched: list[ResearchSource] = []
         for source in sources:
             if len(fetched) >= max_pages:
+                break
+            if self._cancelled(is_cancelled):
                 break
             if not source.url or source.excerpt:
                 fetched.append(source)
@@ -164,13 +206,24 @@ class ResearchCoordinator:
             host = host_for(source.url)
             blocked = {d.lower().removeprefix("www.") for d in list(getattr(self.config, "research_blocked_domains", []) or [])}
             if any(host == d or host.endswith("." + d) for d in blocked):
+                self._emit(event, "source_skipped", url=source.url, domain=host,
+                           title=source.title, reason="blocked_domain")
                 continue
+            self._emit(event, "source_open", url=source.url, domain=host,
+                       title=source.title, source_class=source.source_class,
+                       badges=list(source.badges))
             try:
                 source = self.web.fetch(source, max_chars=int(getattr(self.config, "research_max_chars_per_source", 20000)))
+                self._emit(event, "source_read", url=source.url, domain=host,
+                           title=source.title, chars=len(source.excerpt or ""),
+                           source_class=source.source_class,
+                           badges=list(source.badges))
             except Exception as exc:
                 source.metadata["fetch_error"] = f"{type(exc).__name__}: {exc}"
+                self._emit(event, "source_skipped", url=source.url, domain=host,
+                           title=source.title, reason=type(exc).__name__)
             fetched.append(source)
-        return self.ranker.rank(fetched, query)
+        return self.ranker.rank(fetched, query, topics)
 
     def _github_sources(self, query: str, *, limit: int = 8, version: str = "", repo: str = "", kind: str = "auto") -> list[ResearchSource]:
         errors: list[Exception] = []
@@ -207,52 +260,213 @@ class ResearchCoordinator:
                 raise RuntimeError("; ".join(f"{type(e).__name__}: {e}" for e in errors)) from exc
             raise
 
-    def research_topic(self, query: str, *, mode: str = "auto", version: str = "") -> dict[str, Any]:
+    def _evidence_pass(
+        self,
+        sources: list[ResearchSource],
+        query: str,
+        topics: list[str],
+    ) -> evidence_mod.EvidenceReport:
+        """Independence clustering → claim mapping → conflict detection →
+        corroboration/confidence. Mutates source metadata/badges."""
+        report = evidence_mod.EvidenceReport()
+        report.topics = topics
+        report.high_stakes = self.topic_classifier.high_stakes(topics)
+        if not sources:
+            return report
+        groups = self.independence.analyze(sources)
+        report.independent_groups = len(set(groups.values()))
+        profiles = {
+            s.id: self.registry.profile_for(host_for(s.url) or s.url)
+            for s in sources
+        }
+        report.claims = evidence_mod.extract_claims(sources, query)
+        report.conflicts = self.conflict_detector.detect(sources, report.claims, query)
+        # Re-label badges now that conflicts/outdated are known.
+        for s in sources:
+            profile = profiles[s.id]
+            s.reliability = evidence_mod.reliability_label(
+                s, profile, conflicts=report.conflicts)
+            s.badges = evidence_mod.source_badges(s, profile, topics)
+            support = sum(1 for c in report.claims if s.id in c["supporting"])
+            s.corroboration_count = support
+            if s.metadata.get("independence_group") is not None:
+                s.independence_group = int(s.metadata["independence_group"])
+        report.corroboration = evidence_mod.corroboration_state(
+            sources, report.claims, report.conflicts, profiles)
+        confidence, reasons = evidence_mod.evidence_confidence(
+            sources, report.claims, report.conflicts, profiles,
+            high_stakes=report.high_stakes)
+        report.confidence = confidence
+        report.confidence_reasons = reasons
+        return report
+
+    def research_topic(
+        self,
+        query: str,
+        *,
+        mode: str = "auto",
+        version: str = "",
+        scope: str = "auto",
+        queries: list[str] | None = None,
+        urls: list[str] | None = None,
+        event=None,
+        is_cancelled=None,
+    ) -> dict[str, Any]:
         safe_query = self.redact_query(query)
         plan = self.plan(safe_query, mode)
         session = ResearchSession(task=safe_query, mode=plan.mode, plan=plan.as_dict())
+        general = scope == "general"
+        topics = self.topic_classifier.classify(safe_query)
+        session.topics = topics
         sources: list[ResearchSource] = []
         max_queries = max(1, int(getattr(self.config, "research_max_queries", 6)))
         max_pages = max(1, int(getattr(self.config, "research_max_pages", 8)))
+        network_allowed = plan.mode not in {"none", "local_only", "offline"}
+        self._emit(event, "research_start", query=safe_query, mode=plan.mode,
+                   scope=scope, topics=topics)
         try:
-            sources.extend(self.repository.search(safe_query, limit=8, version=version))
-            sources.extend(self.local_docs.search(safe_query, limit=8, version=version))
-            sources.extend(self.packages.search(safe_query, limit=8, version=version))
-            network_allowed = plan.mode not in {"none", "local_only", "offline"}
-            if network_allowed:
-                questions = [q.text for q in plan.questions] or [safe_query]
-                for question in questions[:max_queries]:
-                    q = self.redact_query(f"{safe_query} {question} {version}".strip())
+            if not general:
+                sources.extend(self.repository.search(safe_query, limit=8, version=version))
+                sources.extend(self.local_docs.search(safe_query, limit=8, version=version))
+                sources.extend(self.packages.search(safe_query, limit=8, version=version))
+            # User-supplied URLs are fetched directly as candidate sources.
+            for url in list(urls or [])[:4]:
+                if self._cancelled(is_cancelled):
+                    break
+                host = host_for(url)
+                self._emit(event, "source_open", url=url, domain=host,
+                           title=url, source_class="user_supplied")
+                src = ResearchSource(
+                    title=url, source_type="web", url=url, provider="user_url")
+                try:
+                    src = self.web.fetch(src, max_chars=int(
+                        getattr(self.config, "research_max_chars_per_source", 20000)))
+                    src.title = src.title or url
+                    sources.append(src)
+                    self._emit(event, "source_read", url=url, domain=host,
+                               title=src.title, chars=len(src.excerpt or ""))
+                except Exception as exc:
+                    session.errors.append(f"url fetch {host}: {type(exc).__name__}: {exc}")
+                    self._emit(event, "source_skipped", url=url, domain=host,
+                               reason=type(exc).__name__)
+            if network_allowed and not self._cancelled(is_cancelled):
+                if general:
+                    questions = list(queries or []) or [safe_query]
+                else:
+                    questions = [q.text for q in plan.questions] or [safe_query]
+                gh_hints = github_hints_for(safe_query)
+                web_hits = 0
+                for qi, question in enumerate(questions[:max_queries]):
+                    if self._cancelled(is_cancelled):
+                        break
+                    q = self.redact_query(
+                        question if general else f"{safe_query} {question} {version}".strip())
+                    session.queries.append(q)
                     official_domains = domains_for(q)
-                    if plan.mode in {"official", "deep", "balanced"} and official_domains:
-                        for domain in official_domains[:2]:
-                            try:
-                                sources.extend(self._cached_search(self.web, f"site:{domain} {q}", limit=5, version=version))
-                            except Exception as exc:
-                                session.errors.append(f"official search {domain}: {type(exc).__name__}: {exc}")
-                    elif plan.mode in {"official", "balanced", "deep"}:
+                    self._emit(event, "search_query", query=q, index=qi + 1,
+                               total=min(len(questions), max_queries))
+                    before = len(sources)
+                    if general:
+                        # Official-first for technical topics, then broad.
+                        if official_domains and plan.mode in {"official", "deep", "balanced", "auto"}:
+                            for domain in official_domains[:2]:
+                                try:
+                                    sources.extend(self._cached_search(
+                                        self.web, f"site:{domain} {q}", limit=4, version=version))
+                                except Exception as exc:
+                                    session.errors.append(f"official search {domain}: {type(exc).__name__}: {exc}")
                         try:
                             sources.extend(self._cached_search(self.web, q, limit=6, version=version))
                         except Exception as exc:
                             session.errors.append(f"web search: {type(exc).__name__}: {exc}")
-                    if plan.mode == "deep" or "error" in question.lower():
-                        try:
-                            sources.extend(self._github_sources(q, limit=6, version=version))
-                        except Exception as exc:
-                            session.errors.append(f"github search: {type(exc).__name__}: {exc}")
-            ranked = self.ranker.rank(self._dedupe(sources), safe_query)
-            if network_allowed:
-                ranked = self._fetch_top(ranked, safe_query, max_pages)
+                        if re.search(r"\berror\b|\bexception\b|\bissue\b|\bbug\b|"
+                                     r"0x[0-9a-f]+|winerror|errno|crash|fails?\b",
+                                     q, re.I) or plan.mode == "deep":
+                            try:
+                                gh_rows = self._github_sources(q, limit=6, version=version)
+                                for row in gh_rows:
+                                    cls = self.registry.github_repo_class(
+                                        row.url, expected=gh_hints, query=safe_query)
+                                    row.metadata["github_class"] = cls
+                                    if cls == "official_repo":
+                                        row.authority = "official_repo"
+                                sources.extend(gh_rows)
+                            except Exception as exc:
+                                session.errors.append(f"github search: {type(exc).__name__}: {exc}")
+                    else:
+                        if plan.mode in {"official", "deep", "balanced"} and official_domains:
+                            for domain in official_domains[:2]:
+                                try:
+                                    sources.extend(self._cached_search(self.web, f"site:{domain} {q}", limit=5, version=version))
+                                except Exception as exc:
+                                    session.errors.append(f"official search {domain}: {type(exc).__name__}: {exc}")
+                        elif plan.mode in {"official", "balanced", "deep"}:
+                            try:
+                                sources.extend(self._cached_search(self.web, q, limit=6, version=version))
+                            except Exception as exc:
+                                session.errors.append(f"web search: {type(exc).__name__}: {exc}")
+                        if plan.mode == "deep" or "error" in question.lower():
+                            try:
+                                sources.extend(self._github_sources(q, limit=6, version=version))
+                            except Exception as exc:
+                                session.errors.append(f"github search: {type(exc).__name__}: {exc}")
+                    web_hits += len(sources) - before
+                    self._emit(event, "search_results", query=q, count=len(sources) - before)
+                    # Query refinement (Part 21): a dry first query gets one
+                    # focused retry rather than repeating near-identical text.
+                    # "Dry" also covers junk SERPs — engines sometimes bucket
+                    # queries that lead with "the latest X of Y" as news and
+                    # return only homepage results (domain roots, no article
+                    # path); those don't address anything.
+                    new_sources = sources[before:]
+                    junk_serp = len(new_sources) >= 2 and all(
+                        _is_root_url(s.url) for s in new_sources)
+                    if (general and qi == 0
+                            and (len(new_sources) < 2 or junk_serp)
+                            and len(questions) < max_queries):
+                        from .policy import _keywordize
+                        refined = self.redact_query(
+                            _keywordize(q) or f"{q} guide".strip())
+                        if refined.lower() != q.lower():
+                            session.queries.append(refined)
+                            self._emit(event, "search_query", query=refined,
+                                       index=qi + 2, total=min(len(questions), max_queries) + 1)
+                            try:
+                                sources.extend(self._cached_search(self.web, refined, limit=6, version=version))
+                            except Exception as exc:
+                                session.errors.append(f"refined search: {type(exc).__name__}: {exc}")
+            ranked = self.ranker.rank(self._dedupe(sources), safe_query, topics)
+            if general and network_allowed:
+                # Quality over quantity (Part 57): diversify before fetching
+                # so one domain can't consume the whole page budget.
+                ranked = self.ranker.diversify(ranked, max_per_domain=2, limit=max_pages)
+            if network_allowed and not self._cancelled(is_cancelled):
+                ranked = self._fetch_top(ranked, safe_query, max_pages,
+                                         event=event, is_cancelled=is_cancelled,
+                                         topics=topics)
+            self._emit(event, "research_compare",
+                       count=min(len(ranked), max_pages),
+                       independent=len({s.metadata.get('independence_group') for s in ranked} or {0}))
+            report = self._evidence_pass(ranked[: max_pages + 4], safe_query, topics)
+            session.evidence = report.as_dict()
             session.sources = [s.as_dict() for s in ranked[:50]]
             session.findings = self._findings(ranked)
-            session.summary = self._summary(plan, ranked, session.findings)
-            session.status = "completed" if not session.errors else "completed_with_warnings"
+            session.summary = self._summary(plan, ranked, session.findings, report)
+            if self._cancelled(is_cancelled):
+                session.status = "cancelled"
+            else:
+                session.status = "completed" if not session.errors else "completed_with_warnings"
         except Exception as exc:
             session.status = "failed"
             session.errors.append(f"{type(exc).__name__}: {exc}")
         finally:
             session.finished_at = time.time()
             self.cache.save_session(session.as_dict())
+            self._emit(event, "research_complete",
+                       status=session.status,
+                       source_count=len(session.sources),
+                       confidence=session.evidence.get("confidence", ""),
+                       corroboration=session.evidence.get("corroboration", ""))
         return session.as_dict()
 
     @staticmethod
@@ -279,9 +493,22 @@ class ResearchCoordinator:
         return findings
 
     @staticmethod
-    def _summary(plan: ResearchPlan, sources: list[ResearchSource], findings: list[str]) -> str:
+    def _summary(
+        plan: ResearchPlan,
+        sources: list[ResearchSource],
+        findings: list[str],
+        report: evidence_mod.EvidenceReport | None = None,
+    ) -> str:
         lines = ["Research Summary", f"Mode: {plan.mode}", "Questions:"]
         lines.extend(f"- {q.text}" for q in plan.questions[:6])
+        if report is not None:
+            lines.append(
+                f"Evidence confidence: {report.confidence} "
+                f"({report.corroboration}; {report.independent_groups} independent source group(s))")
+            if report.conflicts:
+                lines.append("CONFLICTS DETECTED — do not present a false consensus:")
+                for c in report.conflicts[:4]:
+                    lines.append(f"- {c.get('kind')}: {str(c.get('claim') or c.get('detail') or '')[:200]}")
         lines.append("Findings:")
         lines.extend(f"- {x}" for x in findings[:8])
         lines.append("Sources:")
