@@ -4292,13 +4292,21 @@ class AgentOrchestrator:
         # model routing so cheap answers stay cheap. When the persona
         # speech genome is wired the canned lanes render through it — a
         # deterministic reply can stay in character without a model call.
-        builtin_reply = (
+        # The GitHub connection-status lane is exempt from the canned
+        # suppression: GITHUB_STATUS is an ACTION_INTENT (repo inspection),
+        # but pure connection questions are answered from the live
+        # capability probe — the lane self-filters real action requests.
+        github_reply = (
+            self._github_status_reply(user_text)
+            if mode == "auto" else None)
+        builtin_reply = github_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and not env.suppresses_canned() else None)
         builtin_response = (
             builtin_reply.text if builtin_reply is not None else None)
         if (
             builtin_response is not None
+            and github_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):
@@ -4306,9 +4314,10 @@ class AgentOrchestrator:
             # canned small talk ("what can you do", "hi") would reply
             # flat and break character. Let the model lane answer; the
             # utility prompt already lists real capabilities.
-            # EXCEPTION: creator-locked identity answers (age/birthday/
-            # creator) are facts, not style — they stay deterministic
-            # under a persona so no model output can contradict them.
+            # EXCEPTIONS: creator-locked identity answers (age/birthday/
+            # creator) and the GitHub live-status lane are facts, not
+            # style — they stay deterministic under a persona so no
+            # model output can contradict them.
             from .. import identity
             if identity.response_for(user_text) is None:
                 builtin_response = None
