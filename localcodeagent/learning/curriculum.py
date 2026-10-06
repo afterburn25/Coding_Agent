@@ -189,6 +189,11 @@ class StudySessionStore:
     def summary(self) -> dict:
         with self._lock:
             rows = list(self._data["sessions"])
-        return {"total": len(rows),
-                "active": sum(1 for s in rows if s.get("status") == "active"),
-                "completed": sum(1 for s in rows if s.get("status") == "completed")}
+        out = {"total": len(rows),
+               "active": sum(1 for s in rows if s.get("status") == "active"),
+               "completed": sum(1 for s in rows if s.get("status") == "completed")}
+        act = next((s for s in reversed(rows)
+                    if s.get("status") == "active"), None)
+        if act:
+            out["active_session"] = dict(act)
+        return out

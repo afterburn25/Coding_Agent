@@ -1,0 +1,127 @@
+/* Learning dashboard — reuses missions-shell layout tokens. */
+
+.learning-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.learning-card {
+  background: var(--panel-bg, #16181d);
+  border: 1px solid var(--border, #2a2e37);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.learning-card .num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.learning-card .lbl {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.learning-card .sub {
+  font-size: 11px;
+  opacity: 0.55;
+  margin-top: 6px;
+}
+
+.panel {
+  background: var(--panel-bg, #16181d);
+  border: 1px solid var(--border, #2a2e37);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.panel h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.panel-sub {
+  font-size: 12px;
+  opacity: 0.6;
+  margin: 0 0 12px;
+}
+
+.learning-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .learning-grid { grid-template-columns: 1fr; }
+}
+
+.table-wrap { overflow-x: auto; }
+
+.learning-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.learning-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--border, #2a2e37);
+}
+
+.learning-table td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--border, #22252c);
+}
+
+.learning-table tr:last-child td { border-bottom: none; }
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-pill.strong     { background: #14432a; color: #7fe0a8; }
+.status-pill.developing { background: #433a14; color: #e0c97f; }
+.status-pill.weak       { background: #4a2020; color: #f0a0a0; }
+.status-pill.untested   { background: #2a2e37; color: #9aa1ad; }
+
+.learning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.learning-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #22252c);
+  font-size: 13px;
+}
+
+.learning-list li:last-child { border-bottom: none; }
+
+.learning-list .meta {
+  display: block;
+  font-size: 11px;
+  opacity: 0.55;
+  margin-top: 2px;
+}
+
+.empty-note {
+  font-size: 12px;
+  opacity: 0.5;
+  font-style: italic;
+}

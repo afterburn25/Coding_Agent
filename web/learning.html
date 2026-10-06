@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core · Learning</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/missions.css" />
+  <link rel="stylesheet" href="/profile.css" />
+  <link rel="stylesheet" href="/learning.css" />
+</head>
+<body>
+<div class="missions-shell">
+      <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>LEARNING</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/command.html"><span class="nav-icon">⎈</span><span>Command</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/projects.html"><span class="nav-icon">▣</span><span>Projects</span></a>
+        <a class="nav-item" href="/knowledge.html"><span class="nav-icon">✦</span><span>Knowledge</span></a>
+        <a class="nav-item" href="/workspace.html"><span class="nav-icon">⌬</span><span>Workspace</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item active" href="/learning.html"><span class="nav-icon">✧</span><span>Learning</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Local mode</strong><small>Learning from verified outcomes only.</small></div>
+      </div>
+    </aside>
+
+  <main class="missions-main">
+    <header class="missions-header">
+      <div>
+        <h1>Continual Learning</h1>
+        <p class="missions-sub">What Nexus has learned from verified outcomes — never from
+        self-assessment. Every number here is backed by recorded evidence.</p>
+      </div>
+      <button id="refreshBtn" class="btn secondary" type="button">Refresh</button>
+    </header>
+
+    <section class="learning-cards" id="overviewCards"></section>
+
+    <section class="panel">
+      <h2>Highest-value weaknesses</h2>
+      <p class="panel-sub">Evidence-backed competencies ranked by learning value.
+      Confidence stays low until there are enough evaluated attempts.</p>
+      <div class="table-wrap">
+        <table class="learning-table" id="weaknessTable">
+          <thead><tr>
+            <th>Competency</th><th>Status</th><th>Success</th>
+            <th>Attempts</th><th>Confidence</th><th>Trend</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty-note" id="weaknessEmpty" hidden>No tracked weaknesses yet.</p>
+    </section>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Study priorities</h2>
+        <p class="panel-sub">What the planner thinks is worth studying next
+        (weakness × value × frequency ÷ cost).</p>
+        <ul class="learning-list" id="priorityList"></ul>
+        <p class="empty-note" id="priorityEmpty" hidden>Nothing worth studying right now.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Study sessions</h2>
+        <p class="panel-sub">Bounded research-backed sessions against a curriculum —
+        never open-ended crawling.</p>
+        <div id="studyDetail"></div>
+      </section>
+    </div>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Mastery &amp; retention</h2>
+        <p class="panel-sub">Closed-book evaluations and spaced retention checks.
+        One good eval is never mastery.</p>
+        <div id="masteryDetail"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Skill proposals</h2>
+        <p class="panel-sub">Verified lesson patterns promoted toward installable
+        skills — promotion needs explicit approval.</p>
+        <ul class="learning-list" id="proposalList"></ul>
+        <p class="empty-note" id="proposalEmpty" hidden>No pending proposals.</p>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/learning.js"></script>
+</body>
+</html>
