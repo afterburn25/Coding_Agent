@@ -1240,6 +1240,25 @@ class AgentOrchestrator:
         r"same\s+(?:girl|guy|woman|man|person|pose|image|picture|"
         r"photo|one|style|character|outfit)|"
         r"but\s+i\b|instead\b|keep the)\b", re.I)
+    # Weak signals — bare negations. "isn't it true that you're
+    # software" carries one but is a complete sentence about her, not
+    # an edit instruction. Weak signals alone can't anchor a follow-up;
+    # they need image vocabulary in the same message. Strong signals
+    # (directives, attribute edits) can fire alone.
+    _IMAGE_FOLLOWUP_STRONG_RE = re.compile(
+        r"\b(?:do it|do that|try again|retry|redo|again\b|generate it|"
+        r"make it|make her|make him|show me|go ahead|"
+        r"i wanted|i asked for|i meant|still want|"
+        r"(?:full|whole|entire|complete)\s+body|zoom\s+(?:out|in)|"
+        r"too\s+(?:close|cropped|zoomed|tight|small|big)|"
+        r"show\s+(?:the\s+)?(?:whole|full|rest|more)|"
+        r"wider|bigger|smaller|taller|longer|"
+        r"same\s+(?:girl|guy|woman|man|person|pose|image|picture|"
+        r"photo|one|style|character|outfit)|"
+        r"instead\b|keep the)\b", re.I)
+    _IMAGE_FOLLOWUP_WEAK_RE = re.compile(
+        r"\b(?:isn'?t|ain'?t|that'?s not|doesn'?t|didn'?t|"
+        r"wrong\b|nope|not what i|but\s+i\b)\b", re.I)
     _IMAGEISH_RE = re.compile(
         r"\b(?:images?|pictures?|photos?|pics?|selfie|portrait|artwork|"
         r"drawing|illustration|render|wallpaper|girl|woman|man|guy|pose|"
@@ -1451,6 +1470,12 @@ class AgentOrchestrator:
         has_signal = bool(self._IMAGE_FOLLOWUP_RE.search(low))
         has_imagery = bool(self._IMAGEISH_RE.search(low))
         if not has_signal and not has_imagery:
+            return None
+        if has_signal and not has_imagery and \
+                not self._IMAGE_FOLLOWUP_STRONG_RE.search(low):
+            # The only signal is a bare negation with no image
+            # vocabulary — a complete statement about something
+            # else, not an edit instruction.
             return None
         if self.conversation_manager is None:
             return None

@@ -65,7 +65,13 @@ _NATURE = re.compile(
 # refusal explaining the fact is locked — not a silent identity answer.
 _WRITE_INTENT = re.compile(
     r"^\s*(?:learn|remember|memorize|forget|unlearn|update|change|set|"
-    r"correct|teach|replace|no[,.! ]|actually[,.! ])",
+    r"correct|teach|replace|no[,.!]"
+    r"|no\s+(?:that's|that\s+is|you\s+should|the\s+answer|the\s+correct|"
+    r"try|use|it\s+should|don't|do\s+not|not\s+quite|make\s+it|"
+    r"go\s+back)\b"
+    r"|actually[,!]"
+    r"|actually\s+(?:the\s+answer|it\s+should|that'?s|the\s+correct|"
+    r"you\s+should|wrong|incorrect)\b)",
     re.I,
 )
 
