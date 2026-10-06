@@ -58,14 +58,13 @@ let narratedUpTo = -1;
 // freezing on 'ended'. The swap crossfades so any residual discontinuity
 // hides in the blend. All times come from the timeline file — never
 // duplicated as constants here.
-const BOOT_LOOP_XFADE_MS = 400, MAX_CATCHUP = 1.75;
+const BOOT_LOOP_XFADE_MS = 400;
 // caption gates sorted by progressGate: [{id, gate, at}] — progress is REAL
 // (host StartupProgress), `at` is the authored clip time of that caption.
 let clipGates = [];
 let onlineGate = 1.0, onlineAt = 0;
 // The authored finalizing hold frame — the clip may not pass it while
 // progress is still below the online gate.
-let holdAt = Infinity;
 let bootLoopStart = 0, bootLoopEnd = Infinity;
 let bootTailReached = false, bootSwapping = false, bootMutedIncoming = null;
 let lastClipCaption = -1;
@@ -73,28 +72,6 @@ let lastClipCaption = -1;
 // Real displayed progress → authored clip time. Between caption gates the
 // mapping interpolates inside the segment so the footage paces reality; a
 // gate is a hard boundary the clip may approach but never cross ahead of
-// the real milestone. Returns null once released (progress ≥ online gate)
-// — the clip then catches up to the online boundary and free-runs the tail.
-function progressToAuthoredTime(p) {
-  if (!clipGates.length || p >= onlineGate) return null;
-  if (p <= clipGates[0].gate) return clipGates[0].at;
-  for (let i = 0; i < clipGates.length - 1; i++) {
-    const a = clipGates[i], b = clipGates[i + 1];
-    if (p < b.gate) {
-      return a.at + (p - a.gate) / (b.gate - a.gate) * (b.at - a.at);
-    }
-  }
-  return onlineAt;
-}
-
-// The displayed bar value bounds the clip too: while the bar is parked at
-// the finalizing ceiling (~99.6%) the footage pins to the authored hold
-// frame — the online caption cannot appear before true completion.
-function clipTargetFor(progress) {
-  const t = progressToAuthoredTime(progress);
-  return t === null ? null : Math.min(t, holdAt);
-}
-
 // One diagnostics post per caption the clip actually enters — the host log
 // then records real progress, authored clip time, hold and catch-up state
 // for every transition without per-frame spam.
@@ -107,7 +84,7 @@ function reportClipCaption(v) {
   if (idx > lastClipCaption) {
     lastClipCaption = idx;
     host({ type: 'caption-view', id: clipGates[idx].id, at: clipGates[idx].at,
-           clipTime: +v.currentTime.toFixed(2), held: holdLoop,
+           clipTime: +v.currentTime.toFixed(2), held: v.paused || v.playbackRate < .3,
            rate: +v.playbackRate.toFixed(2), progress: externalProgress?.value ?? null });
   }
 }
@@ -118,7 +95,6 @@ function reportClipCaption(v) {
 function startBootSwap() {
   const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
   bootTailReached = true; bootSwapping = true; bootMutedIncoming = nxt;
-  holdLoop = false;   // reaching the tail implies the online gate released
   // Timeline-less fallback: loop the last ~4s (the settled tail of either
   // master) rather than restarting the whole cinematic at 0.
   nxt.currentTime = bootLoopStart > 0 ? bootLoopStart : Math.max(0, cur.duration - 4);
@@ -135,33 +111,6 @@ function startBootSwap() {
   }, BOOT_LOOP_XFADE_MS);
 }
 
-// --- Milestone hold loop -------------------------------------------------
-// When real progress stalls, the footage must never cross the next caption
-// boundary — but freezing dead on a frame reads as a stall, and toggling
-// pause/play as smoothed progress trickles causes visible flicker. Instead
-// the two clip copies ping-pong an ambient window just before the hold
-// edge, crossfading each pass, so picture and baked audio keep breathing
-// until the real milestone advances the gate.
-const HOLD_WIN = 2.0, HOLD_RATE = .6, HOLD_EXIT = .08, HOLD_XFADE_LEAD = .6, HOLD_XFADE_MS = 600;
-let holdLoop = false, holdEdge = 0;
-
-function holdSwap(pauseNow) {
-  const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
-  bootSwapping = true; bootMutedIncoming = nxt;
-  if (pauseNow) cur.pause();   // already at the edge — freeze under the fade
-  nxt.currentTime = Math.max(0, holdEdge - HOLD_WIN);
-  nxt.playbackRate = HOLD_RATE;
-  nxt.hidden = false;
-  nxt.style.zIndex = 3; cur.style.zIndex = 2;
-  void nxt.play().catch(() => {});
-  void nxt.offsetWidth;
-  nxt.classList.add('live');
-  bootIdx = 1 - bootIdx;
-  setTimeout(() => {
-    cur.pause(); cur.hidden = true; cur.classList.remove('live');
-    bootMutedIncoming = null; applyMediaAudio(); bootSwapping = false;
-  }, HOLD_XFADE_MS);
-}
 // One in-flight user-requested attempt at a time — duplicate Retry clicks
 // coalesce (button disabled here, single-flight guard on the host).
 let attemptInFlight = false;
@@ -309,67 +258,21 @@ function paint() {
   shownFill += (fillTarget - shownFill) * .09;   // ~60Hz ease; no snap on host updates
   if (Math.abs(fillTarget - shownFill) < .003) shownFill = fillTarget;
   $('fill').style.transform = `scaleX(${shownFill.toFixed(3)})`;
-  // The clip's playback position is bound to REAL progress through the
-  // authored caption timeline: piecewise progress→clip-time mapping, hard
-  // pause at a future caption boundary until its milestone lands, bounded
-  // ≤1.75x catch-up when reality jumps ahead. A stalled backend parks the
-  // picture (and its baked audio → stem hum sustains) rather than letting
-  // the scene claim progress reality hasn't made. Once the host reports
-  // true completion the clip is released across the online boundary and
-  // free-runs into the authored looping tail until dismissal.
+  // The clip is pure cinematic background: it plays forward at natural speed
+  // start to finish — never paused, never rewound, never rate-shifted —
+  // then loops the authored online tail until the host dismisses. All truth
+  // on screen (status text, progress bar, captions) is DOM-driven from real
+  // StartupProgress, so the footage can never get ahead of reality and a
+  // stalled backend can never freeze or replay it.
   if (videoMode && !clock.activeFault && bootclips.length) {
     const cur = bootclips[bootIdx];
     const dur = cur.duration || clipTimeline?.duration || 30;
     const loopAt = Math.min(bootLoopEnd, dur) - .06;
     if (!bootSwapping && (cur.ended || cur.currentTime >= loopAt)) {
-      // Tail reached — the pacing gate only lets the clip get this far
-      // once real progress released the online boundary, so looping the
-      // authored online tail until dismissal is honest.
       startBootSwap();
     } else if (!bootSwapping) {
-      const prog = externalProgress?.value ?? clamp(clock.time / manifest.duration);
-      const target = clipGates.length
-        ? clipTargetFor(prog) : Math.min(prog, .985) * dur;
-      if (holdLoop) {
-        if (target === null || target > holdEdge + HOLD_EXIT) {
-          holdLoop = false;   // real milestone advanced — pacing resumes below
-        } else {
-          // Still waiting: loop the ambient window under the edge. The
-          // trigger leads the edge by the fade span so the outgoing copy
-          // stays inside the window and never crosses the boundary.
-          if (cur.currentTime >= holdEdge - HOLD_XFADE_LEAD) {
-            holdSwap(false);
-          } else {
-            if (cur.paused && !cur.ended) void cur.play().catch(() => {});
-            if (cur.playbackRate !== HOLD_RATE) cur.playbackRate = HOLD_RATE;
-          }
-        }
-      }
-      if (!holdLoop) {
-        if (target === null) {
-          // Released — real completion confirmed. Catch up to the authored
-          // online boundary at bounded speed, then settle to natural pace.
-          const rate = cur.currentTime < onlineAt ? MAX_CATCHUP : 1;
-          if (cur.paused && !cur.ended) void cur.play().catch(() => {});
-          if (Math.abs(cur.playbackRate - rate) > .06) cur.playbackRate = rate;
-        } else {
-          const drift = target - cur.currentTime;
-          if (drift <= -.02) {
-            // Ahead of real progress — enter the ambient hold loop at this
-            // edge instead of freezing on a dead frame.
-            holdLoop = true; holdEdge = target;
-            holdSwap(true);
-          } else {
-            if (cur.paused) void cur.play().catch(() => {});
-            // Rate follows the gap: a .35s lead is natural speed, deeper
-            // backlog ramps toward the 1.75x cap, near-zero drifts crawl.
-            const rate = clamp(drift / .35, .15, MAX_CATCHUP);
-            if (Math.abs(cur.playbackRate - rate) > .06) cur.playbackRate = rate;
-          }
-        }
-      }
-      // Fires on both the gated and released paths — crossing the online
-      // caption is itself a logged transition.
+      if (cur.paused && !cur.ended) void cur.play().catch(() => {});
+      if (Math.abs(cur.playbackRate - 1) > .02) cur.playbackRate = 1;
       reportClipCaption(cur);
     }
   }
@@ -473,7 +376,6 @@ function triggerFault(details = {}) {
   const progress = externalProgress?.value ?? clamp(clock.time / manifest.duration);
   const started = clock.triggerFault(details, reduced, progress);
   host({ type: 'startup-fault', message: clock.diagnostics.message });
-  holdLoop = false;   // a fault owns the surface — drop any stale hold state
   // Fault is a new surface truth — any stale green online styling clears.
   $('status').classList.remove('online');
   $('detail').classList.remove('online');
@@ -735,7 +637,6 @@ async function boot() {
     const onlineCap = clipGates.find(c => c.id === 'online') ?? clipGates[clipGates.length - 1];
     onlineGate = onlineCap.gate;
     onlineAt = onlineCap.at;
-    holdAt = clipTimeline?.finalizingHold?.at ?? onlineAt;
     bootLoopStart = clipTimeline?.onlineTail?.loopStart ?? onlineAt;
     bootLoopEnd = clipTimeline?.onlineTail?.loopEnd ?? (clipTimeline?.duration ?? Infinity);
   }

@@ -472,6 +472,11 @@ internal sealed class SplashForm : Form
                     break;
                 case "splash-error":
                     _webFailed = true;
+                    BackendProcess.NoteStartup(
+                        Path.Combine(_appDir, "data", "logs"),
+                        "splash renderer failed: " +
+                        (doc.RootElement.TryGetProperty("reason", out var sre)
+                            ? sre.GetString() ?? "unknown" : "unknown"));
                     // No cinematic surface left to confirm — when the real
                     // completion lands the native fallback may claim ONLINE.
                     _progress.ConfirmSequence();

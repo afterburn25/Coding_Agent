@@ -506,8 +506,12 @@ class RecoverySequenceTests(unittest.TestCase):
 
 
 class StartupCaptionTimelineTests(unittest.TestCase):
-    """The startup clip is paced by startup_caption_timeline.json against
-    REAL StartupProgress — never by elapsed time or video position alone.
+    """The startup clip is pure cinematic background — it plays forward at
+    natural speed and loops the authored online tail. All on-screen truth
+    (captions, progress bar, ONLINE state) is DOM-driven from real
+    StartupProgress; startup_caption_timeline.json supplies the authored
+    caption boundaries (for transition logging), the online gate, and the
+    tail loop bounds.
     """
 
     SPLASH = ROOT / "desktop" / "ChatNexus.Desktop" / "splash"
@@ -555,47 +559,44 @@ class StartupCaptionTimelineTests(unittest.TestCase):
     def test_page_consumes_timeline_not_hardcoded_times(self):
         src = self.src
         self.assertIn("startup_caption_timeline.json", src)
-        # Piecewise real-progress → authored-clip-time mapping exists and is
-        # clamped by the finalizing hold frame until true completion.
-        self.assertIn("progressToAuthoredTime", src)
-        self.assertIn("clipTargetFor", src)
-        self.assertIn("finalizingHold", src)
+        # Caption boundaries come from the timeline for transition logging,
+        # the online gate/boundary, and the tail loop bounds.
+        self.assertIn("clipGates", src)
         self.assertRegex(src, r"clipGates\.find\(c => c\.id === 'online'\)")
-        # Loop bounds come from onlineTail, not duplicated literals.
         self.assertIn("onlineTail", src)
         for literal in ("13.8", "24.4"):
             self.assertNotIn(literal, src, f"hardcoded seam time {literal}")
 
-    def test_clip_cannot_cross_future_caption(self):
+    def test_clip_plays_forward_never_rewinds(self):
         src = self.src
-        # Ahead of the real-progress target the clip enters an ambient hold
-        # loop below the boundary — never crossing — and only exits once the
-        # milestone lets the target move past the hold edge again.
-        self.assertRegex(src, r"drift <= -\.\d+\)? \{\s*")
-        self.assertIn("holdLoop = true; holdEdge = target", src)
-        self.assertIn("target > holdEdge + HOLD_EXIT", src)
-        self.assertIn("holdEdge - HOLD_XFADE_LEAD", src)
-        # The loop window stays strictly under the hold edge, so the next
-        # caption boundary can never be reached ahead of real progress.
-        self.assertIn("holdEdge - HOLD_WIN", src)
-        # Pacing authority is the host-posted progress, not wall clock.
-        self.assertIn("externalProgress?.value", src)
-        self.assertIn("Math.min(t, holdAt)", src)
+        # The story plays at natural speed; play() is retried if a stall
+        # leaves the element paused, and the rate is only ever reset to 1.
+        self.assertIn("cur.paused && !cur.ended) void cur.play()", src)
+        self.assertIn("cur.playbackRate = 1", src)
+        # No footage is ever rewound, seeked backward, rate-shifted, or
+        # crossfaded mid-story — looping past events is what replayed the
+        # iris/unlock during milestone stalls.
+        self.assertNotIn("holdSwap", src)
+        self.assertNotIn("holdLoop", src)
+        self.assertNotIn("progressToAuthoredTime", src)
+        self.assertNotIn("clipTargetFor", src)
+        self.assertNotIn("MAX_CATCHUP", src)
+        self.assertNotIn("const drift", src)
+        # The boot clip's position is never seeked — the only seek in the
+        # module is the tail-loop handoff onto the idle copy (plus the
+        # fault/recovery clip resets, which are separate elements).
+        self.assertEqual(len(re.findall(r"nxt\.currentTime\s*=", src)), 1)
+        self.assertNotIn("cur.currentTime =", src)
+        self.assertNotIn("bootvid.currentTime =", src)
 
-    def test_hold_keeps_ambient_motion(self):
+    def test_tail_loops_until_dismissal(self):
         src = self.src
-        # A stalled milestone loops live footage under the edge instead of
-        # freezing on a dead frame — the two clip copies ping-pong a short
-        # window with a crossfade.
-        self.assertIn("function holdSwap(", src)
-        self.assertIn("HOLD_WIN", src)
-        self.assertIn("HOLD_RATE", src)
-        # A fault clears any stale hold so the error surface owns the truth.
-        self.assertIn("holdLoop = false", src)
-
-    def test_catchup_is_bounded(self):
-        self.assertRegex(self.src, r"MAX_CATCHUP\s*=\s*1\.75")
-        self.assertIn("clamp(drift / .35, .15, MAX_CATCHUP)", self.src)
+        # End of footage hands off to the idle copy looping the authored
+        # online tail — the only loop, and only past the unique events.
+        self.assertIn("startBootSwap", src)
+        self.assertIn("bootLoopStart", src)
+        self.assertIn("bootLoopEnd", src)
+        self.assertIn("nxt.currentTime = bootLoopStart", src)
 
     def test_online_boundary_requires_true_completion(self):
         src = self.src
