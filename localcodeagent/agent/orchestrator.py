@@ -704,10 +704,10 @@ class AgentOrchestrator:
         clock = cls.current_time_snapshot()
 
         def _sem(sid: str, act: str, text: str,
-                 *spans: str) -> tuple:
+                 *spans: str, frame=None) -> tuple:
             return (SemanticResponse(
                 facts=[text], semantic_id=sid, speech_act=act,
-                exact_spans=[s for s in spans if s]), text)
+                exact_spans=[s for s in spans if s], frame=frame), text)
 
         time_queries = {
             "what time is it", "what is the time", "what's the time",
@@ -778,7 +778,7 @@ class AgentOrchestrator:
             from ..context import realize as _rz
             return _sem("capability", "answer", cls._builtin_render(
                 "capability", _rz.CAPABILITY_VARIANTS,
-                intent="capability"))
+                intent="capability"), frame=_rz.capability_frame())
 
         self_learning_phrases = (
             "can you be self learning", "can you be self-learning", "can you self learn",
@@ -789,7 +789,8 @@ class AgentOrchestrator:
             from ..context import realize as _rz
             return _sem("self_learning", "answer", cls._builtin_render(
                 "self_learning", _rz.SELF_LEARNING_VARIANTS,
-                intent="self_learning"))
+                intent="self_learning"),
+                frame=_rz.self_learning_frame())
 
         if normalized in {
             "who are you", "what are you", "what is your name", "what's your name", "whats your name",
@@ -804,6 +805,36 @@ class AgentOrchestrator:
     def builtin_utility_response(cls, user_text: str) -> str | None:
         pair = cls.builtin_semantic(user_text)
         return pair[1] if pair else None
+
+    # "Say that differently" — re-realize the last semantic reply from
+    # the SAME MeaningFrame without rerunning tools (§39–§40).
+    _REPHRASE_REQUESTS = {
+        "say that differently", "say it differently",
+        "say that another way", "say it another way",
+        "say it again differently", "rephrase that", "rephrase it",
+        "reword that", "reword it", "word that differently",
+        "word it differently", "phrase it differently",
+        "phrase that differently", "different wording",
+        "try different words", "try saying that differently",
+        "say it differently please", "youre repeating yourself",
+        "you're repeating yourself", "stop repeating yourself",
+        "you keep saying the same thing", "same thing again",
+        "say something different",
+    }
+
+    def _rephrase_reply(self, user_text: str):
+        """Normalized rephrase request → fresh surface of the last
+        MeaningFrame; None when the request isn't a rephrase or nothing
+        rephraseable was rendered."""
+        from ..context.realize import RenderedReply
+        normalized = re.sub(
+            r"\s+", " ", str(user_text).strip().lower()).strip("!?., ")
+        if normalized not in self._REPHRASE_REQUESTS:
+            return None
+        text = _BUILTIN_RENDERER.rephrase_last()
+        if not text:
+            return None
+        return RenderedReply(text=text, speech_act="answer")
 
     def _github_status_reply(self, user_text: str):
         """GitHub connection/status questions answered from the live
@@ -864,6 +895,9 @@ class AgentOrchestrator:
         active persona's speech genome when a resolver is wired; the
         canonical text untouched otherwise. → RenderedReply | None."""
         from ..context.realize import RenderedReply
+        rephrase = self._rephrase_reply(user_text)
+        if rephrase is not None:
+            return rephrase
         github_lane = self._github_status_reply(user_text)
         if github_lane is not None:
             return github_lane
@@ -872,10 +906,10 @@ class AgentOrchestrator:
             return None
         sem, canonical = pair
         sp = self._speech(user_text)
-        if not sp:
-            return RenderedReply(text=canonical,
-                                 speech_act=sem.speech_act or "answer")
-        genome, ctx = sp
+        genome, ctx = sp if sp else (None, None)
+        # The genome supplies persona style when wired; either way the
+        # canonical body is a MeaningFrame — realized fresh every time,
+        # never replayed as fixed prose.
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent=sem.semantic_id or "answer",
             canonical=canonical)

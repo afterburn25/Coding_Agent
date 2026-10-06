@@ -88,6 +88,11 @@ class SemanticResponse:
     # delivery plan's emphasis and never alters them.
     exact_spans: list[str] = field(default_factory=list)
     register: str = ""                # one of REGISTERS; "" → "casual"
+    # Optional pre-built MeaningFrame (context/realization.py). When
+    # present the renderer realizes the BODY from atoms — canonical is
+    # treated as meaning, not wording.
+    frame: Any = None
+    canonical: str = ""
 
 
 @dataclass
@@ -155,6 +160,11 @@ class RenderedReply:
     # True when a real speech genome shaped this reply (False = the
     # neutral default genome or the no-persona legacy lane).
     genome_rendered: bool = False
+    # Realization observability (§37): the realized BODY without wrapper,
+    # its structure signature, and how it was produced.
+    body: str = ""
+    structure_signature: str = ""
+    realization: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -166,6 +176,9 @@ class RenderedReply:
             "micro_reaction": self.micro_reaction,
             "used_address": self.used_address,
             "genome_rendered": self.genome_rendered,
+            "body": self.body,
+            "structure_signature": self.structure_signature,
+            "realization": dict(self.realization),
         }
 
 
@@ -176,28 +189,141 @@ class ResponseFingerprint:
     closing: str
     text_hash: str
     ts: float
+    semantic_id: str = ""
+    structure: str = ""
+    # Normalized body surface — needed so cross-restart similarity checks
+    # still have real text to compare (bounded, normalized words only).
+    norm_text: str = ""
 
 
 class ResponseLedger:
     """Rolling bounded history of realizations — the repetition memory
     (§41). Cooldowns: an opening/closing/pattern just used can't be
-    picked again until enough different ones intervene."""
+    picked again until enough different ones intervene.
 
-    def __init__(self, maxlen: int = 24):
+    Per-semantic history feeds the similarity gate: the same semantic_id
+    may not recur with the same wording, opening, closing, or structure.
+    Optional JSONL persistence means a restart doesn't erase repetition
+    awareness — rows store surface metadata (hash, signatures, bounded
+    normalized text), never reasoning.
+    """
+
+    def __init__(self, maxlen: int = 24, persist_path: str = ""):
         self._rows: list[ResponseFingerprint] = []
+        self._by_semantic: dict[str, list[ResponseFingerprint]] = {}
         self._maxlen = maxlen
+        # Per-semantic history must cover the whole soak window —
+        # exact-dup rejection compares against this full set, so a cap
+        # of 10 lets bodies recur after 10 renders (§16).
+        self._per_id_max = 64
+        self._persist_path = ""
+        if persist_path:
+            self.attach(persist_path)
 
-    def record(self, intent: str, text: str) -> ResponseFingerprint:
+    # -- persistence ---------------------------------------------------
+
+    def attach(self, path: str) -> None:
+        """Enable JSONL persistence — load existing rows, append future
+        ones. Failures degrade to in-memory only."""
+        from pathlib import Path
+        import json
+        self._persist_path = str(path)
+        try:
+            p = Path(path)
+            if not p.exists():
+                return
+            for line in p.read_text(encoding="utf-8").splitlines()[-400:]:
+                try:
+                    row = json.loads(line)
+                    fp = ResponseFingerprint(
+                        intent=row.get("intent", ""),
+                        opening=row.get("opening", ""),
+                        closing=row.get("closing", ""),
+                        text_hash=row.get("text_hash", ""),
+                        ts=float(row.get("ts") or 0),
+                        semantic_id=row.get("semantic_id", ""),
+                        structure=row.get("structure", ""),
+                        norm_text=row.get("norm_text", "")[:400])
+                    self._rows.append(fp)
+                    if fp.semantic_id:
+                        self._by_semantic.setdefault(
+                            fp.semantic_id, []).append(fp)
+                except Exception:
+                    continue
+            self._rows = self._rows[-self._maxlen:]
+            for sid, rows in self._by_semantic.items():
+                self._by_semantic[sid] = rows[-self._per_id_max:]
+        except OSError:
+            pass
+
+    def _persist(self, fp: ResponseFingerprint) -> None:
+        if not self._persist_path:
+            return
+        import json
+        from pathlib import Path
+        try:
+            p = Path(self._persist_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "intent": fp.intent, "opening": fp.opening,
+                    "closing": fp.closing, "text_hash": fp.text_hash,
+                    "ts": fp.ts, "semantic_id": fp.semantic_id,
+                    "structure": fp.structure,
+                    "norm_text": fp.norm_text[:400]}) + "\n")
+        except OSError:
+            pass
+
+    # -- recording -------------------------------------------------------
+
+    def record(self, intent: str, text: str, *,
+               semantic_id: str = "", structure: str = "",
+               body: str = "") -> ResponseFingerprint:
+        from .realization import structure_signature, text_fingerprint
         fp = ResponseFingerprint(
             intent=intent,
             opening=opening_of(text),
             closing=closing_of(text),
             text_hash=fingerprint(text),
             ts=time.time(),
+            semantic_id=semantic_id,
+            structure=structure or structure_signature(body or text),
+            norm_text=_norm_text(body or text)[:400],
         )
         self._rows.append(fp)
         self._rows = self._rows[-self._maxlen:]
+        if semantic_id:
+            hist = self._by_semantic.setdefault(semantic_id, [])
+            hist.append(fp)
+            self._by_semantic[semantic_id] = hist[-self._per_id_max:]
+        self._persist(fp)
         return fp
+
+    # -- per-semantic history ---------------------------------------------
+
+    def recent_bodies(self, semantic_id: str, n: int = 5) -> list[str]:
+        """Normalized bodies of the last N renders of one semantic_id —
+        the similarity gate's comparison set."""
+        return [r.norm_text for r in
+                self._by_semantic.get(semantic_id, [])[-n:]
+                if r.norm_text]
+
+    def seen_bodies(self, semantic_id: str) -> set[str]:
+        """Every normalized body ever rendered for this semantic_id —
+        exact-duplicate checks compare against the full history, not
+        just the recent window (§16)."""
+        return {r.norm_text for r in
+                self._by_semantic.get(semantic_id, []) if r.norm_text}
+
+    def recent_structures(self, semantic_id: str, n: int = 3) -> list[str]:
+        return [r.structure for r in
+                self._by_semantic.get(semantic_id, [])[-n:]
+                if r.structure]
+
+    def repeat_index(self, semantic_id: str) -> int:
+        return len(self._by_semantic.get(semantic_id, []))
+
+    # -- existing whole-history surfaces -----------------------------------
 
     def repetition_score(self, text: str, *, intent: str = "") -> dict[str, Any]:
         """Observable repetition metric (§50) — diagnostics metadata,
@@ -352,6 +478,9 @@ class PersonaRenderer:
         self._rng = rng or random.Random()
         self.cooldowns = PhraseCooldowns()
         self._repeat_idx: dict[str, int] = {}
+        from .realization import TierA
+        self._realizer = TierA(self._rng)
+        self._last_frame: Any = None   # for "say that differently"
 
     def render(self, semantic_id: str, variants: list[str] | tuple[str, ...],
                *, intent: str = "") -> str:
@@ -412,10 +541,14 @@ class PersonaRenderer:
         body (verbatim facts + confidence phrasing) → closing family →
         delivery plan → ledger/cooldown bookkeeping.
 
-        ``canonical`` supplies a pre-composed authoritative body (canned
-        responses, Answer Memory, identity facts): it passes through
-        untouched — genome color goes in the wrapper, never the fact.
+        ``canonical`` supplies the authoritative MEANING (canned
+        responses, Answer Memory, identity facts): it is decomposed into
+        a MeaningFrame and re-realized each call — the fact is immutable,
+        the wording is not.
         """
+        from .realization import (
+            frame_from_canonical, frame_from_semantic, structure_signature,
+            too_similar, validate_realization)
         g = genome or derive_genome({})
         ctx = ctx or RenderContext()
         act = sem.speech_act or "answer"
@@ -424,7 +557,8 @@ class PersonaRenderer:
         self.cooldowns.tick()
 
         rep_key = sem.semantic_id or f"{act}:{fingerprint(' '.join(sem.facts))}"
-        repeat = self._repeat_idx.get(rep_key, 0)
+        repeat = max(self._repeat_idx.get(rep_key, 0),
+                     self.ledger.repeat_index(rep_key))
 
         open_fam, opening = self._pick_opening(g, act, serious, ctx,
                                              repeat)
@@ -435,15 +569,23 @@ class PersonaRenderer:
         # stacking both reads as noise.
         micro = "" if open_fam == "reaction" else self._maybe_micro(
             g, act, serious, ctx)
-        address = self._maybe_address(g, act, ctx)
-        if canonical:
-            body = canonical.strip()
-            if (repeat >= 1 and not serious
-                    and act not in ("greet", "farewell")):
-                ack = self._choose(REPEAT_ACKS, "opening", g)
-                body = f"{ack} {body}".strip() if ack else body
+        # Greeting/farewell slot clauses carry their own address
+        # placement — the generic address injector would double it.
+        address = "" if act in ("greet", "farewell") \
+            else self._maybe_address(g, act, ctx)
+        canon = canonical or getattr(sem, "canonical", "") or ""
+        meta: dict[str, Any] = {"tier": "a", "rerenders": 0,
+                                "fallback": ""}
+        if canon or getattr(sem, "frame", None) is not None:
+            body, body_meta = self._realize_body(
+                sem, canon, rep_key, act, serious, repeat, g)
+            meta.update(body_meta)
         else:
             body = self._compose_body(sem, g, ctx, serious, repeat)
+        if (canon and repeat >= 1 and not serious
+                and act not in ("greet", "farewell")):
+            ack = self._choose(REPEAT_ACKS, "opening", g)
+            body = f"{ack} {body}".strip() if ack else body
         close_fam, closing = self._pick_closing(g, act, serious, sem, ctx)
 
         # Order: [micro] [opening] [address] body [closing]
@@ -453,15 +595,125 @@ class PersonaRenderer:
         text = re.sub(r"\s+([.,!?])", r"\1", text)
         text = re.sub(r"[ ]{2,}", " ", text).strip()
 
+        sig = structure_signature(body)
+        meta["structure"] = sig
         self._repeat_idx[rep_key] = repeat + 1
-        self.ledger.record(intent or act, text)
+        self.ledger.record(intent or act, text, semantic_id=rep_key,
+                           structure=sig, body=body)
         plan = self._delivery_plan(g, sem, act, ctx, serious)
         return RenderedReply(
             text=text, plan=plan, speech_act=act,
             repeat_index=repeat, opening_family=open_fam,
             closing_family=close_fam, micro_reaction=micro,
             used_address=bool(address),
-            genome_rendered=genome is not None)
+            genome_rendered=genome is not None,
+            body=body, structure_signature=sig, realization=meta)
+
+    def _realize_body(self, sem: SemanticResponse, canonical: str,
+                      rep_key: str, act: str, serious: bool,
+                      repeat: int, g: dict) -> tuple[str, dict]:
+        """Canonical → MeaningFrame → SurfacePlan → fresh body.
+
+        Rejection loop: candidates that fail semantic validation or land
+        too close to recent same-id renders are re-rolled; last resort
+        returns the canonical itself — wording may repeat but truth never
+        degrades."""
+        from .realization import (
+            body_similarity, frame_from_canonical, frame_from_semantic,
+            too_similar, validate_realization)
+        meta: dict[str, Any] = {"tier": "a", "rerenders": 0,
+                                "fallback": ""}
+        frame = frame_from_semantic(sem)
+        if not (frame.facts or frame.atoms or frame.slots) and canonical:
+            extracted = frame_from_canonical(
+                canonical, semantic_id=rep_key, speech_act=act)
+            extracted.exact_spans = sorted(set(
+                extracted.exact_spans) | set(frame.exact_spans))
+            extracted.confidence = frame.confidence
+            extracted.register = frame.register
+            frame = extracted
+        if not frame.semantic_id:
+            frame.semantic_id = rep_key
+        if not frame.speech_act:
+            frame.speech_act = act
+        self._last_frame = frame
+        if not (frame.facts or frame.atoms or frame.slots):
+            meta["fallback"] = "empty_frame"
+            return canonical.strip(), meta
+        recents = self.ledger.recent_bodies(rep_key)
+        seen = self.ledger.seen_bodies(rep_key)
+        avoid_struct = tuple(
+            s.split(":")[0] for s in self.ledger.recent_structures(rep_key))
+        norm_c = _norm_text
+        best = ""
+        best_score = 1e9
+        # Slots have a bounded clause space — give them a deep retry
+        # budget so exhaustion (canonical echo) is genuinely last-resort.
+        attempts = 24 if frame.slots else 10
+        for attempt in range(attempts):
+            plan = self._realizer.plan(
+                frame, repeat=repeat + attempt,
+                avoid_structures=avoid_struct)
+            cand = self._realizer.realize(frame, plan).strip()
+            if not cand:
+                meta["rerenders"] += 1
+                continue
+            violations = validate_realization(cand, frame)
+            if violations:
+                meta["rerenders"] += 1
+                meta.setdefault("violations", []).extend(violations[:3])
+                continue
+            n_cand = norm_c(cand)
+            # Never emit a body this semantic_id has already produced —
+            # exhaust retries instead of echoing history.
+            if n_cand in seen:
+                meta["rerenders"] += 1
+                continue
+            sim = too_similar(cand, recents)
+            if not sim:
+                return cand, meta
+            meta["rerenders"] += 1
+            # Keep the least-similar valid candidate as the exhaustion
+            # fallback — not the canonical, which would be a guaranteed
+            # repeat.
+            score = max(
+                (sum(1 for v in vs.values() if v)
+                 for vs in
+                 (body_similarity(cand, p) for p in recents)),
+                default=0)
+            if score < best_score:
+                best, best_score = cand, score
+        if best:
+            meta["fallback"] = "similarity_exhausted"
+            return best, meta
+        meta["fallback"] = "canonical"
+        return canonical.strip(), meta
+
+    def rephrase_last(self, *, avoid_structure: str = "") -> str:
+        """"Say that differently" — re-realize the last MeaningFrame with
+        elevated novelty pressure. Returns "" when nothing rephraseable
+        was rendered (a model reply, not a semantic one)."""
+        from .realization import structure_signature
+        frame = self._last_frame
+        if frame is None:
+            return ""
+        recents = self.ledger.recent_bodies(frame.semantic_id)
+        avoid = tuple(s.split(":")[0] for s in
+                      self.ledger.recent_structures(frame.semantic_id))
+        if avoid_structure:
+            avoid = avoid + (avoid_structure,)
+        seen = self.ledger.seen_bodies(frame.semantic_id)
+        for attempt in range(12):
+            plan = self._realizer.plan(
+                frame, repeat=10 + attempt, avoid_structures=avoid)
+            cand = self._realizer.realize(frame, plan).strip()
+            if cand and _norm_text(cand) not in seen:
+                self.ledger.record(
+                    frame.speech_act or "answer", cand,
+                    semantic_id=frame.semantic_id,
+                    structure=structure_signature(cand), body=cand)
+                return cand
+        return ""
 
     # -- act-shaped opening families -----------------------------------
 
@@ -933,6 +1185,75 @@ IDENTITY_VARIANTS = (
     "Nexus — a person, not the machine. Nexus Core is where "
     "I live.",
 )
+
+# ---------------------------------------------------------------------------
+# Lane MeaningFrames — structured semantic atoms for the canned surfaces.
+# Every atom entry is a tuple of interchangeable phrasings; the realizer
+# shuffles order, structure, connectors and leads, so the surface space is
+# combinatorial rather than a handful of fixed paragraphs (§33).
+# ---------------------------------------------------------------------------
+from .realization import MeaningFrame  # noqa: E402
+
+
+def capability_frame() -> MeaningFrame:
+    """What Nexus can do — as atoms, not a paragraph. Order, grouping,
+    lead and connectors are the realizer's job."""
+    return MeaningFrame(
+        semantic_id="capability", speech_act="answer",
+        intent="capability",
+        lead=["I can", "I'm able to", "I'm set up to", "I'm built to"],
+        atoms=[
+            ("inspect and edit code", "read and modify code",
+             "work directly in the codebase"),
+            ("build features", "build out features",
+             "write new functionality"),
+            ("debug errors", "trace bugs", "hunt down failures"),
+            ("run tests and commands behind permission gates",
+             "run tests and shell commands under the permission gates",
+             "execute tests and commands once permitted"),
+            ("research technical and general-knowledge questions",
+             "research technical or general questions",
+             "dig into technical and general knowledge"),
+            ("work with Git and GitHub when authorized",
+             "use Git and GitHub once you've authorized it",
+             "handle GitHub work when access is granted"),
+            ("manage local models", "operate the local model stack",
+             "load and manage the local models"),
+            ("use the configured local image tools",
+             "generate and edit images through the configured backends",
+             "drive the local image systems"),
+            ("learn across conversations through Nexus Brain",
+             "carry approved learning between sessions via Nexus Brain",
+             "retain approved knowledge through Nexus Brain"),
+        ])
+
+
+def self_learning_frame() -> MeaningFrame:
+    """Nexus Brain learning — atoms + alternates; the affirmative is
+    carried by the answer act itself."""
+    return MeaningFrame(
+        semantic_id="self_learning", speech_act="answer",
+        intent="self_learning",
+        lead=["I can", "Nexus Brain can", "with Nexus Brain, I can",
+              "Nexus Brain lets me"],
+        atoms=[
+            ("bank verified general knowledge",
+             "store verified general knowledge",
+             "keep verified general knowledge"),
+            ("remember your facts and preferences",
+             "hold on to facts and preferences",
+             "keep track of what you prefer"),
+            ("learn conversational patterns from feedback and "
+             "corrections",
+             "pick up conversational patterns from your feedback",
+             "adapt conversational patterns through corrections and "
+             "feedback"),
+            ("carry approved training examples across model "
+             "replacements",
+             "keep approved training examples across model replacements",
+             "retain approved examples across model replacements"),
+        ])
+
 
 # Answer-Memory repeat acknowledgements (§37): when the identical stored
 # fact would replay back-to-back, the wrapper marks it a repeat honestly

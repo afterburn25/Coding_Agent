@@ -414,7 +414,8 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             # Surface wording varies; the capability FACTS are stable
             # slots — code work, general knowledge, Nexus Brain.
             self.assertIn("code", result.content.lower())
-            self.assertIn("general-knowledge", result.content)
+            self.assertRegex(result.content.lower(),
+                             r"general[- ](knowledge|questions)")
             self.assertIn("Nexus Brain", result.content)
             self.assertEqual(result.task["status"], "completed")
 

@@ -198,7 +198,8 @@ class TestRendering(unittest.TestCase):
             self.assertIn(fact, out.text)
 
     def test_identity_canonical_verbatim(self):
-        """Creator-locked facts survive genome rendering verbatim."""
+        """Creator-locked facts survive realization — wording may vary,
+        the identity atoms (names, workstation) may not."""
         canonical = ("I'm Nexus — I live and work in Nexus Core, the "
                      "workstation my father John Hamburn built.")
         g = derive_genome(personality_for("sassy"))
@@ -207,7 +208,8 @@ class TestRendering(unittest.TestCase):
         for i in range(4):
             out = r.render_semantic(sem, g, self.ctx,
                                     canonical=canonical)
-            self.assertIn(canonical, out.text)
+            for locked in ("Nexus", "Nexus Core", "John Hamburn"):
+                self.assertIn(locked, out.text)
 
     def test_verified_gets_no_hedge(self):
         g = derive_genome(personality_for("calm"))
