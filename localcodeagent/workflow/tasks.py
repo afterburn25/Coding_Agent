@@ -31,6 +31,7 @@ class TaskRecord:
     final_content: str = ""
     error: str = ""
     research: dict[str, Any] = field(default_factory=dict)
+    intel: dict[str, Any] = field(default_factory=dict)
     reverted: bool = False
     interrupted_from: str = ""
     recovery_count: int = 0

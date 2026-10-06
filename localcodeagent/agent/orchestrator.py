@@ -330,6 +330,17 @@ class AgentOrchestrator:
         # Task-scoped so a concurrent chat drive (or a parallel mission node)
         # can't steal or clear another lane's attribution.
         self._mission_by_task: dict[str, str] = {}
+        # Intelligence Governor — metacognitive assessment + bounded
+        # cognitive-op ladder per turn. Capabilities reflect the lanes
+        # this install actually has; absent ones degrade cleanly.
+        from ..governor import IntelligenceGovernor
+        caps = {"model"}
+        if self.research is not None:
+            caps.add("research")
+        caps.add("verify")
+        if self.tools is not None:
+            caps.add("tools")
+        self.governor = IntelligenceGovernor(capabilities=caps)
         self._sessions: dict[str, _AgentSession] = {}
         # task_id -> thread currently executing a synchronous drive for that
         # task. Registered for the whole drive (including tool/verification
@@ -5254,6 +5265,33 @@ class AgentOrchestrator:
         # current/explicit research) and by the pre-answer research gate.
         from ..research import policy as _research_policy
         policy_decision = self.web_policy.decide(user_text)
+        memory_match = None  # bound only when Answer Memory is consulted
+        # Intelligence Governor — metacognitive assessment + bounded
+        # cognitive-op ladder computed BEFORE lane selection: knowledge
+        # state, stakes, novelty, and think mode decide how much
+        # reasoning the turn earns. Stored on the task + emitted for
+        # observability; ops map onto existing lanes.
+        think_mode = self._think_mode.get(conversation_id, "auto")
+        intel_plan = None
+        try:
+            last_ev = ((self._recent_research(conversation_id) or {})
+                       .get("session") or {}).get("evidence") or None
+            km_hit = bool(
+                self.knowledge_memory is not None
+                and self.knowledge_memory.prompt_context(user_text))
+            intel_plan = self.governor.plan(
+                user_text,
+                policy=policy_decision,
+                knowledge_hit=km_hit,
+                last_evidence=last_ev,
+                think_mode=think_mode,
+                prior_uncertain=False,
+            )
+            self.tasks.update(task.id, intel=intel_plan.as_dict())
+            self._safe_emit(event_callback,
+                            {"type": "intel", "plan": intel_plan.as_dict()})
+        except Exception:
+            intel_plan = None
         # Explicit web asks and current/volatile questions go to research —
         # a stored answer learned days ago must not replay over fresh
         # evidence. Recommended/optional levels may still use a trusted hit.
@@ -5588,6 +5626,15 @@ class AgentOrchestrator:
             policy_decision.level == _research_policy.WEB_OPTIONAL
             and research_mode in {"auto", "official", "balanced", "deep"}
         )
+        # Governor modulation — think=fast takes the cheapest sufficient
+        # path: optional research is skipped (required/recommended still
+        # run; a fast lane must not silently serve stale answers).
+        if (
+            intel_plan is not None
+            and intel_plan.assessment.think_mode == "fast"
+            and policy_decision.level == _research_policy.WEB_OPTIONAL
+        ):
+            wants_research = False
         # Follow-up reuse: context-dependent turns ("what changed?",
         # "tell me more", "and the second one?") resolve against the last
         # session's evidence instead of issuing an unrelated search.
