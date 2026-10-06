@@ -527,6 +527,13 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
                 t) and not _IMAGE_OP_RE.search(t):
         return False, 0.0, []
 
+    # Hypothetical "imagine" frames request thought, not an artifact —
+    # "imagine you were an AI", "imagine if it rained", "imagine what
+    # she'd say". "Imagine a dragon" (direct object) still generates.
+    if re.search(r"\bimagine\s+(?:if|you|we|i\b|being|that|this|what|"
+                 r"how|when|where|why|who|there|it|they|he|she)\b", t):
+        return False, 0.0, []
+
     visual_noun = bool(_VISUAL_NOUN_RE.search(t))
     visual_adj = bool(_VISUAL_ADJ_RE.search(t))
     non_image = bool(_NON_IMAGE_RE.search(t))

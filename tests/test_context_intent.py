@@ -90,6 +90,18 @@ class TestImageParaphrases(unittest.TestCase):
             env = understand_turn(text)
             self.assertNotEqual(env.primary_intent, IMAGE_GENERATION, text)
 
+    def test_hypothetical_imagine_is_not_a_job(self):
+        """'Imagine you were/if/what' frames thought, not an artifact —
+        'imagine a dragon' (direct object) still generates."""
+        for text in ("imagine you were an AI. what would you say",
+                     "imagine if it rained",
+                     "imagine what she looks like",
+                     "imagine being somewhere else"):
+            env = understand_turn(text)
+            self.assertNotEqual(env.primary_intent, IMAGE_GENERATION, text)
+        env = understand_turn("imagine a dragon")
+        self.assertEqual(env.primary_intent, IMAGE_GENERATION)
+
     def test_subject_extraction(self):
         env = understand_turn(
             "generate an image of a photorealistic adult angel "

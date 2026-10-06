@@ -54,7 +54,9 @@ class RouterTests(unittest.TestCase):
                 "how could i have created you",
                 "if you're real then how could i have created you",
                 "who made you", "who created you", "did i make you",
-                "why are you ignoring me", "are you a bot"):
+                "why are you ignoring me", "are you a bot",
+                "if you were a function what would you do",
+                "you were a great help today"):
             with self.subTest(prompt=prompt):
                 d = self.router.choose(prompt)
                 self.assertEqual(d.role, "utility")

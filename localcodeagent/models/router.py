@@ -135,6 +135,13 @@ class ModelRouter:
         # create/make/fix aimed at a person (or nothing) isn't work.
         # An artifact object ("a logo", "the repo", "this") keeps the
         # request on the work ladder so tool-capable tiers get real tasks.
+        # A pronoun+copula+article phrase describes the PERSON, not a
+        # deliverable — "if you were a function" is hypothetical chat,
+        # while "why did the build fail" names real work.
+        artifact_scan = re.sub(
+            r"\b(?:you|i|he|she|it|we|they)\s+"
+            r"(?:were|was|'re|'m|am|is|are|seem\w*|becam\w*|becom\w*)\s+"
+            r"(?:a|an|the)\s+[\w'-]+", " ", t)
         if (
             len(t) <= 320
             and re.match(
@@ -143,7 +150,7 @@ class ModelRouter:
                 r"if|tell me|show me)\b", t)
             and not re.search(
                 r"\b(?:a|an|the)\s+[\w'-]+|\bthis\b|\bthat\b"
-                r"|\bthese\b|\bthose\b", t)
+                r"|\bthese\b|\bthose\b", artifact_scan)
         ):
             return "utility", 0, ["question-shaped conversational request"]
 
