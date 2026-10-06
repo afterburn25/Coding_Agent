@@ -720,9 +720,11 @@ class TestDSP(unittest.TestCase):
             self.assertEqual(w.getnchannels(), 2)
             self.assertEqual(w.getframerate(), sr)
 
-    def test_trim_tail_artifact_cuts_isolated_blip(self):
-        # Speech + silence + a short stray-consonant blip at the very end —
-        # the Kokoro boundary artifact heard as a trailing "d".
+    def test_trim_tail_artifact_reattaches_isolated_blip(self):
+        # Speech + silence + a short stray-consonant island at the end —
+        # the Kokoro detached-phoneme artifact heard as a trailing
+        # "t"/"d" after a beat. The island is spliced back onto the word,
+        # not cut — it may be the word's real final consonant.
         sr = 24000
         rng = np.random.default_rng(0)
         t = np.arange(sr) / sr
@@ -733,8 +735,25 @@ class TestDSP(unittest.TestCase):
         tail = np.zeros(int(sr * 0.05))
         x = np.concatenate([speech, gap, blip, tail]).astype(np.float32)
         y = dsp.trim_tail_artifact(x, sr)
-        self.assertLessEqual(y.size, int(sr * 1.05))
-        self.assertGreaterEqual(y.size, int(sr * 0.95))
+        # Gap removed (~speech + pad + blip + tail), island kept.
+        self.assertLessEqual(y.size, int(sr * 1.15))
+        self.assertGreaterEqual(y.size, int(sr * 1.0))
+        # The island now attaches to the speech — no deep gap remains
+        # before the final voiced run.
+        frame = int(sr * 0.01)
+        env = np.sqrt((y[: y.size // frame * frame]
+                       .reshape(-1, frame) ** 2).mean(axis=1))
+        peak = float(env.max())
+        voiced = env > peak * 10 ** (-42 / 20)
+        last = len(voiced) - 1 - int(voiced[::-1].argmax())
+        run_start = last
+        while run_start > 0 and voiced[run_start - 1]:
+            run_start -= 1
+        run_peak = float(env[run_start:last + 1].max())
+        g = run_start
+        while g > 0 and env[g - 1] <= run_peak * 10 ** (-10 / 20):
+            g -= 1
+        self.assertLess((run_start - g) * 10, 40)
 
     def test_trim_tail_artifact_leaves_speech_alone(self):
         sr = 24000

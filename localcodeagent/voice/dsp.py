@@ -302,13 +302,23 @@ def limiter(x: np.ndarray, sr: int, ceiling: float = 0.89) -> np.ndarray:
 
 def trim_tail_artifact(x: np.ndarray, sr: int, *,
                        floor_db: float = -42.0, blip_ms: float = 140.0,
-                       gap_ms: float = 55.0, pad_ms: float = 30.0,
-                       end_slack_ms: float = 200.0) -> np.ndarray:
-    """Cut a TTS boundary artifact — the model sometimes emits a stray
-    consonant blip (heard as a trailing "d"/"t") after the real utterance
-    ends. Conservative: only trims when a short voiced island sits at the
-    very end of the clip, separated from the preceding speech by a clear
-    near-silent gap. Ordinary tails pass through untouched."""
+                       blip_min_ms: float = 15.0, gap_drop_db: float = 10.0,
+                       min_gap_ms: float = 18.0, max_gap_ms: float = 300.0,
+                       pad_ms: float = 8.0,
+                       end_slack_ms: float = 350.0) -> np.ndarray:
+    """Reattach a detached final phoneme — the Kokoro boundary artifact
+    heard as a trailing "t"/"d" after a beat of silence at the end of an
+    utterance. The island is a real final consonant emitted late: speech
+    decays, a deep dip follows, then a short loud burst sits stranded
+    before the clip ends. Cutting the island could eat a real consonant,
+    so we splice the gap out instead — the phoneme lands back on the word
+    and reads as a normal ending.
+
+    Detection is dip-relative, not floor-absolute: Kokoro's inter-phoneme
+    silence carries breath/noise around -30..-40 dB, above any absolute
+    floor, so the gap is measured against the island's own level.
+    Ordinary tails (long final run, no dip, island far from the end)
+    pass through untouched."""
     if x.ndim != 1 or x.size < int(sr * 0.3):
         return x
     frame = max(1, int(sr * 0.01))                    # 10 ms frames
@@ -323,26 +333,43 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     if not voiced.any():
         return x
     last = n - 1 - int(voiced[::-1].argmax())          # last voiced frame
-    # Walk the final voiced run — the candidate blip.
-    run_start = last
-    while run_start > 0 and voiced[run_start - 1]:
+    if (n - 1 - last) * 10 > end_slack_ms:
+        return x                                       # island not at the end
+    # Segment the island at a higher level — the dip separating it from
+    # speech carries Kokoro breath noise around -30..-40 dB, above the
+    # absolute floor, so the island never forms its own -42 dB run.
+    # Find the last "strong" run (>= -22 dB), then extend it down to the
+    # last voiced frame so a decaying release tail counts as one island.
+    strong = env > peak * (10.0 ** (-22.0 / 20.0))
+    if not strong.any():
+        return x
+    last_strong = n - 1 - int(strong[::-1].argmax())
+    run_start = last_strong
+    while run_start > 0 and strong[run_start - 1]:
         run_start -= 1
-    if last - run_start + 1 > int(blip_ms / 10):
-        return x                                       # tail is real speech
-    if n - 1 - last > int(end_slack_ms / 10):
-        return x                                       # blip not at the end
-    # Measure the silence gap before it — must clearly separate.
+    run_ms = (last - run_start + 1) * 10
+    if not blip_min_ms <= run_ms <= blip_ms:
+        return x                                       # real speech tail
+    # Measure the dip before it — contiguous frames below the island's
+    # own level. A genuine word-final plosive attaches to the vowel; a
+    # detached artifact sits behind a real gap.
+    run_peak = float(env[run_start:last + 1].max())
+    gap_floor = run_peak * (10.0 ** (-gap_drop_db / 20.0))
     gap_start = run_start
-    while gap_start > 0 and not voiced[gap_start - 1]:
+    while gap_start > 0 and env[gap_start - 1] <= gap_floor:
         gap_start -= 1
-    if run_start - gap_start < int(gap_ms / 10) or gap_start == 0:
-        return x                                       # no clean separation
-    cut = gap_start * frame + int(sr * pad_ms / 1000.0)
-    out = x[:cut].copy()
-    fade = min(out.size, int(sr * 0.006))
+    gap_ms_meas = (run_start - gap_start) * 10
+    if not min_gap_ms <= gap_ms_meas <= max_gap_ms or gap_start == 0:
+        return x                                       # attached or too far
+    # Splice: drop the gap, keep the island, fade both joints.
+    join = gap_start * frame + int(sr * pad_ms / 1000.0)
+    pre = x[:join].copy()
+    post = x[run_start * frame:].copy()
+    fade = min(int(sr * 0.004), pre.size, post.size)
     if fade > 1:
-        out[-fade:] *= np.linspace(1.0, 0.0, fade)
-    return out
+        pre[-fade:] *= np.linspace(1.0, 0.0, fade)
+        post[:fade] *= np.linspace(0.0, 1.0, fade)
+    return np.concatenate([pre, post])
 
 
 def to_stereo_decorrelated(main: np.ndarray, layers: list[np.ndarray], sr: int,
