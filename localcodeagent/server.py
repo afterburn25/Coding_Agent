@@ -912,6 +912,8 @@ class AppState:
             self_knowledge=lambda: self.self_knowledge,
             creator_address=lambda: self.profiles.preferred_address(
                 self.profiles.active()),
+            asker_is_creator=lambda: bool(
+                (self.profiles.active() or {}).get("is_creator")),
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""

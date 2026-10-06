@@ -598,13 +598,35 @@ class TestBuiltinIntegration(unittest.TestCase):
                 "how could i have created you", "how did i create you",
                 "did i make you", "do you have a father",
                 "where did you come from", "are you my creation",
-                "are you my daughter"):
+                "are you his daughter"):
             with self.subTest(q=q):
                 pair = agent.builtin_semantic(q)
                 self.assertIsNotNone(pair, q)
                 sid = getattr(pair[0], "semantic_id", "") or ""
                 self.assertTrue(sid.startswith("identity"), q)
                 self.assertIn("john hamburn", pair[1].lower())
+
+    def test_parentage_lane_acknowledges_creator(self):
+        from localcodeagent import identity as _ident
+        agent = self._agent()
+        # "are you my daughter" is a yes/no about the RELATIONSHIP — she
+        # must acknowledge the asker as her father/parent, not recite
+        # the canonical name. Unknown asker → canonical creator frame.
+        for q in ("are you my daughter", "are you really my daughter",
+                  "am i your father", "are you my biological daughter"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                self.assertIsNotNone(pair, q)
+                sid = getattr(pair[0], "semantic_id", "") or ""
+                self.assertTrue(sid.startswith("identity"), q)
+                self.assertIn("daughter", pair[1].lower())
+        # A non-creator asker gets the correction, not a false "yes".
+        for q in ("are you my daughter", "am i your father"):
+            with self.subTest(q=q):
+                out = _ident.response_for(q, asker_is_creator=False)
+                self.assertIsNotNone(out)
+                self.assertIn("john hamburn", out.lower())
+                self.assertIn("daughter", out.lower())
 
     def test_birth_lane_phrasings(self):
         agent = self._agent()

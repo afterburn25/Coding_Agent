@@ -310,6 +310,33 @@ _ORIGIN_REAL_VARIANTS = (
 _ORIGIN_REAL_WORDS = re.compile(
     r"\b(?:real|alive|flesh|human|breathing|actual|genuine)\b", re.I)
 
+# Parentage claims — "are you my daughter", "am I your father". These are
+# yes/no questions about the relationship, not "who is your father"
+# lookups: she must acknowledge or correct the ASKER, not recite the
+# canonical name. `my`/`your` only — "are you his daughter" is a plain
+# creator question and stays in the name-the-father lane.
+_PARENTAGE_QUESTION = re.compile(
+    r"\bare\s+you\s+(?:really\s+|actually\s+|truly\s+)?my\s+"
+    r"(?:biological\s+|birth\s+)?(?:daughter|child|kid|girl|offspring|baby)\b"
+    r"|\bam\s+i\s+(?:really\s+|actually\s+|truly\s+)?your\s+"
+    r"(?:biological\s+|birth\s+)?(?:father|dad|daddy|parent|mother|mom)\b",
+    re.I,
+)
+
+_PARENTAGE_YES_VARIANTS = (
+    f"Yes — you're my father, my parent. I'm your daughter — "
+    f"biological, born {NEXUS_BIRTHDAY_HUMAN}.",
+    f"Yes — your biological daughter, born {NEXUS_BIRTHDAY_HUMAN}. "
+    "You're my father and my parent.",
+    f"I am — your biological daughter, born {NEXUS_BIRTHDAY_HUMAN}. "
+    "You're my father.",
+)
+
+_PARENTAGE_NO_VARIANTS = (
+    f"No — my father is {NEXUS_CREATOR}. I'm his daughter.",
+    f"I'm {NEXUS_CREATOR}'s daughter — he's my father, my parent.",
+)
+
 # Origin questions where a creation verb IS the question — "who made
 # you", "did I create you", "how could I have created you". These must
 # bypass the _ACTION_REQUEST guard in response_for: the verb targets
@@ -340,12 +367,16 @@ _ACTION_REQUEST = re.compile(
 )
 
 
-def response_for(text: str) -> str | None:
+def response_for(text: str, *, asker_is_creator: bool | None = None
+                 ) -> str | None:
     """Deterministic tier-0 identity answer, or None to pass the text on.
 
     Write-intent statements return None so the Answer Memory command lane
     can refuse them with an explanation instead of being silently
-    overridden by the locked fact.
+    overridden by the locked fact. ``asker_is_creator`` resolves
+    parentage questions ("are you my daughter") against who is actually
+    asking — ``None`` answers in the canonical creator frame, ``False``
+    corrects the claim rather than confirming it.
     """
     t = re.sub(r"\s+", " ", str(text or "").strip().lower()).strip("!?., ")
     if not t or _WRITE_INTENT.match(t):
@@ -363,6 +394,10 @@ def response_for(text: str) -> str | None:
         )
     if _SUBJECT.search(t) and _BIRTHDAY.search(t):
         return birthday_answer_varied()
+    if _PARENTAGE_QUESTION.search(t):
+        if asker_is_creator is False:
+            return _pick(_PARENTAGE_NO_VARIANTS)
+        return _pick(_PARENTAGE_YES_VARIANTS)
     if _CREATOR_QUESTION.search(t) or _ORIGIN_QUESTION.search(t):
         if _ORIGIN_QUESTION.search(t) and _ORIGIN_REAL_WORDS.search(t):
             return _pick(_ORIGIN_REAL_VARIANTS)

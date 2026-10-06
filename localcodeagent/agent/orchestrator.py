@@ -213,6 +213,7 @@ class AgentOrchestrator:
         capability_registry=None,
         self_knowledge=None,
         creator_address=None,
+        asker_is_creator=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -264,6 +265,10 @@ class AgentOrchestrator:
         # Feeds the address-inversion repair: small models routinely flip
         # "I call you Father" into "you call me Father".
         self._creator_address = creator_address
+        # Zero-arg resolver returning bool — is the active profile the
+        # creator? Parentage identity answers ("are you my daughter")
+        # acknowledge vs. correct based on who is actually asking.
+        self._asker_is_creator = asker_is_creator
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -707,8 +712,21 @@ class AgentOrchestrator:
             pass
         return None
 
+    def _resolve_asker_is_creator(self) -> bool | None:
+        """Resolve the active profile's is_creator flag — None when no
+        resolver is wired (tests, bare construction) so identity answers
+        keep the canonical creator frame."""
+        try:
+            resolver = self._asker_is_creator
+            if callable(resolver):
+                return bool(resolver())
+        except Exception:
+            pass
+        return None
+
     @classmethod
-    def builtin_semantic(cls, user_text: str):
+    def builtin_semantic(cls, user_text: str,
+                         asker_is_creator: bool | None = None):
         """Deterministic local lanes expressed as WHAT-to-say —
         ``(SemanticResponse, canonical_text) | None``. The persona
         genome layer renders the surface; callers without one use the
@@ -767,7 +785,8 @@ class AgentOrchestrator:
         # contradict them. The genome may color the envelope; the fact
         # text itself passes through verbatim.
         from .. import identity
-        identity_answer = identity.response_for(normalized)
+        identity_answer = identity.response_for(
+            normalized, asker_is_creator=asker_is_creator)
         if identity_answer is not None:
             return _sem(f"identity:{normalized[:40]}", "answer",
                         identity_answer)
@@ -1102,7 +1121,8 @@ class AgentOrchestrator:
                        or self._github_target_reply(user_text))
         if github_lane is not None:
             return github_lane
-        pair = self.builtin_semantic(user_text)
+        pair = self.builtin_semantic(
+            user_text, self._resolve_asker_is_creator())
         if pair is None:
             return None
         sem, canonical = pair
@@ -4585,7 +4605,10 @@ class AgentOrchestrator:
             # style — they stay deterministic under a persona so no
             # model output can contradict them.
             from .. import identity
-            if identity.response_for(user_text) is None:
+            if identity.response_for(
+                    user_text,
+                    asker_is_creator=self._resolve_asker_is_creator()
+                    ) is None:
                 builtin_response = None
         brain_blocked_response = (
             "Image generation is disabled by the creator-locked Nexus Brain."
