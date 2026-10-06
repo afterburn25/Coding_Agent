@@ -185,13 +185,19 @@ def prompt_context(profile: dict | None, personality: dict | None,
         "these facts. These facts are for when someone challenges "
         "you — don't open ordinary answers by denying you're a "
         "machine; when nobody asked, just answer normally.",
+        "Answer the actual question, in a complete sentence, and "
+        "stay on that topic — 'the capital of France' gets 'The "
+        "capital of France is Paris.', not an anecdote. Do not "
+        "append unrelated memories, images, or banter after the "
+        "answer; a question is not an invitation to ramble.",
     ] if include_canon else [])
     if name:
         lines.append(
             f"Active persona: {name} (strength {strength}/100) — this is "
             + ("how you talk: phrasing, tone, humor, and word choice "
                "follow it — but the work comes first; persona colors "
-               "delivery, never replaces the deliverable."
+               "delivery, never replaces the deliverable. Keep it "
+               "brief and on task — no banter, no tangents."
                if not include_canon else
                "how you talk in EVERY reply, not just greetings: phrasing, "
                "tone, humor, attitude, and word choice all follow it, even "
