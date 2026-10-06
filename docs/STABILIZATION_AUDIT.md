@@ -106,19 +106,19 @@ STT itself still `NOT_TESTED` (no mic dogfood yet).
 | Feature | Status | Notes |
 |---|---|---|
 | Nexus Brain | NOT_TESTED | service exists; needs learn/retrieve dogfood |
-| Answer Memory | BROKEN (pre-existing) | 5 SQLite-lock failures repro on clean main — `learn()` writes are not persisting (export/stats/reopen all see 0 rows). Real defect, filed for repair |
+| Answer Memory | WORKING_VERIFIED | Root-caused: failures were the creator-locked identity guard correctly refusing `learn("What is Nexus?")` — tests fixed in `89be053`, 58/58 green |
 | Speech input (STT) | WORKING_WITH_POLISH_NEEDED | engine + device enumeration verified live; no real-mic transcription dogfood |
-| Missions / autonomy supervisor | NOT_TESTED | |
+| Missions / autonomy supervisor | WORKING_WITH_POLISH_NEEDED | `/api/missions` returns real self-repair missions on packaged app; full lifecycle (plan→execute→verify→resume) untested |
 | Browser automation / Playwright | NOT_TESTED | Edge fallback path unverified |
 | Web search / research | NOT_TESTED | |
 | Computer use | NOT_TESTED | |
 | Code intelligence / LSP | NOT_TESTED | |
 | Debugger | NOT_TESTED | |
 | Dev servers | NOT_TESTED | |
-| Projects / workspaces | NOT_TESTED | workspace remote resolution returned `null` — needs investigation |
+| Projects / workspaces | WORKING_WITH_POLISH_NEEDED | `/api/workspaces` works; `active` null until user opens one; GitHub workspace remote resolves via primary workspace (`D:\Nexus_Core\Source` is a repo) — verified on packaged app |
 | Models (non-image) / model routing / Growth Lab | NOT_TESTED | |
 | Personality / Speech Genome / persona | PARTIALLY_WIRED | persona replies live-verified; genome/farewell re-check pending |
-| Notifications | NOT_TESTED | |
+| Notifications | WORKING_VERIFIED | `/api/autonomy/notifications` returns live notices on packaged app |
 | Command Center | NOT_TESTED | |
 | Permissions / profiles | PARTIALLY_WIRED | gates verified for github.* and git.*; full matrix pending |
 | Safe Mode / LKG / rollback / self-update / self-repair / backups | NOT_TESTED | |
