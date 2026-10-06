@@ -494,7 +494,8 @@ class _FakeResearch:
     def plan(self, task, mode="auto"):
         return SimpleNamespace(needed=True, mode="balanced")
 
-    def research_topic(self, query, *, mode="auto", version=""):
+    def research_topic(self, query, *, mode="auto", version="", scope="auto",
+                       queries=None, urls=None, event=None, is_cancelled=None):
         self.calls += 1
         return {
             "id": "research1",

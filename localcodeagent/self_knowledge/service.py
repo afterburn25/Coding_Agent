@@ -30,6 +30,21 @@ from .actions import ActionRegistry, ActionSpec, ActionResult
 _WORD = re.compile(r"[a-z0-9'\-]+")
 _NUM = re.compile(r"(\d+(?:\.\d+)?)")
 
+# Version-question subjects that mean "Nexus Core itself" — interrogatives,
+# self-references, and version qualifiers. Anything else ("version of
+# python", "react version", "what's new in node") is an external-subject
+# question and must fall through to the research/model lane.
+_SELF_VERSION_WORDS = frozenset({
+    "what", "whats", "which", "the", "a", "an", "this", "that",
+    "you", "your", "yours", "yourself", "it", "itself",
+    "nexus", "core", "app", "application", "workstation", "system",
+    "latest", "current", "stable", "new", "newest", "recent",
+    "installed", "running", "next", "upcoming", "dev", "beta",
+    "alpha", "preview",
+    "repo", "repository", "workspace", "project", "codebase", "code",
+    "files", "tree", "branch",
+})
+
 
 @dataclass(slots=True)
 class Resolution:
@@ -300,7 +315,23 @@ class SelfKnowledgeService:
                 text="Recent changes: " + "; ".join(parts) + ".",
                 truth={"kind": "changes"})
         if re.search(r"\bversion\b|\bwhat changed\b|\bchangelog\b|"
-                     r"\bwhat's new\b", t):
+                     r"\bwhat's new\b|\bwhats new\b", t):
+            # Self-check only fires when the version/changelog question is
+            # actually about Nexus Core — "version of python", "react
+            # version", "what's new in node" are external-subject
+            # questions and belong to the research/model lane.
+            foreign = re.search(
+                r"\bversion\s+(?:of|for)\s+([a-z][a-z0-9_.-]*)|"
+                r"\b(?:new|changes?)\s+in\s+([a-z][a-z0-9_.-]*)|"
+                r"\bchangelog\s+(?:of|for)\s+([a-z][a-z0-9_.-]*)", t)
+            if not foreign:
+                foreign = re.search(
+                    r"\b([a-z][a-z0-9_.-]*)\s+version\b", t)
+            subject = (next((g for g in foreign.groups() if g), "")
+                       if foreign else "")
+            if (subject and subject not in _SELF_VERSION_WORDS
+                    and not subject.lstrip("v").replace(".", "").isdigit()):
+                return None
             fn = self._env.get("version")
             ver = fn() if callable(fn) else None
             return Resolution(

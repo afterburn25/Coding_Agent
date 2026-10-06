@@ -104,6 +104,9 @@ class KnowledgeMemory:
                 "url": str(source.get("url", ""))[:2000],
                 "provider": str(source.get("provider", ""))[:80],
                 "reliability": str(source.get("reliability", ""))[:80],
+                "source_class": str(source.get("source_class", ""))[:80],
+                "badges": [str(b)[:40] for b in list(source.get("badges") or [])[:5]],
+                "published_at": str(source.get("published_at", ""))[:80],
                 "retrieved_at": float(source.get("retrieved_at") or now),
             })
 
@@ -199,6 +202,16 @@ class KnowledgeMemory:
     def prompt_context(self, query: str) -> str:
         row = self.lookup(query)
         if not row:
+            return ""
+        # Weak evidence never re-enters the prompt as "sourced knowledge" —
+        # a low/conflicted research record would both mislead the model and
+        # suppress a fresh search for the same question.
+        meta = row.get("metadata") or {}
+        conf = str(meta.get("confidence") or "").lower()
+        if conf in {"low", "conflicted", "unverified", "community_only"}:
+            return ""
+        if str(meta.get("corroboration") or "").lower() in {
+                "unverified", "community_only"}:
             return ""
         sources = [s for s in row.get("sources", []) if s.get("url")]
         lines = [

@@ -95,6 +95,12 @@ class _StubResearch:
     def prepare_task(self, text, mode="auto"):
         return {"guidance": "preflight"}
 
+    def research_topic(self, query, *, mode="auto", version="", scope="auto",
+                       queries=None, urls=None, event=None, is_cancelled=None):
+        self.researched += 1
+        return {"status": "completed", "summary": "", "sources": [],
+                "findings": [], "errors": []}
+
 
 class RequestClassificationTests(unittest.TestCase):
     def test_stable_questions(self):
@@ -172,7 +178,7 @@ class FastLaneRoutingTests(unittest.TestCase):
             provider = _CaptureProvider()
             agent = _agent(Path(td), research=research, provider=provider)
             agent.run("search the web for mars facts")
-            self.assertGreater(research.planned, 0)
+            self.assertGreater(research.researched, 0)
 
     def test_fast_general_output_cap_and_long_form_escalation(self):
         with tempfile.TemporaryDirectory() as td:
