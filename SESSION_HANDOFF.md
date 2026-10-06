@@ -16,11 +16,15 @@ data: exact-match pin, owner listing, or the real repo list. Tests in
 `tests/test_speech_genome.py` cover exact repo, owner, owner/repo,
 unknown target, and the in-flight-turn skip. Focused suite 46/46 green.
 
-**Install note:** the deployed `D:\Nexus_Core\backend` predates this fix
-(and the ChangeJournal code — the installed backend predates the whole
-convergence merge). Rebuild via the packaging PyInstaller invocation is
-in `build/backend-dist/`; deploy = replace `D:\Nexus_Core\backend` while
-the app is closed, then refresh the LKG snapshot.
+**Deployed.** `D:\Nexus_Core\backend` replaced with a fresh build of
+`main` at `e6667bdd` (Oct 6 ~11:27) — carries the GitHub lane, the
+Father-inversion guard, true voice replay (segment re-serve by
+`voice_task_id`, `repeat_last` re-publish), broadened identity/origin
+coverage incl. real-blend answers, utility-tier routing for casual
+identity asks, and the startup-greeting prefetch (`?publish=0` +
+`greetFetch` held on the transition gate). Prior backend parked at
+`D:\Nexus_Core\backend-pre-20261006`; LKG snapshot refreshed
+(`data/lkg/snap-1791304164704`, `latest.txt` updated).
 
 ## 2026-10-06 — Stabilization convergence merged + installed-app repair (v0.23.0)
 
