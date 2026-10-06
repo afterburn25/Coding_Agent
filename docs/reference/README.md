@@ -1,4 +1,11 @@
-# docs/reference — preserved artifacts from retired branches
+# docs/reference — visual references and preserved artifacts
+
+## NexusCore-Startup-Captioned-Reference.mp4
+
+Current 30-second startup caption presentation target for Devin. The runtime
+copy is a matching clean plate without variable captions or progress. Read
+[the caption/tail handoff](../STARTUP_CINEMATIC_CAPTIONS.md) for exact authored
+boundaries, the cyan finalizing hold, the green pulse and the seamless loop.
 
 ## voice-concept-isabella.yml
 Status: **SUPERSEDED_BY_PRODUCTION_VOICE_SYSTEM**

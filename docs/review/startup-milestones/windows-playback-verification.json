@@ -1,0 +1,95 @@
+{
+  "success": true,
+  "windowsMediaPlayer": [
+    {
+      "file": "desktop/ChatNexus.Desktop/splash/assets/NexusCore-Startup-Glow-Only.mp4",
+      "duration": 30,
+      "advancedTo": 0.3495411,
+      "playState": 3,
+      "errors": 0
+    },
+    {
+      "file": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4",
+      "duration": 30,
+      "advancedTo": 0.3456245,
+      "playState": 3,
+      "errors": 0
+    }
+  ],
+  "webView2Version": "154.0.4258.53",
+  "webView2": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+    "files": [
+      {
+        "src": "/desktop/ChatNexus.Desktop/splash/assets/NexusCore-Startup-Glow-Only.mp4",
+        "width": 1280,
+        "height": 720,
+        "duration": 30,
+        "points": [
+          {
+            "seek": 0,
+            "advancedTo": 0.262166,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 11.6,
+            "advancedTo": 11.862534,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 12.2,
+            "advancedTo": 12.461026,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 24.4,
+            "advancedTo": 24.662021,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 29.5,
+            "advancedTo": 29.762045,
+            "decodedFrames": 9
+          }
+        ],
+        "repeatedTailSeekPassed": true,
+        "mediaError": null
+      },
+      {
+        "src": "/docs/reference/NexusCore-Startup-Captioned-Reference.mp4",
+        "width": 1280,
+        "height": 720,
+        "duration": 30,
+        "points": [
+          {
+            "seek": 0,
+            "advancedTo": 0.262253,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 11.6,
+            "advancedTo": 11.861019,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 12.2,
+            "advancedTo": 12.476234,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 24.4,
+            "advancedTo": 24.661666,
+            "decodedFrames": 9
+          },
+          {
+            "seek": 29.5,
+            "advancedTo": 29.761022,
+            "decodedFrames": 9
+          }
+        ],
+        "repeatedTailSeekPassed": true,
+        "mediaError": null
+      }
+    ]
+  }
+}

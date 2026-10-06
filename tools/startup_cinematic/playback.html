@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Nexus Core video decode verification</title>
+<style>body{margin:0;background:#000}video{width:100vw;height:100vh;object-fit:contain}</style></head><body>
+<video muted playsinline preload="auto"></video>
+<script>
+const v=document.querySelector('video');
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function until(name){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Timeout: '+name)),10000);v.addEventListener(name,()=>{clearTimeout(timer);resolve();},{once:true});v.addEventListener('error',()=>{clearTimeout(timer);reject(Error(JSON.stringify(v.error)));},{once:true});});}
+async function seek(time){const pending=until('seeked');v.currentTime=time;await pending;}
+async function probe(){
+ const report={userAgent:navigator.userAgent,files:[]};
+ for(const src of ['/desktop/ChatNexus.Desktop/splash/assets/NexusCore-Startup-Glow-Only.mp4','/docs/reference/NexusCore-Startup-Captioned-Reference.mp4']){
+  const ready=until('loadeddata');v.src=src;v.load();await ready;
+  if(v.videoWidth!==1280||v.videoHeight!==720||v.duration!==30)throw Error('Metadata mismatch');
+  const points=[];
+  for(const time of [0,11.6,12.2,24.4,29.5]){
+   await seek(time+.001);const before=v.getVideoPlaybackQuality().totalVideoFrames;await v.play();await wait(300);v.pause();
+   const after=v.getVideoPlaybackQuality().totalVideoFrames;
+   if(after<=before||v.currentTime<=time+.1||v.error)throw Error('Video did not decode/play at '+time);
+   points.push({seek:time,advancedTo:v.currentTime,decodedFrames:after-before});
+  }
+  // Repeat the exact authored tail boundary twice to exercise seeking after EOF.
+  for(let i=0;i<2;i++){await seek(29.85);const end=until('ended');await v.play();await end;await seek(24.4);await v.play();await wait(160);v.pause();}
+  report.files.push({src,width:v.videoWidth,height:v.videoHeight,duration:v.duration,points,repeatedTailSeekPassed:true,mediaError:null});
+ }
+ window.chrome.webview.postMessage({ok:true,report});
+}
+probe().catch(e=>window.chrome.webview.postMessage({ok:false,error:String(e)}));
+</script></body></html>

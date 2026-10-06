@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "duration": 30,
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "captionTransition": 0.2,
+  "captions": [
+    {"id":"init","progressGate":0.00,"at":0,"primary":"INITIALIZING · NEXUS CORE","secondary":"Establishing core startup environment"},
+    {"id":"control","progressGate":0.06,"at":1,"primary":"CORE CONTROL · ESTABLISHED","secondary":"Loading configuration and protected system state"},
+    {"id":"services","progressGate":0.15,"at":2,"primary":"STARTING · CORE SERVICES","secondary":"Launching Nexus agent and service runtime"},
+    {"id":"integrity","progressGate":0.30,"at":3,"primary":"VERIFYING · CORE INTEGRITY","secondary":"Confirming backend health and authorization"},
+    {"id":"brain","progressGate":0.55,"at":4,"primary":"SYNCHRONIZING · NEXUS BRAIN","secondary":"Restoring memory, models and system continuity"},
+    {"id":"command","progressGate":0.72,"at":5,"primary":"OPENING · COMMAND INTERFACE","secondary":"Initializing the Nexus control environment"},
+    {"id":"workspace","progressGate":0.85,"at":6,"primary":"LOADING · NEXUS WORKSPACE","secondary":"Connecting tools, profiles and workspace services"},
+    {"id":"interface","progressGate":0.93,"at":8.5,"primary":"SYNCHRONIZING · CORE INTERFACE","secondary":"Establishing communication with core systems"},
+    {"id":"finalizing","progressGate":0.98,"at":10,"primary":"FINALIZING · NEXUS CORE","secondary":"Verifying interface and system readiness"},
+    {"id":"online","progressGate":1.00,"at":12.2,"primary":"CORE SYSTEMS · ONLINE","secondary":"Nexus Core ready"}
+  ],
+  "finalizingHold": {"start":10.2,"at":11.6,"frame":348,"lastSafeFrame":365,"requiresHostReadiness":true},
+  "onlineTail": {"start":12.2,"loopStart":24.4,"loopEnd":30,"pulsePeriod":1.4,"sceneSeamDissolve":0.7,"loopEndExclusive":true},
+  "presentation": {
+    "primaryColor":"#AEDFFF","secondaryColor":"#7690AE",
+    "onlinePrimaryColor":"#59FFA0","onlineSecondaryColor":"#3DD77F",
+    "primaryPulseOpacity":[0.45,1],"secondaryPulseOpacity":[0.75,1],
+    "readoutLeftPercent":28,"readoutWidthPercent":44,"readoutBottomPercent":3.7,
+    "sourceCanvasWidth":1024,"sourceCanvasHeight":576,
+    "primaryFontSize":12,"secondaryFontSize":9,
+    "primaryTrackingEm":0.25,"secondaryTrackingEm":0.10,
+    "fontFamily":"Segoe UI, Arial, sans-serif"
+  },
+  "optionalCaptions": [
+    {"primary":"ACTIVATING · LANGUAGE CORE","secondary":"Loading the primary conversational model"},
+    {"primary":"ACTIVATING · DEVELOPMENT CORE","secondary":"Loading coding and reasoning runtime"},
+    {"primary":"CALIBRATING · MODEL MEMORY","secondary":"Optimizing RAM and VRAM allocation"},
+    {"primary":"INITIALIZING · VOICE SYSTEM","secondary":"Preparing speech and audio services"},
+    {"primary":"CHECKING · VISUAL SYSTEMS","secondary":"Verifying image-generation backends and models"},
+    {"primary":"PREPARING · WORKSTATION","secondary":"Building the background provisioning plan"},
+    {"primary":"BACKGROUND SETUP · SCHEDULED","secondary":"Additional tools and models will continue installing after launch"}
+  ],
+  "runtimeMaster":"assets/NexusCore-Startup-Glow-Only.mp4",
+  "referenceMaster":"../../../docs/reference/NexusCore-Startup-Captioned-Reference.mp4",
+  "runtimeReadout":"No baked milestone captions or progress bar; render both from real host state.",
+  "note":"Authored visual reference only. Milestone gates and the ONLINE transition must remain host-authoritative. No narration is included."
+}
