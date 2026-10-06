@@ -2,6 +2,15 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — v0.24.0 converged: pushed, CI green, install deployed
+
+**Final state.** `main` pushed (`579b2798` → `48494712`); CI run
+37535259344 fully green: Linux unit tests 3m24s (incl. the previously
+failing queued-drain case) and `windows-desktop` 9m32s — real Inno
+installer build + fresh-install/update-preservation smoke (the
+production-installer verification). Local suite 2377 passed / 2
+skipped; Tier-3 soak green (isolated boot + 40 smoke checks).
+
 ## 2026-10-06 — v0.24.0 deployed to installed app (upgrade-install dogfood)
 
 **Deployed.** `D:\Nexus_Core\backend` replaced with the fresh
