@@ -123,7 +123,6 @@ let failCaptionTimer = null;
 // When a clip pauses (progress hold, milestone gate) the stem engine's
 // sustained hum comes back so a stall never goes mute.
 let mediaWasLive = false;
-let mediaDuck = 1;
 let mediaHandoffT = null;
 
 function clipOf(name) {
@@ -143,7 +142,7 @@ function applyMediaAudio() {
     // An incoming loop clip stays muted until the swap completes — the
     // outgoing clip keeps its audio through the crossfade.
     v.muted = audio.disabled || v === bootMutedIncoming;
-    v.volume = clamp(audio.volume * mediaDuck);
+    v.volume = clamp(audio.volume);
   }
 }
 function syncMediaAudio() {
@@ -552,23 +551,16 @@ function showIntervention() {
 
 // b64 → playback through the voice channel; host is told whether audio
 // actually started (durable "user heard it" signal) and when it ends.
-let voiceSeq = 0;
-async function playVoice(id, b64, duckLevel) {
-  const seq = ++voiceSeq;
+async function playVoice(id, b64) {
   try {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
-    mediaDuck = duckLevel ?? .6; applyMediaAudio();      // duck clip audio too
-    const res = await voice.play(bytes, { duckLevel: duckLevel ?? .6 });
+    // The score stays at full level under narration — the wind-up and hum
+    // are authored to sit beneath the voice, so nothing is ever ducked.
+    const res = await voice.play(bytes, { duckLevel: 1 });
     host({ type: 'voice-result', id, started: res.started, seconds: res.seconds ?? 0 });
-    if (res.started && res.done) res.done.then(() => {
-      // A preempted clip still resolves done — only the latest playback may
-      // lift the duck, or an interrupted line would un-duck its replacement.
-      if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); }
-      host({ type: 'voice-ended', id });
-    });
-    else { if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); } host({ type: 'voice-ended', id }); }
+    if (res.started && res.done) res.done.then(() => host({ type: 'voice-ended', id }));
+    else host({ type: 'voice-ended', id });
   } catch (error) {
-    if (seq === voiceSeq) { mediaDuck = 1; applyMediaAudio(); }
     host({ type: 'voice-result', id, started: false, seconds: 0, error: String(error?.message ?? error) });
   }
 }
@@ -609,7 +601,7 @@ function handleHost(msg) {
         }
         break;
       }
-      case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
+      case 'play-voice': void playVoice(msg.id, msg.b64); break;
       case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); mediaDuck = 1; applyMediaAudio(); break;
       case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootclips.forEach(v => v.pause()); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
