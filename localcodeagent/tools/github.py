@@ -650,7 +650,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             "branch": {"type": "string"},
             "set_upstream": {"type": "boolean"},
         },
-    }, "github.write", git_push))
+    }, "git.push", git_push))
 
     registry.register(ToolSpec("github_repository", "Read metadata for the GitHub repository configured as a local Git remote.", {
         "type": "object", "properties": {"remote": {"type": "string"}}
