@@ -1744,13 +1744,16 @@ class AppState:
         except Exception:
             return []
 
-    def _profile_prompt_context(self, user_text: str = "") -> str:
+    def _profile_prompt_context(self, user_text: str = "",
+                                role: str = "") -> str:
         """Active profile's personality + personal memory for prompts.
 
         Presentation-only context; failures degrade to "" so a profile
         problem can never break a user turn. The user message feeds the
         seriousness/topic classifiers so persona color scales to the
-        situation."""
+        situation. Non-utility ``role`` turns drop the identity-canon
+        block — persona style still applies, but canon defense must not
+        hijack a work deliverable."""
         try:
             prof = self.profiles.active()
             if not prof:
@@ -1772,8 +1775,9 @@ class AppState:
                 state=dyn.state(),
                 callback=dyn.callback_for(user_text))
             mems = PersonalMemory(pdir).list(limit=20)
-            text = _profile_prompt_text(prof, active, mems,
-                                        effective=effective)
+            text = _profile_prompt_text(
+                prof, active, mems, effective=effective,
+                include_canon=role in ("", "utility"))
             try:
                 from .personality.consistency import feedforward_hints
                 hints = feedforward_hints(dyn.recent_phrases())

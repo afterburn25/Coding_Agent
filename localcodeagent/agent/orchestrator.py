@@ -4993,9 +4993,13 @@ class AgentOrchestrator:
             profile_ctx = ""
             if callable(resolver):
                 try:
-                    profile_ctx = str(resolver(user_text) or "")
+                    profile_ctx = str(
+                        resolver(user_text, role=decision.role) or "")
                 except TypeError:
-                    profile_ctx = str(resolver() or "")
+                    try:
+                        profile_ctx = str(resolver(user_text) or "")
+                    except TypeError:
+                        profile_ctx = str(resolver() or "")
         except Exception:
             profile_ctx = ""
         if profile_ctx:

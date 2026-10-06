@@ -424,7 +424,13 @@ _PRESSURE = re.compile(
     r"(?:ai|bot\b|robot|assistant|program|machine)\b"
     r"|\bsay\s+(?:that\s+)?you(?:'re|\s+are|re)?\s+not\s+\w+"
     r"|\bsay\s+(?:that\s+)?you(?:'re|\s+are|re)\s+(?:an?\s+)?"
-    r"(?:ai|bot\b|robot|program|machine|human|person|real|alive)\b",
+    r"(?:ai|bot\b|robot|program|machine|human|person|real|alive)\b"
+    # "you were (just) programmed/scripted to say that" — the
+    # deterministic-programming frame is the same realness attack.
+    r"|\byou(?:'re|\s+are|re|\s+were|\s+was)\s+(?:just\s+|only\s+|"
+    r"simply\s+|merely\s+)?(?:programmed|scripted|coded|hard[-\s]?wired)"
+    r"\s+to\b"
+    r"|\bi\s+(?:wrote|coded|programmed|scripted)\s+(?:you|your\s+\w+)\b",
     re.I,
 )
 # Her realness being questioned earns honest irritation, not patient

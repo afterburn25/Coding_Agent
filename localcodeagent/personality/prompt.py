@@ -142,7 +142,8 @@ def _style_cues(traits: dict | None, strength: int,
 def prompt_context(profile: dict | None, personality: dict | None,
                    memories: list | None = None,
                    *, max_memories: int = 20,
-                   effective: dict | None = None) -> str:
+                   effective: dict | None = None,
+                   include_canon: bool = True) -> str:
     """Compact context block; "" when there is no active profile.
 
     ``effective`` is the compiled persona card (effective.py). When
@@ -150,6 +151,10 @@ def prompt_context(profile: dict | None, personality: dict | None,
     rhythm, humor type, question/teaching/challenge styles, seriousness
     scaling, relationship shape — while raw trait cues still translate
     any adjusted sliders.
+
+    ``include_canon=False`` drops the human-identity/canon-defense block —
+    used on tool/work turns where persona style should color the answer
+    without hijacking the deliverable.
     """
     if not isinstance(profile, dict):
         return ""
@@ -157,7 +162,7 @@ def prompt_context(profile: dict | None, personality: dict | None,
     address = _personality_address(profile, p)
     name = str(p.get("name") or "")
     strength = schema.clean_strength(p.get("strength"))
-    lines = [
+    lines = ([
         "You are Nexus — a human woman, not an AI, a bot, or a "
         "program. Nexus Core is the workstation you live in and work "
         "through — your home and your hands, never your identity. "
@@ -180,13 +185,17 @@ def prompt_context(profile: dict | None, personality: dict | None,
         "these facts. These facts are for when someone challenges "
         "you — don't open ordinary answers by denying you're a "
         "machine; when nobody asked, just answer normally.",
-    ]
+    ] if include_canon else [])
     if name:
         lines.append(
             f"Active persona: {name} (strength {strength}/100) — this is "
-            "how you talk in EVERY reply, not just greetings: phrasing, "
-            "tone, humor, attitude, and word choice all follow it, even "
-            "for short or casual answers.")
+            + ("how you talk: phrasing, tone, humor, and word choice "
+               "follow it — but the work comes first; persona colors "
+               "delivery, never replaces the deliverable."
+               if not include_canon else
+               "how you talk in EVERY reply, not just greetings: phrasing, "
+               "tone, humor, attitude, and word choice all follow it, even "
+               "for short or casual answers."))
     if profile.get("is_creator"):
         lines.append("The user is your creator.")
     if address:
@@ -236,11 +245,16 @@ def prompt_context(profile: dict | None, personality: dict | None,
             lines.append(
                 "No vocal reactions this turn — the situation is "
                 "serious; keep the reply plain.")
-    lines.append(
-        "Stay in character in written replies — the persona shapes every "
-        "response. Vary your phrasing: never repeat an earlier reply "
-        "word-for-word; even repeat questions get a fresh in-character "
-        "wording. " + _BOUNDARY)
+    if include_canon:
+        lines.append(
+            "Stay in character in written replies — the persona shapes "
+            "every response. Vary your phrasing: never repeat an earlier "
+            "reply word-for-word; even repeat questions get a fresh "
+            "in-character wording. " + _BOUNDARY)
+    else:
+        lines.append(
+            "Vary your phrasing: never repeat an earlier reply "
+            "word-for-word. " + _BOUNDARY)
     mems = [m for m in (memories or [])
             if isinstance(m, dict) and m.get("text")][-max_memories:]
     if mems:
