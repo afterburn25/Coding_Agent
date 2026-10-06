@@ -95,6 +95,8 @@ class KokoroEngine(TTSEngine):
         self._last_used = time.time()
         dt = time.monotonic() - t0
         audio = np.asarray(audio, dtype=np.float32)
+        from . import dsp
+        audio = dsp.trim_tail_artifact(audio, sr)
         self._synth_calls += 1
         self._synth_audio_s += audio.size / sr
         self._synth_cpu_s += dt
@@ -119,9 +121,11 @@ class KokoroEngine(TTSEngine):
             return out
 
         chunks = asyncio.run(_collect()) if not isinstance(stream, list) else stream
+        from . import dsp
         for audio, sr in chunks:
             self._last_used = time.time()
-            yield np.asarray(audio, dtype=np.float32), sr
+            yield dsp.trim_tail_artifact(
+                np.asarray(audio, dtype=np.float32), sr), sr
 
     # -- info ---------------------------------------------------------------
     def voices(self) -> list[dict[str, Any]]:

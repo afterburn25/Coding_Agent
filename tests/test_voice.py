@@ -720,6 +720,38 @@ class TestDSP(unittest.TestCase):
             self.assertEqual(w.getnchannels(), 2)
             self.assertEqual(w.getframerate(), sr)
 
+    def test_trim_tail_artifact_cuts_isolated_blip(self):
+        # Speech + silence + a short stray-consonant blip at the very end —
+        # the Kokoro boundary artifact heard as a trailing "d".
+        sr = 24000
+        rng = np.random.default_rng(0)
+        t = np.arange(sr) / sr
+        speech = (0.3 * np.sin(2 * np.pi * 150 * t)
+                  + 0.05 * rng.standard_normal(sr))
+        gap = np.zeros(int(sr * 0.10))
+        blip = 0.2 * np.sin(2 * np.pi * 800 * np.arange(int(sr * 0.06)) / sr)
+        tail = np.zeros(int(sr * 0.05))
+        x = np.concatenate([speech, gap, blip, tail]).astype(np.float32)
+        y = dsp.trim_tail_artifact(x, sr)
+        self.assertLessEqual(y.size, int(sr * 1.05))
+        self.assertGreaterEqual(y.size, int(sr * 0.95))
+
+    def test_trim_tail_artifact_leaves_speech_alone(self):
+        sr = 24000
+        n = int(sr * 1.5)
+        t = np.arange(n) / sr
+        # Natural decaying tail — no silence gap + isolated blip.
+        x = (0.3 * np.sin(2 * np.pi * 150 * t)
+             * np.linspace(1.0, 0.05, n)).astype(np.float32)
+        y = dsp.trim_tail_artifact(x, sr)
+        self.assertEqual(y.size, x.size)
+        # A long voiced tail is speech, not a blip.
+        speech = 0.3 * np.sin(2 * np.pi * 150 * np.arange(sr) / sr)
+        voiced_tail = 0.25 * np.sin(2 * np.pi * 200
+                                    * np.arange(int(sr * 0.3)) / sr)
+        x2 = np.concatenate([speech, voiced_tail]).astype(np.float32)
+        self.assertEqual(dsp.trim_tail_artifact(x2, sr).size, x2.size)
+
 
 # --------------------------------------------------------------------------
 # speech-to-text configuration/provisioning contract

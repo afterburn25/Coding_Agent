@@ -300,6 +300,51 @@ def limiter(x: np.ndarray, sr: int, ceiling: float = 0.89) -> np.ndarray:
     return np.clip(out, -float(ceiling), float(ceiling)).astype(np.float32)
 
 
+def trim_tail_artifact(x: np.ndarray, sr: int, *,
+                       floor_db: float = -42.0, blip_ms: float = 140.0,
+                       gap_ms: float = 55.0, pad_ms: float = 30.0,
+                       end_slack_ms: float = 200.0) -> np.ndarray:
+    """Cut a TTS boundary artifact — the model sometimes emits a stray
+    consonant blip (heard as a trailing "d"/"t") after the real utterance
+    ends. Conservative: only trims when a short voiced island sits at the
+    very end of the clip, separated from the preceding speech by a clear
+    near-silent gap. Ordinary tails pass through untouched."""
+    if x.ndim != 1 or x.size < int(sr * 0.3):
+        return x
+    frame = max(1, int(sr * 0.01))                    # 10 ms frames
+    n = x.size // frame
+    if n < 8:
+        return x
+    env = np.sqrt((x[: n * frame].reshape(n, frame) ** 2).mean(axis=1))
+    peak = float(env.max())
+    if peak <= 1e-6:
+        return x
+    voiced = env > peak * (10.0 ** (floor_db / 20.0))
+    if not voiced.any():
+        return x
+    last = n - 1 - int(voiced[::-1].argmax())          # last voiced frame
+    # Walk the final voiced run — the candidate blip.
+    run_start = last
+    while run_start > 0 and voiced[run_start - 1]:
+        run_start -= 1
+    if last - run_start + 1 > int(blip_ms / 10):
+        return x                                       # tail is real speech
+    if n - 1 - last > int(end_slack_ms / 10):
+        return x                                       # blip not at the end
+    # Measure the silence gap before it — must clearly separate.
+    gap_start = run_start
+    while gap_start > 0 and not voiced[gap_start - 1]:
+        gap_start -= 1
+    if run_start - gap_start < int(gap_ms / 10) or gap_start == 0:
+        return x                                       # no clean separation
+    cut = gap_start * frame + int(sr * pad_ms / 1000.0)
+    out = x[:cut].copy()
+    fade = min(out.size, int(sr * 0.006))
+    if fade > 1:
+        out[-fade:] *= np.linspace(1.0, 0.0, fade)
+    return out
+
+
 def to_stereo_decorrelated(main: np.ndarray, layers: list[np.ndarray], sr: int,
                            width: float) -> np.ndarray:
     """Main stays centered; each parallel layer gets alternating micro-delay

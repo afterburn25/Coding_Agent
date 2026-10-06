@@ -1,0 +1,6 @@
+## task error: Image generation is not available because the image tool is not configured.
+## model direct_image_route image-router image
+## task error/done
+## result
+Image generation is not available because the image tool is not configured.
+## end result

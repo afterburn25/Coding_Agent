@@ -1,0 +1,6 @@
+## task completed: 4 subsystems are degraded: Deployment: unavailable — no deployment adapter installed; Image generation: unavailable — image generation disabled; Desktop control: unavailable — no desktop-control tool installed; Coding model: degraded — model configured but runtime not ready.
+## model builtin_utility builtin-local utility
+## task completed/done
+## result
+4 subsystems are degraded: Deployment: unavailable — no deployment adapter installed; Image generation: unavailable — image generation disabled; Desktop control: unavailable — no desktop-control tool installed; Coding model: degraded — model configured but runtime not ready.
+## end result

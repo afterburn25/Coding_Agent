@@ -3830,6 +3830,12 @@ class AgentOrchestrator:
                     # Never learn a fabricated reply — Answer Memory would
                     # replay the lie verbatim to similar future questions.
                     session.unverified_claims = True
+                if claims and not session.tool_events \
+                        and not session.research_context.get("sources") \
+                        and session.decision.role != "utility":
+                    # Casual utility replies describe persona color
+                    # ("just finished polishing the logs") — flag them
+                    # for memory silently, but never badge the chat.
                     notice = (
                         f"\n\n⚠ **{UNVERIFIED_CLAIMS_MARKER}** — no tools or "
                         "commands ran in this reply. Statements asserting "

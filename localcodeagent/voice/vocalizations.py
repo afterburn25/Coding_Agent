@@ -76,7 +76,7 @@ _TOKENS: list[tuple[str, str, float, str, bool]] = [
     ("mm_mm",      "disagreement", 0.5, r"mm[-–\s]?mm", False),
     ("uh_uh",      "disagreement", 0.5, r"uh[-–\s]?uh|nuh[-–\s]?uh", False),
     # -- thinking / hesitation
-    ("hmm",        "thinking",     0.3, r"hmm+m*", False),
+    ("hmm",        "thinking",     0.3, r"hu?mm+m*", False),
     ("um",         "thinking",     0.3, r"umm+|um", False),
     ("uhh",        "thinking",     0.3, r"uhh+|uh", False),
     ("erm",        "thinking",     0.3, r"err?m+", False),
@@ -507,7 +507,7 @@ def adapter_for(engine_name: str) -> VocalizationAdapter:
 # letterizable danger tokens; anything else passes through.
 _CANON_RE = re.compile(
     r"\b("
-    r"m+h+m+|m+[-\s]m+|m{3,}n?|h+m{2,}|"
+    r"m+h+m+|m+[-\s]m+|m{3,}n?|h+u?m{2,}|"
     r"(?:uh|nuh)[-\s]?uh|(?:uh|nuh)[-\s]?huh|uhhuh|"
     r"(?:ha){2,}h?|(?:ba){2,}|ahahaha|(?:he){2,}h?|(?:eh){2,}|"
     r"hee+|hih*i+|tee[-\s]?hee|"
@@ -540,8 +540,9 @@ def canonicalize_vocals(text: str) -> str:
             return "mm-mm"
         if re.fullmatch(r"m{2,}n?", compact):         # mmm, mmmm
             return "mmm" if len(compact) <= 3 else "mmmm"
-        if re.fullmatch(r"h+m+", compact):            # hmm, hmmm
-            return "hmm" if len(compact) <= 3 else "hmmm"
+        if re.fullmatch(r"hu?m{2,}", compact):        # hmm, humm, hummm
+            m_run = len(compact) - len(compact.rstrip("m"))
+            return "hmm" if m_run <= 2 else "hmmm"
         if re.fullmatch(r"(?:u+|n+u+)h+u+h+", compact):
             return "uh-uh"                            # uh-uh, nuh-uh
         if compact.endswith("huh") and compact[:1] in ("u", "n"):
