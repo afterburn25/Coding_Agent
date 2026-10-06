@@ -2,6 +2,43 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — Intelligence Governor + Continual Learning (v0.24.0)
+
+**Milestone landed on `main`** (commits through `d1ea5273`, version bump
+pending commit). Two subsystems, both reusing existing stores — no
+second autonomy/evidence/training machinery.
+
+- **IntelligenceGovernor** (`localcodeagent/governor/`): per-turn
+  metacognitive assessment → costed cognitive-op ladder. Runs before
+  lane selection so every task — including command/early-return turns —
+  carries `intel` on the TaskRecord + an `intel` event. `/think
+  fast|normal|deep|exhaustive` scales the compute budget.
+- **Continual learning** (`localcodeagent/learning/`): promotion
+  taxonomy → lesson extraction (structured, no CoT; command turns
+  filtered by `response_source`) → Jaccard-clustering consolidation
+  (provenance + contradictions preserved, never erased) → competency
+  map (parent nodes don't absorb child attempts) → active-learning
+  priorities → curriculum + study sessions that pull real research
+  (`_study_research` forces web mode — bare topics classify
+  `local_only` for task research, wrong for study) → closed-book
+  mastery eval (fast-model answers, separate grading call, adaptive
+  difficulty + spaced retention) → procedural memory → strategy
+  demotion in the CognitiveScheduler → regression capture into
+  RegressionStore → skill promotion / teacher-student / training-gate
+  (no live weight changes).
+- **Commands**: `/learn /weaknesses /consolidate /study [<topic>|status|go|stop|next|weaknesses] /mastery <topic> [report] /knowledge /procedures /training`
+  plus NL access and `GET /api/learning`.
+- **Live-verified**: study pulled 8 sources + 20 concepts + 10
+  questions on "rust ownership"; `/mastery` ran a real closed-book eval
+  (5/5, PASSED, difficulty 1 — correctly "not mastered" with n=1);
+  consolidation clustered 5 lessons → 2 promoted → 1 procedure;
+  "are you getting smarter?" answers from evaluated outcomes.
+- **Focused suites green**; full suite run in flight at handoff —
+  verify before shipping. **Not done:** dashboard HTML page (API only),
+  retention is scheduled but live intervals take hours, teacher/student
+  and model-growth gates are test-verified only, installer dogfood +
+  InvokeAI re-verify still outstanding from the convergence list.
+
 ## 2026-10-06 — GitHub bare-target follow-up lane (commit `62f8a602` on main)
 
 Live-dogfooded fix: after "GitHub's already connected — point me at a repo,"

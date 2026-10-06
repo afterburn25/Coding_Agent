@@ -1,8 +1,44 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. Verified suite: **2103 tests** green on `main`. v0.22.0 lands the **Persona Speech Genome milestone closeout** — merged via PR #3 after reconciling all active branches; splash video surface + readiness verify-gate + sequence-complete handoff coexist, and `SpeechDeliveryPlan` fields now reach real TTS (pause/seriousness/register/nonverbal-rate wired; emphasis documented honestly). Full evidence matrix in `docs/ROADMAP_CLOSURE.md`. v0.21.0 added **InvokeAI as a first-class image backend** (dual-backend routing with ComfyUI, managed venv runtime, live dogfood on 6.14.2). v0.20.0 lands **workstation P1 + first P2** — LKG/self-update, Command Center, Ctrl+K global search, dependency/coverage/release tools. v0.19.0 delivered the **autonomous development workstation P0 foundation** — Capability Registry, Workspace Manager, application-builder loop, native Git + authenticated GitHub, and the coding workspace UI — see `CHANGELOG.md` and `SESSION_HANDOFF.md`. v0.18.x delivered honesty hardening (Answer Memory fabrication purge, stale-evidence cleanup, startup voice sequencing, task-bar layout). v0.17.0 adds the persona social-continuity layer (cue/sarcasm detection, energy + session pacing, focus tracking, shared-history milestones, saturation dampening, voice smoothing, persona introspection/QA) — see `docs/PERSONALITY.md`. v0.18.0 adds the voice/action-notice polish pass (spoken worker lifecycle + notification notices, expanded phrase vocabulary, comparative persona commands) — see `docs/VOICE_SYSTEM.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.24.0 lands the **Intelligence Governor + Continual Learning** milestone: per-turn metacognitive plans persisted on every task, and a full learning loop (lessons → consolidation → procedures → competencies → curriculum → study → closed-book mastery → regression capture) backed by the existing stores — no second autonomy/evidence/training systems. All learning claims are evaluation-backed; nothing becomes trusted because a model said it. v0.23.0 carried core slash commands + autocomplete and reliability fixes. v0.22.0 landed the Persona Speech Genome closeout (details below). v0.21.0 added InvokeAI as a first-class image backend. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.22.0 — Integrated reliability closeout + Persona Speech Genome
+## Active version: 0.24.0 — Intelligence Governor + Continual Learning
+
+- **IntelligenceGovernor** — every turn gets a bounded metacognitive
+  plan (knowledge state, confidence, uncertainty sources, novelty,
+  stakes, think mode, costed cognitive-op ladder) computed before lane
+  selection so even early-return/command turns carry `intel` metadata
+  on the task record and as an observability event.
+- **Continual learning** (`localcodeagent/learning/`) — memory
+  taxonomy + promotion states, lesson extraction on terminal tasks
+  (command/deterministic turns excluded via `response_source`),
+  Jaccard-clustering consolidation with provenance + contradiction
+  preservation, hierarchy-aware competency map, active-learning
+  planner, curriculum + bounded study sessions that pull real research
+  sources and extract concepts from verified claims, closed-book
+  mastery evaluation through the fast model with separate grading,
+  spaced retention, procedural memory, strategy evaluation that
+  demotes proven-bad strategies in the CognitiveScheduler, regression
+  capture into the shared RegressionStore, skill promotion,
+  teacher/student, and training-candidate quality gates (no live
+  weight training; regression-failing candidates rejected).
+- **Surface** — `/learn /weaknesses /consolidate /study /mastery
+  /knowledge /procedures /training` commands, natural-language access
+  ("what have you learned", "are you getting smarter?"), and
+  `GET /api/learning` dashboard data.
+- **Verified live** — study session pulled 8 sources/20 concepts/10
+  questions on a real topic; closed-book eval answered and graded 5/5;
+  consolidation clustered 5 lessons → 2 promoted → 1 procedure;
+  "are you getting smarter?" answers from evaluated outcomes only.
+
+## Previous: 0.23.0 — Core slash commands + reliability fixes
+
+Remaining core commands (`/shutdown /exit /restart` wired to the
+graceful close path), autocomplete API, and two stale-fixture
+corrections (queued-drain e2e parroting fixture; timing-context test
+gating) — product behavior was correct in both cases.
+
+## Previous: 0.22.0 — Integrated reliability closeout + Persona Speech Genome
 
 v0.22.0 closes the persona speech cycle and converges the branch
 divergence: `main` is the single authoritative branch again.
