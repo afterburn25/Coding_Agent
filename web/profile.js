@@ -245,8 +245,17 @@
       // Isabella's narration + the 2s quiet buffer own the sound stage.
       if (!sessionStorage.getItem("nexus-greeted") && s.active) {
         sessionStorage.setItem("nexus-greeted", "1");
+        // Prefetch NOW — the splash + narration still own the sound stage
+        // for several more seconds, so the synchronous synthesis finishes
+        // inside that window. publish=0 keeps the segment off the shared
+        // bus (it would play over Isabella otherwise); the page holds the
+        // response on the transition gate and enqueues a wav that is
+        // already synthesized — the greeting starts as the window
+        // appears instead of paying fetch+synth latency inside the app.
+        const greetFetch = api(
+          `/api/profiles/${encodeURIComponent(s.active)}/greeting?publish=0`);
         startupGate()
-          .then(() => api(`/api/profiles/${encodeURIComponent(s.active)}/greeting`))
+          .then(() => greetFetch)
           .then((g) => {
             if (g && g.text) {
               // voice_url means the backend synthesized the greeting —

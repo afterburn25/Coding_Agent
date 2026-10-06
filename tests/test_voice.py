@@ -626,6 +626,20 @@ class TestVoiceManager(unittest.TestCase):
         # Same segment id on both paths → client-side dedupe is a noop.
         self.assertGreater(self.m._greeting_hold_until, 0)
 
+    def test_speak_greeting_publish_false_silences_bus(self):
+        """The startup prefetch asks for the wav without the bus segment —
+        publishing it early would play over splash narration. The page
+        holds the returned URL itself until the host's transition gate."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        out = self.m.speak_greeting("greet-p1", "Welcome back.",
+                                    publish=False)
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["url"].endswith(out["segment_id"]))
+        self.assertTrue(self.m.segment_path(out["segment_id"]).exists())
+        self.assertFalse(
+            [p for p in published if p.get("event") == "segment"])
+
     def test_speak_greeting_respects_mute(self):
         self.m.set_muted(True)
         self.assertIsNone(self.m.speak_greeting("greet-p1", "hi"))

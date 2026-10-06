@@ -5180,13 +5180,16 @@ class AppState:
         except Exception:
             pass
 
-    def speak_greeting(self, profile_id: str, text: str) -> dict | None:
+    def speak_greeting(self, profile_id: str, text: str, *,
+                       publish: bool = True) -> dict | None:
         """Voice-side greeting — once per process per profile;
         mute/disabled drop silently. Synchronous so the greeting
         response can carry the audio URL: the previous queue-only path
         emitted an ephemeral bus segment that routinely fired before the
         page's voice EventSource attached, and the greeting was never
-        heard."""
+        heard. publish=False synthesizes without broadcasting — the
+        page prefetches during the splash and holds playback itself on
+        the host's transition signal."""
         try:
             v = getattr(self, "voice", None)
             if v is None:
@@ -5195,7 +5198,7 @@ class AppState:
             if gid in self._queue_announced:
                 return None
             self._queue_announced.add(gid)
-            return v.speak_greeting(gid, str(text or ""))
+            return v.speak_greeting(gid, str(text or ""), publish=publish)
         except Exception:
             return None
 

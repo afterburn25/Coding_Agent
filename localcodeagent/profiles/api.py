@@ -319,7 +319,7 @@ class ProfileAPI:
                 return True
             if path.endswith("/greeting"):
                 pid = self._pid(path, "/api/profiles/", "/greeting")
-                return self._greeting(h, pid)
+                return self._greeting(h, pid, query)
             if path.endswith("/farewell"):
                 pid = self._pid(path, "/api/profiles/", "/farewell")
                 return self._farewell(h, pid)
@@ -372,7 +372,7 @@ class ProfileAPI:
         h.wfile.write(data)
         return True
 
-    def _greeting(self, h, pid: str) -> bool:
+    def _greeting(self, h, pid: str, query: dict | None = None) -> bool:
         p = self.mgr.get(pid)
         if p is None:
             h._json({"error": "no such profile"}, 404)
@@ -412,8 +412,16 @@ class ProfileAPI:
         # voice-disabled states drop it silently. The response carries
         # the audio URL so the page can play it deterministically; the
         # bus segment alone raced the page's voice event subscription.
+        # ?publish=0 synthesizes without broadcasting — the app prefetches
+        # the greeting while the splash still owns the sound stage and
+        # holds playback until the host's transition signal, so the wav
+        # is already in hand when the window appears instead of the
+        # fetch+synth latency landing inside the visible app.
+        raw = ((query or {}).get("publish") or ["1"])[0]
+        publish = str(raw).lower() not in {"0", "false", "no", "off"}
         try:
-            spoken = self.state.speak_greeting(pid, str(g.get("text") or ""))
+            spoken = self.state.speak_greeting(
+                pid, str(g.get("text") or ""), publish=publish)
         except Exception:
             spoken = None
         if spoken and spoken.get("url"):
