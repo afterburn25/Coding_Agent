@@ -151,6 +151,24 @@ class GovernorTests(unittest.TestCase):
         p = g.plan(q, policy=_policy(q))
         self.assertEqual(p.assessment.think_mode, "deep")
 
+    def test_proven_bad_strategy_is_demoted(self):
+        class FakeStrategies:
+            def avoid(self, problem_class, **_):
+                return [{"strategy": "web_research", "attempts": 3,
+                         "success_rate": 0.0}]
+
+        q = "search the web for the latest stable version of Python"
+        g = IntelligenceGovernor(capabilities={"model", "research"})
+        types = [o.type for o in g.plan(q, policy=_policy(q)).operations]
+        self.assertIn("search_web", types)
+        g2 = IntelligenceGovernor(capabilities={"model", "research"},
+                                  strategies=FakeStrategies())
+        types2 = [o.type for o in
+                  g2.plan(q, policy=_policy(q)).operations]
+        self.assertNotIn("search_web", types2)
+        self.assertNotIn("read_source", types2)
+        self.assertTrue(types2)  # never strip the whole plan
+
 
 if __name__ == "__main__":
     unittest.main()

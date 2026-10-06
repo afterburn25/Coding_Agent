@@ -64,8 +64,12 @@ class IntelligenceGovernor:
     anything absent. ``think_mode`` comes from the /think command.
     """
 
-    def __init__(self, *, capabilities: set[str] | None = None) -> None:
+    def __init__(self, *, capabilities: set[str] | None = None,
+                 strategies=None) -> None:
         self.capabilities = set(capabilities or {"model"})
+        # Optional StrategyEvaluator — op types a proven-bad strategy maps
+        # to are demoted out of the plan (learning feeds the scheduler).
+        self.strategies = strategies
 
     def plan(
         self,
@@ -91,6 +95,21 @@ class IntelligenceGovernor:
         ops = scheduler.propose(assessment)
         ranked = scheduler.rank(ops,
                                 importance=1.0 + assessment.novelty * 0.5)
+        if self.strategies is not None:
+            try:
+                from ..learning.lessons import classify_problem
+                avoided = {
+                    r["strategy"] for r in self.strategies.avoid(
+                        classify_problem(text))
+                }
+                if avoided:
+                    op_strategy = {"search_web": "web_research",
+                                   "read_source": "web_research"}
+                    kept = [o for o in ranked
+                            if op_strategy.get(o.type) not in avoided]
+                    ranked = kept or ranked
+            except Exception:
+                pass
         return IntelPlan(
             assessment=assessment,
             operations=ranked[: budget.max_operations],

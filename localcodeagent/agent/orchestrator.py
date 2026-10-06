@@ -5467,6 +5467,9 @@ class AgentOrchestrator:
             km_hit = bool(
                 self.knowledge_memory is not None
                 and self.knowledge_memory.prompt_context(user_text))
+            if getattr(self, "learning", None) is not None \
+                    and self.governor.strategies is None:
+                self.governor.strategies = self.learning.strategies
             intel_plan = self.governor.plan(
                 user_text,
                 policy=policy_decision,
