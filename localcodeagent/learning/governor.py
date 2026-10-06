@@ -254,6 +254,59 @@ class LearningGovernor:
                 "sources_total": used + len(added["sources"]),
                 "sources_budget": src_budget}
 
+    def run_mastery_eval(self, topic: str, *, answer_fn=None,
+                         grade_fn=None, max_questions: int = 5) -> dict:
+        """Closed-book mastery evaluation (Parts 20-22): questions come
+        from the topic's study session (or are generated); answers and
+        grading come from injected model callables — never trusted
+        self-assessment. Score is recorded through MasteryEvaluator
+        which handles difficulty adaptation + retention scheduling."""
+        if not callable(answer_fn) or not callable(grade_fn):
+            return {"error": "evaluation unavailable"}
+        topic = str(topic or "").strip()
+        if not topic:
+            return {"error": "no topic"}
+        sess = self.study_sessions.active()
+        if not sess or sess.get("topic") != topic:
+            sess = next(
+                (s for s in reversed(self.study_sessions.recent(limit=10))
+                 if s.get("topic") == topic), None)
+        questions = [q["prompt"] for q in (sess or {}).get("questions", [])]
+        if not questions:
+            questions = [
+                f"Define {topic} and its core invariants.",
+                f"Show a small correct example of {topic}.",
+                f"Describe a subtle failure mode in {topic} and how to "
+                f"diagnose it.",
+            ]
+        questions = questions[:max(1, int(max_questions))]
+        difficulty = self.mastery.next_difficulty(topic, "closed_book")
+        answers, scores = [], []
+        for q in questions:
+            ans = str(answer_fn(q) or "")[:2000]
+            if not ans:
+                continue
+            sc = grade_fn(q, ans)
+            try:
+                sc = max(0.0, min(1.0, float(sc)))
+            except (TypeError, ValueError):
+                continue
+            answers.append({"question": q, "answer": ans[:400],
+                            "score": round(sc, 3)})
+            scores.append(sc)
+        if not scores:
+            return {"error": "no gradeable answers"}
+        score = sum(scores) / len(scores)
+        passed = sum(1 for s in scores if s >= 0.6)
+        ev = self.mastery.record(
+            topic, "closed_book", score, total=len(scores),
+            passed=passed, difficulty=difficulty,
+            evidence=f"closed-book eval, {len(scores)} questions")
+        return {"competency": topic, "score": ev["score"],
+                "passed": passed, "total": len(scores),
+                "difficulty": difficulty, "verdict": ev["score"] >= 0.75,
+                "answers": answers}
+
     # -- dashboard --------------------------------------------------------------
 
     def summary(self) -> dict:

@@ -287,7 +287,12 @@ class AgentOrchestrator:
                 # through the real coordinator.
                 "study_run": lambda: (
                     self.learning.run_study_step(
-                        research_fn=self._command_research)
+                        research_fn=self._study_research)
+                    if getattr(self, "learning", None) else None),
+                "mastery_eval": lambda topic: (
+                    self.learning.run_mastery_eval(
+                        topic, answer_fn=self._eval_answer,
+                        grade_fn=self._eval_grade)
                     if getattr(self, "learning", None) else None),
             },
             audit=self._command_audit.append,
@@ -826,6 +831,54 @@ class AgentOrchestrator:
             self._remember_research_session(
                 str(ctx.get("conversation_id") or ""), str(query), session)
         return session
+
+    def _study_research(self, topic: str) -> dict[str, Any]:
+        """Research for a study session — unlike task research this must
+        go to the web: the point is learning material, not repo context.
+        Falls back to the normal lane if the coordinator is absent."""
+        if (
+            self.research is not None
+            and self.config.research_enabled
+            and self._brain_subroutine_enabled("web_research", True)
+        ):
+            try:
+                return self.research.research_topic(
+                    f"{topic} guide concepts documentation",
+                    mode="balanced", scope="general")
+            except Exception:
+                pass
+        return self._auto_research(f"{topic} guide")
+
+    def _eval_prompt(self, prompt: str, *, max_tokens: int = 600) -> str:
+        """One bounded model call for learning evaluation — fast lane,
+        no research/memory injection: closed-book by construction."""
+        try:
+            decision = self.router.choose(prompt, override="fast_coder")
+            profile = self.router.get_profile(decision.model_id)
+            provider = self._provider_for(profile)
+            res = provider.complete(
+                messages=[{"role": "user", "content": prompt}],
+                tools=None, max_tokens=max_tokens)
+            return str((res.message or {}).get("content") or "")
+        except Exception:
+            return ""
+
+    def _eval_answer(self, question: str) -> str:
+        return self._eval_prompt(
+            "Answer from memory only — do not use tools or look anything "
+            f"up. Be brief and precise.\n\nQuestion: {question}",
+            max_tokens=500)
+
+    def _eval_grade(self, question: str, answer: str) -> float:
+        """Separate grading call — the answering pass never sets its
+        own score."""
+        raw = self._eval_prompt(
+            "Grade the answer for technical correctness.\n"
+            f"Question: {question}\nAnswer: {answer}\n"
+            "Reply with ONLY a number from 0.0 (wrong) to 1.0 (correct).",
+            max_tokens=12)
+        m = re.search(r"\d*\.?\d+", raw)
+        return float(m.group()) if m else 0.0
 
     def _command_stop(self, exclude_task_id: str = "") -> Any:
         try:

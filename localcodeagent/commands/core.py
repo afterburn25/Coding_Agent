@@ -462,7 +462,27 @@ def _mastery(parsed: ParsedCommand, ctx: dict) -> CommandResult:
         return CommandResult(False, "Learning subsystem unavailable.")
     topic = parsed.raw_args.strip()
     if not topic:
-        return CommandResult(True, "Usage: /mastery <competency>")
+        return CommandResult(
+            True, "Usage: /mastery <competency> [report] — no 'report' "
+                  "runs a live closed-book evaluation.")
+    if not topic.lower().endswith(" report"):
+        res = _env_call(ctx["env"], "mastery_eval", topic)
+        if isinstance(res, dict) and res.get("error"):
+            return CommandResult(False, str(res["error"]))
+        if isinstance(res, dict) and "score" in res:
+            lines = [
+                f"Closed-book eval: {res['competency']} — "
+                f"{res['score']:.0%} "
+                f"({'PASSED' if res['verdict'] else 'not yet'})",
+                f"  {res['passed']}/{res['total']} questions at "
+                f"difficulty {res['difficulty']}",
+            ]
+            for a in (res.get("answers") or [])[:5]:
+                lines.append(f"  [{a['score']:.0%}] {a['question'][:70]}")
+            return CommandResult(True, "\n".join(lines), data=res)
+        topic = topic  # fall through to stored report
+    else:
+        topic = topic[:-7].strip()
     lvl = gov.mastery.mastery_level(topic)
     if not lvl["evaluations"]:
         return CommandResult(True, f"No mastery evaluations for '{topic}' yet.")
