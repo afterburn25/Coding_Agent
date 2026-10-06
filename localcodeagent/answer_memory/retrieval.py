@@ -56,9 +56,16 @@ class Retriever:
     # -- internals -----------------------------------------------------------
 
     def _answers(self, project_id: str, profile_id: str = "") -> list[dict[str, Any]]:
+        # Servable = human- or system-authoritative rows only. Model-sourced
+        # answers are logged as experiences and can be corrected/forgotten,
+        # but must never be replayed — replaying model output freezes
+        # whatever the model happened to say (persona filler, stale
+        # meta-commentary, conceded canon) without adding anything the model
+        # couldn't regenerate fresh.
         return [
             r for r in self.store.cached("answers")
             if not r.get("invalidated")
+            and r.get("source_type") != "model"
             and (r.get("project_scope") == "global" or r.get("project_id") == project_id)
             and (r.get("profile_id") or "") in ("", profile_id)
         ]
@@ -187,6 +194,7 @@ class Retriever:
             return self.store.query(
                 "SELECT a.* FROM answers_fts f JOIN answers a ON a.rowid=f.rowid "
                 "WHERE answers_fts MATCH ? AND a.invalidated=0 "
+                "AND a.source_type!='model' "
                 "AND (a.project_scope='global' OR a.project_id=?) "
                 "AND (a.profile_id='' OR a.profile_id=?) LIMIT ?",
                 (terms, project_id, profile_id, limit),

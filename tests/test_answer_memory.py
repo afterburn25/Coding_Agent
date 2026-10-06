@@ -163,7 +163,7 @@ class LookupTests(unittest.TestCase):
             am.record_exchange("What is photosynthesis?", "Plants convert light to energy.")
             m = am.lookup("What is photosynthesis?")
             self.assertFalse(m.hit, "observed answers must not bypass")
-            self.assertEqual(m.kind, "possible")
+            self.assertEqual(m.kind, "no_match")
             am.store.close()
 
     def test_repetition_promotes_to_trusted(self):
@@ -171,9 +171,15 @@ class LookupTests(unittest.TestCase):
             am = _mem(td)
             for _ in range(5):
                 am.record_exchange("What is photosynthesis?", "Plants convert light to energy.")
+            # Repetition still promotes the stored row internally...
+            row = am.store.query_one(
+                "SELECT trust_state, source_type FROM answers"
+            )
+            self.assertEqual(row["trust_state"], "trusted")
+            # ...but model-sourced answers never serve — replaying model
+            # output freezes whatever the model happened to say.
             m = am.lookup("What is photosynthesis?")
-            self.assertTrue(m.hit)
-            self.assertEqual(m.answer["trust_state"], "trusted")
+            self.assertFalse(m.hit)
             am.store.close()
 
     def test_invalidated_never_bypasses(self):

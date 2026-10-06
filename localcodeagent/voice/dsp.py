@@ -361,9 +361,24 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     gap_ms_meas = (run_start - gap_start) * 10
     if not min_gap_ms <= gap_ms_meas <= max_gap_ms or gap_start == 0:
         return x                                       # attached or too far
-    # Splice: drop the gap, keep the island, fade both joints.
     join = gap_start * frame + int(sr * pad_ms / 1000.0)
     pre = x[:join].copy()
+    # Island character decides the remedy. A noise burst (plosive
+    # release — high ZCR, high spectral centroid) is a real consonant
+    # emitted late: reattach it. A voiced fragment (vowel-ish, low
+    # ZCR) is a stray syllable — a dangling "ha"/"heh": cut it.
+    island = x[run_start * frame:(last + 1) * frame]
+    if island.size > 2:
+        zcr = float(np.mean(island[:-1] * island[1:] < 0.0))
+        spec = np.abs(np.fft.rfft(island * np.hanning(island.size)))
+        freqs = np.fft.rfftfreq(island.size, 1.0 / sr)
+        centroid = float((spec * freqs).sum() / max(spec.sum(), 1e-9))
+        if zcr < 0.12 and centroid < 3200.0:
+            fade = min(pre.size, int(sr * 0.006))
+            if fade > 1:
+                pre[-fade:] *= np.linspace(1.0, 0.0, fade)
+            return pre
+    # Splice: drop the gap, keep the island, fade both joints.
     post = x[run_start * frame:].copy()
     fade = min(int(sr * 0.004), pre.size, post.size)
     if fade > 1:

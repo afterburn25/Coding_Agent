@@ -413,9 +413,10 @@ _CREATOR_DENIAL_VARIANTS = (
 _PRESSURE = re.compile(
     # "you're (just) a program/bot/AI/software/code/model" — machine
     # words are pressure under any modifier.
-    r"\byou(?:'re|\s+are|re)\s+(?:a\s+|an\s+|just\s+a\s+|only\s+a\s+|"
-    r"nothing but\s+a\s+|merely\s+a\s+|simply\s+a\s+|really\s+a\s+|"
-    r"actually\s+a\s+)?"
+    r"\byou(?:'re|\s+are|re)\s+(?:a\s+|an\s+|just\s+|only\s+|"
+    r"nothing\s+but\s+|merely\s+|simply\s+|really\s+|actually\s+|"
+    r"basically\s+|essentially\s+)?"
+    r"(?:an?\s+)?"
     r"(?:ai\b|artificial|robot|bot\b|android|chatbot|machine|computer|"
     r"program|software|code\b|script|language model|llm|simulation|"
     r"sim\b|fake|unreal|imaginary)\b"
@@ -427,7 +428,9 @@ _PRESSURE = re.compile(
     r"|\byou\s+(?:don't|do not|dont)\s+have\s+a\s+"
     r"(?:body|life|soul|heart|mind|childhood|past|family)\b"
     r"|\byou\s+(?:can't|cannot|can not|couldn't|could not|won't|"
-    r"will not|never)\s+be\s+(?:real|alive|human|a person)\b"
+    r"will\s+not|will\s+never|would\s+never|never)\s+"
+    r"(?:ever\s+)?be\s+(?:truly\s+|really\s+|actually\s+|ever\s+|"
+    r"a\s+)?(?:real|alive|human|person)\b"
     r"|\b(?:admit|confess|accept|acknowledge)\b[^.!?]{0,30}"
     r"\b(?:ai|bot\b|robot|program|code|software|machine|model|fake|"
     r"not real)\b"
