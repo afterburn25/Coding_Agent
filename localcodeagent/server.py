@@ -620,6 +620,9 @@ class AppState:
                 "github", e, json.dumps(d)[:200]))
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
+        # L13: learned procedures promote to real skills only through
+        # this registry — user-approved, permission-bound installs.
+        self.learning.skill_promotion.registry = self.skills
         self._rag_db = self.workspace / ".agent" / "rag_index.db"
         self._lsp_pool: LspPool | None = None
         self._knowledge_obj: KnowledgeGraph | None = None

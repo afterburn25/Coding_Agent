@@ -26,7 +26,10 @@ from .lessons import LessonExtractor, LessonStore, classify_problem
 from .mastery import MasteryEvaluator
 from .procedures import ProceduralMemory
 from .promotion import KnowledgePromotionPolicy
+from .skill_promotion import SkillPromotionEngine
 from .strategies import StrategyEvaluator
+from .teacher_student import TeacherStudentPipeline
+from .training_gate import TrainingCandidateGate
 
 # Map problem classes → competency ids so experience lands on the right
 # skill node (dotted ids build the hierarchy on write).
@@ -82,6 +85,16 @@ class LearningGovernor:
             freshness=self.freshness,
             promotion_policy=self.promotion)
         self.extractor = LessonExtractor()
+        # L13–L15: skill promotion needs user approval; training rows
+        # pass the quality gate; teacher/student feeds both.
+        self.skill_promotion = SkillPromotionEngine(
+            data_dir / "skill_candidates.json", procedures=self.procedures)
+        self.training_gate = (TrainingCandidateGate(
+            model_growth, policy=self.promotion)
+            if model_growth is not None else None)
+        self.teacher_student = TeacherStudentPipeline(
+            gate=self.training_gate, competencies=self.competencies)
+        self.last_consolidation: dict | None = None
 
     # -- experience intake ----------------------------------------------------
 

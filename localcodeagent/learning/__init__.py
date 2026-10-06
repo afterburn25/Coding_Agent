@@ -18,7 +18,10 @@ from .lessons import LessonExtractor, LessonStore, classify_problem
 from .mastery import MasteryEvaluator
 from .procedures import ProceduralMemory
 from .promotion import KnowledgePromotionPolicy, PromotionDecision
+from .skill_promotion import SkillPromotionEngine
 from .strategies import StrategyEvaluator
+from .teacher_student import TeacherStudentPipeline
+from .training_gate import TrainingCandidateGate
 
 __all__ = [
     "taxonomy", "CompetencyMap", "ConsolidationBudget",
@@ -26,5 +29,6 @@ __all__ = [
     "StudySessionStore", "FreshnessPolicy", "LearningGovernor",
     "LessonExtractor", "LessonStore", "classify_problem",
     "MasteryEvaluator", "ProceduralMemory", "KnowledgePromotionPolicy",
-    "PromotionDecision", "StrategyEvaluator",
+    "PromotionDecision", "StrategyEvaluator", "SkillPromotionEngine",
+    "TeacherStudentPipeline", "TrainingCandidateGate",
 ]

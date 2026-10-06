@@ -127,12 +127,15 @@ class KnowledgeMemory:
         with self._lock:
             records = self._data.setdefault("records", [])
             normalized = record["normalized_query"]
-            # Replace an older answer to the same normalized question rather than
-            # accumulating contradictory versions indefinitely.
-            records = [
-                row for row in records
-                if str(row.get("normalized_query", "")) != normalized
-            ]
+            # A newer answer SUPERSEDES the old one — history is retained
+            # (Part 29/63: mark, never silently delete). Superseded rows
+            # stay for provenance but are excluded from lookup/search.
+            for row in records:
+                if (str(row.get("normalized_query", "")) == normalized
+                        and not row.get("superseded")):
+                    row["superseded"] = True
+                    row["superseded_at"] = now
+                    row["superseded_by"] = record["id"]
             records.append(record)
             self._data["records"] = records[-self.max_records:]
             self._save()
@@ -147,7 +150,7 @@ class KnowledgeMemory:
         best: tuple[float, dict[str, Any]] | None = None
         with self._lock:
             for row in self._data.get("records", []):
-                if not isinstance(row, dict):
+                if not isinstance(row, dict) or row.get("superseded"):
                     continue
                 expired = float(row.get("expires_at", 0)) <= now
                 if expired and not allow_expired:
@@ -186,7 +189,7 @@ class KnowledgeMemory:
         hits: list[tuple[float, dict[str, Any]]] = []
         with self._lock:
             for row in self._data.get("records", []):
-                if not isinstance(row, dict):
+                if not isinstance(row, dict) or row.get("superseded"):
                     continue
                 candidate = self._terms(str(row.get("normalized_query", "")) + " " + str(row.get("answer", "")))
                 overlap = len(q_terms & candidate)

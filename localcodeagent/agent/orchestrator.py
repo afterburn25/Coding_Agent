@@ -673,6 +673,117 @@ class AgentOrchestrator:
         )
 
     # ------------------------------------------------------------------
+    # Learning natural-language lane — deterministic replies from the
+    # LearningGovernor (Part 55). No model.
+    # ------------------------------------------------------------------
+    def _learning_nl_reply(self, user_text: str) -> str | None:
+        gov = getattr(self, "learning", None)
+        if gov is None:
+            return None
+        low = re.sub(r"\s+", " ", (user_text or "").strip().lower())
+        if not low or len(low) > 300:
+            return None
+        cmd_env = {"learning_gov": lambda: gov}
+        from ..commands import core as _core_cmds
+        from ..commands.types import ParsedCommand
+
+        def run(name: str, args: str = "") -> str:
+            spec = self._cmd_registry.get(name)
+            if spec is None or not callable(spec.handler):
+                return ""
+            parsed = ParsedCommand(name=name, raw_args=args,
+                                   raw=f"/{name} {args}".strip())
+            out = spec.handler(parsed, {"env": cmd_env})
+            return str(getattr(out, "text", out) or "")
+
+        m = re.fullmatch(
+            r"(?:what|whats|what's) have you (?:learned|been learning)"
+            r"(?: lately| recently| so far| this week)?\??|"
+            r"show me what you(?:'ve| have) learned\??", low)
+        if m:
+            return run("learn")
+        if re.fullmatch(
+                r"(?:what are you (?:worst|weakest|bad) at|"
+                r"(?:what are|show me|list) your (?:biggest )?weaknesses|"
+                r"where are you weakest|what do you suck at)\??", low):
+            return run("weaknesses")
+        m = re.fullmatch(
+            r"(?:have you (?:gotten|got) better at|"
+            r"are you getting better at|"
+            r"how good are you at|"
+            r"how are you at)\s+(.+?)\??", low)
+        if m:
+            return self._learning_topic_reply(m.group(1))
+        if re.fullmatch(
+                r"(?:are you getting smarter|have you improved|"
+                r"are you smarter|did you get better|"
+                r"are you getting better)\??", low):
+            return self._learning_trend_reply()
+        m = re.fullmatch(r"study\s+(.+?)\s*$", low)
+        if m and len(m.group(1)) > 2:
+            return run("study", m.group(1))
+        if re.fullmatch(
+                r"(?:what should you study|what do you need to learn|"
+                r"what should you learn next|"
+                r"what are you studying)\??", low):
+            return run("study", "next")
+        return None
+
+    def _learning_topic_reply(self, topic: str) -> str:
+        gov = getattr(self, "learning", None)
+        topic = topic.strip().rstrip("?.")
+        # Match the closest competency id/name — exact id, suffix, or
+        # word overlap.
+        rows = gov.competencies.all() if gov else []
+        low = topic.lower()
+        best = None
+        for r in rows:
+            rid = str(r.get("id") or "").lower()
+            name = str(r.get("name") or "").lower()
+            if low == rid or low == name or rid.endswith(low):
+                best = r
+                break
+            if best is None and any(w in rid for w in low.split() if len(w) > 3):
+                best = r
+        if best is None:
+            return (f"I don't have evaluated data on '{topic}' yet — "
+                    "I only claim competency from verified tasks, "
+                    "not self-assessment.")
+        rate = best.get("success_rate")
+        parts = [
+            f"{best['id']}: {best.get('status')} — "
+            f"{f'{rate:.0%}' if rate is not None else 'untested'} "
+            f"across {best.get('attempts', 0)} evaluated attempts.",
+            f"Trend: {best.get('trend')}. "
+            f"Evidence confidence: {best.get('confidence', 0):.0%} "
+            "(sample size, not self-assessment)."]
+        mb = best.get("model_breakdown") or {}
+        if mb:
+            parts.append("Per model: " + ", ".join(
+                f"{m} {v['successes']}/{v['attempts']}"
+                for m, v in list(mb.items())[:4]))
+        return "\n".join(parts)
+
+    def _learning_trend_reply(self) -> str:
+        gov = getattr(self, "learning", None)
+        if gov is None:
+            return ""
+        rows = [r for r in gov.competencies.all()
+                if r.get("trend") in ("better", "regressed", "unchanged")]
+        if not rows:
+            return ("I don't have enough evaluated history to say — "
+                    "improvement claims need benchmarks and sample "
+                    "counts, and I haven't accumulated enough yet.")
+        lines = ["Based on evaluated outcomes, not self-assessment:"]
+        for r in rows[:8]:
+            rate = r.get("success_rate")
+            lines.append(
+                f"  {r['id']}: {r.get('trend')} — "
+                f"{f'{rate:.0%}' if rate is not None else '—'} "
+                f"over {r.get('attempts', 0)} evaluated tasks")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Slash commands — deterministic env callables + result wrapper.
     # ------------------------------------------------------------------
     def _set_think_mode(self, conversation_id: str, mode: str) -> None:
@@ -5236,6 +5347,17 @@ class AgentOrchestrator:
                         task, user_text, text,
                         event_callback=event_callback,
                         conversation_id=conversation_id)
+
+        # Natural-language learning queries — "what have you learned?",
+        # "what are you worst at?", "study X", "how good are you at Y?"
+        # resolve deterministically against the LearningGovernor (Part
+        # 55). They never reach a model — same guarantee as /commands.
+        learning_text = self._learning_nl_reply(user_text)
+        if learning_text is not None:
+            return self._research_command_result(
+                task, user_text, learning_text,
+                event_callback=event_callback,
+                conversation_id=conversation_id)
 
         # Tier 1/2: Nexus Answer Memory. A trusted learned answer bypasses
         # model inference entirely; a possible match only contributes context
