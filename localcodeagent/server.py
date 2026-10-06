@@ -915,6 +915,14 @@ class AppState:
             asker_is_creator=lambda: bool(
                 (self.profiles.active() or {}).get("is_creator")),
         )
+        # The /shutdown /exit /restart commands run the same graceful
+        # close as the /api/shutdown endpoint — wired here because the
+        # orchestrator doesn't own the HTTPServer.
+        try:
+            self.agent._cmd_executor.env["shutdown"] = self.request_shutdown
+            self.agent._cmd_executor.env["desktop"] = True
+        except Exception:
+            pass
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
         self._prewarm_thread: threading.Thread | None = None
@@ -953,6 +961,34 @@ class AppState:
             self.self_knowledge = None
 
     # -- change-journal undo handlers ------------------------------------
+
+    def request_shutdown(self, *, restart: bool = False) -> None:
+        """Graceful close requested from the /shutdown command lane — the
+        same teardown path as the /api/shutdown endpoint, plus a restart
+        marker a supervising host can detect and respawn from."""
+        if restart:
+            try:
+                (self.runtime_root / ".restart-requested").write_text(
+                    str(int(time.time())), encoding="utf-8")
+            except Exception:
+                pass
+        try:
+            self._write_session_marker(clean=True)
+        except Exception:
+            pass
+        try:
+            self._shutdown.set()
+        except Exception:
+            pass
+        try:
+            prov = getattr(self, "provisioning", None)
+            if prov is not None:
+                prov.shutdown()
+        except Exception:
+            pass
+        srv = getattr(self, "_http_server", None)
+        if srv is not None:
+            threading.Thread(target=srv.shutdown, daemon=True).start()
 
     def _undo_checkpoint_restore(self, record: dict) -> dict:
         """Restore the task checkpoint files this change touched, then
@@ -11350,6 +11386,8 @@ def create_server(
     handler = type("ChatNexusHandler", (Handler,), {"state": state, "web_root": web_root})
     try:
         server = _NexusHTTPServer((host, port), handler)
+        # The /shutdown command needs a handle to stop serve_forever.
+        state._http_server = server
     except BaseException:
         stop_state(state)
         raise
