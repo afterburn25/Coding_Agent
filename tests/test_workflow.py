@@ -247,8 +247,18 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             )
             self.assertIn("Current local date/time from the host system clock", system_text)
             self.assertIn("refreshed at the start of every user turn", system_text)
-            self.assertIn("Conversation timing context from durable message timestamps", system_text)
+            # The timing block quotes prior messages verbatim — it only
+            # ships on timing questions so small models don't answer the
+            # last *quoted* question instead of the real one.
+            self.assertNotIn("Conversation timing context from durable message timestamps", system_text)
             self.assertIn("Conversation quality rules: speak like a capable adult conversational partner", system_text)
+
+            provider.messages.clear()
+            agent.run("how long ago did we last talk?")
+            system_text = "\n".join(
+                str(m.get("content", "")) for m in provider.messages if m.get("role") == "system"
+            )
+            self.assertIn("Conversation timing context from durable message timestamps", system_text)
 
     def test_clock_block_is_last_system_message_for_prefix_cache(self):
         # llama.cpp --cache-reuse reuses the leading token prefix. The clock
