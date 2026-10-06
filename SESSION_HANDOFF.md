@@ -2,6 +2,28 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — v0.24.0 redeployed: installed app now runs shipped build
+
+**Redeployed.** The first 0.24.0 deploy ran a pre-dashboard build
+(`aa2ce19`) with `web/learning.*` patched into `_internal/web` manually.
+Rebuilt `dist/ChatNexus` from `main` at `23eaf719` and swapped
+`D:\Nexus_Core\backend` again: old parked at `backend-pre-aa2ce19`,
+new copied, `NexusCore.exe` relaunched. **Verified live on the
+install:** `/api/status` → 0.24.0, `/learning.html` → 200, and a real
+`/study` session through the full queue exercised `study.active_session`
+(the field the manual patch couldn't ship); `/study stop` drained the
+queue cleanly. Backend listens on a dynamic port (62584 this boot);
+`data/logs/backend.pid` identifies the live process.
+
+**CI:** follow-up docs/handoff push `48494712` → `23eaf719`; run
+37536776217 fully green (tests + windows-desktop Inno build again).
+
+**Disk note:** `D:\Nexus_Core` holds ~12 GB of parked backend dirs from
+earlier sessions (`backend-bloated-023` 9 GB, `backend-prev-023` 2.6 GB,
+plus ~15 smaller `backend-pre-*/prev-*` dirs). Left in place — needs
+owner decision. C: still ~1.5 GB free; user caches `.cache` (~24 GB) /
+`.codex` (~34 GB) are the consumers; autonomy disk guard pauses <1 GB.
+
 ## 2026-10-06 — v0.24.0 converged: pushed, CI green, install deployed
 
 **Final state.** `main` pushed (`579b2798` → `48494712`); CI run
