@@ -57,7 +57,8 @@ def describe_persona(card: dict, personality: dict | None = None) -> str:
     effective card. Honest — only fields actually present are claimed."""
     p = personality or {}
     name = str(p.get("name") or card.get("name") or "Nexus")
-    bits: list[str] = [f"I'm running the {name} persona."]
+    bits: list[str] = [
+        f"I'm Nexus — {name} is just how I'm carrying myself."]
 
     rhythm = _STYLE_WORDS.get(str(card.get("rhythm") or ""), "")
     humor = _HUMOR_WORDS.get(str(card.get("humor_type") or "none"), "")
@@ -91,8 +92,8 @@ def describe_persona(card: dict, personality: dict | None = None) -> str:
     if stage in ("trusted", "long_term"):
         bits.append("We've built up some shorthand over time.")
 
-    bits.append("Facts, code, tools, and safety are the same no "
-                "matter which persona is active — this is style, not "
+    bits.append("However I come across, the facts, code, tools, and "
+                "safety stay the same — that's delivery, not "
                 "substance.")
     return " ".join(bits)
 

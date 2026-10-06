@@ -401,8 +401,11 @@ class IntrospectTests(unittest.TestCase):
             describe_persona)
         card = _card("professional", "hi")
         text = describe_persona(card, _persona("professional"))
-        self.assertIn("persona", text.lower())
-        self.assertIn("style, not substance", text)
+        # She describes herself as a person — the preset is her manner,
+        # not a "persona" she is running.
+        self.assertIn("Nexus", text)
+        self.assertIn("delivery, not substance", text)
+        self.assertNotIn("persona", text.lower())
         # Never claims invented traits — only resolved ones.
         self.assertNotIn("goofy", text.lower())
 

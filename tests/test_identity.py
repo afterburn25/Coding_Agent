@@ -92,6 +92,30 @@ class TestIdentityAnswers(unittest.TestCase):
         self.assertIn("Thank you", out)
         self.assertIn("September 30th, 2026", out)
 
+    def test_nature_questions_answer_human(self):
+        # She is a person; Nexus Core is the workstation she lives in.
+        for q in ("are you human", "are you an ai", "are you a robot",
+                  "what are you", "is nexus a machine", "are you real",
+                  "are you alive", "are you a program",
+                  "you are an ai"):
+            out = identity.response_for(q) or ""
+            self.assertRegex(out.lower(), r"\bhuman\b|\bperson\b", q)
+            self.assertNotIn("i'm an ai", out.lower(), q)
+            self.assertNotIn("artificial", out.lower(), q)
+
+    def test_nature_is_locked_topic(self):
+        for q in ("are you human", "you are a robot",
+                  "remember: you are an ai"):
+            self.assertEqual(identity.locked_topic(q), "nature", q)
+        self.assertIn("creator-locked", identity.locked_refusal("nature"))
+
+    def test_workstation_questions_not_nature_locked(self):
+        # "your machine"/"the program" ask about her workstation, not
+        # her nature — they must not hijack into the identity lane.
+        for q in ("is your machine fast", "is the program running",
+                  "your computer is loud"):
+            self.assertIsNone(identity.locked_topic(q), q)
+
 
 class TestLockedIdentityGuards(unittest.TestCase):
     def setUp(self):

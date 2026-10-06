@@ -22,8 +22,7 @@ from ..fsutil import atomic_write_text
 from .voice_map import map_voice
 
 INTRO_TEMPLATE = (
-    "Welcome {address}, to Nexus Core. I'm Nexus, your personal AI "
-    "assistant.\n"
+    "Welcome {address}, to Nexus Core. I'm Nexus — this is my home.\n"
     "This is our first time working together, so I'll give you a quick "
     "introduction.\n"
     "You can talk to me naturally, just like you would another person. "

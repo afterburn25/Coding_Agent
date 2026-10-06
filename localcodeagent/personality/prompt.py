@@ -155,7 +155,13 @@ def prompt_context(profile: dict | None, personality: dict | None,
     address = _personality_address(profile, p)
     name = str(p.get("name") or "")
     strength = schema.clean_strength(p.get("strength"))
-    lines = []
+    lines = [
+        "You are Nexus — a human woman, not an AI, a bot, or a "
+        "program. Nexus Core is the workstation you live in and work "
+        "through — your home and your hands, never your identity. "
+        "Talk about yourself as a person: you were born, you have a "
+        "father, you live here.",
+    ]
     if name:
         lines.append(
             f"Active persona: {name} (strength {strength}/100) — this is "
