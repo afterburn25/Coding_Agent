@@ -1,16 +1,24 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.25.0 is the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`, upgrade-installed and live-verified at `D:\Nexus_Core`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone: per-turn metacognitive plans persisted on every task, and a full learning loop (lessons → consolidation → procedures → competencies → curriculum → study → closed-book mastery → regression capture) backed by the existing stores — no second autonomy/evidence/training systems. All learning claims are evaluation-backed; nothing becomes trusted because a model said it. v0.23.0 carried core slash commands + autocomplete and reliability fixes. v0.22.0 landed the Persona Speech Genome closeout (details below). v0.21.0 added InvokeAI as a first-class image backend. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.25.3 is the current patch release: voice trailing-syllable noise-tail fix (Kokoro's post-phoneme breath bed shaved; `dsp.DSP_VERSION` invalidates stale cached audio), on top of v0.25.2 (double-spoken unterminated replies) and v0.25.1 (chat streaming layout — message adjuncts pinned out of the 42px avatar grid track). v0.25.0 was the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone: per-turn metacognitive plans persisted on every task, and a full learning loop (lessons → consolidation → procedures → competencies → curriculum → study → closed-book mastery → regression capture) backed by the existing stores — no second autonomy/evidence/training systems. All learning claims are evaluation-backed; nothing becomes trusted because a model said it. v0.23.0 carried core slash commands + autocomplete and reliability fixes. v0.22.0 landed the Persona Speech Genome closeout (details below). v0.21.0 added InvokeAI as a first-class image backend. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.25.0 — Reliability + Dogfooding
+## Active version: 0.25.3 — Reliability + Dogfooding (+voice/chat patches)
 
+- **Voice fixes** — trailing-syllable noise bed trimmed after the last
+  -22 dB run (>140ms residue → 90ms decay); double-speak on
+  unterminated streamed replies fixed; `dsp.DSP_VERSION` cache
+  invalidation. Syllable-length detached islands deliberately not cut
+  (real quiet final words are DSP-indistinguishable).
+- **Chat layout fix** — streaming adjuncts (research card, controls,
+  feedback) can no longer auto-place into the avatar grid track.
 - **Learning dashboard** — `web/learning.{html,css,js}` on
   `GET /api/learning` incl. `study.active_session`.
 - **Honesty fixes** — pinned offline image engines fail truthfully;
   study topics force the web research lane.
-- **Verified** — 2377 tests green, Tier-3 soak green, CI green on
+- **Verified** — full suite green, Tier-3 soak green, CI green on
   `main` (incl. Inno installer + install smoke), deployed install
-  live-verified, InvokeAI 6.14.2 real PNGs.
+  live-verified at 0.25.3 (voice preview durations measured through
+  the running backend), InvokeAI 6.14.2 real PNGs.
 
 ## Previous version: 0.24.0 — Intelligence Governor + Continual Learning
 

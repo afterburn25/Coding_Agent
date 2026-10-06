@@ -2,6 +2,34 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — v0.25.3: voice trailing-syllable fix, deployed + verified
+
+**Shipped.** `93d28414` → pushed, tagged `v0.25.3`, GitHub Release live,
+CI run 37543247808 fully green (tests 3m52s + windows-desktop 9m2s Inno
+installer + install/update smoke). Deployed to `D:\Nexus_Core`: old
+backend parked at `backend-pre-v0253`, `/api/status` → 0.25.3, voice
+preview through the running backend confirms trimmed durations
+("All done." 1.28→0.79s, "Yes." 1.02→0.55s, "Sure thing." 0.98→0.79s).
+
+**What it fixes.** Kokoro leaves a breathy noise bed decaying 150–500ms
+after the real last phoneme (audible as trailing hiss/mumbled syllables),
+plus dead air that made `end_slack` bail before any tail logic ran.
+`trim_tail_artifact` now shaves >140ms sub-(-22 dB) residue to a 90ms
+decay first, then runs detached-phoneme logic on the trimmed audio.
+Verified with Whisper transcription on a 15-phrase live-synthesis
+battery — no words eaten. **Deliberately not fixed:** syllable-length
+detached islands (a rare second artifact class) — quiet real final words
+are DSP-indistinguishable; an earlier attempt ate "now"/"for you".
+`dsp.DSP_VERSION` added to the audio cache key so stale pre-fix
+segments invalidate instead of replaying old artifacts.
+
+**Earlier in the session:** v0.25.1 (`ce6f434`/`849403d`) chat streaming
+layout — `.message` grid adjuncts were auto-placing into the 42px avatar
+track ("scrunched" replies + mangled controls on research/action
+responses); v0.25.2 (`f189296`) double-speak on unterminated streamed
+replies — `finish_task` counted emissions before `flush()` so the
+`final_text` fallback re-enqueued the whole reply.
+
 ## 2026-10-06 — v0.24.0 redeployed: installed app now runs shipped build
 
 **Redeployed.** The first 0.24.0 deploy ran a pre-dashboard build
