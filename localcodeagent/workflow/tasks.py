@@ -60,6 +60,10 @@ class TaskStore:
         self._tasks: dict[str, TaskRecord] = {}
         self._order: list[str] = []
         self._log_buffers: dict[str, list[str]] = {}
+        # Optional hook fired once per terminal transition (completed,
+        # error, cancelled, …) — the continual-learning governor uses it
+        # to extract lessons. Set by the host after construction.
+        self.on_terminal = None
         self._load()
         self._prune_logs()
 
@@ -161,6 +165,12 @@ class TaskStore:
                 # paths that skip _close_session would hold the transcript
                 # in memory forever (and lose it on restart).
                 self.flush_log(task_id)
+                cb = self.on_terminal
+                if cb is not None:
+                    try:
+                        cb(task.as_dict())
+                    except Exception:
+                        pass
             return task
 
     def add_changed_file(self, task_id: str, path: str) -> TaskRecord:

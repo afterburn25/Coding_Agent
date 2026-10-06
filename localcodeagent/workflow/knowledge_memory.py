@@ -224,6 +224,19 @@ class KnowledgeMemory:
             lines.extend(f"- {s.get('title')}: {s.get('url')}" for s in sources[:8])
         return "\n".join(lines)[:20000]
 
+    def mark_expired(self, record_id: str, *, reason: str = "") -> dict[str, Any] | None:
+        """Mark a record expired without deleting it (L9: stale knowledge
+        is marked, never silently erased)."""
+        with self._lock:
+            for row in self._data.get("records", []):
+                if isinstance(row, dict) and row.get("id") == record_id:
+                    row["expires_at"] = 0.0
+                    row["stale"] = True
+                    row["stale_reason"] = str(reason)[:200]
+                    self._save()
+                    return dict(row)
+            return None
+
     def records(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(row) for row in self._data.get("records", []) if isinstance(row, dict)]

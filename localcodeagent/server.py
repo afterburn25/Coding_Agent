@@ -246,6 +246,23 @@ class AppState:
         if not growth_dir.is_absolute():
             growth_dir = runtime_root / growth_dir
         self.model_growth = ModelGrowthLab(growth_dir)
+        # Continual learning — coordinates the stores above (knowledge
+        # memory, evidence, decisions, regressions, benchmarks, model
+        # growth) and owns lessons/procedures/strategies/competencies/
+        # study/mastery under data/learning/.
+        from .learning import LearningGovernor
+        self.learning = LearningGovernor(
+            runtime_root / "data" / "learning",
+            knowledge_memory=self.knowledge_memory,
+            evidence=self.evidence,
+            decisions=self.decisions,
+            regressions=self.regressions,
+            benchmarks=getattr(self, "benchmarks", None),
+            model_growth=self.model_growth)
+        # Every terminal task transition feeds the learning loop — lesson
+        # extraction, competency updates, strategy stats — regardless of
+        # which lane (chat, queue, mission, worker) produced it.
+        self.tasks.on_terminal = self.learning.observe_task
         # Protected Nexus Brain state has one canonical location. Mutable
         # config.json cannot redirect an initialized Brain to an unprotected file.
         self._boot(52, "SYNCHRONIZING · NEXUS BRAIN", "Verifying persistent intelligence and signed Brain state")
@@ -505,6 +522,7 @@ class AppState:
         self.benchmarks = BenchmarkLab(
             runtime_root / "data" / "benchmarks.json",
             baselines=self.baselines)
+        self.learning.benchmarks = self.benchmarks
         self.temp_specialists = TempSpecialistStore(
             runtime_root / "data" / "temp_specialists.json")
         from .release import RCManager
@@ -914,6 +932,7 @@ class AppState:
                 self.profiles.active()),
             asker_is_creator=lambda: bool(
                 (self.profiles.active() or {}).get("is_creator")),
+            learning=self.learning,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the

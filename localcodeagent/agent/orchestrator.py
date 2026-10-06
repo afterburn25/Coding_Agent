@@ -233,6 +233,7 @@ class AgentOrchestrator:
         self_knowledge=None,
         creator_address=None,
         asker_is_creator=None,
+        learning=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -279,12 +280,16 @@ class AgentOrchestrator:
                 "workspace": lambda: str(self.checkpoints.workspace),
                 "why": self._command_why,
                 "desktop": bool(getattr(self.config, "desktop", False)),
+                # LearningGovernor — slash commands drive it directly;
+                # lazy so post-construction wiring still resolves.
+                "learning_gov": lambda: getattr(self, "learning", None),
             },
             audit=self._command_audit.append,
         )
         self.model_growth = model_growth
         self.nexus_brain = nexus_brain
         self.answer_memory = answer_memory
+        self.learning = learning
         self.activities = activities
         self.digital_twin = digital_twin
         # May be a graph instance or a zero-arg callable returning one — the

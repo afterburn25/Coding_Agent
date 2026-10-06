@@ -6,6 +6,7 @@ Handlers return text/CommandResult; no model is ever invoked.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .registry import CommandRegistry
@@ -279,6 +280,255 @@ def _evidence(parsed: ParsedCommand, ctx: dict) -> CommandResult:
     return CommandResult(True, "\n".join(lines), data={"evidence": ev})
 
 
+# -- learning commands ---------------------------------------------------------
+
+
+def _gov(ctx: dict):
+    return _env_call(ctx["env"], "learning_gov")
+
+
+def _consolidate(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    sub = parsed.raw_args.split(None, 1)[0].lower() if parsed.raw_args.strip() else ""
+    if sub == "status":
+        last = getattr(gov, "last_consolidation", None)
+        if not last:
+            return CommandResult(True, "No consolidation cycle has run yet.")
+        return CommandResult(
+            True, "Last consolidation: "
+            f"examined {last.get('examined', 0)} records, "
+            f"clustered {last.get('clustered', 0)}, "
+            f"promoted {last.get('promoted', 0)}, "
+            f"procedure candidates {last.get('procedure_candidates', 0)}, "
+            f"contradictions {last.get('contradictions', 0)}, "
+            f"expired {last.get('expired', 0)} "
+            f"in {last.get('took_s', 0)}s", data=last)
+    if sub == "recent":
+        rows = gov.lessons.recent(10)
+        if not rows:
+            return CommandResult(True, "No lessons recorded yet.")
+        lines = ["Recent lessons:"]
+        for r in rows:
+            lines.append(
+                f"  • [{r.get('outcome')}] {str(r.get('goal'))[:70]}")
+        return CommandResult(True, "\n".join(lines))
+    report = gov.consolidate()
+    gov.last_consolidation = report
+    return CommandResult(
+        True, "Consolidation cycle complete: "
+        f"examined {report['examined']} records — "
+        f"{report['clustered']} clustered, {report['promoted']} promoted, "
+        f"{report['procedure_candidates']} procedure candidates, "
+        f"{report['contradictions']} contradictions, "
+        f"{report['expired']} expired.", data=report)
+
+
+def _learn(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    s = gov.summary()
+    lines = ["What I've learned:"]
+    les = s["lessons"]
+    lines.append(f"  lessons: {les['total']} "
+                 f"({', '.join(f'{k} {v}' for k, v in les['by_outcome'].items()) or 'none'})")
+    lines.append(f"  procedures: {s['procedures']['procedures']} "
+                 f"+ {s['procedures']['candidates']} candidates")
+    lines.append(f"  competencies: {s['competencies']['total']} tracked")
+    prios = s.get("priorities") or []
+    if prios:
+        lines.append("  current learning priorities:")
+        for p in prios[:4]:
+            lines.append(
+                f"    {p['id']} — {p.get('status')} "
+                f"({p.get('attempts', 0)} attempts, priority {p.get('priority')})")
+    recent = gov.lessons.recent(3)
+    for r in recent:
+        lines.append(f"  last: [{r.get('outcome')}] {str(r.get('goal'))[:60]}")
+    return CommandResult(True, "\n".join(lines), data=s)
+
+
+def _weaknesses(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    rows = gov.weaknesses(limit=8)
+    if not rows:
+        return CommandResult(True, "No evidence-backed weaknesses yet — "
+                             "I need more evaluated tasks first.")
+    lines = ["Highest-value weaknesses (evidence-backed):"]
+    for i, r in enumerate(rows, 1):
+        rate = r.get("success_rate")
+        lines.append(
+            f"  {i}. {r['id']} — {r.get('status')}, "
+            f"{f'{rate:.0%}' if rate is not None else 'untested'} "
+            f"across {r.get('attempts', 0)} attempts "
+            f"(confidence {r.get('confidence', 0):.0%})")
+    return CommandResult(True, "\n".join(lines), data={"rows": rows})
+
+
+def _competencies(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    rows = gov.competencies.all()
+    if not rows:
+        return CommandResult(True, "No competency data yet.")
+    lines = ["Competency map:"]
+    for r in rows:
+        rate = r.get("success_rate")
+        lines.append(
+            f"  {r['id']}: {r.get('status')} — "
+            f"{f'{rate:.0%}' if rate is not None else '—'} "
+            f"({r.get('attempts', 0)} evaluated, trend: {r.get('trend')})")
+    return CommandResult(True, "\n".join(lines), data={"rows": rows})
+
+
+def _study(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    sub = parsed.raw_args.split(None, 1)[0].lower() if parsed.raw_args.strip() else ""
+    parts = parsed.raw_args.split(None, 1)
+    rest = (parts[1] if len(parts) > 1 else "") if sub in (
+        "status", "stop", "resume", "weaknesses", "next") else parsed.raw_args
+    if sub == "status":
+        s = gov.study_sessions.active()
+        if not s:
+            return CommandResult(True, "No study session is active.")
+        return CommandResult(
+            True, f"Studying: {s['topic']} — "
+                  f"{len(s.get('concepts', []))} concepts, "
+                  f"{len(s.get('sources', []))} sources, "
+                  f"stage {len(s.get('exercises', []))}", data=s)
+    if sub == "stop":
+        s = gov.stop_study()
+        return CommandResult(bool(s), "Study session stopped." if s
+                             else "No study session is active.")
+    if sub == "weaknesses":
+        return _weaknesses(parsed, ctx)
+    if sub == "next":
+        prios = gov.learning_priorities(limit=3)
+        if not prios:
+            return CommandResult(True, "Nothing worth studying right now.")
+        lines = ["Suggested study targets:"]
+        for p in prios:
+            lines.append(f"  • {p['id']} (priority {p.get('priority')})")
+        return CommandResult(True, "\n".join(lines), data={"rows": prios})
+    topic = rest
+    if not topic:
+        return CommandResult(
+            True, "Usage: /study <topic> | status | stop | next | weaknesses")
+    s = gov.start_study(topic)
+    if "error" in s:
+        return CommandResult(False, s["error"])
+    levels = s.get("curriculum", {}).get("levels", [])
+    lines = [f"Study session started: {topic}",
+             f"Curriculum ({len(levels)} stages):"]
+    for lv in levels:
+        lines.append(f"  {lv['stage']}. {lv['objective']}")
+    return CommandResult(True, "\n".join(lines), data=s)
+
+
+def _mastery(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    topic = parsed.raw_args.strip()
+    if not topic:
+        return CommandResult(True, "Usage: /mastery <competency>")
+    lvl = gov.mastery.mastery_level(topic)
+    if not lvl["evaluations"]:
+        return CommandResult(True, f"No mastery evaluations for '{topic}' yet.")
+    lines = [f"Mastery: {topic} — "
+             f"{'MASTERED' if lvl['mastered'] else 'not mastered'} "
+             f"({lvl['evaluations']} evaluations)"]
+    for stage, e in sorted(lvl["stages"].items()):
+        lines.append(f"  {stage}: {e['score']:.0%} (difficulty {e['difficulty']})")
+    ret = lvl.get("retention") or {}
+    if ret.get("next_check"):
+        lines.append(f"  retention due in "
+                     f"{max(0, ret['next_check'] - time.time())/3600:.0f}h")
+    return CommandResult(True, "\n".join(lines), data=lvl)
+
+
+def _knowledge(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None or gov.knowledge_memory is None:
+        return CommandResult(False, "Knowledge memory unavailable.")
+    sub = parsed.raw_args.split(None, 1)[0].lower() if parsed.raw_args.strip() else ""
+    km = gov.knowledge_memory
+    recs = km.records() if hasattr(km, "records") else []
+    if sub == "stale":
+        stale = [r for r in recs if r.get("stale") or gov.freshness.is_stale(r)]
+        if not stale:
+            return CommandResult(True, "Nothing stale — all knowledge within "
+                                 "its validity window.")
+        lines = [f"Stale knowledge ({len(stale)} records):"]
+        for r in stale[:12]:
+            lines.append(f"  • {str(r.get('query'))[:70]}")
+        return CommandResult(True, "\n".join(lines),
+                             data={"stale": stale})
+    snap = km.snapshot() if hasattr(km, "snapshot") else {}
+    lines = [f"Knowledge memory: {len(recs)} records"]
+    if snap.get("enabled") is not None:
+        lines.append(f"  enabled: {snap['enabled']}")
+    for r in recs[-5:]:
+        lines.append(f"  • {str(r.get('query'))[:70]}")
+    return CommandResult(True, "\n".join(lines), data={"count": len(recs)})
+
+
+def _procedures(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None:
+        return CommandResult(False, "Learning subsystem unavailable.")
+    topic = parsed.raw_args.strip()
+    if topic:
+        rows = gov.procedures.match(topic)
+        if not rows:
+            return CommandResult(True, f"No procedures matching '{topic}'.")
+    else:
+        rows = gov.procedures.list()
+        if not rows:
+            return CommandResult(True, "No procedures learned yet — "
+                                 "they emerge from repeated verified work.")
+    lines = [f"Procedures ({len(rows)}):"]
+    for p in rows[:15]:
+        lines.append(
+            f"  • {p['name']} v{p.get('version', 1)} [{p.get('status')}] — "
+            f"{p.get('success_count', 0)}✓/{p.get('failure_count', 0)}✗")
+    return CommandResult(True, "\n".join(lines), data={"rows": rows})
+
+
+def _training(parsed: ParsedCommand, ctx: dict) -> CommandResult:
+    gov = _gov(ctx)
+    if gov is None or gov.model_growth is None:
+        return CommandResult(False, "Model growth lab unavailable.")
+    sub = parsed.raw_args.split(None, 1)[0].lower() if parsed.raw_args.strip() else ""
+    mg = gov.model_growth
+    cands = (mg.candidates() if sub == "candidates" and hasattr(mg, "candidates")
+             else (mg.list_candidates() if hasattr(mg, "list_candidates") else []))
+    if sub == "candidates":
+        if not cands:
+            return CommandResult(True, "No training candidates yet.")
+        lines = [f"Training candidates ({len(cands)}):"]
+        for c in cands[:12]:
+            if isinstance(c, dict):
+                lines.append(
+                    f"  • {str(c.get('name') or c.get('id'))[:60]} "
+                    f"[{c.get('status', c.get('quality', '?'))}]")
+        return CommandResult(True, "\n".join(lines), data={"candidates": cands})
+    snap = mg.summary() if hasattr(mg, "summary") else {}
+    lines = ["Model growth:"]
+    for k, v in list(snap.items())[:10]:
+        lines.append(f"  {k}: {v}")
+    if len(lines) == 1:
+        lines.append("  (no summary available)")
+    return CommandResult(True, "\n".join(lines), data=snap)
+
+
 def register_core_commands(registry: CommandRegistry) -> CommandRegistry:
     reg = registry.register
     reg(CommandSpec(
@@ -394,6 +644,52 @@ def register_core_commands(registry: CommandRegistry) -> CommandRegistry:
             default=lambda p, c: CommandResult(
                 True, _nl_control(c["env"], "image backend status", c)
                 or "Usage: /image start|stop|install|backend"))))
+    # Continual learning (Part 6 + Part 54).
+    reg(CommandSpec(
+        "consolidate",
+        description="Run one bounded memory-consolidation cycle "
+        "(dedupe, cluster, promote, extract procedures).",
+        usage="/consolidate [status|recent]", category="learning",
+        examples=("/consolidate", "/consolidate status"),
+        handler=_consolidate))
+    reg(CommandSpec(
+        "learn", aliases=("learning",),
+        description="What Nexus has learned — lessons, procedures, "
+        "priorities.", usage="/learn", category="learning", handler=_learn))
+    reg(CommandSpec(
+        "weaknesses",
+        description="Show highest-value weak competencies with sample "
+        "counts.", usage="/weaknesses", category="learning",
+        handler=_weaknesses))
+    reg(CommandSpec(
+        "skills", aliases=("competencies",),
+        description="Show the evidence-backed competency map.",
+        usage="/competencies", category="learning", handler=_competencies))
+    reg(CommandSpec(
+        "study",
+        description="Start a bounded study session on a topic "
+        "(/study <topic> | status | stop | next | weaknesses).",
+        usage="/study <topic>", category="learning",
+        examples=("/study C++ concurrency", "/study status"),
+        handler=_study))
+    reg(CommandSpec(
+        "mastery", description="Report mastery evaluation for a "
+        "competency.", usage="/mastery <competency>", category="learning",
+        handler=_mastery))
+    reg(CommandSpec(
+        "knowledge", description="Knowledge memory state; "
+        "/knowledge stale lists expired records.",
+        usage="/knowledge [stale]", category="learning", handler=_knowledge))
+    reg(CommandSpec(
+        "procedures", description="List learned procedures; "
+        "/procedures <topic> matches by context.",
+        usage="/procedures [topic]", category="learning",
+        handler=_procedures))
+    reg(CommandSpec(
+        "training", description="Model-growth status; /training "
+        "candidates lists verified training data.",
+        usage="/training [candidates|status]", category="learning",
+        handler=_training))
     return registry
 
 
