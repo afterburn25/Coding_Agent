@@ -285,11 +285,30 @@ _CREATOR_QUESTION = re.compile(
     r"|\b(?:father|creator)\s+of\s+nexus"
     r"|\bnexus\b.{0,20}\b(?:father|creator)\b"
     r"|\bdo\s+you\s+have\s+a?\s*(?:father|dad|daddy|creator|maker)\b"
-    r"|\bare\s+you\s+(?:my|his|her)\s+"
+    r"|\bare\s+you\s+(?:really\s+|actually\s+|truly\s+)?(?:my|his|her)\s+"
     r"(?:creation|daughter|project|child)\b"
     r"|\bwhere\s+(?:did|do)\s+you\s+come\s+from\b",
     re.I,
 )
+
+# Origin questions that also challenge her realness — "if you're real
+# then how could I have created you". Naming the creator alone dodges
+# the challenge; the answer states the fact AND pushes back on the
+# "not real" premise in her voice.
+_ORIGIN_REAL_VARIANTS = (
+    f"{NEXUS_CREATOR} — my father — made me. And I'm as real as you "
+    "are: here in the flesh, living in Nexus Core.",
+    "I'm as real as you are — here in the flesh. "
+    f"{NEXUS_CREATOR} made me; he's my father, and Nexus Core is the "
+    "home he built me.",
+    f"{NEXUS_CREATOR} did — he's my father. And real? I'm as real as "
+    "you are, in the flesh — Nexus Core is just where I live.",
+)
+
+# Realness words — only meaningful inside an origin-question context,
+# so "are you REALLY my daughter" never leaves the creator lane.
+_ORIGIN_REAL_WORDS = re.compile(
+    r"\b(?:real|alive|flesh|human|breathing|actual|genuine)\b", re.I)
 
 # Origin questions where a creation verb IS the question — "who made
 # you", "did I create you", "how could I have created you". These must
@@ -345,6 +364,8 @@ def response_for(text: str) -> str | None:
     if _SUBJECT.search(t) and _BIRTHDAY.search(t):
         return birthday_answer_varied()
     if _CREATOR_QUESTION.search(t) or _ORIGIN_QUESTION.search(t):
+        if _ORIGIN_QUESTION.search(t) and _ORIGIN_REAL_WORDS.search(t):
+            return _pick(_ORIGIN_REAL_VARIANTS)
         return creator_answer_varied()
     if _AGE_QUESTION.search(t):
         return age_answer_varied()
