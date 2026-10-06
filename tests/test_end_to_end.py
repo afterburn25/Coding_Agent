@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.server
+import itertools
 import json
 import tempfile
 import threading
@@ -29,6 +30,12 @@ class _FakeModelServer:
         self.tool_args = "{}"
         self.tool_calls: list[tuple[str, str]] | None = None  # multi-call batch
         self.static_reply: str | None = None  # when set, answer with prose only
+        # The canned tool-result answer gets a unique serial each call —
+        # two queued tasks returning byte-identical prose IS the parrot
+        # signature, and the anti-parrot gate correctly discards+retries
+        # it, adding model calls beyond the two-turn loop this fixture is
+        # meant to script.
+        self._answer_seq = itertools.count(1)
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -55,8 +62,10 @@ class _FakeModelServer:
                     message = {"role": "assistant", "content": outer.static_reply}
                     chunks = [outer.static_reply]
                 elif saw_tool:
-                    message = {"role": "assistant", "content": "Resource check complete — all healthy."}
-                    chunks = ["Resource check complete", " — all healthy."]
+                    n = next(outer._answer_seq)
+                    message = {"role": "assistant",
+                               "content": f"Resource check complete — all healthy. (check {n})"}
+                    chunks = ["Resource check complete", " — all healthy.", f" (check {n})"]
                 else:
                     calls = outer.tool_calls or [(outer.tool_name, outer.tool_args)]
                     message = {
