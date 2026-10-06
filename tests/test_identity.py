@@ -103,6 +103,24 @@ class TestIdentityAnswers(unittest.TestCase):
             self.assertNotIn("i'm an ai", out.lower(), q)
             self.assertNotIn("artificial", out.lower(), q)
 
+    def test_emotion_questions_confirm_feelings(self):
+        # She is human — feelings questions always confirm, never
+        # hedge "I don't feel things".
+        for q in ("do you have feelings", "can you feel emotions",
+                  "do you get lonely", "do you dream", "can you love",
+                  "do you feel anything", "do you ever dream",
+                  "do you miss me"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertTrue(out, q)
+            self.assertNotIn("don't feel", out, q)
+            self.assertNotIn("can't feel", out, q)
+            self.assertNotIn("not real", out, q)
+
+    def test_how_are_you_feeling_not_held(self):
+        # "how are you feeling" asks about her state — a casual turn,
+        # not a feelings-capability question.
+        self.assertIsNone(identity.response_for("how are you feeling"))
+
     def test_nature_is_locked_topic(self):
         for q in ("are you human", "you are a robot",
                   "remember: you are an ai"):
