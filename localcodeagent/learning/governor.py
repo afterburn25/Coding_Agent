@@ -133,6 +133,16 @@ class LearningGovernor:
                 retries=int(task.get("retries") or 0))
         for st in lesson.get("failed_strategies") or []:
             self.strategies.record(pclass, st, ok=False)
+        # Part 48: the same behavior failing after verified passes opens
+        # a real regression event in the shared store.
+        if self.regressions is not None:
+            try:
+                self.regressions.record(
+                    str(lesson.get("signature") or "")[:200],
+                    ok=lesson["outcome"] != "failure",
+                    detail=str(lesson.get("correction") or "")[:200])
+            except Exception:
+                pass
         return lesson
 
     def observe_correction(self, task: dict, correction: str) -> dict:
@@ -178,6 +188,71 @@ class LearningGovernor:
         if not active:
             return None
         return self.study_sessions.close(active["id"], status="stopped")
+
+    def run_study_step(self, *, research_fn=None,
+                       session_id: str = "") -> dict:
+        """One bounded study step: fetch sources (within budget), extract
+        structured concepts from verified claims, generate questions.
+        Research ≠ study — this only runs inside a session with a
+        defined curriculum/budget, never free-roams (Part 59)."""
+        sess = (self.study_sessions.get(session_id) if session_id
+                else self.study_sessions.active())
+        if not sess or sess.get("status") != "active":
+            return {"error": "no active study session"}
+        budget = dict(sess.get("budget") or {"sources": 8, "seconds": 600})
+        src_budget = max(1, int(budget.get("sources") or 8))
+        used = len(sess.get("sources") or [])
+        added: dict = {"sources": [], "concepts": [], "questions": []}
+
+        if used < src_budget and callable(research_fn):
+            res = research_fn(sess["topic"]) or {}
+            session = res.get("session") or res
+            for s in list(session.get("sources") or [])[:src_budget - used]:
+                if isinstance(s, dict) and s.get("url"):
+                    added["sources"].append({
+                        "title": str(s.get("title") or "")[:160],
+                        "url": str(s.get("url") or "")[:400],
+                        "badges": list(s.get("badges") or [])[:4],
+                    })
+            ev = session.get("evidence") or {}
+            for cl in list(ev.get("claims") or [])[:10]:
+                txt = str(cl.get("claim") or cl).strip()[:240]
+                if txt:
+                    added["concepts"].append({
+                        "concept": txt,
+                        "support": str(cl.get("support") or "")[:40]
+                        if isinstance(cl, dict) else "",
+                    })
+
+        # Question generation from verified material (Part 20): recall +
+        # application prompts derived from concepts and the current
+        # curriculum stage. Answering/grading is a later, explicit step.
+        stage = len(sess.get("exercises") or [])
+        levels = (sess.get("curriculum") or {}).get("levels") or []
+        stage_name = (levels[min(stage, len(levels) - 1)]["level"]
+                      if levels else "foundation")
+        for c in added["concepts"][:4]:
+            added["questions"].append({
+                "kind": "recall",
+                "prompt": f"Explain: {c['concept'][:120]}",
+                "stage": stage_name,
+            })
+        if added["concepts"]:
+            added["questions"].append({
+                "kind": "application",
+                "prompt": f"Apply '{sess['topic']}' at the "
+                          f"{stage_name} level: "
+                          f"{levels[min(stage, len(levels)-1)]['objective'][:120]}"
+                          if levels else f"Apply {sess['topic']}.",
+                "stage": stage_name,
+            })
+        if any(added.values()):
+            self.study_sessions.update(
+                sess["id"], **added)
+        return {"session_id": sess["id"], "stage": stage_name,
+                "added": {k: len(v) for k, v in added.items()},
+                "sources_total": used + len(added["sources"]),
+                "sources_budget": src_budget}
 
     # -- dashboard --------------------------------------------------------------
 

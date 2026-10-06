@@ -283,6 +283,12 @@ class AgentOrchestrator:
                 # LearningGovernor — slash commands drive it directly;
                 # lazy so post-construction wiring still resolves.
                 "learning_gov": lambda: getattr(self, "learning", None),
+                # /study <topic> runs one bounded research-backed step
+                # through the real coordinator.
+                "study_run": lambda: (
+                    self.learning.run_study_step(
+                        research_fn=self._command_research)
+                    if getattr(self, "learning", None) else None),
             },
             audit=self._command_audit.append,
         )

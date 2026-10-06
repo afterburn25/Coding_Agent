@@ -393,7 +393,8 @@ def _study(parsed: ParsedCommand, ctx: dict) -> CommandResult:
     sub = parsed.raw_args.split(None, 1)[0].lower() if parsed.raw_args.strip() else ""
     parts = parsed.raw_args.split(None, 1)
     rest = (parts[1] if len(parts) > 1 else "") if sub in (
-        "status", "stop", "resume", "weaknesses", "next") else parsed.raw_args
+        "status", "stop", "go", "resume", "continue",
+        "weaknesses", "next") else parsed.raw_args
     if sub == "status":
         s = gov.study_sessions.active()
         if not s:
@@ -407,16 +408,30 @@ def _study(parsed: ParsedCommand, ctx: dict) -> CommandResult:
         s = gov.stop_study()
         return CommandResult(bool(s), "Study session stopped." if s
                              else "No study session is active.")
+    if sub in ("go", "resume", "continue", "next"):
+        if sub == "next":
+            prios = gov.learning_priorities(limit=3)
+            if not prios:
+                return CommandResult(True, "Nothing worth studying right now.")
+            lines = ["Suggested study targets:"]
+            for p in prios:
+                lines.append(f"  • {p['id']} (priority {p.get('priority')})")
+            return CommandResult(True, "\n".join(lines), data={"rows": prios})
+        step = _env_call(ctx["env"], "study_run")
+        if isinstance(step, dict) and not step.get("error"):
+            a = step.get("added") or {}
+            return CommandResult(
+                True, f"Study step at {step.get('stage')} level: "
+                      f"+{a.get('sources', 0)} sources, "
+                      f"+{a.get('concepts', 0)} concepts, "
+                      f"+{a.get('questions', 0)} questions "
+                      f"({step.get('sources_total')}/"
+                      f"{step.get('sources_budget')} source budget)",
+                data=step)
+        return CommandResult(
+            False, str((step or {}).get("error") or "no active study session"))
     if sub == "weaknesses":
         return _weaknesses(parsed, ctx)
-    if sub == "next":
-        prios = gov.learning_priorities(limit=3)
-        if not prios:
-            return CommandResult(True, "Nothing worth studying right now.")
-        lines = ["Suggested study targets:"]
-        for p in prios:
-            lines.append(f"  • {p['id']} (priority {p.get('priority')})")
-        return CommandResult(True, "\n".join(lines), data={"rows": prios})
     topic = rest
     if not topic:
         return CommandResult(
@@ -429,6 +444,15 @@ def _study(parsed: ParsedCommand, ctx: dict) -> CommandResult:
              f"Curriculum ({len(levels)} stages):"]
     for lv in levels:
         lines.append(f"  {lv['stage']}. {lv['objective']}")
+    # One bounded study step now — real research through the normal
+    # coordinator, inside this session's source budget.
+    step = _env_call(ctx["env"], "study_run")
+    if isinstance(step, dict) and step.get("added"):
+        a = step["added"]
+        lines.append(
+            f"First step: +{a.get('sources', 0)} sources, "
+            f"+{a.get('concepts', 0)} concepts, "
+            f"+{a.get('questions', 0)} questions")
     return CommandResult(True, "\n".join(lines), data=s)
 
 
