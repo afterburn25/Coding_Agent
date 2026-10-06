@@ -2,6 +2,26 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — GitHub bare-target follow-up lane (commit `62f8a602` on main)
+
+Live-dogfooded fix: after "GitHub's already connected — point me at a repo,"
+a bare token like `afterburn25` fell through every lane into the model,
+which narrated intent ("let me check if that's a repo…") while running
+nothing — the unverified-claims badge correctly flagged it. New
+`_github_target_reply` lane in `localcodeagent/agent/orchestrator.py`
+detects a bare repo-ish token when the prior assistant turn was the repo
+invite, executes `github_list_repos` through the normal registry
+(read-only `github.read`, no approval needed), and answers with actual
+data: exact-match pin, owner listing, or the real repo list. Tests in
+`tests/test_speech_genome.py` cover exact repo, owner, owner/repo,
+unknown target, and the in-flight-turn skip. Focused suite 46/46 green.
+
+**Install note:** the deployed `D:\Nexus_Core\backend` predates this fix
+(and the ChangeJournal code — the installed backend predates the whole
+convergence merge). Rebuild via the packaging PyInstaller invocation is
+in `build/backend-dist/`; deploy = replace `D:\Nexus_Core\backend` while
+the app is closed, then refresh the LKG snapshot.
+
 ## 2026-10-06 — Stabilization convergence merged + installed-app repair (v0.23.0)
 
 **Convergence landed.** `milestone/nexus-stabilization-convergence` → PR #7 →
