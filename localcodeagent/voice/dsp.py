@@ -15,6 +15,11 @@ import numpy as np
 
 from .types import VoicePreset
 
+# Bump when the DSP chain's audible output changes so cached segments
+# (keyed on engine/preset, not on post-processing) invalidate instead of
+# serving audio synthesized under the old pipeline.
+DSP_VERSION = "2"
+
 
 # ---------------------------------------------------------------------------
 # primitives
@@ -305,7 +310,9 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
                        blip_min_ms: float = 15.0, gap_drop_db: float = 10.0,
                        min_gap_ms: float = 18.0, max_gap_ms: float = 300.0,
                        pad_ms: float = 8.0,
-                       end_slack_ms: float = 350.0) -> np.ndarray:
+                       end_slack_ms: float = 350.0,
+                       noise_tail_ms: float = 140.0,
+                       decay_ms: float = 90.0) -> np.ndarray:
     """Reattach a detached final phoneme — the Kokoro boundary artifact
     heard as a trailing "t"/"d" after a beat of silence at the end of an
     utterance. The island is a real final consonant emitted late: speech
@@ -318,7 +325,16 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     silence carries breath/noise around -30..-40 dB, above any absolute
     floor, so the gap is measured against the island's own level.
     Ordinary tails (long final run, no dip, island far from the end)
-    pass through untouched."""
+    pass through untouched.
+
+    A second artifact is handled first: the breathy noise bed Kokoro
+    leaves decaying for hundreds of ms after the real last phoneme —
+    audible as a trailing hiss. Everything after the last -22 dB run is
+    below the level any real consonant reaches, so a residue longer than
+    ``noise_tail_ms`` is pure artifact and gets shaved to a short decay.
+    Syllable-length detached islands are deliberately NOT cut: real
+    quiet final words are DSP-indistinguishable from stray syllables,
+    and eating a real word is worse than leaving an artifact."""
     if x.ndim != 1 or x.size < int(sr * 0.3):
         return x
     frame = max(1, int(sr * 0.01))                    # 10 ms frames
@@ -333,8 +349,6 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     if not voiced.any():
         return x
     last = n - 1 - int(voiced[::-1].argmax())          # last voiced frame
-    if (n - 1 - last) * 10 > end_slack_ms:
-        return x                                       # island not at the end
     # Segment the island at a higher level — the dip separating it from
     # speech carries Kokoro breath noise around -30..-40 dB, above the
     # absolute floor, so the island never forms its own -42 dB run.
@@ -344,6 +358,36 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     if not strong.any():
         return x
     last_strong = n - 1 - int(strong[::-1].argmax())
+    # Noise tail: Kokoro lets a breathy noise bed decay for hundreds of ms
+    # after the real last phoneme — audible as a trailing hiss/mumble.
+    # Everything after the last strong run is below -22 dB (no real
+    # consonant lives down there), so a long residue is pure artifact:
+    # shave it to a short natural decay, then judge what remains.
+    if (last - last_strong) * 10 > noise_tail_ms:
+        keep = last_strong * frame + int(sr * decay_ms / 1000.0)
+        keep = min(keep, x.size)
+        tail_len = min(keep - 1, int(sr * 0.03))
+        trimmed = x[:keep].copy()
+        if tail_len > 1:
+            trimmed[-tail_len:] *= np.linspace(1.0, 0.0, tail_len)
+        x = trimmed
+        n = x.size // frame
+        if n < 8:
+            return x
+        env = np.sqrt((x[: n * frame].reshape(n, frame) ** 2).mean(axis=1))
+        peak = float(env.max())
+        if peak <= 1e-6:
+            return x
+        voiced = env > peak * (10.0 ** (floor_db / 20.0))
+        if not voiced.any():
+            return x
+        last = n - 1 - int(voiced[::-1].argmax())
+        strong = env > peak * (10.0 ** (-22.0 / 20.0))
+        if not strong.any():
+            return x
+        last_strong = n - 1 - int(strong[::-1].argmax())
+    if (n - 1 - last) * 10 > end_slack_ms:
+        return x                                       # island not at the end
     run_start = last_strong
     while run_start > 0 and strong[run_start - 1]:
         run_start -= 1

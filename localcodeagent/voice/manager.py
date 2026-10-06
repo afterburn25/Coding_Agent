@@ -590,7 +590,8 @@ class VoiceManager:
                               str(overrides[src]), text)
         engine = self.engine(preset.engine)
         preset_json = preset.to_json()
-        key = AudioCache.key(text, preset.engine, engine.version,
+        key = AudioCache.key(text, preset.engine,
+                             f"{engine.version}|dsp{dsp.DSP_VERSION}",
                              preset.base_voice,
                              AudioCache.preset_hash(preset_json), speed)
         hit = self.cache.get(key)

@@ -787,6 +787,35 @@ class TestDSP(unittest.TestCase):
         x2 = np.concatenate([speech, voiced_tail]).astype(np.float32)
         self.assertEqual(dsp.trim_tail_artifact(x2, sr).size, x2.size)
 
+    def test_trim_tail_artifact_shaves_noise_bed(self):
+        # Kokoro leaves a breathy noise bed decaying for hundreds of ms
+        # after the real last phoneme — audible as a trailing hiss.
+        # Everything after the last -22 dB run is sub-consonant level,
+        # so a long residue is shaved to a short decay.
+        sr = 24000
+        rng = np.random.default_rng(0)
+        speech = 0.3 * np.sin(2 * np.pi * 150 * np.arange(sr) / sr)
+        hiss = (0.006 * rng.standard_normal(int(sr * 0.4))
+                * np.linspace(1.0, 0.3, int(sr * 0.4)))
+        tail = np.zeros(int(sr * 0.3))
+        x = np.concatenate([speech, hiss.astype(np.float32), tail])
+        y = dsp.trim_tail_artifact(x, sr)
+        # Noise bed + dead air gone; kept ~speech + short decay.
+        self.assertLessEqual(y.size, int(sr * 1.15))
+        self.assertGreaterEqual(y.size, int(sr * 1.0))
+
+    def test_trim_tail_artifact_keeps_natural_release(self):
+        # A short natural release decay (< noise_tail_ms) after the last
+        # strong run is speech, not a noise bed — leave it alone.
+        sr = 24000
+        rng = np.random.default_rng(0)
+        speech = 0.3 * np.sin(2 * np.pi * 150 * np.arange(sr) / sr)
+        release = (0.01 * rng.standard_normal(int(sr * 0.08))
+                   * np.linspace(1.0, 0.2, int(sr * 0.08)))
+        x = np.concatenate([speech, release.astype(np.float32)])
+        y = dsp.trim_tail_artifact(x, sr)
+        self.assertEqual(y.size, x.size)
+
 
 # --------------------------------------------------------------------------
 # speech-to-text configuration/provisioning contract
