@@ -1,0 +1,152 @@
+{
+  "fps": 30,
+  "frames": 900,
+  "loopEndpointPixelsIdentical": true,
+  "captionBounds": [
+    {
+      "id": "init",
+      "at": 0,
+      "frame": 0
+    },
+    {
+      "id": "control",
+      "at": 1,
+      "frame": 30
+    },
+    {
+      "id": "services",
+      "at": 2,
+      "frame": 60
+    },
+    {
+      "id": "integrity",
+      "at": 3,
+      "frame": 90
+    },
+    {
+      "id": "brain",
+      "at": 4,
+      "frame": 120
+    },
+    {
+      "id": "command",
+      "at": 5,
+      "frame": 150
+    },
+    {
+      "id": "workspace",
+      "at": 6,
+      "frame": 180
+    },
+    {
+      "id": "interface",
+      "at": 8.5,
+      "frame": 255
+    },
+    {
+      "id": "finalizing",
+      "at": 10,
+      "frame": 300
+    },
+    {
+      "id": "online",
+      "at": 12.2,
+      "frame": 366
+    }
+  ],
+  "hold": {
+    "t": 11.6,
+    "id": "finalizing",
+    "progress": 0.98,
+    "dissolve": 1,
+    "seam": 0,
+    "primary": "FINALIZING · NEXUS CORE",
+    "secondary": "Verifying interface and system readiness",
+    "color": "rgb(174, 223, 255)",
+    "secondaryColor": "rgb(118, 144, 174)",
+    "opacity": 1,
+    "secondaryOpacity": 1,
+    "fits": true,
+    "charge": 1,
+    "iris": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "rings": [
+      0.6,
+      -0.85,
+      1.1
+    ],
+    "cylinder": 1.5707963267948966,
+    "orbit": 1.4084999999999999
+  },
+  "pulse": [
+    {
+      "t": 24.8,
+      "id": "online",
+      "progress": 1,
+      "dissolve": 1,
+      "seam": 0,
+      "primary": "CORE SYSTEMS · ONLINE",
+      "secondary": "Nexus Core ready",
+      "color": "rgb(89, 255, 160)",
+      "secondaryColor": "rgb(61, 215, 127)",
+      "opacity": 0.45,
+      "secondaryOpacity": 0.75,
+      "fits": true,
+      "charge": 1,
+      "iris": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "rings": [
+        0.6,
+        -0.85,
+        1.1
+      ],
+      "cylinder": 1.5707963267948966,
+      "orbit": 3.6979999999999995
+    },
+    {
+      "t": 25.5,
+      "id": "online",
+      "progress": 1,
+      "dissolve": 1,
+      "seam": 0,
+      "primary": "CORE SYSTEMS · ONLINE",
+      "secondary": "Nexus Core ready",
+      "color": "rgb(89, 255, 160)",
+      "secondaryColor": "rgb(61, 215, 127)",
+      "opacity": 1,
+      "secondaryOpacity": 1,
+      "fits": true,
+      "charge": 1,
+      "iris": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "rings": [
+        0.6,
+        -0.85,
+        1.1
+      ],
+      "cylinder": 1.5707963267948966,
+      "orbit": 3.817
+    }
+  ],
+  "captionOverflowFrames": 0,
+  "preOnlineFullProgressFrames": 0,
+  "errors": []
+}

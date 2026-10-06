@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import struct
 import unittest
@@ -149,10 +150,15 @@ class StartupSplashLifecycleTests(unittest.TestCase):
 
     def test_splash_shows_real_milestone_progress(self):
         for primary, secondary in (
-            ("INITIALIZING · NEXUS CORE", "Starting native host and loading configuration"),
+            ("INITIALIZING · NEXUS CORE", "Establishing core startup environment"),
+            ("CORE CONTROL · ESTABLISHED", "Loading configuration and protected system state"),
             ("STARTING · CORE SERVICES", "Launching Nexus agent and service runtime"),
-            ("SYNCHRONIZING · INTERFACE", "Connecting interface to core services"),
-            ("LOADING · COMMAND INTERFACE", "Starting the Nexus workspace"),
+            ("VERIFYING · CORE INTEGRITY", "Confirming backend health and authorization"),
+            ("SYNCHRONIZING · NEXUS BRAIN", "Restoring memory, models and system continuity"),
+            ("OPENING · COMMAND INTERFACE", "Initializing the Nexus control environment"),
+            ("LOADING · NEXUS WORKSPACE", "Connecting tools, profiles and workspace services"),
+            ("SYNCHRONIZING · CORE INTERFACE", "Establishing communication with core systems"),
+            ("FINALIZING · NEXUS CORE", "Verifying interface and system readiness"),
             ("CORE SYSTEMS · ONLINE", "Nexus Core ready"),
         ):
             self.assertIn(primary, DESKTOP)
@@ -190,7 +196,7 @@ class StartupSplashLifecycleTests(unittest.TestCase):
         self.assertIn("public string Secondary", PROGRESS)
         # Ready-but-before-7s holds on FINALIZING, never READY.
         self.assertIn('"FINALIZING · NEXUS CORE"', PROGRESS)
-        self.assertIn('"Preparing interface"', PROGRESS)
+        self.assertIn('"Verifying interface and system readiness"', PROGRESS)
         self.assertIn('"CORE SYSTEMS · ONLINE"', PROGRESS)
 
     def test_completion_effect_and_immediate_transition(self):
@@ -347,12 +353,14 @@ class CinematicSplashTests(unittest.TestCase):
         # Secondary, so neither surface can drift to different wording.
         self.assertIn("StartupStatus", DESKTOP)
         for label in (
-            "INITIALIZING · NEXUS CORE", "RESTORING · SYSTEM STATE",
-            "SYNCHRONIZING · NEXUS BRAIN", "STARTING · CORE SERVICES",
+            "INITIALIZING · NEXUS CORE", "CORE CONTROL · ESTABLISHED",
+            "STARTING · CORE SERVICES", "VERIFYING · CORE INTEGRITY",
+            "SYNCHRONIZING · NEXUS BRAIN", "OPENING · COMMAND INTERFACE",
+            "LOADING · NEXUS WORKSPACE", "SYNCHRONIZING · CORE INTERFACE",
+            "FINALIZING · NEXUS CORE", "CORE SYSTEMS · ONLINE",
             "CALIBRATING · MODEL RUNTIME", "VERIFYING · CAPABILITIES",
             "INITIALIZING · VOICE SYSTEM", "CHECKING · VISUAL SYSTEMS",
-            "LOADING · COMMAND INTERFACE", "SYNCHRONIZING · INTERFACE",
-            "CORE SYSTEMS · ONLINE", "ACTIVATING · LANGUAGE CORE",
+            "ACTIVATING · LANGUAGE CORE",
             "ACTIVATING · DEVELOPMENT CORE", "CALIBRATING · MODEL MEMORY",
             "PREPARING · WORKSTATION", "BACKGROUND SETUP · SCHEDULED",
             "NEXUS CORE · COULD NOT START", "SAFE MODE · INITIALIZING",
@@ -495,6 +503,154 @@ class RecoverySequenceTests(unittest.TestCase):
         self.assertTrue((pkg / "tools" / "video_export" / "verify_package.py").is_file())
         self.assertTrue(
             (ROOT / "docs" / "SPLASH_SEQUENCES_DEVIN_HANDOFF.md").is_file())
+
+
+class StartupCaptionTimelineTests(unittest.TestCase):
+    """The startup clip is paced by startup_caption_timeline.json against
+    REAL StartupProgress — never by elapsed time or video position alone.
+    """
+
+    SPLASH = ROOT / "desktop" / "ChatNexus.Desktop" / "splash"
+    PAGE = SPLASH / "web" / "splash.mjs"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.src = cls.PAGE.read_text(encoding="utf-8")
+        cls.timeline = json.loads(
+            (cls.SPLASH / "startup_caption_timeline.json").read_text(encoding="utf-8"))
+        cls.style = (cls.SPLASH / "web" / "style.css").read_text(encoding="utf-8")
+
+    def test_timeline_defines_approved_ladder(self):
+        tl = self.timeline
+        self.assertEqual(tl["duration"], 30)
+        captions = {c["id"]: c for c in tl["captions"]}
+        gates = [c["progressGate"] for c in tl["captions"]]
+        self.assertEqual(gates, sorted(gates))  # authored order is gate order
+        for cid, gate, primary in (
+            ("init", 0.00, "INITIALIZING · NEXUS CORE"),
+            ("control", 0.06, "CORE CONTROL · ESTABLISHED"),
+            ("services", 0.15, "STARTING · CORE SERVICES"),
+            ("integrity", 0.30, "VERIFYING · CORE INTEGRITY"),
+            ("brain", 0.55, "SYNCHRONIZING · NEXUS BRAIN"),
+            ("command", 0.72, "OPENING · COMMAND INTERFACE"),
+            ("workspace", 0.85, "LOADING · NEXUS WORKSPACE"),
+            ("interface", 0.93, "SYNCHRONIZING · CORE INTERFACE"),
+            ("finalizing", 0.98, "FINALIZING · NEXUS CORE"),
+            ("online", 1.00, "CORE SYSTEMS · ONLINE"),
+        ):
+            c = captions[cid]
+            self.assertEqual(c["progressGate"], gate, cid)
+            self.assertEqual(c["primary"], primary, cid)
+        self.assertEqual(captions["online"]["secondary"], "Nexus Core ready")
+        # Online tail loop bounds + pulse period are authored in the file.
+        tail = tl["onlineTail"]
+        self.assertLess(captions["online"]["at"], tail["loopStart"])
+        self.assertLess(tail["loopStart"], tail["loopEnd"])
+        self.assertLessEqual(tail["loopEnd"], tl["duration"])
+        self.assertGreater(tail["pulsePeriod"], 0)
+        # The finalizing hold frame sits inside the finalizing caption.
+        self.assertGreater(tl["finalizingHold"]["at"], captions["finalizing"]["at"])
+        self.assertLess(tl["finalizingHold"]["at"], captions["online"]["at"])
+
+    def test_page_consumes_timeline_not_hardcoded_times(self):
+        src = self.src
+        self.assertIn("startup_caption_timeline.json", src)
+        # Piecewise real-progress → authored-clip-time mapping exists and is
+        # clamped by the finalizing hold frame until true completion.
+        self.assertIn("progressToAuthoredTime", src)
+        self.assertIn("clipTargetFor", src)
+        self.assertIn("finalizingHold", src)
+        self.assertRegex(src, r"clipGates\.find\(c => c\.id === 'online'\)")
+        # Loop bounds come from onlineTail, not duplicated literals.
+        self.assertIn("onlineTail", src)
+        for literal in ("13.8", "24.4"):
+            self.assertNotIn(literal, src, f"hardcoded seam time {literal}")
+
+    def test_clip_cannot_cross_future_caption(self):
+        src = self.src
+        # Ahead of the real-progress target the clip enters an ambient hold
+        # loop below the boundary — never crossing — and only exits once the
+        # milestone lets the target move past the hold edge again.
+        self.assertRegex(src, r"drift <= -\.\d+\)? \{\s*")
+        self.assertIn("holdLoop = true; holdEdge = target", src)
+        self.assertIn("target > holdEdge + HOLD_EXIT", src)
+        self.assertIn("holdEdge - HOLD_XFADE_LEAD", src)
+        # The loop window stays strictly under the hold edge, so the next
+        # caption boundary can never be reached ahead of real progress.
+        self.assertIn("holdEdge - HOLD_WIN", src)
+        # Pacing authority is the host-posted progress, not wall clock.
+        self.assertIn("externalProgress?.value", src)
+        self.assertIn("Math.min(t, holdAt)", src)
+
+    def test_hold_keeps_ambient_motion(self):
+        src = self.src
+        # A stalled milestone loops live footage under the edge instead of
+        # freezing on a dead frame — the two clip copies ping-pong a short
+        # window with a crossfade.
+        self.assertIn("function holdSwap(", src)
+        self.assertIn("HOLD_WIN", src)
+        self.assertIn("HOLD_RATE", src)
+        # A fault clears any stale hold so the error surface owns the truth.
+        self.assertIn("holdLoop = false", src)
+
+    def test_catchup_is_bounded(self):
+        self.assertRegex(self.src, r"MAX_CATCHUP\s*=\s*1\.75")
+        self.assertIn("clamp(drift / .35, .15, MAX_CATCHUP)", self.src)
+
+    def test_online_boundary_requires_true_completion(self):
+        src = self.src
+        # sequence-complete fires only when displayed progress reached the
+        # online gate AND the clip physically crossed its authored boundary.
+        self.assertIn("externalProgress?.value ?? 0) >= onlineGate", src)
+        self.assertIn("currentTime ?? 0) >= onlineAt", src)
+        self.assertIn("'sequence-complete'", src)
+        # Green pulse keys off the canonical online caption text — which the
+        # host only sends after real completion is confirmed.
+        self.assertIn("externalProgress.primary === 'CORE SYSTEMS · ONLINE'", src)
+        for cls in ("#status.online", "#detail.online"):
+            self.assertIn(cls, self.style)
+        self.assertIn("#59ffa0", self.style)
+        self.assertIn("#3dd77f", self.style)
+
+    def test_reduced_motion_keeps_green_without_pulse(self):
+        reduced = re.search(
+            r"@media \(prefers-reduced-motion:reduce\)\{[^}]*\}", self.style)
+        self.assertIsNotNone(reduced)
+        block = reduced.group(0)
+        self.assertIn("#status.online", block)
+        self.assertIn("#detail.online", block)
+        self.assertIn("animation:none", block)
+
+    def test_finalizing_ceiling_and_confirm_gate(self):
+        # Bar parks just under 100% while the cinematic converges.
+        self.assertIn("0.996", PROGRESS)
+        self.assertIn("AwaitingSequence", PROGRESS)
+        # ONLINE text requires the surface to confirm the boundary crossed.
+        self.assertIn("_sequenceConfirmed", PROGRESS)
+        self.assertIn("ConfirmSequence", PROGRESS)
+        self.assertIn("ConfirmSequence", PROGRAM)
+        self.assertIn('"sequence-complete"', PROGRAM)
+
+    def test_transition_logging_is_milestone_level(self):
+        self.assertIn("'caption-view'", self.src)
+        self.assertIn("startup caption shown", PROGRAM)
+        self.assertIn("LogMilestone", PROGRESS)
+
+    def test_host_reports_ladder_keys_at_anchors(self):
+        for fraction, key in (
+            ("0.06", "desktop_init"), ("0.15", "backend_launch"),
+            ("0.30", "backend_health"), ("0.55", "runtime_sync"),
+            ("0.72", "webview_init"), ("0.85", "interface_nav"),
+            ("0.93", "interface_ready"),
+        ):
+            self.assertIn(f'Report({fraction}, "{key}")', PROGRAM,
+                          f"{fraction} → {key}")
+
+    def test_fault_still_interrupts_normal_path(self):
+        # Fault surfaces clear stale online styling and own the captions.
+        self.assertIn("classList.remove('online')", self.src)
+        self.assertIn("'trigger-fault'", self.src)
+        self.assertIn("activeFault", self.src)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,80 @@
+[
+  {
+    "file": "init.png",
+    "at": 0.4,
+    "frame": 12,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "control.png",
+    "at": 1.4,
+    "frame": 42,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "services.png",
+    "at": 2.4,
+    "frame": 72,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "integrity.png",
+    "at": 3.4,
+    "frame": 102,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "brain.png",
+    "at": 4.4,
+    "frame": 132,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "command.png",
+    "at": 5.4,
+    "frame": 162,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "workspace.png",
+    "at": 6.4,
+    "frame": 192,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "interface.png",
+    "at": 8.9,
+    "frame": 267,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "finalizing.png",
+    "at": 11.6,
+    "frame": 348,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "online-low.png",
+    "at": 24.8,
+    "frame": 744,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "online-peak.png",
+    "at": 25.5,
+    "frame": 765,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "first.png",
+    "at": 0,
+    "frame": 0,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  },
+  {
+    "file": "last.png",
+    "at": 29.966666666666665,
+    "frame": 899,
+    "source": "docs/reference/NexusCore-Startup-Captioned-Reference.mp4"
+  }
+]

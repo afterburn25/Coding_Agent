@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Nexus Core · Startup review</title>
+<style>html{color-scheme:dark;background:#07111d;color:#bdd3e4;font:15px/1.6 'Segoe UI',sans-serif}body{max-width:1400px;margin:40px auto;padding:0 24px}h1{font-weight:500;letter-spacing:.08em;color:#b1e6ff}h2{font-weight:500;font-size:18px}p{color:#86a6bd;max-width:900px}a{color:#6ad8fc}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:24px}video,img{width:100%;display:block;background:#02060d}figure{margin:0 0 22px}figcaption{font-size:13px;margin-top:6px;color:#9ab7cd}button{background:#102b40;color:#b5e9ff;border:1px solid #28506b;border-radius:4px;padding:8px 12px;margin:8px 6px 8px 0;cursor:pointer}.frames{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}@media(max-width:600px){main{grid-template-columns:1fr}}</style></head><body>
+<h1>NEXUS CORE · STARTUP REVIEW</h1>
+<p>30 seconds · 1280 × 720 · 30 fps. Existing core motion, lighting and cinematic sound. The clean master leaves the loading readout for live application captions.</p>
+<main><section><h2>Captioned reference</h2><video id="reference" controls preload="metadata" src="../../reference/NexusCore-Startup-Captioned-Reference.mp4"></video><button data-time="11.6">Finalizing hold</button><button data-time="24.8">Online pulse · low</button><button data-time="25.5">Online pulse · peak</button><p><a href="../../reference/NexusCore-Startup-Captioned-Reference.mp4" download>Download captioned reference</a></p></section>
+<section><h2>Clean runtime master</h2><video controls preload="metadata" src="../../../desktop/ChatNexus.Desktop/splash/assets/NexusCore-Startup-Glow-Only.mp4"></video><p><a href="../../../desktop/ChatNexus.Desktop/splash/assets/NexusCore-Startup-Glow-Only.mp4" download>Download clean master</a></p></section></main>
+<p>Hold before ONLINE at 11.6 s. Loop the completed state from 24.4 s to 30.0 s (end exclusive): four full 1.4-second pulses. These are presentation boundaries; the host owns actual readiness. <a href="../../STARTUP_CINEMATIC_CAPTIONS.md">Timing and integration handoff</a>.</p>
+<h2>Frames extracted from the delivered reference MP4</h2><div class="frames">
+<figure><img src="init.png" alt="Initializing Nexus Core"><figcaption>0.4 s · INITIALIZING · NEXUS CORE</figcaption></figure>
+<figure><img src="control.png" alt="Core control established"><figcaption>1.4 s · CORE CONTROL · ESTABLISHED</figcaption></figure>
+<figure><img src="services.png" alt="Starting core services"><figcaption>2.4 s · STARTING · CORE SERVICES</figcaption></figure>
+<figure><img src="integrity.png" alt="Verifying core integrity"><figcaption>3.4 s · VERIFYING · CORE INTEGRITY</figcaption></figure>
+<figure><img src="brain.png" alt="Synchronizing Nexus Brain"><figcaption>4.4 s · SYNCHRONIZING · NEXUS BRAIN</figcaption></figure>
+<figure><img src="command.png" alt="Opening command interface"><figcaption>5.4 s · OPENING · COMMAND INTERFACE</figcaption></figure>
+<figure><img src="workspace.png" alt="Loading Nexus workspace"><figcaption>6.4 s · LOADING · NEXUS WORKSPACE</figcaption></figure>
+<figure><img src="interface.png" alt="Synchronizing core interface"><figcaption>8.9 s · SYNCHRONIZING · CORE INTERFACE</figcaption></figure>
+<figure><img src="finalizing.png" alt="Cyan finalizing hold"><figcaption>11.6 s · FINALIZING · NEXUS CORE</figcaption></figure>
+<figure><img src="online-low.png" alt="Green online caption at low pulse"><figcaption>24.8 s · ONLINE · pulse low</figcaption></figure>
+<figure><img src="online-peak.png" alt="Green online caption at pulse peak"><figcaption>25.5 s · ONLINE · pulse peak</figcaption></figure>
+</div><script>const v=document.querySelector('#reference');document.querySelectorAll('button').forEach(b=>b.onclick=()=>{v.pause();v.currentTime=Number(b.dataset.time);});</script></body></html>

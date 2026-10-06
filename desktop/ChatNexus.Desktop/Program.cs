@@ -435,9 +435,33 @@ internal sealed class SplashForm : Form
                     break;
                 case "sequence-complete":
                     _sequenceComplete = true;
+                    // The cinematic really crossed its authored online
+                    // boundary — only now may the caption claim ONLINE.
+                    _progress.ConfirmSequence();
+                    break;
+                case "caption-view":
+                    {
+                        // Transition-level pacing log: which authored caption
+                        // the clip just entered, and whether real progress
+                        // had it held or catching up at that moment.
+                        var root = doc.RootElement;
+                        var capId = root.TryGetProperty("id", out var cid) ? cid.GetString() ?? "?" : "?";
+                        var clipT = root.TryGetProperty("clipTime", out var cte) ? cte.GetDouble() : 0.0;
+                        var authored = root.TryGetProperty("at", out var ate) ? ate.GetDouble() : 0.0;
+                        var prog = root.TryGetProperty("progress", out var pge) && pge.ValueKind == JsonValueKind.Number
+                            ? pge.GetDouble() : 0.0;
+                        var held = root.TryGetProperty("held", out var hde) && hde.GetBoolean();
+                        var rate = root.TryGetProperty("rate", out var rte) ? rte.GetDouble() : 1.0;
+                        BackendProcess.NoteStartup(
+                            Path.Combine(_appDir, "data", "logs"),
+                            $"startup caption shown: {capId} at t={clipT:0.00}s " +
+                            $"(authored {authored:0.00}s) progress={prog:0.000} " +
+                            $"held={held} rate={rate:0.00}x");
+                    }
                     break;
                 case "recovery-sequence-complete":
                     _recoverySequenceComplete = true;
+                    _progress.ConfirmSequence();
                     break;
                 case "recovery-stage-shown":
                     if (doc.RootElement.TryGetProperty("stage", out var st)
@@ -448,6 +472,9 @@ internal sealed class SplashForm : Form
                     break;
                 case "splash-error":
                     _webFailed = true;
+                    // No cinematic surface left to confirm — when the real
+                    // completion lands the native fallback may claim ONLINE.
+                    _progress.ConfirmSequence();
                     BeginInvoke(() =>
                     {
                         if (_web is not null) { _web.Visible = false; }
@@ -1163,7 +1190,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(40);
             }
 
-            _progress.Report(0.06, "init");
+            _progress.Report(0.06, "desktop_init");
 
             // --test-fault: one-shot fault for recovery dogfooding — fires
             // once the cinematic/recovery surface has had time to boot, so
@@ -1187,7 +1214,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                     () => _main?.BackendUrl, TimeSpan.FromSeconds(45))
                 ?? Task.CompletedTask;
 
-            _progress.Report(0.15, "services");
+            _progress.Report(0.15, "backend_launch");
             await _main.PrepareAsync(_progress);
 
             // Core is online — verify the app will genuinely load before
@@ -1206,29 +1233,41 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             }
 
             // The interface posted its ready handshake; the app is genuinely
-            // usable. Now hold the splash until the minimum display time too,
-            // then play the brief READY + core-glow completion effect before
-            // handing off — still no blank intermediate state.
+            // usable. FINALIZING: the clip holds on its authored finalizing
+            // frame and the bar parks just under 100% while the minimum
+            // display time elapses — nothing may claim ONLINE ahead of the
+            // truth gate.
             _progress.MarkAppReady();
-
-            // The app is genuinely ready — now converge the cinematic's
-            // remaining tail onto its online state instead of letting it
-            // free-run behind. While it converges the bar parks just under
-            // 100% and the status stays "FINALIZING" so the text never
-            // claims online ahead of the visual. Bounded so a dead WebView
-            // can never hang startup.
             var splash = _splash;
             if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
             {
                 _progress.AwaitingSequence = true;
+            }
+            while (!_progress.MinimumElapsed)
+            {
+                await Task.Delay(60);
+            }
+
+            // Real completion: release the footage across its authored
+            // online boundary. The surface posts sequence-complete when the
+            // clip actually crosses it — ConfirmSequence is what allows the
+            // caption/green pulse to claim ONLINE. Bounded so a dead
+            // WebView can never hang startup.
+            _progress.BeginCompletion();
+            if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
+            {
                 splash.RequestSequenceFinish();
                 var seqDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
                 while (!splash.SequenceComplete && DateTimeOffset.Now < seqDeadline)
                 {
                     await Task.Delay(50);
                 }
-                _progress.AwaitingSequence = false;
             }
+            // The sequence-complete post normally confirms inside the wait
+            // above; this also covers the deadline/fallback paths — the real
+            // readiness gate has already passed, so a wedged clip or a dead
+            // surface must not strand the label on FINALIZING forever.
+            _progress.ConfirmSequence();
 
             // "Core systems online." lands on the visual online moment —
             // truthful and synchronized instead of early.
@@ -1237,7 +1276,6 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             {
                 await Task.Delay(60);
             }
-            _progress.BeginCompletion();
             while (!_progress.CompletionFinished)
             {
                 await Task.Delay(33);
@@ -2500,12 +2538,12 @@ internal sealed class MainForm : Form
         // host owns between "backend launched" and "backend healthy".
         _backend!.BootPhase += (pct, primary, secondary) =>
             progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
-        progress.Report(0.30, "services");
+        progress.Report(0.30, "backend_health");
         // Cold starts on machines scanning a fresh unsigned exe (AV) can
         // exceed 60s even when the backend is healthy — the PyInstaller
         // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
         await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
-        progress.Report(0.55, "interface");
+        progress.Report(0.55, "runtime_sync");
 
         var userDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -2527,11 +2565,11 @@ internal sealed class MainForm : Form
         await _webView.EnsureCoreWebView2Async(environment);
         ConfigureWebView();
         await ClearStaleWebCacheAsync(userDataFolder);
-        progress.Report(0.72, "workspace");
+        progress.Report(0.72, "webview_init");
 
         var ready = WaitForInterfaceReadyAsync();
         _webView.Source = new Uri(_backend.BaseUrl);
-        progress.Report(0.85, "workspace");
+        progress.Report(0.85, "interface_nav");
         // First-run workstation messaging only when provisioning is real —
         // an enabled, frozen install builds and runs its setup plan in the
         // background; nothing here waits on downloads.
@@ -2540,7 +2578,7 @@ internal sealed class MainForm : Form
             progress.Report(0.87, "workstation");
             progress.Report(0.90, "bg_setup");
         }
-        progress.Report(0.93, "interface");
+        progress.Report(0.93, "interface_ready");
         await ready;
     }
 

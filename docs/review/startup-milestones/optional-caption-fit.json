@@ -1,0 +1,30 @@
+[
+  {
+    "primary": "ACTIVATING · LANGUAGE CORE",
+    "fits": true
+  },
+  {
+    "primary": "ACTIVATING · DEVELOPMENT CORE",
+    "fits": true
+  },
+  {
+    "primary": "CALIBRATING · MODEL MEMORY",
+    "fits": true
+  },
+  {
+    "primary": "INITIALIZING · VOICE SYSTEM",
+    "fits": true
+  },
+  {
+    "primary": "CHECKING · VISUAL SYSTEMS",
+    "fits": true
+  },
+  {
+    "primary": "PREPARING · WORKSTATION",
+    "fits": true
+  },
+  {
+    "primary": "BACKGROUND SETUP · SCHEDULED",
+    "fits": true
+  }
+]

@@ -1,0 +1,94 @@
+{
+  "seconds": 30.0,
+  "sampleRate": 48000,
+  "channels": 2,
+  "peak": 0.3202032837916196,
+  "speechInputs": [],
+  "sourceStems": [
+    {
+      "id": "dormant_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/ambient_hum.wav",
+      "sha256": "44e9ed66a69155af03d1a2cb7194a6f168c19796d61e6c167bca32398de5ba64"
+    },
+    {
+      "id": "security_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/security_activate.wav",
+      "sha256": "879e633ad9757b206a45f8c5153a783bd14cbc61137ea6fa652cb700ab9a727f"
+    },
+    {
+      "id": "authorization_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/authorization.wav",
+      "sha256": "c9cdc8be437acd7cccfd80e2faa777d38ce803c8e4f65cb114d2479f15e7cec6"
+    },
+    {
+      "id": "tumbler_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/tumbler_clicks.wav",
+      "sha256": "1ce0f0ec0656c3624947df06080e8a0abc4d84051cf8185dd36f6bb5b4bb47ef"
+    },
+    {
+      "id": "lock_turn_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/lock_turn.wav",
+      "sha256": "7f0e55ea721b56d65797d2a54e9586e977a8ba79536aad06bfe69dcc80ae4fbd"
+    },
+    {
+      "id": "pin_1_release",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/pin_01.wav",
+      "sha256": "93fe61ca2824b70a07482aec863c1d2c81004633c29766fde4a62eeae5b48dfd"
+    },
+    {
+      "id": "pin_2_release",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/pin_02.wav",
+      "sha256": "95bf2c6f2f3be63651bd3b601be6d47d4554cda8a75d077281be9584bdba2c41"
+    },
+    {
+      "id": "pin_3_release",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/pin_03.wav",
+      "sha256": "a0d1305780f6a045c36e5c18300c307fe7a8c6b25bfaa2d287c8f174958d8b5f"
+    },
+    {
+      "id": "pin_4_release",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/pin_04.wav",
+      "sha256": "872b6dec556ab74b67c1adf5a7dbbf6f49a6262c95e6bfcf816f12db48f8fcf4"
+    },
+    {
+      "id": "ring_rotation_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/ring_rotation.wav",
+      "sha256": "21b749181152cd2719192a9fef2b3565eab6f40c59b9be8a1b7f072d23e17b0d"
+    },
+    {
+      "id": "iris_open_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/iris_open.wav",
+      "sha256": "77623047e1e6de6ccefe3dca4b819c27576b185fcbcf38614609d511b5499b9f"
+    },
+    {
+      "id": "core_charge_start",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/core_charge.wav",
+      "sha256": "1d4408d8ad00305c44d307cb3131eef30e3081d121fd1aaf2786d19274cafa10"
+    },
+    {
+      "id": "energy_swell",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/energy_swell.wav",
+      "sha256": "6dd60169f063954d06f7bcef31b2b4426641eb2cbd9607779ea6c4dfac6e754b"
+    },
+    {
+      "id": "charged_sustain",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/charged_hum.wav",
+      "sha256": "2c35d43e06cf2a21dbc9ab7169036bcb01028cd7f027e2cb5f6b0ac60571227b"
+    },
+    {
+      "id": "online_pulse",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/core_online.wav",
+      "sha256": "76d8551081c9516b7135f5fe0de2af2b2495a4f9a4ff7f6c38388e13dbc429fb"
+    },
+    {
+      "id": "stable_online",
+      "source": "desktop/ChatNexus.Desktop/splash/audio/stable_hum.wav",
+      "sha256": "49ed1279cacc2f707153438a473884f56acd180390fa620533fd1cd9144da97e"
+    }
+  ],
+  "loopSeamDelta": [
+    -2.2218123868489315e-10,
+    -0.00013184025367461716
+  ],
+  "tailRms": 0.027103548337642693
+}
