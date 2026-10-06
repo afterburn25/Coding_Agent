@@ -81,3 +81,4 @@ tools_*.png
 NUL
 .repair-worktrees/
 Devinchat-nexus/
+.dogfood/

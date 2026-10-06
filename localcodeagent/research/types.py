@@ -34,6 +34,13 @@ class ResearchSource:
     score: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
     untrusted: bool = True
+    # Evidence-quality fields (trust registry + evidence scoring).
+    source_class: str = ""
+    independence_group: int = -1
+    corroboration_count: int = 0
+    badges: list[str] = field(default_factory=list)
+    score_components: dict[str, float] = field(default_factory=dict)
+    topics: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -81,6 +88,9 @@ class ResearchSession:
     errors: list[str] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
+    topics: list[str] = field(default_factory=list)
+    queries: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
