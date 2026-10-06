@@ -568,14 +568,30 @@ class StartupCaptionTimelineTests(unittest.TestCase):
 
     def test_clip_cannot_cross_future_caption(self):
         src = self.src
-        # The clip pauses when it runs ahead of the real-progress target and
-        # only resumes once the milestone lets the target move again.
+        # Ahead of the real-progress target the clip enters an ambient hold
+        # loop below the boundary — never crossing — and only exits once the
+        # milestone lets the target move past the hold edge again.
         self.assertRegex(src, r"drift <= -\.\d+\)? \{\s*")
-        self.assertIn("if (!cur.paused) cur.pause()", src)
-        self.assertIn("cur.paused) void cur.play()", src)
+        self.assertIn("holdLoop = true; holdEdge = target", src)
+        self.assertIn("target > holdEdge + HOLD_EXIT", src)
+        self.assertIn("holdEdge - HOLD_XFADE_LEAD", src)
+        # The loop window stays strictly under the hold edge, so the next
+        # caption boundary can never be reached ahead of real progress.
+        self.assertIn("holdEdge - HOLD_WIN", src)
         # Pacing authority is the host-posted progress, not wall clock.
         self.assertIn("externalProgress?.value", src)
         self.assertIn("Math.min(t, holdAt)", src)
+
+    def test_hold_keeps_ambient_motion(self):
+        src = self.src
+        # A stalled milestone loops live footage under the edge instead of
+        # freezing on a dead frame — the two clip copies ping-pong a short
+        # window with a crossfade.
+        self.assertIn("function holdSwap(", src)
+        self.assertIn("HOLD_WIN", src)
+        self.assertIn("HOLD_RATE", src)
+        # A fault clears any stale hold so the error surface owns the truth.
+        self.assertIn("holdLoop = false", src)
 
     def test_catchup_is_bounded(self):
         self.assertRegex(self.src, r"MAX_CATCHUP\s*=\s*1\.75")

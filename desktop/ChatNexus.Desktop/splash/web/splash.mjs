@@ -107,7 +107,7 @@ function reportClipCaption(v) {
   if (idx > lastClipCaption) {
     lastClipCaption = idx;
     host({ type: 'caption-view', id: clipGates[idx].id, at: clipGates[idx].at,
-           clipTime: +v.currentTime.toFixed(2), held: v.paused,
+           clipTime: +v.currentTime.toFixed(2), held: holdLoop,
            rate: +v.playbackRate.toFixed(2), progress: externalProgress?.value ?? null });
   }
 }
@@ -118,6 +118,7 @@ function reportClipCaption(v) {
 function startBootSwap() {
   const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
   bootTailReached = true; bootSwapping = true; bootMutedIncoming = nxt;
+  holdLoop = false;   // reaching the tail implies the online gate released
   // Timeline-less fallback: loop the last ~4s (the settled tail of either
   // master) rather than restarting the whole cinematic at 0.
   nxt.currentTime = bootLoopStart > 0 ? bootLoopStart : Math.max(0, cur.duration - 4);
@@ -132,6 +133,34 @@ function startBootSwap() {
     cur.pause(); cur.hidden = true; cur.classList.remove('live');
     bootMutedIncoming = null; applyMediaAudio(); bootSwapping = false;
   }, BOOT_LOOP_XFADE_MS);
+}
+
+// --- Milestone hold loop -------------------------------------------------
+// When real progress stalls, the footage must never cross the next caption
+// boundary — but freezing dead on a frame reads as a stall, and toggling
+// pause/play as smoothed progress trickles causes visible flicker. Instead
+// the two clip copies ping-pong an ambient window just before the hold
+// edge, crossfading each pass, so picture and baked audio keep breathing
+// until the real milestone advances the gate.
+const HOLD_WIN = 2.0, HOLD_RATE = .6, HOLD_EXIT = .08, HOLD_XFADE_LEAD = .6, HOLD_XFADE_MS = 600;
+let holdLoop = false, holdEdge = 0;
+
+function holdSwap(pauseNow) {
+  const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
+  bootSwapping = true; bootMutedIncoming = nxt;
+  if (pauseNow) cur.pause();   // already at the edge — freeze under the fade
+  nxt.currentTime = Math.max(0, holdEdge - HOLD_WIN);
+  nxt.playbackRate = HOLD_RATE;
+  nxt.hidden = false;
+  nxt.style.zIndex = 3; cur.style.zIndex = 2;
+  void nxt.play().catch(() => {});
+  void nxt.offsetWidth;
+  nxt.classList.add('live');
+  bootIdx = 1 - bootIdx;
+  setTimeout(() => {
+    cur.pause(); cur.hidden = true; cur.classList.remove('live');
+    bootMutedIncoming = null; applyMediaAudio(); bootSwapping = false;
+  }, HOLD_XFADE_MS);
 }
 // One in-flight user-requested attempt at a time — duplicate Retry clicks
 // coalesce (button disabled here, single-flight guard on the host).
@@ -301,23 +330,42 @@ function paint() {
       const prog = externalProgress?.value ?? clamp(clock.time / manifest.duration);
       const target = clipGates.length
         ? clipTargetFor(prog) : Math.min(prog, .985) * dur;
-      if (target === null) {
-        // Released — real completion confirmed. Catch up to the authored
-        // online boundary at bounded speed, then settle to natural pace.
-        const rate = cur.currentTime < onlineAt ? MAX_CATCHUP : 1;
-        if (cur.paused && !cur.ended) void cur.play().catch(() => {});
-        if (Math.abs(cur.playbackRate - rate) > .01) cur.playbackRate = rate;
-      } else {
-        const drift = target - cur.currentTime;
-        if (drift <= -.05) {
-          // Ahead of real progress — hold before the next caption boundary.
-          if (!cur.paused) cur.pause();
+      if (holdLoop) {
+        if (target === null || target > holdEdge + HOLD_EXIT) {
+          holdLoop = false;   // real milestone advanced — pacing resumes below
         } else {
-          if (cur.paused) void cur.play().catch(() => {});
-          // Rate follows the gap: a .35s lead is natural speed, deeper
-          // backlog ramps toward the 1.75x cap, near-zero drifts crawl.
-          const rate = clamp(drift / .35, .15, MAX_CATCHUP);
-          if (Math.abs(cur.playbackRate - rate) > .01) cur.playbackRate = rate;
+          // Still waiting: loop the ambient window under the edge. The
+          // trigger leads the edge by the fade span so the outgoing copy
+          // stays inside the window and never crosses the boundary.
+          if (cur.currentTime >= holdEdge - HOLD_XFADE_LEAD) {
+            holdSwap(false);
+          } else {
+            if (cur.paused && !cur.ended) void cur.play().catch(() => {});
+            if (cur.playbackRate !== HOLD_RATE) cur.playbackRate = HOLD_RATE;
+          }
+        }
+      }
+      if (!holdLoop) {
+        if (target === null) {
+          // Released — real completion confirmed. Catch up to the authored
+          // online boundary at bounded speed, then settle to natural pace.
+          const rate = cur.currentTime < onlineAt ? MAX_CATCHUP : 1;
+          if (cur.paused && !cur.ended) void cur.play().catch(() => {});
+          if (Math.abs(cur.playbackRate - rate) > .06) cur.playbackRate = rate;
+        } else {
+          const drift = target - cur.currentTime;
+          if (drift <= -.02) {
+            // Ahead of real progress — enter the ambient hold loop at this
+            // edge instead of freezing on a dead frame.
+            holdLoop = true; holdEdge = target;
+            holdSwap(true);
+          } else {
+            if (cur.paused) void cur.play().catch(() => {});
+            // Rate follows the gap: a .35s lead is natural speed, deeper
+            // backlog ramps toward the 1.75x cap, near-zero drifts crawl.
+            const rate = clamp(drift / .35, .15, MAX_CATCHUP);
+            if (Math.abs(cur.playbackRate - rate) > .06) cur.playbackRate = rate;
+          }
         }
       }
       // Fires on both the gated and released paths — crossing the online
@@ -425,6 +473,7 @@ function triggerFault(details = {}) {
   const progress = externalProgress?.value ?? clamp(clock.time / manifest.duration);
   const started = clock.triggerFault(details, reduced, progress);
   host({ type: 'startup-fault', message: clock.diagnostics.message });
+  holdLoop = false;   // a fault owns the surface — drop any stale hold state
   // Fault is a new surface truth — any stale green online styling clears.
   $('status').classList.remove('online');
   $('detail').classList.remove('online');
