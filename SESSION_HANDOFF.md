@@ -26,10 +26,20 @@ behind the generic capability queue claiming "still being installed"
 (commit `aa2ce19`). Full local suite: **2377 passed, 2 skipped**.
 
 **Stale branches/PRs:** all 7 listed PRs are MERGED or CLOSED — nothing
-open. 15 local `repair/ri-*` branches are all merged into main (safe to
-delete, needs confirmation). `origin/feature/cinematic-core-unlock-splash`
-is NOT merged (PR #2 closed unmerged — decide whether artifacts are
-preserved before deleting).
+open. All 15 `repair/ri-*` worktrees+branches deleted (merged into main);
+`origin/feature/cinematic-core-unlock-splash` deleted on approval. Local
+and remote now carry only `main`.
+
+**Tier-3 soak green** (`localcodeagent.selftest --json`, 313s): all
+unittest suites + isolated 0.24.0 boot + 40 smoke checks pass. Two real
+findings fixed/handled: selftest crashed on CP1252 bytes in test output
+(`errors="replace"` + None-safe concat, commit `3c550ae`); and ~15
+autonomy tests "failed" because **C: hit 100% disk** — the real
+`disk nearly full` budget guard correctly paused missions (correct
+behavior, exhausted environment). Cleared 731 MB of pip cache →
+1.5 GB free → all 105 autonomy tests pass isolated. **Note: C: remains
+nearly full** — big consumers are user caches (`.cache` 24 GB,
+`.codex` 34 GB); worth user attention.
 
 ## 2026-10-06 — Intelligence Governor + Continual Learning (v0.24.0)
 
