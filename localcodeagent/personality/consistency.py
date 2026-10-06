@@ -115,6 +115,25 @@ def feedforward_hints(recent: dict | None) -> list[str]:
     if len(closers) >= 2:
         hints.append("Vary your closer — recently used: "
                      + "; ".join(f"'{c}…'" for c in closers) + ".")
+    # Motif echo — a distinctive content word appearing in a third or
+    # more of recent replies is a self-amplifying loop ("the toaster
+    # still warm from yesterday"). Name it and tell her to drop it
+    # unless the user brings it up.
+    motifs = [m for m in (rec.get("motifs") or []) if m]
+    if len(motifs) >= 4:
+        tally: dict[str, int] = {}
+        for m in motifs:
+            for w in m:
+                tally[w] = tally.get(w, 0) + 1
+        echoed = sorted(
+            w for w, n in tally.items()
+            if n >= max(3, len(motifs) // 3))
+        if echoed:
+            hints.append(
+                "Do NOT reuse these images — they've echoed through "
+                "recent replies: " + ", ".join(f"'{w}'" for w in
+                                               echoed[:4])
+                + ". Fresh detail each time.")
     return hints
 
 

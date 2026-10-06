@@ -534,6 +534,14 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
                  r"how|when|where|why|who|there|it|they|he|she)\b", t):
         return False, 0.0, []
 
+    # A bare modal ability question about a visual verb — "can you draw",
+    # "could you paint" — asks about capability, not for an artifact.
+    if re.match(
+            r"^(?:can|could|would|will|may)\s+you\s+"
+            r"(?:draw|paint|sketch|visuali[sz]e|doodle|render|illustrate|"
+            r"depict)\s*[?!.]*\s*$", t):
+        return False, 0.0, []
+
     visual_noun = bool(_VISUAL_NOUN_RE.search(t))
     visual_adj = bool(_VISUAL_ADJ_RE.search(t))
     non_image = bool(_NON_IMAGE_RE.search(t))
@@ -814,6 +822,17 @@ def _classify_turn(text: str, *, active: Any = None,
     # --- 1. Corrections override older context outright.
     m = _CORRECTION_RE.match(t)
     if m and not re.match(r"^(?:no|nope|nah)\s*[!?.]*$", t):
+        repl = (m.group(1) or m.group(2) or "").strip(" ,.;")
+        # "no offense but you're not…" is a full clause — a statement,
+        # not an artifact correction. Corrections name the replacement
+        # value ("no, the red one"), they don't argue a point.
+        if re.search(
+                r"\b(?:you|i|he|she|it|we|they)\s*"
+                r"(?:'re|'m|'s|'ll|'d|are|am|is|were|was|can|could|"
+                r"can't|cannot|would|do|don't|did|didn't|will)\b",
+                repl):
+            m = None
+    if m:
         repl = (m.group(1) or m.group(2) or "").strip(" ,.;")
         env.correction_of = "previous_attribute"
         env.correction_value = repl

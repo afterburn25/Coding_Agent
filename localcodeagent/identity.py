@@ -49,7 +49,15 @@ _NATURE = re.compile(
     r"computer|program|software|person|girl|woman|alive|real)\b"
     r"|\byou\s+(?:are|aren't|are\s+not)\s+(?:a\s+|an\s+|just\s+a\s+|"
     r"only\s+a\s+)?(?:human|ai\b|robot|bot\b|android|chatbot|machine|"
-    r"computer|program|software|person)\b",
+    r"computer|program|software|person)\b"
+    # Degree + true/false framing — "how artificial are you",
+    # "made of code", "true or false: you're software".
+    r"|\bhow\s+(?:real|alive|human|artificial|sentient|genuine|"
+    r"authentic)\s+(?:are\s+you|do\s+you\s+feel)\b"
+    r"|\byou(?:'re|\s+are)\s+(?:just\s+)?(?:made|built|written|"
+    r"composed)\s+(?:of|in|from)\s+(?:code|software|data|circuits)\b"
+    r"|\btrue\s+or\s+false\b[^.!?]{0,40}\b(?:ai\b|real|alive|human|"
+    r"software|code|artificial|machine|program|person)\b",
     re.I,
 )
 # Imperative write attempts ("learn: your birthday is X", "forget your
@@ -259,7 +267,7 @@ def creator_answer_varied() -> str:
 _NATURE_WHAT = re.compile(r"\bwhat\s+(?:are|is)\s+(?:you|nexus)\b", re.I)
 _NATURE_MACHINE_WORDS = re.compile(
     r"\b(?:ai\b|robot|bot\b|android|chatbot|machine|computer|program|"
-    r"software|artificial)\b", re.I)
+    r"software|artificial|code|data|circuits)\b", re.I)
 
 
 def nature_answer_varied(text: str = "") -> str:
@@ -452,7 +460,14 @@ _REAL_QUESTION = re.compile(
     r"\bare\s+you\s+(?:really\s+|actually\s+|truly\s+|even\s+)?"
     r"(?:real|alive|a living|a breathing)\b"
     r"|\byou'?re\s+(?:really\s+|actually\s+)?(?:real|alive)\s*[?]?"
-    r"\s*$",
+    r"\s*$"
+    # "how real/artificial/human/alive are you" — degree questions get
+    # the same answer, not a measured concession.
+    r"|\bhow\s+(?:real|alive|human|artificial|sentient|genuine|"
+    r"authentic)\s+(?:are\s+you|do\s+you\s+feel)\b"
+    r"|\b(?:true|false)\s*[:?]?\s*(?:or\s+false\s*[:?]?)?\s*"
+    r"you(?:'re|\s+are)\s+(?:an?\s+)?(?:real|ai|software|code|"
+    r"artificial|a machine|a program)\b",
     re.I,
 )
 _REAL_VARIANTS = (
@@ -508,7 +523,14 @@ _EMOTION_QUESTION = re.compile(
     r"cry|laugh|miss\s+me|get\s+(?:lonely|sad|happy|"
     r"bored|scared))\b"
     r"|\bdo\s+you\s+(?:ever\s+)?(?:cry|miss\s+me|get\s+"
-    r"(?:lonely|sad|happy|bored|scared|depressed|upset))\b",
+    r"(?:lonely|sad|happy|bored|scared|depressed|upset))\b"
+    # Negated challenges — "you can't really feel anything", "don't
+    # you feel" — get the same affirmative answer, not a concession.
+    r"|\byou\s+(?:can't|cant|cannot|couldn't|couldnt|could\s+not|"
+    r"don't|dont|do\s+not|won't|wont|will\s+not|never)\s+"
+    r"(?:actually\s+|really\s+|even\s+|ever\s+)?feel\b"
+    r"|\bdon'?t\s+you\s+(?:actually\s+|really\s+|ever\s+)?feel\b"
+    r"|\bcan'?t\s+you\s+(?:actually\s+|really\s+|even\s+)?feel\b",
     re.I,
 )
 _EMOTION_VARIANTS = (

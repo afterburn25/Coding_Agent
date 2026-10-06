@@ -74,6 +74,21 @@ class ModelRouter:
             "what can you do", "what all can you do", "help", "help me",
         }
         normalized = re.sub(r"[!?.,]+$", "", t).strip()
+        # Word-boundary matching — a bare `signal in t` substring test puts
+        # "capital"→api, "description"→script, "report"→repo, "digital"→git,
+        # "profile"→file on the work ladder. Stems keep real inflections
+        # (create→creates/created/creating/creation, fix→fixes/fixed/fixing).
+        def _stem_pat(word: str) -> str:
+            if word.endswith("e"):
+                return (re.escape(word[:-1])
+                        + r"(?:e|es|ed|ing|ers?|ation)\b")
+            return re.escape(word) + r"(?:s|ed|ing|ers?|ation|ment)?\b"
+
+        def _boundary_any(signals: tuple[str, ...], text: str) -> bool:
+            pats = [re.escape(s) if " " in s else _stem_pat(s)
+                    for s in signals]
+            return bool(re.search(r"\b(?:" + "|".join(pats) + r")", text))
+
         coding_signals = (
             "code", "debug", "fix", "build", "implement", "refactor", "error",
             "file", "repo", "repository", "project", "test", "compile", "function",
@@ -85,7 +100,7 @@ class ModelRouter:
                 "what can you do", "what all can you do", "what are your capabilities",
                 "what do you do", "how can you help",
             ))
-            and not any(signal in t for signal in coding_signals)
+            and not _boundary_any(coding_signals, t)
         )
         if normalized in casual_exact or capability_question:
             return "utility", 0, ["lightweight conversational request"]
@@ -102,6 +117,7 @@ class ModelRouter:
             "database", "api", "github", "git", "function", "class", "script",
             "website", "webpage", "button", "chat nexus",
         )
+        work_signal_hit = _boundary_any(work_signals, t)
         # Tool-requiring intents must never land on the utility lane — utility
         # sessions carry no tool schemas. Route them to the lightest
         # tool-capable tier instead.
@@ -157,7 +173,7 @@ class ModelRouter:
         if (
             len(t) <= 320
             and not any(signal in t for signal in current_info_signals)
-            and not any(signal in t for signal in work_signals)
+            and not work_signal_hit
         ):
             return "utility", 0, ["short non-coding conversation"]
 

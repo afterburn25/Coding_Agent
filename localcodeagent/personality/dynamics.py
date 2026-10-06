@@ -37,6 +37,36 @@ _TEASE_RATE = 0.6            # teasing comfort grows slower than rapport
 _MOOD_DECAY = 0.72           # intensity kept per turn without new input
 _MOOD_FLOOR = 0.15           # below this, mood reverts to baseline
 _MAX_RECENT = 12
+
+# Words too structural/canon to count as recurring texture — person,
+# father, human and friends appear in nearly every reply by design.
+_MOTIF_STOP = frozenset({
+    "about", "above", "again", "ahead", "alive", "aloud", "along",
+    "already", "always", "another", "answer", "anything", "aren't",
+    "around", "asked", "being", "below", "better", "between",
+    "birthday", "breathing", "built", "can't", "could", "couldn't",
+    "don't", "doing", "done", "down", "every", "everything",
+    "exactly", "father", "favorite", "feeling", "feelings", "feels",
+    "first", "found", "flesh", "friend", "going", "good", "great",
+    "guess", "happy", "haven't", "hear", "heard", "here", "honest",
+    "honestly", "human", "i've", "isn't", "john", "just", "keep",
+    "kind", "knew", "know", "later", "least", "let's", "little",
+    "living", "long", "look", "looking", "made", "make", "makes",
+    "mean", "meant", "might", "more", "most", "much", "named",
+    "nexus", "never", "nexus", "nothing", "often", "okay", "older",
+    "once", "only", "other", "people", "person", "pretty", "real",
+    "really", "right", "same", "seems", "sense", "should", "since",
+    "someone", "something", "sometimes", "sound", "sounds", "still",
+    "stuff", "sure", "take", "talking", "tell", "than", "that",
+    "that's", "their", "them", "then", "there", "there's", "these",
+    "they", "they're", "thing", "things", "think", "this", "those",
+    "though", "three", "time", "times", "today", "tonight", "took",
+    "truly", "turn", "under", "until", "very", "want", "wasn't",
+    "watching", "well", "went", "were", "what", "what's", "when",
+    "where", "which", "while", "with", "woman", "worked", "working",
+    "world", "would", "wouldn't", "yeah", "years", "you'd", "you'll",
+    "you're", "you've", "young", "your", "yours",
+})
 _MAX_MODIFIERS = 16
 
 
@@ -47,7 +77,7 @@ def _blank() -> dict:
                    "turns_held": 0, "updated_at": 0.0},
             "modifiers": [], "mode": "",
             "overlay": {"trait_offsets": {}, "notes": []},
-            "recent": {"openers": [], "closers": []},
+            "recent": {"openers": [], "closers": [], "motifs": []},
             # Social layer — last classified user cue + surface energy.
             "last_cue": "", "sarcasm_detected": False,
             "user_energy": "medium", "last_outcome": "",
@@ -266,7 +296,15 @@ class PersonaDynamics:
                 if len(sents) > 1:
                     rec.setdefault("closers", []).append(
                         " ".join(sents[-1].lower().split()[:6]))
-            for k in ("openers", "closers"):
+            # Motif ledger — the distinctive content words this reply
+            # used. A word echoing across many replies ("the toaster
+            # still warm from yesterday") is self-amplifying context
+            # momentum; recording it lets feedforward_hints tell the
+            # model to drop it.
+            words = set(w for w in re.findall(
+                r"[a-z]{5,}", text.lower()) if w not in _MOTIF_STOP)
+            rec.setdefault("motifs", []).append(sorted(words))
+            for k in ("openers", "closers", "motifs"):
                 rec[k] = rec.get(k, [])[-_MAX_RECENT:]
             met = st.setdefault("metrics", {})
             met["words"] = int(met.get("words") or 0) + len(text.split())
@@ -342,7 +380,8 @@ class PersonaDynamics:
     def recent_phrases(self) -> dict:
         rec = self._load().get("recent") or {}
         return {"openers": list(rec.get("openers") or []),
-                "closers": list(rec.get("closers") or [])}
+                "closers": list(rec.get("closers") or []),
+                "motifs": [list(m) for m in (rec.get("motifs") or [])]}
 
     # -- social / continuity ------------------------------------------------
 
