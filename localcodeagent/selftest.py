@@ -102,6 +102,7 @@ def validate_self_update(
                 cwd=root,
                 env=env,
                 text=True,
+                errors="replace",
                 capture_output=True,
                 timeout=max(30, int(test_timeout)),
             )
@@ -111,7 +112,7 @@ def validate_self_update(
             result["log_tail"] = str((exc.stdout or "") + (exc.stderr or ""))[-12000:]
             result["duration_seconds"] = round(time.monotonic() - started, 3)
             return result
-        test_output = (tests.stdout + tests.stderr)
+        test_output = (tests.stdout or "") + (tests.stderr or "")
         result["tests"] = {
             "ok": tests.returncode == 0,
             "returncode": tests.returncode,
