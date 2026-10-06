@@ -212,6 +212,7 @@ class AgentOrchestrator:
         image_outputs=None,
         capability_registry=None,
         self_knowledge=None,
+        creator_address=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -258,6 +259,11 @@ class AgentOrchestrator:
         # service instance or a zero-arg resolver returning one (lazy so
         # AppState wiring order doesn't matter).
         self._self_knowledge = self_knowledge
+        # Zero-arg resolver returning the title the persona uses for the
+        # user (ProfileManager.preferred_address — "Father" by default).
+        # Feeds the address-inversion repair: small models routinely flip
+        # "I call you Father" into "you call me Father".
+        self._creator_address = creator_address
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -800,14 +806,41 @@ class AgentOrchestrator:
                 intent="self_learning"),
                 frame=_rz.self_learning_frame())
 
-        if normalized in {
-            "who are you", "what are you", "what is your name", "what's your name", "whats your name",
-            "are you human",
-        }:
+        if cls._is_identity_question(normalized):
             from ..context import realize as _rz
             return _sem("identity", "answer", cls._builtin_render(
                 "identity", _rz.IDENTITY_VARIANTS, intent="identity"))
         return None
+
+    @staticmethod
+    def _is_identity_question(normalized: str) -> bool:
+        """"Who/what are you"-family questions → the canned identity
+        lane. Exact-match alone lets "are you a bot" / "are you real"
+        fall to the model, which then improvises identity claims (and
+        inverts the creator-title direction)."""
+        if re.fullmatch(
+                r"(?:who|what)(?:'s|s| is| are| r|'re)?\s+"
+                r"(?:you|u|your name|nexus|this|nexus core)", normalized):
+            return True
+        if re.fullmatch(
+                r"are\s+(?:you|u)\s+(?:really\s+|actually\s+|still\s+)?"
+                r"(?:a|an|the)?\s*"
+                r"(?:bot|chatbot|ai|robot|program|computer|machine|"
+                r"human|person|woman|girl|real|alive|sentient|nexus|"
+                r"assistant|voice)", normalized):
+            return True
+        if re.fullmatch(
+                r"(?:you're|youre|you are|ur)\s+(?:really\s+|actually\s+)?"
+                r"(?:a|an|the)?\s*"
+                r"(?:bot|chatbot|ai|robot|program|machine|nexus)",
+                normalized):
+            return True
+        if re.fullmatch(
+                r"(?:who|what)(?:'s| is| are)?\s+nexus\b|"
+                r"(?:tell me about|introduce)\s+yourself|"
+                r"what(?:'s| is|s)?\s+your name", normalized):
+            return True
+        return False
 
     @classmethod
     def builtin_utility_response(cls, user_text: str) -> str | None:
@@ -1290,6 +1323,55 @@ class AgentOrchestrator:
                 continue
             hits.append(s[m.start():m.start() + 100].split("\n")[0].strip())
         return hits
+
+    def _address_titles(self) -> list[str]:
+        """Titles the persona uses for the user — the profile's resolved
+        creator address plus "Father" (the factory default a model may
+        emit even when the profile customized it)."""
+        titles: list[str] = []
+        resolver = getattr(self, "_creator_address", None)
+        if callable(resolver):
+            try:
+                t = str(resolver() or "").strip()
+            except Exception:
+                t = ""
+            if t:
+                titles.append(t)
+        if "Father" not in titles:
+            titles.append("Father")
+        return titles
+
+    def _fix_address_inversion(self, text: str) -> str:
+        """Repair the creator-title inversion — a known small-model
+        failure (see prompt.py: 'call them: Father' inverts easily) where
+        a reply says "you call me Father" / "call me Father" instead of
+        "I call you Father". The title is the user's, so those shapes are
+        unambiguously wrong; rewrite the verb phrase to the correct
+        direction and keep the rest of the sentence."""
+        s = str(text or "")
+        for title in self._address_titles():
+            t = re.escape(title)
+            # "you (can|should|…) call/address/refer to/name me (as) <T>"
+            # → "I call you <T>" — collapses the modal too: "you should
+            # call me Father" → "I call you Father" stays truthful.
+            s = re.sub(
+                r"\b[Yy]ou\s+(?:(?:can|could|should|would|will|may|"
+                r"might|must|get to|chose to|choose to|like to|"
+                r"used to|have to)\s+)?"
+                r"(?:call(?:ed|ing)?|address(?:ed|ing)?|nam(?:e|ed|ing)|"
+                r"refer(?:red|ring)?\s+to)\s+me\s+"
+                r"(?:as\s+|by\s+(?:the\s+(?:name|title)\s+)?)?"
+                r"[\"'“”]?" + t + r"[\"'“”]?(?=[\s,.!?…—;:)\]" + "'" + r'”’]|$)',
+                f'I call you "{title}"', s)
+            # Bare "call me <T>" without a "you" subject ("just call me
+            # Father") — swap the object only.
+            s = re.sub(
+                r"\b(call(?:ed|ing)?|address(?:ed|ing)?|"
+                r"refer(?:red|ring)?\s+to|nam(?:e|ed|ing))\s+me\s+"
+                r"(as\s+|by\s+)?([\"'“”]?)" + t + r"\3\b",
+                lambda m: f"{m.group(1)} you {m.group(2) or ''}"
+                          f'{m.group(3)}{title}{m.group(3)}', s)
+        return s
 
     def _resolve_image_followup(
         self, user_text: str, attach: dict[str, Any] | None
@@ -3675,6 +3757,12 @@ class AgentOrchestrator:
                         continue
                     except Exception:
                         pass
+                # Creator-title direction fix BEFORE truth checks — small
+                # models invert "I call you Father" into "you call me
+                # Father"; the title is the user's, so that shape is
+                # unambiguously wrong and safe to repair deterministically.
+                session.main_content = self._fix_address_inversion(
+                    session.main_content)
                 # HARD TRUTH RULE: a reply asserting executed actions while
                 # zero tools ran this turn is fabrication. The text may
                 # already have streamed, so enforcement appends a visible

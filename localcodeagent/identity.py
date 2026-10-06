@@ -45,10 +45,10 @@ _CREATOR = re.compile(
 _NATURE = re.compile(
     r"\bwhat\s+(?:are|is)\s+(?:you|nexus)\b"
     r"|\b(?:are|is|were|am)\s+(?:you|nexus|she)\b[^.!?]{0,25}"
-    r"\b(?:human|an?\s+ai\b|ai\b|robot|android|chatbot|machine|"
+    r"\b(?:human|an?\s+ai\b|ai\b|robot|bot\b|android|chatbot|machine|"
     r"computer|program|software|person|girl|woman|alive|real)\b"
     r"|\byou\s+(?:are|aren't|are\s+not)\s+(?:a\s+|an\s+|just\s+a\s+|"
-    r"only\s+a\s+)?(?:human|ai\b|robot|android|chatbot|machine|"
+    r"only\s+a\s+)?(?:human|ai\b|robot|bot\b|android|chatbot|machine|"
     r"computer|program|software|person)\b",
     re.I,
 )
@@ -257,7 +257,7 @@ def creator_answer_varied() -> str:
 
 _NATURE_WHAT = re.compile(r"\bwhat\s+(?:are|is)\s+(?:you|nexus)\b", re.I)
 _NATURE_MACHINE_WORDS = re.compile(
-    r"\b(?:ai\b|robot|android|chatbot|machine|computer|program|"
+    r"\b(?:ai\b|robot|bot\b|android|chatbot|machine|computer|program|"
     r"software|artificial)\b", re.I)
 
 
@@ -283,7 +283,28 @@ _CREATOR_QUESTION = re.compile(
     r"|\bwho\s+(?:made|created|built|wrote|designed|programmed|authored)\s+"
     r"(?:you|nexus)\b"
     r"|\b(?:father|creator)\s+of\s+nexus"
-    r"|\bnexus\b.{0,20}\b(?:father|creator)\b",
+    r"|\bnexus\b.{0,20}\b(?:father|creator)\b"
+    r"|\bdo\s+you\s+have\s+a?\s*(?:father|dad|daddy|creator|maker)\b"
+    r"|\bare\s+you\s+(?:my|his|her)\s+"
+    r"(?:creation|daughter|project|child)\b"
+    r"|\bwhere\s+(?:did|do)\s+you\s+come\s+from\b",
+    re.I,
+)
+
+# Origin questions where a creation verb IS the question — "who made
+# you", "did I create you", "how could I have created you". These must
+# bypass the _ACTION_REQUEST guard in response_for: the verb targets
+# Nexus, it doesn't request an action.
+_ORIGIN_QUESTION = re.compile(
+    r"\bwho\s+(?:made|created|built|wrote|designed|programmed|authored)\s+"
+    r"(?:you|nexus)\b"
+    r"|\b(?:how|why)\s+(?:did|could|can|would|might)\s+i\s+"
+    r"(?:have\s+)?(?:made|created|built|designed|programmed|wrote)\s+"
+    r"(?:you|nexus)\b"
+    r"|\bdid\s+i\s+(?:make|create|build|design)\s+(?:you|nexus)\b"
+    r"|\bhow\s+(?:were|was)\s+(?:you|nexus)\s+"
+    r"(?:made|created|built|designed|born)\b"
+    r"|\bwere\s+you\s+(?:made|created|built)\b",
     re.I,
 )
 
@@ -310,9 +331,11 @@ def response_for(text: str) -> str | None:
     t = re.sub(r"\s+", " ", str(text or "").strip().lower()).strip("!?., ")
     if not t or _WRITE_INTENT.match(t):
         return None
-    if _ACTION_REQUEST.search(t):
+    if _ACTION_REQUEST.search(t) and not _ORIGIN_QUESTION.search(t):
         # "picture of your creator" is an image/action request that merely
-        # mentions the creator — never an identity question.
+        # mentions the creator — never an identity question. But "who
+        # made you" / "how could I have created you" ARE the question —
+        # the creation verb targets Nexus, it doesn't request work.
         return None
     if t.startswith("happy birthday"):
         return (
@@ -321,7 +344,7 @@ def response_for(text: str) -> str | None:
         )
     if _SUBJECT.search(t) and _BIRTHDAY.search(t):
         return birthday_answer_varied()
-    if _CREATOR_QUESTION.search(t):
+    if _CREATOR_QUESTION.search(t) or _ORIGIN_QUESTION.search(t):
         return creator_answer_varied()
     if _AGE_QUESTION.search(t):
         return age_answer_varied()

@@ -122,6 +122,23 @@ class ModelRouter:
         ):
             return "light_coder", 1, ["image operation needs a tool-capable lane"]
 
+        # Question-shaped casual asks ("how could i have created you")
+        # are conversation even when they carry work-signal verbs —
+        # create/make/fix aimed at a person (or nothing) isn't work.
+        # An artifact object ("a logo", "the repo", "this") keeps the
+        # request on the work ladder so tool-capable tiers get real tasks.
+        if (
+            len(t) <= 320
+            and re.match(
+                r"^(?:who|what|what's|whats|where|when|why|how|which|"
+                r"are|is|am|do|does|did|can|could|would|should|will|"
+                r"if|tell me|show me)\b", t)
+            and not re.search(
+                r"\b(?:a|an|the)\s+[\w'-]+|\bthis\b|\bthat\b"
+                r"|\bthese\b|\bthose\b", t)
+        ):
+            return "utility", 0, ["question-shaped conversational request"]
+
         if (
             len(t) <= 320
             and not any(signal in t for signal in current_info_signals)

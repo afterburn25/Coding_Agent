@@ -569,6 +569,110 @@ class TestBuiltinIntegration(unittest.TestCase):
         agent = self._github_target_agent(tool_error=True)
         self.assertIsNone(agent._github_target_reply("afterburn25"))
 
+    def test_identity_lane_phrasings(self):
+        agent = self._agent()
+        for q in (
+                "who are you", "what are you", "what is your name",
+                "whats your name", "are you human", "are you a bot",
+                "are you an ai", "are you ai", "are you real",
+                "are you a person", "are you nexus", "are you sentient",
+                "who's nexus", "tell me about yourself",
+                "introduce yourself", "you're a bot", "are you alive"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                self.assertIsNotNone(pair, q)
+                first = pair[0]
+                sid = (getattr(first, "semantic_id", None)
+                       or getattr(first, "intent", ""))
+                self.assertTrue(sid.startswith("identity"), q)
+
+    def test_origin_lane_phrasings(self):
+        agent = self._agent()
+        # Creation-verb questions must hit the canonical creator-locked
+        # lane (identity.py), never the model — "how could I have created
+        # you" used to fall through and produce rambling narration.
+        for q in (
+                "who made you", "who created you", "who built you",
+                "who is your father", "who's your creator",
+                "how were you made", "how were you created",
+                "how could i have created you", "how did i create you",
+                "did i make you", "do you have a father",
+                "where did you come from", "are you my creation",
+                "are you my daughter"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                self.assertIsNotNone(pair, q)
+                sid = getattr(pair[0], "semantic_id", "") or ""
+                self.assertTrue(sid.startswith("identity"), q)
+                self.assertIn("john hamburn", pair[1].lower())
+
+    def test_birth_lane_phrasings(self):
+        agent = self._agent()
+        for q in ("when were you born", "how old are you",
+                  "what's your birthday", "when is your birthday"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                self.assertIsNotNone(pair, q)
+                sid = getattr(pair[0], "semantic_id", "") or ""
+                self.assertTrue(sid.startswith("identity"), q)
+                # Canonical NEXUS_BIRTHDAY — not a model guess.
+                self.assertIn("september 30", pair[1].lower())
+
+    def test_identity_lane_no_model_confabulation(self):
+        from localcodeagent import identity as _ident
+        # Origin questions must resolve through the canonical locked
+        # facts — the same answers every time, never invented dates.
+        for q in ("who made you", "how could i have created you"):
+            self.assertIsNotNone(_ident.response_for(q), q)
+
+    def test_identity_lane_misses_unrelated(self):
+        agent = self._agent()
+        for q in (
+                "what time is it", "are you done", "who wrote this",
+                "are you sure", "are you busy"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                first = pair[0] if pair else None
+                sid = (getattr(first, "semantic_id", None)
+                       or getattr(first, "intent", ""))
+                self.assertFalse(
+                    sid == "identity" or sid.startswith("identity:"),
+                    q)
+
+    def test_address_inversion_repaired(self):
+        agent = self._agent()
+        out = agent._fix_address_inversion(
+            "You call me 'Father' — that's your title, not mine.")
+        self.assertIn('I call you "Father"', out)
+        self.assertNotIn("call me", out)
+
+    def test_address_inversion_modal_and_bare(self):
+        agent = self._agent()
+        out = agent._fix_address_inversion(
+            "You can call me Father anytime.")
+        self.assertIn('I call you "Father"', out)
+        out2 = agent._fix_address_inversion("Just call me Father, ok?")
+        self.assertIn("call you Father", out2)
+        self.assertNotIn("call me", out2)
+
+    def test_address_inversion_keeps_correct_use(self):
+        agent = self._agent()
+        # Correct direction + vocative use must not be touched.
+        s = "I call you \"Father\". What's on your mind, Father?"
+        self.assertEqual(agent._fix_address_inversion(s), s)
+        s2 = "You called me, Father — as usual."
+        self.assertEqual(agent._fix_address_inversion(s2), s2)
+
+    def test_address_inversion_custom_title(self):
+        agent = self._agent()
+        agent._creator_address = lambda: "Dad"
+        out = agent._fix_address_inversion("You call me Dad, right?")
+        self.assertIn('I call you "Dad"', out)
+        # "Father" still repaired — the default leaks from training data
+        # even when the profile picked another title.
+        out2 = agent._fix_address_inversion("you call me Father")
+        self.assertIn('I call you "Father"', out2)
+
     def test_genome_reply_vs_plain(self):
         plain = self._agent()._builtin_reply("hi")
         self.assertFalse(plain.genome_rendered)

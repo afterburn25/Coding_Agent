@@ -460,6 +460,39 @@ class TestVoiceManager(unittest.TestCase):
             len([p for p in published if p.get("event") == "segment"]),
             2)
 
+    def test_repeat_last_replays_recorded_segments(self):
+        """🔊/repeat must re-serve the exact clips, not re-synthesize —
+        the original carried the persona delivery plan (pace/tone) that
+        a flat speak_text rebuild would lose."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-rx")
+        self.m.finish_task("t-rx", "Same voice, same pace.")
+        orig = []
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            orig = [p for p in published if p.get("event") == "segment"]
+            if orig:
+                break
+            time.sleep(0.05)
+        self.assertTrue(orig)
+        self.assertEqual(self.m.segments_for_task("t-rx"),
+                         [p["segment_id"] for p in orig])
+        published.clear()
+        self.assertTrue(self.m.repeat_last())
+        replayed = [p for p in published if p.get("event") == "segment"]
+        self.assertEqual([p["segment_id"] for p in replayed],
+                         [p["segment_id"] for p in orig])
+
+    def test_segments_for_task_evicted_and_unknown(self):
+        self.assertEqual(self.m.segments_for_task("nope"), [])
+        seg_path = Path(self.m.cache.dir) / "gone.wav"
+        seg_path.write_bytes(b"x")
+        sid = self.m._register_segment(seg_path, "t-old")
+        self.assertEqual(self.m.segments_for_task("t-old"), [sid])
+        self.m.segments.pop(sid)  # simulate bounded-segment eviction
+        self.assertEqual(self.m.segments_for_task("t-old"), [])
+
     def test_queue_synthesizes_and_publishes(self):
         published = []
         self.m._publish = lambda kind, payload: published.append(payload)

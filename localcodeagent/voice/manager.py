@@ -9,7 +9,7 @@ import re
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Any, Callable
 
@@ -83,6 +83,10 @@ class VoiceManager:
         self._muted_at = 0.0
         self.segments: dict[str, Path] = {}  # seg_id -> wav path (recent)
         self._seg_order: deque[str] = deque(maxlen=200)
+        # task_id -> ordered seg_ids — lets the 🔊 replay button re-serve
+        # the exact clips a reply spoke with, instead of re-synthesizing
+        # the text without the persona delivery plan (wrong pace/tone).
+        self._task_segments: OrderedDict[str, list[str]] = OrderedDict()
         self.vocal = VocalizationEngine(
             adapter_for(getattr(config, "voice_engine", "kokoro")),
             publish=self._publish)
@@ -128,7 +132,17 @@ class VoiceManager:
         """Re-queue the most recently spoken utterance. Returns False
         when nothing has been spoken yet (or voice is muted/off —
         enqueue drops those anyway)."""
-        text = getattr(self, "_last_spoken", (None, ""))[1]
+        task_id, text = getattr(self, "_last_spoken", (None, ""))
+        # Re-publish the exact recorded segments when they still exist —
+        # re-synthesizing the text would lose the persona delivery plan
+        # (pace/tone/pauses) the reply originally spoke with.
+        seg_ids = self.segments_for_task(task_id) if task_id else []
+        if seg_ids:
+            for seq, sid in enumerate(seg_ids):
+                self._publish("voice", {
+                    "event": "segment", "task_id": task_id, "seq": seq,
+                    "segment_id": sid, "url": f"/api/voice/audio/{sid}"})
+            return True
         if not text:
             return False
         return self.enqueue(f"repeat-{uuid.uuid4().hex[:8]}",
@@ -595,6 +609,12 @@ class VoiceManager:
         seg_id = uuid.uuid4().hex[:16]
         self.segments[seg_id] = path
         self._seg_order.append(seg_id)
+        if task_id:
+            ids = self._task_segments.setdefault(task_id, [])
+            ids.append(seg_id)
+            self._task_segments.move_to_end(task_id)
+            while len(self._task_segments) > 64:
+                self._task_segments.popitem(last=False)
         # Trim bookkeeping (files themselves are cache-managed).
         while len(self.segments) > 400:
             old = self._seg_order.popleft() if self._seg_order else None
@@ -606,6 +626,12 @@ class VoiceManager:
 
     def segment_path(self, seg_id: str) -> Path | None:
         return self.segments.get(seg_id)
+
+    def segments_for_task(self, task_id: str) -> list[str]:
+        """Ordered, still-resident segment ids for a response's speech
+        task — the exact audio the reply played with, for honest replay."""
+        ids = self._task_segments.get(str(task_id or "")) or []
+        return [sid for sid in ids if sid in self.segments]
 
     # -- status / metrics ----------------------------------------------------
     def status(self) -> dict[str, Any]:

@@ -46,6 +46,33 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(d.role, "deep_reasoner")
         self.assertEqual(d.model_id, "deep")
 
+    def test_question_shaped_chat_stays_utility(self):
+        """Creation verbs aimed at a person are conversation — not work.
+        'how could i have created you' must not buy a light-coder model
+        just because it contains 'create'."""
+        for prompt in (
+                "how could i have created you",
+                "if you're real then how could i have created you",
+                "who made you", "who created you", "did i make you",
+                "why are you ignoring me", "are you a bot"):
+            with self.subTest(prompt=prompt):
+                d = self.router.choose(prompt)
+                self.assertEqual(d.role, "utility")
+
+    def test_question_with_artifact_keeps_work_lane(self):
+        """Question shape alone isn't enough — an artifact object or
+        demonstrative ('a logo', 'the repo', 'this') keeps tool-capable
+        tiers reachable for real tasks."""
+        for prompt in (
+                "how do i fix this",
+                "can you create a logo",
+                "why did the build fail",
+                "can you check the repo",
+                "what is the latest python version"):
+            with self.subTest(prompt=prompt):
+                self.assertNotEqual(
+                    self.router.choose(prompt).role, "utility")
+
     def test_review_phase(self):
         d = self.router.choose("Check the changes", phase="review")
         self.assertEqual(d.role, "reviewer")

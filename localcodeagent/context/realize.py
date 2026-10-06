@@ -1190,6 +1190,11 @@ IDENTITY_VARIANTS = (
     "I live.",
 )
 
+# Origin/creator/age/birthday questions are creator-locked facts — they
+# live in localcodeagent/identity.py (canonical NEXUS_BIRTHDAY and
+# NEXUS_CREATOR), which answers them deterministically upstream in
+# builtin_semantic before any model or memory can contradict them.
+
 # ---------------------------------------------------------------------------
 # Lane MeaningFrames — structured semantic atoms for the canned surfaces.
 # Every atom entry is a tuple of interchangeable phrasings; the realizer

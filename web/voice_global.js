@@ -132,7 +132,13 @@
   NV.speak = async function (text, opts) {
     if (NV.muted || !NV.enabled) return null;
     const out = await api('/api/voice/speak', Object.assign({ text: String(text || '') }, opts || {}));
-    if (out && out.url) NV.enqueue(out.url, { manual: true });
+    // Replays return the original recorded segments as an ordered urls
+    // list — enqueue every one so a multi-sentence reply plays through.
+    if (out && Array.isArray(out.urls) && out.urls.length) {
+      for (const u of out.urls) NV.enqueue(u, { manual: true });
+    } else if (out && out.url) {
+      NV.enqueue(out.url, { manual: true });
+    }
     return out;
   };
 

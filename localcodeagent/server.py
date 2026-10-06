@@ -910,6 +910,8 @@ class AppState:
             image_outputs=self._image_job_outputs,
             capability_registry=self.capability_registry,
             self_knowledge=lambda: self.self_knowledge,
+            creator_address=lambda: self.profiles.preferred_address(
+                self.profiles.active()),
         )
         self.history: list[dict] = self.conversation_manager.history(limit=32)
         self._brain_creator_token = ""
@@ -7582,6 +7584,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     self._json({"error": "text is required"}, 400)
                     return
+                # Replay beats re-synthesis: when the message carries the
+                # speech rid that spoke it, serve the exact recorded
+                # segments — identical pace/tone, zero CPU synth latency.
+                vtid = str(body.get("voice_task_id") or "").strip()
+                if vtid:
+                    seg_ids = voice.segments_for_task(vtid)
+                    if seg_ids:
+                        self._json({
+                            "ok": True, "replayed": True,
+                            "urls": [f"/api/voice/audio/{s}"
+                                     for s in seg_ids],
+                            "segments": len(seg_ids)})
+                        return
                 try:
                     out = voice.speak_text(
                         text[:20000],
@@ -8894,8 +8909,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"error": "unknown answer-memory endpoint"}, 404)
 
-    def _agent_payload(self, result) -> dict:
-        return {
+    def _agent_payload(self, result, *, voice_task_id: str = "") -> dict:
+        payload = {
             "content": result.content,
             "routing": {
                 "role": result.routing.role,
@@ -8917,9 +8932,16 @@ class Handler(BaseHTTPRequestHandler):
             "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         }
+        if voice_task_id:
+            # The speech rid that spoke this reply — the 🔊 replay button
+            # resolves it to the exact recorded segments, so a replay
+            # re-serves the original audio (same pace/tone) instead of
+            # re-synthesizing the text flat.
+            payload["voice_task_id"] = voice_task_id
+        return payload
 
-    def _agent_response(self, result) -> None:
-        self._json(self._agent_payload(result))
+    def _agent_response(self, result, *, voice_task_id: str = "") -> None:
+        self._json(self._agent_payload(result, voice_task_id=voice_task_id))
 
     def do_PATCH(self) -> None:
         """PATCH exists only for the profile API — PATCH /api/profiles/{id}
@@ -10234,7 +10256,8 @@ class Handler(BaseHTTPRequestHandler):
                             delivery=getattr(result, "delivery", None))
                         self.state._persona_note_turn(message, result.content)
                         self.state.history = self.state.conversation_manager.history(limit=32)
-                        payload = self._agent_payload(result)
+                        payload = self._agent_payload(
+                            result, voice_task_id=voice_rid)
                         if chat_req_specs:
                             rows = self.state._persist_request_requirements(
                                 chat_req_specs, result)
@@ -10423,7 +10446,8 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 self.state.history = self.state.conversation_manager.history(limit=32)
                 if chat_req_specs:
-                    payload = self._agent_payload(result)
+                    payload = self._agent_payload(
+                        result, voice_task_id=voice_rid)
                     rows = self.state._persist_request_requirements(
                         chat_req_specs, result)
                     payload["requirements"] = rows
@@ -10431,7 +10455,7 @@ class Handler(BaseHTTPRequestHandler):
                         r["description"] for r in rows]
                     self._json(payload)
                     return
-                self._agent_response(result)
+                self._agent_response(result, voice_task_id=voice_rid)
                 return
 
             if path == "/api/queue":
@@ -10880,7 +10904,7 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
                     self.state.history.append({"role": "assistant", "content": result.content})
-                self._agent_response(result)
+                self._agent_response(result, voice_task_id=voice_rid)
                 return
 
             if path == "/api/tasks/recover":
