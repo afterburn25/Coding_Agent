@@ -447,9 +447,13 @@ class RecoverySequenceTests(unittest.TestCase):
         # Host messages that drive the attempt lifecycle.
         for msg in ("'recovery-begin'", "'recovery-stage'", "'recovery-failed'"):
             self.assertIn(msg, src, msg)
-        # A stage may never display ahead of host confirmation.
-        self.assertIn("confirmedStage + 1 < RECOVERY_STAGE_TIMES.length", src)
-        self.assertIn("RECOVERY_STAGE_TIMES[confirmedStage + 1]", src)
+        # The clip free-runs through the attempt — the only pause is the
+        # online boundary, the one claim that must wait for host confirmation.
+        self.assertIn("confirmedStage < RECOVERY_STAGE_TIMES.length - 1", src)
+        self.assertIn("RECOVERY_STAGE_TIMES[RECOVERY_STAGE_TIMES.length - 1]", src)
+        # Narration fires on the footage's own visual beats, not confirms.
+        self.assertIn("RECOVERY_NARRATION", src)
+        self.assertIn("'recovery-stage-shown'", src)
         # One in-flight attempt; duplicate Retry coalesces.
         self.assertIn("attemptInFlight", src)
         self.assertIn("if (attemptInFlight || !clock.activeFault) return", src)

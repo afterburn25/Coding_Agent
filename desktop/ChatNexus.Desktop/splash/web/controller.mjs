@@ -23,9 +23,9 @@ export const RECOVERY_STAGES = Object.freeze([
   'CORE INTEGRITY · VERIFIED',
   'CORE SYSTEMS · ONLINE'
 ]);
-// Caption-entry times (seconds) inside NexusCore-Recovery.mp4 — the clip may
-// not cross index i's time until the host has confirmed stage i. Index 0
-// plays immediately when the attempt begins.
+// Caption-entry times (seconds) inside NexusCore-Recovery.mp4. The clip plays
+// at authored pace; only the last index's time is a hold point — the online
+// caption may not appear until the host confirms the attempt succeeded.
 export const RECOVERY_STAGE_TIMES = Object.freeze([0, 2.2, 4.4, 6.6, 8.8, 12.6, 15.8, 18.6, 21.4]);
 // Interrupted-attempt captions (NexusCore-Recovery-Failed.mp4), shown on the
 // DOM fallback path with the same pacing as the footage (~2.7s apart).

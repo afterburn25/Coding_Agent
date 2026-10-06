@@ -21,16 +21,21 @@ let lastDraw = -Infinity, lastRevision = 0, lastPanel = false;
 let previousHeld = false, completePosted = false, lastPhaseId = '';
 // Rendered scene clips are the primary surface once decoded; the DOM
 // layers beneath stay live as the fallback if playback never starts.
-const bootvid = $('bootvid'), errvid = $('errvid'), recvid = $('recvid'), failvid = $('failvid');
+const bootvid = $('bootvid'), bootvid2 = $('bootvid2'), errvid = $('errvid'), recvid = $('recvid'), failvid = $('failvid');
+// Two stacked copies of the boot clip ping-pong across the online-tail
+// loop: the outgoing clip finishes under the incoming one's opacity fade,
+// so the seam never shows a hard cut.
+const bootclips = [bootvid, bootvid2].filter(Boolean);
+let bootIdx = 0;
 let videoMode = false;
 // A sequence clip that owns the whole surface right now: 'error' (fault
 // continuation), 'recovery' (user-requested attempt), 'recovery-failed'.
 // While set, the DOM recovery panel stays hidden — the clip ends contained
 // and THEN the real controls reappear.
 let overlay = null;
-// The last recovery milestone the HOST confirmed. The recovery clip may not
-// cross RECOVERY_STAGE_TIMES[i] until confirmedStage >= i — a caption can
-// never claim a milestone ahead of the real attempt.
+// The last recovery milestone the HOST confirmed. The clip free-runs at its
+// authored pace — only the final ONLINE boundary holds for confirmation, the
+// one claim that may never precede the real attempt's outcome.
 let confirmedStage = -1;
 // Stages whose caption the clip has actually crossed — voice is requested
 // at the visual boundary, not when the host confirms, so narration and
@@ -47,6 +52,32 @@ const RECOVERY_NARRATION = [
   { at: 21.35, stage: 8 },  // green caption — "The core is back online."
 ];
 let narratedUpTo = -1;
+// The boot clip's online tail (≈13.8s→end) is a settled glow scene that
+// loops until the host dismisses the splash — the surface and its baked
+// hum stay alive while the app finishes opening instead of freezing on
+// 'ended'. Frame-diff picked 13.8s as the near-identical seam frame; the
+// swap crossfades so the mist/particle discontinuity hides in the blend.
+const BOOT_LOOP_START = 13.8, BOOT_LOOP_XFADE_MS = 400;
+let bootTailReached = false, bootSwapping = false, bootMutedIncoming = null;
+
+// Hand the online tail to the idle copy of the clip: it starts at the loop
+// point and fades in over the outgoing clip, which keeps its baked audio
+// until the swap settles — picture and hum both cross the seam cleanly.
+function startBootSwap() {
+  const cur = bootclips[bootIdx], nxt = bootclips[1 - bootIdx];
+  bootTailReached = true; bootSwapping = true; bootMutedIncoming = nxt;
+  nxt.currentTime = BOOT_LOOP_START;
+  nxt.hidden = false;
+  nxt.style.zIndex = 3; cur.style.zIndex = 2;
+  void nxt.play().catch(() => {});
+  void nxt.offsetWidth;                 // flush so the fade transition runs
+  nxt.classList.add('live');
+  bootIdx = 1 - bootIdx;
+  setTimeout(() => {
+    cur.pause(); cur.hidden = true; cur.classList.remove('live');
+    bootMutedIncoming = null; applyMediaAudio(); bootSwapping = false;
+  }, BOOT_LOOP_XFADE_MS);
+}
 // One in-flight user-requested attempt at a time — duplicate Retry clicks
 // coalesce (button disabled here, single-flight guard on the host).
 let attemptInFlight = false;
@@ -67,16 +98,18 @@ function clipOf(name) {
     : name === 'recovery-failed' ? failvid : bootvid;
 }
 function activeMedia() {
-  return overlay ? clipOf(overlay) : (videoMode ? bootvid : null);
+  return overlay ? clipOf(overlay) : (videoMode ? bootclips[bootIdx] : null);
 }
 function mediaOwnsMix() {
   const v = activeMedia();
   return Boolean(v && !v.paused && !v.ended);
 }
 function applyMediaAudio() {
-  for (const v of [bootvid, errvid, recvid, failvid]) {
+  for (const v of [...bootclips, errvid, recvid, failvid]) {
     if (!v) continue;
-    v.muted = audio.disabled;
+    // An incoming loop clip stays muted until the swap completes — the
+    // outgoing clip keeps its audio through the crossfade.
+    v.muted = audio.disabled || v === bootMutedIncoming;
     v.volume = clamp(audio.volume * mediaDuck);
   }
 }
@@ -197,13 +230,21 @@ function paint() {
   // the picture (and its baked audio) rather than letting the scene claim
   // progress reality hasn't made. The final frame holds while readiness
   // catches up — the host owns dismissal.
-  if (videoMode && !clock.activeFault && bootvid) {
-    const dur = bootvid.duration || 17;
-    const target = Math.min(fillTarget, .985) * dur;
-    const drift = target - bootvid.currentTime;
-    if (drift <= -.6) { if (!bootvid.paused) bootvid.pause(); }
-    else if (bootvid.paused && !bootvid.ended) void bootvid.play().catch(() => {});
-    if (!bootvid.paused && bootvid.playbackRate !== 1) bootvid.playbackRate = 1;
+  if (videoMode && !clock.activeFault && bootclips.length) {
+    const cur = bootclips[bootIdx];
+    const dur = cur.duration || 17;
+    if (!bootSwapping && (cur.ended || cur.currentTime >= dur - .5)) {
+      // Tail reached — the pacing hold can only let the clip get here once
+      // real progress allowed the online caption, so looping the settled
+      // glow until dismissal is honest (and keeps the baked hum running).
+      startBootSwap();
+    } else if (!bootSwapping) {
+      const target = Math.min(fillTarget, .985) * dur;
+      const drift = target - cur.currentTime;
+      if (drift <= -.6) { if (!cur.paused) cur.pause(); }
+      else if (cur.paused && !cur.ended) void cur.play().catch(() => {});
+      if (!cur.paused && cur.playbackRate !== 1) cur.playbackRate = 1;
+    }
   }
   $('stage').classList.toggle('fault', Boolean(state.fault));
   document.body.classList.toggle('overlay-clip', overlay !== null);
@@ -264,10 +305,10 @@ function frame(now) {
         const state = paint();
         if (state.phase.id !== lastPhaseId) { lastPhaseId = state.phase.id; host({ type: 'phase', id: state.phase.id }); }
         // sequence-complete means the visible sequence actually finished:
-        // in video mode that's the clip's final online frame, not the DOM
-        // clock underneath it.
+        // in video mode that's the clip reaching its online tail (which
+        // then loops until dismissal), not the DOM clock underneath it.
         if (!completePosted && clock.mode === 'normal' && state.online
-            && (!videoMode || !bootvid || bootvid.ended)) {
+            && (!videoMode || !bootvid || bootvid.ended || bootTailReached)) {
           completePosted = true;
           host({ type: 'sequence-complete' });
         }
@@ -292,7 +333,7 @@ function changed(fade = .008) {
 // partial progress are the actual state, not a jumped-to final frame.
 function useErrorClip(progress) {
   return !reduced && videoMode && errvid
-    && (bootvid?.ended || clock.held || progress >= .9);
+    && (bootclips.some(v => v.ended) || bootTailReached || clock.held || progress >= .9);
 }
 
 function triggerFault(details = {}) {
@@ -314,14 +355,13 @@ function triggerFault(details = {}) {
     void errvid.offsetWidth;           // flush style so the fade runs
     errvid.classList.add('live');
     void errvid.play().catch(() => { overlay = null; errvid.hidden = true; changed(.16); });
-    if (bootvid) setTimeout(() => bootvid.pause(), 400);
-  } else if (started && videoMode && bootvid) {
+    if (bootclips.length) setTimeout(() => bootclips.forEach(v => v.pause()), 400);
+  } else if (started && videoMode && bootclips.length) {
     // Early/mid fault while the clip ruled the surface: hand back to the
     // canvas so containment plays from the real partial geometry.
     videoMode = false;
     document.body.classList.remove('video-mode');
-    bootvid.classList.remove('live');
-    bootvid.pause();
+    bootclips.forEach(v => { v.classList.remove('live'); v.pause(); });
   }
   if (started) changed(.16); else if (!failed) paint();
   return started;
@@ -535,7 +575,7 @@ function handleHost(msg) {
       }
       case 'play-voice': void playVoice(msg.id, msg.b64, msg.duck); break;
       case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); mediaDuck = 1; applyMediaAudio(); break;
-      case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootvid?.pause(); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
+      case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootclips.forEach(v => v.pause()); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
   } catch (error) { fail(error); }
 }
