@@ -2060,6 +2060,50 @@ body[data-gesture="look_away"] .nexus-presence > img {
   letter-spacing:.2px;
 }
 
+/* Self-knowledge lane: action cards, deep links, inline controls */
+.chat-ui {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+  align-items:center;
+}
+.chat-ui .chat-action {
+  text-transform:uppercase;
+  letter-spacing:.4px;
+  font-size:11px;
+}
+.chat-ui .chat-action.active {
+  border-color:#2f6b4f;
+  color:#7ee2b0;
+}
+.chat-ui .chat-link {
+  font-size:12px;
+  color:#8ab4ff;
+  text-decoration:none;
+  border:1px solid #263d5d;
+  border-radius:8px;
+  padding:4px 10px;
+}
+.chat-ui .chat-link:hover { background:#13253f; }
+.chat-ui .chat-control {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  margin-top:2px;
+}
+.chat-ui .chat-control select,
+.chat-ui .chat-control input[type="range"] {
+  background:#0b1728;
+  border:1px solid #263d5d;
+  color:#dceaff;
+  border-radius:8px;
+  padding:4px 8px;
+  font:inherit;
+  font-size:12px;
+}
+
 .policy-select {
   width:100%;
   background:#0b1728;

@@ -165,6 +165,9 @@ class RenderedReply:
     body: str = ""
     structure_signature: str = ""
     realization: dict = field(default_factory=dict)
+    # Self-knowledge lane UI payload — action cards, deep links, and
+    # inline controls the frontend renders under the message.
+    ui: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -179,6 +182,7 @@ class RenderedReply:
             "body": self.body,
             "structure_signature": self.structure_signature,
             "realization": dict(self.realization),
+            "ui": dict(self.ui),
         }
 
 
