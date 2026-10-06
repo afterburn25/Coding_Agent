@@ -22,7 +22,10 @@ from ..streaming import TokenCoalescer
 from .classify import wants_long_form
 from ..models.telemetry import ModelPerformanceTelemetry
 from ..runtime.manager import RuntimeManager
+from ..commands import (
+    CommandExecutor, CommandRegistry, parse_command, register_core_commands)
 from ..research import ResearchCoordinator
+from ..version import version as _app_version
 from ..tools.base import ToolRegistry
 from .. import netdiag
 from ..workflow.checkpoint import CheckpointManager
@@ -235,6 +238,30 @@ class AgentOrchestrator:
         # follow-up reuse so "what changed?" resolves against the topic
         # already researched rather than issuing an unrelated search.
         self._last_research: dict[str, dict[str, Any]] = {}
+        # Deterministic slash commands — strict leading-"/" messages bypass
+        # intent inference, routing, and every model; they execute against
+        # registered commands → existing services (never a second executor).
+        self._think_mode: dict[str, str] = {}
+        self._command_audit: list[dict[str, Any]] = []
+        self._cmd_registry = CommandRegistry()
+        register_core_commands(self._cmd_registry)
+        self._cmd_executor = CommandExecutor(
+            self._cmd_registry,
+            env={
+                "registry": self._cmd_registry,
+                "version": _app_version,
+                "status": self._command_status,
+                "think_get": lambda conv: self._think_mode.get(str(conv), "auto"),
+                "think_set": self._set_think_mode,
+                "run_research": self._command_research,
+                "last_research": lambda conv: self._recent_research(str(conv)),
+                "format_sources": self._format_sources_reply,
+                "model_info": self._command_model_info,
+                "stop_active": self._command_stop,
+                "desktop": bool(getattr(self.config, "desktop", False)),
+            },
+            audit=self._command_audit.append,
+        )
         self.model_growth = model_growth
         self.nexus_brain = nexus_brain
         self.answer_memory = answer_memory
@@ -607,6 +634,99 @@ class AgentOrchestrator:
         return AgentResult(
             content=text, routing=decision, model_events=[evt], steps=0,
             task=completed_task.as_dict(), response_source="research_followup",
+        )
+
+    # ------------------------------------------------------------------
+    # Slash commands — deterministic env callables + result wrapper.
+    # ------------------------------------------------------------------
+    def _set_think_mode(self, conversation_id: str, mode: str) -> None:
+        self._think_mode[str(conversation_id)] = mode
+
+    def _command_status(self) -> dict[str, Any]:
+        models = [m for m in getattr(self.router, "models", [])
+                  if getattr(m, "enabled", True)]
+        return {
+            "version": _app_version() if callable(_app_version) else _app_version,
+            "model": getattr(models[0], "id", "") if models else "",
+            "research_mode": str(getattr(self.config, "research_mode", "")),
+        }
+
+    def _command_model_info(self) -> dict[str, Any]:
+        roles: dict[str, str] = {}
+        active = ""
+        for m in getattr(self.router, "models", []):
+            if not getattr(m, "enabled", True):
+                continue
+            mid = str(getattr(m, "id", "") or getattr(m, "name", ""))
+            if not active:
+                active = mid
+            for r in getattr(m, "roles", []) or []:
+                roles.setdefault(str(r), mid)
+        return {"active": active, "roles": roles}
+
+    def _command_research(
+        self, query: str, ctx: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        session = self._auto_research(str(query or ""))
+        if session and ctx:
+            self._remember_research_session(
+                str(ctx.get("conversation_id") or ""), str(query), session)
+        return session
+
+    def _command_stop(self, exclude_task_id: str = "") -> Any:
+        try:
+            for t in self.tasks.by_status("running", "queued"):
+                if str(t.get("id") or "") == str(exclude_task_id):
+                    continue
+                self.tasks.update(
+                    t["id"], status="cancelled", phase="done",
+                    summary="Cancelled by user.", pending_approval=None)
+                return f"Stopped {str(t.get('title') or t.get('id'))[:70]}"
+        except Exception:
+            pass
+        return False
+
+    def _command_result(
+        self,
+        task,
+        user_text: str,
+        parsed,
+        *,
+        event_callback,
+        conversation_id: str,
+    ) -> AgentResult:
+        """Deterministic reply for slash commands — no model, ever."""
+        result = self._cmd_executor.execute(
+            parsed,
+            ctx={"conversation_id": conversation_id, "task_id": task.id},
+        )
+        text = result.text
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-local",
+            reasons=["slash command — deterministic, no model invoked"],
+            complexity=0,
+        )
+        completed_task = self.tasks.update(
+            task.id, status="completed", phase="done",
+            model_id="builtin-local", model_role="utility",
+            summary=text, final_content=text, steps=0, error="",
+        )
+        evt = {"type": "builtin_utility", "model_id": "builtin-local",
+               "role": "utility", "reason": f"command /{parsed.name}"}
+        self._safe_emit(event_callback, {"type": "model", "event": evt})
+        self._safe_emit(event_callback, {
+            "type": "command",
+            "command": {"name": parsed.name, "ok": result.ok,
+                        "data": result.data}})
+        self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(user_text, text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(
+                user_text, text, intent="conversation", model_id="builtin-local")
+        return AgentResult(
+            content=text, routing=decision, model_events=[evt], steps=0,
+            task=completed_task.as_dict(), response_source="command",
         )
 
     def _sync_nexus_brain(self) -> None:
@@ -4608,6 +4728,15 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else ""
         )
+        # Slash commands — the ONLY early exit before intent inference,
+        # memory, routing, or models. A strict leading-"/" message resolves
+        # through CommandRegistry and executes deterministically.
+        parsed_command = parse_command(user_text)
+        if parsed_command is not None:
+            return self._command_result(
+                task, user_text, parsed_command,
+                event_callback=event_callback,
+                conversation_id=conversation_id)
         conversation_intent = (
             self.conversation_manager.classify_intent(user_text)
             if self.conversation_manager is not None
