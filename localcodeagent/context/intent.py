@@ -331,6 +331,34 @@ _CORRECTION_RE = re.compile(
     r"^(?:i\s+meant|i\s+said|actually)\b[,]?\s*(.+)",
     re.IGNORECASE)
 
+# "no <idiom>" openers that are never artifact corrections.
+_NO_IDIOMS = frozenset({
+    "problem", "worries", "worry", "kidding", "wonder", "hurry",
+    "rush", "offense", "offence", "thanks", "need", "way", "idea",
+    "pressure", "stress", "trouble", "issue", "issues",
+})
+
+# Edit-directive vocabulary — a correction against an active image
+# task only becomes an IMAGE_FOLLOWUP when it actually names an image
+# attribute or edit action. "Actually the answer is 42" is not one.
+_IMAGE_EDIT_VOCAB_RE = re.compile(
+    r"\b(?:zoom|wider|bigger|smaller|taller|longer|brighter|darker|"
+    r"blur(?:ry|red)?|sharper|cropp?|crop(?:ped|ping)?|close[-\s]?up|"
+    r"full[-\s]?body|portrait|landscape|color|colour|red|blue|green|"
+    r"blonde|brunette|hair|eyes?|outfit|dress|suit|pose|smile|"
+    r"background|foreground|style|anime|realistic|cartoon|sketch|"
+    r"image|picture|photo|pic|selfie|drawing|illustration|render|"
+    r"wallpaper|art|version|instead)\b", re.IGNORECASE)
+
+
+def _image_followup_vocabulary(text: str, repl: str) -> bool:
+    """True when a correction fragment plausibly edits an image —
+    visual noun, attribute word, or edit directive present."""
+    hay = f"{text} {repl}"
+    return bool(_VISUAL_NOUN_RE.search(hay)
+                or _VISUAL_ADJ_RE.search(hay)
+                or _IMAGE_EDIT_VOCAB_RE.search(hay))
+
 _FEEDBACK_RE = re.compile(
     r"\b(?:that'?s\s+not\s+what\s+i\s+(?:meant|asked|wanted|said)|"
     r"you\s+(?:lost|ignored|missed|forgot)\s+(?:the\s+)?(?:context|"
@@ -821,6 +849,13 @@ def _classify_turn(text: str, *, active: Any = None,
 
     # --- 1. Corrections override older context outright.
     m = _CORRECTION_RE.match(t)
+    if m:
+        _repl_chk = (m.group(1) or m.group(2) or "").strip(" ,.;")
+        # "no problem", "no worries", "no kidding" are idioms, never
+        # corrections of a previous artifact.
+        if _repl_chk.split(" ")[0].rstrip(".,!;").lower() in _NO_IDIOMS \
+                and len(_repl_chk.split()) <= 2:
+            m = None
     if m and not re.match(r"^(?:no|nope|nah)\s*[!?.]*$", t):
         repl = (m.group(1) or m.group(2) or "").strip(" ,.;")
         # "no offense but you're not…" is a full clause — a statement,
@@ -832,12 +867,23 @@ def _classify_turn(text: str, *, active: Any = None,
                 r"can't|cannot|would|do|don't|did|didn't|will)\b",
                 repl):
             m = None
+        # A replacement starting with a pronoun is a clause —
+        # "actually i like the dragon" is conversation, not a
+        # correction naming an artifact attribute.
+        elif re.match(r"(?:i|you|he|she|it|we|they)\s", repl):
+            m = None
+        # Bare "no " (no punctuation) only corrects when the fragment
+        # is short — "no zoom out", "no the red one". "no problem,
+        # take your time" is a statement.
+        elif re.match(r"^no\s", t) and not re.match(r"^no[,!.]", t) \
+                and len(repl.split()) > 3:
+            m = None
     if m:
         repl = (m.group(1) or m.group(2) or "").strip(" ,.;")
         env.correction_of = "previous_attribute"
         env.correction_value = repl
         env.evidence.append("correction marker")
-        if image_ctx:
+        if image_ctx and _image_followup_vocabulary(t, repl):
             env.primary_intent = IMAGE_FOLLOWUP
             env.requested_action = "modify"
             env.subject = getattr(active, "active_image_subject", "")

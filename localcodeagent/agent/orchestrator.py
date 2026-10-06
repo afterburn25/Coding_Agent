@@ -4607,8 +4607,14 @@ class AgentOrchestrator:
             followup = self._resolve_image_followup(
                 followup_text, attach)
             if followup is None and env.primary_intent == "image_followup":
-                followup = {"prompt": env.followup_prompt or user_text,
-                            "source_images": [], "meta": []}
+                # Respect the resolver's weak-signal veto — an env-level
+                # image_followup from a misclassified correction prefix
+                # ("no problem, take your time") must not force a job.
+                _fl = (env.followup_prompt or user_text).lower()
+                if self._IMAGEISH_RE.search(_fl) or \
+                        self._IMAGE_FOLLOWUP_STRONG_RE.search(_fl):
+                    followup = {"prompt": env.followup_prompt or user_text,
+                                "source_images": [], "meta": []}
             if followup is not None:
                 effective = followup["prompt"]
                 # Preservation: the fragment modifies the LIVE subject —
