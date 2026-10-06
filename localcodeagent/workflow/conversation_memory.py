@@ -390,8 +390,13 @@ class ConversationMemory:
                 result["behavior_rules"].append(rule)
 
             correction = bool(re.match(
-                r"^(?:no[, ]|that's\s+(?:wrong|not right)|that is\s+(?:wrong|not right)|"
-                r"you should|instead[, ]|correction\s*:)",
+                r"^(?:no,|that's\s+(?:wrong|not right)|that is\s+(?:wrong|not right)|"
+                r"you should|instead[, ]|correction\s*:"
+                # "no <correction-shaped continuation>" — bare "no "
+                # alone swallowed "no offense but…", "no problem".
+                r"|no\s+(?:that's|that\s+is|you\s+should|the\s+answer|"
+                r"the\s+correct|try|use|it\s+should|don't|do\s+not|"
+                r"not\s+quite|make\s+it|go\s+back)\b)",
                 raw,
                 flags=re.IGNORECASE,
             ))

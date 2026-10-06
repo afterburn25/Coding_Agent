@@ -1485,10 +1485,13 @@ class AgentOrchestrator:
                     has_imgs = any(
                         str((a or {}).get("kind") or "") == "image"
                         for a in (msg.get("attachments") or []))
-                    if (content and content != t and (
-                            self.direct_image_generation_intent(content)
-                            or self._IMAGEISH_RE.search(content.lower()))) \
-                            or has_imgs:
+                    # Only a turn that was itself an image request (or
+                    # carried an image attachment) can anchor a follow-up.
+                    # _IMAGEISH_RE is too broad here — "she", "her",
+                    # "body" match ordinary chat, which is how "isn't it
+                    # true that you're software" used to queue a job.
+                    if has_imgs or (content and content != t
+                            and self.direct_image_generation_intent(content)):
                         last_user_img = content or "use the attached image"
             if job_ids and last_user_img and sources:
                 break
