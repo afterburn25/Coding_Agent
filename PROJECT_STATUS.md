@@ -930,7 +930,14 @@ Unit checkpoint: **362 tests passing**.
 
 ## Next milestone
 
-**Modular workstation core + Answer Memory are in place** (643 tests). Priorities:
+**Convergence landed (v0.23.0, full suite 2196 tests).** Current state:
+- ChangeJournal + verified undo merged via PR #7 (`157b9b21`); `/api/changes` routes live.
+- Self-knowledge catalog + chat control plane (7db6d2eb) and InvokeAI auto-routing fix (0047315d) are on `main`.
+- Installed app `D:\Nexus_Core` repaired live: false .NET error (stray `hostfxr.dll`), 0.21↔0.23 backend/host mismatch (LKG side effect), and double-splash (PNG drifted from the re-rendered clip — re-rendered from frame 0) all fixed; fresh 0.23.0 LKG snapshot taken.
+- Repo hygiene: PR #2 closed (superseded); merged branches deleted; remote is `main` + preserved `feature/cinematic-core-unlock-splash` prototype only.
+- Open: Tier-3 soak on the merged main, clean/upgrade/production-installer dogfood of the cleaned deployment, onnxruntime-gpu voice bundle decision, persona 20× matrix + page sweep on the packaged app.
+
+Priorities:
 1. run real 14B/30B dogfood tasks against the Nexus Core repository and harden failures found there
 2. continue testing real Qwen/FLUX ComfyUI API workflows in parallel without blocking self-hosting
 3. ~~validate MCP Streamable HTTP against real MCP servers~~ — done: official filesystem server over stdio and official everything server over Streamable HTTP both completed handshake/tool-call round trips

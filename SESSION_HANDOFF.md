@@ -2,6 +2,76 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — Stabilization convergence merged + installed-app repair (v0.23.0)
+
+**Convergence landed.** `milestone/nexus-stabilization-convergence` → PR #7 →
+squash-merge `157b9b21` on `main`. CI green on the branch; the remote-main
+unit-test failures (`KnowledgeToolTests` JSON errors) are fixed by this merge.
+Full local suite: **2196 passed, 2 skipped**.
+
+- **ChangeJournal** (`localcodeagent/changes.py`, new): durable bounded JSONL
+  ledger for every meaningful mutation. Wired into filesystem writes (per-task
+  upserts restored via checkpoints + verify-diff), SettingsRegistry writes
+  (single `on_change` hook — chat/actions/inline all record once), git
+  branch-create (undo = switch-back + branch -D), git commit (undo = soft reset
+  refused if HEAD moved), git push (recorded honestly irreversible). Chat
+  "undo that" falls back to the journal; dry-run probes never execute real
+  undos; vague "turn it back on" phrasing stays out of the undo lane.
+  Routes: `GET /api/changes`, `POST /api/changes/undo`. Tests:
+  `tests/test_changes.py` (14).
+- **Stale test fix**: `git_push` correctly gates on dedicated `git.push`
+  permission (commit 3fb151cb) — test updated to match.
+- **Docs**: `docs/CHAT_CONTROL_PLANE.md` documents the journal + undo lanes.
+
+### Installed app (`D:\Nexus_Core`) — three real bugs fixed live
+
+- **False ".NET required" error**: stray `hostfxr.dll` from an older
+  self-contained deployment made the framework-dependent apphost search only
+  `D:\Nexus_Core\shared\` (which doesn't exist) instead of the global 8.0.31
+  runtime. Moved to `hostfxr.dll.stray` → app boots.
+- **0.21↔0.23 host/backend mismatch**: an LKG rollback had silently restored
+  the Oct-4 0.21.0 backend under the 0.23.0 host — broken voice APIs and the
+  double-splash symptom. Restored the real 0.23.0 build from
+  `backend-replaced`; old one kept at `backend-lkg-0.21.0`.
+- **Double splash**: `nexus-core-splash.png` had drifted from the re-rendered
+  startup clip — the warm-up surface and the video's first frame were two
+  visibly different designs. Re-rendered the PNG from the clip's actual
+  frame 0 in all 4 locations (install root + `splash/assets/` + both repo
+  copies) and cleared the splash WebView2 cache (`data/webview2-splash`).
+- **Version markers**: root `D:\Nexus_Core\VERSION` was stale at 0.21.0 →
+  0.23.0. New LKG snapshot `snap-1791301722298` taken of the verified
+  coherent 0.23.0 backend so any future rollback lands correctly.
+- **Voice delay**: inherent to CPU-only onnxruntime in the frozen backend —
+  uncached lines synthesize on CPU (first line after idle-unload slowest).
+  GPU accel needs an onnxruntime-gpu bundle (~1–2 GB); deferred decision.
+  The ~5s post-"online" silence is authored pacing (3s dwell + quiet buffer).
+- **Remaining install debt**: ~12 stale `backend-*` dirs + ~280 leftover
+  self-contained runtime files in `D:\Nexus_Core` — a clean production
+  installer run should replace the whole layout. `D:\Nexus_Core\Source`
+  checkout is corrupt (pre-existing).
+
+### Repository hygiene
+
+- PR #2 (draft `feature/cinematic-core-unlock-splash`) closed as superseded —
+  its content landed properly via #4/#5/#7; branch kept by design (27 MB
+  prototype assets).
+- Deleted merged branches (local + remote): `codex/startup-milestone-captions`,
+  `feature/startup-milestone-captions`, `fix/full-core-glow`,
+  `milestone/integrated-reliability-closeout`, `voice-concept-isabella`,
+  `milestone/nexus-stabilization-convergence` — all verified landed
+  (note: repo uses squash merges, so `git cherry`/`rev-list` show
+  non-equivalent SHAs; verify via mergeCommit parent + tree diff).
+- Remote now: `main` + `feature/cinematic-core-unlock-splash` only.
+- Scratch commit `61ee12b0` remains excluded as required.
+
+### Still open
+
+- Post-merge main CI + scheduled Tier-3 soak (next scheduled run).
+- Clean-install / upgrade-install / production-installer dogfood against the
+  cleaned deployment.
+- onnxruntime-gpu voice bundle decision.
+- Persona 20× variation matrix + page/button sweep on the packaged app.
+
 ## 2026-10-05 (late) — Integrated reliability closeout → 0.22.0
 
 **Cycle closed.** `milestone/integrated-reliability-closeout` absorbed
