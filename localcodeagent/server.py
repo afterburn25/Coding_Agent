@@ -8200,6 +8200,21 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/commands":
+            reg = getattr(getattr(self.state, "agent", None),
+                          "_cmd_registry", None)
+            self._json({"commands": reg.as_dict() if reg else {}})
+            return
+
+        if path == "/api/commands/complete":
+            qs = parse_qs(urlparse(self.path).query)
+            prefix = (qs.get("prefix") or [""])[0]
+            reg = getattr(getattr(self.state, "agent", None),
+                          "_cmd_registry", None)
+            self._json({"completions":
+                        reg.complete(prefix) if reg else []})
+            return
+
         if path == "/api/status":
             runtime = self.state.runtime.summary(probe_external=False)
             self._json({

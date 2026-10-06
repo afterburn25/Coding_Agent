@@ -35,6 +35,9 @@ class CommandSpec:
     # When set, execution delegates to ActionRegistry.execute(action_id)
     # instead of a local handler — the same path the GUI uses.
     action_id: str = ""
+    # map_params(raw_args) -> dict — typed argument mapping merged into
+    # the params handed to the action (e.g. "4" -> {"value": 4}).
+    map_params: Any = None
     # handler(parsed, ctx) -> CommandResult | str | dict
     handler: Callable[..., Any] | None = None
     # available_when(env) -> bool — gates commands on real capability.

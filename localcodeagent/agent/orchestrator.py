@@ -185,6 +185,22 @@ from ..context.realize import PersonaRenderer as _PersonaRenderer
 _BUILTIN_RENDERER = _PersonaRenderer()
 
 
+class _CommandActionsProxy:
+    """Lazy ActionRegistry access for slash commands — self_knowledge may
+    be a resolver, and a missing service must fail cleanly, not crash."""
+
+    def __init__(self, resolver) -> None:
+        self._resolver = resolver
+
+    def execute(self, *args, **kwargs):
+        svc = self._resolver()
+        actions = getattr(svc, "actions", None) if svc is not None else None
+        if actions is None:
+            from ..self_knowledge.actions import ActionResult
+            return ActionResult(False, "action service unavailable")
+        return actions.execute(*args, **kwargs)
+
+
 class AgentOrchestrator:
     def __init__(
         self,
@@ -258,6 +274,10 @@ class AgentOrchestrator:
                 "format_sources": self._format_sources_reply,
                 "model_info": self._command_model_info,
                 "stop_active": self._command_stop,
+                "actions": _CommandActionsProxy(self._self_knowledge_service),
+                "nl_control": self._command_nl_control,
+                "workspace": lambda: str(self.checkpoints.workspace),
+                "why": self._command_why,
                 "desktop": bool(getattr(self.config, "desktop", False)),
             },
             audit=self._command_audit.append,
@@ -685,6 +705,39 @@ class AgentOrchestrator:
         except Exception:
             pass
         return False
+
+    def _command_nl_control(self, text: str, ctx: dict | None = None):
+        """Deterministic self-knowledge resolver — typed questions like
+        'self diagnose' or 'undo that', never a model."""
+        svc = self._self_knowledge_service()
+        if svc is None:
+            return None
+        try:
+            return svc.respond(str(text or ""))
+        except Exception:
+            return None
+
+    def _command_why(self, ctx: dict | None = None) -> str | None:
+        """Explain the most recent real task's routing — model + role +
+        summary — from the task ledger."""
+        own = str((ctx or {}).get("task_id") or "")
+        try:
+            for t in self.tasks.recent(limit=8):
+                if str(t.get("id") or "") == own:
+                    continue
+                parts = []
+                if t.get("model_id"):
+                    parts.append(
+                        f"model {t['model_id']} ({t.get('model_role') or '?'})")
+                if t.get("status"):
+                    parts.append(f"status {t['status']}")
+                if t.get("summary"):
+                    parts.append(f"summary: {str(t['summary'])[:160]}")
+                if parts:
+                    return "Last task: " + "; ".join(parts)
+        except Exception:
+            pass
+        return None
 
     def _command_result(
         self,

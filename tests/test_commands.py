@@ -180,6 +180,60 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(r.text, "voice on")
         self.assertTrue(r.data["verified"])
 
+    def test_subcommand_dispatch(self):
+        calls = []
+        class FakeActions:
+            def execute(self, action_id, params, confirmed=False):
+                calls.append((action_id, dict(params)))
+                return type("R", (), {
+                    "ok": True, "message": f"ran {action_id}",
+                    "detail": "", "links": [], "verified": True})()
+        self.env["actions"] = FakeActions()
+        ex = CommandExecutor(self.reg, env=self.env)
+        r = ex.execute(parse_command("/github test"), ctx={})
+        self.assertTrue(r.ok)
+        self.assertEqual(calls[-1][0], "github.test")
+        r = ex.execute(parse_command("/voice preset amber"), ctx={})
+        self.assertEqual(calls[-1][0], "voice.set_preset")
+        self.assertEqual(calls[-1][1]["value"], "amber")
+
+    def test_workers_typed_arg(self):
+        calls = []
+        class FakeActions:
+            def execute(self, action_id, params, confirmed=False):
+                calls.append((action_id, dict(params)))
+                return type("R", (), {
+                    "ok": True, "message": "ceiling set", "detail": "",
+                    "links": [], "verified": True})()
+        self.env["actions"] = FakeActions()
+        ex = CommandExecutor(self.reg, env=self.env)
+        r = ex.execute(parse_command("/workers 4"), ctx={})
+        self.assertTrue(r.ok)
+        self.assertEqual(calls[-1][1]["value"], 4)
+        bad = ex.execute(parse_command("/workers 99"), ctx={})
+        self.assertFalse(bad.ok)
+
+    def test_confidence_and_evidence(self):
+        self.env["last_research"] = lambda conv: {
+            "session": {"evidence": {
+                "confidence": "high",
+                "corroboration": "primary_plus_secondary",
+                "reasons": ["official docs agree"],
+                "independent_groups": 3}}}
+        ex = CommandExecutor(self.reg, env=self.env)
+        r = ex.execute(parse_command("/confidence"), ctx={})
+        self.assertTrue(r.ok)
+        self.assertIn("high", r.text)
+        r = ex.execute(parse_command("/evidence"), ctx={})
+        self.assertIn("groups", r.text.lower())
+
+    def test_why(self):
+        self.env["why"] = lambda ctx: "Last task: model qwen (utility)"
+        ex = CommandExecutor(self.reg, env=self.env)
+        r = ex.execute(parse_command("/why"), ctx={})
+        self.assertTrue(r.ok)
+        self.assertIn("qwen", r.text)
+
 
 if __name__ == "__main__":
     unittest.main()

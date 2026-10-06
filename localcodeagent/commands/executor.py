@@ -81,16 +81,24 @@ class CommandExecutor:
             except Exception:
                 return CommandResult(
                     False, f"/{spec.name} isn't available right now.")
+        confirmed = bool(ctx.get("confirmed")) or (
+            parsed.raw_args.strip().lower() in {"yes", "confirm", "now"})
         if spec.action_id:
             actions = self.env.get("actions")
             if actions is None:
                 return CommandResult(
                     False, f"/{spec.name} has no action backend wired.")
+            params: dict[str, Any] = {
+                "args": parsed.raw_args, "raw": parsed.raw_args}
+            if callable(spec.map_params):
+                try:
+                    mapped = spec.map_params(parsed.raw_args)
+                    if isinstance(mapped, dict):
+                        params.update(mapped)
+                except Exception:
+                    pass
             res = actions.execute(
-                spec.action_id,
-                {"args": parsed.raw_args, "raw": parsed.raw_args},
-                confirmed=bool(ctx.get("confirmed")),
-            )
+                spec.action_id, params, confirmed=confirmed)
             text = res.message or res.detail or (
                 "Done." if res.ok else "Failed.")
             if res.message == "needs_confirmation":
@@ -106,8 +114,6 @@ class CommandExecutor:
             return CommandResult(
                 False, f"/{spec.name} is blocked by permissions "
                        f"({spec.permission}: {verdict}).")
-        confirmed = bool(ctx.get("confirmed")) or (
-            parsed.raw_args.strip().lower() in {"yes", "confirm", "now"})
         if spec.risk in _NEEDS_CONFIRM and not confirmed:
             return CommandResult(
                 False,
