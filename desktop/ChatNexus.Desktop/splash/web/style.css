@@ -9,16 +9,17 @@
 @keyframes nexus-online-pulse-dim{0%,100%{opacity:.5}50%{opacity:1}}
 #status.online{color:#59ffa0;animation:nexus-online-pulse 1.4s ease-in-out infinite}
 #detail.online{color:#3dd77f;animation:nexus-online-pulse-dim 1.4s ease-in-out infinite}
-@media (prefers-reduced-motion:reduce){#status.online{animation:none}}
+@media (prefers-reduced-motion:reduce){#status.online,#detail.online{animation:none}}
 .boot-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:2;opacity:0;transition:opacity .35s ease}
 .boot-media.live{opacity:1}
-/* The rendered clip carries its own baked readout — once it is the live
-   surface the DOM stand-ins step aside (kept painted for fallback). */
+/* The runtime master is clean — no baked readout, captions, or bar. Once
+   the clip is the live surface the DOM stand-ins step aside (kept painted
+   for fallback). */
 .video-mode #chamber,.video-mode #scene,.video-mode #shade{visibility:hidden}
 /* The DOM readout stays live over the clip — its status text and bar are
-   real milestones, not the footage's baked captions. Only while a sequence
-   overlay clip (error/recovery/recovery-failed) owns the surface does the
-   baked captioning take over. */
+   the truthful milestone surface the authored clip leaves blank space for.
+   Only while a sequence overlay clip (error/recovery/recovery-failed) owns
+   the surface does the footage's baked captioning take over. */
 body.overlay-clip #readout{visibility:hidden}
 #missing-art{position:absolute;top:64%;width:100%;text-align:center;font-size:32px;letter-spacing:.28em;color:#afdcff}#missing-art span{display:block;font-size:10px;margin-top:8px}
 .no-script{position:absolute;bottom:0;z-index:5;background:#081422;width:100%;text-align:center}

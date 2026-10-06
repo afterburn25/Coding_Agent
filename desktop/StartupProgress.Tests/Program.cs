@@ -287,8 +287,10 @@ Console.WriteLine("canonical startup status vocabulary");
 {
     var required = new[]
     {
-        "init", "restore", "brain", "services", "models", "capabilities",
-        "voice", "visual", "workspace", "interface", "online",
+        "init", "boot", "desktop_init", "restore", "backend_launch",
+        "backend_health", "runtime_sync", "brain", "services", "models",
+        "capabilities", "voice", "visual", "webview_init", "interface_nav",
+        "interface_ready", "interface", "workspace", "finalizing", "online",
         "language_core", "dev_core", "model_memory", "workstation",
         "bg_setup", "anomaly", "containment", "analyzing", "repair",
         "lkg", "safemode", "fatal",
@@ -303,11 +305,25 @@ Console.WriteLine("canonical startup status vocabulary");
         "ready state is CORE SYSTEMS · ONLINE");
     Check(StartupStatus.Map["online"].Secondary == "Nexus Core ready",
         "ready secondary is plain-English");
+    Check(StartupStatus.Map["finalizing"].Primary == "FINALIZING · NEXUS CORE",
+        "finalizing label is FINALIZING · NEXUS CORE");
+    Check(StartupStatus.Map["finalizing"].Secondary == "Verifying interface and system readiness",
+        "finalizing secondary");
+    Check(StartupStatus.Map["desktop_init"].Primary == "CORE CONTROL · ESTABLISHED",
+        "desktop_init label");
+    Check(StartupStatus.Map["backend_health"].Primary == "VERIFYING · CORE INTEGRITY",
+        "backend_health label");
+    Check(StartupStatus.Map["webview_init"].Primary == "OPENING · COMMAND INTERFACE",
+        "webview_init label");
+    Check(StartupStatus.Map["interface_nav"].Primary == "LOADING · NEXUS WORKSPACE",
+        "interface_nav label");
+    Check(StartupStatus.Map["interface_ready"].Primary == "SYNCHRONIZING · CORE INTERFACE",
+        "interface_ready label");
     Check(StartupStatus.Map["fatal"].Primary == "NEXUS CORE · COULD NOT START",
         "fatal state approved label");
     // Truth audit: no status may claim a heavy service/model is starting
     // or downloading — startup only *checks* those.
-    var banned = new[] { "INVOKEAI", "COMFYUI", "DOWNLOAD",
+    var banned = new[] { "INVOKEAI", "COMFYUI", "DOWNLOAD", "PREVIEW",
         "STARTING INVOKE", "LOADING MODEL WEIGHTS" };
     foreach (var kv in StartupStatus.Map)
     {
@@ -343,12 +359,12 @@ Console.WriteLine("status key resolution");
 Console.WriteLine("status coalescing hold");
 {
     var r = new Rig();
-    r.Progress.Report(0.06, "init");
+    r.Progress.Report(0.06, "desktop_init");
     r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
-    Check(r.Progress.Primary == "INITIALIZING · NEXUS CORE", "first status shown");
-    r.Progress.Report(0.15, "services");
+    Check(r.Progress.Primary == "CORE CONTROL · ESTABLISHED", "first status shown");
+    r.Progress.Report(0.15, "backend_launch");
     r.Advance(0.05, 0.05); // inside the hold — rapid milestone
-    Check(r.Progress.Primary == "INITIALIZING · NEXUS CORE",
+    Check(r.Progress.Primary == "CORE CONTROL · ESTABLISHED",
         "rapid status change is held");
     r.Progress.Report(0.30, "capabilities");
     r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
@@ -375,10 +391,46 @@ Console.WriteLine("ready label");
     Check(r.Progress.ReadyToDismiss, "bar completes to ready-to-dismiss");
     r.Progress.BeginCompletion();
     r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
+    // Completion started but the cinematic hasn't crossed its online
+    // boundary yet — the label must still be FINALIZING, not ONLINE.
+    Check(r.Progress.Primary == "FINALIZING · NEXUS CORE",
+        $"pre-confirm completion stays FINALIZING ({r.Progress.Primary})");
+    Check(r.Progress.Secondary == "Verifying interface and system readiness",
+        $"finalizing secondary ({r.Progress.Secondary})");
+    r.Progress.ConfirmSequence();
     Check(r.Progress.Primary == "CORE SYSTEMS · ONLINE",
-        $"ready state resolves to CORE SYSTEMS · ONLINE ({r.Progress.Primary})");
+        $"confirmed sequence resolves to CORE SYSTEMS · ONLINE ({r.Progress.Primary})");
     Check(r.Progress.Secondary == "Nexus Core ready",
         $"ready secondary ({r.Progress.Secondary})");
+}
+
+// ---------------------------------------------------------------- milestone captions
+Console.WriteLine("milestone ladder maps to approved captions");
+{
+    var expected = new (double At, string Primary)[]
+    {
+        (0.06, "CORE CONTROL · ESTABLISHED"),
+        (0.15, "STARTING · CORE SERVICES"),
+        (0.30, "VERIFYING · CORE INTEGRITY"),
+        (0.55, "SYNCHRONIZING · NEXUS BRAIN"),
+        (0.72, "OPENING · COMMAND INTERFACE"),
+        (0.85, "LOADING · NEXUS WORKSPACE"),
+        (0.93, "SYNCHRONIZING · CORE INTERFACE"),
+    };
+    var keys = new[] { "desktop_init", "backend_launch", "backend_health",
+        "runtime_sync", "webview_init", "interface_nav", "interface_ready" };
+    for (var i = 0; i < expected.Length; i++)
+    {
+        var r = new Rig();
+        r.Progress.Report(expected[i].At, keys[i]);
+        r.Advance(StartupProgress.StatusHold.TotalSeconds + 0.1, 0.05);
+        Check(r.Progress.Primary == expected[i].Primary,
+            $"{expected[i].At:F2} → {expected[i].Primary} (got {r.Progress.Primary})");
+    }
+    // 0% is INITIALIZING before any milestone reports.
+    var fresh = new Rig();
+    Check(fresh.Progress.Primary == "INITIALIZING · NEXUS CORE",
+        $"0% → INITIALIZING (got {fresh.Progress.Primary})");
 }
 
 // ---------------------------------------------------------------- narrator: voice-off gate

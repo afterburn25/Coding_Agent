@@ -232,17 +232,31 @@ internal static class StartupStatus
     public static readonly IReadOnlyDictionary<string, (string Primary, string Secondary)> Map =
         new Dictionary<string, (string, string)>(StringComparer.Ordinal)
     {
-        ["init"]          = ("INITIALIZING · NEXUS CORE",    "Starting native host and loading configuration"),
-        ["restore"]       = ("RESTORING · SYSTEM STATE",     "Loading profiles, settings and protected state"),
-        ["brain"]         = ("SYNCHRONIZING · NEXUS BRAIN",  "Restoring memory, knowledge and continuity"),
-        ["services"]      = ("STARTING · CORE SERVICES",     "Launching Nexus agent and service runtime"),
+        // Canonical milestone ladder — the exact approved phrases. Both the
+        // ladder keys (boot/desktop_init/…) and their historical aliases
+        // resolve to the same wording so no surface can drift.
+        ["init"]           = ("INITIALIZING · NEXUS CORE",    "Establishing core startup environment"),
+        ["boot"]           = ("INITIALIZING · NEXUS CORE",    "Establishing core startup environment"),
+        ["desktop_init"]   = ("CORE CONTROL · ESTABLISHED",   "Loading configuration and protected system state"),
+        ["restore"]        = ("CORE CONTROL · ESTABLISHED",   "Loading configuration and protected system state"),
+        ["backend_launch"] = ("STARTING · CORE SERVICES",     "Launching Nexus agent and service runtime"),
+        ["services"]       = ("STARTING · CORE SERVICES",     "Launching Nexus agent and service runtime"),
+        ["backend_health"] = ("VERIFYING · CORE INTEGRITY",   "Confirming backend health and authorization"),
+        ["runtime_sync"]   = ("SYNCHRONIZING · NEXUS BRAIN",  "Restoring memory, models and system continuity"),
+        ["brain"]          = ("SYNCHRONIZING · NEXUS BRAIN",  "Restoring memory, models and system continuity"),
+        ["webview_init"]   = ("OPENING · COMMAND INTERFACE",  "Initializing the Nexus control environment"),
+        ["interface_nav"]  = ("LOADING · NEXUS WORKSPACE",    "Connecting tools, profiles and workspace services"),
+        ["workspace"]      = ("LOADING · NEXUS WORKSPACE",    "Connecting tools, profiles and workspace services"),
+        ["interface_ready"]= ("SYNCHRONIZING · CORE INTERFACE","Establishing communication with core systems"),
+        ["interface"]      = ("SYNCHRONIZING · CORE INTERFACE","Establishing communication with core systems"),
+        ["finalizing"]     = ("FINALIZING · NEXUS CORE",      "Verifying interface and system readiness"),
+        ["online"]         = ("CORE SYSTEMS · ONLINE",        "Nexus Core ready"),
+        // Optional real sub-milestones — only ever reported while the named
+        // work is genuinely running.
         ["models"]        = ("CALIBRATING · MODEL RUNTIME",  "Detecting models, hardware and available resources"),
         ["capabilities"]  = ("VERIFYING · CAPABILITIES",     "Checking tools, permissions and managed services"),
         ["voice"]         = ("INITIALIZING · VOICE SYSTEM",  "Preparing speech and audio services"),
         ["visual"]        = ("CHECKING · VISUAL SYSTEMS",    "Verifying image backends and model availability"),
-        ["workspace"]     = ("LOADING · COMMAND INTERFACE",  "Starting the Nexus workspace"),
-        ["interface"]     = ("SYNCHRONIZING · INTERFACE",    "Connecting interface to core services"),
-        ["online"]        = ("CORE SYSTEMS · ONLINE",        "Nexus Core ready"),
         ["language_core"] = ("ACTIVATING · LANGUAGE CORE",   "Loading the primary conversational model"),
         ["dev_core"]      = ("ACTIVATING · DEVELOPMENT CORE","Loading coding and reasoning runtime"),
         ["model_memory"]  = ("CALIBRATING · MODEL MEMORY",   "Optimizing RAM and VRAM allocation"),
@@ -296,7 +310,7 @@ internal sealed class StartupProgress
     private TimeSpan? _readyAt;         // clock time when AppReady fired
     private double _readyBase;          // displayed value at that instant
     private string _primary = "INITIALIZING · NEXUS CORE";
-    private string _phaseSecondary = "Preparing local application environment";
+    private string _phaseSecondary = "Establishing core startup environment";
     private DateTimeOffset? _completionStarted;
     private readonly Dictionary<string, double> _phaseDurations = new(StringComparer.Ordinal);
     private bool _diagnosticsWritten;
@@ -401,20 +415,35 @@ internal sealed class StartupProgress
     /// worse than coalescing to the latest one. The newest status always
     /// wins once the hold elapses; readiness/failure overrides still apply.
     /// </summary>
-    internal static TimeSpan StatusHold = TimeSpan.FromMilliseconds(350);
+    internal static TimeSpan StatusHold = TimeSpan.FromMilliseconds(700);
 
     private (string Primary, string Secondary) _shown;
     private TimeSpan _shownAt;
 
+    /// <summary>
+    /// Set once the presentation surface has actually shown the online
+    /// moment (WebView splash posts sequence-complete when the clip crosses
+    /// its authored online boundary; the native fallback/no-surface path
+    /// confirms directly). Until then a completed startup reads FINALIZING —
+    /// the green ONLINE claim may not precede its visual.
+    /// </summary>
+    public void ConfirmSequence()
+    {
+        lock (_sync) { _sequenceConfirmed = true; }
+    }
+    private bool _sequenceConfirmed;
+    /// <summary>True once the cinematic reported its online boundary crossed.</summary>
+    public bool SequenceConfirmed { get { lock (_sync) { return _sequenceConfirmed; } } }
+
     private (string Primary, string Secondary) RawStatus()
     {
-        if (_completionStarted is not null)
+        if (_completionStarted is not null && _sequenceConfirmed)
         {
             return StartupStatus.Map["online"];
         }
-        if (AppReady)
+        if (AppReady || _completionStarted is not null)
         {
-            return ("FINALIZING · NEXUS CORE", "Preparing interface");
+            return StartupStatus.Map["finalizing"];
         }
         lock (_sync)
         {
@@ -434,7 +463,11 @@ internal sealed class StartupProgress
         lock (_sync)
         {
             if (raw == _shown) return _shown;
-            if (_now() - _shownAt < StatusHold) return _shown;
+            // ONLINE is a truth gate, not a caption flash — it lands the
+            // moment real completion is confirmed, skipping the hold so the
+            // green pulse is simultaneous with the clip's online boundary.
+            var instant = raw == StartupStatus.Map["online"];
+            if (!instant && _now() - _shownAt < StatusHold) return _shown;
             _shown = raw;
             _shownAt = _now();
             return _shown;
@@ -509,8 +542,34 @@ internal sealed class StartupProgress
                 _profile.Record(finishedKey, elapsed);
                 _phaseIndex = index;
                 _phaseStart = now;
+                LogMilestone(Ladder[index].Key, clamped, primary, now);
             }
         }
+    }
+
+    /// <summary>
+    /// One line per real milestone transition — never per frame. The page
+    /// logs its side (authored clip time, hold/catch-up) via caption-view
+    /// posts; together they reconstruct the full pacing story.
+    /// </summary>
+    private void LogMilestone(string key, double fraction, string primary, TimeSpan at)
+    {
+        try
+        {
+            if (_logDir is null)
+            {
+                return;
+            }
+            Directory.CreateDirectory(_logDir);
+            var line = $"{DateTimeOffset.Now:O} [STARTUP] milestone {key}@{fraction:0.00} " +
+                       $"elapsed={at.TotalSeconds:0.0}s caption='{primary}'{Environment.NewLine}";
+            using var fs = new FileStream(
+                Path.Combine(_logDir, "backend-host.log"),
+                FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var sw = new StreamWriter(fs);
+            sw.Write(line);
+        }
+        catch { /* diagnostics must never break startup */ }
     }
 
     public void MarkAppReady()
@@ -525,9 +584,13 @@ internal sealed class StartupProgress
             var key = Ladder[_phaseIndex].Key;
             _phaseDurations[key] = elapsed;
             _profile.Record(key, elapsed);
-            if (_milestone < 1.0)
+            // App-ready is the FINALIZING state, not completion — the last
+            // real milestone the host can claim on its own is the finalizing
+            // gate; 1.0 is only earned when BeginCompletion runs after the
+            // readiness wait.
+            if (_milestone < 0.98)
             {
-                _milestone = 1.0;
+                _milestone = 0.98;
             }
         }
     }
@@ -551,7 +614,9 @@ internal sealed class StartupProgress
         lock (_sync)
         {
             _completionStarted ??= DateTimeOffset.Now;
-            _displayed = 1.0; // bar is already visually complete (≥0.9995)
+            _awaitingSequence = false;   // release the finalizing bar hold
+            _milestone = 1.0;            // real completion — the full claim
+            _displayed = 1.0;
         }
         WriteDiagnostics();
     }
