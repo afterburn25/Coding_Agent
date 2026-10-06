@@ -629,6 +629,14 @@ body[data-gesture="look_away"] .nexus-presence > img {
   gap:10px;
 }
 
+/* Streaming appends adjuncts (research card, chat-ui controls, feedback,
+   retry) as extra grid children — without explicit columns they auto-place
+   into the 42px avatar track and squeeze the bubble. Pin every non-role
+   child to the content column. */
+.message > .role { grid-column:1; grid-row:1; }
+.message.assistant > :not(.role) { grid-column:2; }
+.message.user > :not(.role) { grid-column:1; }
+
 .message .role {
   font-size:0;
   width:34px;
