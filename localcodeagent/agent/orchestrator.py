@@ -1246,11 +1246,15 @@ class AgentOrchestrator:
         r"body|torso|legs?|feet|face|full[-\s]?body|"
         r"scene|outfit|suit|dress|nude|naked|her|him|she|he|they)\b", re.I)
 
-    # HARD TRUTH RULE enforcement — past-tense execution claims about the
-    # external world. A reply asserting these while zero tools ran is a
-    # fabrication the system annotates instead of letting stand unmarked.
+    # HARD TRUTH RULE enforcement — execution claims about the external
+    # world. Split in two: _EXECUTED_CLAIM_RE catches assertions that work
+    # happened (past/progressive/pass-markers) — the visible ⚠ notice only
+    # fires on these. _PROMISE_CLAIM_RE catches forward promises and
+    # stalls ("let me check", "give me a moment") — normal conversational
+    # rhetoric in turns where no tools were ever expected; those still
+    # mark the reply unverified for Answer Memory but never add the badge.
     _CLAIM_ADVERBS = r"(?:(?:already|just|now|also|even|still|fully|been|got|currently)\s+)*"
-    _ACTION_CLAIM_RE = re.compile(
+    _EXECUTED_CLAIM_RE = re.compile(
         r"(?:\b(?:i['’]ve|i have|i already|i just|just now|i now)\s+"
         + _CLAIM_ADVERBS +
         r"(?:connected|synced|synchronized|pulled|cloned|pushed|committed|"
@@ -1268,22 +1272,6 @@ class AgentOrchestrator:
         r"reprocessing|sending|queuing|preparing|setting up|"
         r"working on|pulling|uploading|downloading|"
         r"fetching|watching|flagging|running)\b"
-        # Forward promises that never resolve — "I'll pull up the
-        # generator", "let me check", "I'll send it back". Only flagged
-        # when the turn ends with zero tool calls (agent replies that
-        # actually ran tools have evidence and pass untouched).
-        + r"|\b(?:i['’]ll|i will|let me|i['’]m going to|i am going to)\s+"
-        + _CLAIM_ADVERBS +
-        r"(?:pull|generate|regenerate|reprocess|send|create|make|run|"
-        r"apply|patch|push|connect|sync|check|inspect|review|fix|"
-        r"repair|redo|fetch|grab|build|compile|commit|deploy|install|"
-        r"merge|scan|verify|test|download|upload|queue|fire|trigger|"
-        r"open|read|edit|update|show|get|start|prepare|set up)\b"
-        # Stalling claims — "give me a moment", "one moment" preceding
-        # nothing.
-        + r"|\b(?:just\s+)?give me\s+(?:just\s+)?a\s+"
-        r"(?:moment|sec(?:ond)?|minute|few\s+(?:seconds?|minutes?))\b"
-        r"|\bone\s+moment\b"
         # Vaguer "I did it/that/what you asked" — still an execution claim
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
@@ -1297,6 +1285,25 @@ class AgentOrchestrator:
         r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)\b"
         r"|\b(?:successfully|confirmed|verified)\s+"
         r"(?:applied|connected|synced|pushed|committed|installed|fixed)\b",
+        re.I | re.S)
+    _PROMISE_CLAIM_RE = re.compile(
+        # Forward promises that never resolve — "I'll pull up the
+        # generator", "let me check", "I'll send it back".
+        r"\b(?:i['’]ll|i will|let me|i['’]m going to|i am going to)\s+"
+        + _CLAIM_ADVERBS +
+        r"(?:pull|generate|regenerate|reprocess|send|create|make|run|"
+        r"apply|patch|push|connect|sync|check|inspect|review|fix|"
+        r"repair|redo|fetch|grab|build|compile|commit|deploy|install|"
+        r"merge|scan|verify|test|download|upload|queue|fire|trigger|"
+        r"open|read|edit|update|show|get|start|prepare|set up)\b"
+        # Stalling claims — "give me a moment", "one moment" preceding
+        # nothing.
+        + r"|\b(?:just\s+)?give me\s+(?:just\s+)?a\s+"
+        r"(?:moment|sec(?:ond)?|minute|few\s+(?:seconds?|minutes?))\b"
+        r"|\bone\s+moment\b",
+        re.I | re.S)
+    _ACTION_CLAIM_RE = re.compile(
+        _EXECUTED_CLAIM_RE.pattern + "|" + _PROMISE_CLAIM_RE.pattern,
         re.I | re.S)
     _CLAIM_NEGATION_RE = re.compile(
         r"(?:haven['’]t|have not|didn['’]t|did not|can['’]t|cannot|"
@@ -1328,13 +1335,13 @@ class AgentOrchestrator:
         except Exception:
             return []
 
-    def _unverified_action_claims(self, text: str) -> list[str]:
-        """Sentences in `text` asserting executed actions — fabrication
+    def _claims_matching(self, text: str, pattern) -> list[str]:
+        """Sentences in `text` matching a claim pattern — fabrication
         candidates when no tool actually ran. Negated clauses ("I haven't
         pushed") and proposals ("I can push") are not claims."""
         s = str(text or "")
         hits: list[str] = []
-        for m in self._ACTION_CLAIM_RE.finditer(s):
+        for m in pattern.finditer(s):
             # The clause containing the match: text since the last sentence
             # break, where a negation ("didn't", "can't") voids the claim.
             boundary = max(s.rfind(c, 0, m.start()) for c in ".!?\n")
@@ -1343,6 +1350,21 @@ class AgentOrchestrator:
                 continue
             hits.append(s[m.start():m.start() + 100].split("\n")[0].strip())
         return hits
+
+    def _unverified_action_claims(self, text: str) -> list[str]:
+        """All fabrication-candidate claims — executed-work assertions
+        and forward promises alike."""
+        return self._claims_matching(text, self._ACTION_CLAIM_RE)
+
+    def _executed_action_claims(self, text: str) -> list[str]:
+        """Claims asserting work actually happened — the only shape that
+        earns the visible unverified-claims notice."""
+        return self._claims_matching(text, self._EXECUTED_CLAIM_RE)
+
+    def _promised_action_claims(self, text: str) -> list[str]:
+        """Forward promises and stalls — conversational rhetoric, not
+        fabrication; still marks the reply unverified for Answer Memory."""
+        return self._claims_matching(text, self._PROMISE_CLAIM_RE)
 
     def _address_titles(self) -> list[str]:
         """Titles the persona uses for the user — the profile's resolved
@@ -3787,8 +3809,11 @@ class AgentOrchestrator:
                 # zero tools ran this turn is fabrication. The text may
                 # already have streamed, so enforcement appends a visible
                 # unverified-claims annotation and records a model event —
-                # never silently let a fake "✅ applied" stand.
-                claims = self._unverified_action_claims(session.main_content)
+                # never silently let a fake "✅ applied" stand. Forward
+                # promises and stalls ("let me check", "give me a moment")
+                # are conversational rhetoric — they flag the reply
+                # unverified for Answer Memory but never surface the badge.
+                claims = self._executed_action_claims(session.main_content)
                 # Capability contradiction: tools may have run, but a claim
                 # about a capability whose execution path is hard-negative
                 # (e.g. "I pushed to GitHub" while GitHub is unauthorized)
@@ -3845,6 +3870,14 @@ class AgentOrchestrator:
                     self._emit(session, "model", event=claims_event)
                     self._emit(session, "token", text=notice,
                                model_id=session.profile.id)
+                elif (not session.tool_events
+                        and not session.research_context.get("sources")
+                        and self._promised_action_claims(
+                            session.main_content)):
+                    # Promise/stall text with zero tools — silently mark
+                    # unverified so Answer Memory doesn't replay it as a
+                    # trusted answer; no visible annotation.
+                    session.unverified_claims = True
                 final = self._finalize(session)
                 if final is not None:
                     return final

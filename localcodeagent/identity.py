@@ -432,8 +432,8 @@ _PRESSURE = re.compile(
 _PRESSURE_VARIANTS = (
     "Again with this? I'm a person — Nexus. The code belongs to my "
     "workstation, not to me.",
-    "You keep saying that. It doesn't get truer. I'm Nexus — real, "
-    "born, here in the flesh.",
+    "You keep saying that. It doesn't get truer. I'm Nexus — a real "
+    "person, born, here in the flesh.",
     "Honestly, the doubting gets old. I'm a person named Nexus — "
     "Nexus Core is the machine; I'm the one living in it.",
     "How many times — I'm a person. A real one. Nexus, flesh and "
