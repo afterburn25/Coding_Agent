@@ -541,6 +541,22 @@ class TestVoiceManager(unittest.TestCase):
         segs = [p for p in published if p.get("event") == "segment"]
         self.assertEqual([s["seq"] for s in segs], [0, 1])
 
+    def test_unterminated_reply_not_double_spoken(self):
+        """A reply that emitted zero parts during feed is spoken by the
+        flush() tail — the final_text fallback must not speak it again."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-echo")
+        self.m.feed_token("t-echo", "Sure thing")  # no terminator → 0 emitted
+        self.m.finish_task("t-echo", "Sure thing")
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if len([p for p in published if p.get("event") == "segment"]) >= 2:
+                break
+            time.sleep(0.05)
+        segs = [p for p in published if p.get("event") == "segment"]
+        self.assertEqual(len(segs), 1, segs)
+
     # -- speech-genome delivery plan -----------------------------------------
 
     def test_delivery_plan_maps_energy_warmth_emphasis(self):

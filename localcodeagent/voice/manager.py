@@ -267,11 +267,15 @@ class VoiceManager:
             pace = 1.0
         try:
             if self.enabled() and not self.muted():
-                n_emitted = streamer.emitted_count if streamer else 0
                 if streamer:
                     for sent in streamer.flush():
                         self.enqueue(task_id, sent, speed=pace,
                                      delivery=delivery)
+                # Count after flush: a reply that never crossed a sentence
+                # boundary during feed still speaks via the flush tail —
+                # checking before flush would re-speak the same text through
+                # the final_text fallback (the "double voice" bug).
+                n_emitted = streamer.emitted_count if streamer else 0
                 if n_emitted == 0 and final_text and self.mode() in {
                         "responses", "responses_activity"}:
                     spoken = self.filter.filter(final_text)
