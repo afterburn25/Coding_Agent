@@ -1,0 +1,11 @@
+{
+  "seconds": 13,
+  "branchAt": 8.8,
+  "onlineLeadSeconds": 0.5,
+  "messages": [
+    { "at": 0, "text": "RECOVERY ATTEMPT · FAILED" },
+    { "at": 2.7, "text": "AUTOMATIC RECOVERY · HALTED" },
+    { "at": 5.4, "text": "CORE CONTAINMENT · MAINTAINED" },
+    { "at": 8.1, "text": "USER INTERVENTION · REQUIRED" }
+  ]
+}

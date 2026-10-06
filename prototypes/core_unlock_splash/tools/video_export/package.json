@@ -1,0 +1,7 @@
+{
+  "name": "nexus-splash-video-review",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Development-only export tools; not shipped with Nexus Core",
+  "devDependencies": { "playwright": "1.62.1" }
+}

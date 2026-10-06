@@ -8,6 +8,33 @@ export const RECOVERY_STATES = Object.freeze({
   SAFE_MODE: ['SAFE MODE · INITIALIZING', 'Starting essential systems only.'],
   HUMAN_INTERVENTION_REQUIRED: ['NEXUS CORE · COULD NOT START', 'Automatic recovery was unable to restore core services.']
 });
+// User-requested recovery attempt milestones — single source for the exact
+// captions the recovery clip bakes in AND the text the DOM fallback shows.
+// Each index is a host-confirmed stage; the page may never claim a stage the
+// host has not confirmed (see splash.mjs recovery gating).
+export const RECOVERY_STAGES = Object.freeze([
+  'EMERGENCY CONTAINMENT · ENGAGED',
+  'NONESSENTIAL SYSTEMS · ISOLATED',
+  'RECOVERY MATRIX · INITIALIZING',
+  'FAULT SOURCE · LOCATED',
+  'CORE RECONSTRUCTION · IN PROGRESS',
+  'STABILITY THRESHOLD · RECOVERING',
+  'CONTAINMENT · RELEASED',
+  'CORE INTEGRITY · VERIFIED',
+  'CORE SYSTEMS · ONLINE'
+]);
+// Caption-entry times (seconds) inside NexusCore-Recovery.mp4. The clip plays
+// at authored pace; only the last index's time is a hold point — the online
+// caption may not appear until the host confirms the attempt succeeded.
+export const RECOVERY_STAGE_TIMES = Object.freeze([0, 2.2, 4.4, 6.6, 8.8, 12.6, 15.8, 18.6, 21.4]);
+// Interrupted-attempt captions (NexusCore-Recovery-Failed.mp4), shown on the
+// DOM fallback path with the same pacing as the footage (~2.7s apart).
+export const RECOVERY_FAILED_STAGES = Object.freeze([
+  'RECOVERY ATTEMPT · FAILED',
+  'AUTOMATIC RECOVERY · HALTED',
+  'CORE CONTAINMENT · MAINTAINED',
+  'USER INTERVENTION · REQUIRED'
+]);
 const mix = (a, b, t) => a + (b - a) * t;
 const closed = s => s.iris.every(v => v === 0) && s.pins.every(v => v === 0) && s.cylinder === 0;
 
@@ -137,8 +164,15 @@ export class SplashController {
       if (e.id.startsWith('pin_')) return this.faultFrom.pins[Number(e.id[4]) - 1] > .01;
       if (e.id === 'iris_close_start') return this.faultFrom.iris.some(v => v > .01);
       return true;
-    }).map(e => ['instability_start', 'electrical_instability', 'power_drop_start'].includes(e.id)
-      ? { ...e, gain: e.gain * (.15 + .85 * this.faultFrom.reveal * this.faultFrom.brightness) } : e);
+    }).map(e => {
+      if (e.id === 'emergency_idle')
+        // The idle hum must die out once containment seals — a contained
+        // dead core does not drone on under the intervention panel.
+        return { ...e, loop: false, until: e.at + 4.5, fadeOut: 1.2 };
+      if (['instability_start', 'electrical_instability', 'power_drop_start'].includes(e.id))
+        return { ...e, gain: e.gain * (.15 + .85 * this.faultFrom.reveal * this.faultFrom.brightness) };
+      return e;
+    });
   }
   play() { if (this.recoveryState !== 'SAFE_MODE' || !this.activeFault) this.transport.play(); }
   pause() { this.transport.pause(); }

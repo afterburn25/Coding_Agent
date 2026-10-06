@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Review references for Devin; real progress, recovery and readiness remain host-owned",
+  "updated": "2026-10-05",
+  "format": {
+    "container": "mp4",
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "sampleRate": 48000,
+    "channels": 2
+  },
+  "runtime": {
+    "renderer": "web/renderer.mjs",
+    "controller": "web/controller.mjs",
+    "timeline": "web/timeline.mjs",
+    "manifest": "animation_manifest.json",
+    "referenceAdapters": "tools/video_export/export-error-continuation.cjs",
+    "targetFps": 60,
+    "fixedSphereGeometry": true,
+    "startupUnchanged": true,
+    "productionIntegrationPending": true
+  },
+  "clips": [
+    {
+      "id": "startup",
+      "file": "review/videos/NexusCore-Startup-Glow-Only.mp4",
+      "seconds": 17,
+      "frames": 510,
+      "bytes": 1917520,
+      "sha256": "bcc3ecc6e9032c95b1c0244d79071b81663743dd64a415151b18e26ee4b63955",
+      "sourceConfig": null,
+      "startsFrom": null
+    },
+    {
+      "id": "error",
+      "file": "review/videos/NexusCore-Error-Red-Continuation.mp4",
+      "seconds": 12,
+      "frames": 360,
+      "bytes": 2017621,
+      "sha256": "99dac6a8fe37fddae4d34f4bfb091393af2dedb494062d0af6c26f1de0dec433",
+      "sourceConfig": "tools/video_export/error-continuation.json",
+      "startsFrom": {
+        "sequence": "startup",
+        "frame": 509,
+        "leadSeconds": 0.5
+      },
+      "endsIn": "awaiting-user"
+    },
+    {
+      "id": "recovery",
+      "file": "review/videos/NexusCore-Recovery.mp4",
+      "seconds": 27,
+      "frames": 810,
+      "bytes": 2797227,
+      "sha256": "21c8c80ac633e204a90333948f4e53dff620387355e2a0c90f056936e20d0ce6",
+      "sourceConfig": "tools/video_export/recovery.json",
+      "startsFrom": {
+        "sequence": "error",
+        "frame": 359,
+        "requiresUserAction": "retry"
+      }
+    },
+    {
+      "id": "recovery-failed",
+      "file": "review/videos/NexusCore-Recovery-Failed.mp4",
+      "seconds": 13,
+      "frames": 390,
+      "bytes": 832449,
+      "sha256": "c1293f4e7fc712a43461cb22ed679fa6ea4c3e20bc891592e082563ee8616b8f",
+      "sourceConfig": "tools/video_export/recovery-failed.json",
+      "startsFrom": {
+        "sequence": "recovery",
+        "seconds": 8.8,
+        "alternativeToSuccessfulRecovery": true,
+        "requires": "active-retry-attempt-failed"
+      },
+      "endsIn": "awaiting-user"
+    }
+  ],
+  "interaction": {
+    "initialFailure": {
+      "play": "error",
+      "then": "awaiting-user",
+      "terminalStatus": "USER INTERVENTION · REQUIRED",
+      "automaticRetry": false,
+      "actions": [
+        "retry",
+        "open-log",
+        "rollback",
+        "safe-mode",
+        "exit"
+      ]
+    },
+    "retry": {
+      "requires": "explicit-user-action",
+      "fromStates": [
+        "awaiting-user"
+      ],
+      "play": "recovery",
+      "startsExactlyOneRealAttempt": true,
+      "coalesceDuplicateClicks": true
+    },
+    "recoverySuccess": {
+      "requires": "confirmed-backend-success-and-app-readiness",
+      "then": "online"
+    },
+    "recoveryFailure": {
+      "requires": "active-retry-attempt-failed",
+      "play": "recovery-failed",
+      "then": "awaiting-user",
+      "automaticRetry": false
+    }
+  }
+}

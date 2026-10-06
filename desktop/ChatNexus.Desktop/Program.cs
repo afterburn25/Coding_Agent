@@ -17,7 +17,13 @@ internal static class Program
     {
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var selfTest = args.Any(a => string.Equals(a, "--self-test", StringComparison.OrdinalIgnoreCase));
-        var testFault = args.Any(a => string.Equals(a, "--test-fault", StringComparison.OrdinalIgnoreCase));
+        var testFaultArg = args.FirstOrDefault(
+            a => a.StartsWith("--test-fault", StringComparison.OrdinalIgnoreCase));
+        var testFault = testFaultArg is not null;
+        // --test-fault faults early (~4s, mid-boot DOM containment path);
+        // --test-fault=late throws after VerifyLoadableAsync — the genuine
+        // full-power fault that exercises the error-continuation clip.
+        var testFaultLate = testFaultArg?.EndsWith("=late", StringComparison.OrdinalIgnoreCase) == true;
 
         // First-breath marker — if the host ever dies before the backend
         // launch path (splash/WebView2 init), this is the line that tells us
@@ -69,7 +75,7 @@ internal static class Program
             }
 
             ApplicationConfiguration.Initialize();
-            Application.Run(new NexusCoreApplicationContext(appDir, testFault));
+            Application.Run(new NexusCoreApplicationContext(appDir, testFault, testFaultLate));
             return 0;
         }
         catch (Exception ex)
@@ -100,7 +106,7 @@ internal static class Program
 /// </summary>
 internal sealed class SplashForm : Form
 {
-    private readonly StartupProgress _progress;
+    private StartupProgress _progress;
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _topmostTimer = new();
     private readonly Image? _artwork;
@@ -115,9 +121,14 @@ internal sealed class SplashForm : Form
     private readonly Stopwatch _initSw = Stopwatch.StartNew();
 
     private Panel? _failurePanel;
+    private Label? _failureDetail;
     private string? _failureMessage;
+    private string? _failureDetailText;
     public event Action? RetryRequested;
     public event Action? ExitRequested;
+    /// <summary>The recovery clip actually SHOWING a stage caption — the
+    /// moment narration should speak it, synced to the footage.</summary>
+    public event Action<int>? RecoveryStageShown;
     /// <summary>Playback channel for narration bytes — web audio with ducking.</summary>
     public Func<byte[], string, Task>? VoiceSink { get; set; }
 
@@ -132,12 +143,19 @@ internal sealed class SplashForm : Form
     public event Action<string>? VoicePlaybackEnded;
     private volatile bool _webFailed;
     private volatile bool _sequenceComplete;
+    private volatile bool _recoverySequenceComplete;
     private int _lastGateIdx = -1;
 
     /// <summary>The cinematic posted its online frame — the sequence ran to completion.</summary>
     public bool SequenceComplete => _sequenceComplete;
+    /// <summary>The recovery clip played its full authored tail to the end frame.</summary>
+    public bool RecoverySequenceComplete => _recoverySequenceComplete;
     /// <summary>Cinematic is live and fault-free — its completion is worth waiting for.</summary>
     public bool CinematicActive => _webReady && !_webFailed;
+    /// <summary>The splash page posted splash-ready — its surface can paint frame one.</summary>
+    public bool WebReady => _webReady;
+    /// <summary>The cinematic surface is unavailable; native fallback owns the display.</summary>
+    public bool WebFailed => _webFailed;
 
     // Manifest gates released at real startup milestones (StartupProgress
     // ladder anchors) — the timeline can never outrun reality.
@@ -317,12 +335,17 @@ internal sealed class SplashForm : Form
             {
                 // Throwing routes the narrator to its SoundPlayer fallback —
                 // a line that arrives as the splash tears down should still
-                // be heard rather than silently dropped.
-                if (_web?.CoreWebView2 is null || !_webReady)
+                // be heard rather than silently dropped. The WebView2 object
+                // itself is UI-thread only — even the CoreWebView2 getter
+                // throws off-thread, so the ready check reads the volatile
+                // flag and every control access goes through Invoke.
+                if (!_webReady)
                     throw new InvalidOperationException("splash channel unavailable");
                 var b64 = Convert.ToBase64String(bytes);
-                _web.CoreWebView2.PostWebMessageAsJson(
-                    JsonSerializer.Serialize(new { type = "play-voice", id = _key, b64, duck = 0.35 }));
+                var json = JsonSerializer.Serialize(new { type = "play-voice", id = _key, b64, duck = 0.35 });
+                void Post() => _web.CoreWebView2.PostWebMessageAsJson(json);
+                if (InvokeRequired) Invoke((Action)Post);
+                else Post();
                 BackendProcess.NoteStartup(Path.Combine(_appDir, "data", "logs"),
                     $"splash voice posted {_key} ({bytes.Length}B)");
                 await Task.CompletedTask;
@@ -336,7 +359,7 @@ internal sealed class SplashForm : Form
         }
     }
 
-    private void PostToWeb(object message)
+    internal void PostToWeb(object message)
     {
         try
         {
@@ -388,7 +411,8 @@ internal sealed class SplashForm : Form
                         {
                             _failurePanel.Dispose();
                             _failurePanel = null;
-                            PostToWeb(new { type = "trigger-fault", message = _failureMessage });
+                            _failureDetail = null;
+                            PostToWeb(new { type = "trigger-fault", message = _failureMessage, detail = _failureDetailText });
                             PostToWeb(new { type = "show-recovery" });
                         }
                     });
@@ -411,6 +435,16 @@ internal sealed class SplashForm : Form
                     break;
                 case "sequence-complete":
                     _sequenceComplete = true;
+                    break;
+                case "recovery-sequence-complete":
+                    _recoverySequenceComplete = true;
+                    break;
+                case "recovery-stage-shown":
+                    if (doc.RootElement.TryGetProperty("stage", out var st)
+                        && st.TryGetInt32(out var stageIdx))
+                    {
+                        RecoveryStageShown?.Invoke(stageIdx);
+                    }
                     break;
                 case "splash-error":
                     _webFailed = true;
@@ -448,13 +482,33 @@ internal sealed class SplashForm : Form
         catch { }
     }
 
-    private void RecoveryFeedback(string text) =>
+    internal void RecoveryFeedback(string text)
+    {
         PostToWeb(new { type = "action-feedback", text });
+        // Native fallback panel carries the same feedback line — recovery
+        // attempts must narrate even when the cinematic surface is gone.
+        if (_failureDetail is not null && !IsDisposed)
+        {
+            try { _failureDetail.Text = text; } catch { }
+        }
+    }
 
     /// <summary>The app is ready — tell the cinematic to converge its tail
     /// onto the online state instead of free-running to its fixed duration.</summary>
     public void RequestSequenceFinish() =>
         PostToWeb(new { type = "complete-sequence" });
+
+    /// <summary>
+    /// A user-requested recovery attempt owns a fresh progress model — the
+    /// fault-stopped pump resumes and milestone gates re-release against the
+    /// new attempt's real progress.
+    /// </summary>
+    internal void ResetProgress(StartupProgress progress)
+    {
+        _progress = progress;
+        _lastGateIdx = -1;
+        _timer.Start();
+    }
 
     /// <summary>
     /// The context calls Show() up front, but the window stays suppressed
@@ -482,7 +536,13 @@ internal sealed class SplashForm : Form
         _shown = true;
         _allowShow = true;
         Show();
+        // Launched from a shell/IDE we may not hold foreground rights —
+        // the topmost watchdog keeps the window above everything but the
+        // initial activation still needs the foreground-queue attach or the
+        // splash opens behind whatever the user was doing.
+        Win32.ForceForeground(Handle);
         Activate();
+        BringToFront();
     }
 
     /// <summary>
@@ -586,16 +646,17 @@ internal sealed class SplashForm : Form
         }
     }
 
-    public void ShowFailure(string message)
+    public void ShowFailure(string message, string? detail = null)
     {
         _timer.Stop();
         _progress.MarkFailed();
         _failureMessage = message;
+        _failureDetailText = detail;
         if (_webReady && !_webFailed)
         {
             // Cinematic containment + recovery UI own the fault surface;
             // nothing here blocks the real recovery path.
-            PostToWeb(new { type = "trigger-fault", message });
+            PostToWeb(new { type = "trigger-fault", message, detail });
             PostToWeb(new { type = "show-recovery" });
             return;
         }
@@ -615,9 +676,10 @@ internal sealed class SplashForm : Form
             Dock = DockStyle.Top,
             Height = 140,
         };
-        var detail = new Label
+        var detailLabel = new Label
         {
-            Text = message,
+            Text = _failureDetailText is null ? message
+                 : $"{message}\n\n{_failureDetailText[..Math.Min(_failureDetailText.Length, 600)]}",
             ForeColor = Color.FromArgb(150, 170, 200),
             Font = new Font("Segoe UI", 10f),
             AutoSize = false,
@@ -625,6 +687,7 @@ internal sealed class SplashForm : Form
             Dock = DockStyle.Top,
             Height = 120,
         };
+        _failureDetail = detailLabel;
         var buttons = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -679,7 +742,7 @@ internal sealed class SplashForm : Form
         buttons.Anchor = AnchorStyles.None;
 
         _failurePanel.Controls.Add(buttons);
-        _failurePanel.Controls.Add(detail);
+        _failurePanel.Controls.Add(detailLabel);
         _failurePanel.Controls.Add(title);
         Controls.Add(_failurePanel);
         _failurePanel.BringToFront();
@@ -874,11 +937,13 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
     private string BackendUrl => _main?.BackendUrl ?? "http://127.0.0.1:8765/";
 
     private bool _testFault;
+    private readonly bool _testFaultLate;
 
-    public NexusCoreApplicationContext(string appDir, bool testFault = false)
+    public NexusCoreApplicationContext(string appDir, bool testFault = false, bool testFaultLate = false)
     {
         _appDir = appDir;
         _testFault = testFault;
+        _testFaultLate = testFaultLate;
         _progress = CreateProgress();
         _splash = new SplashForm(appDir, _progress);
         _splash.RetryRequested += OnRetry;
@@ -897,6 +962,18 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _splash.VoicePlaybackResult += (id, started, secs) =>
             _narrator.NotifyVoiceResult(id, started, secs);
         _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
+        // A stage line speaks when its caption is actually on screen — the
+        // clip's own pacing drives narration, not the host's confirm times.
+        _splash.RecoveryStageShown += stage =>
+            _narrator.RecoveryStage(stage, () => _main?.BackendUrl);
+        // Closing the splash window itself (taskbar right-click → Close,
+        // Alt+F4, Task Manager End task) must exit the whole app — with no
+        // main form assigned yet the context would otherwise keep the
+        // process running with zero windows.
+        _splash.FormClosed += (_, _) =>
+        {
+            if (MainForm is null) Application.Exit();
+        };
         _splash.Show();
         // Launched from a shell/IDE we may not hold foreground rights —
         // TopMost keeps the splash above other windows, but it still needs
@@ -920,31 +997,172 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         return new StartupProgress(profile, Path.Combine(dataDir, "logs"));
     }
 
+    // Retry = exactly one real in-place recovery attempt per explicit user
+    // action. Duplicate clicks coalesce on this guard; the splash keeps its
+    // surface so the recovery sequence continues from the contained frame.
+    private int _recoveryInFlight;
+    private int _recoveryAttemptCount;
+
     private void OnRetry()
     {
-        _splash?.Dispose();
-        _main?.DisposeBackend();
-        _main?.Dispose();
-        _main = null;
-        _progress = CreateProgress();
-        _splash = new SplashForm(_appDir, _progress);
-        _splash.RetryRequested += OnRetry;
-        _splash.ExitRequested += () => Application.Exit();
-        if (_narrator is not null)
+        if (Interlocked.CompareExchange(ref _recoveryInFlight, 1, 0) != 0) return;
+        _ = RunRecoveryAttemptAsync();
+    }
+
+    /// <summary>
+    /// One honest recovery attempt on the SAME splash surface. Every stage
+    /// caption the cinematic shows is gated on a milestone posted here —
+    /// the page can never claim fault-located/verified/online ahead of the
+    /// real work. A throw interrupts the sequence into recovery-failed and
+    /// returns control to the user; nothing retries automatically.
+    /// </summary>
+    private async Task RunRecoveryAttemptAsync()
+    {
+        var attempt = ++_recoveryAttemptCount;
+        try
         {
-            _splash.VoicePlaybackResult += (id, started, secs) =>
-                _narrator.NotifyVoiceResult(id, started, secs);
-            _splash.VoicePlaybackEnded += id => _narrator.NotifyVoiceEnded(id);
+            // Preflight recoverability BEFORE the cinematic commits — if the
+            // backend can't even be launched there is no attempt to depict:
+            // the failure clip plays instead of footage claiming the core is
+            // powering back up. The catch below owns the failure transition.
+            var backendExe = Path.Combine(_appDir, "backend", "ChatNexus.Backend.exe");
+            if (!File.Exists(backendExe))
+                throw new FileNotFoundException("Nexus Core backend executable is missing.", backendExe);
+
+            // Voice is part of recovery too — the URL factory resolves once
+            // the relaunched backend can actually serve synthesis. The user
+            // acted, so a still-playing fault line belongs to a superseded
+            // state: stop it so "Attempting to reinitialize the core." can
+            // speak the moment the clip's first caption renders.
+            _splash?.PostToWeb(new { type = "stop-voice", fade = 0.1 });
+            _splash?.PostToWeb(new { type = "recovery-begin", attempt });
+            _splash?.RecoveryFeedback($"Recovery attempt {attempt} started.");
+            _narrator?.RecoveryBegan(() => _main?.BackendUrl);
+            RecoveryStage(0);   // EMERGENCY CONTAINMENT · ENGAGED
+
+            // Tear down the failed app/backend before relaunch — the
+            // "isolated" stage is true only once the old core is gone.
+            _main?.DisposeBackend();
+            _main?.Dispose();
+            _main = null;
+            RecoveryStage(1);   // NONESSENTIAL SYSTEMS · ISOLATED
+
+            _progress = CreateProgress();
+            _splash?.ResetProgress(_progress);   // progress pump feeds the recovery surface again
+
+            RecoveryStage(2);   // RECOVERY MATRIX · INITIALIZING — relaunch begins
+            _main = new MainForm(_appDir);
+            _main.CreateControl();
+            _main.FarewellHook = () =>
+                _narrator?.FarewellAsync(
+                    () => _main?.BackendUrl, TimeSpan.FromSeconds(45))
+                ?? Task.CompletedTask;
+            await _main.PrepareAsync(_progress);
+            RecoveryStage(3);   // FAULT SOURCE · LOCATED — backend came up healthy
+
+            RecoveryStage(4);   // CORE RECONSTRUCTION · IN PROGRESS — verify the UI
+            await _main.VerifyLoadableAsync();
+            RecoveryStage(5);   // STABILITY THRESHOLD · RECOVERING — interface loads
+
+            _progress.MarkAppReady();
+            RecoveryStage(6);   // CONTAINMENT · RELEASED
+            while (!_progress.ReadyToDismiss)
+            {
+                await Task.Delay(60);
+            }
+            RecoveryStage(7);   // CORE INTEGRITY · VERIFIED — readiness gates true
+            _progress.BeginCompletion();
+            while (!_progress.CompletionFinished)
+            {
+                await Task.Delay(33);
+            }
+            RecoveryStage(8);   // CORE SYSTEMS · ONLINE — the green tail earns itself
+
+            // The authored clip must play its WHOLE tail — the app never
+            // opens mid-sequence. Bounded so a dead WebView can't hang the
+            // handoff; the DOM fallback has no clip to wait on and the flag
+            // simply never sets, so the bound is what releases that path.
+            var recDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(45);
+            while (_splash is not null && !_splash.RecoverySequenceComplete
+                   && DateTimeOffset.Now < recDeadline)
+            {
+                await Task.Delay(50);
+            }
+
+            // "The core is back online." already spoke via the stage-8 beat
+            // when the clip's online caption appeared — ~2s dwell on the held
+            // green frame, then the voice-gated handoff.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            if (_narrator is not null)
+            {
+                await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
+            }
+            _narrator?.Cancel();
+            var splash = _splash;
+            _splash = null;
+            // MainForm assignment must precede splash.Close() — the splash's
+            // FormClosed handler exits the process while MainForm is unset.
+            MainForm = _main;
+            splash?.Close();
+            splash?.Dispose();
+            _main.WindowState = FormWindowState.Normal;
+            _main.Show();
+            _main.TopMost = true;
+            _main.Activate();
+            _main.BringToFront();
+            Win32.ForceForeground(_main.Handle);
+            _main.TopMost = false;
+            _main.SignalStartupTransition();
+            _narrator?.PrewarmRecoveryLines(() => _main?.BackendUrl);
         }
-        _splash.Show();
-        _splash.Activate();
-        _ = RunStartupAsync();
+        catch (Exception ex)
+        {
+            BackendProcess.NoteStartup(
+                Path.Combine(_appDir, "data", "logs"),
+                $"recovery attempt {attempt} failed: {ex.GetType().Name}: {ex.Message}");
+            // The fresh model is marked failed — the pump may keep ticking;
+            // Tick() is a no-op on a Failed model and the fault surface
+            // ignores progress posts anyway.
+            _progress?.MarkFailed();
+            _splash?.PostToWeb(new { type = "recovery-failed", message = ex.Message,
+                detail = $"{ex.GetType().Name}: {ex.Message}\n\nFull log: data\\logs\\backend-host.log" });
+            _splash?.RecoveryFeedback($"Recovery attempt {attempt} failed: {ex.Message}");
+            // Spoken before teardown — the wounded backend may still serve
+            // TTS; a truly dead one just skips the line. The backend itself
+            // stays alive for diagnostics and next-attempt disposal owns it.
+            _narrator?.RecoveryFailed(() => _main?.BackendUrl);
+            _main?.Dispose();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _recoveryInFlight, 0);
+        }
+    }
+
+    /// <summary>Confirm a recovery milestone — the cinematic may not show a
+    /// stage until this posts. Narration follows the clip's own timing via
+    /// RecoveryStageShown, not this confirm moment. Monotonic; duplicates
+    /// are ignored.</summary>
+    private void RecoveryStage(int stage)
+    {
+        _splash?.PostToWeb(new { type = "recovery-stage", stage });
     }
 
     private async Task RunStartupAsync()
     {
         try
         {
+            // Cold start: the cinematic surface must be on screen before any
+            // real progress accrues — otherwise the bar first paints at ~50%
+            // on a warm backend. The native fallback is already visible while
+            // we wait, and a dead/missing WebView releases the gate fast.
+            var cinematicDeadline = DateTimeOffset.Now + TimeSpan.FromSeconds(10);
+            while (_splash is { } gate && !gate.WebReady && !gate.WebFailed
+                   && DateTimeOffset.Now < cinematicDeadline)
+            {
+                await Task.Delay(40);
+            }
+
             _progress.Report(0.06, "init");
 
             // --test-fault: one-shot fault for recovery dogfooding — fires
@@ -952,7 +1170,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // the REAL ShowFailure path (fault narration, containment
             // animation, recovery panel, host actions) is exercised end to
             // end. Retry relaunches startup with the flag already spent.
-            if (_testFault)
+            if (_testFault && !_testFaultLate)
             {
                 _testFault = false;
                 await Task.Delay(4000);
@@ -977,6 +1195,15 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // throws into the catch → the splash's error sequence takes
             // over on the SAME surface instead of showing a broken window.
             await _main.VerifyLoadableAsync();
+
+            // --test-fault=late: a real fault at full power — the backend is
+            // verified but the startup still must fail, exercising the
+            // error-continuation clip + recovery retry for real.
+            if (_testFault && _testFaultLate)
+            {
+                _testFault = false;
+                throw new InvalidOperationException("test fault (late) — recovery dogfood");
+            }
 
             // The interface posted its ready handshake; the app is genuinely
             // usable. Now hold the splash until the minimum display time too,
@@ -1016,9 +1243,10 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
-            // Dwell on the fully-loaded state before the swap — a few
-            // seconds at stable online so the completion actually reads.
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            // Dwell on the fully-loaded state before the swap — hold the
+            // pulsating CORE SYSTEMS · ONLINE state ~3s so the completion
+            // actually reads before the handoff.
+            await Task.Delay(TimeSpan.FromSeconds(3));
 
             // Voice gate: the splash stays up until the last startup
             // narration has ACTUALLY finished playing (voice-ended ack, not
@@ -1029,6 +1257,9 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
             }
             _narrator?.Cancel();
+            // MainForm assignment must precede splash.Close() — the splash's
+            // FormClosed handler exits the process while MainForm is unset.
+            MainForm = _main;
             _splash?.Close();
             _splash?.Dispose();
             _splash = null;
@@ -1047,7 +1278,10 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // Release the held startup greeting — the splash owned the
             // audio stage until narration + quiet buffer finished.
             _main.SignalStartupTransition();
-            MainForm = _main;
+            // A healthy backend warms the fixed recovery/failed narration
+            // into cache — later fault flows speak instantly even when the
+            // backend can no longer serve synthesis.
+            _narrator?.PrewarmRecoveryLines(() => _main?.BackendUrl);
         }
         catch (Exception ex)
         {
@@ -1059,8 +1293,13 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 Path.Combine(_appDir, "data", "logs"),
                 $"startup failed: {ex.GetType().Name}: {ex.Message}");
             _narrator?.Fault(() => _main?.BackendUrl);
-            _splash?.ShowFailure(
-                $"{ex.Message}\n\nDetails are in data\\logs\\backend-host.log");
+            // The wounded backend may still serve TTS during the
+            // intervention window — cache every recovery line now so a
+            // later attempt's narration (including the failure line) plays
+            // from disk even if the backend is gone entirely.
+            _narrator?.PrewarmRecoveryLines(() => _main?.BackendUrl);
+            _splash?.ShowFailure(ex.Message,
+                $"{ex.GetType().Name}: {ex.Message}\n\nFull log: data\\logs\\backend-host.log");
         }
     }
 
@@ -2251,7 +2490,11 @@ internal sealed class MainForm : Form
 
     public async Task PrepareAsync(StartupProgress progress)
     {
-        AttachBackend(BackendProcess.Start(_appDir));
+        // BackendProcess.Start does file waits (Defender/LKG settle) that can
+        // block for tens of seconds — keep it off the UI thread so the splash
+        // and recovery surface stay alive while it runs.
+        var backend = await Task.Run(() => BackendProcess.Start(_appDir));
+        AttachBackend(backend);
         // Backend-internal init phases arrive on stdout as [nexus-boot] markers
         // while the HTTP server is still coming up; map them into the band the
         // host owns between "backend launched" and "backend healthy".
@@ -2476,7 +2719,7 @@ internal sealed class MainForm : Form
             }
 
             await Task.Delay(350);
-            var replacement = BackendProcess.Start(_appDir);
+            var replacement = await Task.Run(() => BackendProcess.Start(_appDir));
             AttachBackend(replacement);
             await replacement.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
 

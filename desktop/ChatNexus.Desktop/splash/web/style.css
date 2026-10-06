@@ -14,7 +14,12 @@
 .boot-media.live{opacity:1}
 /* The rendered clip carries its own baked readout — once it is the live
    surface the DOM stand-ins step aside (kept painted for fallback). */
-.video-mode #chamber,.video-mode #scene,.video-mode #shade,.video-mode #readout{visibility:hidden}
+.video-mode #chamber,.video-mode #scene,.video-mode #shade{visibility:hidden}
+/* The DOM readout stays live over the clip — its status text and bar are
+   real milestones, not the footage's baked captions. Only while a sequence
+   overlay clip (error/recovery/recovery-failed) owns the surface does the
+   baked captioning take over. */
+body.overlay-clip #readout{visibility:hidden}
 #missing-art{position:absolute;top:64%;width:100%;text-align:center;font-size:32px;letter-spacing:.28em;color:#afdcff}#missing-art span{display:block;font-size:10px;margin-top:8px}
 .no-script{position:absolute;bottom:0;z-index:5;background:#081422;width:100%;text-align:center}
 #recovery{position:absolute;z-index:4;right:2%;top:7%;width:27%;max-height:78%;overflow:auto;padding:20px;background:linear-gradient(140deg,#101e2df5,#070e19f5);border:1px solid #8c714454;border-top:2px solid #bc9657;box-shadow:0 12px 32px #0009;border-radius:3px}
@@ -31,7 +36,13 @@
 .recovery-actions button{font-size:10px;padding:6px;border:1px solid #2d425a;background:#101b29;color:#b9cee4;border-radius:4px;font:inherit;cursor:pointer}
 .recovery-actions button:hover{background:#18304a;border-color:#5490b5}
 .recovery-actions button:focus-visible{outline:2px solid #66ddff;outline-offset:3px}
+.recovery-actions button:disabled{opacity:.45;cursor:default}
+.recovery-actions button:disabled:hover{background:#101b29;border-color:#2d425a}
 #recovery #action-feedback{font-size:9px;color:#7790a7;min-height:1em}
-#stage.fault #fill{background:linear-gradient(90deg,#745c3d,#d8b77a);box-shadow:0 0 4px #c9995c55}
-#stage.fault #status{color:#cdb58d}
+@keyframes nexus-fill-fault-pulse{0%,100%{background:linear-gradient(90deg,#6e2f28,#c94a3e);box-shadow:0 0 4px #e05a4d66}50%{background:linear-gradient(90deg,#8a3a30,#f06052);box-shadow:0 0 14px #ff5a4dbb}}
+#stage.fault #fill{background:linear-gradient(90deg,#6e2f28,#c94a3e);box-shadow:0 0 4px #e05a4d66;animation:nexus-fill-fault-pulse 1.6s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){#stage.fault #fill{animation:none}}
+#stage.fault #status{color:#e88a7d}
+#stage.fault #status.recovering,#stage.fault #detail.recovering{transition:color 1.8s ease;color:#dfe9f5}
+#stage.fault #fill.recovering{animation:none;transition:none}
 @media(max-width:850px){#recovery{width:44%;padding:12px;right:1.5%;top:4%}#recovery h2{font-size:14px}#recovery p{font-size:9px}.recovery-actions button{padding:4px;font-size:9px}}

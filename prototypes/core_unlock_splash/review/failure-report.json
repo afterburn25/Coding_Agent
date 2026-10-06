@@ -1,0 +1,86 @@
+{
+  "initializationMs": 609.6129,
+  "hostCpuSeconds": 0.125,
+  "elapsedSeconds": 13.1340872,
+  "hostWorkingSetMb": 65.14453125,
+  "browserCpuSeconds": 3.84375,
+  "browserWorkingSetMb": 482.3828125,
+  "browserProcesses": [
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.171875,
+      "WorkingSetMb": 37.09765625
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.03125,
+      "WorkingSetMb": 19.91015625
+    },
+    {
+      "Kind": "Gpu",
+      "CpuSeconds": 2.375,
+      "WorkingSetMb": 110.5078125
+    },
+    {
+      "Kind": "Browser",
+      "CpuSeconds": 0.703125,
+      "WorkingSetMb": 136.87890625
+    },
+    {
+      "Kind": "Renderer",
+      "CpuSeconds": 1.875,
+      "WorkingSetMb": 151.078125
+    },
+    {
+      "Kind": "Utility",
+      "CpuSeconds": 0.125,
+      "WorkingSetMb": 26.91015625
+    }
+  ],
+  "note": "Working sets may include shared pages. CPU covers the host and WebView2 processes; GPU utilization and simultaneous model loading need target-hardware profiling.",
+  "renderer": {
+    "checks": {
+      "continuousAndContainedAt0": true,
+      "continuousAndContainedAt1.9": true,
+      "continuousAndContainedAt2.8": true,
+      "continuousAndContainedAt5.15": true,
+      "continuousAndContainedAt7.8": true,
+      "continuousAndContainedAt11.79": true,
+      "noRepeatedFaultLoop": true,
+      "visibleInstability": true,
+      "failureAudioOnly": true,
+      "contained": true,
+      "recoveryPanel": true,
+      "progressFrozen": true,
+      "failureAudioOutput": true,
+      "emergencyHum": true,
+      "mutedFailure": true,
+      "hostAttemptCounter": true,
+      "rollback": true,
+      "restartingLocked": true,
+      "humanIntervention": true,
+      "reauthorization": true,
+      "recoveryRespectsReadiness": true,
+      "recoveryReachedOnline": true,
+      "safeModeImmediate": true,
+      "reducedFault": true,
+      "allFailureStemsDecoded": true,
+      "noAudioWarnings": true
+    },
+    "passed": true,
+    "decodedStems": 28,
+    "audioPeak": 0.29398804903030396,
+    "audioState": "running",
+    "warnings": [],
+    "testedNormalTimes": [
+      0,
+      1.9,
+      2.8,
+      5.15,
+      7.8,
+      11.79
+    ],
+    "containmentSeconds": 5.6,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0"
+  }
+}

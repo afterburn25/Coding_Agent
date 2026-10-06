@@ -1,0 +1,30 @@
+{
+  "seconds": 27,
+  "fadeAt": 12.6,
+  "fadeSeconds": 1.8,
+  "onlineAt": 21.4,
+  "messages": [
+    { "at": 0, "text": "EMERGENCY CONTAINMENT · ENGAGED" },
+    { "at": 2.2, "text": "NONESSENTIAL SYSTEMS · ISOLATED" },
+    { "at": 4.4, "text": "RECOVERY MATRIX · INITIALIZING" },
+    { "at": 6.6, "text": "FAULT SOURCE · LOCATED" },
+    { "at": 8.8, "text": "CORE RECONSTRUCTION · IN PROGRESS" },
+    { "at": 12.6, "text": "STABILITY THRESHOLD · RECOVERING" },
+    { "at": 15.8, "text": "CONTAINMENT · RELEASED" },
+    { "at": 18.6, "text": "CORE INTEGRITY · VERIFIED" },
+    { "at": 21.4, "text": "CORE SYSTEMS · ONLINE" }
+  ],
+  "motion": [
+    [0, 2.35],
+    [10.4, 2.35],
+    [11.2, 3.15],
+    [12, 3.95],
+    [12.8, 4.75],
+    [13.5, 4.75],
+    [15, 5.65],
+    [18.6, 9.65],
+    [20.8, 11.65],
+    [21.4, 12.2],
+    [27, 17.8]
+  ]
+}

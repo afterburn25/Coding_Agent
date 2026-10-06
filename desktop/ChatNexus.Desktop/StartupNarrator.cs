@@ -27,6 +27,26 @@ internal sealed class StartupNarrator
     public const string FaultLine =
         "Startup fault detected. Core Destabilization Imminent. " +
         "Core containment engaged. Beginning recovery diagnostics.";
+    /// <summary>Cache keys are versioned — a text change must not be
+    /// silenced by a stale wav written under the same key.</summary>
+    public const string RecoveryLine = "Attempting to reinitialize the core.";
+    /// <summary>Recovery narration is a small set of beats keyed to the
+    /// stage caption actually appearing on screen — the splash posts
+    /// recovery-stage-shown as the clip crosses that boundary, so each
+    /// line lands on the footage rather than at confirm time. Beats are
+    /// related announcements, not verbatim captions: three mid-sequence
+    /// lines plus the online line spoken on the held green end frame.</summary>
+    public static readonly (int Stage, string Key, string Text)[] RecoveryBeats =
+    {
+        (0, "recovery-v2",       RecoveryLine),
+        (6, "recovery-iris-v2",  "Releasing containment."),
+        (7, "recovery-power-v2", "Core initialization in progress. Powering the core."),
+        (8, "recovery-online-v2","The core is back online."),
+    };
+    /// <summary>The failed-attempt clip is short — one line at its start
+    /// narrates the whole sequence; anything more races the footage.</summary>
+    public const string RecoveryFailedLine =
+        "Recovery attempt failed. Core containment maintained. User intervention required.";
 
     private readonly string _appDir;
     private readonly string _statePath;
@@ -186,13 +206,13 @@ internal sealed class StartupNarrator
     /// the previous clip's real end (voice-ended ack or PlaySync return,
     /// tracked in _lastPlaybackEnd by Play).
     /// </summary>
-    private readonly ConcurrentQueue<(Func<Task> Run, TaskCompletionSource<bool> Done)> _voiceQueue = new();
+    private readonly ConcurrentQueue<(Func<Task> Run, TaskCompletionSource<bool> Done, TimeSpan? Quiet)> _voiceQueue = new();
     private int _voiceWorker;
 
-    internal Task EnqueueVoiceAsync(Func<Task> play)
+    internal Task EnqueueVoiceAsync(Func<Task> play, TimeSpan? quiet = null)
     {
         var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _voiceQueue.Enqueue((play, done));
+        _voiceQueue.Enqueue((play, done, quiet));
         if (Interlocked.Exchange(ref _voiceWorker, 1) == 0)
             _ = DrainVoiceQueueAsync();
         return done.Task;
@@ -207,7 +227,10 @@ internal sealed class StartupNarrator
                 var end = _lastPlaybackEnd;
                 if (end is not null)
                 {
-                    var wait = end.Value + QuietBuffer - _now();
+                    // Per-item quiet window — recovery beats pace the footage
+                    // (a long gap lands the online line seconds after its
+                    // caption); ordinary narration keeps the full buffer.
+                    var wait = end.Value + (item.Quiet ?? QuietBuffer) - _now();
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
                 }
                 try { await item.Run(); item.Done.TrySetResult(true); }
@@ -332,17 +355,22 @@ internal sealed class StartupNarrator
     /// then plays. Never throws; never blocks the caller.
     /// </summary>
     public void Speak(string key, string text, Func<string?> backendUrl, TimeSpan? deadline = null)
+        => _ = SpeakAsync(key, text, backendUrl, deadline);
+
+    /// <summary>Awaitable Speak — callers that need serialized narration
+    /// (recovery stage lines) chain onto this instead of fire-and-forget.</summary>
+    internal Task SpeakAsync(string key, string text, Func<string?> backendUrl, TimeSpan? deadline = null,
+        TimeSpan? quiet = null)
     {
-        if (!Enabled || _cancelled) { Log($"speak '{key}' suppressed: enabled={Enabled} cancelled={_cancelled}"); return; }
+        if (!Enabled || _cancelled) { Log($"speak '{key}' suppressed: enabled={Enabled} cancelled={_cancelled}"); return Task.CompletedTask; }
         var cached = Cached(key);
         if (cached is not null)
         {
             Log($"speak '{key}' delivering from cache ({cached.Length}B)");
-            _ = DeliverAsync(key, cached);
-            return;
+            return DeliverAsync(key, cached, quiet);
         }
         Log($"speak '{key}' queued — polling backend for synthesis");
-        _ = Task.Run(async () =>
+        return Task.Run(async () =>
         {
             _inflight++;
             try
@@ -374,7 +402,7 @@ internal sealed class StartupNarrator
                             {
                                 Directory.CreateDirectory(_cacheDir);
                                 try { File.WriteAllBytes(CachePath(key), wav); } catch { }
-                                await DeliverAsync(key, wav);
+                                await DeliverAsync(key, wav, quiet);
                                 return;
                             }
                         }
@@ -388,16 +416,16 @@ internal sealed class StartupNarrator
         });
     }
 
-    internal async Task DeliverAsync(string key, byte[] wav)
+    internal async Task DeliverAsync(string key, byte[] wav, TimeSpan? quiet = null)
     {
         // A synthesized friendly line still deserves delivery after the
         // ordinary completion cancel — the SoundPlayer fallback covers a
         // splash that's already gone. A declared fault silences friendly
         // lines — but the fault line itself must still be heard.
-        if (_faulted && key != "fault") return;
+        if (_faulted && key != "fault" && key != "recovery-failed") return;
         _delivering = true;
         NarrationStarted?.Invoke(key);
-        try { await EnqueueVoiceAsync(() => Play(wav, key)); }
+        try { await EnqueueVoiceAsync(() => Play(wav, key), quiet); }
         catch (Exception ex) { Log($"play '{key}' failed: {ex.GetType().Name}"); }
         finally { _delivering = false; }
         NarrationEnded?.Invoke(key);
@@ -469,6 +497,109 @@ internal sealed class StartupNarrator
         }
         _saidOnline = true;
         Speak("online", OnlineLine, backendUrl, TimeSpan.FromSeconds(45));
+    }
+
+    /// <summary>User-requested retry began — plays once the relaunched
+    /// backend can serve synthesis; bounded so it can't land stale.</summary>
+    /// <summary>User-requested retry began — resets narration state only.
+    /// The opening line is spoken by the stage-0 beat when the clip's
+    /// first caption actually renders, so it can never double or land
+    /// before the footage is on screen.</summary>
+    public void RecoveryBegan(Func<string?> backendUrl)
+    {
+        if (!Enabled || _cancelled) return;
+        // The user-requested attempt supersedes the fault state — without this
+        // DeliverAsync would keep dropping every line that isn't 'fault',
+        // including the recovery, online, and recovery-failed narration.
+        _faulted = false;
+        _recoveryGen++;                          // a new attempt orphans any
+        _recoveryVoiceChain = Task.CompletedTask; // queued lines from the last one
+    }
+
+    // Stage beats chain serially and carry a generation check — concurrent
+    // synth completes in arbitrary order, so without the chain a later beat
+    // could land before an earlier one, and without the generation a
+    // leftover from a failed attempt could play inside a retry. Beats use
+    // a tight gap — they pace the footage, so a full QuietBuffer between
+    // them lands each line seconds after the caption it belongs to.
+    private static readonly TimeSpan RecoveryBeatGap = TimeSpan.FromMilliseconds(300);
+    private Task _recoveryVoiceChain = Task.CompletedTask;
+    private int _recoveryGen;
+
+    /// <summary>A recovery stage whose caption is actually on screen — the
+    /// splash posts recovery-stage-shown as the clip crosses each boundary.
+    /// Only beat-mapped stages narrate; the rest pass silently so the few
+    /// spoken lines stay pinned to the footage they accompany.</summary>
+    public void RecoveryStage(int stage, Func<string?> backendUrl)
+    {
+        if (!Enabled || _cancelled) return;
+        var beat = Array.Find(RecoveryBeats, b => b.Stage == stage);
+        if (beat.Key is null) return;
+        _faulted = false;
+        var gen = _recoveryGen;
+        _recoveryVoiceChain = _recoveryVoiceChain.ContinueWith(async _ =>
+        {
+            if (gen != _recoveryGen || _cancelled) return;
+            await SpeakAsync(beat.Key, beat.Text, backendUrl, TimeSpan.FromSeconds(12),
+                RecoveryBeatGap);
+        }).Unwrap();
+    }
+
+    /// <summary>The requested attempt failed — one line over the
+    /// interrupted-recovery clip; a new attempt bumps the generation and
+    /// silences any leftover.</summary>
+    public void RecoveryFailed(Func<string?> backendUrl)
+    {
+        if (!Enabled || _cancelled) return;
+        var gen = _recoveryGen;
+        _recoveryVoiceChain = _recoveryVoiceChain.ContinueWith(async _ =>
+        {
+            if (gen != _recoveryGen || _cancelled) return;
+            await SpeakAsync("recovery-failed", RecoveryFailedLine,
+                backendUrl, TimeSpan.FromSeconds(15), RecoveryBeatGap);
+        }).Unwrap();
+    }
+
+    /// <summary>Pre-synthesize the fixed recovery/failed narration into the
+    /// wav cache while a healthy backend is up — later fault flows then play
+    /// instantly even when the backend can no longer serve requests.</summary>
+    public void PrewarmRecoveryLines(Func<string?> backendUrl)
+    {
+        if (!Enabled || _cancelled) return;
+        _ = Task.Run(async () =>
+        {
+            var lines = new List<(string Key, string Text)>();
+            foreach (var b in RecoveryBeats)
+                lines.Add((b.Key, b.Text));
+            lines.Add(("recovery-failed", RecoveryFailedLine));
+            // Failure-path narration must be backend-independent — by the
+            // time recovery-failed plays there may be no backend left to
+            // synthesize it. Poll the URL and retry each synth so a slow or
+            // wounded backend still lands the wav in cache while it can.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
+            foreach (var (key, text) in lines)
+            {
+                if (_cancelled) return;
+                if (Cached(key) is not null) continue;
+                try
+                {
+                    byte[]? wav = null;
+                    while (wav is null && DateTime.UtcNow < deadline && !_cancelled)
+                    {
+                        var url = backendUrl()?.TrimEnd('/');
+                        if (!string.IsNullOrEmpty(url))
+                            wav = await Synthesize(url, text, CancellationToken.None);
+                        if (wav is null) await Task.Delay(1500);
+                    }
+                    if (wav is not null)
+                    {
+                        Directory.CreateDirectory(_cacheDir);
+                        try { File.WriteAllBytes(CachePath(key), wav); } catch { }
+                    }
+                }
+                catch { /* cache warming is best-effort */ }
+            }
+        });
     }
 
     /// <summary>Fatal startup — supersedes friendly narration immediately.</summary>
