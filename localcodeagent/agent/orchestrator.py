@@ -805,11 +805,68 @@ class AgentOrchestrator:
         pair = cls.builtin_semantic(user_text)
         return pair[1] if pair else None
 
+    def _github_status_reply(self, user_text: str):
+        """GitHub connection/status questions answered from the live
+        capability probe — never a guess about whether the credential is
+        wired. Action requests (push/PR/create…) are left for the tools
+        lane. → RenderedReply | None."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        normalized = re.sub(
+            r"\s+", " ", str(user_text).strip().lower()).strip("!?., ")
+        if "github" not in normalized:
+            return None
+        if re.search(
+                r"\b(?:push|commit|clone|merge|branch|create|open|fork|"
+                r"delete|issue)\b|\bpull request\b|\bpr\b", normalized):
+            return None   # action request — the tools/model lane owns it
+        if not re.search(
+                r"\b(?:connect\w*|link\w*|access\w*|status|authoriz\w*|"
+                r"log\s?in\w*|sign\s?in\w*|credential\w*|token\w*|"
+                r"hooked up|set\s?up|setup|account\w*|authenticat\w*)\b",
+                normalized):
+            return None
+        reg = getattr(self, "capabilities", None)
+        if reg is None:
+            return None
+        try:
+            report = reg.evaluate_one("github", force=True)
+        except Exception:
+            return None
+        state = getattr(report, "state", "") or "unavailable"
+        detail = getattr(report, "detail", "") or ""
+        if state in ("verified", "available"):
+            canonical = ("GitHub's already connected — I'm authorized. "
+                         "Point me at a repo and I'll get to work.")
+        elif state == "unauthorized":
+            canonical = ("I'm not connected to GitHub yet — there's no "
+                         "credential configured. Hand me a token through "
+                         "the GitHub connect settings and I'm in.")
+        elif state == "setup_required":
+            canonical = ("GitHub integration is disabled in my "
+                         "configuration — turn it on and I can connect.")
+        else:
+            canonical = ("GitHub isn't reachable right now — "
+                         f"{detail or 'the connection is failing'}. "
+                         "That's a blocker I can't code around.")
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id=f"capability:github:{state}",
+            speech_act="answer")
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="github_status", canonical=canonical)
+
     def _builtin_reply(self, user_text: str):
         """The instance-level persona path: SemanticResponse through the
         active persona's speech genome when a resolver is wired; the
         canonical text untouched otherwise. → RenderedReply | None."""
         from ..context.realize import RenderedReply
+        github_lane = self._github_status_reply(user_text)
+        if github_lane is not None:
+            return github_lane
         pair = self.builtin_semantic(user_text)
         if pair is None:
             return None

@@ -466,6 +466,37 @@ class TestBuiltinIntegration(unittest.TestCase):
         self.assertNotIn("not a person", canon.lower())
         self.assertNotIn("software", canon.lower())
 
+    def _github_registry(self, authed: bool):
+        from localcodeagent.capabilities import CapabilityRegistry
+        return CapabilityRegistry(env={
+            "github_enabled": lambda: True,
+            "github_authorized": lambda: authed,
+        })
+
+    def test_github_status_lane_connected(self):
+        agent = self._agent()
+        agent.capabilities = self._github_registry(authed=True)
+        out = agent._builtin_reply("can you connect to github")
+        self.assertIsNotNone(out)
+        self.assertIn("connected", out.text.lower())
+        self.assertNotIn("not connected", out.text.lower())
+
+    def test_github_status_lane_unauthorized(self):
+        agent = self._agent()
+        agent.capabilities = self._github_registry(authed=False)
+        out = agent._builtin_reply("i need you to connect to github")
+        self.assertIsNotNone(out)
+        self.assertIn("credential", out.text.lower())
+
+    def test_github_status_lane_skips_actions_and_other(self):
+        agent = self._agent()
+        agent.capabilities = self._github_registry(authed=True)
+        # Action requests stay with the tools/model lane — the status
+        # lane only answers connection/status questions.
+        self.assertIsNone(agent._github_status_reply("push this to github"))
+        self.assertIsNone(agent._github_status_reply("open a github pr"))
+        self.assertIsNone(agent._github_status_reply("who are you"))
+
     def test_genome_reply_vs_plain(self):
         plain = self._agent()._builtin_reply("hi")
         self.assertFalse(plain.genome_rendered)
