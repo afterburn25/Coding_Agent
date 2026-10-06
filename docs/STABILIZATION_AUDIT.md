@@ -28,6 +28,10 @@ Last updated: after packaged-backend dogfood on the `244af60`+ build
 | Chat control plane live-verified on packaged backend 0.23.0: voice toggle, undo, worker ceiling, backend status | port-58333 live probe |
 | Worker ceiling propagates to live `AdaptiveWorkerManager` | `self_knowledge` setter |
 | `VERSION` bundled in packaged backend (was `0.0.0-dev` regression) | `packaging/build_windows.ps1` |
+| Permission matrix verified: `git.push` deny→`PERMISSION_DENIED: git.push`, ask→`APPROVAL_REQUIRED` naming the right key; `git_push` was wrongly gated on `github.write` — fixed | `localcodeagent/tools/github.py` |
+| STT on packaged app: faster-whisper `base` available, 24 input devices enumerated | `/api/stt` on :58341 |
+| All 17 UI pages serve 200 HTML on packaged backend | page sweep :58341 |
+| Full unit suite: **2175 passed / 7 failed** — 5 pre-existing `answer_memory` SQLite-lock flakes (repro on clean main), 2 doc-version staleness (fixed in `78f72ec`) | `pytest tests` |
 
 ## GitHub — `WORKING_VERIFIED`
 
@@ -102,7 +106,8 @@ STT itself still `NOT_TESTED` (no mic dogfood yet).
 | Feature | Status | Notes |
 |---|---|---|
 | Nexus Brain | NOT_TESTED | service exists; needs learn/retrieve dogfood |
-| Answer Memory | PARTIALLY_WIRED | 5 pre-existing SQLite-lock test failures on clean main (unrelated to this work); live persistence unverified |
+| Answer Memory | BROKEN (pre-existing) | 5 SQLite-lock failures repro on clean main — `learn()` writes are not persisting (export/stats/reopen all see 0 rows). Real defect, filed for repair |
+| Speech input (STT) | WORKING_WITH_POLISH_NEEDED | engine + device enumeration verified live; no real-mic transcription dogfood |
 | Missions / autonomy supervisor | NOT_TESTED | |
 | Browser automation / Playwright | NOT_TESTED | Edge fallback path unverified |
 | Web search / research | NOT_TESTED | |
