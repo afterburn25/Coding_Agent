@@ -3818,8 +3818,13 @@ class AgentOrchestrator:
                 # about a capability whose execution path is hard-negative
                 # (e.g. "I pushed to GitHub" while GitHub is unauthorized)
                 # is still fabrication — annotate it the same way.
-                cap_contra = self._capability_contradictions(
-                    session.main_content)
+                # Capability contradictions only matter on tool-capable
+                # work turns — casual utility replies mentioning a dead
+                # capability ("I'll let the system sleep") are persona
+                # text, not execution claims.
+                cap_contra = (
+                    self._capability_contradictions(session.main_content)
+                    if session.decision.role != "utility" else [])
                 if claims and not session.tool_events \
                         and not session.research_context.get("sources"):
                     # Never learn a fabricated reply — Answer Memory would
@@ -3862,7 +3867,7 @@ class AgentOrchestrator:
                         "type": "unverified_action_claims",
                         "model_id": session.profile.id,
                         "claims": [c[:120] for c in claims[:3]] or
-                                  [f"capability:{c['id']}"
+                                  [f"capability:{c['capability']}"
                                    for c in cap_contra[:3]],
                         "capability_contradiction": cap_contra[:3],
                     }
