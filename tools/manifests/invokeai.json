@@ -1,7 +1,7 @@
 {
   "id": "invokeai",
   "name": "InvokeAI",
-  "version": "6.x",
+  "version": "6.14.2",
   "category": "images",
   "description": "Local InvokeAI image-generation backend \u00e2\u20ac\u201d the preferred primary engine for standard generation, editing, inpainting, and variations. Installs into a dedicated virtualenv under tools/InvokeAI so its pinned torch stack never conflicts with ComfyUI's embedded Python.",
   "provider": "invoke-ai",
@@ -25,7 +25,7 @@
   ],
   "install": {
     "method": "venv",
-    "package": "invokeai",
+    "package": "invokeai==6.14.2",
     "dest": "tools/InvokeAI",
     "size_bytes": 6000000000,
     "python_candidates": [

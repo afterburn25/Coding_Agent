@@ -962,6 +962,16 @@ class AppState:
                         w._ceiling = min(w._ceiling, w.max_workers)
                     except Exception:
                         pass
+            if key == "invokeai_dir":
+                # Path change → drop the 60s discovery cache so the next
+                # probe re-scans instead of routing around a stale result.
+                rt = getattr(getattr(self, "image_manager", None),
+                             "invokeai_runtime", None)
+                if rt is not None:
+                    try:
+                        rt.invalidate_discovery()
+                    except Exception:
+                        pass
             self.persist_config_fields([key])
             try:
                 self.events.publish("settings",

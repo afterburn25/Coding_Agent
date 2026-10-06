@@ -28,11 +28,12 @@ class InvokeRuntimeStatus:
     pid: int | None = None
     managed: bool = False
     healthy: bool = False
-    installed: bool = True
+    installed: bool = False
     error: str = ""
     log_path: str = ""
     restarts: int = 0
     started_at: float = 0.0
+    installed_version: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -45,6 +46,7 @@ class InvokeRuntimeStatus:
             "log_path": self.log_path,
             "restarts": self.restarts,
             "started_at": self.started_at,
+            "installed_version": self.installed_version,
         }
 
 
@@ -79,6 +81,64 @@ class InvokeAIRuntime:
         self._discover_cache = result
         self._discover_ts = time.time()
         return result
+
+    def invalidate_discovery(self) -> None:
+        """Drop the 60s discovery cache — call after install/repair/
+        removal/runtime-path changes so the next probe re-scans."""
+        self._discover_cache = None
+        self._discover_ts = 0.0
+
+    def installed_version(self, root: Path | None = None) -> str:
+        """The invokeai package version inside the discovered venv — read
+        from dist-info metadata on disk (a subprocess import would stall
+        callers for seconds)."""
+        if root is None:
+            root, _prefix = self.discover()
+        if root is None:
+            return ""
+        try:
+            for site in (root / "Lib" / "site-packages",
+                         *(root / "lib").glob("python*/site-packages")):
+                if not site.is_dir():
+                    continue
+                for d in site.glob("invokeai-*.dist-info"):
+                    return d.name[len("invokeai-"):-len(".dist-info")]
+        except OSError:
+            pass
+        return ""
+
+    def registry_models(self) -> list[dict]:
+        """InvokeAI's registered models read directly from its SQLite
+        registry — works while the server is stopped.
+
+        The registry lives at ``<managed-root>/databases/invokeai.db``;
+        each ``models.config`` row is the same JSON shape the REST API
+        returns, so rows carry the real ``key``/``name``/``base``/``type``
+        the graph builder needs. Returns [] when no managed registry
+        exists or the schema isn't recognized — callers fall back to the
+        live API or an empty pool."""
+        data_root = self.base_dir / "data" / "invokeai"
+        db_path = data_root / "databases" / "invokeai.db"
+        if not db_path.is_file():
+            return []
+        import sqlite3
+        rows: list[dict] = []
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                for (raw,) in con.execute("select config from models"):
+                    try:
+                        cfg = json.loads(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(cfg, dict) or not cfg.get("key"):
+                        continue
+                    rows.append(cfg)
+            finally:
+                con.close()
+        except Exception:
+            return []
+        return rows
 
     def _discover_uncached(self) -> tuple[Path | None, list[str] | None]:
         configured = str(getattr(self.config, "invokeai_dir", "")).strip()
@@ -447,6 +507,8 @@ class InvokeAIRuntime:
         self.status.healthy = healthy
         root, _prefix = self.discover()
         self.status.installed = root is not None
+        self.status.installed_version = self.installed_version(root) \
+            if root is not None else ""
         if self._process and self._process.poll() is not None:
             self.status.state = "error"
             self.status.pid = None

@@ -561,6 +561,14 @@ class ImageManager:
         try:
             if self._backend_up("invokeai"):
                 rows = self.invokeai_backend.models()
+            elif self.invokeai_runtime.discover()[0] is not None:
+                # Backend installed but stopped: read InvokeAI's own model
+                # registry (SQLite) so the router still sees its models and
+                # Auto can pick InvokeAI — the job then cold-starts the
+                # server via ensure_ready(). Without this, a stopped
+                # InvokeAI is invisible to routing and every request
+                # silently falls back to ComfyUI.
+                rows = self.invokeai_runtime.registry_models()
         except Exception:
             rows = []
         self._invokeai_model_cache = rows

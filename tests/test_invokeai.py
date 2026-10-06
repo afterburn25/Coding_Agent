@@ -312,6 +312,73 @@ class RuntimeDiscoveryTests(unittest.TestCase):
             self.assertFalse(status["installed"])
             self.assertFalse(status["healthy"])
 
+    def _write_registry(self, root: Path, rows: list[dict]) -> None:
+        import sqlite3
+        dbdir = root / "data" / "invokeai" / "databases"
+        dbdir.mkdir(parents=True)
+        con = sqlite3.connect(str(dbdir / "invokeai.db"))
+        con.execute("create table models (id text primary key, config text)")
+        for i, cfg in enumerate(rows):
+            con.execute("insert into models values (?, ?)",
+                        (f"m{i}", json.dumps(cfg)))
+        con.commit()
+        con.close()
+
+    def _runtime(self, root: Path) -> InvokeAIRuntime:
+        cfg = SimpleNamespace(invokeai_dir="", invokeai_python="",
+                              invokeai_auto_start=False)
+        return InvokeAIRuntime(base_dir=root,
+                               backend=InvokeAIBackend("http://127.0.0.1:9"),
+                               config=cfg)
+
+    def test_registry_models_reads_offline_db(self):
+        """The model pool must reflect InvokeAI's registry even while the
+        server is stopped — otherwise a stopped InvokeAI is invisible to
+        Auto routing and every request falls back to ComfyUI."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_registry(root, [{
+                "key": "dafe3f01-8986-49ef-8ee0-2951bd47d31f",
+                "name": "Juggernaut-XL_v9_RunDiffusionPhoto_v2",
+                "base": "sdxl", "type": "main", "format": "checkpoint",
+                "hash": "blake3:abc"}])
+            rt = self._runtime(root)
+            rows = rt.registry_models()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"],
+                             "Juggernaut-XL_v9_RunDiffusionPhoto_v2")
+            self.assertEqual(rows[0]["base"], "sdxl")
+
+    def test_registry_models_missing_db(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self._runtime(Path(td)).registry_models(), [])
+
+    def test_invalidate_discovery_drops_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            rt = self._runtime(Path(td))
+            with patch("localcodeagent.image.invokeai_runtime.shutil.which",
+                       return_value=None):
+                self.assertEqual(rt.discover(), (None, None))
+            # Install lands after the first probe — invalidate and rescan.
+            scripts = Path(td) / "tools" / "InvokeAI" / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "invokeai-web.exe").write_text("@echo off\n")
+            rt.invalidate_discovery()
+            root, prefix = rt.discover()
+            self.assertIsNotNone(root)
+            self.assertIn("invokeai-web", prefix[0])
+
+    def test_installed_version_from_distinfo(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            site = root / "tools" / "InvokeAI" / "Lib" / "site-packages"
+            (site / "invokeai-6.14.2.dist-info").mkdir(parents=True)
+            (root / "tools" / "InvokeAI" / "Scripts").mkdir(parents=True)
+            (root / "tools" / "InvokeAI" / "Scripts"
+             / "invokeai-web.exe").write_text("@echo off\n")
+            rt = self._runtime(root)
+            self.assertEqual(rt.installed_version(), "6.14.2")
+
 
 def _manager(root: Path, *, backend_override: str = "", config_backend: str = "auto") -> ImageManager:
     profile = ImageModelProfile(
@@ -385,6 +452,37 @@ class BackendSelectionTests(unittest.TestCase):
             job = m.create_job(ImageRequest(prompt="a cat"))
             self.assertEqual(job.backend, "invokeai")
             self.assertTrue(job.model_id.startswith("invokeai:"))
+
+    def test_auto_picks_invokeai_when_installed_but_stopped(self):
+        """Regression: a stopped InvokeAI must still be routable — the
+        manager reads its SQLite model registry offline so Auto can pick
+        an InvokeAI model, then the job cold-starts the server."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Installed venv marker.
+            scripts = root / "tools" / "InvokeAI" / "Scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "invokeai-web.exe").write_text("@echo off\n")
+            # Offline registry with one fleet model.
+            import sqlite3
+            dbdir = root / "data" / "invokeai" / "databases"
+            dbdir.mkdir(parents=True)
+            con = sqlite3.connect(str(dbdir / "invokeai.db"))
+            con.execute("create table models (id text primary key, config text)")
+            con.execute("insert into models values (?, ?)", ("m1", json.dumps({
+                "key": "dafe3f01-8986-49ef-8ee0-2951bd47d31f",
+                "name": "Juggernaut-XL_v9_RunDiffusionPhoto_v2",
+                "base": "sdxl", "type": "main", "format": "checkpoint"})))
+            con.commit(); con.close()
+
+            m = _manager(root)  # endpoints :9/:8188 both down
+            m.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            m.backend_runtime.discover = lambda: (root, "python")
+            job = m.create_job(ImageRequest(prompt="a cat"))
+            self.assertEqual(job.backend, "invokeai")
+            self.assertTrue(job.model_id.startswith("invokeai:"))
+            self.assertTrue(any("invokeai" in r.lower()
+                                for r in job.routing_reasons))
 
     def test_manual_comfyui_override(self):
         with tempfile.TemporaryDirectory() as td:
