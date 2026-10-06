@@ -8,11 +8,11 @@ read `docs/SPLASH_SEQUENCES_DEVIN_HANDOFF.md` at the repository root.
 
 | File | Purpose |
 |---|---|
-| `error-continuation.json` | Startup endpoint, longer visible instability, four red warnings |
+| `error-continuation.json` | 30-second startup duration/endpoint, longer visible instability, four red warnings |
 | `recovery.json` | Nine recovery captions, mechanism mapping, red-to-normal fade and green pulse |
 | `recovery-failed.json` | Contained recovery branch and four failure captions |
 | `export-error-continuation.cjs` | Deterministic `exportStartupFrame`, `exportErrorFrame`, `exportRecoveryFrame`, `exportFailedFrame` adapters, browser verification and 30 fps capture |
-| `mix_audio.py` | Original stereo mixing primitives and unchanged startup mix |
+| `mix_audio.py` | Original stereo mixing primitives and startup mix with extended online hum |
 | `mix_error_continuation.py` | Continued online hum, extended instability, synchronized containment audio |
 | `mix_recovery.py` | Recovery event schedule and pitch-preserving iris/charge retiming |
 | `mix_recovery_failed.py` | Quiet contained-state hum and warning cues |
@@ -26,7 +26,7 @@ production splash files, fetch third-party artwork, start Nexus or run repairs.
 Capture progress is deterministic at `frame / fps`; the underlying renderer
 remains time based. Live production animation should retain its 60 Hz target.
 
-The exported 17/12/27/13-second movies are presentation examples. Actual loading,
+The exported 30/12/27/13-second movies are presentation examples. Actual loading,
 fault, recovery milestones, buttons and readiness remain host-owned. Use
 separate original audio stems for live holds, muting, voice ducking and reliable
 interruption; the mixed MP4 tracks fade at their fixed end for standalone review.
@@ -73,10 +73,14 @@ python build_video.py --clip recovery-failed
 continuity without encoding a full movie. It writes review PNGs and a report.
 Reports, temporary WAVs, silent MP4s, PNGs and node_modules are ignored by Git.
 
-Keep the approved startup movie byte-for-byte unchanged. An explicit
-`python build_video.py --clip startup` is available for intentional future
-authoring, but is not needed for this handoff and will invalidate the preserved
-startup checksum until a new startup is deliberately approved.
+The user requested a 30-second startup. Its original opening is unchanged; the
+added time continues the full-power animation and hum. Rebuild with
+`python build_video.py --clip startup`. `startupSeconds` in
+`error-continuation.json` controls both startup duration and the next clip's
+continuation point. After changing it, rebuild error and successful recovery as
+well so their orbit/ambient phases match the new endpoint. Check whether the
+contained recovery-failed frames change before deciding whether to rebuild it.
+Never append a frozen screenshot or restart the startup to fill the extra time.
 
 After editing a clip, rebuild it, run `verify_package.py --media`, visually
 review it, then commit the MP4 and updated `../../sequence_manifest.json`

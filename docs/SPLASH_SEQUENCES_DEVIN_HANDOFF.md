@@ -17,7 +17,7 @@ automatically merge itself into main, or update the installed application.
 
 | State | File under `review/videos/` | Duration | Intended transition |
 |---|---|---:|---|
-| Startup | `NexusCore-Startup-Glow-Only.mp4` | 17 s | Existing normal startup, unchanged |
+| Startup | `NexusCore-Startup-Glow-Only.mp4` | 30 s | Original opening, followed by a longer moving online hold |
 | Error | `NexusCore-Error-Red-Continuation.mp4` | 12 s | Continue from startup's fully powered final frame; stop at intervention |
 | Recovery | `NexusCore-Recovery.mp4` | 27 s | Begin only after the user selects Retry |
 | Recovery failed | `NexusCore-Recovery-Failed.mp4` | 13 s | Alternative branch at recovery's 8.8 s reconstruction stage |
@@ -29,8 +29,16 @@ references, with captions/progress/recovery controls baked into the pixels.
 For a live splash, port the source animation and use real DOM/native controls;
 an MP4's recorded buttons cannot receive clicks and its captions cannot change.
 
-The exact startup SHA-256 remains
-`bcc3ecc6e9032c95b1c0244d79071b81663743dd64a415151b18e26ee4b63955`.
+The startup reference is now **30 seconds total**, as requested. The original
+opening/charge sequence and geometry remain unchanged; once online at roughly
+12.2 s, the orbitals and particles keep moving at full glow for about 18 s.
+The stable hum continues throughout the hold and fades only over the final
+second of this standalone video. It is not a frozen final frame or a replay.
+The current MP4 checksum is in `sequence_manifest.json`.
+
+The previously delivered 17-second startup had SHA-256
+`bcc3ecc6e9032c95b1c0244d79071b81663743dd64a415151b18e26ee4b63955`;
+that historical hash no longer describes the extended file.
 Keep the current production startup flow, progress authority, voice behavior,
 readiness convergence and dismissal fixes. The legacy review startup caption is
 cyan `NEXUS CORE ONLINE`; production's current green `CORE SYSTEMS · ONLINE`
@@ -66,7 +74,7 @@ loop. Keep these states separate from a renderer failure/static fallback.
 
 ## Error: continue instead of replaying startup
 
-The first frame matches startup frame 509 at 30 fps (16.9667 s): iris fully
+The first frame matches startup frame 899 at 30 fps (29.9667 s): iris fully
 open, fixed sphere geometry, full emitted core glow, completed bar. After a
 0.5 s online lead, the full bar pulses red with a 1.2 s period. Status is red,
 with these exact labels:
@@ -199,7 +207,9 @@ orbital/particle movement and pulses while retaining readable static status.
 1. Pull current main and inspect this branch; port only the new presentation
    and required assets, retaining the existing production lifecycle fixes.
 2. Watch all four reference MP4s and read the JSON timings. Keep normal startup
-   unchanged. Separate live labels/progress/controls from artwork.
+   opening unchanged and preserve moving full-power holds. The 30-second movie
+   is not a mandatory production loading delay. Separate live labels/progress/
+   controls from artwork.
 3. Connect error and confirmed recovery stages to the real host messages.
    First failure waits at intervention; Retry starts exactly one real attempt;
    only a failed attempt enters the recovery-failed presentation.

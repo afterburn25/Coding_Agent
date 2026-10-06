@@ -20,31 +20,32 @@
     "referenceAdapters": "tools/video_export/export-error-continuation.cjs",
     "targetFps": 60,
     "fixedSphereGeometry": true,
-    "startupUnchanged": true,
+    "startupOpeningUnchanged": true,
+    "startupOnlineHoldExtended": true,
     "productionIntegrationPending": true
   },
   "clips": [
     {
       "id": "startup",
       "file": "review/videos/NexusCore-Startup-Glow-Only.mp4",
-      "seconds": 17,
-      "frames": 510,
-      "bytes": 1917520,
-      "sha256": "bcc3ecc6e9032c95b1c0244d79071b81663743dd64a415151b18e26ee4b63955",
+      "seconds": 30.0,
+      "frames": 900,
+      "bytes": 2891122,
+      "sha256": "941e237b11637968ad7ee29938bab50d560daa37d1cb8b2f46bb82ec1db956ec",
       "sourceConfig": null,
       "startsFrom": null
     },
     {
       "id": "error",
       "file": "review/videos/NexusCore-Error-Red-Continuation.mp4",
-      "seconds": 12,
+      "seconds": 12.0,
       "frames": 360,
-      "bytes": 2017621,
-      "sha256": "99dac6a8fe37fddae4d34f4bfb091393af2dedb494062d0af6c26f1de0dec433",
+      "bytes": 2014339,
+      "sha256": "c0d58ec64f8b488096b25696e7ddb300e1820ed235fbcd56906e22209d16a72c",
       "sourceConfig": "tools/video_export/error-continuation.json",
       "startsFrom": {
         "sequence": "startup",
-        "frame": 509,
+        "frame": 899,
         "leadSeconds": 0.5
       },
       "endsIn": "awaiting-user"
@@ -52,10 +53,10 @@
     {
       "id": "recovery",
       "file": "review/videos/NexusCore-Recovery.mp4",
-      "seconds": 27,
+      "seconds": 27.0,
       "frames": 810,
-      "bytes": 2797227,
-      "sha256": "21c8c80ac633e204a90333948f4e53dff620387355e2a0c90f056936e20d0ce6",
+      "bytes": 2798822,
+      "sha256": "e1e1b67df605a5d8f24caa306cf8fbc1ea2e2d2f2ebe02f2da24847fd84dfdc0",
       "sourceConfig": "tools/video_export/recovery.json",
       "startsFrom": {
         "sequence": "error",

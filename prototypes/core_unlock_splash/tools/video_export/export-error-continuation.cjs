@@ -18,8 +18,8 @@ const startup = path.join(out, 'NexusCore-Startup-Glow-Only.mp4');
 const startupHash = crypto.createHash('sha256').update(fs.readFileSync(startup)).digest('hex');
 const finalStartupTime = config.startupSeconds - 1 / config.fps;
 
-// Apply export-only timing changes in memory. The installed app and startup
-// source/movie stay unchanged. Closure events and their audio share this offset.
+// Apply export-only timing changes in memory. Production startup stays unchanged;
+// the startup movie's online hold uses startupSeconds. Closure/audio move together.
 const setup = `
   const exportConfig = ${JSON.stringify(config)};
   let lastExportState;
@@ -40,7 +40,11 @@ const hook = `exportStartupFrame(t) {
   document.body.classList.add('capture');
   for (const id of ['fill', 'track', 'status', 'detail']) $(id).removeAttribute('style');
   paint(); audio.stop();
-  return { t, status: $('status').textContent, fill: $('fill').style.transform };
+  const state = clock.sample(false);
+  return { t, status: $('status').textContent, fill: $('fill').style.transform,
+    charge: state.charge, iris: state.iris, rings: state.rings, pins: state.pins,
+    cylinder: state.cylinder, orbit: state.orbit, ambientTime: state.ambientTime,
+    brightness: state.brightness, particleCount: state.particleCount };
 },
     exportErrorFrame(t) {
   cancelAnimationFrame(raf);
@@ -286,6 +290,23 @@ const server = http.createServer((req, res) => {
         await page.screenshot({ path: path.join(out, 'NexusCore-Recovery-Failed-' + i + '.png') });
       }
     }
+    const startupStates = [];
+    if (isStartup) {
+      for (const t of [12.6, 17, 24, config.startupSeconds - 1 / config.fps]) {
+        const state = await page.evaluate(t => window.preview.exportStartupFrame(t), t);
+        if (state.charge !== 1 || state.brightness !== 1 || state.fill !== 'scaleX(1)' || state.iris.some(value => value !== 1)) throw new Error('Online hold lost full power');
+        const png = await page.screenshot({ type: 'png' });
+        const frameHash = crypto.createHash('sha256').update(png).digest('hex');
+        startupStates.push({ ...state, frameHash });
+        fs.writeFileSync(path.join(out, 'NexusCore-Startup-Hold-' + t.toFixed(2) + '.png'), png);
+      }
+      for (let i = 1; i < startupStates.length; i++) {
+        if (startupStates[i].frameHash === startupStates[i - 1].frameHash || startupStates[i].orbit <= startupStates[i - 1].orbit) throw new Error('Online animation froze');
+        for (const key of ['iris', 'rings', 'pins', 'cylinder']) {
+          if (JSON.stringify(startupStates[i][key]) !== JSON.stringify(startupStates[0][key])) throw new Error('Online mechanism geometry changed');
+        }
+      }
+    }
     if (!process.argv.includes('--stills')) {
       const target = path.join(__dirname, isStartup ? 'Startup-silent.mp4' : isFailed ? 'Recovery-Failed-silent.mp4' : isRecovery ? 'Recovery-silent.mp4' : 'Error-Continuation-silent.mp4');
       const encoder = spawn('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(config.fps), '-vcodec', 'png', '-i', 'pipe:0', '-an', '-vf', 'scale=1280:720:flags=lanczos', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', target], { windowsHide: true });
@@ -307,6 +328,6 @@ const server = http.createServer((req, res) => {
     if (errors.length) throw new Error(errors.join('\n'));
     const hashNow = crypto.createHash('sha256').update(fs.readFileSync(startup)).digest('hex');
     if (hashNow !== startupHash) throw new Error('Startup changed');
-    fs.writeFileSync(path.join(__dirname, isFailed ? 'recovery-failed-render-report.json' : isRecovery ? 'recovery-render-report.json' : 'error-continuation-render-report.json'), JSON.stringify({ config, recoveryConfig: isRecovery ? recoveryConfig : undefined, startupHash, continuityPassed: true, capturedStates, recoveryStates, failedStates, errors }, null, 2));
+    fs.writeFileSync(path.join(__dirname, isStartup ? 'startup-render-report.json' : isFailed ? 'recovery-failed-render-report.json' : isRecovery ? 'recovery-render-report.json' : 'error-continuation-render-report.json'), JSON.stringify({ config, recoveryConfig: isRecovery ? recoveryConfig : undefined, startupHash, continuityPassed: true, capturedStates, recoveryStates, failedStates, startupStates, errors }, null, 2));
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

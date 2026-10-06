@@ -22,7 +22,10 @@ for clip in manifest['clips']:
     assert len(data) == clip['bytes']
     assert hashlib.sha256(data).hexdigest() == clip['sha256']
     if clip['id'] == 'startup':
-        assert clip['sha256'] == 'bcc3ecc6e9032c95b1c0244d79071b81663743dd64a415151b18e26ee4b63955', 'Approved startup must remain unchanged'
+        config = json.loads((ROOT / 'tools/video_export/error-continuation.json').read_text(encoding='utf-8'))
+        assert clip['seconds'] == config['startupSeconds']
+        error_clip = next(item for item in manifest['clips'] if item['id'] == 'error')
+        assert error_clip['startsFrom']['frame'] == clip['frames'] - 1
     if clip.get('sourceConfig'):
         config = json.loads((ROOT / clip['sourceConfig']).read_text(encoding='utf-8'))
         assert config['seconds'] == clip['seconds']

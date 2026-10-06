@@ -14,7 +14,9 @@ four actual MP4s in [`review/videos/`](review/videos/), an editable
 [`sequence_manifest.json`](sequence_manifest.json), and portable animation/audio
 export source in [`tools/video_export/`](tools/video_export/README.md).
 
-The startup MP4 is unchanged. Error begins at the startup endpoint, with a full
+The startup MP4 now runs for 30 seconds: the original opening is followed by
+about 18 seconds of fully powered orbital/particle motion and sustained hum.
+Error begins at the updated startup endpoint, with a full
 flashing red progress bar and four warning captions. Successful recovery uses
 the nine requested messages, restores cyan/blue and white during stability
 recovery, and finishes with a green pulsing online label. Failed recovery

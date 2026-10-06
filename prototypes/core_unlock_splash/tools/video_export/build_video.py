@@ -33,5 +33,12 @@ if manifest_path.exists():
     item = next(clip for clip in manifest['clips'] if clip['id'] == args.clip)
     item['sha256'] = hashlib.sha256(destination.read_bytes()).hexdigest()
     item['bytes'] = destination.stat().st_size
+    info = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(destination)]))
+    visual = next(stream for stream in info['streams'] if stream['codec_type'] == 'video')
+    item['seconds'] = float(info['format']['duration'])
+    item['frames'] = int(visual['nb_frames'])
+    if args.clip == 'startup':
+        error_clip = next(clip for clip in manifest['clips'] if clip['id'] == 'error')
+        error_clip['startsFrom']['frame'] = item['frames'] - 1
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(destination)

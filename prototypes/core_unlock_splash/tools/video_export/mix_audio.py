@@ -55,7 +55,8 @@ def write(name, signal):
     return {'seconds': len(signal) / RATE, 'peak': float(np.max(np.abs(signal)))}
 
 if __name__ == '__main__':
-    normal = render(m['events'], 17)
+    config = json.loads((OUT / 'error-continuation.json').read_text(encoding='utf-8'))
+    normal = render(m['events'], config['startupSeconds'])
     report = {'normal': write('Startup.wav', normal)}
     (OUT / 'audio-report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report))
