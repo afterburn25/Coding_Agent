@@ -1,7 +1,0 @@
-{
-  "cached_at": 1791275857.71319,
-  "provider": "web",
-  "query": "site:github.com Exception ci_failure CI failed: test_rebuild_index. run 37429413786 — Answer GitHub connection questions despite canned-reply suppression evidence={'run_id': '37429413786', 'jobs': '', 'conclusion': 'failure', 'failure_ke Is the error documented in official docs or upstream issues for the installed version?",
-  "version": "",
-  "value": []
-}
