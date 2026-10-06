@@ -1162,8 +1162,9 @@ class AgentOrchestrator:
     def _repeated_reply(self, session: _AgentSession, content: str) -> bool:
         """True when `content` is a near-verbatim re-issue of a recent
         assistant turn — the model parroting its own history instead of
-        answering the newest message. Ignores short replies (<60 chars:
-        "Done." twice is benign)."""
+        answering the newest message. Ignores very short replies (<24
+        chars: "Done." twice is benign), but a verbatim substantive echo —
+        even a single short sentence — still counts as parroting."""
         prev_texts = self._recent_assistant_texts(
             session.messages[:-1])  # skip the just-appended reply
         for prev in prev_texts:
@@ -1175,9 +1176,9 @@ class AgentOrchestrator:
         if not prev:
             return False
         a, b = self._norm_for_parrot(prev), self._norm_for_parrot(content)
-        if len(a) < 60 or len(b) < 60:
+        if len(a) < 24 or len(b) < 24:
             return False
-        if b.startswith(a[: max(60, len(a) // 2)]):
+        if b.startswith(a[: max(24, len(a) // 2)]):
             return True
         aw, bw = set(a.split()), set(b.split())
         return bool(aw) and len(aw & bw) / len(aw | bw) >= 0.8
@@ -3651,7 +3652,7 @@ class AgentOrchestrator:
             refusal_gate_open = refusal_retry_enabled
             prev_reply_norm = self._norm_for_parrot(
                 self._prev_assistant_text(session.messages))
-            parrot_gate_open = len(prev_reply_norm) >= 60
+            parrot_gate_open = len(prev_reply_norm) >= 24
             coalescer = TokenCoalescer()
 
             def stream_piece(piece: str) -> None:
