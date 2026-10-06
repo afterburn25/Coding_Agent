@@ -236,6 +236,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"remote": remote, "branch": branch, "output": output[-8000:]}, indent=2)
 
     def github_repository(args: dict) -> str:
+        _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -249,6 +250,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_list_issues(args: dict) -> str:
+        _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -271,6 +273,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"repository": repo, "items": compact}, indent=2)
 
     def github_create_issue(args: dict) -> str:
+        _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -292,6 +295,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_create_pull_request(args: dict) -> str:
+        _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -327,6 +331,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_ci_status(args: dict) -> str:
+        _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
