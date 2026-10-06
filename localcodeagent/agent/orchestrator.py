@@ -792,7 +792,8 @@ class AgentOrchestrator:
                 intent="self_learning"))
 
         if normalized in {
-            "who are you", "what are you", "what is your name", "what's your name", "are you human",
+            "who are you", "what are you", "what is your name", "what's your name", "whats your name",
+            "are you human",
         }:
             from ..context import realize as _rz
             return _sem("identity", "answer", cls._builtin_render(

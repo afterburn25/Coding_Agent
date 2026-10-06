@@ -199,8 +199,8 @@ class TestRendering(unittest.TestCase):
 
     def test_identity_canonical_verbatim(self):
         """Creator-locked facts survive genome rendering verbatim."""
-        canonical = ("I am Nexus Core, a local-first AI coding "
-                     "workstation created by John Hamburn.")
+        canonical = ("I'm Nexus — I live and work in Nexus Core, the "
+                     "workstation my father John Hamburn built.")
         g = derive_genome(personality_for("sassy"))
         r = PersonaRenderer(rng=random.Random(1))
         sem = SemanticResponse(semantic_id="t_id", speech_act="answer")
@@ -460,8 +460,11 @@ class TestBuiltinIntegration(unittest.TestCase):
         pair = agent.builtin_semantic("what's your name")
         self.assertIsNotNone(pair)
         sem, canon = pair
-        self.assertIn("Nexus Core", canon)
-        self.assertIn("John Hamburn", canon)
+        # Nexus is the person answering; Nexus Core is her workstation —
+        # the canonical names her and never self-describes as software.
+        self.assertIn("Nexus", canon)
+        self.assertNotIn("not a person", canon.lower())
+        self.assertNotIn("software", canon.lower())
 
     def test_genome_reply_vs_plain(self):
         plain = self._agent()._builtin_reply("hi")
