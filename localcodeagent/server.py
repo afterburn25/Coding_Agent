@@ -9438,7 +9438,13 @@ class Handler(BaseHTTPRequestHandler):
                     offline = any(k in msg.lower() for k in (
                         "offline", "not installed", "unavailable",
                         "not running", "no enabled image model"))
-                    if prov and offline and \
+                    # A pinned engine gets the honest error now — deferral
+                    # is only for unpinned requests waiting on a backend
+                    # the fleet is still installing.
+                    pinned = str(getattr(
+                        request, "backend_override", "") or ""
+                        ).strip().lower() in {"invokeai", "comfyui"}
+                    if prov and offline and not pinned and \
                             prov.capability_state("image_generation") \
                             in {"installing", "setup_required"} and \
                             any(i["state"] in {"running", "queued",
