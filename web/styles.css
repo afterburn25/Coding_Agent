@@ -2060,6 +2060,86 @@ body[data-gesture="look_away"] .nexus-presence > img {
   letter-spacing:.2px;
 }
 
+/* Live research card — action status while Nexus searches/reads sources */
+.research-live-card {
+  margin:0 0 10px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--panel2);
+  padding:10px 12px;
+  font-size:12px;
+}
+.research-live-card .rc-status {
+  color:var(--link);
+  font-weight:600;
+  letter-spacing:.2px;
+}
+.research-live-card.done .rc-status {
+  color:#5dd39e;
+}
+.research-live-card .rc-details {
+  margin-top:6px;
+}
+.research-live-card .rc-summary {
+  cursor:pointer;
+  color:var(--muted);
+  font-size:11px;
+  list-style:none;
+}
+.research-live-card .rc-summary::before {
+  content:'▸ ';
+}
+.research-live-card .rc-details[open] .rc-summary::before {
+  content:'▾ ';
+}
+.research-live-card .rc-sources {
+  margin-top:8px;
+  display:grid;
+  gap:6px;
+}
+.research-live-card .rc-source {
+  border-top:1px solid var(--line);
+  padding-top:6px;
+}
+.research-live-card .rc-source-head {
+  font-size:12px;
+  font-weight:600;
+}
+.research-live-card .rc-source-head a {
+  color:var(--link);
+  text-decoration:none;
+}
+.research-live-card .rc-source-head a:hover {
+  text-decoration:underline;
+}
+.research-live-card .rc-badge {
+  display:inline-block;
+  padding:1px 6px;
+  margin-left:4px;
+  border-radius:6px;
+  border:1px solid #2a3d63;
+  background:#101a30;
+  color:#8fb4f0;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.5px;
+  vertical-align:1px;
+}
+.research-live-card .rc-source-meta {
+  color:var(--muted);
+  font-size:10px;
+  margin-top:2px;
+}
+.research-live-card .rc-conflict {
+  margin-top:6px;
+  padding:6px 8px;
+  border-radius:8px;
+  border:1px solid #4d3b1a;
+  background:#241a08;
+  color:#e0b869;
+  font-size:11px;
+}
+
 /* Self-knowledge lane: action cards, deep links, inline controls */
 .chat-ui {
   display:flex;

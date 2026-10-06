@@ -563,6 +563,71 @@ function armVoiceHold(state){
   state.awaitingVoice=true;
   state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),8000);
 }
+/* ---------- live research card ---------- */
+// Structured research lifecycle events render an inline card inside the
+// streaming reply: action status only — never chain-of-thought.
+function researchLiveCard(state){
+  if(!state||!state.wrap)return null;
+  let card=state.wrap.querySelector('.research-live-card');
+  if(!card){
+    card=document.createElement('div');
+    card.className='research-live-card';
+    card.innerHTML='<div class="rc-status">Searching the web…</div>'+
+      '<details class="rc-details"><summary class="rc-summary"></summary><div class="rc-sources"></div></details>';
+    state.wrap.insertBefore(card,state.wrap.firstChild);
+  }
+  return card;
+}
+function researchLiveStep(state,ev){
+  const card=researchLiveCard(state);
+  const kind=String(ev&&ev.type||'');
+  const labels={
+    research_start:`Searching the web…`,
+  };
+  let line='';
+  if(kind==='search_query'){line=`Searching the web — "${String(ev.query||'').slice(0,80)}"`;}
+  else if(kind==='search_results'){line=`Found ${ev.count||0} result(s)`;}
+  else if(kind==='source_open'){line=`Reading ${ev.domain||ev.url||'source'}…`;}
+  else if(kind==='source_read'){line=`Read ${ev.domain||'source'}${ev.chars?' · '+Math.round(ev.chars/1000)+'k chars':''}`;}
+  else if(kind==='source_skipped'){line=`Skipped ${ev.domain||'source'}${ev.reason?' ('+ev.reason+')':''}`;}
+  else if(kind==='research_compare'){line=`Comparing ${ev.count||'several'} sources…`;}
+  else if(kind==='research_complete'){
+    const n=Number(ev.source_count||0);
+    const conf=ev.confidence?` · evidence ${ev.confidence}`:'';
+    line=ev.status==='cancelled'?`Research stopped — ${n} source(s) read`:`✓ Researched ${n} source${n===1?'':'s'}${conf}`;
+  }
+  else if(kind==='research_start'){line=labels.research_start;}
+  if(!line)return;
+  if(card){
+    card.querySelector('.rc-status').textContent=line;
+    if(kind==='research_complete')card.classList.add('done');
+  }
+  appendLiveActivity('RESEARCH · '+line.replace(/^✓ /,''));
+}
+function researchSessionCard(state,rs){
+  // Full session payload — fill the expandable source list with badges.
+  const card=researchLiveCard(state);if(!card||!rs||typeof rs!=='object')return;
+  const sources=Array.isArray(rs.sources)?rs.sources:[];
+  const evd=rs.evidence||{};
+  const summary=card.querySelector('.rc-summary');
+  const box=card.querySelector('.rc-sources');
+  const conf=evd.confidence?` · ${evd.confidence} confidence`:'';
+  const corr=evd.corroboration?` · ${String(evd.corroboration).replaceAll('_',' ')}`:'';
+  summary.textContent=`View research — ${sources.length} source${sources.length===1?'':'s'}${conf}${corr}`;
+  box.innerHTML=sources.slice(0,10).map(s=>{
+    const badges=(s.badges||[]).slice(0,4).map(b=>`<span class="rc-badge">${esc(b)}</span>`).join(' ');
+    const host=s.url?String(s.url).replace(/^https?:\/\//,'').split('/')[0]:'';
+    const pub=s.published_at?` · ${esc(String(s.published_at)).slice(0,20)}`:'';
+    const url=String(s.url||'');
+    const title=url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(String(s.title||url))}</a>`:esc(String(s.title||'source'));
+    return `<div class="rc-source"><div class="rc-source-head">${title} ${badges}</div>`+
+      `<div class="rc-source-meta">${esc(host)}${s.reliability?' · '+esc(String(s.reliability)):''}${pub}${s.source_class?' · '+esc(String(s.source_class)).replaceAll('_',' '):''}</div></div>`;
+  }).join('');
+  if(evd.conflicts&&evd.conflicts.length){
+    box.insertAdjacentHTML('beforeend',
+      `<div class="rc-conflict">⚠ ${evd.conflicts.length} conflict(s) between sources — Nexus reports the disagreement rather than picking a side.</div>`);
+  }
+}
 function handleAgentStreamEvent(name,data,state){
   if(name==='voice'){
     try{window.NexusVoice?.onEvent(data);}catch{}
@@ -585,7 +650,8 @@ function handleAgentStreamEvent(name,data,state){
     else nexusThinkingStep(state,'Model route locked',(e.model_id||e.to||'local model')+(e.role?' · '+e.role:''),'model');
     appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;
   }
-  if(name==='research'){const p=data.research?.plan||data.research||{};nexusThinkingStep(state,'Sensor sweep',p.mode||'Researching external evidence','research');appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
+  if(name==='research_event'){researchLiveStep(state,data.event||{});return;}
+  if(name==='research'){const p=data.research?.plan||data.research||{};nexusThinkingStep(state,'Sensor sweep',p.mode||'Researching external evidence','research');researchSessionCard(state,data.research);appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}${p.needed===true?' · evidence needed':''}`);return;}
   if(name==='tool_start'){const t=data.tool||{};nexusThinkingStep(state,'Engineering operation',String(t.name||'tool').replaceAll('_',' '),'tool:'+String(t.name||'unknown'));toolStartBlock(t);return;}
   if(name==='tool_output'){
     const name=String(data.tool||'');
@@ -689,6 +755,15 @@ function connectAgentEvents(){
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
+    on('research_event',d=>{const ev=d.event||{};const k=String(ev.type||'');
+      const msg=k==='search_query'?`searching "${String(ev.query||'').slice(0,60)}"`
+        :k==='source_open'?`reading ${ev.domain||ev.url||''}`
+        :k==='source_read'?`read ${ev.domain||''}`
+        :k==='source_skipped'?`skipped ${ev.domain||''}`
+        :k==='research_compare'?`comparing ${ev.count||''} sources`
+        :k==='research_complete'?`researched ${ev.source_count||0} source(s)${ev.confidence?' · '+ev.confidence:''}`
+        :'';
+      if(msg)appendLiveActivity('RESEARCH · '+msg);});
     on('install_offer',d=>{renderInstallOffer(d,null);});
     on('activity',d=>{upsertActivityRow(d.activity||d);});
     on('job',d=>{
