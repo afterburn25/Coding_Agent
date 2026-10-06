@@ -63,10 +63,20 @@ class AudioCache:
                 pass
 
     def stats(self) -> dict:
-        files = [f for f in self.dir.glob("*.wav") if f.exists()]
+        # stat() each entry lazily with a race guard — an eviction can
+        # unlink a wav between the glob and the stat; FileNotFoundError
+        # used to crash the whole /status request.
+        entries = 0
+        total = 0
+        for f in self.dir.glob("*.wav"):
+            try:
+                total += f.stat().st_size
+                entries += 1
+            except OSError:
+                continue
         return {
-            "entries": len(files),
-            "bytes": sum(f.stat().st_size for f in files),
+            "entries": entries,
+            "bytes": total,
             "max_bytes": self.max_bytes,
             "dir": str(self.dir),
         }

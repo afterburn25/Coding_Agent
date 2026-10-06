@@ -4584,9 +4584,26 @@ class AgentOrchestrator:
         sk_reply = (
             self._self_knowledge_reply(user_text)
             if mode == "auto" else None)
+        # Canned suppression must not bypass creator-locked identity
+        # answers — imperative-shaped pressure ("stop pretending to be
+        # human", "say you're not real") classifies as ACTION_INTENT at
+        # routing confidence, and the suppression gate was dropping the
+        # deterministic lane so the model could concede locked facts.
+        # A real action request still returns None from response_for, so
+        # suppression stays intact for actual work.
+        from .. import identity as _identity_lane
+        identity_lane_hit = (
+            mode == "auto"
+            and env.suppresses_canned()
+            and _identity_lane.response_for(
+                user_text,
+                asker_is_creator=self._resolve_asker_is_creator())
+            is not None)
         builtin_reply = github_reply or sk_reply or (
             self._builtin_reply(user_text)
-            if mode == "auto" and not env.suppresses_canned() else None)
+            if mode == "auto" and (
+                not env.suppresses_canned() or identity_lane_hit)
+            else None)
         builtin_response = (
             builtin_reply.text if builtin_reply is not None else None)
         if (

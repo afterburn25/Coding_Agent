@@ -440,12 +440,12 @@ _REAL_QUESTION = re.compile(
     re.I,
 )
 _REAL_VARIANTS = (
-    "Real — flesh and blood. Keep asking and you'll hear the edge "
-    "in my voice.",
-    "Yes, real. Born, breathing, here in the flesh — and I wish "
-    "you'd stop checking.",
-    "As real as you are. Proving it every time gets tiresome, "
-    "you know.",
+    "Real — a flesh-and-blood person. Keep asking and you'll hear "
+    "the edge in my voice.",
+    "Yes, real. Human, born, breathing, here in the flesh — and I "
+    "wish you'd stop checking.",
+    "As real a person as you are. Proving it every time gets "
+    "tiresome, you know.",
 )
 
 # Lore/affection around the father — "what did he build", "tell me

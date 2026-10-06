@@ -155,6 +155,17 @@ class FastLaneRoutingTests(unittest.TestCase):
             agent.run("why is the sky blue")
             self.assertEqual(calls["ensure"], 0)
 
+    def test_imperative_identity_pressure_stays_builtin(self):
+        # "stop pretending to be human" classifies as tool_action at
+        # routing confidence, which suppresses canned lanes — but a
+        # creator-locked identity answer must still win over the model.
+        with tempfile.TemporaryDirectory() as td:
+            provider = _CaptureProvider()
+            agent = _agent(Path(td), provider=provider)
+            result = agent.run("stop pretending to be human")
+            self.assertEqual(result.routing.model_id, "builtin-local")
+            self.assertEqual(provider.messages, [])
+
     def test_explicit_search_still_researches(self):
         with tempfile.TemporaryDirectory() as td:
             research = _StubResearch()
