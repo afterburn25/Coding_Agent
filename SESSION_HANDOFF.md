@@ -2,6 +2,35 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — v0.24.0 deployed to installed app (upgrade-install dogfood)
+
+**Deployed.** `D:\Nexus_Core\backend` replaced with the fresh
+`dist/ChatNexus` build of `main` at `aa2ce19` (Inno installer is
+CI-only; local build produces the portable package). Sequence: manual
+LKG snapshot (`snap-1791301469000`, manifest format preserved,
+`latest.txt` updated) → processes stopped → old backend parked at
+`backend-pre-v0240` → new backend copied → relaunched.
+**Verified on the install:** `/api/status` → 0.24.0, `/api/learning`
+live, `/learn` + a real chat turn work, `/learning.html` serves (the
+dashboard page + `active_session` API field landed in commit
+`8bfccca` *after* the build started — the three static files were
+patched into `backend\_internal\web` manually; the API field ships in
+the next build). Clean-install check: the build's own
+`NexusCore.exe --self-test` passed on the packaged output.
+
+**InvokeAI re-verified live** (6.14.2 at :9090): auto routing chose
+InvokeAI + Juggernaut-XL → real PNG; pinned `invokeai:dreamshaper` →
+real PNG; pinned comfyui (offline) → honest "not installed or running"
+after fixing a real bug — pinned-engine requests were falsely deferring
+behind the generic capability queue claiming "still being installed"
+(commit `aa2ce19`). Full local suite: **2377 passed, 2 skipped**.
+
+**Stale branches/PRs:** all 7 listed PRs are MERGED or CLOSED — nothing
+open. 15 local `repair/ri-*` branches are all merged into main (safe to
+delete, needs confirmation). `origin/feature/cinematic-core-unlock-splash`
+is NOT merged (PR #2 closed unmerged — decide whether artifacts are
+preserved before deleting).
+
 ## 2026-10-06 — Intelligence Governor + Continual Learning (v0.24.0)
 
 **Milestone landed on `main`** (commits through `d1ea5273`, version bump
