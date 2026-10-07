@@ -33,7 +33,10 @@ requests stalled into prose narration with zero tool calls.
   nexus_probe_v28.txt` → action_nudge → `write_file` call → approval
   gate → file on disk → verification gate → denial → clean finalize.
 
-Post-release soak-hardening commits on `main` (ride the next patch):
+## 2026-10-07 — v0.28.2: soak-hardening patch
+
+Shipped on top of 0.28.1 so the release tag matches the deployed build
+(`2955b307`, tag `v0.28.2`, deployed + verified on `D:\Nexus_Core`).
 
 - **Concurrent env probes** (`dde03ee7`): `EnvironmentStore.detect`
   ran up to 6 serial subprocess probes at 5 s timeout each (~30 s
@@ -46,7 +49,7 @@ Post-release soak-hardening commits on `main` (ride the next patch):
   of `waiting_approval`). Row now writes before the transition,
   matching the recovery path's existing order.
 - Dispatched soak run `37630507840` green; push CI green on
-  `bc7db5a1`. Both fixes are deployed to `D:\Nexus_Core`.
+  `bc7db5a1` and `2955b307`.
 
 ## 2026-10-07 — v0.28.0: performance audit pass 2 (measure → fix → verify)
 
