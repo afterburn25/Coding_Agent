@@ -530,6 +530,30 @@ class TestOrchestratorLane(unittest.TestCase):
         self.assertIsNone(reply)
         self.assertFalse((ws / "halfway").exists())
 
+    def test_compound_mid_sequence_unavailable_is_honest(self):
+        # A tool going missing mid-sequence must not silently drop the
+        # tail (there is no model lane to fall into once clauses have
+        # executed) — and must not under-claim the work that did run.
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow",
+                 "filesystem.delete": "allow"})
+        self.addCleanup(td2.cleanup)
+        (ws / "gone.txt").write_text("x")
+        orch.tools.set_enabled("fs_delete", False)
+        result = orch.run(
+            "create a folder named keepdir, and then delete gone.txt",
+            event_callback=None)
+        self.assertTrue((ws / "keepdir").is_dir())
+        self.assertTrue((ws / "gone.txt").exists())
+        self.assertIn("Created", result.content)
+        self.assertIn("unavailable", result.content.lower())
+        self.assertIn("nothing was changed", result.content.lower())
+
 
 class TestGitStateLane(unittest.TestCase):
     """Regression — 'what branches are in github for your project?'

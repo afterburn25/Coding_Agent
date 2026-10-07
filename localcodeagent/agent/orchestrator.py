@@ -1978,8 +1978,19 @@ class AgentOrchestrator:
                 task_id=task_id)
             status = outcome["status"]
             last_status = status
-            if status == "unavailable":
+            if status == "unavailable" and not lines:
+                # Nothing executed yet — a missing direct tool may still
+                # be reachable through the model lane (e.g. shell);
+                # fall through rather than hard-answering.
                 return None
+            if status == "unavailable":
+                # Mid-sequence: earlier clauses already ran — there is
+                # no model lane to fall into from here. Report honestly.
+                lines.append(
+                    f"I couldn't run '{plan.action_text}' — the required "
+                    "tool is unavailable. Nothing was changed for it.")
+                stopped_early = True
+                break
             lines.append(outcome["text"])
             if status == "awaiting_approval":
                 parked_plan = plan
@@ -3833,6 +3844,14 @@ class AgentOrchestrator:
                     prior_text=text)
                 if chained is not None:
                     return chained
+                # _local_action_multi returns None when a tool is
+                # unavailable — in the fresh lane that's a fall-through
+                # to the model, but a resumed tail has no model lane to
+                # fall into. Report it honestly instead of silently
+                # dropping the remaining clauses.
+                text += (f" The remaining {len(tail)} step(s) could not "
+                         "run — the required tool is unavailable on this "
+                         "workspace. Nothing was executed for them.")
         else:
             if self.action_ledger is not None:
                 entry = self.action_ledger.begin(
