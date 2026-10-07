@@ -8691,6 +8691,12 @@ class Handler(BaseHTTPRequestHandler):
                 # Lets the UI skip flat canned replies when a named persona
                 # is driving delivery — the model answers in character.
                 "persona_active": self.state.agent._persona_active(),
+                # Safe Mode silently disables workers/autonomy/watchers —
+                # it must be visible on the main surface, not only behind
+                # the Command Center badge, or a workstation can run
+                # crippled for days unnoticed.
+                "safe_mode": bool(getattr(self.state, "safemode", None)
+                                  and self.state.safemode.is_active()),
             })
             _st["total"] = (time.monotonic() - _all_t0) * 1000
             if _st["total"] > 500:
