@@ -1337,7 +1337,40 @@ class AutonomousSupervisor:
             lock = node.get("lock") or ("agent_lane" if kind == "agent" else "")
             if lock:
                 self.locks.release(lock, owner)
+        if kind not in {"agent", "integrate", "review"}:
+            self._record_node_evidence(m, node, kind, result)
         self._finish_node(mission_id, node_id, result or {"ok": False})
+
+    def _record_node_evidence(self, mission: dict, node: dict,
+                              kind: str, result: dict | None) -> None:
+        """Non-executor node kinds (verify/internal/research/job/wait)
+        bypass agent.run — without this their outcomes never reach the
+        ActionLedger and the mission evidence rollup is blind to the
+        very nodes that verify the work. ``action_ledger`` is injected
+        by AppState (supervisor constructs first)."""
+        ledger = getattr(self, "action_ledger", None)
+        if ledger is None:
+            return
+        try:
+            res = result or {}
+            ok = bool(res.get("ok"))
+            entry = ledger.begin(
+                kind="mission_node",
+                action=str(node.get("title") or node.get("instruction")
+                           or "")[:200],
+                capability="mission", tool=f"node:{kind}",
+                params={"node_kind": kind},
+                task_id=str(node.get("id") or ""),
+                mission_id=str(mission.get("id") or ""))
+            output = str(res.get("output") or res.get("error") or "")
+            ledger.finish(
+                entry["id"],
+                status="verified" if ok else "failed",
+                verification=output[:300] if ok else "",
+                verified=ok,
+                failure="" if ok else output[:300])
+        except Exception:
+            pass
 
     def _node_activity_open(self, mission: dict, node: dict) -> None:
         """Mirror a mission node onto the shared task timeline (Devin-style)."""

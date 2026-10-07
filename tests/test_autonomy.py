@@ -612,6 +612,36 @@ class JobNodeTests(unittest.TestCase):
             self.assertIn("replan", events)
             sup.stop()
 
+    def test_non_executor_nodes_write_ledger_evidence(self):
+        # Verify/internal nodes bypass agent.run — without their own
+        # ledger writes the mission evidence rollup was blind to the
+        # nodes that actually verify the work.
+        from localcodeagent.action_ledger import ActionLedger
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            ledger = ActionLedger(Path(td) / "ledger.json")
+            sup.action_ledger = ledger
+            mission = {"id": "m-1", "title": "check"}
+            node = {"id": "t-1", "title": "Check artifact: out.md",
+                    "instruction": "internal:artifact_exists:out.md",
+                    "kind": "internal"}
+            sup._record_node_evidence(
+                mission, node, "internal",
+                {"ok": True, "output": "out.md: exists"})
+            sup._record_node_evidence(
+                mission, {**node, "id": "t-2", "kind": "verify"},
+                "verify", {"ok": False, "output": "tests failed"})
+            rows = ledger.recent(10, mission_id="m-1")
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["status"], "verified")
+            self.assertTrue(rows[0]["verified"])
+            self.assertEqual(rows[0]["mission_id"], "m-1")
+            self.assertEqual(rows[1]["status"], "failed")
+            self.assertIn("tests failed", rows[1]["failure"])
+            rollup = ledger.mission_rollup("m-1")
+            self.assertEqual(rollup["actions"], 2)
+            sup.stop()
+
 
 class AdmissionEvictionTests(unittest.TestCase):
     def test_shortfall_calls_release_hook(self):

@@ -2961,6 +2961,9 @@ class AppState:
             if getattr(self.config, "autonomous_mode", False) else 0.0,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
+        # Evidence for non-executor node kinds (verify/internal/job) —
+        # executor kinds write their own entries in _mission_node_out.
+        sup.action_ledger = self.action_ledger
         sup.repair = self._build_self_repair(config, sup, runtime_root,
                                              hooks, emit)
         self._wire_signal_sources(sup, runtime_root)
