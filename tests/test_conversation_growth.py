@@ -133,6 +133,19 @@ class ConversationManagerTests(unittest.TestCase):
             for secret in ("hunter2", "s3cret!", "4820", "correct horse"):
                 self.assertNotIn(secret, ctx)
 
+    def test_credential_questions_are_not_hijacked(self):
+        """A question merely mentioning a credential must still reach the
+        normal answer lanes — the guard only refuses learning writes."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            for q in (
+                "my password is gone, how do I reset it?",
+                "why does the passcode field reject my input?",
+                "what is a passphrase?",
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertNotIn("locked", learned, q)
+
     def test_forget_still_works_on_secret_shaped_text(self):
         """'forget …' must run even when the query quotes a credential —
         a refusal here would strand a stored secret forever."""

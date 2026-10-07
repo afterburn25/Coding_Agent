@@ -479,10 +479,25 @@ class ConversationMemory:
 
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
-        # Brain, or echo it back through prompt_context. The refusal
+        # Brain, or echo it back through prompt_context. Scoped to
+        # actual learning writes: a question or statement that merely
+        # mentions a credential ("my password is gone, how do I reset
+        # it?") must still reach the normal answer lanes. The refusal
         # reuses the `locked` slot so the reply still surfaces.
         from ..answer_memory.validation import contains_secret
-        if contains_secret(raw):
+        is_learning_write = bool(
+            re.match(
+                r"^(?:remember|learn|fact\s*:|teach\s*:|training\s*:|"
+                r"note\s*:|always\b|never\b|from\s+now\s+on|"
+                r"i\s+want\s+you\s+to|you\s+should|instead\b|no\b|"
+                r"correction\b|actually\b|stop\b|don't\b|do\s+not\b|"
+                r"we\s+(?:decided|chose|switched|moved|migrated|changed|"
+                r"agreed)|let'?s\b|the\s+plan\s+is)",
+                raw, flags=re.IGNORECASE)
+            or ("?" not in raw
+                and re.match(r"^my\s+.{1,40}\s+is\s+.+$", raw,
+                             flags=re.IGNORECASE)))
+        if is_learning_write and contains_secret(raw):
             result.setdefault("locked", []).append(
                 "I won't store credentials or secrets in memory — "
                 "Brain unlock lives in the Trainer page instead.")
