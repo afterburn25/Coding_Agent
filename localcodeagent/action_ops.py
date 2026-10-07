@@ -73,6 +73,15 @@ _MOVE_RE = re.compile(
 _COPY_RE = re.compile(
     r"\b(?:copy|duplicate)\s+(.+?)\s+(?:to|into|inside|as)\s+(.+?)\s*$",
     re.I | re.S)
+_WRITE_TO_RE = re.compile(
+    r"\b(?:write|save)\s+[\"']([^\"']+)[\"']\s+"
+    r"(?:to|into|in)\s+(.+?)\s*$", re.I | re.S)
+_ONE_ARG_OP_RE = re.compile(
+    r"\b(move|copy|duplicate|rename)\s+(.+?)\s*$", re.I | re.S)
+# 'copy that' / 'move it' are acknowledgments, not file ops — no
+# resolvable target, so they fall through instead of clarifying.
+_PRONOUN_ONLY_RE = re.compile(
+    r"^(?:it|that|this|them|him|her|one|something)\b", re.I)
 _CONTENT_RE = re.compile(
     r"\s+(?:with\s+content|containing|that\s+says?|saying)\s+"
     r"[\"']?(.*?)[\"']?\s*$", re.I | re.S)
@@ -177,6 +186,21 @@ def parse_local_action(text: str, *, workspace: Path | str,
             resolved=res_str, outside_root=outside,
             action_text=action_text, display=str(display))
 
+    # write/save with quoted content — 'write "hello" to note.txt'.
+    m = _WRITE_TO_RE.search(t)
+    if m:
+        content, dst_raw = m.group(1), _path_tail(m.group(2))
+        if not dst_raw:
+            return ActionPlan(
+                kind="write", tool="write_file",
+                permission="filesystem.write",
+                clarify="What file should I write to?",
+                action_text="write file")
+        dst = _resolve(dst_raw, ws, extra_roots)
+        return _mk("write", "write_file", "filesystem.write",
+                   f"write to {dst_raw}", {"path": dst},
+                   {"content": content})
+
     # rename / move / copy — two-path forms first (they're unambiguous).
     for rx, kind, tool in ((_RENAME_RE, "rename", "fs_move"),
                            (_MOVE_RE, "move", "fs_move"),
@@ -202,6 +226,32 @@ def parse_local_action(text: str, *, workspace: Path | str,
         return _mk(kind, tool, "filesystem.write",
                    f"{kind} {src_raw} to {dst_raw}",
                    {"src": src, "dst": dst}, {})
+
+    # Single-operand move/copy/rename — the op is certain but the
+    # destination is missing: clarify, never guess. Pronoun-only tails
+    # ('copy that', 'move it') have no resolvable target → fall through.
+    m = _ONE_ARG_OP_RE.search(t)
+    if m:
+        verb = m.group(1).lower()
+        tail = m.group(2).strip()
+        if not _PRONOUN_ONLY_RE.match(tail):
+            kind = "copy" if verb in ("copy", "duplicate") else \
+                ("rename" if verb == "rename" else "move")
+            tool = "fs_copy" if kind == "copy" else "fs_move"
+            src_raw = _path_tail(tail)
+            if not src_raw:
+                return ActionPlan(
+                    kind=kind, tool=tool, permission="filesystem.write",
+                    clarify=f"What should I {kind}?", action_text=kind)
+            src = _resolve(src_raw, ws, extra_roots)
+            return ActionPlan(
+                kind=kind, tool=tool, permission="filesystem.write",
+                params={"src": str(src[0])},
+                resolved={"src": str(src[0])},
+                outside_root=not src[1],
+                action_text=f"{kind} {src_raw}",
+                clarify=f"What should I {kind} {src_raw} to?",
+                display=str(src[0]))
 
     m = _DELETE_RE.search(t)
     if m:
