@@ -142,7 +142,9 @@ class StartupSplashLifecycleTests(unittest.TestCase):
 
     def test_splash_closes_only_after_main_ready_and_transition_is_atomic(self):
         body = desktop_method_body("RunStartupAsync")
-        self.assertIn("await _main.PrepareAsync(_progress);", body)
+        # Backend spawn is hoisted and overlapped with the splash WebView
+        # boot — PrepareAsync consumes the prespawned task.
+        self.assertIn("await _main.PrepareAsync(_progress, consumed);", body)
         self.assertIn("_progress.MarkAppReady();", body)
         self.assertLess(body.index("MarkAppReady"), body.index("ReadyToDismiss"))
         # Splash closes and main shows in the same UI turn — no blank state.
