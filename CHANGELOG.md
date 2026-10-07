@@ -102,6 +102,30 @@ on verified tool output.
 - **Ledger restart reconciliation** — `recover_orphans()` closes
   crash-interrupted `recorded` entries as `unverified` at boot; only
   `awaiting_approval` is a legitimate cross-restart park.
+- **Replan artifact recheck** — a failed `internal:artifact_exists`
+  criterion now replans to a path that names the missing target,
+  requires real `write_file` output (prose does not satisfy), and
+  re-checks the artifact before re-verify. Declared success criteria
+  are never retired unverified (bounded-soak finding: missions looped
+  on prose-instead-of-write until timeout).
+- **Grammar coverage** — `write "x" to file.txt` / `save "x" into
+  file.txt` plans added; single-operand `move`/`copy`/`rename` now
+  clarifies the missing destination instead of falling through;
+  pronoun tails ("copy that", "move it") fall through as
+  acknowledgments. Write plans carry `expected_size` so verification
+  proves the write, not just file existence.
+- **Action-lane eval** — `scripts/eval_action_lane.py` is a bounded
+  correctness scorecard (31 phrasings: verified/clarify/parked/
+  fall-through) that classifies from ledger evidence and exits
+  non-zero on misclassification; it runs in CI after the unit suite.
+- **Evidence surfaces** — `/api/action-ledger` (the `/api/actions`
+  path was shadowed by the self-knowledge capability route — dead
+  code) and a Command Center "Action evidence" panel rendering the
+  durable record behind every action claim.
+- **Mid-sequence honesty** — an unavailable tool on the first clause
+  still falls through to the model lane; mid-sequence it stops with
+  an honest "could not run / nothing was changed" line instead of
+  silently dropping verified work and resumed tails.
 - **Regression coverage** — `tests/test_action_ops.py` (27 tests:
   parse matrix, in-root verified execution, idempotent no-ops, deny/
   ask/approve/denied flows, outside-root always-asks, disabled tool,
