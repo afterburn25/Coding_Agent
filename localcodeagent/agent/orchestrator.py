@@ -5170,6 +5170,27 @@ class AgentOrchestrator:
                 task, user_text, parsed_command,
                 event_callback=event_callback,
                 conversation_id=conversation_id)
+        # Silent spelling normalization (backlog §1): the intent
+        # classifier and the model see corrected text; the task ledger
+        # keeps the user's raw prompt. Protected spans (code, URLs,
+        # paths, quoted text) and ambiguous tokens pass through
+        # untouched — nothing is ever guessed between equal candidates.
+        try:
+            from ..context.spelling import normalize_user_text
+            _ctx_words: set[str] = set()
+            for _m in (history or [])[-6:]:
+                _ctx_words.update(
+                    w.lower() for w in
+                    re.findall(r"[A-Za-z]{5,}", str(_m.get("content") or "")))
+            _normalized, _spelling_fixes = normalize_user_text(
+                user_text, context_words=_ctx_words)
+            if _spelling_fixes:
+                user_text = _normalized
+                self._safe_emit(event_callback, {
+                    "type": "context",
+                    "event": {"spelling": _spelling_fixes[:8]}})
+        except Exception:
+            pass
         conversation_intent = (
             self.conversation_manager.classify_intent(user_text)
             if self.conversation_manager is not None
@@ -5899,6 +5920,7 @@ class AgentOrchestrator:
         lightweight = decision.role == "utility"
         if self.nexus_brain is not None and self.nexus_brain.initialized:
             persistent_context = self.nexus_brain.prompt_context(
+                user_text,
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
@@ -5906,6 +5928,7 @@ class AgentOrchestrator:
         else:
             persistent_context = (
                 self.conversation_memory.prompt_context(
+                    user_text,
                     project_id=project_id,
                     conversation_id=conversation_id,
                 )

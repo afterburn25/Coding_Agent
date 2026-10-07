@@ -308,6 +308,15 @@ class TestServiceControl(unittest.TestCase):
             cap_states={"github": "unauthorized"})
         res = svc.respond("what can you do")
         self.assertIsNotNone(res)
+        # §10: outcome-led, conversational — never a raw subsystem dump.
+        self.assertIn("code", res.text.lower())
+        self.assertNotIn("Development:", res.text)
+        self.assertNotIn("Terminal commands", res.text)
+
+    def test_technical_ask_gets_full_catalog(self):
+        svc, store, _ = make_service()
+        res = svc.respond("what are your technical capabilities")
+        self.assertIsNotNone(res)
         self.assertIn("Development", res.text)
 
     def test_whats_broken_reports(self):

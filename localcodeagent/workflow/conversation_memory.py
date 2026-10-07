@@ -130,6 +130,49 @@ class ConversationMemory:
     def _same(a: str, b: str) -> bool:
         return a.casefold().strip() == b.casefold().strip()
 
+    _CONTENT_STOPWORDS = frozenset({
+        "what", "when", "where", "which", "that", "this", "these", "those",
+        "with", "from", "your", "yours", "mine", "does", "said", "tell",
+        "know", "about", "would", "could", "should", "there", "their",
+        "they", "them", "then", "than", "have", "has", "are", "was",
+        "were", "will", "just", "like", "mean", "meant", "remember",
+        "before", "earlier", "yesterday", "today", "now", "use", "uses",
+        "the", "and", "for", "you", "did", "didnt", "it's", "its",
+    })
+
+    @classmethod
+    def _content_terms(cls, text: str) -> set[str]:
+        """Content-bearing terms used for relevance-gated recall."""
+        return {
+            t for t in re.findall(r"[a-z0-9_+.#-]{3,}", str(text or "").lower())
+            if t not in cls._CONTENT_STOPWORDS and not t.isdigit()
+        }
+
+    @staticmethod
+    def _fact_slot(text: str) -> str:
+        """Supersession slot for entity-attribute facts.
+
+        Facts naming a concrete subject+relation ("orion uses postgresql",
+        "my editor is vim") occupy a slot; a newer fact in the same slot
+        retires the older one. Vague/open facts ("i prefer tea") keep no
+        slot so unrelated preferences are never clobbered.
+        """
+        t = str(text or "").strip().lower()
+        m = re.match(r"^my\s+([a-z0-9][a-z0-9 ._-]{0,38}?)\s+(?:is|are|was|were)\b", t)
+        if m:
+            return "my:" + re.sub(r"\s+", " ", m.group(1)).strip()
+        m = re.match(
+            r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+            r"(uses?|runs on|is built on|is written in|depends on|prefers?)\b",
+            t,
+        )
+        if m:
+            subj = re.sub(r"\s+", " ", m.group(1)).strip()
+            pred = re.sub(r"\s+", " ", m.group(2)).strip()
+            if subj and subj not in {"i", "we", "you", "they", "he", "she", "it"}:
+                return f"{subj}:{pred}"
+        return ""
+
     def _append_unique(
         self,
         key: str,
@@ -138,6 +181,7 @@ class ConversationMemory:
         *,
         scope: str = "global",
         scope_id: str = "",
+        slot: str = "",
     ) -> bool:
         clean = self._clean(text)
         if not clean:
@@ -148,13 +192,30 @@ class ConversationMemory:
             for row in rows
         ):
             return False
+        now = time.time()
+        row_id = uuid.uuid4().hex[:12]
+        if slot:
+            for row in rows:
+                if (
+                    isinstance(row, dict)
+                    and row.get("active", True)
+                    and str(row.get("slot") or "") == slot
+                    and str(row.get("scope") or "global") == scope
+                    and str(row.get("scope_id") or "") == scope_id
+                ):
+                    row["active"] = False
+                    row["superseded"] = True
+                    row["superseded_at"] = now
+                    row["superseded_by"] = row_id
+                    row["updated_at"] = now
         rows.append({
-            "id": uuid.uuid4().hex[:12],
+            "id": row_id,
             "text": clean,
-            "created_at": time.time(),
+            "created_at": now,
             "active": True,
             "scope": scope,
             "scope_id": scope_id,
+            "slot": slot,
         })
         self._data[key] = rows[-limit:]
         return True
@@ -344,11 +405,43 @@ class ConversationMemory:
                 if match:
                     fact = match.group(1).strip() if match.lastindex else raw
                     break
+            if fact is None:
+                # Declarative entity-attribute statements — "Project Orion
+                # uses PostgreSQL", "Orion runs on Linux" — and updates like
+                # "we switched Orion to SQLite". Updates canonicalize to the
+                # "uses" slot so a newer value supersedes the older one.
+                switch = re.match(
+                    r"^we\s+(?:switched|moved|migrated|changed)\s+"
+                    r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
+                    raw, flags=re.IGNORECASE,
+                )
+                if switch:
+                    fact = f"{switch.group(1).strip()} uses {switch.group(2).strip()}"
+                else:
+                    decl = re.match(
+                        r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                        r"(uses?|runs on|is built on|is written in|depends on|prefers?)\s+(.+)$",
+                        raw, flags=re.IGNORECASE,
+                    )
+                    if decl and decl.group(1).strip().lower().split()[0] not in {
+                            "i", "we", "you", "they", "he", "she", "it",
+                            "what", "which", "who", "why", "how", "when", "where",
+                            "does", "do", "did", "can", "could", "should", "would",
+                            "is", "are", "was", "were", "will", "this", "that",
+                            "tell", "show", "if", "let", "can", "could",
+                            "did", "isnt", "arent", "doesnt"}:
+                        if decl.group(2).lower() in {"switched to", "moved to", "migrated to"}:
+                            fact = f"{decl.group(1).strip()} uses {decl.group(3).strip()}"
+                        else:
+                            fact = raw
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))
                 fact = None
-            if fact and self._append_unique("facts", fact, self.fact_limit, scope=scope, scope_id=scope_id):
+            if fact and self._append_unique(
+                    "facts", fact, self.fact_limit,
+                    scope=scope, scope_id=scope_id, slot=self._fact_slot(fact),
+            ):
                 result["facts"].append(fact)
 
             rule: str | None = None
@@ -475,6 +568,7 @@ class ConversationMemory:
 
     def prompt_context(
         self,
+        query: str = "",
         *,
         project_id: str = "",
         conversation_id: str = "",
@@ -495,12 +589,22 @@ class ConversationMemory:
                 return bool(conversation_id) and scope_id == conversation_id
             return False
 
+        # Relevance gating (§4): when a user turn is supplied, only facts that
+        # share a content term with it enter the prompt — the whole store must
+        # not ride every message. An empty query returns the full scoped view
+        # for explicit memory inspection/management paths.
+        q_terms = self._content_terms(query)
         with self._lock:
-            facts = [
-                str(row.get("text", ""))
-                for row in self._data.get("facts", [])
+            fact_rows = [
+                row for row in self._data.get("facts", [])
                 if isinstance(row, dict) and applies(row)
-            ][-40:]
+            ]
+            if q_terms:
+                fact_rows = [
+                    row for row in fact_rows
+                    if self._content_terms(str(row.get("text", ""))) & q_terms
+                ]
+            facts = [str(row.get("text", "")) for row in fact_rows][-12:]
             rules = [
                 str(row.get("text", ""))
                 for row in self._data.get("behavior_rules", [])

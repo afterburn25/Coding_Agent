@@ -31,7 +31,8 @@ REFERENCE_TERMS: dict[str, tuple[str, ...]] = {
         "that file", "the model", "that model", "the page",
         "that page", "the setting", "that setting", "the commit",
         "that commit", "the response", "that response",
-        "what we were working on",
+        "what we were working on", "what we were talking about",
+        "the thing we discussed", "that thing we discussed",
     ),
     "error": (
         "the error", "that error", "the bug", "that bug", "the failure",
@@ -43,8 +44,11 @@ REFERENCE_TERMS: dict[str, tuple[str, ...]] = {
         "the other one", "the previous one", "the last one",
         "the next one", "another one", "the earlier one",
         "the one from earlier", "the one you just mentioned",
-        "the other version", "the rest", "the middle one",
-        "not that one",
+        "the other version", "the other model", "the other option",
+        "the first option", "the second option", "the third option",
+        "the other image", "the other file", "the other branch",
+        "the rest", "the middle one", "not that one",
+        "yesterday's option", "the earlier option",
     ),
 }
 

@@ -273,8 +273,15 @@ class SelfKnowledgeService:
                 truth={"kind": "setup"})
         if re.search(r"\bwhat can (you|u) do\b|\bwhat are your "
                      r"(capabilities|features)\b|\bcapabilities\b|"
-                     r"\bwhat do you do\b|\bhelp\b$", t):
-            return self._what_can_you_do()
+                     r"\bwhat do you do\b|\bhow can (you|u) help\b|"
+                     r"\bhelp\b$", t):
+            # A *technical* capability ask still gets the full catalog;
+            # a plain "what can you do" gets outcomes, not subsystems.
+            technical = bool(re.search(
+                r"\b(?:technical|detailed|full|complete|exhaustive|"
+                r"all\s+(?:of\s+)?(?:your\s+)?(?:features|capabilities)|"
+                r"feature\s+list|module|subsystem|internals?)\b", t))
+            return self._what_can_you_do(technical=technical)
         if re.search(r"\bwhat can'?t you do\b|\bwhat can you not do\b|"
                      r"\blimitations\b|\bnot implemented\b|"
                      r"\bunfinished\b|\bplanned\b", t):
@@ -341,9 +348,73 @@ class SelfKnowledgeService:
                 truth={"kind": "version", "version": ver})
         return None
 
-    def _what_can_you_do(self) -> Resolution:
-        """Grouped by category, generated from the live catalog —
-        never a static paragraph."""
+    # Outcome-first rendering for "what can you do" (§10): each entry
+    # is (spoken phrase, categories that back it, an example prompt).
+    # Internal plumbing categories (models, connectors, system) never
+    # lead the answer — they exist to serve these outcomes.
+    _OUTCOME_LINES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+        ("answer everyday questions and explain complicated subjects",
+         ("research",), "explain how vaccines work"),
+        ("help you think through decisions and comparisons",
+         ("research",), "which is better for this project — SQLite or Postgres"),
+        ("inspect, write, and debug code, run tests and builds, and "
+         "work with Git and GitHub",
+         ("development", "git"), "refactor this function and run the tests"),
+        ("research current information on the web",
+         ("research",), "what changed in the latest Python release"),
+        ("work with files and projects on this machine",
+         ("development",), "summarize the repository structure"),
+        ("generate and edit images",
+         ("images",), "draw a mountain landscape at sunset"),
+        ("remember useful things from our conversations",
+         ("memory",), "what database did I say Orion uses"),
+        ("talk with you by voice",
+         ("voice",), "say that back out loud"),
+        ("automate multi-step work",
+         ("automation",), "check the build, then push the branch"),
+    )
+
+    def _what_can_you_do(self, *, technical: bool = False) -> Resolution:
+        """Outcome-led answer for a plain ask; the generated catalog for
+        an explicitly technical one."""
+        if not technical:
+            states: dict[str, set[str]] = {}
+            for f in self.catalog.all():
+                st = self.catalog.feature_state(f.id, self._env)
+                states.setdefault(f.category, set()).add(
+                    st.get("runtime_state", ""))
+            okay = {"verified", "available", "running", "not_applicable",
+                    ""}
+            phrases: list[str] = []
+            examples: list[str] = []
+            missing: list[str] = []
+            for phrase, cats, example in self._OUTCOME_LINES:
+                have = states.get(next(
+                    (c for c in cats if c in states), cats[0]), set())
+                if have and not (have & okay):
+                    # Whole backing area is down — note it, don't list it.
+                    missing.append(phrase)
+                    continue
+                phrases.append(phrase)
+                if len(examples) < 3:
+                    examples.append(example)
+            text = (
+                "I can " + "; ".join(phrases)
+                + ". For example, you could say: "
+                + "; ".join(f'"{e}"' for e in examples[:3])
+                + ". Ask 'what are your technical capabilities' if you "
+                  "want the full subsystem list.")
+            if missing:
+                text += (" Right now " + ", ".join(missing[:2])
+                         + " aren't available — usually a setup or "
+                           "backend issue.")
+            return Resolution(
+                "answer", "help",
+                text=text,
+                actions=[{"id": "navigate", "label": "Everything",
+                          "kind": "navigate",
+                          "route": "/index.html#capabilities"}],
+                truth={"kind": "catalog"})
         cats: dict[str, list[tuple[str, str]]] = {}
         for f in self.catalog.all():
             st = self.catalog.feature_state(f.id, self._env)

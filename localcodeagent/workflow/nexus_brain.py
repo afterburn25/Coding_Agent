@@ -1157,15 +1157,28 @@ class NexusBrain:
             or (scope == "conversation" and bool(conversation_id) and scope_id == conversation_id)
         )
 
-    def prompt_context(self, *, project_id: str = "", conversation_id: str = "") -> str:
+    def prompt_context(self, query: str = "", *, project_id: str = "", conversation_id: str = "") -> str:
         if not self.enabled or not self.initialized or not self.verified_for_session or not self.subroutine("long_term_memory", True):
             return ""
+        # Relevance gating: with a live user turn, fact records must share a
+        # content term with it — the whole durable store must not ride every
+        # prompt (memory intrusion). Rules/autobiographical rows are behavioral
+        # and always apply. Empty query returns the full scoped view.
+        from .conversation_memory import ConversationMemory
+        q_terms = ConversationMemory._content_terms(query)
         with self._lock:
             durable = [
                 copy.deepcopy(row) for row in self._data.get("records", [])
                 if isinstance(row, dict) and row.get("kind") in {"fact", "rule", "autobiographical"}
                 and self._applies(row, project_id, conversation_id)
-            ][-80:]
+            ]
+            if q_terms:
+                durable = [
+                    row for row in durable
+                    if row.get("kind") != "fact"
+                    or ConversationMemory._content_terms(str(row.get("text", ""))) & q_terms
+                ]
+            durable = durable[-80:]
             style = RECALL_EXPRESSION_STYLES[self._recall_variant_index % len(RECALL_EXPRESSION_STYLES)]
             self._recall_variant_index = (self._recall_variant_index + 1) % len(RECALL_EXPRESSION_STYLES)
         if not durable:

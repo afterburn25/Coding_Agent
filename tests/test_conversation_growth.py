@@ -617,3 +617,110 @@ class AutomaticResearchLearningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrossChatMemoryTests(unittest.TestCase):
+    """§3 — declarative facts must persist across conversations with
+    recency/supersession; §4 — unrelated facts must not ride every prompt."""
+
+    def test_declarative_fact_captured_and_recalled(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "Project Orion uses PostgreSQL.", conversation_id="chat-a")
+            self.assertTrue(learned["facts"], "declarative fact was not captured")
+            self.assertIn("Orion uses PostgreSQL", learned["facts"][0])
+
+            # Chat B — a different conversation, same global scope.
+            context = memory.prompt_context(
+                "What database did I say Orion uses?", conversation_id="chat-b")
+            self.assertIn("PostgreSQL", context)
+
+    def test_newer_fact_supersedes_older(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("Project Orion uses PostgreSQL.")
+            memory.learn_from_user("We switched Orion to SQLite.")
+
+            # Old fact retired (marked, not deleted).
+            rows = memory.snapshot()["facts"]
+            pg = [r for r in rows if "PostgreSQL" in r["text"]]
+            self.assertTrue(pg and not pg[0]["active"])
+            self.assertTrue(pg[0].get("superseded"))
+            self.assertEqual(pg[0].get("superseded_by"),
+                             rows[-1]["id"])
+
+            context = memory.prompt_context("What database does Orion use now?")
+            self.assertIn("SQLite", context)
+            self.assertNotIn("PostgreSQL", context)
+
+            # History/provenance: the old row is still stored.
+            self.assertTrue(any("PostgreSQL" in r["text"] for r in rows))
+
+    def test_update_forms_of_the_same_slot(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("My editor is vim")
+            memory.learn_from_user("my editor is emacs")
+            rows = memory.snapshot()["facts"]
+            self.assertEqual(len([r for r in rows if r["active"]]), 1)
+            self.assertIn("emacs", rows[-1]["text"])
+
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user("my editor is vim")
+            memory2.learn_from_user("i use slack")  # no slot — must not clobber
+            active = [r["text"] for r in memory2.snapshot()["facts"]
+                      if r["active"]]
+            self.assertEqual(len(active), 2)
+
+    def test_memory_intrusion_gated_recall(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("Project Orion uses PostgreSQL.")
+            memory.learn_from_user("remember that my cat's name is Whiskers")
+            memory.learn_from_user("Project Falcon runs on Kubernetes")
+
+            # Unrelated question drags in nothing.
+            ctx = memory.prompt_context("how do I cook risotto?")
+            self.assertEqual(ctx, "")
+
+            # Question about one project pulls only that fact.
+            ctx = memory.prompt_context("What does Orion use for storage?")
+            self.assertIn("PostgreSQL", ctx)
+            self.assertNotIn("Whiskers", ctx)
+            self.assertNotIn("Falcon", ctx)
+
+            # Empty query = full memory view (explicit recall/management).
+            ctx = memory.prompt_context()
+            self.assertIn("PostgreSQL", ctx)
+            self.assertIn("Whiskers", ctx)
+            self.assertIn("Falcon", ctx)
+
+    def test_scoped_facts_still_relevance_gated(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user(
+                "For this project, the test database uses port 5433",
+                project_id="p1", conversation_id="c1")
+            # Right project, unrelated question — no injection.
+            ctx = memory.prompt_context(
+                "make me a sandwich", project_id="p1", conversation_id="c1")
+            self.assertNotIn("5433", ctx)
+            # Right project + related question — surfaced.
+            ctx = memory.prompt_context(
+                "what port is the test database on?",
+                project_id="p1", conversation_id="c1")
+            self.assertIn("5433", ctx)
+
+    def test_questions_and_pronouns_not_captured_as_facts(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "does Orion use PostgreSQL?",
+                "what database does Orion use?",
+                "it uses a lot of memory",
+                "tell me what Orion uses",
+                "can this app use SQLite?",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)

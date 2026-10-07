@@ -335,6 +335,63 @@ class TestMetaReferences(unittest.TestCase):
         self.assertEqual(env.temporal_context, "earlier")
 
 
+class TestBacklogReferencePhrasings(unittest.TestCase):
+    """§2 follow-up phrases the backlog requires to resolve."""
+
+    def _ctx(self):
+        ac = ActiveContext(
+            active_project="chat-nexus",
+            active_image_subject="sunset mountain")
+        ac.recent_entities = [
+            {"kind": "image", "label": "sunset mountain", "ts": 1e12},
+            {"kind": "image", "label": "forest lake", "ts": 1e11},
+            {"kind": "model", "label": "qwen3-8b", "ts": 1e10},
+        ]
+        ac.touch()
+        return ac
+
+    def test_that_one(self):
+        rep = resolve_with_report("that one", self._ctx())
+        self.assertEqual(rep["resolved"].get("that one"),
+                         "sunset mountain")
+
+    def test_the_second_one(self):
+        rep = resolve_with_report("the second one", self._ctx())
+        self.assertEqual(rep["resolved"].get("the second one"),
+                         "forest lake")
+
+    def test_the_other_model(self):
+        rep = resolve_with_report("the other model", self._ctx())
+        self.assertTrue(rep["resolved"].get("the other model"))
+
+    def test_what_we_were_talking_about(self):
+        rep = resolve_with_report(
+            "go back to what we were talking about", self._ctx())
+        self.assertTrue(rep["resolved"])
+
+    def test_meant_the_previous_one(self):
+        rep = resolve_with_report(
+            "no, I meant the previous one", self._ctx())
+        self.assertTrue(rep["resolved"].get("the previous one"))
+
+    def test_comparison_marks_and_resolves(self):
+        env = understand_turn("compare it to yesterday's option",
+                              active=self._ctx())
+        self.assertTrue(env.comparison)
+
+    def test_unresolvable_stays_ambiguous_not_guessed(self):
+        ac = ActiveContext()
+        ac.recent_entities = [
+            {"kind": "image", "label": "a", "ts": 1e12},
+            {"kind": "error", "label": "b", "ts": 1e11},
+        ]
+        ac.active_error = "b"
+        ac.active_image_subject = "a"
+        rep = resolve_with_report("fix it", ac)
+        # "it" is bound by the fix-verb hint to the error — no guess.
+        self.assertEqual(rep["resolved"].get("it"), "b")
+
+
 # ---------------------------------------------------------------------------
 # §22 — restart persistence; §19 — decay
 # ---------------------------------------------------------------------------
