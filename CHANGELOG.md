@@ -66,7 +66,13 @@ on verified tool output.
 - **Fabricated-claim evidence** — truth-gate detections now write an
   `unverified` ActionLedger entry (kind `claim`), so "the model said
   it did X but nothing ran" is durable evidence, not only a badge.
-- **Regression coverage** — `tests/test_action_ops.py` (30 tests:
+- **Mission evidence** — every mission node outcome writes a
+  `mission_node` ledger entry (verified/awaiting_approval/failed with
+  task status, artifacts, failure), so "what did the mission do"
+  answers from evidence. `ActionLedger.mission_rollup()` summarizes
+  per-mission status counts + last failures/verified actions; served
+  at `GET /api/missions/<id>/evidence`.
+- **Regression coverage** — `tests/test_action_ops.py` (27 tests:
   parse matrix, in-root verified execution, idempotent no-ops, deny/
   ask/approve/denied flows, outside-root always-asks, disabled tool,
   durable ledger, orchestrator lane claim + park + resume + deny, git

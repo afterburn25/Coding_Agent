@@ -282,6 +282,28 @@ class ActionLedger:
                 and (not mission_id or e.get("mission_id") == mission_id)]
         return [dict(e) for e in rows[-limit:]]
 
+    def mission_rollup(self, mission_id: str,
+                       limit: int = 500) -> dict:
+        """Evidence summary for one mission — status counts plus the last
+        few failed/verified actions so 'what did the mission do' answers
+        from evidence, not narration."""
+        entries = self.recent(limit=limit, mission_id=mission_id)
+        statuses: dict[str, int] = {}
+        for e in entries:
+            s = str(e.get("status") or "recorded")
+            statuses[s] = statuses.get(s, 0) + 1
+        return {
+            "mission_id": mission_id,
+            "actions": len(entries),
+            "statuses": statuses,
+            "recent_failures": [
+                e["action"] for e in entries
+                if e.get("status") == "failed"][-5:],
+            "recent_verified": [
+                e["action"] for e in entries
+                if e.get("status") == "verified"][-5:],
+        }
+
     def latest_for(self, *, kind: str = "", artifact: str = "") -> dict | None:
         for e in reversed(self.data["entries"]):
             if kind and e.get("kind") != kind:

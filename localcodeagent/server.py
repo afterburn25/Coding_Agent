@@ -2805,6 +2805,34 @@ class AppState:
                 out["pending_approval"] = (
                     result.pending_approval
                     or task.get("pending_approval") or {"kind": "task"})
+            # Action Evidence Ledger — every mission node outcome is
+            # durable evidence: what ran, under which mission, whether it
+            # verified, and what it produced.
+            if getattr(self, "action_ledger", None) is not None:
+                try:
+                    e = self.action_ledger.begin(
+                        kind="mission_node",
+                        action=str(node.get("title")
+                                   or node.get("instruction") or ""),
+                        capability=str(node.get("kind") or ""),
+                        tool="agent_run",
+                        params={"node_id": str(node.get("id") or "")},
+                        task_id=str(task.get("id") or ""),
+                        mission_id=str(mission.get("id") or ""))
+                    self.action_ledger.finish(
+                        e["id"],
+                        status=("verified" if out["ok"]
+                                else "awaiting_approval"
+                                if out.get("pending_approval")
+                                else "failed"),
+                        verification=f"task status: {status}"
+                        if out["ok"] else "",
+                        verified=bool(out["ok"]) or None,
+                        artifact=",".join(
+                            out.get("artifacts") or [])[:400],
+                        failure=str(out.get("error") or "")[:300])
+                except Exception:
+                    pass
             if (out["ok"] and node.get("kind") == "agent"
                     and _UNVERIFIED_CLAIMS_MARKER in str(
                         out.get("output") or "")):
@@ -7391,6 +7419,15 @@ class Handler(BaseHTTPRequestHandler):
                     "evaluations": m.get("evaluator_history") or [],
                     "verifications": m.get("verification_history") or [],
                 })
+                return True
+            if mid.endswith("/evidence"):
+                mid = mid[:-len("/evidence")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                self._json(
+                    self.state.action_ledger.mission_rollup(m.get("id") or mid))
                 return True
             m = sup.missions.get(mid)
             if m is None:

@@ -270,6 +270,31 @@ class TestAvailabilityAndLedger(unittest.TestCase):
             r["kind"] == "mkdir" and r["status"] == "verified"
             for r in rows))
 
+    def test_mission_rollup_summarizes_evidence(self):
+        td, ws, reg, ledger = make_env()
+        self.addCleanup(td.cleanup)
+        e1 = ledger.begin(kind="mission_node", action="scaffold app",
+                          mission_id="m-1")
+        ledger.finish(e1["id"], status="verified",
+                      verification="task status: completed",
+                      verified=True)
+        e2 = ledger.begin(kind="mission_node", action="wire deps",
+                          mission_id="m-1")
+        ledger.finish(e2["id"], status="failed", failure="boom")
+        e3 = ledger.begin(kind="mission_node", action="other mission",
+                          mission_id="m-2")
+        ledger.finish(e3["id"], status="verified", verified=True)
+        roll = ledger.mission_rollup("m-1")
+        self.assertEqual(roll["actions"], 2)
+        self.assertEqual(roll["statuses"].get("verified"), 1)
+        self.assertEqual(roll["statuses"].get("failed"), 1)
+        self.assertEqual(roll["recent_verified"], ["scaffold app"])
+        self.assertEqual(roll["recent_failures"], ["wire deps"])
+        self.assertEqual(
+            ledger.mission_rollup("m-2")["actions"], 1)
+        self.assertEqual(
+            ledger.mission_rollup("m-none")["actions"], 0)
+
 
 class TestOrchestratorLane(unittest.TestCase):
     """The lane inside AgentOrchestrator — claims the turn, produces a
