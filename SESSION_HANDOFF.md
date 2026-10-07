@@ -2,6 +2,52 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.30.0 — conversation-memory lifecycle (§24-26 continual QA)
+
+The durable-memory loop is now complete end-to-end through the
+production `run()` path — teach, recall, correct, supersede, revoke,
+forget — with Nexus Brain kept in lockstep.
+
+Key surfaces (`localcodeagent/workflow/conversation_memory.py`):
+
+- Corrections — `_correct_fact_value(old, new)` rewrites the fact
+  carrying the rejected value only when it uniquely identifies one;
+  "X not Y" accepts pronoun *and* named subjects ("actually the port
+  was 5433 not 8080"); `correction:`/`i meant`/`to clarify` bodies
+  re-enter the canonicalization pipeline (`corr_body` fallback for
+  uncanonicalizable text).
+- Rule revocation — `_revoke_rules(action)` retires rules whose
+  normalized stems cover the revoked action ("stop responding in
+  JSON"); prohibition-shaped rules are never retired, and unmatched
+  revocations store as `Never` rules. Locked topics refuse via the
+  shared `locked_refusal` lane.
+- Forget variants — `forget()` probes both the raw and
+  filler-stripped query ("the", "my", "about", "fact"); prefix
+  patterns cover `forget about`, `nevermind`, `stop remembering`,
+  `delete the fact about`.
+- `is`-facts — declarative `is|are` captures gated on value signal
+  (digit/uppercase/path/multi-word); `_fact_slot` gained `is|are` so
+  "the port is 8080" supersedes "the port is 5433".
+- `_fact_subject_ok` compares casefolded — subject case preservation
+  must not reopen the question-word hole.
+
+Brain parity (`localcodeagent/workflow/nexus_brain.py`,
+`agent/orchestrator.py`):
+
+- `prompt_context` filters `active` — superseded/forgotten records no
+  longer inject beside their replacements.
+- `run()` calls `_sync_nexus_brain()` whenever `learned` is non-empty
+  (the method was dead code); sync now covers all four lanes including
+  `sync_conversations` (autobiographical).
+
+Regression coverage: `test_corrections_supersede_unique_fact`,
+`test_forget_variants_retire_the_referent`,
+`test_rule_revocation_retires_mandates_not_prohibitions`,
+`test_definite_is_facts_capture_with_value_gate`,
+`test_subject_named_corrections_and_locked_guards`,
+`test_memory_lifecycle_end_to_end` (QA runner, 14-turn lifecycle),
+`test_prompt_context_respects_inactive_records` (brain).
+
 ## v0.29.0 — performance/resource convergence (§15-23)
 
 The perf/resource backlog items are now wired end-to-end on top of the
