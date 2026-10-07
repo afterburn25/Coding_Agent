@@ -711,6 +711,39 @@ class CrossChatMemoryTests(unittest.TestCase):
                           "let us go with option B for the parser"):
                 self.assertEqual(memory2.learn_from_user(noise)["facts"], [])
 
+    def test_corrections_supersede_unique_fact(self):
+        """'X not Y' corrections rewrite the fact carrying Y — but only
+        when Y identifies exactly one active fact; ambiguous or absent
+        referents must never guess."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("Project Orion uses PostgreSQL.")
+            memory.learn_from_user("remember that my editor is vim")
+
+            learned = memory.learn_from_user(
+                "actually it was SQLite not PostgreSQL")
+            self.assertEqual(learned["facts"], ["Orion uses SQLite"])
+            rows = memory.snapshot()["facts"]
+            pg = [r for r in rows if "PostgreSQL" in r["text"]]
+            self.assertFalse(pg[0]["active"])
+
+            learned = memory.learn_from_user("it was emacs not vim")
+            self.assertEqual(learned["facts"], ["my editor is emacs"])
+
+            # No Oracle fact exists — a correction must never guess.
+            self.assertEqual(
+                memory.learn_from_user("it was MySQL not Oracle")["facts"],
+                [])
+
+            # Explicit correction bodies route through the normal
+            # canonicalization pipeline.
+            learned = memory.learn_from_user(
+                "no, i meant the store uses Redis")
+            self.assertEqual(learned["facts"], ["store uses Redis"])
+            learned = memory.learn_from_user(
+                "correction: the port is 5433")
+            self.assertEqual(learned["facts"], ["the port is 5433"])
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")

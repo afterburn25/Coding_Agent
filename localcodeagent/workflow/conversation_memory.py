@@ -166,6 +166,8 @@ class ConversationMemory:
         adverbs ('Orion now uses X' -> 'Orion') and 'off/from X' migration
         tails so the supersession slot stays 'orion:use'."""
         subj = re.sub(r"\s+", " ", str(raw or "").strip())
+        subj = re.sub(r"^(?:the|our|a|an)\s+", "", subj,
+                      flags=re.IGNORECASE)
         subj = re.sub(
             r"\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}$",
             "", subj, flags=re.IGNORECASE)
@@ -186,6 +188,30 @@ class ConversationMemory:
         while words and words[-1].lower() in cls._SUBJECT_ADVERBS:
             words.pop()
         return " ".join(words).strip()
+
+    def _correct_fact_value(self, old_value: str, new_value: str) -> str | None:
+        """'X not Y' correction — rewrite the fact that ends in Y.
+
+        Returns the corrected fact text when exactly one active fact's
+        value tail matches `old_value` (ambiguous matches and no-matches
+        stay untouched — a correction must never guess). The caller
+        stores it via the normal append path so slot supersession
+        retires the stale row rather than editing history in place.
+        """
+        old = str(old_value or "").strip().lower()
+        new = str(new_value or "").strip()
+        if not old or not new or old == new.lower():
+            return None
+        with self._lock:
+            hits = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+                and str(row.get("text", "")).strip().lower().endswith(old)
+            ]
+        if len(hits) != 1:
+            return None
+        text = str(hits[0].get("text", "")).strip()
+        return text[: len(text) - len(old)].rstrip() + " " + new
 
     @staticmethod
     def _fact_subject_ok(subj: str) -> bool:
@@ -221,6 +247,7 @@ class ConversationMemory:
         )
         if m:
             subj = re.sub(r"\s+", " ", m.group(1)).strip()
+            subj = re.sub(r"^(?:the|our|a|an)\s+", "", subj)
             pred = re.sub(r"\s+", " ", m.group(2)).strip()
             if subj and subj not in {"i", "we", "you", "they", "he", "she", "it"}:
                 return f"{subj}:{pred}"
@@ -473,12 +500,49 @@ class ConversationMemory:
                     r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
                     body, flags=re.IGNORECASE,
                 )
+                corr_body = ""
                 if switch:
                     subj = self._clean_subject(switch.group(1))
                     value = self._clean_value(switch.group(2))
                     if self._fact_subject_ok(subj) and value:
                         fact = f"{subj} uses {value}"
                 elif fact is None:
+                    # Corrections — "correction: the port is 5433",
+                    # "no, I meant SQLite", "actually it was Redis not
+                    # Postgres". The 'X not Y' form supersedes the fact
+                    # carrying Y when Y uniquely identifies one.
+                    corr = re.match(
+                        r"^(?:correction|i\s+meant|no[,]?\s+i\s+meant|"
+                        r"to\s+clarify|sorry[,]?\s*i\s+meant)[,:]?\s*(.+)$",
+                        body, flags=re.IGNORECASE,
+                    )
+                    nyc = re.match(
+                        r"^(?:actually[,]?\s+|no[,]?\s+)?(?:it|that|this)\s+"
+                        r"(?:is|was)\s+(.+?)\s+not\s+(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE,
+                    )
+                    if nyc:
+                        new_v = self._clean_value(nyc.group(1))
+                        old_v = self._clean_value(nyc.group(2))
+                        fact = self._correct_fact_value(old_v, new_v)
+                    elif corr:
+                        inner = corr.group(1).strip()
+                        inner_nyc = re.match(
+                            r"^(.+?)\s+not\s+(.+?)[.!?]?$", inner,
+                            flags=re.IGNORECASE)
+                        if inner_nyc:
+                            new_v = self._clean_value(inner_nyc.group(1))
+                            old_v = self._clean_value(inner_nyc.group(2))
+                            fact = self._correct_fact_value(old_v, new_v)
+                        elif fact is None:
+                            # Re-body the correction so the normal
+                            # declarative/decision pipeline canonicalizes
+                            # it ("the store uses Redis" -> "store uses
+                            # Redis"); corr_body is the verbatim fallback
+                            # when nothing structured matches.
+                            body = inner
+                            corr_body = inner.rstrip(".!?")
+                if fact is None:
                     # Decision statements — "we decided to use SQLite for
                     # the store", "the plan is Postgres for production",
                     # "let's go with Redis". Canonicalize to
@@ -555,6 +619,8 @@ class ConversationMemory:
                                 value = self._clean_value(decl.group(3))
                                 if value:
                                     fact = f"{subj} {pred} {value}"
+                if fact is None and corr_body:
+                    fact = corr_body
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))
