@@ -136,6 +136,88 @@ class LkgStore:
                     f"(snapshot is {snap_v or 'unversioned'})")
         return ""
 
+    # ------------------------------------------------------------------
+    # deferred swaps — generalized locked-file replacement
+    # ------------------------------------------------------------------
+    @property
+    def swaps_dir(self) -> Path:
+        """Pending file/dir replacements the desktop host applies at
+        launch, before any process can lock the targets. This is the
+        generalized form of the backend-only update.flag — used for any
+        payload that cannot be rewritten while the app runs (locked
+        exe/dll, in-use native library, busy asset)."""
+        return self.root / "swaps"
+
+    def stage_swap(self, target: str, source: str | Path, *,
+                   reason: str = "") -> dict:
+        """Stage ``source`` (file or directory) to replace ``target``
+        (path relative to the install root) on next launch.
+
+        The host applies swaps transactionally: live target moves to a
+        backup, staged payload moves in, file swaps are re-hashed, and a
+        failed swap restores the backup — a botched swap can never leave
+        the install broken."""
+        raw = str(target or "")
+        rel = raw.replace("\\", "/").strip("/")
+        parts = [p for p in rel.split("/") if p]
+        if (not parts or raw.startswith(("/", "\\"))
+                or re.match(r"^[a-zA-Z]:", raw)
+                or Path(raw).is_absolute()
+                or any(p in {".", ".."} for p in parts)):
+            return {"ok": False,
+                    "error": f"invalid swap target '{target}'"}
+        if parts[0].lower() in {"data", "swaps"}:
+            return {"ok": False,
+                    "error": "swap targets may not live under data/ — "
+                             "the staging area itself"}
+        src = Path(source)
+        if not src.exists():
+            return {"ok": False, "error": f"staged source missing: {src}"}
+        swap_id = f"swap-{int(time.time() * 1000)}"
+        with self._lock:
+            dest = self.swaps_dir / swap_id
+            n = 0
+            while dest.exists():
+                n += 1
+                dest = self.swaps_dir / f"{swap_id}-{n}"
+            payload = dest / "payload"
+            try:
+                if src.is_dir():
+                    shutil.copytree(src, payload)
+                    kind, digest = "dir", ""
+                else:
+                    dest.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, payload)
+                    kind, digest = "file", _sha(payload)
+                atomic_write_text(dest / "swap.json", json.dumps({
+                    "id": dest.name, "target": "/".join(parts),
+                    "kind": kind, "sha256": digest,
+                    "reason": str(reason)[:200],
+                    "created_at": time.time(),
+                }, indent=2))
+            except OSError as exc:
+                shutil.rmtree(dest, ignore_errors=True)
+                return {"ok": False, "error": f"stage failed: {exc}"}
+        return {"ok": True, "swap_id": dest.name,
+                "target": "/".join(parts), "kind": kind}
+
+    def pending_swaps(self) -> list[dict]:
+        """Swap requests awaiting host-side application."""
+        out: list[dict] = []
+        try:
+            entries = sorted(self.swaps_dir.iterdir())
+        except OSError:
+            return out
+        for d in entries:
+            try:
+                row = json.loads(
+                    (d / "swap.json").read_text(encoding="utf-8"))
+                row["id"] = d.name
+                out.append(row)
+            except (OSError, ValueError):
+                continue
+        return out
+
     def _coherence_reason(self, snap: Path) -> str:
         """The snapshot's VERSION files and manifest must agree — a
         mixed-version bundle (like the web-bundle/exe skew that caused

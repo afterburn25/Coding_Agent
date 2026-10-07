@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from localcodeagent.lkg import LkgStore
+from localcodeagent.lkg import LkgStore, _sha
 from localcodeagent.selfupdate import SelfUpdate
 
 
@@ -237,6 +237,61 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertTrue(guard and not guard[0]["ok"])
             # Nothing staged or flagged.
             self.assertIsNone(lkg.consume_update())
+
+
+class PendingSwapTests(unittest.TestCase):
+    """Generalized deferred replacement — stage now, host swaps at boot."""
+
+    def test_stage_file_swap(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            src = Path(td) / "new.bin"
+            src.write_bytes(b"replacement-bytes")
+            lkg = LkgStore(app, Path(td) / "lkg")
+            out = lkg.stage_swap("backend/_internal/foo.dll", src,
+                                 reason="native dep update")
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["target"], "backend/_internal/foo.dll")
+            swaps = lkg.pending_swaps()
+            self.assertEqual(len(swaps), 1)
+            row = swaps[0]
+            self.assertEqual(row["kind"], "file")
+            self.assertEqual(row["sha256"], _sha(src))
+            payload = lkg.swaps_dir / row["id"] / "payload"
+            self.assertEqual(payload.read_bytes(), b"replacement-bytes")
+
+    def test_stage_dir_swap(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            src = Path(td) / "pkgdir"
+            (src / "mod").mkdir(parents=True)
+            (src / "mod" / "x.py").write_text("x=1\n")
+            lkg = LkgStore(app, Path(td) / "lkg")
+            out = lkg.stage_swap("backend/_internal/pkg", src)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["kind"], "dir")
+            row = lkg.pending_swaps()[0]
+            self.assertEqual(row["sha256"], "")
+
+    def test_rejects_escape_and_data_targets(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            src = Path(td) / "f.txt"
+            src.write_text("x")
+            lkg = LkgStore(app, Path(td) / "lkg")
+            for bad in ("../evil.dll", "/abs/x.dll", "..\\up",
+                        "data/lkg/swaps/x", "", "."):
+                out = lkg.stage_swap(bad, src)
+                self.assertFalse(out["ok"], bad)
+            self.assertEqual(lkg.pending_swaps(), [])
+
+    def test_missing_source_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            lkg = LkgStore(app, Path(td) / "lkg")
+            out = lkg.stage_swap("backend/x.bin",
+                                 Path(td) / "nonexistent")
+            self.assertFalse(out["ok"])
 
 
 if __name__ == "__main__":

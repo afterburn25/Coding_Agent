@@ -1929,11 +1929,118 @@ internal sealed class BackendProcess : IDisposable
                     }
                 }
             }
+            ApplyPendingSwaps(appDir, lkgDir, logPath);
         }
         catch (Exception ex)
         {
             // LKG handling must never block the normal launch path.
             AppendHostLog(logPath, $"LKG flag handling failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Generalized deferred replacement — the backend stages a payload
+    /// under data/lkg/swaps/&lt;id&gt;/payload plus a swap.json manifest
+    /// naming a target relative to the install root. Applied here at
+    /// launch, before any process can lock the target (the same reason
+    /// the backend exe swap lives host-side). Transactional: the live
+    /// target moves aside first, the swap verifies, and any failure
+    /// restores the backup — a botched swap never leaves a broken tree.
+    /// </summary>
+    private static void ApplyPendingSwaps(string appDir, string lkgDir, string logPath)
+    {
+        var swapsDir = Path.Combine(lkgDir, "swaps");
+        if (!Directory.Exists(swapsDir)) return;
+        foreach (var dir in Directory.GetDirectories(swapsDir))
+        {
+            var id = Path.GetFileName(dir);
+            try
+            {
+                var manifestPath = Path.Combine(dir, "swap.json");
+                if (!File.Exists(manifestPath))
+                {
+                    AppendHostLog(logPath, $"swap {id}: no manifest — skipped");
+                    continue;
+                }
+                string target, kind, wantSha;
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
+                    target = doc.RootElement.TryGetProperty("target", out var t)
+                        ? t.GetString() ?? "" : "";
+                    kind = doc.RootElement.TryGetProperty("kind", out var k)
+                        ? k.GetString() ?? "" : "";
+                    wantSha = doc.RootElement.TryGetProperty("sha256", out var s)
+                        ? s.GetString() ?? "" : "";
+                }
+                catch { target = ""; kind = ""; wantSha = ""; }
+                // The manifest is untrusted input — only a relative,
+                // in-tree path is legal, and never into data/.
+                var parts = target.Split('/').Where(p => p.Length > 0).ToArray();
+                var targetOk = parts.Length > 0
+                    && !Path.IsPathRooted(target)
+                    && parts.All(p => p != "." && p != "..")
+                    && !string.Equals(parts[0], "data", StringComparison.OrdinalIgnoreCase);
+                var payload = Path.Combine(dir, "payload");
+                var payloadOk = kind == "dir" ? Directory.Exists(payload)
+                                              : File.Exists(payload);
+                if (!targetOk || !payloadOk || (kind != "file" && kind != "dir"))
+                {
+                    AppendHostLog(logPath, $"swap {id}: invalid manifest — skipped");
+                    Directory.Delete(dir, true);
+                    continue;
+                }
+                if (kind == "file" && wantSha.Length > 0
+                    && !string.Equals(Sha256File(payload), wantSha,
+                                      StringComparison.OrdinalIgnoreCase))
+                {
+                    AppendHostLog(logPath, $"swap {id}: staged payload failed sha256 — refused");
+                    Directory.Delete(dir, true);
+                    continue;
+                }
+                var dest = Path.Combine(appDir, Path.Combine(parts));
+                var backup = dest + ".swapbak-" + id;
+                var moved = false;
+                try
+                {
+                    if (Directory.Exists(dest))
+                    {
+                        if (Directory.Exists(backup)) Directory.Delete(backup, true);
+                        Directory.Move(dest, backup); moved = true;
+                    }
+                    else if (File.Exists(dest))
+                    {
+                        if (File.Exists(backup)) File.Delete(backup);
+                        File.Move(dest, backup); moved = true;
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    if (kind == "dir") Directory.Move(payload, dest);
+                    else File.Move(payload, dest);
+                    if (Directory.Exists(backup)) Directory.Delete(backup, true);
+                    else if (File.Exists(backup)) File.Delete(backup);
+                    AppendHostLog(logPath, $"swap {id}: applied → {target}");
+                }
+                catch (Exception ex)
+                {
+                    AppendHostLog(logPath,
+                        $"swap {id}: apply failed ({ex.GetType().Name}) — restoring backup");
+                    try
+                    {
+                        if (moved && Directory.Exists(backup)) Directory.Move(backup, dest);
+                        else if (moved && File.Exists(backup)) File.Move(backup, dest);
+                    }
+                    catch (Exception rex)
+                    {
+                        AppendHostLog(logPath,
+                            $"swap {id}: backup restore failed: {rex.GetType().Name}: {rex.Message}");
+                    }
+                }
+                Directory.Delete(dir, true);
+            }
+            catch (Exception ex)
+            {
+                AppendHostLog(logPath, $"swap {id}: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 
