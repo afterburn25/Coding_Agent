@@ -53,6 +53,34 @@ class NexusBrainTests(unittest.TestCase):
             self.assertAlmostEqual(reloaded.emotion_profile()["warmth"], 0.9)
             self.assertEqual(reloaded.self_model()["name"], "Nexus Prime")
 
+    def test_prompt_context_respects_inactive_records(self):
+        """Conversation-memory supersession/forget flips a synced record's
+        active flag — prompt_context must not keep injecting it."""
+        with tempfile.TemporaryDirectory() as td:
+            brain = NexusBrain(Path(td) / "nexus_brain.json")
+            brain.initialize_creator("Creator", "example-passcode")
+            brain.sync_conversation_memory({
+                "facts": [{"id": "f1", "text": "Orion uses PostgreSQL",
+                           "active": True, "scope": "global"}],
+                "behavior_rules": [],
+            })
+            self.assertIn(
+                "PostgreSQL",
+                brain.prompt_context(query="orion database"))
+
+            brain.sync_conversation_memory({
+                "facts": [
+                    {"id": "f1", "text": "Orion uses PostgreSQL",
+                     "active": False, "scope": "global"},
+                    {"id": "f2", "text": "Orion uses SQLite",
+                     "active": True, "scope": "global"},
+                ],
+                "behavior_rules": [],
+            })
+            ctx = brain.prompt_context(query="orion database")
+            self.assertNotIn("PostgreSQL", ctx)
+            self.assertIn("SQLite", ctx)
+
     def test_unlock_throttling_backs_off_failed_attempts(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "nexus_brain.json"

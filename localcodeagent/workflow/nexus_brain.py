@@ -1170,6 +1170,7 @@ class NexusBrain:
             durable = [
                 copy.deepcopy(row) for row in self._data.get("records", [])
                 if isinstance(row, dict) and row.get("kind") in {"fact", "rule", "autobiographical"}
+                and row.get("active", True)
                 and self._applies(row, project_id, conversation_id)
             ]
             if q_terms:
