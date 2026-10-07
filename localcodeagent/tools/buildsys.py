@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -139,6 +141,44 @@ def _command_for(entry: dict[str, Any], action: str) -> str | None:
     if action == "test":
         return entry["commands"].get("build")
     return None
+
+
+# Linter detection: (id, config markers, command). A linter runs only
+# when its config exists OR its binary is on PATH — no guessing.
+LINTERS: list[dict[str, Any]] = [
+    {"id": "ruff",
+     "markers": ["ruff.toml", ".ruff.toml"],
+     "binary": "ruff", "command": "ruff check ."},
+    {"id": "flake8", "markers": [".flake8", "setup.cfg", "tox.ini"],
+     "binary": "flake8", "command": "flake8 ."},
+    {"id": "pylint", "markers": [".pylintrc", "pylintrc"],
+     "binary": "pylint", "command": "pylint ."},
+    {"id": "eslint",
+     "markers": [".eslintrc", ".eslintrc.js", ".eslintrc.json",
+                 ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs"],
+     "binary": "npx", "command": "npx eslint ."},
+    {"id": "biome", "markers": ["biome.json", "biome.jsonc"],
+     "binary": "npx", "command": "npx biome check ."},
+    {"id": "dotnet-format", "markers": ["*.sln", "*.csproj"],
+     "binary": "dotnet",
+     "command": "dotnet format --verify-no-changes"},
+    {"id": "clippy", "markers": ["Cargo.toml"],
+     "binary": "cargo", "command": "cargo clippy"},
+]
+
+
+def detect_linters(root: Path) -> list[dict[str, Any]]:
+    """Linters whose config markers exist and whose binary resolves."""
+    root = Path(root)
+    found = []
+    for spec in LINTERS:
+        if not any(_marker_matches(root, m) for m in spec["markers"]):
+            continue
+        binary = spec["binary"]
+        available = shutil.which(binary) is not None
+        found.append({"id": spec["id"], "command": spec["command"],
+                      "binary": binary, "available": available})
+    return found
 
 
 def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_timeout: int = 600, extra_roots=None) -> None:
@@ -317,4 +357,151 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         lambda a: _run_action(a, "clean"),
         category="coding",
         capabilities=["build_project", "terminal_run"],
+    ))
+
+    def lint_run(args: dict[str, Any]) -> str:
+        raw = str(args.get("path", "") or "")
+        root = _resolve_root(raw)
+        if root is None:
+            return ("ERROR: path must be a directory inside a "
+                    "registered workspace")
+        linters = detect_linters(root)
+        want = str(args.get("linter", "") or "").strip().lower()
+        if want:
+            linters = [l for l in linters if l["id"] == want]
+            if not linters:
+                return (f"ERROR: linter '{want}' not detected here — "
+                        "needs a config marker and a resolvable binary")
+        usable = [l for l in linters if l["available"]]
+        if not usable:
+            names = ", ".join(l["id"] for l in linters) or "none"
+            return (f"ERROR: no runnable linter (detected configs: "
+                    f"{names}) — install the linter or add its config")
+        chosen = usable[0]
+        cmd = chosen["command"]
+        timeout = max(1, min(int(args.get("timeout_seconds", 300)), 1200))
+        started = time.time()
+        try:
+            proc = subprocess.run(
+                cmd, cwd=str(root), shell=True, capture_output=True,
+                text=True, timeout=timeout,
+                creationflags=no_window_flags())
+            payload = {"linter": chosen["id"], "command": cmd,
+                       "exit_code": proc.returncode,
+                       "stdout": (proc.stdout or "")[-MAX_OUTPUT:],
+                       "stderr": (proc.stderr or "")[-8000:],
+                       "timed_out": False}
+        except subprocess.TimeoutExpired as exc:
+            payload = {"linter": chosen["id"], "command": cmd,
+                       "exit_code": None,
+                       "stdout": (exc.stdout or "")[-MAX_OUTPUT:]
+                       if isinstance(exc.stdout, str) else "",
+                       "stderr": (exc.stderr or "")[-8000:]
+                       if isinstance(exc.stderr, str) else "",
+                       "timed_out": True}
+        payload["elapsed_seconds"] = round(time.time() - started, 3)
+        payload["detected_linters"] = [l["id"] for l in linters]
+        return json.dumps(payload, ensure_ascii=False)
+
+    def profile_run(args: dict[str, Any]) -> str:
+        """CPU-profile a workspace script — Python only for now; other
+        languages report honestly instead of faking a profile."""
+        raw = str(args.get("script", "") or "").strip()
+        if not raw:
+            return "ERROR: 'script' is required (workspace-relative path)"
+        root = _resolve_root(str(args.get("path", "") or ""))
+        if root is None:
+            return ("ERROR: path must be a directory inside a "
+                    "registered workspace")
+        cand = Path(raw)
+        script = (root / cand).resolve() if not cand.is_absolute() \
+            else cand.resolve()
+        try:
+            script.relative_to(root)
+        except ValueError:
+            return "ERROR: script must live under the target directory"
+        if not script.is_file():
+            return f"ERROR: not a file: {raw}"
+        if script.suffix != ".py":
+            return ("ERROR: profiling is implemented for Python scripts "
+                    "only (cProfile); other languages are not supported "
+                    "yet")
+        out_file = root / ".agent" / "runtime" / "profile.pstats"
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        script_args = str(args.get("args", "") or "").strip()
+        timeout = max(1, min(int(args.get("timeout_seconds", 300)), 1200))
+        cmd = (f'"{sys.executable}" -m cProfile -o '
+               f'"{out_file}" "{script}" {script_args}'.strip())
+        started = time.time()
+        try:
+            proc = subprocess.run(
+                cmd, cwd=str(root), shell=True, capture_output=True,
+                text=True, timeout=timeout,
+                creationflags=no_window_flags())
+        except subprocess.TimeoutExpired:
+            return json.dumps({"ok": False, "command": cmd,
+                               "timed_out": True}, ensure_ascii=False)
+        top_n = min(int(args.get("top", 25) or 25), 100)
+        summary_cmd = (
+            f'"{sys.executable}" -c "import pstats;'
+            f" p=pstats.Stats(r'{out_file}');"
+            f" p.sort_stats('cumulative').print_stats({top_n})" '"')
+        summ = subprocess.run(
+            summary_cmd, cwd=str(root), shell=True, capture_output=True,
+            text=True, timeout=60, creationflags=no_window_flags())
+        return json.dumps({
+            "ok": proc.returncode == 0,
+            "command": cmd,
+            "exit_code": proc.returncode,
+            "stdout": (proc.stdout or "")[-8000:],
+            "stderr": (proc.stderr or "")[-8000:],
+            "elapsed_seconds": round(time.time() - started, 3),
+            "profile_stats": str(out_file),
+            "top_functions": (summ.stdout or "")[-MAX_OUTPUT:],
+        }, ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "lint_run",
+        "Run the workspace's configured linter (ruff, flake8, pylint, "
+        "eslint, biome, dotnet format, clippy) — detected by config "
+        "markers; errors honestly when none is usable.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "linter": {"type": "string",
+                           "description": "linter id (default: first "
+                                          "detected)"},
+                "timeout_seconds": {"type": "integer", "default": 300},
+            },
+        },
+        "shell.execute",
+        lint_run,
+        category="coding",
+        capabilities=["lint_run", "run_tests"],
+    ))
+    registry.register(ToolSpec(
+        "profile_run",
+        "CPU-profile a workspace Python script with cProfile and return "
+        "the top cumulative functions. Other languages report "
+        "unsupported — no fake profiles.",
+        {
+            "type": "object",
+            "properties": {
+                "script": {"type": "string",
+                           "description": "path to the .py entry point"},
+                "path": {"type": "string",
+                         "description": "workspace dir (default: "
+                                        "primary)"},
+                "args": {"type": "string",
+                         "description": "argv for the profiled script"},
+                "top": {"type": "integer", "default": 25},
+                "timeout_seconds": {"type": "integer", "default": 300},
+            },
+            "required": ["script"],
+        },
+        "shell.execute",
+        profile_run,
+        category="coding",
+        capabilities=["profile_run", "run_tests"],
     ))

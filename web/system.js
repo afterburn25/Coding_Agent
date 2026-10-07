@@ -286,17 +286,46 @@ async function secretsApi(action,body){
   return r;
 }
 
+/* ---------- Quality ---------- */
+function renderQuality(q){
+  if(!q)return;
+  const sys=(q.systems||[]).map(s=>`${esc(s.name||s.id)}`).join(', ')||'none detected';
+  const lins=(q.linters||[]).map(l=>`${esc(l.id)}${l.available?'':' (binary missing)'}`).join(', ')||'none detected';
+  const deps=(q.dependencies||{});
+  const bench=(q.benchmarks||{});
+  $('#qualitySummary').innerHTML=
+    `<div><span class="k">Root</span>${esc(q.root||'')}</div>`+
+    `<div><span class="k">Build systems</span>${sys}</div>`+
+    `<div><span class="k">Linters</span>${lins}</div>`+
+    `<div><span class="k">Dependencies</span>${esc(deps.total??deps.count??'—')} tracked${deps.outdated?' · '+esc(deps.outdated)+' outdated':''}</div>`;
+  const rows=(bench.recent||bench.runs||bench.results||[]);
+  $('#qualityBenchmarks').innerHTML=rows.length
+    ? rows.slice(-15).reverse().map(b=>
+      `<div><span class="k">${esc(b.name||'')}</span>${esc(b.latency_ms!=null?Math.round(b.latency_ms)+'ms':'')}${b.throughput?' · '+esc(b.throughput)+'/s':''} <span class="meta">${fmtTs(b.at||b.ts)}</span></div>`).join('')
+    : '<div class="off">No benchmark results recorded.</div>';
+}
+async function qualityRun(endpoint,body,label){
+  const out=$('#qualityOut');
+  out.hidden=false;
+  out.textContent=`${label} running… (this can take a while)`;
+  try{
+    const r=await api(endpoint,'POST',body);
+    out.textContent=typeof r==='string'?r:JSON.stringify(r,null,2);
+  }catch(e){out.textContent=label+' failed: '+e.message;}
+}
+
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg,br,tr,se]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg,br,tr,se,qu]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
       api('/api/skills'),api('/api/connectors'),api('/api/jobs'),
       api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments'),
       api('/api/diagnostics'),api('/api/brain/status'),api('/api/brain/trace?limit=60'),
-      api('/api/secrets')]);
+      api('/api/secrets'),api('/api/quality')]);
     renderSecrets(se.secrets||[]);
+    renderQuality(qu);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
     renderDiagnostics(dg);renderBrain(br,tr);
     renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
@@ -432,6 +461,24 @@ $('#envDeclare').onclick=async()=>{
   if(!components.length){alert('List at least one component.');return;}
   const r=await api('/api/environment/manifest','POST',{project_id:pid,components});
   if(r.ok){renderEnvManifest(r.manifest);$('#envVerifyResult').innerHTML='';}
+};
+
+/* ---------- Quality events ---------- */
+const _qBody=()=>({path:$('#qualityPath').value.trim(),extra_args:$('#qualityExtra').value.trim()});
+$('#qTest').onclick=()=>qualityRun('/api/quality/test',_qBody(),'Tests');
+$('#qCoverage').onclick=()=>qualityRun('/api/quality/coverage',_qBody(),'Coverage');
+$('#qLint').onclick=()=>qualityRun('/api/quality/lint',_qBody(),'Lint');
+$('#qProfile').onclick=()=>{
+  const script=$('#qualityScript').value.trim();
+  if(!script){alert('Script path required.');return;}
+  qualityRun('/api/quality/profile',
+    {path:$('#qualityPath').value.trim(),script,args:$('#qualityScriptArgs').value.trim()},'Profile');
+};
+$('#qAudit').onclick=()=>qualityRun('/api/audit/run',_qBody(),'Audit');
+$('#qDeps').onclick=async()=>{
+  const out=$('#qualityOut');out.hidden=false;out.textContent='Listing dependencies…';
+  try{const r=await api('/api/audit/deps');out.textContent=JSON.stringify(r,null,2);}
+  catch(e){out.textContent='deps failed: '+e.message;}
 };
 
 /* ---------- Secrets events ---------- */

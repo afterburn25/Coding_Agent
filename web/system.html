@@ -65,6 +65,7 @@
       <a href="#secSimulate">Plan Simulation</a>
       <a href="#secEnvironment">Environment</a>
       <a href="#secSecrets">Secrets</a>
+      <a href="#secQuality">Quality</a>
     </div>
     <section class="panel" id="secHealth">
       <h2>Health</h2>
@@ -220,6 +221,29 @@
         <button id="secretSet" class="mini-button" type="button">Store</button>
       </div>
       <div id="secretsList" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secQuality">
+      <h2>Quality</h2>
+      <div id="qualitySummary" class="kv"></div>
+      <div class="row-actions">
+        <input id="qualityPath" type="text" placeholder="project dir (default: workspace root)…" />
+        <input id="qualityExtra" type="text" placeholder="extra args (optional)…" />
+      </div>
+      <div class="row-actions">
+        <button id="qTest" class="mini-button" type="button">Run tests</button>
+        <button id="qCoverage" class="mini-button" type="button">Coverage</button>
+        <button id="qLint" class="mini-button" type="button">Lint</button>
+        <button id="qAudit" class="mini-button" type="button">Project audit</button>
+        <button id="qDeps" class="mini-button" type="button">Dependencies</button>
+      </div>
+      <div class="row-actions">
+        <input id="qualityScript" type="text" placeholder="profile a .py script (path relative to dir)…" />
+        <input id="qualityScriptArgs" type="text" placeholder="script args…" />
+        <button id="qProfile" class="mini-button" type="button">Profile</button>
+      </div>
+      <pre id="qualityOut" class="quality-out" hidden></pre>
+      <div class="section-title">Benchmarks</div>
+      <div id="qualityBenchmarks" class="kv"></div>
     </section>
   </main>
 </div>

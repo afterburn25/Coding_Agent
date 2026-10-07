@@ -6830,6 +6830,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(json.loads(tool.handler(
                 {"path": str(self._audit_root())})))
             return True
+        if path == "/api/quality":
+            root = self._audit_root()
+            from .tools.buildsys import detect_build_systems, \
+                detect_linters
+            self._json({
+                "root": str(root),
+                "systems": detect_build_systems(root),
+                "linters": detect_linters(root),
+                "benchmarks": self.state.benchmarks.summary(),
+                "dependencies": self.state.dependencies.summary()})
+            return True
         if path == "/api/eval/history":
             self._json({"runs": self.state.eval_lab.history(
                 suite=(q.get("suite") or [""])[0],
@@ -6851,6 +6862,34 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             self._json(json.loads(tool.handler(
                 {"path": str(self._audit_root())})))
+            return True
+        if path.startswith("/api/quality/"):
+            # Quality actions delegate to the tool handlers — the HTTP
+            # lane is the trusted local UI, same as /api/audit/run.
+            action = path[len("/api/quality/"):]
+            tool_name = {"test": "run_tests", "coverage": "coverage_report",
+                         "lint": "lint_run", "profile": "profile_run"
+                         }.get(action)
+            if tool_name is None:
+                self._json({"error": "unknown quality action"}, 404)
+                return True
+            tool = self.state.tools.get(tool_name)
+            if tool is None:
+                self._json({"error": f"{tool_name} unavailable"}, 503)
+                return True
+            args = {"path": str(body.get("path") or self._audit_root()),
+                    "system": str(body.get("system") or "auto"),
+                    "extra_args": str(body.get("extra_args") or "")}
+            if action == "profile":
+                args = {"script": str(body.get("script") or ""),
+                        "path": str(body.get("path")
+                                    or self._audit_root()),
+                        "args": str(body.get("args") or "")}
+            out = tool.handler(args)
+            try:
+                self._json(json.loads(out))
+            except (ValueError, TypeError):
+                self._json({"output": out})
             return True
         if path == "/api/backups/create":
             self._json(self.state.backups.create(
