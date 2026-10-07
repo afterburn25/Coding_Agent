@@ -170,11 +170,18 @@ class ConversationQaRunner:
         for index, turn in enumerate(scenario.turns):
             cid = turn.conversation_id or scenario.default_conversation_id
             self._activate(cid)
+            # Mirror the server lane: agent.run(history=...) carries the
+            # active conversation's transcript so follow-ups can resolve.
+            try:
+                hist = (self.conversation_manager.history(limit=32)
+                        if self.conversation_manager is not None else [])
+            except Exception:
+                hist = []
             started = time.perf_counter()
             failure: list[str] = []
             result = None
             try:
-                result = self.agent.run(turn.text)
+                result = self.agent.run(turn.text, history=hist)
             except Exception as exc:  # noqa: BLE001 - failures are the signal
                 failure.append(f"unexpected_error: {exc!r}")
             elapsed = (time.perf_counter() - started) * 1000.0
@@ -504,6 +511,10 @@ def generate_hard_scenarios(
                    conversation_id="s4"),
             QaTurn("go back to what we were talking about",
                    conversation_id="s4", expect={
+                       # The model must see the interrupted topic in the
+                       # transcript — a return-without-history is the
+                       # failure this pattern exists to catch.
+                       "context_contains": "photosynthesis",
                        "task_status": "completed",
                    }),
         ], seed=seed))
