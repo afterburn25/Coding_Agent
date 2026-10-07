@@ -139,10 +139,10 @@ messages.
 | Requirement | Status | Evidence |
 |---|---|---|
 | Brain closure audit (export/sign/update/stale/foreign/model-replacement continuity/backup-restore/audit/paraphrase/plan-eval-learn/multi-hour) | LANDED | `export_creator_key_backup`/`restore_creator_key_backup` + `/api/nexus-brain/key-backup|key-restore` + trainer UI + TEST ×18; project.json `next_security_upgrade` corrected; multi-hour unattended dogfood pending |
-| MCP live validation + code-intel dogfood | PARTIAL | `mcp.py` stdio+HTTP clients + `ec55090` "validated/pinned code-intelligence dependencies + MCP interop record"; live real-MCP-server dogfood not recorded |
+| MCP live validation + code-intel dogfood | LANDED_VERIFIED | `mcp.py` stdio+HTTP clients; LIVE 2026-10-07: real `@modelcontextprotocol/server-filesystem` via stdio — connect, 14 tools imported (`mcp__filesystem__*`), `list_directory`/`read_text_file` returned real data. Note: npx.cmd shim mangles `D:\n...` launch args (upstream, reproduced via raw Popen — not the client) |
 | UI cohesion pass on every page | PARTIAL | `b600e60b4` sweep found+fixed 3 defects; systematic all-page polish pending Phase 18 work |
 | Version/release metadata agreement | LANDED_VERIFIED | VERSION 0.27.0 (released, tag `v0.27.0`); `sync_version.py --check` passes; all derived surfaces (project.json, csproj, .iss, pyproject, backend_version.txt) agree |
-| Long-run soak (hours; mixed workload) | PARTIAL | `scripts/mission_soak.py` + `scripts/selftest` soak tier + nightly CI workflow; multi-hour run not yet completed |
+| Long-run soak (hours; mixed workload) | PARTIAL | `scripts/mission_soak.py` + `scripts/selftest` soak tier + nightly CI workflow; **bounded run 2026-10-07**: kill-mid-mission → restart → mission resumes → approvals re-granted; multi-hour run still open |
 
 ## Live incident — packaged LKG rollback (2026-10-05, resolved)
 
@@ -210,4 +210,4 @@ the record of what drifted and how it was resolved.
 9. ~~Per-page browser E2E + bounded visual regression.~~ **DONE** (b7744ef7 — 18 pages, Edge, baselines)
 10. ~~Autonomous Git/PR/CI closure loop wiring + dogfood.~~ **DONE** (7b03f77a wiring + live `ci failure` event dogfood)
 11. Brain backup/restore — **DONE** (already landed; metadata fixed); MCP/code-intel live dogfood still open.
-12. **Remaining gate:** clean-install dogfood + long mixed soak + fault-injection matrix + CI green on head. LKG version floor + coherence now landed.
+12. **Gate status 2026-10-07:** clean-install dogfood **DONE** — real `NexusCore-Setup-0.27.0` artifact, checksum-verified, silent-installed to `D:\Nexus_Core_Fresh`, backend booted, `/api/health`+`/api/status` served v0.27.0 on real GPU hardware, `--self-test` passed, uninstalled clean. **Found+fixed a real defect**: `/VERYSILENT` uninstall hung on the unguarded `AskUninstallScope` modal (`UninstallSilent()` guard added). CI green on `213b97ca` (test + windows-desktop incl. installer compile + fresh-install/update smoke). Bounded soak in flight (kill→restart→resume verified). Still open: multi-hour mixed soak, live fault matrix (network cut/Defender lock/disk shortage — crash/kill/resume already exercised).
