@@ -522,14 +522,27 @@ class ConversationMemory:
                         body, flags=re.IGNORECASE,
                     )
                     nyc = re.match(
-                        r"^(?:actually[,]?\s+|no[,]?\s+)?(?:it|that|this)\s+"
+                        r"^(?:actually[,]?\s+|no[,]?\s+)?"
+                        r"(it|that|this|the\s+[a-z0-9][a-z0-9 ._-]{0,34}?|"
+                        r"[a-z0-9][a-z0-9 ._-]{0,34}?)\s+"
                         r"(?:is|was)\s+(.+?)\s+not\s+(.+?)[.!?]?$",
                         body, flags=re.IGNORECASE,
                     )
                     if nyc:
-                        new_v = self._clean_value(nyc.group(1))
-                        old_v = self._clean_value(nyc.group(2))
+                        subj_txt = self._clean_subject(nyc.group(1))
+                        new_v = self._clean_value(nyc.group(2))
+                        old_v = self._clean_value(nyc.group(3))
                         fact = self._correct_fact_value(old_v, new_v)
+                        if (
+                            fact is None
+                            and subj_txt
+                            and subj_txt.casefold() not in {"it", "that", "this"}
+                            and self._fact_subject_ok(subj_txt)
+                        ):
+                            # "actually the port was 5433 not 8080" names
+                            # its subject — the corrected statement can be
+                            # learned even when no old-value fact exists.
+                            fact = f"{subj_txt} is {new_v}"
                     elif corr:
                         inner = corr.group(1).strip()
                         inner_nyc = re.match(
@@ -666,7 +679,11 @@ class ConversationMemory:
                     # prohibition ("stop responding in JSON" with no prior
                     # mandate means "never do that").
                     rule = f"Never {action.strip()}"
-                    if not locked_topic(rule) and self._append_unique(
+                    topic = locked_topic(rule)
+                    if topic:
+                        result.setdefault("locked", []).append(
+                            locked_refusal(topic))
+                    elif self._append_unique(
                             "behavior_rules", rule, self.rule_limit,
                             scope=scope, scope_id=scope_id):
                         result["behavior_rules"].append(rule)

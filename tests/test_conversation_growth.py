@@ -843,6 +843,39 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "42", memory.prompt_context(
                     query="ticket id", conversation_id="conv2"))
 
+    def test_subject_named_corrections_and_locked_guards(self):
+        """'actually the port was X not Y' corrects (or learns) the named
+        subject; locked identity topics refuse through every new path."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the port is 8080")
+            learned = memory.learn_from_user(
+                "actually the port was 5433 not 8080")
+            self.assertEqual(learned["facts"], ["port is 5433"])
+            rows = memory.snapshot()["facts"]
+            self.assertFalse(
+                [r for r in rows if r["text"] == "port is 8080"][0]["active"])
+
+            # Subject-named correction with no old-value fact still learns.
+            learned = memory.learn_from_user(
+                "actually the retries budget was 3 not 5")
+            self.assertEqual(learned["facts"],
+                             ["retries budget is 3"])
+
+            for locked_text in (
+                "actually your birthday was June 5 not June 6",
+                "stop celebrating your birthday",
+            ):
+                out = memory.learn_from_user(locked_text)
+                self.assertTrue(out["locked"], locked_text)
+                self.assertEqual(out["facts"], [])
+                self.assertEqual(out["behavior_rules"], [])
+
+            # Conversational negations must not parse as corrections.
+            self.assertEqual(
+                memory.learn_from_user("this is really not a test")["facts"],
+                [])
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")
