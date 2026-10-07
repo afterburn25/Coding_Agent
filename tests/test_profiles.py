@@ -792,6 +792,8 @@ class TestVoiceDelivery(unittest.TestCase):
             emitted_count = 0
             def flush(self):
                 return ["hello there, this is a test"]
+            def pop_emit_spans(self):
+                return [0]
 
         vm._streamers["t"] = _Streamer()
         vm.finish_task("t", delivery={"pace": 1.2, "register": "formal"})

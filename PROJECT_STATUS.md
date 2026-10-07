@@ -1,8 +1,24 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.2 is the current release — **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.29.0 is the current release — **Performance & resource convergence**: WorkerLeakTracker wired into managed image backends, direction-aware baseline regression gates attached to every BenchmarkLab run, a unified PerfTrace timeline (`/api/perf/timeline`) riding the event bus, recursive file_changed watches, a q4_0 KV-cache tuner candidate, and `/api/storage/audit` for JSON-persistence classification. v0.28.2 was **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.28.2 — soak-hardening patch
+## Active version: 0.29.0 — performance & resource convergence
+
+- **Worker leak tracking** — `WorkerLeakTracker` (RAM/VRAM
+  before/peak/after + residual, repeat-leaker suspects) on
+  `RuntimeManager.leaks`, consumed by managed ComfyUI/InvokeAI.
+- **Regression gates** — `BaselineStore.check` is direction-aware;
+  `BenchmarkLab` attaches the verdict to every recorded run.
+- **Unified perf timeline** — `PerfTrace` lanes (startup/chat/voice/gpu)
+  ride the `EventBus` via a new observer hook; `/api/perf/timeline`.
+- **Recursive watches** — `file_changed` triggers see nested edits
+  (bounded tree scan, noise-dir skip).
+- **KV benchmarking** — `q4_0/q4_0` cache-type candidate added to the
+  tuner sweep beside `q8_0/q8_0`.
+- **Storage audit** — `audit_storage` + `/api/storage/audit` classify
+  JSON persistence (sqlite_candidate / watch / bounded_ok).
+
+### 0.28.2 — soak-hardening patch
 
 - **Concurrent environment probes** — `EnvironmentStore.detect` runs
   its independent subprocess probes on a 4-worker pool instead of

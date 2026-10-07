@@ -2,6 +2,34 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.29.0 — performance/resource convergence (§15-23)
+
+The perf/resource backlog items are now wired end-to-end on top of the
+already-landed machinery (demand eviction, idle unload, crash
+signatures, BenchmarkLab/BaselineStore):
+
+- `localcodeagent/workers/leaks.py` — `WorkerLeakTracker`: per-worker
+  RAM/VRAM before/peak/after + residual ledger; `leak_suspects()` flags
+  repeat-leakers. Owned by `RuntimeManager` (`self.leaks`), consumed by
+  managed ComfyUI/InvokeAI via a `leak_tracker` kwarg.
+- `localcodeagent/perftrace.py` — `PerfTrace`: bounded lanes
+  (startup/chat/voice/gpu) fed by `EventBus.observe`; residency events
+  mark the gpu lane at `_residency_activity`. `/api/perf/timeline`.
+- `localcodeagent/storage_audit.py` — `audit_storage` classifies JSON
+  persistence (sqlite_candidate/watch/bounded_ok);
+  `/api/storage/audit`.
+- `BaselineStore.check(metric, value, direction="higher"|"lower")` —
+  throughput drops now flag; `BenchmarkLab` attaches the check to each
+  run before recording the sample.
+- `TriggerStore._tree_mtime` — recursive bounded dir watch (5000 files,
+  depth 8, noise-dir skip) so nested project edits fire `file_changed`.
+- Tuner sweep adds a `q4_0/q4_0` KV candidate next to `q8_0/q8_0`.
+
+Already landed, do not duplicate: interactive-lane QoS yield in the
+supervisor, `release_managed_models_for_vram`, crash signatures +
+bounded restarts, idle/demand eviction, KV q8 candidate, SQLite-backed
+heavy stores (answer_memory, rag, hippocampus, knowledge).
+
 ## 2026-10-07 — v0.28.1: action-turn reliability patch
 
 Post-release dogfood exposed and fixed a real broken path: action
