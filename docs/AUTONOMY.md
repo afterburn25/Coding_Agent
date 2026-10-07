@@ -326,6 +326,31 @@ stack trace — the localizer suffix-matches CI-runner paths
 (`/home/runner/work/<repo>/<repo>/…`) onto repo files so CI tracebacks
 localize like local ones.
 
+## The Git→PR→CI closure loop
+
+End-to-end change flow, fully wired:
+
+1. **Write** — a mission or chat turn edits files in the workspace (or a
+   `.repair-worktrees` worktree for self-repair).
+2. **Branch/commit/push** — `git_create_branch` / `git_commit` /
+   `git_push` (journal records every step; `git_push` and `create_pr`
+   are `github.write`-gated).
+3. **PR** — `github_create_pull_request` opens the PR and publishes a
+   `pull_request` bus event.
+4. **CI observe** — `github_ci_status` / `github_actions_run` publish
+   deduped `ci` bus events when a run reaches a terminal conclusion
+   (each `(run, conclusion)` fires at most once).
+5. **React** — `handle_bus_event` maps those onto the `ci_completed`,
+   `ci_failed` and `pull_request_updated` trigger signals. A `ci_failed`
+   trigger can spawn a repair mission (diagnose → patch → push again);
+   `ci_completed` can close the loop (merge or notify). Triggers carry
+   conditions (`repo`, `branch`) and debounce, so the loop is bounded
+   and per-repo configurable.
+
+The loop is opt-in: triggers are user-visible rows in
+`data/autonomy/triggers.json`, gated by `github.write` permission like
+every push/PR action. Nothing merges or pushes silently.
+
 ## Priority scheduling & fairness
 
 - `MissionStore.list()` orders by priority rank
