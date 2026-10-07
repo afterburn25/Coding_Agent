@@ -2,6 +2,66 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-06 — v0.26.0 (branch): Chatterbox Turbo voice engine integrated
+
+**State.** `feature/chatterbox-voice-engine` holds 4 commits
+(`556e0816` engine+runtime, `ea99b948` integration, `fc5c1423`
+provisioning+UI+tests, `d01879da` release 0.26.0). **Not yet pushed /
+not on `main`** — push, CI, and a production installer build are the
+next gate. Full suite: **2417 passed** locally; voice suite 104/104.
+
+**Architecture.** Second registered `TTSEngine`. `ChatterboxEngine`
+(`voice/chatterbox.py`) spawns `voice/chatterbox_worker.py` inside the
+isolated runtime `runtime/voice/chatterbox` (CPython 3.12 + torch
+2.6.0+CU124 + chatterbox-tts 0.1.7, ~4.5 GB) — JSONL over stdin/stdout,
+stderr isolated, defensive non-JSON line skip (the lib *does* print
+noise to stdout). Backend stays Python 3.14 and torch-free. GPU policy:
+`auto` → CUDA only with ≥3.2 GB free VRAM (`voice_chatterbox_*
+config`). Live-verified: 8.5s cold load, 2.8 GB VRAM, RTF 0.30–0.35 on
+the 3080 Ti.
+
+**Voice.** Canonical reference = approved
+`isabella-nexus-v6-enhanced-synthetic.mp3` (sha256
+`7a70916…` verified against the manifest), packaged at
+`voice/chatterbox_voices/isabella/` + official preset
+`nexus-isabella-chatterbox`. User voices in
+`models/voice/chatterbox/voices/` merge + shadow official. `reference.py`
+validates refs (>5s, clip/silence/format). Turbo conds are global —
+worker re-prepares on voice switch.
+
+**Loudness.** Root cause of quiet output: turbo reference conditioning
+≈ −27 LUFS; the chain only peak-limited. New `voice/loudness.py` (pure
+NumPy BS.1770, within 0.5 LU of pyloudnorm) normalizes to −17 LUFS
+between output gain and the −1 dBFS limiter. Opt-in per preset;
+config `voice_normalize_loudness`/`voice_target_lufs`/
+`voice_limiter_enabled` apply as preset overrides so `dsp.process`
+keeps its signature. Measured: −26.8 → −17.0 LUFS, peaks ≤0.89.
+
+**Emotion/gestures.** `ChatterboxVocalizationAdapter` maps existing
+planner styles → native turbo tags; tokenizer probe reports dedicated-
+token tags (all 19 known tags confirmed live). Voice Lab in Voice
+Studio auditions only confirmed tags + has a cold-start probe button.
+Adapter follows the active preset's engine (`_sync_adapter`).
+
+**Safety.** Chatterbox failure → Kokoro fallback in `_synthesize`,
+cached under a *separate* engine key. StartupNarrator cache salted with
+backend-published `data/voice/startup/engine.json` sig (fault/recovery
+keep legacy fallback). `HF_HUB_OFFLINE=1` in the worker env.
+
+**Provisioning.** Two verified items: `chatterbox-runtime` (pinned
+python-build-standalone CPython 3.12.15, sha256) + `chatterbox-model`
+(9 files, sha256, idempotent). `chatterbox_voices` ships via
+`--add-data` in `packaging/build_windows.ps1`.
+
+**Samples.** `samples/chatterbox-isabella/` (gitignored): 5 required
+phrases + 10 emotion/gesture auditions, all through the real
+manager→DSP→cache path. Whisper-verified: no literal tag leakage.
+
+**Gotchas.** stdlib `wave` can't read float WAVs — worker saves PCM_S.
+`sys.path` script-dir shadowing breaks stdlib `types` — worker scrubs
+it + spawned with `-P`. `exaggeration`/`cfg`/`min_p` are ignored by
+turbo (`emotion_adv=False`) — emotion control is tags + temperature.
+
 ## 2026-10-06 — v0.25.3: voice trailing-syllable fix, deployed + verified
 
 **Shipped.** `93d28414` → pushed, tagged `v0.25.3`, GitHub Release live,
