@@ -1013,6 +1013,14 @@ class AppState:
         except Exception:
             pass
         try:
+            # A clean exit proves this build — ratchet the LKG rollback
+            # floor so stale older snapshots can never be restored.
+            lkg = getattr(self, "lkg", None)
+            if lkg is not None:
+                lkg.mark_proven(VERSION)
+        except Exception:
+            pass
+        try:
             self._shutdown.set()
         except Exception:
             pass

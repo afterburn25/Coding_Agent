@@ -89,6 +89,57 @@ class LkgTests(unittest.TestCase):
             self.assertEqual(flag["version"], "0.20.0")
             self.assertIsNone(lkg.consume_update())
 
+    def test_version_floor_refuses_stale_snapshot(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            lkg = self._store(td, app)
+            old = lkg.snapshot()["name"]
+            self.assertEqual(lkg.floor(), "0.19.0")
+            # Install a newer build that proves itself — the floor
+            # ratchets and the older snapshot becomes unrestorable.
+            (app / "VERSION").write_text("0.20.0\n")
+            new = lkg.snapshot()["name"]
+            self.assertEqual(lkg.floor(), "0.20.0")
+            for fn in (lkg.request_rollback, lkg.apply_rollback):
+                out = fn(old)
+                self.assertFalse(out["ok"], out)
+                self.assertIn("floor", out["reason"])
+            # The current-version snapshot stays restorable.
+            self.assertTrue(lkg.request_rollback(new)["ok"])
+            lkg.consume_rollback()
+            # Floor surfaces in status/listing for diagnostics.
+            st = lkg.status()
+            self.assertEqual(st["floor"], "0.20.0")
+            flags = {s["name"]: s["below_floor"] for s in st["snapshots"]}
+            self.assertTrue(flags[old])
+            self.assertFalse(flags[new])
+
+    def test_mark_proven_only_ratchets_up(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            lkg = self._store(td, app)
+            lkg.mark_proven("0.19.0")
+            lkg.mark_proven("0.18.5")
+            self.assertEqual(lkg.floor(), "0.19.0")
+            lkg.mark_proven("0.20.0")
+            self.assertEqual(lkg.floor(), "0.20.0")
+            lkg.mark_proven("garbage")
+            self.assertEqual(lkg.floor(), "0.20.0")
+
+    def test_verify_detects_incoherent_versions(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            lkg = self._store(td, app)
+            name = lkg.snapshot()["name"]
+            snap = lkg.root / name
+            # A mixed-version bundle (the avatar/voice incident shape)
+            # must never verify.
+            (snap / "backend" / "_internal" / "VERSION").write_text("9.9.9")
+            v = lkg.verify(name)
+            self.assertFalse(v["ok"])
+            self.assertIn("coherence", v["reason"])
+            self.assertFalse(lkg.request_rollback(name)["ok"])
+
     def test_prunes_to_three_snapshots(self):
         with tempfile.TemporaryDirectory() as td:
             app = _app(Path(td))

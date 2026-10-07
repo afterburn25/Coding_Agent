@@ -1822,10 +1822,51 @@ internal sealed class BackendProcess : IDisposable
                         || (File.Exists(snapExe)
                             && string.Equals(Sha256File(snapExe), wantSha,
                                              StringComparison.OrdinalIgnoreCase));
+                    // Version floor — floor.txt records the newest
+                    // proven-good build at this install. A snapshot
+                    // older than that is stale junk, not a safety net:
+                    // restoring it regresses the install.
+                    var floorRefused = false;
+                    var coherenceBad = false;
+                    if (verified)
+                    {
+                        var snapVersion = ReadTextOr(
+                            Path.Combine(snap, "VERSION")).Trim();
+                        var bundledVersion = ReadTextOr(Path.Combine(
+                            snapBackend, "_internal", "VERSION")).Trim();
+                        var manifestVersion = "";
+                        try
+                        {
+                            using var md = JsonDocument.Parse(
+                                File.ReadAllText(Path.Combine(snap, "manifest.json")));
+                            manifestVersion = md.RootElement.TryGetProperty("version", out var mv)
+                                ? mv.GetString() ?? "" : "";
+                        }
+                        catch { manifestVersion = ""; }
+                        var seen = new HashSet<string>(StringComparer.Ordinal);
+                        foreach (var v in new[] { snapVersion, bundledVersion, manifestVersion })
+                            if (v.Length > 0) seen.Add(v);
+                        coherenceBad = seen.Count > 1;
+                        var floor = ReadTextOr(
+                            Path.Combine(lkgDir, "floor.txt")).Trim();
+                        floorRefused = Version.TryParse(snapVersion, out var sv)
+                            && Version.TryParse(floor, out var fv)
+                            && sv < fv;
+                    }
                     if (!verified)
                     {
                         AppendHostLog(logPath,
                             $"LKG rollback refused — snapshot '{name}' failed exe hash verification");
+                    }
+                    else if (coherenceBad)
+                    {
+                        AppendHostLog(logPath,
+                            $"LKG rollback refused — snapshot '{name}' has mixed VERSION metadata");
+                    }
+                    else if (floorRefused)
+                    {
+                        AppendHostLog(logPath,
+                            $"LKG rollback refused — snapshot '{name}' is below the proven-build floor");
                     }
                     else if (Directory.Exists(snapBackend))
                     {
@@ -1894,6 +1935,12 @@ internal sealed class BackendProcess : IDisposable
             // LKG handling must never block the normal launch path.
             AppendHostLog(logPath, $"LKG flag handling failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private static string ReadTextOr(string path)
+    {
+        try { return File.ReadAllText(path); }
+        catch { return ""; }
     }
 
     private static string Sha256File(string path)
