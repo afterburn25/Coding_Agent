@@ -683,6 +683,34 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(memory2.snapshot()["facts"][0]["text"],
                              "Atlas uses Redis")
 
+    def test_decision_statements_capture_and_supersede(self):
+        """§3/§8 — 'we decided to use X for Y' and kin must land in the
+        same supersession slot so a revised decision retires the old."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("we decided to use SQLite for the store")
+            memory.learn_from_user("the plan is Postgres for production")
+            memory.learn_from_user("we settled on Rust for the agent")
+            memory.learn_from_user("we agreed the API should stay REST")
+            texts = [r["text"] for r in memory.snapshot()["facts"]]
+            self.assertIn("store uses SQLite", texts)
+            self.assertIn("production uses Postgres", texts)
+            self.assertIn("agent uses Rust", texts)
+            self.assertIn("API should stay REST", texts)
+
+            # A revised decision retires the earlier one.
+            memory.learn_from_user("we decided to use MySQL for the store")
+            active = [r["text"] for r in memory.snapshot()["facts"]
+                      if r["active"]]
+            self.assertIn("store uses MySQL", active)
+            self.assertNotIn("store uses SQLite", active)
+
+            # Action decisions and option refs are not facts.
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            for noise in ("we decided to refactor the auth module",
+                          "let us go with option B for the parser"):
+                self.assertEqual(memory2.learn_from_user(noise)["facts"], [])
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")

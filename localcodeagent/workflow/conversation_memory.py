@@ -215,7 +215,8 @@ class ConversationMemory:
             return "my:" + re.sub(r"\s+", " ", m.group(1)).strip()
         m = re.match(
             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-            r"(uses?|runs on|is built on|is written in|depends on|prefers?)\b",
+            r"(uses?|runs on|is built on|is written in|depends on|prefers?|"
+            r"should stay|should be|must be|will be|shall be|stays?|remains?)\b",
             t,
         )
         if m:
@@ -477,7 +478,52 @@ class ConversationMemory:
                     value = self._clean_value(switch.group(2))
                     if self._fact_subject_ok(subj) and value:
                         fact = f"{subj} uses {value}"
-                else:
+                elif fact is None:
+                    # Decision statements — "we decided to use SQLite for
+                    # the store", "the plan is Postgres for production",
+                    # "let's go with Redis". Canonicalize to
+                    # "subject uses value" so a revised decision retires
+                    # the earlier one in the same slot.
+                    dec = re.match(
+                        r"^(?:we\s+(?:decided|chose|settled|opted|picked|went)|"
+                        r"(?:let'?s|let\s+us)\s+(?:go|decide|settle|opt)|"
+                        r"the\s+plan\s+is)\s*"
+                        r"(?:to\s+use|to\s+go\s+with|on|with|for)?\s*"
+                        r"([a-z0-9][a-z0-9 ._+/#-]{0,38}?)"
+                        r"(?:\s+(?:for|as|in|on)\s+(?:the\s+|our\s+|a\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,38}?))?[.!?]?$",
+                        body, flags=re.IGNORECASE,
+                    )
+                    if dec:
+                        value = self._clean_value(dec.group(1))
+                        subj = self._clean_subject(dec.group(2) or "")
+                        if not subj:
+                            subj = "this project"
+                        # "decided to refactor X" is an action decision,
+                        # not a tool/choice statement — skip it rather
+                        # than canonicalize garbage.
+                        if (value and self._fact_subject_ok(subj)
+                                and not re.match(
+                                    r"^(?:option|to|the|that|a|an|we|it|i)\b",
+                                    value, flags=re.IGNORECASE)):
+                            fact = f"{subj} uses {value}"
+                    if fact is None:
+                        # "we agreed (that) the API should stay REST"
+                        agreed = re.match(
+                            r"^we\s+agreed\s+(?:that\s+)?"
+                            r"(?:the\s+|our\s+)?"
+                            r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"(should|must|will|shall)\s+"
+                            r"(stay|be|remain|keep|use|have)\s+(.+)$",
+                            body, flags=re.IGNORECASE,
+                        )
+                        if agreed:
+                            subj = self._clean_subject(agreed.group(1))
+                            value = self._clean_value(agreed.group(4))
+                            if self._fact_subject_ok(subj) and value:
+                                fact = (f"{subj} {agreed.group(2).lower()} "
+                                        f"{agreed.group(3).lower()} {value}")
+                if fact is None:
                     # Subject-led update: "Orion moved to Redis",
                     # "Orion migrated off Postgres to Redis".
                     subj_switch = re.match(
