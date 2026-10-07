@@ -199,7 +199,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
         dst = _resolve(dst_raw, ws, extra_roots)
         return _mk("write", "write_file", "filesystem.write",
                    f"write to {dst_raw}", {"path": dst},
-                   {"content": content})
+                   {"content": content,
+                    "expected_size": len(content.encode("utf-8"))})
 
     # rename / move / copy — two-path forms first (they're unambiguous).
     for rx, kind, tool in ((_RENAME_RE, "rename", "fs_move"),
@@ -299,7 +300,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
                 clarify="What file should I create?",
                 action_text="create file")
         path = _resolve(raw, ws, extra_roots)
-        params = {"content": content}
+        params = {"content": content,
+                  "expected_size": len(content.encode("utf-8"))}
         return _mk("write", "write_file", "filesystem.write",
                    f"create file {raw}", {"path": path}, params)
 
