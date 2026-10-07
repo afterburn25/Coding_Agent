@@ -6,14 +6,15 @@ const api=(p,body)=>fetch(p,body===undefined?{}:{method:'POST',headers:{'Content
 const ago=ts=>{const s=Math.max(0,Date.now()/1000-Number(ts||0));if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago';};
 
 async function refresh(){
-  const [status,workers,missions,queue,lkg,update,servers,caps,activity,safemode,prov]=await Promise.all([
+  const [status,workers,missions,queue,lkg,update,servers,caps,activity,safemode,prov,ledger]=await Promise.all([
     api('/api/status').catch(()=>({})),api('/api/workers').catch(()=>({})),
     api('/api/missions').catch(()=>({})),api('/api/queue').catch(()=>({})),
     api('/api/lkg').catch(()=>({})),api('/api/update/status').catch(()=>({})),
     api('/api/devservers').catch(()=>({})),api('/api/capability-states').catch(()=>({})),
     api('/api/activity?recent=30').catch(()=>({})),
     api('/api/safemode').catch(()=>({})),
-    api('/api/provisioning').catch(()=>({}))]);
+    api('/api/provisioning').catch(()=>({})),
+    api('/api/action-ledger?recent=25').catch(()=>({}))]);
   const sm=safemode||{};
   const voice=(window.NexusVoice?.status)||{};
   $('#ccHeader').innerHTML=
@@ -115,6 +116,18 @@ async function refresh(){
     `${esc(a.title||a.category||'')}`+
     `<small> · ${esc(a.category||'')}${a.mission_id?' · mission':''} · ${ago(a.started_at)}</small></div>`).join('')
     ||'<div class="hist-row">no activity yet</div>';
+
+  // action evidence — the durable record behind every action claim;
+  // a reply is only truthful when a 'verified' row exists here
+  const badge=st=>st==='verified'?'cc-ok':(st==='awaiting_approval'||st==='recorded')?'cc-warn':'cc-bad';
+  $('#ccEvidence').innerHTML=(ledger.entries||[]).map(e=>
+    `<div class="hist-row"><span class="cc-badge ${badge(e.status)}">${esc(e.status||'')}</span> `+
+    `${esc(e.action||e.kind||'')}`+
+    `<small> · ${esc(e.kind||'')}${e.tool?' · '+esc(e.tool):''}`+
+    `${e.artifact?' → '+esc(e.artifact):''}`+
+    `${e.failure?' · '+esc(e.failure):''}`+
+    `${e.mission_id?' · mission':''} · ${ago(e.finished_at||e.created_at)}</small></div>`).join('')
+    ||'<div class="hist-row">no recorded actions yet</div>';
 }
 
 $('#ccRefresh').addEventListener('click',refresh);
