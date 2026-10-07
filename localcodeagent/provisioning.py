@@ -364,6 +364,7 @@ class ProvisioningManager:
         for it in self._items.values():
             if it.state != "completed":
                 continue
+            _pt = time.monotonic()
             if it.kind == "tool":
                 # Re-run the manifest's own detection — a plan that says
                 # "completed/verified" while the payload is gone requeues
@@ -393,7 +394,8 @@ class ProvisioningManager:
                 try:
                     from .voice.chatterbox_runtime import runtime_status
                     if not runtime_status(
-                            self._chatterbox_runtime_dir())["verified"]:
+                            self._chatterbox_runtime_dir(),
+                            deep=False)["verified"]:
                         it.state, it.verified = "waiting", False
                         it.detail = "runtime missing — requeued"
                 except Exception:
@@ -440,6 +442,10 @@ class ProvisioningManager:
                         it.detail = "components missing — requeued"
                 except Exception:
                     pass
+            _pms = (time.monotonic() - _pt) * 1000
+            if _pms > 100:
+                print(f"[nexus-init] inventory/{it.id} {_pms:.0f}ms",
+                      flush=True)
 
     def _invalidate_invokeai_discovery(self) -> None:
         """Drop the runtime's 60s discovery cache after install/repair so
@@ -803,7 +809,9 @@ class ProvisioningManager:
         ensure_runtime(self._chatterbox_runtime_dir(), progress=_progress)
         self._set(it, "verifying", detail="verifying chatterbox runtime")
         from .voice.chatterbox_runtime import runtime_status
-        st = runtime_status(self._chatterbox_runtime_dir())
+        # Deep import already ran inside ensure_runtime before the marker
+        # was written — a shallow re-check is enough here.
+        st = runtime_status(self._chatterbox_runtime_dir(), deep=False)
         if not st["verified"]:
             raise RuntimeError(
                 f"chatterbox runtime failed verification: {st['detail']}")

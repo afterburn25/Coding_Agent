@@ -157,13 +157,20 @@ class ToolRegistry:
             if cap in {str(c).lower() for c in spec.capabilities}
         )
 
-    def refresh_install_status(self) -> dict[str, str]:
-        """Re-scan manifest tools for executable presence (post-install/update)."""
+    def refresh_install_status(self, name: str | None = None) -> dict[str, str]:
+        """Re-scan manifest tools for executable presence (post-install/update).
+        `name` scopes the rescan to one manifest — callers verifying a
+        single tool must not re-probe every manifest on the registry."""
         changed: dict[str, str] = {}
         from .plugins import PluginManifest
-        for name, meta in self._plugin_meta.items():
+        if name is not None:
+            metas = {name: self._plugin_meta[name]} \
+                if name in self._plugin_meta else {}
+        else:
+            metas = self._plugin_meta
+        for mname, meta in metas.items():
             manifest_path = meta.get("manifest_path")
-            spec = self._tools.get(name)
+            spec = self._tools.get(mname)
             if not manifest_path or spec is None:
                 continue
             try:
@@ -173,7 +180,7 @@ class ToolRegistry:
             new_status = "installed" if manifest.is_installed(self.install_root) else "missing"
             if spec.install_status != new_status:
                 spec.install_status = new_status
-                changed[name] = new_status
+                changed[mname] = new_status
         return changed
 
     def is_enabled(self, name: str) -> bool:

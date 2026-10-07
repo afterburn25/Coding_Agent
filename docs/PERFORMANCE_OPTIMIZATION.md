@@ -67,6 +67,40 @@ Baseline and measurement method: `docs/PERFORMANCE_BASELINE.md`
   on-demand (`/api/image/backend/*` confirmed: nothing on :8188 at idle)
   and idle-evict at 900 s.
 
+### Startup (second pass — measured with `[nexus-init]` step timers)
+Boot showed a **9.4 s gap** between the 94% and 98% markers, all inside
+`AppState.__init__`'s tail. Step timing pinned it to
+`_start_provisioning` — `ProvisioningManager.__init__` → `_inventory()`
+re-verified every completed item **synchronously, before the socket
+bound**:
+
+- `chatterbox_runtime` → `runtime_status` spawned the embedded Python
+  and **imported torch+chatterbox** (~5 s)
+- `tool` items → `self._tool_installed` called
+  `tools.refresh_install_status()` — a **full-registry** manifest probe
+  (shutil.which + install-root dir scans) once **per item**
+- `chatterbox_model` → `model_ready` **sha256'd ~3.3 GB of weights**
+- `voice-assets` → `asset_status` hashed ~400 MB of ONNX assets
+
+Fixes (all measured, semantics preserved):
+- `runtime_status(..., deep=False)` — marker + `python.exe` +
+  site-packages dirs; the deep import probe still runs inside
+  `ensure_runtime` before the marker is written and stays the default
+  for explicit verification callers.
+- `refresh_install_status(name)` — scoped single-manifest refresh;
+  `_tool_installed` probes only its own manifest.
+- `verified` caches (`.nexus-model-verified.json`,
+  `.nexus-assets-verified.json`) — a file whose (size, mtime_ns, sha256)
+  signature matches a previously-hashed entry reports verified without
+  re-hashing; any changed/unknown file is still hashed honestly.
+- Permanent `[nexus-init] <step> <ms>` boot-stage lines + per-item
+  `inventory/<id>` lines when a probe exceeds 100 ms — init regressions
+  are now diagnosable from `backend-host.log` alone.
+
+Measured: provisioning init **8350 ms → 65 ms**; AppState tail
+**9.9 s → 1.4 s**; `backend_health` **15.3 s → 6.1 s**; total startup
+**~21.4 s → ~12.7 s** (installed build, warm disk cache).
+
 ## Measured results (installed build)
 
 | Metric | Before | After |
@@ -77,8 +111,12 @@ Baseline and measurement method: `docs/PERFORMANCE_BASELINE.md`
 | Idle VRAM (llama + desktop, voice unloaded) | ~4.5 GB + 3.3 GB silent tax | **~4.5 GB, voice at 0** |
 | Per-message nvidia-smi spawn | 1/msg | 0 (15 s cache) |
 | Backend RAM over 30 turns | — | +339 MB then **flat at ~641 MB** |
+| Backend RAM over 50 turns | — | warm-up to ~6.1 GB (llama ctx + voice), then **flat through turn 50** |
 | Mean simple-chat turn | — | 1.15 s (voice enabled) |
 | Idle process count | 3 | 3 (NexusCore, backend, llama-server) |
+| Startup: provisioning init | ~8.4 s | **65 ms** |
+| Startup: backend_health | ~15.3 s | **~6.1 s** |
+| Startup: total to ready | ~21.4 s | **~12.7 s** |
 
 ## Verified live on the installed build
 - Engine `loaded:false, worker_alive:false` 120 s after last speech.
@@ -106,8 +144,10 @@ Baseline and measurement method: `docs/PERFORMANCE_BASELINE.md`
   mitigations would be pre-warm on voice toggle or a smaller warm pool —
   deliberately **not** done (that's the residency tax this milestone
   removed).
-- Startup ~15 s backend boot is dominated by PyInstaller unpack +
-  subsystem init; not yet stage-profiled.
-- 50-turn soak not run (30-turn was flat at ~641 MB); image generation
-  runs mostly through WDDM shared memory on a busy 12 GB card — slow but
-  correct, and memory returns afterward.
+- Startup residual (~12.7 s total): ~2–3 s PyInstaller unpack + module
+  imports before the first marker, ~1.3 s subsystem init (boot 4→94%),
+  ~2.4 s WebView2 interface_ready. InvokeAI `discover()` still spends
+  ~1 s inside inventory on first call — acceptable once per boot.
+- 50-turn soak: **done** — flat at ~6.1 GB; no growth turns 20–50.
+- Image generation runs mostly through WDDM shared memory on a busy
+  12 GB card — slow but correct, and memory returns afterward.

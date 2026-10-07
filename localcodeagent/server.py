@@ -972,13 +972,20 @@ class AppState:
             logging.getLogger(__name__).exception("Nexus Brain init failed")
             self.brain = None
         self._boot(94, "STARTING · CORE SERVICES", "Synchronizing running services and task state")
+        _t = time.monotonic()
         self._start_primary_prewarm()
+        _t = _init_step("prewarm", _t)
         self._start_auto_tune()
+        _t = _init_step("auto_tune", _t)
         self._start_auto_resume()
+        _t = _init_step("auto_resume", _t)
         self._start_source_sync()
+        _t = _init_step("source_sync", _t)
         self._start_provisioning()
+        _t = _init_step("provisioning", _t)
         if getattr(config, "autonomy_enabled", True):
             self.autonomy.start()
+        _t = _init_step("autonomy_start", _t)
         # Conversational control plane — built last so every subsystem the
         # probes reference exists. A build failure must never break boot.
         try:
@@ -987,6 +994,7 @@ class AppState:
             import logging
             logging.getLogger(__name__).exception("self-knowledge init failed")
             self.self_knowledge = None
+        _init_step("self_knowledge", _t)
 
     # -- change-journal undo handlers ------------------------------------
 
@@ -6048,13 +6056,17 @@ class AppState:
 
     def _tool_installed(self, tool_id: str) -> bool:
         """Post-install verification for provisioning: re-scan the manifest's
-        executable detection so a no-op install can't mark the item done."""
+        executable detection so a no-op install can't mark the item done.
+        Scoped to the one manifest — a full-registry refresh per item made
+        boot-time inventory O(items × manifests) subprocess/dir probes."""
         try:
-            self.tools.refresh_install_status()
             spec = self._tool_spec(tool_id)
+            if spec is None:
+                return False
+            self.tools.refresh_install_status(spec.name)
         except Exception:
             return False
-        return bool(spec and spec.install_status == "installed")
+        return spec.install_status == "installed"
 
     def install_tool(self, tool_id: str, *, approve: bool = False) -> dict:
         """Run a manifest tool's install command as a tracked job.
@@ -11592,6 +11604,15 @@ class _NexusHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def _init_step(label: str, t0: float) -> float:
+    """Boot-stage stopwatch — prints one line per step into the host log
+    (stdout is piped), so init regressions are diagnosable from
+    backend-host.log without a profiler."""
+    now = time.monotonic()
+    print(f"[nexus-init] {label} {(now - t0) * 1000:.0f}ms", flush=True)
+    return now
+
+
 def create_server(
     config: AgentConfig,
     workspace: Path,
@@ -11602,10 +11623,13 @@ def create_server(
     config_path: Path | None = None,
     boot: Callable[[float, str, str], None] | None = None,
 ) -> tuple[ThreadingHTTPServer, AppState]:
+    _t0 = time.monotonic()
     state = AppState(config, workspace, runtime_root, config_path=config_path, boot=boot)
+    _t0 = _init_step("appstate", _t0)
     handler = type("ChatNexusHandler", (Handler,), {"state": state, "web_root": web_root})
     try:
         server = _NexusHTTPServer((host, port), handler)
+        _init_step("http_bind", _t0)
         # The /shutdown command needs a handle to stop serve_forever.
         state._http_server = server
     except BaseException:

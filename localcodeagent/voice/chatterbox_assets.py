@@ -12,6 +12,7 @@ provisioning manager — it is not a single downloadable file.
 from __future__ import annotations
 
 import hashlib
+import json
 import urllib.request
 from pathlib import Path
 
@@ -70,17 +71,56 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+# Verified-content cache — after a file's sha256 is checked once, its
+# (size, mtime_ns, sha256) signature is recorded here. Boot-time status
+# re-checks then trust unchanged metadata instead of re-hashing ~3 GB of
+# weights; any changed/unknown file is still hashed honestly.
+_VERIFY_CACHE = ".nexus-model-verified.json"
+
+
 def model_status(model_dir: Path) -> dict[str, dict]:
+    model_dir = Path(model_dir)
+    cache: dict = {}
+    try:
+        raw = json.loads(
+            (model_dir / _VERIFY_CACHE).read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and isinstance(raw.get("files"), dict):
+            cache = raw["files"]
+    except Exception:
+        cache = {}
     out = {}
+    new_cache: dict = {}
+    dirty = False
     for name, meta in MODEL_FILES.items():
         p = model_dir / name
         entry = {"path": str(p), "present": p.exists(), "verified": False}
         if p.exists():
             try:
-                entry["verified"] = sha256_file(p) == meta["sha256"]
+                stt = p.stat()
             except OSError:
-                pass
+                out[name] = entry
+                continue
+            sig = {"size": stt.st_size, "mtime_ns": stt.st_mtime_ns,
+                   "sha256": meta["sha256"]}
+            if cache.get(name) == sig:
+                entry["verified"] = True
+            else:
+                try:
+                    entry["verified"] = sha256_file(p) == meta["sha256"]
+                    dirty = True
+                except OSError:
+                    pass
+            if entry["verified"]:
+                new_cache[name] = sig
         out[name] = entry
+    if dirty or new_cache != cache:
+        try:
+            tmp = (model_dir / _VERIFY_CACHE).with_suffix(".tmp")
+            tmp.write_text(json.dumps({"files": new_cache}),
+                           encoding="utf-8")
+            tmp.replace(model_dir / _VERIFY_CACHE)
+        except OSError:
+            pass
     return out
 
 

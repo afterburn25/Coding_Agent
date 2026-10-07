@@ -10,6 +10,7 @@ update these hashes deliberately.
 from __future__ import annotations
 
 import hashlib
+import json
 import urllib.request
 from pathlib import Path
 
@@ -45,18 +46,57 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+# Verified-content cache — after a file's sha256 is checked once, its
+# (size, mtime_ns, sha256) signature is recorded here. Status re-checks
+# trust unchanged metadata instead of re-hashing hundreds of MB of ONNX
+# weights on every engine init; changed/unknown files are still hashed.
+_VERIFY_CACHE = ".nexus-assets-verified.json"
+
+
 def asset_status(asset_dir: Path) -> dict[str, dict]:
+    asset_dir = Path(asset_dir)
+    cache: dict = {}
+    try:
+        raw = json.loads(
+            (asset_dir / _VERIFY_CACHE).read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and isinstance(raw.get("files"), dict):
+            cache = raw["files"]
+    except Exception:
+        cache = {}
     out = {}
+    new_cache: dict = {}
+    dirty = False
     for name, meta in ASSETS.items():
         p = asset_dir / name
         entry = {"path": str(p), "kind": meta["kind"], "present": p.exists(),
                  "verified": False}
         if p.exists():
             try:
-                entry["verified"] = sha256_file(p) == meta["sha256"]
+                stt = p.stat()
             except OSError:
-                pass
+                out[name] = entry
+                continue
+            sig = {"size": stt.st_size, "mtime_ns": stt.st_mtime_ns,
+                   "sha256": meta["sha256"]}
+            if cache.get(name) == sig:
+                entry["verified"] = True
+            else:
+                try:
+                    entry["verified"] = sha256_file(p) == meta["sha256"]
+                    dirty = True
+                except OSError:
+                    pass
+            if entry["verified"]:
+                new_cache[name] = sig
         out[name] = entry
+    if dirty or new_cache != cache:
+        try:
+            tmp = (asset_dir / _VERIFY_CACHE).with_suffix(".tmp")
+            tmp.write_text(json.dumps({"files": new_cache}),
+                           encoding="utf-8")
+            tmp.replace(asset_dir / _VERIFY_CACHE)
+        except OSError:
+            pass
     return out
 
 

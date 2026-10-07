@@ -115,7 +115,32 @@ def _packages_ok(py: Path) -> tuple[bool, str]:
     return True, r.stdout.strip()
 
 
-def runtime_status(runtime_dir: Path) -> dict:
+def _packages_present(runtime_dir: Path) -> tuple[bool, str]:
+    """Shallow payload check — the site-packages dirs a completed install
+    leaves behind. Used for boot-time re-verification where a multi-second
+    torch import probe would stall startup; the deep import probe still
+    guards the post-install verify path (the marker is only written after
+    it passes), so a directory-level spot check is enough to detect
+    deleted/corrupted payloads."""
+    rd = Path(runtime_dir)
+    for sp in (rd / "Lib" / "site-packages",
+               rd / "python" / "Lib" / "site-packages",
+               rd / "lib" / "site-packages"):
+        if not sp.is_dir():
+            continue
+        missing = [pkg for pkg in ("torch", "torchaudio", "chatterbox")
+                   if not (sp / pkg).is_dir()]
+        if missing:
+            return False, f"site-packages missing: {', '.join(missing)}"
+        return True, "python + package dirs present"
+    return False, "site-packages missing"
+
+
+def runtime_status(runtime_dir: Path, *, deep: bool = True) -> dict:
+    """Report runtime install state. ``deep=True`` (default) spawns the
+    interpreter and imports the voice stack — seconds on a cold disk, so
+    callers on the boot path pass ``deep=False`` for a marker + package-dir
+    check; the marker is only written after a deep probe passes."""
     rd = Path(runtime_dir)
     py = runtime_python(rd)
     marker = {}
@@ -129,7 +154,8 @@ def runtime_status(runtime_dir: Path) -> dict:
     if py is None:
         st["detail"] = "python not installed"
         return st
-    ok, detail = _packages_ok(py)
+    ok, detail = (_packages_ok(py) if deep
+                  else _packages_present(rd))
     st["packages_ok"] = ok
     st["detail"] = detail
     st["verified"] = ok and marker.get("schema") == RUNTIME_SCHEMA
@@ -178,9 +204,13 @@ def _extract_python(archive: Path, runtime_dir: Path) -> None:
 
 def ensure_runtime(runtime_dir: Path, progress=None) -> dict:
     """Install or complete the isolated voice runtime. Idempotent —
-    a verified runtime short-circuits before touching the network."""
+    a verified runtime short-circuits before touching the network.
+    The early-out check is shallow (marker + package dirs): the marker
+    is only written after a successful deep import probe, so payload
+    presence is enough — a second torch import would just stall every
+    ensure call on an already-healthy runtime."""
     rd = Path(runtime_dir)
-    st = runtime_status(rd)
+    st = runtime_status(rd, deep=False)
     if st["verified"]:
         return st
     rd.mkdir(parents=True, exist_ok=True)
