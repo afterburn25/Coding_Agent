@@ -21,12 +21,23 @@
   full-registry manifest scans + sha256 over GBs of weights). Now:
   shallow `runtime_status(deep=False)`, scoped per-manifest refresh,
   verified-content caches (size+mtime+sha256). Provisioning init
-  **8.35 s → 65 ms**; total startup **~21.4 s → ~12.7 s**.
+  **8.35 s → 65 ms**.
+- **`/api/status` hot path** — `[nexus-slow]` section timers showed
+  `images.summary()` (~800 ms steady / ~2.8 s periodic) was a live HTTP
+  health probe per backend; this box takes ~2 s to refuse dead
+  localhost ports. Now: 30 s stale-while-revalidate probe cache
+  (single-flight background refresh; live-process check bypasses),
+  parallel backend probes, bounded timeouts, and `_invokeai_models`
+  reuses the just-probed health instead of re-probing on expiry.
+  Desktop health poll + narrator ping moved to cheap `/api/health`;
+  WebView2 env bootstrap overlaps `backend_health`. Steady status
+  **~20 ms**; `backend_health` **15.3 s → ~1.56 s**; total startup
+  **~21.4 s → ~7.0 s**.
 - **Verified live** — engine unloads at 120 s idle (VRAM −2.3 GB);
   image gen round-trips on demand (vram 4.1→7.34 GB freed post-job);
   **50-turn soak flat ~6.1 GB**; idle = 3 processes / ~4.5 GB VRAM.
 - Evidence: `docs/PERFORMANCE_BASELINE.md`, `docs/PERFORMANCE_OPTIMIZATION.md`,
-  `scripts/benchmark.py`. CI green on `main` through `9abc9de`.
+  `scripts/benchmark.py`. CI green on `main` through `bbac4e19`.
 
 ## Active version: 0.26.1 — Chatterbox Turbo voice engine (merged + deployed)
 
