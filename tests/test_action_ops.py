@@ -420,6 +420,70 @@ class TestOrchestratorLane(unittest.TestCase):
         rows = ledger.recent(10)
         self.assertTrue(any(r["status"] == "denied" for r in rows))
 
+    def test_compound_local_actions_execute_in_order(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow"})
+        self.addCleanup(td2.cleanup)
+        result = orch.run(
+            "create a folder named alpha, and then "
+            "create a folder named beta",
+            event_callback=None)
+        self.assertTrue((ws / "alpha").is_dir())
+        self.assertTrue((ws / "beta").is_dir())
+        self.assertIn("alpha", result.content.lower())
+        self.assertIn("beta", result.content.lower())
+        verified = [r for r in ledger.recent(10)
+                    if r["status"] == "verified"]
+        self.assertGreaterEqual(len(verified), 2)
+
+    def test_compound_stops_at_approval_gate(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow",
+                 "filesystem.delete": "ask"})
+        self.addCleanup(td2.cleanup)
+        (ws / "gone.txt").write_text("x")
+        result = orch.run(
+            "create a folder named firstdir, and then "
+            "delete gone.txt",
+            event_callback=None)
+        # First clause verified; the delete parked — nothing past the
+        # gate ran or was claimed.
+        self.assertTrue((ws / "firstdir").is_dir())
+        self.assertTrue((ws / "gone.txt").exists())
+        task = tasks.get(result.task["id"])
+        self.assertEqual(task.status, "waiting_approval")
+        self.assertIn("approval", result.content.lower())
+
+    def test_compound_unparseable_clause_falls_through(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow"})
+        self.addCleanup(td2.cleanup)
+        # Second clause is not a local action — the lane must NOT
+        # partially execute the first and narrate the second.
+        from localcodeagent.context.intent import understand_turn
+        text = ("create a folder named halfway, and then "
+                "tell me a joke")
+        env = understand_turn(text, active=None)
+        self.assertTrue(env.compound)
+        reply = orch._local_action_reply(text, "t1", env=env)
+        self.assertIsNone(reply)
+        self.assertFalse((ws / "halfway").exists())
+
 
 class TestGitStateLane(unittest.TestCase):
     """Regression — 'what branches are in github for your project?'

@@ -1829,7 +1829,7 @@ class AgentOrchestrator:
         return reply
 
     def _local_action_reply(self, user_text: str, task_id: str,
-                            event_callback=None):
+                            event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
         D:\\Nexus', 'move a.txt to b/'. Parses bounded phrasings into a
         plan, then runs the full lifecycle: capability -> permission ->
@@ -1839,6 +1839,29 @@ class AgentOrchestrator:
         lane. Success language comes only from verified tool output —
         never from the phrasing of the request."""
         from ..action_ops import execute_plan, parse_local_action
+        # Compound local actions — "create folder x, then delete y.txt".
+        # Every clause must parse: one unparseable clause hands the WHOLE
+        # turn to the model lane (never partially executed on a guess).
+        clauses = [
+            str(s.get("text") or "")
+            for s in (getattr(env, "secondary_intents", None) or [])
+            if str(s.get("text") or "").strip()
+        ] if getattr(env, "compound", False) else []
+        if len(clauses) > 1:
+            plans = []
+            for clause in clauses:
+                try:
+                    p = parse_local_action(
+                        clause,
+                        workspace=self.checkpoints.workspace,
+                        extra_roots=self.tools.context.get("extra_roots"))
+                except Exception:
+                    p = None
+                if p is None:
+                    return None
+                plans.append(p)
+            return self._local_action_multi(
+                plans, task_id, event_callback=event_callback)
         try:
             plan = parse_local_action(
                 user_text,
@@ -1927,6 +1950,123 @@ class AgentOrchestrator:
             self.conversation_memory.record_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(user_text, text)
+        return AgentResult(
+            content=text,
+            routing=decision,
+            model_events=[builtin_event],
+            steps=0,
+            task=done.as_dict(),
+        )
+
+    def _local_action_multi(self, plans: list, task_id: str,
+                            event_callback=None):
+        """Sequential execution of a fully-parsed compound request.
+        Each clause runs the same verify+ledger lifecycle; the sequence
+        stops at the first gate (approval, failure, denial, clarify,
+        unavailable) so nothing past a gate executes undecided. The
+        reply is the concatenation of real outcomes, plus an honest
+        note when steps remain."""
+        from ..action_ops import execute_plan
+        lines: list[str] = []
+        parked_plan = None
+        stopped_early = False
+        last_status = "verified"
+        for plan in plans:
+            outcome = execute_plan(
+                plan, tools=self.tools, ledger=self.action_ledger,
+                task_id=task_id)
+            status = outcome["status"]
+            last_status = status
+            if status == "unavailable":
+                return None
+            lines.append(outcome["text"])
+            if status == "awaiting_approval":
+                parked_plan = plan
+                stopped_early = True
+                break
+            if status in {"failed", "denied", "clarify"}:
+                stopped_early = True
+                break
+        remaining = len(plans) - len(lines)
+        if parked_plan is None and stopped_early and remaining > 0:
+            lines.append(
+                f"I stopped there — {remaining} more step(s) are waiting"
+                " on this before they can run.")
+        elif parked_plan is not None and remaining > 0:
+            lines.append(
+                f"{remaining} more step(s) queued behind that approval —"
+                " approve it and ask me to continue.")
+        text = " ".join(lines)
+        decision = RoutingDecision(
+            role="utility",
+            model_id="builtin-local",
+            reasons=["local action lane — no model call"],
+            complexity=0,
+        )
+        builtin_event = {
+            "type": "builtin_utility",
+            "model_id": "builtin-local",
+            "role": "utility",
+            "reason": "local action lane",
+        }
+        self._safe_emit(
+            event_callback, {"type": "model", "event": builtin_event})
+        if parked_plan is not None:
+            pending = {
+                "kind": "local_action",
+                "name": parked_plan.tool,
+                "arguments": {k: str(v)
+                              for k, v in parked_plan.params.items()},
+                "permission": parked_plan.permission,
+                "call_id": "",
+                "detail": parked_plan.action_text,
+                "plan": {
+                    "kind": parked_plan.kind,
+                    "tool": parked_plan.tool,
+                    "permission": parked_plan.permission,
+                    "params": {k: str(v)
+                               for k, v in parked_plan.params.items()},
+                    "resolved": dict(parked_plan.resolved),
+                    "outside_root": parked_plan.outside_root,
+                    "action_text": parked_plan.action_text,
+                    "display": parked_plan.display,
+                },
+            }
+            parked = self.tasks.update(
+                task_id, status="waiting_approval",
+                phase="waiting_approval", pending_approval=pending)
+            cb = self._logging_callback(task_id, event_callback)
+            self._safe_emit(cb, {
+                "type": "approval", "approval": pending,
+                "task": parked.as_dict()})
+            return AgentResult(
+                content=text,
+                routing=decision,
+                model_events=[builtin_event],
+                steps=0,
+                task=parked.as_dict(),
+                pending_approval=pending,
+            )
+        failed = last_status == "failed"
+        done = self.tasks.update(
+            task_id,
+            status="failed" if failed else "completed",
+            phase="done",
+            model_id="builtin-local",
+            model_role="utility",
+            summary=text,
+            final_content=text,
+            steps=0,
+            error=text if failed else "",
+        )
+        self._safe_emit(
+            event_callback, {"type": "task", "task": done.as_dict()})
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(
+                " | ".join(p.action_text for p in plans), text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(
+                " | ".join(p.action_text for p in plans), text)
         return AgentResult(
             content=text,
             routing=decision,
@@ -5815,7 +5955,7 @@ class AgentOrchestrator:
             # Missions always take the model/worker pipeline — a
             # deterministic one-shot reply can't drive a workstream.
             action_reply = self._local_action_reply(
-                user_text, task.id, event_callback)
+                user_text, task.id, event_callback, env=env)
             if action_reply is not None:
                 return action_reply
         # Canned suppression must not bypass creator-locked identity
