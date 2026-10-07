@@ -2,7 +2,10 @@
  * on every page, with progress info and a cancel button for stuck or stale
  * jobs. Polls /api/tasks; nothing renders while the lane is idle. */
 (() => {
-  const POLL_MS = 4000;
+  // The EventSource subscription below delivers real updates instantly —
+  // this interval is only a safety net for missed events, so it can be
+  // slow. 4 s was needlessly hammering /api/tasks every idle second.
+  const POLL_MS = 15000;
   const STALE_MS = 5 * 60 * 1000;
   const ACTIVE = new Set(["running", "verifying", "reviewing", "waiting_approval"]);
 

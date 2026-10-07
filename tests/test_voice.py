@@ -1149,6 +1149,26 @@ class TestChatterboxEngine(unittest.TestCase):
         self.assertFalse(st["available"])
         self.assertIn("model", st)
 
+    def test_status_poll_does_not_extend_idle_lease(self):
+        """Introspection must not bump _last_used — otherwise any UI
+        status poll resets the idle-unload timer and pins ~2 GB of VRAM
+        forever (observed: status() ran a worker request that refreshed
+        the lease on every call)."""
+        calls = []
+        eng = self.eng
+        eng._loaded = True
+        eng._proc = types.SimpleNamespace(poll=lambda: None)
+        eng._last_used = 1000.0
+
+        def rec(payload, timeout, **kw):
+            calls.append((payload.get("cmd"), kw.get("touch", False)))
+            return {"ok": True, "device": "cuda", "sr": 24000}
+        eng._request = rec
+
+        eng.status()
+        self.assertIn(("status", False), calls)
+        self.assertEqual(eng._last_used, 1000.0)
+
     def test_manager_falls_back_to_kokoro(self):
         """A chatterbox preset whose engine fails must still speak —
         the kokoro engine renders it and the event is published."""
@@ -1475,15 +1495,27 @@ class TestVoiceIdleUnload(unittest.TestCase):
     def test_vram_pressure_unloads_gpu_engine(self):
         eng = self._fake_worker_engine()  # actively used, but VRAM tight
         srv = self._server({"chatterbox": eng}, idle_s=600.0)
-        import localcodeagent.runtime.hardware as hw
-        orig = hw.detect_hardware
-        try:
-            hw.detect_hardware = lambda: types.SimpleNamespace(
-                gpus=[types.SimpleNamespace(free_vram_mb=900)])
-            srv._unload_idle_voice_engine()
-        finally:
-            hw.detect_hardware = orig
+        srv.runtime = types.SimpleNamespace(
+            fresh_hardware=lambda: types.SimpleNamespace(
+                gpus=[types.SimpleNamespace(free_vram_mb=900)]))
+        srv._unload_idle_voice_engine()
         self.assertTrue(eng.unloaded)
+
+    def test_gpu_idle_floor_beats_cpu_timeout(self):
+        # A cuda engine idles out on the GPU leash (default 120 s) long
+        # before the 600 s CPU-engine window.
+        eng = self._fake_worker_engine(
+            last_used=time.time() - 200)
+        srv = self._server({"chatterbox": eng}, idle_s=600.0)
+        srv._unload_idle_voice_engine()
+        self.assertTrue(eng.unloaded)
+
+    def test_gpu_engine_inside_floor_stays(self):
+        eng = self._fake_worker_engine(
+            last_used=time.time() - 60)
+        srv = self._server({"chatterbox": eng}, idle_s=600.0)
+        srv._unload_idle_voice_engine()
+        self.assertFalse(eng.unloaded)
 
 
 if __name__ == "__main__":

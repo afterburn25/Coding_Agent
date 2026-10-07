@@ -1,0 +1,206 @@
+{
+  "mode": "idle",
+  "samples": [
+    {
+      "ts": "2026-10-07T02:07:58+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4568.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 14.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 26.92
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.64
+        }
+      ]
+    },
+    {
+      "ts": "2026-10-07T02:08:04+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4503.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 12.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 26.92
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.66
+        }
+      ]
+    },
+    {
+      "ts": "2026-10-07T02:08:09+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4517.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 12.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 27.02
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.69
+        }
+      ]
+    },
+    {
+      "ts": "2026-10-07T02:08:15+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4523.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 16.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 27.02
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.72
+        }
+      ]
+    },
+    {
+      "ts": "2026-10-07T02:08:21+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4566.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 18.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 27.05
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.78
+        }
+      ]
+    },
+    {
+      "ts": "2026-10-07T02:08:26+00:00",
+      "processes": 3,
+      "ram_mb_total": 3391.8,
+      "threads": -1,
+      "vram_used_mb": 4558.0,
+      "vram_total_mb": 12288.0,
+      "gpu_util_pct": 14.0,
+      "by_process": [
+        {
+          "pid": 59932,
+          "ppid": 18708,
+          "name": "NexusCore.exe",
+          "ram_mb": 93.6,
+          "cpu_s": 1.2
+        },
+        {
+          "pid": 59504,
+          "ppid": 59932,
+          "name": "ChatNexus.Backend.exe",
+          "ram_mb": 322.5,
+          "cpu_s": 27.14
+        },
+        {
+          "pid": 56856,
+          "ppid": 59504,
+          "name": "llama-server.exe",
+          "ram_mb": 2975.7,
+          "cpu_s": 8.78
+        }
+      ]
+    }
+  ],
+  "ram_mb_total": 3391.8,
+  "vram_mb": 4558.0,
+  "processes": 3,
+  "threads": -1,
+  "cpu_pct_by_process": {
+    "NexusCore.exe": 0.0,
+    "ChatNexus.Backend.exe": 0.88,
+    "llama-server.exe": 0.56
+  }
+}

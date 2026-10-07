@@ -1,0 +1,29 @@
+{
+  "mode": "chat",
+  "simple": {
+    "ok": true,
+    "ttft_s": 1.66,
+    "total_s": 1.69,
+    "token_events": 0,
+    "tok_per_s": 0.0
+  },
+  "simple_blocking": {
+    "ok": true,
+    "total_s": 1.0,
+    "chars": 5,
+    "model": null
+  },
+  "normal": {
+    "ok": true,
+    "ttft_s": 0.8,
+    "total_s": 2.12,
+    "token_events": 0,
+    "tok_per_s": 0.0
+  },
+  "normal_blocking": {
+    "ok": true,
+    "total_s": 2.27,
+    "chars": 541,
+    "model": null
+  }
+}

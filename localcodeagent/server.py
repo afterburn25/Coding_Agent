@@ -738,6 +738,11 @@ class AppState:
         self._stt_engine = None
         self._stt_tried = False
         self._voice_session = None
+        # VRAM broker hook: when a managed LLM launch is short on VRAM, idle
+        # image backends and idle GPU voice engines release before a resident
+        # model gets evicted — restarting them later is cheaper than
+        # reloading a multi-GB LLM mid-session.
+        self.runtime.vram_releasers.append(self._release_idle_gpu_consumers)
         # Operational state — last user interaction drives the "away"
         # briefing and the idle/away signal in /api/nexus/state.
         self._last_interaction_at = time.time()
@@ -4765,6 +4770,45 @@ class AppState:
         self._unload_idle_voice_engine()
         self._autonomy_watchdog()
 
+    def _release_idle_gpu_consumers(self) -> None:
+        """RuntimeManager vram_releasers callback — free GPU memory held by
+        subsystems the runtime doesn't own when an LLM launch needs it.
+        Anything mid-work is left alone; this only reclaims idle capacity."""
+        images = getattr(self, "images", None)
+        if images is not None:
+            try:
+                busy = images.has_active_jobs()
+            except Exception:
+                busy = True
+            if not busy:
+                for rt in (getattr(images, "backend_runtime", None),
+                           getattr(images, "invokeai_runtime", None)):
+                    try:
+                        st = getattr(rt, "status", None)
+                        if (st is not None and st.managed
+                                and st.state == "running"):
+                            rt.stop()
+                    except Exception:
+                        pass
+        voice = getattr(self, "voice", None)
+        if voice is None:
+            return
+        try:
+            with voice._lock:
+                speech_busy = (voice._active_job is not None
+                               or bool(voice._queue))
+        except Exception:
+            speech_busy = True
+        if speech_busy:
+            return
+        for _name, eng in list(getattr(voice, "_engines", {}).items()):
+            try:
+                if (getattr(eng, "_device", "") == "cuda"
+                        and getattr(eng, "_loaded", False)):
+                    eng.unload()
+            except Exception:
+                pass
+
     def _unload_idle_voice_engine(self) -> None:
         """Release TTS engines after voice_idle_unload_seconds of silence —
         keeps overnight sessions lean without losing anything.
@@ -4779,7 +4823,12 @@ class AppState:
         if voice is None:
             return
         idle_s = float(getattr(self.config, "voice_idle_unload_seconds", 600.0))
-        if idle_s <= 0:
+        # GPU-resident engines get a much shorter leash — a ~3 GB voice
+        # worker held for the full CPU-engine timeout is a permanent tax
+        # on a 12 GB card between utterances.
+        gpu_idle_s = float(getattr(
+            self.config, "voice_gpu_idle_unload_seconds", 120.0))
+        if idle_s <= 0 and gpu_idle_s <= 0:
             return
         try:
             now = time.time()
@@ -4792,10 +4841,18 @@ class AppState:
             if gpu_loaded and any(
                     getattr(eng, "min_free_vram_mb", 0.0) > 0
                     for eng in gpu_loaded):
-                from .runtime.hardware import detect_hardware
-                free_vram = max(
-                    (g.free_vram_mb for g in detect_hardware().gpus),
-                    default=None)
+                # Cached telemetry (15 s staleness) — spawning a fresh
+                # nvidia-smi every watchdog tick is measurable churn. A
+                # probe failure must not abort the idle pass.
+                rt = getattr(self, "runtime", None)
+                try:
+                    snap = rt.fresh_hardware() if rt is not None else None
+                except Exception:
+                    snap = None
+                if snap is not None:
+                    free_vram = max(
+                        (g.free_vram_mb for g in snap.gpus),
+                        default=None)
             for name, eng in engines:
                 loaded = getattr(eng, "_model", None) is not None or (
                     getattr(eng, "_loaded", False)
@@ -4803,14 +4860,17 @@ class AppState:
                     and eng._proc.poll() is None)
                 if not loaded:
                     continue
+                is_gpu = getattr(eng, "_device", "") == "cuda"
                 under_pressure = (
                     free_vram is not None
-                    and getattr(eng, "_device", "") == "cuda"
+                    and is_gpu
                     and free_vram < float(
                         getattr(eng, "min_free_vram_mb", 0.0)))
                 last = getattr(eng, "_last_used",
                                getattr(eng, "_loaded_at", 0.0))
-                if under_pressure or now - last > idle_s:
+                engine_idle_s = gpu_idle_s if is_gpu else idle_s
+                if under_pressure or (
+                        engine_idle_s > 0 and now - last > engine_idle_s):
                     eng.unload()
                     self._voice_publish({
                         "event": "engine_idle_unload", "engine": name,

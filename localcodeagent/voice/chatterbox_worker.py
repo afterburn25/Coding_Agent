@@ -121,10 +121,28 @@ def _pick_device(req: str, min_free_vram_mb: float) -> tuple[str, dict]:
     return "cpu", info
 
 
+# T3 (the 1.9 GB transformer) is the bulk of resident VRAM — bf16 halves it
+# with no quality-relevant loss. s3gen/ve stay fp32: the vocoder path is
+# where reduced precision is actually audible.
+_DTYPES = {"bf16": "bfloat16", "fp16": "float16"}
+
+
+def _cast_dtype(tts, dtype_name: str) -> None:
+    if dtype_name not in _DTYPES:
+        return
+    torch = _torch()
+    dt = getattr(torch, _DTYPES[dtype_name])
+    tts.t3.to(dt)
+    conds = getattr(tts, "conds", None)
+    if conds is not None and hasattr(conds, "t3"):
+        conds.t3 = conds.t3.to(dtype=dt)
+
+
 def _cmd_load(req: dict) -> None:
     if _state["tts"] is not None:
         _out(ok=True, device=_state["device"], already=True,
              load_s=round(_state["load_s"], 2), sr=_state["tts"].sr,
+             dtype=_state.get("dtype") or "fp32",
              tags=_supported_tags(_state["tts"]))
         return
     model_dir = Path(str(req.get("model_dir") or ""))
@@ -135,6 +153,9 @@ def _cmd_load(req: dict) -> None:
     device, info = _pick_device(
         str(req.get("device") or "auto"),
         float(req.get("min_free_vram_mb") or 1500))
+    dtype = str(req.get("dtype") or "").lower()
+    if dtype not in _DTYPES:
+        dtype = ""
     t0 = time.monotonic()
     try:
         from chatterbox.tts_turbo import ChatterboxTurboTTS
@@ -142,9 +163,13 @@ def _cmd_load(req: dict) -> None:
     except Exception as exc:
         _err(f"chatterbox-turbo load failed on {device}: {exc}", **info)
         return
+    try:
+        _cast_dtype(tts, dtype)
+    except Exception:
+        dtype = ""  # fp32 fallback — a failed cast must not lose the model
     _state.update(tts=tts, device=device, model_dir=str(model_dir),
                   load_s=time.monotonic() - t0, voices={},
-                  current_voice="")
+                  current_voice="", dtype=dtype or "fp32")
     extra = {}
     try:
         torch = _torch()
@@ -186,6 +211,13 @@ def _cmd_prepare_voice(req: dict) -> None:
     try:
         tts.prepare_conditionals(ref, exaggeration=exag,
                                  norm_loudness=norm)
+        # prepare_conditionals rebuilds conds in fp32 — recast so the T3
+        # conditioning matches the model dtype.
+        conds = getattr(tts, "conds", None)
+        if conds is not None and hasattr(conds, "t3"):
+            dt = _DTYPES.get(str(_state.get("dtype") or ""))
+            if dt:
+                conds.t3 = conds.t3.to(dtype=getattr(_torch(), dt))
     except AssertionError as exc:
         _err(f"reference rejected: {exc}")
         return
@@ -222,6 +254,11 @@ def _cmd_synthesize(req: dict) -> None:
         try:
             tts.prepare_conditionals(spec[0], exaggeration=spec[1],
                                      norm_loudness=spec[2])
+            conds = getattr(tts, "conds", None)
+            if conds is not None and hasattr(conds, "t3"):
+                dt = _DTYPES.get(str(_state.get("dtype") or ""))
+                if dt:
+                    conds.t3 = conds.t3.to(dtype=getattr(_torch(), dt))
             _state["current_voice"] = voice_id
         except Exception as exc:
             _err(f"voice switch to {voice_id!r} failed: {exc}")

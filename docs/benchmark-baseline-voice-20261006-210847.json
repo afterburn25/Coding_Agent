@@ -1,0 +1,56 @@
+{
+  "mode": "voice",
+  "initial_engine": {
+    "name": "chatterbox",
+    "version": "0.1.7/turbo-749d1c1",
+    "loaded": false,
+    "worker_alive": true,
+    "device": "cuda",
+    "device_pref": "auto",
+    "load_time_s": 8.67,
+    "runtime_dir": "D:\\Nexus_Core\\runtime\\voice\\chatterbox",
+    "model_dir": "D:\\Nexus_Core\\models\\voice\\chatterbox",
+    "available": true,
+    "voices": [
+      {
+        "id": "isabella",
+        "label": "Isabella",
+        "lang": "en-GB",
+        "gender": "female",
+        "installed": true,
+        "official": true,
+        "description": "Default Nexus Core voice \u2014 approved V6 synthetic Isabella (Kokoro bf_isabella + Nexus DSP texture), cloned via Chatterbox Turbo reference conditioning."
+      }
+    ],
+    "supported_tags": [
+      "advertisement",
+      "angry",
+      "chuckle",
+      "clear throat",
+      "cough",
+      "crying",
+      "dramatic",
+      "fear",
+      "gasp",
+      "groan",
+      "happy",
+      "laugh",
+      "narration",
+      "sarcastic",
+      "shush",
+      "sigh",
+      "sniff",
+      "surprised",
+      "whispering"
+    ],
+    "model": "ResembleAI/chatterbox-turbo",
+    "model_revision": "749d1c1a"
+  },
+  "vram_before_mb": 4825.0,
+  "vram_unloaded_mb": 4825.0,
+  "cold_ttfa_s": 6.89,
+  "cold_audio_s": 1.31,
+  "vram_loaded_mb": 8144.0,
+  "warm_ttfa_s": 1.18,
+  "warm_rtf": 0.62
+}

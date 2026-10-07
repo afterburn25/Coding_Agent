@@ -5614,7 +5614,9 @@ class AgentOrchestrator:
             vision_override = "vision"
 
         # Fast lanes exhausted — probe hardware and route to a model.
-        self.runtime.refresh_hardware()
+        # Cached telemetry is enough: resource_fit is a heuristic, and an
+        # uncached detect_hardware() spawns nvidia-smi on EVERY message.
+        self.runtime.fresh_hardware()
         # Research/current-information asks are evidence questions, not
         # tool-ladder work — the work lane can't answer them and produces
         # hollow tool-loop replies. The question lane feeds research into

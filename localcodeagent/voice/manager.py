@@ -144,6 +144,8 @@ class VoiceManager:
                 eng.min_free_vram_mb = float(getattr(
                     self.config, "voice_chatterbox_min_free_vram_mb",
                     3200))
+                eng.dtype_pref = str(getattr(
+                    self.config, "voice_chatterbox_dtype", "bf16"))
             self._engines[name] = eng
             if name == (self.current_preset().engine
                         if self.current_preset() else ""):
@@ -288,19 +290,40 @@ class VoiceManager:
                     self._spoken_tasks.pop(k, None)
         if stale:
             self.stop_all(reason="new_response")
-        # Pre-warm the TTS engine while the text response streams in, so the
-        # first emitted sentence doesn't pay the ~1s model-load cost after an
-        # idle unload. load() is idempotent and lock-guarded.
-        if (self.enabled() and not self.muted()
-                and self.mode() in {"responses", "responses_activity"}):
-            threading.Thread(target=self._warm_engine,
-                             name="nexus-voice-warm", daemon=True).start()
 
     def _warm_engine(self) -> None:
         try:
             self.engine().load()
         except Exception:
             pass
+
+    def _warm_on_first_speech(self) -> None:
+        """Pre-warm the TTS engine when speech is actually pending — the
+        first emitted sentence starts the ~1–9s load in parallel with the
+        rest of the model's reply instead of paying it at enqueue time.
+        begin_task must NOT warm: a plain-text turn or a fully filtered
+        reply (code-only, long lists) would otherwise load a ~3 GB GPU
+        voice model that never speaks."""
+        if getattr(self, "_warming", False):
+            return
+        if not (self.enabled() and not self.muted()
+                and self.mode() in {"responses", "responses_activity"}):
+            return
+        try:
+            eng = self.engine()
+            if getattr(eng, "_model", None) is not None or getattr(
+                    eng, "_loaded", False):
+                return
+        except Exception:
+            return
+        self._warming = True
+        def _run() -> None:
+            try:
+                self._warm_engine()
+            finally:
+                self._warming = False
+        threading.Thread(target=_run,
+                         name="nexus-voice-warm", daemon=True).start()
 
     def feed_token(self, task_id: str, delta: str) -> int:
         """Feed a token delta; returns number of sentences enqueued."""
@@ -397,6 +420,13 @@ class VoiceManager:
         if not text.strip():
             return None
         text = _apply_pause_hint(text, delivery)
+        # Skip the engine pre-warm when the utterance is already rendered —
+        # replaying a cached wav must not spin up a ~2 GB GPU worker.
+        probe_preset = (self.presets.get(preset_id)
+                        if preset_id else None) or self.current_preset()
+        if probe_preset is None or not self._cache_probe(
+                text, probe_preset, speed, delivery=delivery):
+            self._warm_on_first_speech()
         with self._lock:
             seq = self._spoken_tasks.get(task_id, 0)
             self._spoken_tasks[task_id] = seq + 1
@@ -648,10 +678,12 @@ class VoiceManager:
                                  + d_gain)
         return VoicePreset.from_dict(raw)
 
-    def _synthesize(self, text: str, preset: VoicePreset, speed: float,
-                    *, apply_personality: bool = True,
-                    delivery: dict | None = None):
-        """Full pipeline → stereo WAV on disk. Returns (pcm, sr, path)."""
+    def _synth_key(self, text: str, preset: VoicePreset, speed: float,
+                   *, apply_personality: bool = True,
+                   delivery: dict | None = None):
+        """Resolve the cache key exactly as synthesis computes it — shared
+        with enqueue's cache probe so a fully-cached utterance can skip the
+        engine pre-warm instead of pinning ~2 GB VRAM to replay a wav."""
         if apply_personality:
             try:
                 vmap = (self._personality_voice() or {}
@@ -678,6 +710,26 @@ class VoiceManager:
                              f"{engine.version}|dsp{dsp.DSP_VERSION}",
                              preset.base_voice,
                              AudioCache.preset_hash(preset_json), speed)
+        return engine, key, text, preset, speed, preset_json
+
+    def _cache_probe(self, text: str, preset: VoicePreset, speed: float,
+                     delivery: dict | None = None) -> bool:
+        """True when this utterance is already rendered on disk. Probe
+        failures answer False — warming anyway is the safe default."""
+        try:
+            _e, key, _t, _p, _s, _j = self._synth_key(
+                text, preset, speed, delivery=delivery)
+            return self.cache.get(key) is not None
+        except Exception:
+            return False
+
+    def _synthesize(self, text: str, preset: VoicePreset, speed: float,
+                    *, apply_personality: bool = True,
+                    delivery: dict | None = None):
+        """Full pipeline → stereo WAV on disk. Returns (pcm, sr, path)."""
+        engine, key, text, preset, speed, preset_json = self._synth_key(
+            text, preset, speed, apply_personality=apply_personality,
+            delivery=delivery)
         hit = self.cache.get(key)
         if hit is not None:
             # Decode header for reported duration (avoid re-encode).

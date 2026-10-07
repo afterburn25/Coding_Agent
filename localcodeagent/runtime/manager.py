@@ -132,6 +132,11 @@ class RuntimeManager:
         # "reason"} when a managed runtime is reclaimed or rewarmed so the UI
         # timeline can show FREEING VRAM / REWARMING steps.
         self.on_residency_event: Callable[[dict[str, Any]], None] | None = None
+        # External VRAM releasers: registered by the app shell for consumers
+        # the runtime doesn't own (idle image backends, idle GPU voice
+        # workers). Called — best-effort — when a managed model launch needs
+        # VRAM and reclaiming them is cheaper than evicting a resident LLM.
+        self.vram_releasers: list[Callable[[], None]] = []
         from .tuner import RuntimeTuner
         self.tuner = RuntimeTuner(self.base_dir, config, runtime=self)
         for model in config.models:
@@ -1110,13 +1115,26 @@ class RuntimeManager:
         if target.runtime != "llama_cpp":
             return
         total_vram = float(getattr(self.hardware, "total_vram_gb", 0.0) or 0.0)
-        if total_vram <= 0 or not active:
+        if total_vram <= 0:
             return
         self.refresh_hardware()
         resident_vram = sum(max(0.0, float(profiles.get(mid).estimated_vram_gb)) if profiles.get(mid) else 0.0 for mid in active)
         free_vram = float(self.hardware.free_vram_gb)
         needed = max(0.0, float(target.estimated_vram_gb)) - free_vram
         if needed <= 0 and resident_vram + float(target.estimated_vram_gb) <= total_vram * 0.92:
+            return
+        # Idle external GPU consumers (image backends, GPU voice workers)
+        # release before we evict a resident LLM — restarting them on next
+        # use is far cheaper than reloading a multi-GB model mid-session.
+        if needed > 0 and self.vram_releasers:
+            for release in list(self.vram_releasers):
+                try:
+                    release()
+                except Exception:
+                    pass
+            self.refresh_hardware()
+            free_vram = float(self.hardware.free_vram_gb)
+        if not active:
             return
         keep_loaded_residents = [mid for mid in active if profiles.get(mid, target).keep_loaded]
         keep_loaded_residents.sort(key=lambda mid: self._last_used.get(mid, 0.0))

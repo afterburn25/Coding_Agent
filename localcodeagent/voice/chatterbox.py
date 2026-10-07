@@ -124,6 +124,7 @@ class ChatterboxEngine(TTSEngine):
         self.runtime_dir = (Path(runtime_dir) if runtime_dir
                             else Path("runtime/voice/chatterbox"))
         self.device_pref = device          # auto | cpu | cuda
+        self.dtype_pref = "bf16"           # bf16 halves T3's 1.9 GB; s3gen/ve stay fp32
         self.min_free_vram_mb = float(min_free_vram_mb)
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
@@ -217,7 +218,8 @@ class ChatterboxEngine(TTSEngine):
                 f"Chatterbox worker failed to spawn: {exc}") from exc
         self._reader = _WorkerPump(self._proc)
 
-    def _request(self, payload: dict, timeout: float) -> dict:
+    def _request(self, payload: dict, timeout: float, *,
+                 touch: bool = False) -> dict:
         """One request → one response line. A dead/misbehaving worker is
         killed so the next call respawns cleanly."""
         with self._lock:
@@ -257,7 +259,12 @@ class ChatterboxEngine(TTSEngine):
                 except json.JSONDecodeError:
                     continue
                 if resp.get("ok"):
-                    self._last_used = time.time()
+                    # Only real speech work extends the idle-unload lease —
+                    # introspection (status/capabilities) must not reset the
+                    # timer or UI status polls would pin ~2 GB of VRAM
+                    # forever.
+                    if touch:
+                        self._last_used = time.time()
                     return resp
                 raise VoiceEngineError(str(resp.get("error") or
                                            "chatterbox request failed"))
@@ -283,10 +290,11 @@ class ChatterboxEngine(TTSEngine):
                 "run voice setup/provisioning")
         resp = self._request(
             {"cmd": "load", "device": self.device_pref,
-             "model_dir": str(self.model_dir),
+             "model_dir": str(self.model_dir), "dtype": self.dtype_pref,
              "min_free_vram_mb": self.min_free_vram_mb},
             timeout=LOAD_TIMEOUT_S)
         self._loaded = True
+        self._last_used = time.time()
         self._device = str(resp.get("device") or "cpu")
         self._load_time_s = float(resp.get("load_s") or 0.0)
         self._sr = int(resp.get("sr") or self.sample_rate)
@@ -334,7 +342,7 @@ class ChatterboxEngine(TTSEngine):
                        "reference": str(ref_path),
                        "exaggeration": float(meta.get("exaggeration", 0.5)),
                        "norm_loudness": bool(meta.get("normalization", True))},
-                      timeout=120.0)
+                      timeout=120.0, touch=True)
         self._prepared.add(voice_id)
         return meta
 
@@ -351,7 +359,7 @@ class ChatterboxEngine(TTSEngine):
             "top_p": float(meta.get("top_p", 0.95)),
             "top_k": int(meta.get("top_k", 1000)),
             "repetition_penalty": float(meta.get("repetition_penalty", 1.2)),
-            "out": str(out)}, timeout=self.synth_timeout_s)
+            "out": str(out)}, timeout=self.synth_timeout_s, touch=True)
         pcm, sr = _read_wav_mono(out)
         try:
             out.unlink(missing_ok=True)

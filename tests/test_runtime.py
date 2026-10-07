@@ -675,6 +675,62 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertEqual(manager.resident_model_ids(), ["pinned"])
             self.assertEqual(manager._pending_rewarm, set())
 
+    def test_enforce_residency_frees_external_consumers_first(self):
+        # An incoming launch short on VRAM must reclaim idle external
+        # consumers (image backends, GPU voice workers) BEFORE evicting a
+        # resident keep_loaded model — restarting them on next use is far
+        # cheaper than rewarming a multi-GB LLM mid-session.
+        with tempfile.TemporaryDirectory() as td:
+            pinned = self._profile(id="pinned",
+                                   model_path="models/pinned.gguf",
+                                   keep_loaded=True, estimated_vram_gb=4.0)
+            target = self._profile(id="target",
+                                   model_path="models/target.gguf",
+                                   estimated_vram_gb=6.0)
+            cfg = AgentConfig(models=[pinned, target])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            gpu = GPUInfo(0, "GPU", 12288, 9000, 3288)
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64, available_ram_gb=32,
+                gpus=[gpu], nvidia_smi_available=True)
+            released = []
+
+            def releaser():
+                released.append(True)
+                gpu.free_vram_mb = 11264  # idle consumer exited
+
+            manager.vram_releasers = [releaser]
+            manager.refresh_hardware = lambda: manager.hardware
+            proc = _attach_fake_managed(manager, pinned)
+
+            manager._enforce_residency(target)
+
+            self.assertTrue(released)
+            self.assertFalse(proc.terminated)
+            self.assertEqual(manager.resident_model_ids(), ["pinned"])
+
+    def test_enforce_residency_runs_releasers_with_no_residents(self):
+        # When image/voice consumers hold the card and no other LLM is
+        # resident, reclaim must still run — previously `_enforce_residency`
+        # returned early on `not active` and the launch squeezed the GPU.
+        with tempfile.TemporaryDirectory() as td:
+            target = self._profile(id="target",
+                                   model_path="models/target.gguf",
+                                   estimated_vram_gb=8.0)
+            cfg = AgentConfig(models=[target])
+            manager = RuntimeManager(cfg, base_dir=Path(td))
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64, available_ram_gb=32,
+                gpus=[GPUInfo(0, "GPU", 12288, 10000, 2288)],
+                nvidia_smi_available=True)
+            released = []
+            manager.vram_releasers = [lambda: released.append(True)]
+            manager.refresh_hardware = lambda: manager.hardware
+
+            manager._enforce_residency(target)
+
+            self.assertTrue(released)
+
     def test_reclaim_orphaned_port_kills_only_llama_orphans(self):
         # Backend crash leaves an unmanaged llama-server holding the model's
         # port; a managed sibling sharing the port must never be killed, and

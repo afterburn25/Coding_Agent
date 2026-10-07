@@ -350,11 +350,17 @@ class AgentConfig:
     voice_device: str = "cpu"              # cpu | gpu (best-effort ORT provider)
     voice_max_concurrency: int = 1
     voice_idle_unload_seconds: float = 600.0
+    # CUDA-resident voice engines (Chatterbox) get a much shorter leash —
+    # ~3 GB held between utterances starves the LLM lane on a 12 GB card.
+    voice_gpu_idle_unload_seconds: float = 120.0
     # Chatterbox Turbo — isolated runtime (runtime/voice/chatterbox venv)
     # driven over stdio by the chatterbox engine provider.
     voice_chatterbox_runtime_dir: str = "runtime/voice/chatterbox"
     voice_chatterbox_device: str = "auto"  # auto | cpu | cuda
     voice_chatterbox_min_free_vram_mb: float = 3200.0
+    # bf16 halves T3's ~1.9 GB transformer VRAM; s3gen/ve stay fp32 for
+    # vocoder fidelity. fp32/fp16 selectable for tuning.
+    voice_chatterbox_dtype: str = "bf16"
     voice_chatterbox_synth_timeout_s: float = 240.0
     # Output loudness management — applied in the DSP chain before the
     # peak limiter so normalized speech never clips.
@@ -789,6 +795,7 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.voice_device = str(raw.get("voice_device", cfg.voice_device))
     cfg.voice_max_concurrency = max(1, int(raw.get("voice_max_concurrency", cfg.voice_max_concurrency)))
     cfg.voice_idle_unload_seconds = max(0.0, float(raw.get("voice_idle_unload_seconds", cfg.voice_idle_unload_seconds)))
+    cfg.voice_gpu_idle_unload_seconds = max(0.0, float(raw.get("voice_gpu_idle_unload_seconds", cfg.voice_gpu_idle_unload_seconds)))
     cfg.voice_chatterbox_runtime_dir = str(raw.get(
         "voice_chatterbox_runtime_dir", cfg.voice_chatterbox_runtime_dir))
     _cb_dev = str(raw.get("voice_chatterbox_device",
@@ -798,6 +805,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.voice_chatterbox_min_free_vram_mb = max(0.0, float(raw.get(
         "voice_chatterbox_min_free_vram_mb",
         cfg.voice_chatterbox_min_free_vram_mb)))
+    _cb_dt = str(raw.get("voice_chatterbox_dtype",
+                         cfg.voice_chatterbox_dtype)).strip().lower()
+    cfg.voice_chatterbox_dtype = _cb_dt if _cb_dt in {
+        "bf16", "fp16", "fp32"} else "bf16"
     cfg.voice_chatterbox_synth_timeout_s = max(30.0, float(raw.get(
         "voice_chatterbox_synth_timeout_s",
         cfg.voice_chatterbox_synth_timeout_s)))
