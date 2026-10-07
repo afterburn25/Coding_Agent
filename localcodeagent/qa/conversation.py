@@ -99,12 +99,14 @@ class ScriptedProvider:
             return str(self.script[idx])
         return self.default
 
-    def complete(self, *, messages, tools=None, max_tokens=None):
+    def complete(self, *, messages, tools=None, max_tokens=None,
+                 tool_choice=None):
         content = self._answer(messages)
         self.calls.append({
             "messages": list(messages),
             "tools": tools,
             "max_tokens": max_tokens,
+            "tool_choice": tool_choice,
         })
         return ProviderResponse(
             message={"role": "assistant", "content": content}, raw={})

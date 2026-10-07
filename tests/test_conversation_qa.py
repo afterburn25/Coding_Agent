@@ -24,7 +24,7 @@ from localcodeagent.qa import (
     ScriptedProvider,
     generate_scenarios,
 )
-from localcodeagent.tools.base import ToolRegistry
+from localcodeagent.tools.base import ToolRegistry, ToolSpec
 from localcodeagent.workflow.checkpoint import CheckpointManager
 from localcodeagent.workflow.conversation_manager import ConversationManager
 from localcodeagent.workflow.conversation_memory import ConversationMemory
@@ -71,8 +71,18 @@ def _make(root: Path, *, provider: ScriptedProvider | None = None):
         auto_verify_after_changes=False, review_after_changes=False)
     provider = provider or ScriptedProvider()
     conversations = ConversationManager(root / "conversations.json")
+    registry = ToolRegistry({"filesystem.read": "allow", "filesystem.write": "allow"})
+    registry.register(ToolSpec(
+        "write_file", "Write a file", {"type": "object"},
+        "filesystem.write", lambda a: "ok"))
+    registry.register(ToolSpec(
+        "read_file", "Read a file", {"type": "object"},
+        "filesystem.read", lambda a: "ok"))
+    registry.register(ToolSpec(
+        "run_command", "Run a command", {"type": "object"},
+        "filesystem.read", lambda a: "ok"))
     agent = AgentOrchestrator(
-        config, ModelRouter(config.models), ToolRegistry(config.permissions),
+        config, ModelRouter(config.models), registry,
         _FakeRuntime(),
         tasks=TaskStore(root), checkpoints=CheckpointManager(root),
         memory=ProjectMemory(root), repository_index=RepositoryIndex(root),
@@ -209,6 +219,63 @@ class HandAuthoredScenarioTests(unittest.TestCase):
                        expect={"system_contains": "MongoDB"}),
                 QaTurn("my printer says offline but it's on"),
             ], default_conversation_id="mixed-chat")
+            run = runner.run(scenario)
+            self.assertTrue(run.ok, run.failures)
+
+
+class ToolUseQaTests(unittest.TestCase):
+    """§8/§9 — action requests must reach the model with tools; pure
+    questions must not. Coding context survives topic switches."""
+
+    def test_action_requests_offer_tools_questions_do_not(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            scenario = QaScenario("tool-gating", [
+                QaTurn("create a file named notes.txt containing hello",
+                       expect={"tool_calls": True}),
+                QaTurn("why is the sky blue", expect={"no_tool_calls": True}),
+                QaTurn("fix the bug in parser.py", expect={"tool_calls": True}),
+                QaTurn("what is 2+2", expect={"no_tool_calls": True}),
+                QaTurn("run the tests", expect={"tool_calls": True}),
+                QaTurn("how do I poach an egg",
+                       expect={"no_tool_calls": True}),
+            ])
+            run = runner.run(scenario)
+            self.assertTrue(run.ok, run.failures)
+
+    def test_narration_without_execution_retriggers_tool_call(self):
+        """§9: a model that narrates a plan instead of calling a tool gets
+        re-prompted with tool_choice='required' — it can't talk its way out
+        of executing an action request."""
+        with tempfile.TemporaryDirectory() as td:
+            provider = ScriptedProvider(
+                script=["I'll create the file notes.txt for you now."])
+            agent, provider, convos = _make(Path(td), provider=provider)
+            agent.run("create a file named notes.txt containing hello")
+            self.assertGreaterEqual(len(provider.calls), 2)
+            self.assertEqual(provider.calls[1].get("tool_choice"), "required")
+
+    def test_coding_context_survives_topic_switch(self):
+        """§8 stress shape: coding → unrelated → image-ish → return to
+        coding → earlier fact recall — no state corruption."""
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            scenario = QaScenario("coding-switch", [
+                QaTurn("the auth module uses JWT tokens."),
+                QaTurn("refactor the login handler", expect={"tool_calls": True}),
+                QaTurn("anyway — how do I make cold brew coffee",
+                       expect={"no_tool_calls": True,
+                               "system_not_contains": "JWT"}),
+                QaTurn("back to coding — add a test for the login handler",
+                       expect={"tool_calls": True}),
+                QaTurn("what token type does the auth module use?",
+                       expect={"system_contains": "JWT",
+                               "no_tool_calls": True}),
+            ])
             run = runner.run(scenario)
             self.assertTrue(run.ok, run.failures)
 
