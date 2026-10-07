@@ -461,6 +461,10 @@ class AppState:
         register_audit_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
+        from .tools.migrations import register_migration_tools
+        register_migration_tools(
+            self.tools, self.workspace,
+            extra_roots=self.workspaces.allowed_roots)
         register_deploy_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
