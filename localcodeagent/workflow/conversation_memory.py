@@ -155,6 +155,51 @@ class ConversationMemory:
             if t not in cls._CONTENT_STOPWORDS and not t.isdigit()
         }
 
+    _SUBJECT_ADVERBS = frozenset({
+        "now", "currently", "today", "recently", "actually", "finally",
+        "just", "also", "still", "really", "meanwhile", "anyway",
+    })
+
+    @classmethod
+    def _clean_subject(cls, raw: str) -> str:
+        """Normalize a declarative-fact subject: drop trailing discourse
+        adverbs ('Orion now uses X' -> 'Orion') and 'off/from X' migration
+        tails so the supersession slot stays 'orion:use'."""
+        subj = re.sub(r"\s+", " ", str(raw or "").strip())
+        subj = re.sub(
+            r"\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}$",
+            "", subj, flags=re.IGNORECASE)
+        # Strip trailing discourse adverbs only — 'Orion now' -> 'Orion'
+        # while a mid-subject 'still' in a real name stays put.
+        words = subj.split()
+        while words and words[-1].lower() in cls._SUBJECT_ADVERBS:
+            words.pop()
+        return " ".join(words).strip()
+
+    @classmethod
+    def _clean_value(cls, raw: str) -> str:
+        """Strip trailing punctuation and discourse adverbs from a fact
+        value — 'MySQL now.' -> 'MySQL' so the stored fact stays
+        canonical and dedup/supersession compare cleanly."""
+        value = str(raw or "").strip().rstrip(".!?")
+        words = value.split()
+        while words and words[-1].lower() in cls._SUBJECT_ADVERBS:
+            words.pop()
+        return " ".join(words).strip()
+
+    @staticmethod
+    def _fact_subject_ok(subj: str) -> bool:
+        """Question/command-shaped openings are not fact subjects."""
+        if not subj:
+            return False
+        return subj.split()[0] not in {
+            "i", "we", "you", "they", "he", "she", "it",
+            "what", "which", "who", "why", "how", "when", "where",
+            "does", "do", "did", "can", "could", "should", "would",
+            "is", "are", "was", "were", "will", "this", "that",
+            "tell", "show", "if", "let",
+            "isnt", "arent", "doesnt"}
+
     @staticmethod
     def _fact_slot(text: str) -> str:
         """Supersession slot for entity-attribute facts.
@@ -415,32 +460,55 @@ class ConversationMemory:
             if fact is None:
                 # Declarative entity-attribute statements — "Project Orion
                 # uses PostgreSQL", "Orion runs on Linux" — and updates like
-                # "we switched Orion to SQLite". Updates canonicalize to the
-                # "uses" slot so a newer value supersedes the older one.
+                # "we switched Orion to SQLite" / "Orion moved to Redis".
+                # All of these canonicalize to "subject predicate value" so
+                # a newer statement occupies the same supersession slot.
+                body = re.sub(
+                    r"^(?:actually|by the way|btw|also|so|fyi|note|quick note|"
+                    r"for the record|just so you know)[,:\s]+",
+                    "", raw, flags=re.IGNORECASE)
                 switch = re.match(
                     r"^we\s+(?:switched|moved|migrated|changed)\s+"
                     r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
-                    raw, flags=re.IGNORECASE,
+                    body, flags=re.IGNORECASE,
                 )
                 if switch:
-                    fact = f"{switch.group(1).strip()} uses {switch.group(2).strip()}"
+                    subj = self._clean_subject(switch.group(1))
+                    value = self._clean_value(switch.group(2))
+                    if self._fact_subject_ok(subj) and value:
+                        fact = f"{subj} uses {value}"
                 else:
-                    decl = re.match(
+                    # Subject-led update: "Orion moved to Redis",
+                    # "Orion migrated off Postgres to Redis".
+                    subj_switch = re.match(
                         r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-                        r"(uses?|runs on|is built on|is written in|depends on|prefers?)\s+(.+)$",
-                        raw, flags=re.IGNORECASE,
+                        r"(?:switched|moved|migrated|changed)"
+                        r"(?:\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)?"
+                        r"\s+to\s+(.+)$",
+                        body, flags=re.IGNORECASE,
                     )
-                    if decl and decl.group(1).strip().lower().split()[0] not in {
-                            "i", "we", "you", "they", "he", "she", "it",
-                            "what", "which", "who", "why", "how", "when", "where",
-                            "does", "do", "did", "can", "could", "should", "would",
-                            "is", "are", "was", "were", "will", "this", "that",
-                            "tell", "show", "if", "let", "can", "could",
-                            "did", "isnt", "arent", "doesnt"}:
-                        if decl.group(2).lower() in {"switched to", "moved to", "migrated to"}:
-                            fact = f"{decl.group(1).strip()} uses {decl.group(3).strip()}"
-                        else:
-                            fact = raw
+                    decl = None
+                    subj = ""
+                    if subj_switch:
+                        subj = self._clean_subject(subj_switch.group(1))
+                        value = self._clean_value(subj_switch.group(2))
+                        if self._fact_subject_ok(subj) and value:
+                            fact = f"{subj} uses {value}"
+                    else:
+                        decl = re.match(
+                            r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"(uses?|runs on|is built on|is written in|"
+                            r"depends on|prefers?)\s+(.+)$",
+                            body, flags=re.IGNORECASE,
+                        )
+                        if decl:
+                            subj = self._clean_subject(decl.group(1))
+                            if self._fact_subject_ok(subj):
+                                pred = re.sub(
+                                    r"\s+", " ", decl.group(2).strip().lower())
+                                value = self._clean_value(decl.group(3))
+                                if value:
+                                    fact = f"{subj} {pred} {value}"
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))

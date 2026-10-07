@@ -657,6 +657,32 @@ class CrossChatMemoryTests(unittest.TestCase):
             # History/provenance: the old row is still stored.
             self.assertTrue(any("PostgreSQL" in r["text"] for r in rows))
 
+    def test_discourse_prefixed_and_moved_forms_capture_and_supersede(self):
+        """§24-found gaps: discourse prefixes, 'moved/migrated to', and
+        'off X to Y' forms all canonicalize into the same slot so the
+        newest statement supersedes regardless of phrasing."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("Project Orion uses PostgreSQL.")
+            memory.learn_from_user("actually, Orion uses MySQL now")
+            memory.learn_from_user("Orion moved to Redis")
+            memory.learn_from_user("by the way, Orion uses Cassandra")
+            rows = memory.snapshot()["facts"]
+            active = [r["text"] for r in rows if r["active"]]
+            self.assertEqual(active, ["Orion uses Cassandra"])
+            # Every earlier form retired into the same slot.
+            self.assertTrue(all(r.get("slot") == "orion:uses"
+                                for r in rows[:4]))
+            ctx = memory.prompt_context("what database does Orion use?")
+            self.assertIn("Cassandra", ctx)
+            self.assertNotIn("MySQL now", ctx)  # trailing adverb stripped
+
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user(
+                "we migrated Atlas off Postgres to Redis")
+            self.assertEqual(memory2.snapshot()["facts"][0]["text"],
+                             "Atlas uses Redis")
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")
