@@ -396,8 +396,9 @@
       "biological_human_claim": false
     },
     "hard_tool_safety_bypass": false,
-    "verified_code_checkpoint": "d398b77",
-    "next_security_upgrade": "creator private-key backup/recovery plus signed Brain audit/history",
+    "verified_code_checkpoint": "6c8ae0b",
+    "creator_key_backup_recovery": "export_creator_key_backup/restore_creator_key_backup — Ed25519 key re-encrypted under a backup passcode, integrity + signature + brain_id verified on restore; POST /api/nexus-brain/key-backup and /key-restore; audited key_backup_exported/restored/rejected",
+    "next_security_upgrade": "none queued — key backup/recovery and signed audit/history landed",
     "canonical_path_enforced": true,
     "config_redirect_or_disable_after_initialization": false,
     "signature_scheme": "ed25519",
