@@ -1109,6 +1109,8 @@ class AgentOrchestrator:
         try:
             if self.conversation_memory is not None:
                 self.nexus_brain.sync_conversation_memory(self.conversation_memory.snapshot())
+            if self.conversation_manager is not None:
+                self.nexus_brain.sync_conversations(self.conversation_manager.snapshot())
             if self.knowledge_memory is not None:
                 self.nexus_brain.sync_knowledge_records(self.knowledge_memory.records())
             if self.model_growth is not None:

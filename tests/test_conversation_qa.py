@@ -222,6 +222,41 @@ class HandAuthoredScenarioTests(unittest.TestCase):
             run = runner.run(scenario)
             self.assertTrue(run.ok, run.failures)
 
+    def test_memory_lifecycle_end_to_end(self):
+        """Teach → recall → correct → supersede → rule → revoke →
+        is-fact → correction-supersession → forget, all through run():
+        the retired value must disappear from later prompts."""
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            scenario = QaScenario("lifecycle-14", [
+                QaTurn("Project Vega uses Cassandra."),
+                QaTurn("what database does Vega use?",
+                       expect={"system_contains": "Cassandra"}),
+                QaTurn("actually it was FoundationDB not Cassandra"),
+                QaTurn("what database does Vega use?",
+                       expect={"system_contains": "FoundationDB",
+                               "system_not_contains": "Cassandra"}),
+                QaTurn("always answer in bullet points"),
+                QaTurn("what color is the sky"),
+                QaTurn("stop answering in bullet points"),
+                QaTurn("the staging port is 8443"),
+                QaTurn("what port is staging on",
+                       expect={"system_contains": "8443"}),
+                QaTurn("correction: the staging port is 9443"),
+                QaTurn("what port is staging on",
+                       expect={"system_contains": "9443",
+                               "system_not_contains": "8443"}),
+                QaTurn("forget about the staging port"),
+                QaTurn("what port is staging on",
+                       expect={"system_not_contains": "9443"}),
+                QaTurn("what database does Vega use?",
+                       expect={"system_contains": "FoundationDB"}),
+            ], default_conversation_id="lc")
+            run = runner.run(scenario)
+            self.assertTrue(run.ok, run.failures)
+
 
 class ToolUseQaTests(unittest.TestCase):
     """§8/§9 — action requests must reach the model with tools; pure
