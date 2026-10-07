@@ -8371,7 +8371,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
-            runtime = self.state.runtime.summary(probe_external=False)
+            # Per-section stopwatch — this endpoint aggregates ~10 subsystem
+            # summaries and is the host's boot health probe, so a slow
+            # section (hardware probe, sqlite scan) shows up as boot time.
+            _st = {}
+            _all_t0 = time.monotonic()
+            def _timed(key, fn):
+                _t0 = time.monotonic()
+                out = fn()
+                _st[key] = (time.monotonic() - _t0) * 1000
+                return out
+            runtime = _timed("runtime",
+                lambda: self.state.runtime.summary(probe_external=False))
             self._json({
                 "version": VERSION,
                 "workspace": str(self.state.workspace),
@@ -8389,19 +8400,31 @@ class Handler(BaseHTTPRequestHandler):
                 "permissions": self.state.config.permissions,
                 "policy_mode": self.state.config.conversation_policy_mode,
                 "ethical_temperature": float(getattr(self.state.config, "ethical_temperature", 1.0)),
-                "clock": self.state.agent.current_time_snapshot(),
-                "nexus_brain": self.state.nexus_brain.summary(),
+                "clock": _timed("clock",
+                    lambda: self.state.agent.current_time_snapshot()),
+                "nexus_brain": _timed("nexus_brain",
+                    lambda: self.state.nexus_brain.summary()),
                 "nexus_brain_seed": dict(self.state.brain_seed_status),
                 "runtime": runtime,
-                "tasks": self.state.task_payload(),
-                "repository_index": self.state.repository_index.summary(),
-                "research": self.state.research.summary(),
-                "model_telemetry": self.state.model_telemetry.summary(),
-                "image": self.state.images.summary(),
+                "tasks": _timed("tasks", lambda: self.state.task_payload()),
+                "repository_index": _timed("repo_index",
+                    lambda: self.state.repository_index.summary()),
+                "research": _timed("research",
+                    lambda: self.state.research.summary()),
+                "model_telemetry": _timed("model_telemetry",
+                    lambda: self.state.model_telemetry.summary()),
+                "image": _timed("image",
+                    lambda: self.state.images.summary()),
                 # Lets the UI skip flat canned replies when a named persona
                 # is driving delivery — the model answers in character.
                 "persona_active": self.state.agent._persona_active(),
             })
+            _st["total"] = (time.monotonic() - _all_t0) * 1000
+            if _st["total"] > 500:
+                print("[nexus-slow] /api/status " + " ".join(
+                    f"{k}={v:.0f}ms" for k, v in sorted(
+                        _st.items(), key=lambda kv: -kv[1])),
+                    flush=True)
             return
         if path == "/api/models":
             self._json({"models": [asdict(m) for m in self.state.config.models]})

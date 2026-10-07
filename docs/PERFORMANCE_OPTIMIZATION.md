@@ -98,8 +98,31 @@ Fixes (all measured, semantics preserved):
   are now diagnosable from `backend-host.log` alone.
 
 Measured: provisioning init **8350 ms → 65 ms**; AppState tail
-**9.9 s → 1.4 s**; `backend_health` **15.3 s → 6.1 s**; total startup
-**~21.4 s → ~12.7 s** (installed build, warm disk cache).
+**9.9 s → 1.4 s**; `backend_health` **15.3 s → 4.3 s**; total startup
+**~21.4 s → ~7.6 s** (installed build, warm disk cache).
+
+### `/api/status` hot path (third pass — `[nexus-slow]` section timers)
+The endpoint aggregates ~10 subsystem summaries and doubles as the
+host's boot health probe (polled every 150 ms) and the frontend's
+post-turn refresh. Section timing showed **`images.summary()` =
+~800 ms steady, ~2.8 s periodic** — every call ran a live HTTP health
+`probe()` per image backend, and on this machine a connect to a dead
+localhost port takes ~2 s before being refused (filter/AV quirk), so
+each probe burned its full timeout.
+
+Fixes:
+- `ImageManager.summary` caches the two `probe()` results for **10 s**
+  (`_SUMMARY_PROBE_TTL`), bypassed whenever a backend `_process` is
+  active so job state transitions stay fresh.
+- The two probes run **in parallel** (independent objects) — serialized
+  dead-endpoint timeouts no longer stack.
+- InvokeAI `_health_uncached` bounds its probe at **1 s** (was the full
+  4 s request timeout); ComfyUI already caps at 0.75 s.
+- `/api/status` emits `[nexus-slow] <section> <ms>` lines when total
+  exceeds 500 ms — same always-on diagnostics as `[nexus-init]`.
+
+Measured: steady-state `/api/status` **~800 ms → ~20 ms** (cached
+probes); first/boot call 2.8 s → ~1.05 s.
 
 ## Measured results (installed build)
 
@@ -115,8 +138,9 @@ Measured: provisioning init **8350 ms → 65 ms**; AppState tail
 | Mean simple-chat turn | — | 1.15 s (voice enabled) |
 | Idle process count | 3 | 3 (NexusCore, backend, llama-server) |
 | Startup: provisioning init | ~8.4 s | **65 ms** |
-| Startup: backend_health | ~15.3 s | **~6.1 s** |
-| Startup: total to ready | ~21.4 s | **~12.7 s** |
+| Startup: /api/status steady-state | ~800 ms | **~20 ms** (10 s probe cache) |
+| Startup: backend_health | ~15.3 s | **~4.3 s** |
+| Startup: total to ready | ~21.4 s | **~7.6 s** |
 
 ## Verified live on the installed build
 - Engine `loaded:false, worker_alive:false` 120 s after last speech.
@@ -144,10 +168,12 @@ Measured: provisioning init **8350 ms → 65 ms**; AppState tail
   mitigations would be pre-warm on voice toggle or a smaller warm pool —
   deliberately **not** done (that's the residency tax this milestone
   removed).
-- Startup residual (~12.7 s total): ~2–3 s PyInstaller unpack + module
-  imports before the first marker, ~1.3 s subsystem init (boot 4→94%),
-  ~2.4 s WebView2 interface_ready. InvokeAI `discover()` still spends
-  ~1 s inside inventory on first call — acceptable once per boot.
+- Startup residual (~7.6 s total): ~1.5 s frozen-exe spawn → first
+  marker (PyInstaller + imports), ~1.4 s subsystem init (boot 4→94%),
+  ~1 s first status probe, ~2.4 s WebView2 interface_ready.
+- Machine quirk: refused localhost connects take ~2 s here (filter/AV).
+  Dead image-backend probes are bounded (≤1 s, parallel, 10 s-cached)
+  so the quirk no longer taxes boot or status polls.
 - 50-turn soak: **done** — flat at ~6.1 GB; no growth turns 20–50.
 - Image generation runs mostly through WDDM shared memory on a busy
   12 GB card — slow but correct, and memory returns afterward.

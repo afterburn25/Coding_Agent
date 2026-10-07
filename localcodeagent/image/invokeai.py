@@ -97,13 +97,16 @@ class InvokeAIBackend(ImageBackend):
     # -- HTTP plumbing -------------------------------------------------
 
     def _json(self, path: str, *, method: str = "GET",
-              payload: dict | None = None) -> Any:
+              payload: dict | None = None,
+              timeout: float | None = None) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             self.endpoint + path, data=data, method=method,
             headers={"Content-Type": "application/json"} if data else {})
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(
+                    req, timeout=self.timeout if timeout is None
+                    else timeout) as resp:
                 raw = resp.read()
                 return json.loads(raw.decode("utf-8")) if raw else {}
         except urllib.error.HTTPError:
@@ -125,9 +128,12 @@ class InvokeAIBackend(ImageBackend):
         return result
 
     def _health_uncached(self) -> tuple[bool, str]:
+        # Health probes get a bounded 1s timeout — a dead/tarpitted
+        # endpoint otherwise burns the full request timeout (4s) on every
+        # status refresh.
         for probe in ("/api/v1/app/version", "/api/v1/app/runtime_config"):
             try:
-                info = self._json(probe)
+                info = self._json(probe, timeout=min(self.timeout, 1.0))
                 version = info.get("version") or info.get("app_version") or ""
                 return True, f"InvokeAI {version}".strip()
             except urllib.error.HTTPError:

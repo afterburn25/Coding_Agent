@@ -394,11 +394,45 @@ class ImageManager:
         except Exception as exc:
             self._update_setup(state="failed", error=f"{type(exc).__name__}: {exc}")
 
+    _SUMMARY_PROBE_TTL = 10.0
+
     def summary(self) -> dict[str, Any]:
-        backend_runtime = self.backend_runtime.probe()
+        # probe() does a live HTTP health check per backend — a dead
+        # endpoint can cost its full connect timeout (measured ~0.75 s
+        # each on this box where refused localhost connects take ~2 s).
+        # /api/status is the host's boot health probe and a UI poll, so
+        # brief caching keeps dead backends from taxing every status call.
+        # Active backends always probe fresh — state transitions during
+        # a job must not lag behind the cache.
+        busy = (getattr(self.backend_runtime, "_process", None) is not None
+                or getattr(self.invokeai_runtime, "_process", None)
+                is not None)
+        cached = getattr(self, "_summary_probe_cache", None)
+        if not busy and cached is not None \
+                and time.time() - cached[0] < self._SUMMARY_PROBE_TTL:
+            backend_runtime, invoke_runtime = cached[1]
+        else:
+            # The two probes are independent objects — run them in
+            # parallel so serialized dead-endpoint timeouts don't stack.
+            probed: dict[str, dict] = {}
+            threads = [
+                threading.Thread(
+                    target=lambda n, fn: probed.__setitem__(n, fn()),
+                    args=(name, fn), daemon=True)
+                for name, fn in (("comfyui", self.backend_runtime.probe),
+                                 ("invokeai", self.invokeai_runtime.probe))]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+            backend_runtime = probed.get("comfyui") or {
+                "healthy": False, "error": "probe timed out"}
+            invoke_runtime = probed.get("invokeai") or {
+                "healthy": False, "error": "probe timed out"}
+            self._summary_probe_cache = (
+                time.time(), (backend_runtime, invoke_runtime))
         healthy = bool(backend_runtime.get("healthy"))
         detail = str(backend_runtime.get("error") or "")
-        invoke_runtime = self.invokeai_runtime.probe()
         invoke_models = self._invokeai_models()
         return {
             "enabled": bool(getattr(self.config, "image_enabled", True)),
