@@ -983,10 +983,11 @@ follow-ups, and stops replaying identical canned prose.
 
 ### Known limitations / next
 
-- Compound secondary actions are retained as metadata; full multi-step
-  execution of trailing clauses is scheduler work, not yet wired.
-- Ambiguity surfacing is marked on the envelope; the UI does not yet
-  render a focused clarification prompt for ambiguous references.
+- Compound local actions landed: fully-parsed clause sequences execute
+  through the verified lane with gate-aware stop/resume; mixed clauses
+  (action + non-action) still fall to the model lane whole.
+- Ambiguity surfacing landed: envelope markers reach the model as
+  prompt advisories and render as an "Ambiguous" hint chip in chat.
 - `web/app.js` builtin replies gained a small variant bank
   (`CLIENT_REPLY_VARIANTS` rotation); deeper JS-side sharing with the
   Python `PersonaRenderer` is future work.

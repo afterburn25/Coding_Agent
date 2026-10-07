@@ -80,7 +80,28 @@ on verified tool output.
   `requirement_changed` history event), the mission executor warns the
   model which values are dead, and a notification surfaces the drift.
   Terminal and unrelated nodes stay untouched; completed work keeps
-  its historical context.
+  its historical context. Stale nodes never dispatch —
+  `_step_executing` replans around them (skipped + fresh recovery path
+  on their satisfied deps), and `AnswerMemory.invalidate_superseded`
+  retires learned answers carrying the dead value so the memory fast
+  path can't serve it with a trusted badge.
+- **Ambiguity + envelope advisories** — `env.ambiguity` was write-only;
+  it now reaches the model as a prompt advisory (ask, don't guess),
+  rides `AgentResult.ambiguity` → chat payload → an "Ambiguous" hint
+  chip in the UI (SSE + `renderAgentResult` paths), and the same
+  advisory block surfaces temporal anchors, comparisons, conditionals,
+  alternatives, and compound-request markers.
+- **Compound local actions** — `env.secondary_intents` clauses that
+  all parse as bounded local actions now execute sequentially through
+  the same verify+ledger lifecycle. The sequence stops at the first
+  gate (approval/failure/denial/clarify) — nothing past a gate runs
+  undecided — and the tail parks on the approval record so resume
+  continues it (denial cancels it and says so). One unparseable
+  clause hands the whole turn to the model lane — never partial
+  execution on a guess.
+- **Ledger restart reconciliation** — `recover_orphans()` closes
+  crash-interrupted `recorded` entries as `unverified` at boot; only
+  `awaiting_approval` is a legitimate cross-restart park.
 - **Regression coverage** — `tests/test_action_ops.py` (27 tests:
   parse matrix, in-root verified execution, idempotent no-ops, deny/
   ask/approve/denied flows, outside-root always-asks, disabled tool,

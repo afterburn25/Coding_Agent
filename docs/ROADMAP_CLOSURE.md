@@ -88,9 +88,9 @@ messages.
 | Requirement | Status | Evidence |
 |---|---|---|
 | Declared plan (voice→InvokeAI→fleet→Whisper→ComfyUI→image models) | LANDED_VERIFIED | `provisioning.py:_declared_plan`; LIVE: plan reconciled `invokeai→completed` today after manifest fix |
-| Full recommended workstation stack (ripgrep, ffmpeg, ffprobe, tesseract, pandoc, duckdb, piper, docker, blender, code-intel extras, Playwright/Chromium, …) | **PARTIAL — real gap** | 11 bundled manifests exist in `tools/manifests/` but only voice/invokeai/whisper/fleet/comfyui/image-models are in the plan. No Playwright item (browser assets install via `/api/browser/install` ad-hoc, not the planner). |
-| Install profiles (Core / Recommended / Complete Workstation / Custom) | **NOT_LANDED** | No profile concept in `provisioning.py`/`config.py`. |
-| Approval gate for privileged/large/licensed items (WAITING_FOR_APPROVAL) | PARTIAL | `packages.install` permission exists; no per-item approval state in the plan for OS-level tools |
+| Full recommended workstation stack (ripgrep, ffmpeg, ffprobe, tesseract, pandoc, duckdb, piper, docker, blender, code-intel extras, Playwright/Chromium, …) | LANDED | All 12 manifests are in `_declared_plan` tiered core/recommended/complete; `browser-runtime` is a first-class plan item (`browser_runtime` kind) that verifies instantly when Edge resolves and downloads managed Chromium otherwise |
+| Install profiles (Core / Recommended / Complete Workstation / Custom) | LANDED | `TIER_ORDER` + per-item `tier` + `provisioning_profile` config (default `recommended`) + `provisioning_include`/`_exclude` for custom selection |
+| Approval gate for privileged/large/licensed items (WAITING_FOR_APPROVAL) | LANDED | Per-item `requires_approval` → `waiting_approval` plan state (Docker, Blender, licensed fleet weights); `POST /api/provisioning/approve` resumes; `packages.install` permission governs tool installs |
 | Progress (bytes/%/speed/ETA/stage), pause/resume/cancel/retry, restart persistence, disk reserve, checksum, healthy-skip, AV-retry, failure classification, waiting_for_capability | LANDED_VERIFIED | provisioning.py + Command Center/Settings UI; LIVE reconcile after deploy fix |
 | Spoken meaningful failures, deduped, no spam | LANDED_NEEDS_DOGFOOD | `_speak_notice` once-per-incident; LIVE not fully exercised for every class |
 | Background UX: chat usable during provisioning + one-time notice | LANDED_NEEDS_DOGFOOD | `provisioning` runs async; verify the spoken/text notice exists |
