@@ -9177,10 +9177,13 @@ class Handler(BaseHTTPRequestHandler):
                     payload["summary"] = self.state.activities.summary(task_id)
             self._json(payload)
             return
-        if path == "/api/actions":
+        if path == "/api/action-ledger":
             # Action Evidence Ledger — the durable record behind every
             # action claim. Success language in a reply is only
             # legitimate when a 'verified' entry exists here.
+            # NOTE: /api/actions is the self-knowledge capability route
+            # (claimed earlier in this handler) — the ledger must use a
+            # distinct path or it is unreachable.
             query = parse_qs(urlparse(self.path).query)
             task_id = query.get("task_id", [""])[0]
             mission_id = query.get("mission_id", [""])[0]
