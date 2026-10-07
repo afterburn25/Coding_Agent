@@ -1160,10 +1160,11 @@ class NexusBrain:
     def prompt_context(self, query: str = "", *, project_id: str = "", conversation_id: str = "") -> str:
         if not self.enabled or not self.initialized or not self.verified_for_session or not self.subroutine("long_term_memory", True):
             return ""
-        # Relevance gating: with a live user turn, fact records must share a
-        # content term with it — the whole durable store must not ride every
-        # prompt (memory intrusion). Rules/autobiographical rows are behavioral
-        # and always apply. Empty query returns the full scoped view.
+        # Relevance gating: with a live user turn, fact and
+        # autobiographical records must share a content term with it —
+        # the whole durable store must not ride every prompt (memory
+        # intrusion). Rules are behavioral and always apply. Empty query
+        # returns the full scoped view.
         from .conversation_memory import ConversationMemory
         q_terms = ConversationMemory._content_terms(query)
         with self._lock:
@@ -1176,7 +1177,7 @@ class NexusBrain:
             if q_terms:
                 durable = [
                     row for row in durable
-                    if row.get("kind") != "fact"
+                    if row.get("kind") == "rule"
                     or ConversationMemory._content_terms(str(row.get("text", ""))) & q_terms
                 ]
             durable = durable[-80:]
