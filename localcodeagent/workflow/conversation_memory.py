@@ -477,6 +477,17 @@ class ConversationMemory:
             result["forgotten"].extend(forgotten)
             return result
 
+        # Credentials are never persisted — "remember my passcode is X"
+        # must not bank the secret into facts/rules, sync it to the
+        # Brain, or echo it back through prompt_context. The refusal
+        # reuses the `locked` slot so the reply still surfaces.
+        from ..answer_memory.validation import contains_secret
+        if contains_secret(raw):
+            result.setdefault("locked", []).append(
+                "I won't store credentials or secrets in memory — "
+                "Brain unlock lives in the Trainer page instead.")
+            return result
+
         with self._lock:
             fact: str | None = None
             for pattern in (

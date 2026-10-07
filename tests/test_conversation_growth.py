@@ -112,6 +112,40 @@ class ConversationManagerTests(unittest.TestCase):
             self.assertNotIn("locked", learned)
             self.assertTrue(any("june 1" in f.lower() for f in learned["facts"]))
 
+    def test_credentials_are_never_persisted(self):
+        """Secrets must not bank into facts/rules, sync to the Brain, or
+        echo through prompt_context — the turn refuses with a notice."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            for q in (
+                "remember that my passcode is hunter2",
+                "my password is s3cret!",
+                "remember my pin is 4820",
+                "learn that my passphrase is correct horse battery",
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertIn("locked", learned, q)
+                self.assertIn("credentials", learned["locked"][0], q)
+                self.assertEqual(learned["facts"], [], q)
+                self.assertEqual(learned["behavior_rules"], [], q)
+                self.assertEqual(learned["training_examples"], [], q)
+            ctx = memory.prompt_context()
+            for secret in ("hunter2", "s3cret!", "4820", "correct horse"):
+                self.assertNotIn(secret, ctx)
+
+    def test_forget_still_works_on_secret_shaped_text(self):
+        """'forget …' must run even when the query quotes a credential —
+        a refusal here would strand a stored secret forever."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            memory._data["facts"].append({
+                "id": "f1", "text": "my db password is s3cret",
+                "created_at": 1.0, "active": True, "scope": "global",
+            })
+            learned = memory.learn_from_user("forget my db password")
+            self.assertNotIn("locked", learned)
+            self.assertTrue(learned["forgotten"])
+
     def test_history_survives_truncated_or_missing_main_file(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "conversations.json"
