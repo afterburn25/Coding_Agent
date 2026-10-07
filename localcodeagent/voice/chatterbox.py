@@ -369,6 +369,18 @@ class ChatterboxEngine(TTSEngine):
                 raise VoiceEngineError(str(resp.get("error") or
                                            "chatterbox request failed"))
 
+    @staticmethod
+    def _close_pipes(proc: subprocess.Popen) -> None:
+        # kill()/wait() leave the parent's stdin/stdout/stderr wrappers
+        # open — close them so teardown doesn't leak fds (the pump threads
+        # treat the resulting ValueError as end-of-stream and exit).
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except Exception:
+                pass
+
     def _kill_locked(self) -> None:
         proc, self._proc = self._proc, None
         self._reader = None
@@ -377,6 +389,7 @@ class ChatterboxEngine(TTSEngine):
                 proc.kill()
             except Exception:
                 pass
+            self._close_pipes(proc)
         self._loaded = False
         self._prepared.clear()
 
@@ -416,6 +429,8 @@ class ChatterboxEngine(TTSEngine):
                         proc.kill()
                     except Exception:
                         pass
+            if proc is not None:
+                self._close_pipes(proc)
             self._proc = None
             self._reader = None
             self._loaded = False

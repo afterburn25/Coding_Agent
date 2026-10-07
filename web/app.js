@@ -1043,12 +1043,14 @@ loadConversations().then(convos=>{const active=convos?.active;if(active?.message
 // main shell is genuinely interactive. Post it after the first paint —
 // status/readiness/memory hydrate panels asynchronously and don't gate
 // interactivity (measured ~1.8s of nav→ready was these API calls).
-requestAnimationFrame(()=>requestAnimationFrame(()=>{
-  try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
-}));
-Promise.allSettled([loadStatus(),loadReadiness(),loadConversationMemory()]).finally(()=>{
-  try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
-});input.focus();
+// The hydration completion is the fallback post for cases where rAF is
+// deferred (hidden/occluded WebView); whichever fires first wins.
+let _readyPosted=false;
+const _postReady=()=>{if(_readyPosted)return;_readyPosted=true;
+  try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}};
+requestAnimationFrame(()=>requestAnimationFrame(_postReady));
+Promise.allSettled([loadStatus(),loadReadiness(),loadConversationMemory()]).finally(_postReady);
+input.focus();
 
 // Push-to-talk STT — hold the mic button (or click to toggle), speak, and
 // the transcript lands in the composer. Hidden entirely when the backend
