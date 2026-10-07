@@ -185,6 +185,12 @@ class ChatterboxEngine(TTSEngine):
             raise VoiceEngineError(
                 f"Chatterbox runtime not found at {self.runtime_dir} — "
                 "run voice setup/provisioning")
+        if not _WORKER.exists():
+            # Frozen builds ship the worker via --add-data; a missing file
+            # here means packaging dropped it — fail loudly, not with a
+            # dead-process mystery two calls later.
+            raise VoiceEngineError(
+                f"Chatterbox worker script missing at {_WORKER}")
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env.setdefault("HF_HUB_OFFLINE", "1")

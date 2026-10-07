@@ -702,8 +702,22 @@ class VoiceManager:
             self._publish("voice", {
                 "event": "engine_fallback", "engine": preset.engine,
                 "fallback": "kokoro"})
-            audio, sr = self.engine("kokoro").synthesize(
-                text, voice=preset.base_voice, speed=speed,
+            kok = self.engine("kokoro")
+            fb_voice = preset.base_voice
+            try:
+                # The preset's voice id belongs to the failed engine —
+                # isabella isn't a Kokoro voice. Map to the closest
+                # Kokoro equivalent (bf_isabella is the reference's own
+                # source voice) or Kokoro's first available voice.
+                kok_ids = {str(v.get("id")) for v in kok.voices()}
+                if fb_voice not in kok_ids:
+                    fb_voice = ("bf_isabella" if "bf_isabella" in kok_ids
+                                else next(iter(sorted(kok_ids)),
+                                          fb_voice))
+            except Exception:
+                pass
+            audio, sr = kok.synthesize(
+                text, voice=fb_voice, speed=speed,
                 lang=_lang_tag(preset.language))
             fallback = True
         # Global loudness settings apply as preset overrides — the preset

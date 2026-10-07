@@ -1113,6 +1113,42 @@ class TestChatterboxEngine(unittest.TestCase):
         self.assertTrue(any(e.get("event") == "engine_fallback"
                             for e in published))
 
+    def test_fallback_maps_unknown_voice_to_kokoro_voice(self):
+        """The chatterbox preset's voice id isn't a Kokoro voice — the
+        fallback must map to a real Kokoro voice (bf_isabella, the
+        approved reference's own source) instead of passing the foreign
+        id through and failing a second time."""
+        from localcodeagent.voice.engine import VoiceEngineError
+        m = VoiceManager(_Cfg(), preset_dir=Path(self.tmp.name) / "pres",
+                         cache_dir=Path(self.tmp.name) / "cache",
+                         publish=lambda k, p: None)
+
+        class DeadChatterbox:
+            name, version, sample_rate = "chatterbox", "x", 24000
+            def synthesize(self, *a, **k):
+                raise VoiceEngineError("worker not installed")
+            def voices(self): return []
+            def status(self): return {"name": "chatterbox", "loaded": False}
+
+        seen = {}
+
+        class KokoroSpy(_FakeEngine):
+            def synthesize(self, text, *, voice=None, speed=1.0, lang="en"):
+                seen["voice"] = voice
+                return super().synthesize(text, voice=voice, speed=speed,
+                                        lang=lang)
+            def voices(self):
+                return [{"id": "af_heart"}, {"id": "bf_isabella"}]
+
+        m._engines["chatterbox"] = DeadChatterbox()
+        m._engines["kokoro"] = KokoroSpy()
+        preset = VoicePreset(id="cb", name="cb", engine="chatterbox",
+                             base_voice="isabella")
+        m.presets.save(preset)
+        pcm, sr, path = m._synthesize("hello", preset, 1.0)
+        self.assertGreater(pcm.size, 0)
+        self.assertEqual(seen["voice"], "bf_isabella")
+
     def test_cache_keys_separate_engines(self):
         """Same text under kokoro vs chatterbox must never share a cache
         entry — the engine name + version fold into the key."""
