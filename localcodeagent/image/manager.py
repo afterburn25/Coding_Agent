@@ -394,7 +394,10 @@ class ImageManager:
         except Exception as exc:
             self._update_setup(state="failed", error=f"{type(exc).__name__}: {exc}")
 
-    _SUMMARY_PROBE_TTL = 10.0
+    # Post-chat status polls usually land >10 s apart, so a short TTL
+    # made every turn pay the dead-endpoint probe again; dead backends
+    # are stable state while on-demand autostart owns the lifecycle.
+    _SUMMARY_PROBE_TTL = 30.0
 
     def summary(self) -> dict[str, Any]:
         # probe() does a live HTTP health check per backend — a dead
