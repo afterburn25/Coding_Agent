@@ -876,6 +876,39 @@ class CrossChatMemoryTests(unittest.TestCase):
                 memory.learn_from_user("this is really not a test")["facts"],
                 [])
 
+    def test_update_item_recomputes_slot_and_supersedes(self):
+        """Editing fact text must move its supersession slot with it —
+        a stale slot would retire an unrelated row on the next learn —
+        and an edit landing on an occupied slot supersedes it."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the port is 5433")
+            memory.learn_from_user("the timeout is 30")
+            rows = {r["text"]: r for r in memory.snapshot()["facts"]}
+            memory.update_item(
+                "fact", rows["port is 5433"]["id"], text="the host is atlas")
+            memory.learn_from_user("the port is 9090")
+            state = {r["text"]: r["active"]
+                     for r in memory.snapshot()["facts"]}
+            self.assertEqual(
+                state,
+                {"the host is atlas": True, "timeout is 30": True,
+                 "port is 9090": True})
+
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the port is 8080")
+            memory.learn_from_user("the retries is 3")
+            rows = {r["text"]: r for r in memory.snapshot()["facts"]}
+            memory.update_item(
+                "fact", rows["retries is 3"]["id"],
+                text="the port is 9090")
+            state = {r["text"]: r["active"]
+                     for r in memory.snapshot()["facts"]}
+            self.assertEqual(
+                state,
+                {"port is 8080": False, "the port is 9090": True})
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")

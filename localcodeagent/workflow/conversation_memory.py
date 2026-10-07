@@ -781,6 +781,27 @@ class ConversationMemory:
                         if not clean:
                             raise ValueError("text cannot be empty")
                         row["text"] = clean
+                        # The supersession slot derives from the text —
+                        # a stale slot would retire an unrelated row on
+                        # the next same-slot learn.
+                        row["slot"] = self._fact_slot(clean)
+                        # An edit landing on a slot occupied by another
+                        # active row supersedes it — same rule as learn.
+                        if row["slot"] and row.get("active", True):
+                            for other in self._data.get(key, []):
+                                if (
+                                    isinstance(other, dict)
+                                    and other is not row
+                                    and other.get("active", True)
+                                    and str(other.get("slot") or "") == row["slot"]
+                                    and str(other.get("scope") or "global") == str(row.get("scope") or "global")
+                                    and str(other.get("scope_id") or "") == str(row.get("scope_id") or "")
+                                ):
+                                    other["active"] = False
+                                    other["superseded"] = True
+                                    other["superseded_at"] = time.time()
+                                    other["superseded_by"] = row.get("id")
+                                    other["updated_at"] = time.time()
                     if active is not None:
                         row["active"] = bool(active)
                     if scope is not None:
