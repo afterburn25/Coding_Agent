@@ -341,14 +341,10 @@ class ConversationMemory:
                 {"role": "assistant", "content": assistant, "timestamp": now},
             ])
             self._data["messages"] = messages[-self.history_limit:]
-            # Track option lists from assistant replies so a short
+            # Track option lists from the latest assistant reply so a short
             # follow-up like "option 1" can be resolved instead of falling
-            # through to the model as an ambiguous fragment. A reply with
-            # no list must not wipe a still-pending list — only a new list
-            # replaces it.
-            options = self.extract_options(assistant)
-            if options:
-                self._data["pending_options"] = options
+            # through to the model as an ambiguous fragment.
+            self._data["pending_options"] = self.extract_options(assistant)
             self._save()
 
     @staticmethod
@@ -403,9 +399,6 @@ class ConversationMemory:
                 break
         if number is None or not 1 <= number <= len(options):
             return None
-        # A selection consumes the pending list — it must not resolve
-        # again turns later against a stale proposal.
-        self._data["pending_options"] = []
         return f"Option {number} — {options[number - 1]}"
 
     def _previous_exchange(self) -> tuple[str, str]:
