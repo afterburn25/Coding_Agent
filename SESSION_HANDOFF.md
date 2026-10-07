@@ -2,7 +2,9 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
-## v0.31.0 — verified local-action execution
+## v0.31.1 — evidence & reliability convergence
+
+Patch on the v0.31.0 base — see CHANGELOG `[0.31.1]`.
 
 Nexus is an execution agent, not a narrator. The observed failure —
 "can you create a folder d:\Nexus" answered "Yes — Workspaces is
