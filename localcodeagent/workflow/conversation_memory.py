@@ -138,6 +138,13 @@ class ConversationMemory:
         "were", "will", "just", "like", "mean", "meant", "remember",
         "before", "earlier", "yesterday", "today", "now", "use", "uses",
         "the", "and", "for", "you", "did", "didnt", "it's", "its",
+        # Generic nouns — a lone shared term like "project" must never
+        # count as relevance, or every "Project X" fact rides every
+        # "Project Y" question (the §4 intrusion leak the QA loop caught).
+        "project", "thing", "things", "stuff", "something", "anything",
+        "way", "ways", "kind", "type", "sort", "part", "parts", "case",
+        "cases", "name", "names", "issue", "issues", "problem",
+        "problems", "question", "questions", "answer", "answers",
     })
 
     @classmethod

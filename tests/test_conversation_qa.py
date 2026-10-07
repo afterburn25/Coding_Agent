@@ -299,6 +299,31 @@ class SeededGenerationTests(unittest.TestCase):
                 run = runner.run(scenario)
                 self.assertTrue(run.ok, run.failures)
 
+    def test_hard_patterns_supersede_intrusion_distance(self):
+        """§24 — composed difficulty: supersession must retire the old
+        value, unrelated memory must not intrude, and a fact taught in
+        one chat must surface in another chat's prompt on relevance."""
+        from localcodeagent.qa import generate_hard_scenarios
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            failures = []
+            for scenario in generate_hard_scenarios(11, count=3):
+                run = runner.run(scenario)
+                if not run.ok:
+                    failures.extend(f"{run.scenario_id}: {f}"
+                                    for f in run.failures)
+            self.assertEqual(failures, [])
+
+    def test_hard_scenarios_deterministic(self):
+        from localcodeagent.qa import generate_hard_scenarios
+        a = generate_hard_scenarios(5, count=2)
+        b = generate_hard_scenarios(5, count=2)
+        self.assertEqual(
+            [(s.scenario_id, [t.text for t in s.turns]) for s in a],
+            [(s.scenario_id, [t.text for t in s.turns]) for s in b])
+
 
 class FailureCorpusTests(unittest.TestCase):
     def test_failures_recorded_and_closeable(self):

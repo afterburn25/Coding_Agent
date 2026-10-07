@@ -16,6 +16,7 @@ from .conversation import (
     ConversationQaRunner,
     ScriptedProvider,
     generate_scenarios,
+    generate_hard_scenarios,
 )
 from .corpus import FailureCorpus, CorpusEntry
 
@@ -27,6 +28,7 @@ __all__ = [
     "ConversationQaRunner",
     "ScriptedProvider",
     "generate_scenarios",
+    "generate_hard_scenarios",
     "FailureCorpus",
     "CorpusEntry",
 ]

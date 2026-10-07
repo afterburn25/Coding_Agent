@@ -403,3 +403,108 @@ def generate_scenarios(
 
 def pool_categories() -> list[str]:
     return list(_POOL)
+
+
+# ----------------------------------------------------------------------
+# §24 — composed hard-pattern generation
+#
+# generate_scenarios mixes single utterances with generic asserts; these
+# patterns compose structured sequences across conversations with
+# assertions that actually catch behavior failures: supersession,
+# intrusion control, long-distance recall, interruption return.
+
+_HARD_FACT_SUBJECTS = ["Orion", "Meridian", "Atlas", "Vega", "Lumen"]
+_HARD_FACT_PREDS = [
+    ("database", "PostgreSQL", "SQLite", "what database does %s use"),
+    ("language", "Python", "Rust", "what language is %s written in"),
+    ("deploy target", "Kubernetes", "bare metal", "where does %s deploy"),
+]
+_HARD_DISTRACTORS = (
+    _POOL["everyday"] + _POOL["science"] + _POOL["technology"])
+
+
+def generate_hard_scenarios(
+    seed: int,
+    *,
+    count: int = 4,
+    scenario_prefix: str = "hard",
+) -> list[QaScenario]:
+    """Composed difficulty patterns — each is a real failure class:
+
+    - supersession: teach → supersede → recall must yield the NEW value
+      and never inject the old one (context_not_contains old value).
+    - intrusion: teach fact A + unrelated fact B, then query A — B's
+      value must not ride the prompt.
+    - long_distance: teach a fact, bury it under N distractor turns in a
+      different conversation, then recall in the original chat.
+    - interruption: topic A turns → topic switch → "go back to what we
+      were talking about" — the return turn's prompt must still carry
+      conversation context (non-empty user content), and the run must
+      complete without errors.
+    """
+    rng = random.Random(seed)
+    out: list[QaScenario] = []
+    for i in range(max(1, int(count))):
+        subject = rng.choice(_HARD_FACT_SUBJECTS)
+        pred, old_v, new_v, query_fmt = rng.choice(_HARD_FACT_PREDS)
+        project = f"Project {subject}"
+        query = query_fmt % project
+
+        # Pattern 1 — supersession: teach + switch in s1a, recall in s1b.
+        # s1b's own history never mentions either value, so a hit on
+        # context means the durable memory record won — and the superseded
+        # value must stay inactive.
+        out.append(QaScenario(f"{scenario_prefix}-supersede-{i}", [
+            QaTurn(f"{project} uses {old_v}.", conversation_id="s1a"),
+            QaTurn(f"we switched {project} to {new_v}.", conversation_id="s1a"),
+            QaTurn(query, conversation_id="s1b", expect={
+                "context_contains": new_v,
+                "context_not_contains": old_v,
+                "task_status": "completed",
+            }),
+        ], seed=seed))
+
+        # Pattern 2 — intrusion: unrelated fact in ANOTHER chat must not
+        # ride this prompt (s2's history legitimately contains only its
+        # own turns — the distractor lives in s2b's transcript).
+        other = rng.choice([s for s in _HARD_FACT_SUBJECTS
+                            if s != subject])
+        distractor_fact = f"Project {other} uses Fortran."
+        out.append(QaScenario(f"{scenario_prefix}-intrusion-{i}", [
+            QaTurn(f"{project} uses {new_v}.", conversation_id="s2"),
+            QaTurn(distractor_fact, conversation_id="s2b"),
+            QaTurn(query, conversation_id="s2", expect={
+                "context_contains": new_v,
+                "context_not_contains": "Fortran",
+            }),
+        ], seed=seed))
+
+        # Pattern 3 — cross-chat recall: teach in s3a, bury the memory
+        # under distractor turns elsewhere, recall in s3b. context must
+        # carry the fact even though s3b's own history never mentions it.
+        turns: list[QaTurn] = [
+            QaTurn(f"{project} uses {new_v}.", conversation_id="s3a"),
+        ]
+        for _ in range(8):
+            turns.append(QaTurn(rng.choice(_HARD_DISTRACTORS),
+                                conversation_id="s3c"))
+        turns.append(QaTurn(query, conversation_id="s3b", expect={
+            "context_contains": new_v,
+        }))
+        out.append(QaScenario(f"{scenario_prefix}-distance-{i}",
+                              turns, seed=seed))
+
+        # Pattern 4 — interruption and return.
+        out.append(QaScenario(f"{scenario_prefix}-interrupt-{i}", [
+            QaTurn("explain how photosynthesis works",
+                   conversation_id="s4"),
+            QaTurn("what wavelengths do plants absorb",
+                   conversation_id="s4"),
+            QaTurn("anyway — what's a good pasta shape for alfredo",
+                   conversation_id="s4"),
+            QaTurn("go back to what we were talking about",
+                   conversation_id="s4", expect={
+                       "task_status": "completed",
+                   }),
+        ], seed=seed))
+    return out
