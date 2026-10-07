@@ -1,0 +1,403 @@
+"""Deterministic multi-turn conversation runner (backlog §5).
+
+Drives AgentOrchestrator with a scripted model provider so behavior is
+tested deterministically: what text reached the model, which context was
+injected, what routing/tool decisions were made, and how the task closed
+— not what a live model happened to say.
+
+Per-turn assertions are plain dicts (see ASSERT KEYS below); failures are
+reported per turn and optionally written to a FailureCorpus.
+"""
+
+from __future__ import annotations
+
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from ..models.provider import ProviderResponse
+from .corpus import CorpusEntry, FailureCorpus
+
+# Assert keys evaluated per turn (all optional):
+#   user_contains / user_not_contains      — last user message sent to model
+#   system_contains / system_not_contains  — system prompt sent to model
+#   response_contains / not_contains       — assistant result content
+#   source                                 — result.response_source
+#   task_status                            — result.task["status"] (default "completed")
+#   tool_calls / no_tool_calls             — provider received/omitted tools=...
+#   context_contains / not_contains        — any message (any role) content
+# Values may be a string or list of strings.
+
+
+@dataclass
+class QaTurn:
+    text: str
+    conversation_id: str = ""
+    expect: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class QaScenario:
+    scenario_id: str
+    turns: list[QaTurn]
+    seed: int = 0
+    default_conversation_id: str = "qa-chat"
+
+
+@dataclass
+class TurnResult:
+    index: int
+    text: str
+    conversation_id: str
+    failures: list[str]
+    user_content: str = ""
+    system_content: str = ""
+    all_content: str = ""
+    response: str = ""
+    response_source: str = ""
+    task_status: str = ""
+    tool_calls: int = 0
+    elapsed_ms: float = 0.0
+
+
+@dataclass
+class QaRunResult:
+    scenario_id: str
+    turns: list[TurnResult]
+
+    @property
+    def failures(self) -> list[str]:
+        out: list[str] = []
+        for turn in self.turns:
+            out.extend(f"turn {turn.index} ({turn.text!r}): {f}" for f in turn.failures)
+        return out
+
+    @property
+    def ok(self) -> bool:
+        return not any(t.failures for t in self.turns)
+
+
+class ScriptedProvider:
+    """Model provider that replays scripted answers and records calls.
+
+    `script` may be a list of response strings (indexed by call) or a
+    callable(messages, call_index) -> str. After the script runs out the
+    provider returns `default`.
+    """
+
+    def __init__(self, script=None, default: str = "Here is the answer.") -> None:
+        self.script = script if script is not None else []
+        self.default = default
+        self.calls: list[dict[str, Any]] = []
+
+    def _answer(self, messages) -> str:
+        idx = len(self.calls)
+        if callable(self.script):
+            return str(self.script(messages, idx))
+        if isinstance(self.script, (list, tuple)) and idx < len(self.script):
+            return str(self.script[idx])
+        return self.default
+
+    def complete(self, *, messages, tools=None, max_tokens=None):
+        content = self._answer(messages)
+        self.calls.append({
+            "messages": list(messages),
+            "tools": tools,
+            "max_tokens": max_tokens,
+        })
+        return ProviderResponse(
+            message={"role": "assistant", "content": content}, raw={})
+
+    # Observation helpers ------------------------------------------------
+    @property
+    def last_user_content(self) -> str:
+        if not self.calls:
+            return ""
+        for msg in reversed(self.calls[-1]["messages"]):
+            if msg.get("role") == "user":
+                return str(msg.get("content", ""))
+        return ""
+
+    @property
+    def last_system_content(self) -> str:
+        if not self.calls:
+            return ""
+        return "\n".join(
+            str(m.get("content", "")) for m in self.calls[-1]["messages"]
+            if m.get("role") == "system")
+
+    @property
+    def last_all_content(self) -> str:
+        if not self.calls:
+            return ""
+        return "\n".join(
+            str(m.get("content", "")) for m in self.calls[-1]["messages"])
+
+
+class ConversationQaRunner:
+    """Runs scenarios through an AgentOrchestrator and evaluates asserts."""
+
+    def __init__(self, agent, provider: ScriptedProvider, *,
+                 conversation_manager=None,
+                 corpus: FailureCorpus | None = None) -> None:
+        self.agent = agent
+        self.provider = provider
+        self.conversation_manager = conversation_manager
+        self.corpus = corpus
+        self._conversations: dict[str, str] = {}
+
+    def _activate(self, logical_id: str) -> str:
+        """Map a logical scenario conversation id onto a real managed chat."""
+        mgr = self.conversation_manager
+        if mgr is None or not logical_id:
+            return ""
+        real = self._conversations.get(logical_id)
+        if real is None:
+            real = str(mgr.create(title=f"qa:{logical_id}").get("id") or "")
+            self._conversations[logical_id] = real
+        active = str(mgr.active().get("id") or "")
+        if active != real:
+            mgr.set_active(real)
+        return real
+
+    def run(self, scenario: QaScenario) -> QaRunResult:
+        results: list[TurnResult] = []
+        history: list[dict[str, str]] = []
+        calls_before = len(self.provider.calls)
+        for index, turn in enumerate(scenario.turns):
+            cid = turn.conversation_id or scenario.default_conversation_id
+            self._activate(cid)
+            started = time.perf_counter()
+            failure: list[str] = []
+            result = None
+            try:
+                result = self.agent.run(turn.text)
+            except Exception as exc:  # noqa: BLE001 - failures are the signal
+                failure.append(f"unexpected_error: {exc!r}")
+            elapsed = (time.perf_counter() - started) * 1000.0
+            called = len(self.provider.calls) > calls_before
+            calls_before = len(self.provider.calls)
+
+            tr = TurnResult(
+                index=index, text=turn.text, conversation_id=cid,
+                failures=failure, elapsed_ms=elapsed)
+            if result is not None:
+                tr.response = str(getattr(result, "content", "") or "")
+                tr.response_source = str(getattr(result, "response_source", "") or "")
+                task = getattr(result, "task", {}) or {}
+                tr.task_status = str(task.get("status", ""))
+            if called:
+                tr.user_content = self.provider.last_user_content
+                tr.system_content = self.provider.last_system_content
+                tr.all_content = self.provider.last_all_content
+                tr.tool_calls = int(self.provider.calls[-1].get("tools") is not None)
+            history.append({"role": "user", "content": turn.text})
+            history.append({"role": "assistant", "content": tr.response})
+            failure.extend(self._evaluate(turn, tr, called))
+            results.append(tr)
+
+        run = QaRunResult(scenario.scenario_id, results)
+        if self.corpus is not None and not run.ok:
+            self._record(scenario, run, history)
+        return run
+
+    # ------------------------------------------------------------------
+    def _evaluate(self, turn: QaTurn, tr: TurnResult, called: bool) -> list[str]:
+        expect = turn.expect or {}
+        out: list[str] = []
+        status = expect.get("task_status", "completed")
+        if tr.task_status and tr.task_status != status:
+            out.append(f"task_status: expected {status!r}, got {tr.task_status!r}")
+
+        def _need(key, haystack, label, negate=False):
+            vals = expect.get(key)
+            if not vals:
+                return
+            if isinstance(vals, str):
+                vals = [vals]
+            for v in vals:
+                found = str(v).lower() in haystack.lower()
+                if negate and found:
+                    out.append(f"{label}: unexpected {v!r} present")
+                elif not negate and not found:
+                    out.append(f"{label}: missing {v!r}")
+
+        _need("user_contains", tr.user_content, "user_content")
+        _need("user_not_contains", tr.user_content, "user_content", negate=True)
+        _need("system_contains", tr.system_content, "system")
+        _need("system_not_contains", tr.system_content, "system", negate=True)
+        _need("context_contains", tr.all_content, "context")
+        _need("context_not_contains", tr.all_content, "context", negate=True)
+        _need("response_contains", tr.response, "response")
+        _need("response_not_contains", tr.response, "response", negate=True)
+
+        if "source" in expect and tr.response_source != expect["source"]:
+            out.append(f"source: expected {expect['source']!r}, got {tr.response_source!r}")
+        if expect.get("tool_calls") and not tr.tool_calls:
+            out.append("tool_calls: expected provider to receive tools")
+        if expect.get("no_tool_calls") and tr.tool_calls:
+            out.append("no_tool_calls: provider received tools unexpectedly")
+        return out
+
+    def _record(self, scenario: QaScenario, run: QaRunResult,
+                history: list[dict[str, str]]) -> None:
+        for tr in run.turns:
+            for fail in tr.failures:
+                category = fail.split(":", 1)[0].strip()
+                if category not in (
+                    "task_status", "user_content", "system", "context",
+                    "response", "source", "tool_calls", "no_tool_calls",
+                    "unexpected_error",
+                ):
+                    category = "unexpected_error"
+                self.corpus.record(CorpusEntry(
+                    category={
+                        "task_status": "task_not_completed",
+                        "no_tool_calls": "unexpected_tool_call",
+                        "tool_calls": "bad_tool_choice",
+                    }.get(category, category),
+                    conversation=list(history),
+                    failed_turn_index=tr.index,
+                    user_text=tr.text,
+                    expected=str((scenario.turns[tr.index].expect or {})),
+                    actual=fail,
+                    seed=scenario.seed,
+                    scenario_id=scenario.scenario_id,
+                ))
+
+
+# ----------------------------------------------------------------------
+# Seeded scenario generation
+
+_POOL: dict[str, list[str]] = {
+    "everyday": [
+        "what's a good weeknight dinner I can make in 20 minutes",
+        "how do I get a coffee stain out of a shirt",
+        "what's the weather usually like in Lisbon in April",
+        "recommend a book like The Name of the Wind",
+    ],
+    "science": [
+        "why is the sky blue",
+        "explain the difference between viruses and bacteria",
+        "what does the liver actually do",
+        "how do vaccines train the immune system",
+    ],
+    "history": [
+        "what caused the fall of the Roman Empire",
+        "who was the first person to circumnavigate the globe",
+        "what was the printing press's effect on Europe",
+    ],
+    "technology": [
+        "what's the difference between TCP and UDP",
+        "how does HTTPS keep data private",
+        "what is a GPU bottleneck",
+        "explain what an operating system kernel does",
+    ],
+    "programming": [
+        "what is the difference between a list and a tuple in python",
+        "explain what a race condition is",
+        "what does 'idempotent' mean for an API",
+        "how do I reverse a string in python",
+    ],
+    "math": [
+        "what is 17 times 24",
+        "how do I compute compound interest",
+        "explain what a prime number is",
+        "what's the derivative of x squared",
+    ],
+    "cooking": [
+        "give me a recipe for crawfish feticcinii",
+        "how do I make chiken alfredo from scratch",
+        "what can I substitute for buttermilk in a recipie",
+        "how long should I rest steak after cooking",
+    ],
+    "writing": [
+        "help me write a thank-you note to my neighbor",
+        "give me a one-sentence tagline for a hiking app",
+        "how do I make this sentence less wordy",
+    ],
+    "troubleshooting": [
+        "my laptop fan runs loud even when idle, what gives",
+        "wifi keeps dropping every few minutes",
+        "my printer says offline but it's on",
+    ],
+    "comparisons": [
+        "compare postgres and sqlite for a small desktop app",
+        "electric vs gas cars for a 15 mile commute",
+        "is a standing desk actually better",
+    ],
+    "hypothetical": [
+        "what would happen if the moon disappeared",
+        "if you could only keep one app on your phone which would it be",
+        "what if gravity were twice as strong",
+    ],
+    "typos": [
+        "whats the wether like this week",
+        "how much ram dose a browser use",
+        "chek the recpie for missing steps",
+        "wich is faster, lists or arrays",
+    ],
+    "topic_switch": [
+        "anyway, changing the subject — what's for dinner",
+        "ok forget that, tell me something about jazz",
+        "different question — how do I back up my photos",
+    ],
+    "references": [
+        "tell me more about that",
+        "what about the second one",
+        "go back to what we were talking about",
+        "can you explain that differently",
+    ],
+    "corrections": [
+        "no, I meant the previous one",
+        "that's not quite right, try again",
+        "actually I wanted the other option",
+    ],
+    "memory_teach": [
+        "remember that my favorite editor is neovim",
+        "Project Meridian uses MongoDB",
+        "remember that I prefer metric units",
+    ],
+    "memory_recall": [
+        "what editor did I say I like",
+        "what database does Meridian use",
+        "do I prefer metric or imperial",
+    ],
+}
+
+_GENERIC_EXPECT = {"task_status": "completed", "no_tool_calls": True}
+
+
+def generate_scenarios(
+    seed: int,
+    *,
+    turns: int = 10,
+    count: int = 1,
+    categories: list[str] | None = None,
+    scenario_prefix: str = "gen",
+) -> list[QaScenario]:
+    """Deterministically generate scenarios by mixing utterance pools.
+
+    Reproducible by seed — the same seed produces the same scenarios,
+    so a generated failure can be replayed verbatim as a regression.
+    """
+    rng = random.Random(seed)
+    cats = categories or list(_POOL)
+    scenarios: list[QaScenario] = []
+    for i in range(max(1, int(count))):
+        seq: list[QaTurn] = []
+        for _ in range(max(1, int(turns))):
+            cat = rng.choice(cats)
+            text = rng.choice(_POOL[cat])
+            seq.append(QaTurn(text=text, expect=dict(_GENERIC_EXPECT)))
+        scenarios.append(QaScenario(
+            scenario_id=f"{scenario_prefix}-{seed}-{i}",
+            turns=seq, seed=seed,
+            default_conversation_id=f"{scenario_prefix}-chat-{seed}-{i}",
+        ))
+    return scenarios
+
+
+def pool_categories() -> list[str]:
+    return list(_POOL)

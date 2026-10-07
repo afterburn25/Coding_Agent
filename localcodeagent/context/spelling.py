@@ -336,12 +336,24 @@ def _candidates(token: str, ctx_words: set[str]) -> list[tuple[str, float]]:
     return sorted(scored.items(), key=lambda kv: -kv[1])
 
 
+def _same_stem(a: str, b: str) -> bool:
+    """Morphological siblings (recommend/recommended) — an inflection of
+    the front-runner is not a competing interpretation."""
+    stem = min(len(a), len(b)) - 2
+    if stem < 4:
+        stem = min(len(a), len(b))
+    if stem < 3:
+        return a == b
+    return a[:stem] == b[:stem]
+
+
 def _pick(token: str, ctx_words: set[str]) -> str | None:
     cands = _candidates(token, ctx_words)
     if not cands:
         return None
     best, score = cands[0]
-    runner = cands[1][1] if len(cands) > 1 else 0.0
+    runner = next(
+        (s for w, s in cands[1:] if not _same_stem(best, w)), 0.0)
     if score >= 1.5 and (score - runner >= 0.5 or score >= runner * 1.25):
         return best
     return None  # ambiguous or too weak — leave it
