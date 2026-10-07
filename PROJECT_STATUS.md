@@ -1,8 +1,36 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.27.0 is the current release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the prior release — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core` (Chatterbox synthesizing on CUDA through the frozen backend; two frozen-build fixes in 0.26.1). v0.25.3 was the release before that: voice trailing-syllable noise-tail fix (Kokoro's post-phoneme breath bed shaved; `dsp.DSP_VERSION` invalidates stale cached audio), on top of v0.25.2 (double-spoken unterminated replies) and v0.25.1 (chat streaming layout — message adjuncts pinned out of the 42px avatar grid track). v0.25.0 was the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.0 is the current release — **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.27.0 — performance/residency milestone (deployed to D:\Nexus_Core)
+## Active version: 0.28.0 — performance audit pass 2
+
+- **Startup overlap** — backend spawn runs in parallel with the splash
+  WebView2 boot (was a ~2.4 s serial stall); `nexus-core-ready` posts
+  after first real paint instead of after hydration API calls. Genuine
+  interface readiness ~7.3 s → ~4.1–5.1 s; the remaining tail to
+  `main_shown` is authored cinematic pacing (truth gates), preserved.
+- **`data/logs/boot-trace.log`** — dedicated CLR→main-window mark file
+  (a share-mode collision with backend stdout logging was silently
+  dropping marks in `backend-host.log`); prespawned backend is cleaned
+  up if startup fails before ownership transfers.
+- **Chatterbox conditioning cache** — per-voice `Conditionals` on disk
+  keyed on ref-audio hash + exaggeration + norm_loudness + dtype +
+  revision; warm prepare ~1.05 s → ~0.02 s, live-verified.
+- **`/api/status`** — 375 KB → 33 KB; full research sessions, image
+  jobs, and per-task research plans no longer ride the poll.
+- **Incremental repository index** — unchanged files reuse parsed
+  symbols; only new/changed files re-parse.
+- **Tool-schema pruning** — ~174 callable schemas (~76 KB) no longer
+  all ship per call; coding-core always on, media/github/research/
+  documents on intent or prompt keywords (~41 % cut for coding);
+  `find_tools` is the always-present discovery escape hatch and
+  execution stays name-based.
+- Audits re-verified: idle CPU <1 %, deterministic commands, rAF
+  token batching, adaptive context + shrink, KV q8_0 tuning, HOT→
+  WARM→COLD model lifecycle, VRAM brokerage, image backend idle
+  unload, `_trim_context` governor, atomic per-turn state writes.
+
+## v0.27.0 — performance/residency milestone (deployed to D:\Nexus_Core)
 
 - **Demand-driven GPU residency** — Chatterbox loads bf16 (~2.3 GB vs
   ~3.3 GB fp32), warms only on a cache-miss speech enqueue (never on

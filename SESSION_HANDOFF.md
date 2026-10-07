@@ -2,6 +2,51 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 — v0.28.0: performance audit pass 2 (measure → fix → verify)
+
+A full audit-and-fix sweep over startup, hot paths, residency, and
+per-call prompt cost (commits `8040dcb0`…`8d8d228d`):
+
+- **Startup overlap** (`8040dcb0`, `dbfc78f9`): backend spawn moved
+  ahead of the splash WebView2 wait (~2.4 s serial stall removed);
+  `nexus-core-ready` now posts after first paint instead of after
+  `loadStatus`/`loadReadiness`/`loadConversationMemory` (~1.8 s).
+  Genuine interface readiness **~7.3 s → ~4.1–5.1 s**. The ~12 s tail
+  to `main_shown` (~17.2 s) is authored cinematic pacing — 7 s minimum
+  display + sequence finish + 3 s ONLINE dwell + voice gate — truth
+  gates, not wasted work; left intact by design.
+- **Boot trace**: dedicated `data/logs/boot-trace.log` records every
+  CLR→main-window mark (file-share contention with the backend stdout
+  writer was silently eating marks in `backend-host.log`). Prespawn
+  orphan guard added for faults before `PrepareAsync` consumes the
+  backend task.
+- **Chatterbox conditioning disk cache** (`43808b18`): per-voice
+  `Conditionals` persisted keyed on (ref-audio hash, exaggeration,
+  norm_loudness, dtype, revision). Warm prepare after worker reload
+  **~1.05 s → ~0.02 s**, live-dogfooded on the installed build.
+- **`/api/status` slimming** (`50faf88f`): **375 KB → 33 KB**. Full
+  research sessions, image jobs, and per-task `research.plan` dumps no
+  longer ride the status poll; detail lives in `/api/task-log` et al.
+  No consumer read the dropped keys.
+- **Incremental repository index** (`e0c04e04`): unchanged files
+  (path+size+mtime) keep parsed symbols/preview; only new/changed
+  files re-parse. Add/change/delete sanity-verified.
+- **Tool-schema pruning** (`8d8d228d`): 174 callable schemas ≈ 76 KB
+  used to ship to every non-utility model call. Now coding-core
+  categories are always advertised; media/github/research/documents
+  categories join on intent or prompt keywords → **~41 %** schema cut
+  for coding tasks (102 tools ≈ 46 KB). `find_tools` always present as
+  the discovery escape hatch; execution stays name-based so pruned
+  tools still run if called.
+- **Audits confirmed landed**: idle CPU <1 %, event-driven backend
+  exit detection, SSE (not polled) status refresh, deterministic slash
+  commands never touch the model, rAF token batching, role context
+  hints + idle shrink, KV q8_0 tuner variants, HOT→WARM→COLD model
+  lifecycle, `vram_releasers` GPU brokerage, image backend idle
+  unload, `_trim_context` governor, per-turn atomic JSON, symbol-level
+  repo search, `EvalLab`/`ExperimentStore`/`RegressionStore`/
+  `BaselineStore` QA harness.
+
 ## 2026-10-07 (late) — roadmap remainder landed: 12 more items + dogfood sweep
 
 Finished every open roadmap-closure item post-0.27.0 (commits
