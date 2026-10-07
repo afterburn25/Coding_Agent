@@ -111,15 +111,30 @@ localhost port takes ~2 s before being refused (filter/AV quirk), so
 each probe burned its full timeout.
 
 Fixes:
-- `ImageManager.summary` caches the two `probe()` results for **10 s**
+- `ImageManager.summary` caches the two `probe()` results for **30 s**
   (`_SUMMARY_PROBE_TTL`), bypassed whenever a backend `_process` is
-  active so job state transitions stay fresh.
+  active so job state transitions stay fresh. Post-chat `loadStatus`
+  polls land >10 s apart, so a 10 s TTL re-paid the dead-endpoint probe
+  every turn; managed transitions bypass the cache, so a longer TTL
+  only risks ~30 s of stale "offline" for a manually-started external
+  backend.
 - The two probes run **in parallel** (independent objects) — serialized
   dead-endpoint timeouts no longer stack.
 - InvokeAI `_health_uncached` bounds its probe at **1 s** (was the full
   4 s request timeout); ComfyUI already caps at 0.75 s.
 - `/api/status` emits `[nexus-slow] <section> <ms>` lines when total
   exceeds 500 ms — same always-on diagnostics as `[nexus-init]`.
+
+### Desktop host readiness (fourth pass)
+`WaitUntilHealthyAsync` and the startup narrator both polled
+`/api/status` for "is it up" — paying the full aggregate per probe.
+They now hit `/api/health` (in-memory component probes, ~2 ms; same
+200-when-serving semantics). `CoreWebView2Environment.CreateAsync`
+also moved ahead of the health wait — it only needs the user-data
+folder, so the msedgewebview2 spawn overlaps `backend_health`.
+
+Measured: `backend_health` **4.3 s → ~1.56 s**; `interface_ready`
+**2.7 s → ~1.9 s**; total **7.6 s → ~7.0 s** warm.
 
 Measured: steady-state `/api/status` **~800 ms → ~20 ms** (cached
 probes); first/boot call 2.8 s → ~1.05 s.
@@ -138,9 +153,10 @@ probes); first/boot call 2.8 s → ~1.05 s.
 | Mean simple-chat turn | — | 1.15 s (voice enabled) |
 | Idle process count | 3 | 3 (NexusCore, backend, llama-server) |
 | Startup: provisioning init | ~8.4 s | **65 ms** |
-| Startup: /api/status steady-state | ~800 ms | **~20 ms** (10 s probe cache) |
-| Startup: backend_health | ~15.3 s | **~4.3 s** |
-| Startup: total to ready | ~21.4 s | **~7.6 s** |
+| Startup: /api/status steady-state | ~800 ms | **~20 ms** (30 s probe cache) |
+| Startup: backend_health | ~15.3 s | **~1.56 s** |
+| Startup: interface_ready | ~2.7 s | **~1.9 s** |
+| Startup: total to ready | ~21.4 s | **~7.0 s** |
 
 ## Verified live on the installed build
 - Engine `loaded:false, worker_alive:false` 120 s after last speech.
@@ -168,9 +184,14 @@ probes); first/boot call 2.8 s → ~1.05 s.
   mitigations would be pre-warm on voice toggle or a smaller warm pool —
   deliberately **not** done (that's the residency tax this milestone
   removed).
-- Startup residual (~7.6 s total): ~1.5 s frozen-exe spawn → first
+- Startup residual (~7.0 s total): ~1.5 s frozen-exe spawn → first
   marker (PyInstaller + imports), ~1.4 s subsystem init (boot 4→94%),
-  ~1 s first status probe, ~2.4 s WebView2 interface_ready.
+  ~1.9 s WebView2 env + page-ready (env bootstrap already overlaps the
+  health wait), ~2.9 s pre-`boot` CLR/WinForms/splash construction
+  inside `total` but outside instrumented segments.
+- Fresh-binary caveat: a rebuilt unsigned exe pays a one-time AV scan
+  on first launch (observed ~4 s extra on backend_health) — warm boots
+  are the representative number.
 - Machine quirk: refused localhost connects take ~2 s here (filter/AV).
   Dead image-backend probes are bounded (≤1 s, parallel, 10 s-cached)
   so the quirk no longer taxes boot or status polls.
