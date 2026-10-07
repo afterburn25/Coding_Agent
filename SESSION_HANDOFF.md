@@ -92,7 +92,15 @@ Convergence increments landed on top (`main` @ `282f0878`):
   (bounded-soak finding: missions timed out in a prose-instead-of-
   write loop; `282f0878`).
 
-Post-release hardening (`main` @ `4f980702`, all CI-gated):
+Post-release hardening — shipped as **v0.31.2** (`595eb955`, tag
+pushed, all CI green) and **deployed to `D:\Nexus_Core` 2026-10-07**
+(backend-only swap; old backend at `backend-pre-0.31.2`; live verified:
+`/api/status` reports 0.31.2 + `safe_mode` field, autonomy running).
+Models moved to **`D:\Nexus_Models`** (77 GB) with a junction at
+`D:\Nexus_Core\models` — model files are user state, never inside the
+deploy payload; if rolling back, recreate the junction. The deploy had
+silently stranded all models (missing since 0.31.1) — the soak's
+"No enabled model remains" errors exposed it.
 
 - **POSIX Windows-path gate** — `action_ops._resolve` treats `D:\` /
   UNC paths as absolute on any host so outside-root approvals can't be
