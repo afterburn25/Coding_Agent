@@ -1303,6 +1303,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // display time elapses — nothing may claim ONLINE ahead of the
             // truth gate.
             _progress.MarkAppReady();
+            BootTrace.Mark("app_ready_gate");
             var splash = _splash;
             if (splash is not null && splash.CinematicActive && !splash.SequenceComplete)
             {
@@ -1346,10 +1347,12 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 await Task.Delay(33);
             }
 
+            BootTrace.Mark("completion_finished");
             // Dwell on the fully-loaded state before the swap — hold the
             // pulsating CORE SYSTEMS · ONLINE state ~3s so the completion
             // actually reads before the handoff.
             await Task.Delay(TimeSpan.FromSeconds(3));
+            BootTrace.Mark("dwell_done");
 
             // Voice gate: the splash stays up until the last startup
             // narration has ACTUALLY finished playing (voice-ended ack, not
@@ -1359,6 +1362,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             {
                 await _narrator.VoiceGateAsync(TimeSpan.FromSeconds(45));
             }
+            BootTrace.Mark("voice_gate_done");
             _narrator?.Cancel();
             // MainForm assignment must precede splash.Close() — the splash's
             // FormClosed handler exits the process while MainForm is unset.
@@ -1378,6 +1382,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             _main.BringToFront();
             Win32.ForceForeground(_main.Handle);
             _main.TopMost = false;
+            BootTrace.Mark("main_shown");
             // Release the held startup greeting — the splash owned the
             // audio stage until narration + quiet buffer finished.
             _main.SignalStartupTransition();
