@@ -954,6 +954,78 @@ class DedicatedUpscalerTests(unittest.TestCase):
             self.assertIn("upscaled", finished.outputs[0].replace("\\", "/"))
             self.assertIn("post-process upscaler: up", finished.routing_reasons)
 
+    def test_refine_details_runs_low_denoise_variation_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models/image/gen").mkdir(parents=True)
+            (root / "models/image/edit").mkdir(parents=True)
+            (root / "models/image/gen/model.bin").write_bytes(b"model")
+            (root / "models/image/edit/model.bin").write_bytes(b"edit")
+            workflows = root / "workflows/image"
+            workflows.mkdir(parents=True)
+            (workflows / "gen.json").write_text(json.dumps({
+                "1": {"class_type": "ExampleGenerate",
+                      "inputs": {"prompt": "${prompt}"}},
+                "2": {"class_type": "SaveImage",
+                      "inputs": {"images": ["1", 0]}},
+            }), encoding="utf-8")
+            # Low-denoise img2img — the shape a refinement pass needs.
+            (workflows / "refine.json").write_text(json.dumps({
+                "1": {"class_type": "LoadImage",
+                      "inputs": {"image": "${source_image}"}},
+                "2": {"class_type": "KSampler", "inputs": {
+                    "denoise": "${denoise_strength}",
+                    "seed": "${seed}",
+                    "latent_image": ["1", 0]}},
+                "3": {"class_type": "SaveImage",
+                      "inputs": {"images": ["2", 0]}},
+            }), encoding="utf-8")
+            primary = ImageModelProfile(
+                id="primary", family="test",
+                model_path="models/image/gen/model.bin",
+                capabilities=["text_to_image"],
+                workflows={"text_to_image": "gen.json"})
+            refiner = ImageModelProfile(
+                id="refiner", family="test",
+                model_path="models/image/edit/model.bin",
+                capabilities=["image_edit"],
+                workflows={"variation": "refine.json",
+                           "edit_image": "refine.json"},
+                required_nodes=["LoadImage", "KSampler", "SaveImage"])
+            config = SimpleNamespace(
+                image_models_dir="models/image",
+                image_data_dir="data/image",
+                image_workflows_dir="workflows/image",
+                comfyui_endpoint="http://127.0.0.1:8188",
+                invokeai_endpoint="http://127.0.0.1:9",
+                comfyui_auto_start=False,
+                image_resource_mode="balanced",
+                image_auto_run_jobs=False)
+            _stub_comfy(root)
+            manager = ImageManager(base_dir=root, models=[primary, refiner],
+                                   config=config,
+                                   workspace=root / "workspace")
+            backend = self._Backend()
+            backend.inspect = lambda: {"object_info": {
+                "LoadImage": {}, "KSampler": {}, "SaveImage": {}}}
+            manager.backend = backend
+            manager.backend_runtime.ensure_ready = lambda: None
+            job = manager.create_job(
+                ImageRequest(prompt="a portrait", refine_details=True))
+            manager._run_job(job.id)
+            finished = manager.get_job(job.id)
+            self.assertEqual(finished.state, "finished")
+            # Two submissions: generate then the refinement pass.
+            self.assertEqual(len(backend.submissions), 2)
+            refine_wf = backend.submissions[1]
+            self.assertEqual(refine_wf["2"]["class_type"], "KSampler")
+            self.assertEqual(refine_wf["2"]["inputs"]["denoise"], 0.30)
+            self.assertEqual(refine_wf["1"]["class_type"], "LoadImage")
+            self.assertIn("refined",
+                          finished.outputs[0].replace("\\", "/"))
+            self.assertTrue(any("refinement" in r
+                                for r in finished.routing_reasons))
+
 
 class MultiPromptToolTests(unittest.TestCase):
     def _manager(self, root: Path) -> ImageManager:

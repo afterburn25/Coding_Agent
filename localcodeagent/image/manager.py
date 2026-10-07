@@ -1095,6 +1095,64 @@ class ImageManager:
         return [str(p) for p in self.backend.fetch_outputs(
             backend_job_id, self.generations_dir / job.id / "upscaled")]
 
+    _REFINE_DETAIL_SUFFIX = (
+        "highly detailed, sharp focus, refined facial features, "
+        "detailed skin texture")
+    _REFINE_DEFAULT_DENOISE = 0.30
+
+    def _run_refine_stage(self, job: ImageJob, request: ImageRequest,
+                          source_path: str) -> list[str]:
+        """Face/detail refinement pass — a low-denoise img2img
+        ("variation") run over the generated image. Low denoise keeps
+        composition and pose while the model re-renders fine detail.
+
+        The denoise is deliberately NOT inherited from the generation
+        request: the sampling advisor fills unset denoise with 1.0 for
+        text-to-image, which would re-render the image from scratch.
+        ``image_refine_denoise`` in config tunes the pass (0 < v < 1)."""
+        try:
+            denoise = float(getattr(self.config, "image_refine_denoise", 0.0)
+                            or 0.0)
+        except (TypeError, ValueError):
+            denoise = 0.0
+        if not 0.0 < denoise < 1.0:
+            denoise = self._REFINE_DEFAULT_DENOISE
+        prompt = (request.prompt or "").strip()
+        ref_request = ImageRequest(
+            prompt=(f"{prompt}, {self._REFINE_DETAIL_SUFFIX}"
+                    if prompt else self._REFINE_DETAIL_SUFFIX),
+            operation="variation",
+            source_image=source_path,
+            seed=request.seed,
+            steps=request.steps,
+            guidance=request.guidance,
+            denoise_strength=denoise,
+            model_override=request.model_override
+                if request.model_override not in ("", "auto") else "auto",
+            metadata={**request.metadata, "parent_job": job.id},
+        )
+        decision = self.router.choose(ref_request)
+        profile = self.router.get_profile(decision.model_id)
+        workflow_name = self._profile_ready(profile, "variation")
+        workflow = self.workflows.render(
+            self.workflows.load(workflow_name),
+            self._workflow_variables(ref_request, profile),
+        )
+        rendered_status = self.workflows.validate_api(workflow)
+        if not rendered_status.get("valid"):
+            raise RuntimeError("Rendered refine workflow failed validation: " + "; ".join(rendered_status.get("errors", [])[:4]))
+        unresolved = rendered_status.get("unresolved_tokens", [])
+        if unresolved:
+            raise RuntimeError("Rendered refine workflow still contains unresolved variable(s): " + ", ".join(unresolved))
+        backend_job_id = self._submit_and_wait(
+            job, workflow, stage="refining details",
+            progress_start=0.93, progress_end=0.98)
+        job.routing_reasons.append(
+            f"face/detail refinement: {profile.id} "
+            f"(denoise {ref_request.denoise_strength})")
+        return [str(p) for p in self.backend.fetch_outputs(
+            backend_job_id, self.generations_dir / job.id / "refined")]
+
     def _invokeai_spec(self, job: ImageJob, request: ImageRequest,
                        profile: ImageModelProfile) -> dict[str, Any]:
         """Normalized generation spec for InvokeAIBackend.submit."""
@@ -1418,6 +1476,19 @@ class ImageManager:
                     # generation; surface the failure while preserving output.
                     job.routing_reasons.append(
                         f"post-process upscaler failed: {type(exc).__name__}: {exc}")
+            if request.refine_details and job.operation not in {
+                    "upscale", "variation"} and job.outputs:
+                try:
+                    refined=self._run_refine_stage(job, request, job.outputs[0])
+                    if refined:
+                        job.outputs=refined + job.outputs
+                except _ImageJobCancelled:
+                    raise
+                except Exception as exc:
+                    # Same rule as the upscaler — refinement is optional
+                    # post-processing; its failure never eats the image.
+                    job.routing_reasons.append(
+                        f"face/detail refinement failed: {type(exc).__name__}: {exc}")
             # Mirror finished outputs into the user-facing output folder so
             # generated images are easy to find outside the app.
             try:
