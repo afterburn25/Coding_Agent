@@ -1139,6 +1139,62 @@ class InterruptedJobResumeTests(unittest.TestCase):
             self.assertEqual(failed.state, "failed")
             self.assertEqual(failed.error_code, "application_restarted")
 
+    def test_run_job_missing_id_returns_quietly(self):
+        # Worker spawned for an evicted/unknown job must not die loudly —
+        # and must never leave a phantom 'resuming' row at 0%.
+        with tempfile.TemporaryDirectory() as td:
+            m = self._manager(Path(td), auto_run=False)
+            m._run_job("job-that-does-not-exist")  # no exception
+
+    def test_stall_check_fails_silent_worker(self):
+        # §13: a live job whose worker stopped updating is failed honestly
+        # rather than sitting at 'resuming after restart · 0%' forever.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m = self._manager(root, auto_run=False)
+            m.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m.create_job(ImageRequest(prompt="a cat"))
+            job.state = "queued"
+            job.stage = "resuming after restart"
+            # Worker vanished 20 minutes ago — heartbeat never bumped.
+            job.heartbeat_at = time.time() - 1200
+            m._save_jobs(job)
+            job.heartbeat_at = time.time() - 1200  # _save_jobs bumped it; rewind
+
+            reaped = m.stall_check()
+            self.assertEqual(reaped, 1)
+            failed = m.get_job(job.id)
+            self.assertEqual(failed.state, "failed")
+            self.assertEqual(failed.error_code, "image_job_stalled")
+            self.assertIn("resuming after restart", failed.technical_details)
+            self.assertFalse(m.has_active_jobs())
+
+    def test_stall_check_keeps_fresh_jobs_alive(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m = self._manager(root, auto_run=False)
+            m.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m.create_job(ImageRequest(prompt="a cat"))
+            job.state = "generating"
+            m._save_jobs(job)  # bumps heartbeat to now
+            self.assertEqual(m.stall_check(), 0)
+            self.assertEqual(m.get_job(job.id).state, "generating")
+
+    def test_old_rows_without_heartbeat_use_created_at(self):
+        # Jobs persisted before heartbeat_at existed must not be instantly
+        # reaped — but a genuinely ancient live row must still fail.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            m = self._manager(root, auto_run=False)
+            m.backend = SimpleNamespace(health=lambda: (True, "ok"))
+            job = m.create_job(ImageRequest(prompt="a cat"))
+            job.state = "queued"
+            job.heartbeat_at = 0.0
+            job.created_at = time.time() - 7000  # ancient, no heartbeat
+            job.started_at = 0.0
+            self.assertEqual(m.stall_check(), 1)
+            self.assertEqual(m.get_job(job.id).error_code, "image_job_stalled")
+
 
 class SplitImagePromptTests(unittest.TestCase):
     def test_explicit_count_list_splits(self):

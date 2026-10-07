@@ -157,6 +157,40 @@ class TestSpeechFilter(unittest.TestCase):
         self.assertNotIn("Sauté", out)
         self.assertIn("listed", out.lower())
 
+    def test_bare_section_labels_dropped_with_summarized_lists(self):
+        # Colon-style section headers ("Ingredients:", "Steps:") whose
+        # lists are summarized must not be spoken as orphaned labels;
+        # sentence-style lead-ins survive.
+        text = (
+            "Absolutely, here's the Shrimp Creole.\n\n"
+            "Ingredients:\n"
+            "- 1 lb shrimp\n"
+            "- 1 cup onion\n"
+            "- 2 cups tomatoes\n\n"
+            "Steps:\n"
+            "1. Saute the aromatics\n"
+            "2. Simmer the sauce\n"
+            "3. Add the shrimp\n\n"
+            "Want a spicier version?")
+        out = self.f.filter(text)
+        self.assertIn("Shrimp Creole", out)
+        self.assertIn("spicier", out)
+        self.assertNotIn("Ingredients", out)
+        self.assertNotIn("Steps", out)
+        self.assertNotIn("shrimp, peeled", out.lower())
+        self.assertIn("listed", out.lower())
+
+    def test_sentence_leadin_survives_summarized_list(self):
+        text = (
+            "Here's what I'd suggest checking:\n"
+            "- restart the image backend\n"
+            "- verify the model path exists\n"
+            "- check VRAM headroom\n"
+            "- review the last error log")
+        out = self.f.filter(text)
+        self.assertIn("suggest checking", out)
+        self.assertNotIn("restart", out)
+
     def test_short_lists_still_speak(self):
         out = self.f.filter(
             "Two things stand out:\n"
@@ -186,6 +220,32 @@ class TestSentenceStreamer(unittest.TestCase):
         self.assertEqual(s.feed("The analy"), [])
         self.assertEqual(s.feed("sis is don"), [])
         self.assertEqual(s.feed("e. Next part"), ["The analysis is done."])
+
+    def test_emit_spans_track_raw_offsets(self):
+        # Voice/text sync: every emitted sentence carries the raw-stream
+        # offset where its source text ends, so the client reveals display
+        # text exactly in step with playback.
+        s = SentenceStreamer()
+        out = s.feed("First sentence. Second one here. Third…")
+        spans = s.pop_emit_spans()
+        self.assertEqual(len(out), len(spans))
+        raw = "First sentence. Second one here. Third…"
+        # First emitted sentence's span must cover its raw text; spans are
+        # monotonically non-decreasing.
+        self.assertGreaterEqual(spans[0], len("First sentence."))
+        self.assertEqual(sorted(spans), spans)
+        self.assertLessEqual(spans[-1], len(raw))
+
+    def test_emit_spans_include_skipped_blocks(self):
+        # A skipped list run between spoken sentences still advances the
+        # raw offset — the reveal must not leave structured display text
+        # stuck behind audio.
+        s = SentenceStreamer()
+        s.feed("Intro line.\n- a\n- b\n- c\n- d\n")
+        out = s.feed("Closing line.")
+        spans = s.pop_emit_spans()
+        self.assertTrue(out)
+        self.assertEqual(spans[-1], len("Intro line.\n- a\n- b\n- c\n- d\nClosing line."))
 
     def test_holds_code_until_fence_closes(self):
         s = SentenceStreamer()
@@ -571,6 +631,31 @@ class TestVoiceManager(unittest.TestCase):
         self.assertEqual(segs[0]["task_id"], "t9")
         self.assertEqual(segs[0]["seq"], 0)
         self.assertTrue(self.m.segment_path(segs[0]["segment_id"]).exists())
+
+    def test_segment_payload_carries_text_and_raw_end(self):
+        """Voice/text sync contract: segment events carry the spoken text
+        and the raw-response offset so the client can reveal display text
+        exactly in step with playback."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        raw = "First spoken sentence. Second spoken sentence."
+        self.m.begin_task("t-sync")
+        self.m.feed_token("t-sync", raw)
+        self.m.finish_task("t-sync", raw)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if any(p.get("event") == "segment" for p in published):
+                break
+            time.sleep(0.05)
+        segs = [p for p in published if p.get("event") == "segment"]
+        self.assertTrue(segs, published)
+        self.assertTrue(all("text" in s and s["text"] for s in segs))
+        self.assertTrue(all("raw_end" in s for s in segs))
+        ends = [s["raw_end"] for s in segs]
+        # Offsets are positive, ordered, and bounded by the raw stream.
+        self.assertTrue(all(e > 0 for e in ends))
+        self.assertEqual(sorted(ends), ends)
+        self.assertLessEqual(ends[-1], len(raw))
 
     def test_finish_without_tokens_speaks_final_text(self):
         """Responses with no streamed tokens (local/memory/instant answers)

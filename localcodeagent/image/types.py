@@ -127,6 +127,9 @@ class ImageJob:
     # crash-loop resumes.
     resume_count: int = 0
     resolved_loras: list[dict[str, Any]] = field(default_factory=list)
+    # Last time the job's row was persisted — the stall watchdog uses it
+    # to detect a live-state job whose worker silently vanished.
+    heartbeat_at: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -431,7 +431,12 @@ function toolCompleteBlock(tool){
 }
 function flushStreamText(state){
   state.flushScheduled=false;
-  if(state.pendingText){state.text.textContent+=state.pendingText;state.pendingText='';scrollChat();}
+  if(!state.pendingText)return;
+  // Voice gating holds pendingText as the raw buffer and reveals only up
+  // to voiceReveal (raw-stream offset of the segment currently playing).
+  const n=state.awaitingVoice?Math.min(state.voiceReveal||0,state.pendingText.length):state.pendingText.length;
+  state.text.textContent=state.pendingText.slice(0,n);
+  scrollChat();
 }
 
 /* ---------- structured activity timeline ---------- */
@@ -546,22 +551,46 @@ function scheduleStreamFlush(state){
   const raf=(typeof requestAnimationFrame==='function')?requestAnimationFrame:(f)=>setTimeout(f,16);
   raf(()=>flushStreamText(state));
 }
+let voiceGatedState=null;
 function releaseVoiceHold(state){
+  if(state.voiceHoldTimer){clearTimeout(state.voiceHoldTimer);state.voiceHoldTimer=null;}
   if(!state.awaitingVoice)return;
   state.awaitingVoice=false;
-  if(state.voiceHoldTimer){clearTimeout(state.voiceHoldTimer);state.voiceHoldTimer=null;}
+  state.voiceReveal=Infinity;
+  if(voiceGatedState===state)voiceGatedState=null;
   scheduleStreamFlush(state);
 }
+function wireVoicePlayback(){
+  // Per-segment text/voice sync: NexusVoice emits a 'play' event at the
+  // moment a segment audibly starts; matching its task_id + raw_end
+  // reveals exactly the display text that segment speaks.
+  const nv=window.NexusVoice;
+  if(!nv||nv.__nexusChatSync)return;
+  nv.__nexusChatSync=true;
+  nv.on(function(evt){
+    const e=evt||{},st=voiceGatedState;
+    if(!st||!st.awaitingVoice)return;
+    if(e.event==='play'&&e.meta&&e.meta.task_id===st.voiceTaskId){
+      const re=Number(e.meta.raw_end||0);
+      st.voiceReveal=re>0?re:Infinity;
+      scheduleStreamFlush(st);
+    }
+  });
+}
 function armVoiceHold(state){
-  // Voice-first sync: when speech is active, hold the visible response until
-  // the first audio segment is ready so text and voice land together.
+  // Voice-first sync: hold the visible response in step with audio
+  // playback — segments reveal their own span as they start speaking.
   // Muted/off mode → text posts immediately (typed response wins).
   const nv=window.NexusVoice;
   const voiceMode=String(nv?.status?.mode||'responses');
   if(!nv||!nv.enabled||nv.muted)return;
   if(voiceMode!=='responses'&&voiceMode!=='responses_activity')return;
   state.awaitingVoice=true;
-  state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),8000);
+  state.voiceReveal=0;
+  state.voiceTaskId='';
+  voiceGatedState=state;
+  wireVoicePlayback();
+  state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),12000);
 }
 /* ---------- live research card ---------- */
 // Structured research lifecycle events render an inline card inside the
@@ -631,7 +660,10 @@ function researchSessionCard(state,rs){
 function handleAgentStreamEvent(name,data,state){
   if(name==='voice'){
     try{window.NexusVoice?.onEvent(data);}catch{}
-    if(data&&(data.event==='segment'||data.event==='stop'||data.event==='muted'))releaseVoiceHold(state);
+    // A segment event means audio is READY — text releases when playback
+    // starts (the NexusVoice 'play' event), not on synthesis completion.
+    if(data&&data.event==='segment'&&!state.voiceTaskId&&String(data.task_id||'').startsWith('chat-'))state.voiceTaskId=String(data.task_id);
+    if(data&&(data.event==='stop'||data.event==='muted'||data.event==='error'))releaseVoiceHold(state);
     return;
   }
   if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
@@ -645,7 +677,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
   if(name==='model'){
     const e=data.event||{};
-    if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.pendingText='';if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
+    if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.pendingText='';state.voiceReveal=0;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
     else if(e.type==='switch'||e.type==='activation_fallback')nexusThinkingStep(state,'Routing matrix updated',(e.from||'model')+' → '+(e.to||e.model_id||''),'model-switch');
     else nexusThinkingStep(state,'Model route locked',(e.model_id||e.to||'local model')+(e.role?' · '+e.role:''),'model');
     appendLiveActivity(`MODEL · ${e.type||'event'} · ${e.model_id||e.to||''} ${e.role||''}`.trim());return;

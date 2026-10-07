@@ -28,10 +28,12 @@ log = logging.getLogger(__name__)
 
 class SpeechJob:
     __slots__ = ("job_id", "task_id", "seq", "text", "preset_id", "speed",
-                 "delivery", "cancelled", "created_at", "events", "priority")
+                 "delivery", "cancelled", "created_at", "events", "priority",
+                 "raw_end")
 
     def __init__(self, task_id: str, seq: int, text: str, preset_id: str,
-                 speed: float, delivery: dict | None = None) -> None:
+                 speed: float, delivery: dict | None = None,
+                 raw_end: int = 0) -> None:
         self.job_id = uuid.uuid4().hex[:16]
         self.task_id = task_id
         self.seq = seq
@@ -43,6 +45,9 @@ class SpeechJob:
         self.created_at = time.time()
         self.events: list[dict] = []
         self.priority = False
+        # Raw-response-stream offset where this segment's source text ends —
+        # the client reveals display text up to here when playback starts.
+        self.raw_end = int(raw_end)
 
 
 class VoiceManager:
@@ -335,8 +340,11 @@ class VoiceManager:
             self.begin_task(task_id)
             streamer = self._streamers[task_id]
         n = 0
-        for sent in streamer.feed(delta):
-            self.enqueue(task_id, sent)
+        sents = streamer.feed(delta)
+        spans = streamer.pop_emit_spans()
+        for i, sent in enumerate(sents):
+            self.enqueue(task_id, sent,
+                         raw_end=spans[i] if i < len(spans) else 0)
             n += 1
         return n
 
@@ -368,9 +376,12 @@ class VoiceManager:
         try:
             if self.enabled() and not self.muted():
                 if streamer:
-                    for sent in streamer.flush():
-                        self.enqueue(task_id, sent, speed=pace,
-                                     delivery=delivery)
+                    tail = streamer.flush()
+                    spans = streamer.pop_emit_spans()
+                    for i, sent in enumerate(tail):
+                        self.enqueue(
+                            task_id, sent, speed=pace, delivery=delivery,
+                            raw_end=spans[i] if i < len(spans) else 0)
                 # Count after flush: a reply that never crossed a sentence
                 # boundary during feed still speaks via the flush tail —
                 # checking before flush would re-speak the same text through
@@ -382,9 +393,12 @@ class VoiceManager:
                     if spoken:
                         for sent in _split_sentences(spoken):
                             for part in split_for_speech(sent):
+                                # raw_end 0 signals "reveal everything
+                                # remaining" — no stream positions exist.
                                 self.enqueue(task_id, part,
                                              speed=pace,
-                                             delivery=delivery)
+                                             delivery=delivery,
+                                             raw_end=-1)
         finally:
             try:
                 self.vocal.end_task(task_id)
@@ -396,7 +410,8 @@ class VoiceManager:
                 preset_id: str | None = None, speed: float = 1.0,
                 delivery: dict | None = None,
                 priority: bool = False,
-                vocalize: bool = True) -> SpeechJob | None:
+                vocalize: bool = True,
+                raw_end: int = 0) -> SpeechJob | None:
         """vocalize=False skips vocalization resolution — for
         system-authored notices whose persona lead-ins are already
         final text ("Oof — …" must not be re-detected and stripped)."""
@@ -433,7 +448,7 @@ class VoiceManager:
             job = SpeechJob(task_id, seq, text,
                             preset_id or (self.current_preset().id
                                           if self.current_preset() else ""),
-                            speed, delivery=delivery)
+                            speed, delivery=delivery, raw_end=raw_end)
             job.events = events
             if priority:
                 # Ahead of normal jobs but behind earlier priority jobs —
@@ -487,6 +502,7 @@ class VoiceManager:
             "event": "segment", "task_id": task_id, "seq": 0,
             "segment_id": seg_id, "url": f"/api/voice/audio/{seg_id}",
             "seconds": round(pcm.shape[0] / sr, 2),
+            "text": spoken,
         }
         events = getattr(vres, "events", None) or []
         if events:
@@ -585,6 +601,11 @@ class VoiceManager:
                 "event": "segment", "task_id": job.task_id, "seq": job.seq,
                 "segment_id": seg_id, "url": f"/api/voice/audio/{seg_id}",
                 "seconds": round(pcm.shape[0] / sr, 2),
+                # Spoken text + raw-response offset for text/voice sync:
+                # the client reveals display text up to raw_end when this
+                # segment starts playing (-1 = reveal all remaining).
+                "text": job.text,
+                "raw_end": int(job.raw_end),
             }
             if job.events:
                 # Gesture/vocalization metadata rides the segment event —

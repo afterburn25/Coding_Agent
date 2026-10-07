@@ -55,10 +55,15 @@ class SentenceStreamer:
         # for a full opening sentence makes voice lag visibly behind text.
         self.first_clause = first_clause
         self._raw = ""           # unprocessed deltas
+        self._raw_fed = 0        # total raw chars ever fed
         self._text = ""          # speakable text awaiting sentence boundary
         self._in_fence = False
         self._emitted = 0
         self._skipped_blocks = 0
+        # Parallel to each emitted string since the last feed/flush: the
+        # raw-stream offset where its source text ends. The chat page uses
+        # it to reveal display text exactly in step with audio playback.
+        self._emit_spans: list[int] = []
         # List items are held until the run ends: a run of >= 3 is
         # structured data (recipe steps, ingredient lists) and collapses
         # to one spoken mention; shorter runs are spoken normally.
@@ -70,7 +75,9 @@ class SentenceStreamer:
         return self._emitted
 
     def feed(self, delta: str) -> list[str]:
+        self._emit_spans = []
         self._raw += delta
+        self._raw_fed += len(str(delta or ""))
         out: list[str] = []
         while "\n" in self._raw:
             line, self._raw = self._raw.split("\n", 1)
@@ -110,6 +117,7 @@ class SentenceStreamer:
         return out
 
     def flush(self) -> list[str]:
+        self._emit_spans = []
         out: list[str] = []
         if self._raw:
             out.extend(self._handle_line(self._raw))
@@ -118,6 +126,13 @@ class SentenceStreamer:
         out.extend(self._pop_ready(force_all=True))
         self._text = ""
         return out
+
+    def pop_emit_spans(self) -> list[int]:
+        """Raw-stream end offsets for the strings returned by the most
+        recent feed()/flush() call, in order. ``len`` may be shorter than
+        the emitted list when a chunk had no usable span."""
+        spans, self._emit_spans = self._emit_spans, []
+        return spans
 
     # -- internals ------------------------------------------------------
     def _handle_line(self, line: str) -> list[str]:
@@ -155,19 +170,23 @@ class SentenceStreamer:
     def _pop_ready(self, force_all: bool = False) -> list[str]:
         out: list[str] = []
         buf = self._text
+
+        def _emit(part: str) -> None:
+            out.append(part)
+            self._emitted += 1
+            self._emit_spans.append(self._raw_fed - len(self._raw))
+
         while buf.strip():
             limit = self.first_clause if self._emitted == 0 else self.max_clause
             m = _SENT_END.search(buf)
             if m:
                 sent, buf = buf[: m.end()].strip(), buf[m.end():]
                 for part in split_for_speech(sent, limit):
-                    out.append(part)
-                    self._emitted += 1
+                    _emit(part)
                 continue
             if force_all:
                 for part in split_for_speech(buf.strip(), limit):
-                    out.append(part)
-                    self._emitted += 1
+                    _emit(part)
                 buf = ""
                 break
             if len(buf) > limit:
@@ -183,8 +202,7 @@ class SentenceStreamer:
                 if cut:
                     sent, buf = buf[:cut].strip(), buf[cut:]
                     if sent:
-                        out.append(sent)
-                        self._emitted += 1
+                        _emit(sent)
                     continue
             break
         self._text = buf

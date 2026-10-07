@@ -185,11 +185,24 @@ class SpeechTextFilter:
         list_run: list[str] = []
         skipped_kinds: set[str] = set()
 
+        def drop_orphan_label() -> None:
+            # A short heading-style label ("Ingredients:", "Steps:") whose
+            # block was summarized/skipped must not be spoken alone —
+            # it names a structure the listener never hears. Sentence-like
+            # labels ("Here's what I'd suggest:") stay: they carry meaning.
+            if (
+                out
+                and out[-1].rstrip().endswith(":")
+                and len(out[-1].strip().split()) <= 3
+            ):
+                out.pop()
+
         def flush_list() -> None:
             nonlocal list_seen
             if not list_run:
                 return
             if len(list_run) >= self.LIST_SUMMARIZE_MIN:
+                drop_orphan_label()
                 list_seen += 1
             else:
                 out.extend(x.rstrip() for x in list_run)
@@ -216,6 +229,7 @@ class SpeechTextFilter:
             if cls == SKIP:
                 continue
             if cls == SUMMARIZE:
+                drop_orphan_label()
                 table_seen += 1
                 continue
             out.append(line.rstrip())

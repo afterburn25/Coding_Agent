@@ -108,6 +108,12 @@
     const audio = new Audio(item.url);
     audio.volume = Math.min(1, Math.max(0, NV.volume));
     const seq = ++NV._playSeq;
+    // Text/voice sync: announce when the segment AUDIBLY starts so the
+    // chat page releases its held text at that moment — segment events
+    // fire on synthesis-complete (audio ready), not on playback start.
+    audio.onplaying = () => {
+      if (NV.current === audio) NV._emit({ event: 'play', meta: item.meta || {} });
+    };
     audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._lastEnd = Date.now(); NV._lastTaskId = (item.meta && item.meta.task_id) || null; NV._playNext(); NV._emit(); } };
     audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
     NV.current = audio;

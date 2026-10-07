@@ -155,6 +155,7 @@ class ImageManager:
                     was_active = job.state != "queued"
                     job.state="queued"; job.stage="resuming after restart"
                     job.progress=0.0
+                    job.heartbeat_at=time.time()
                     job.error=""; job.error_code=""; job.error_message=""
                     job.technical_details=""
                     job.started_at=0.0; job.finished_at=0.0
@@ -211,6 +212,8 @@ class ImageManager:
 
     def _save_jobs(self, job: "ImageJob | None" = None) -> None:
         self.last_activity = time.time()
+        if job is not None:
+            job.heartbeat_at = self.last_activity
         with self._lock:
             ordered = sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)
             rows=[j.as_dict() for j in ordered[:500]]
@@ -519,7 +522,7 @@ class ImageManager:
             "setup": self.setup_state(),
             "workflows": self.workflows.list(),
             "comfy_extra_model_paths": str(self.comfy_extra_paths),
-            "jobs": [j.as_dict() for j in sorted(self._jobs.values(), key=lambda j:j.created_at, reverse=True)[:25]],
+            "jobs": [j.as_dict() for j in self._live_jobs_view()],
             "profiles": self.profiles.list(),
             "resource_mode": getattr(self.config, "image_resource_mode", "balanced"),
         }
@@ -1387,7 +1390,11 @@ class ImageManager:
                 self.runtime.restore_managed_models(stopped)
 
     def _run_job(self, job_id: str) -> None:
-        job=self._jobs[job_id]
+        job = self._jobs.get(job_id)
+        if job is None:
+            # Worker spawned for a job that no longer exists — never die
+            # silently leaving a phantom 'resuming' row at 0%.
+            return
         if job.backend == "invokeai":
             self._run_invokeai_job(job)
             return
@@ -1571,7 +1578,52 @@ class ImageManager:
         except KeyError as exc:
             raise KeyError(f"Unknown image job {job_id}") from exc
 
+    _LIVE_STATES = {"queued", "loading_model", "generating", "refining",
+                    "upscaling", "cancelling"}
+
+    def stall_check(self, *, now: float | None = None) -> int:
+        """§13: a live-state job whose worker silently died must not sit at
+        'resuming after restart · 0%' forever. heartbeat_at is bumped on
+        every persisted update; a job with no update for the stall budget
+        is failed honestly instead of lying on screen.
+
+        Called on every status read (cheap dict scan) — no background
+        thread needed.
+        """
+        now = time.time() if now is None else float(now)
+        budget = max(60, int(getattr(
+            self.config, "image_job_stall_seconds", 600)))
+        reaped = 0
+        for job in list(self._jobs.values()):
+            if job.state not in self._LIVE_STATES:
+                continue
+            beat = job.heartbeat_at or job.started_at or job.created_at
+            if not beat or now - beat <= budget:
+                continue
+            prior_stage, prior_state = job.stage, job.state
+            job.state = "failed"
+            job.stage = "failed"
+            job.error_code = "image_job_stalled"
+            job.error_message = (
+                "The image job stopped reporting progress — the worker "
+                "most likely exited without recording a failure.")
+            job.error = job.error_message
+            job.technical_details = (
+                f"No persisted update for {int(now - beat)}s "
+                f"(stall budget {budget}s); last stage was "
+                f"{prior_stage!r} at state {prior_state!r} before reaping.")
+            job.finished_at = now
+            self._save_jobs(job)
+            reaped += 1
+        return reaped
+
+    def _live_jobs_view(self) -> list[ImageJob]:
+        self.stall_check()
+        return sorted(self._jobs.values(),
+                      key=lambda j: j.created_at, reverse=True)[:25]
+
     def has_active_jobs(self) -> bool:
+        self.stall_check()
         return any(j.state in {"queued", "loading_model", "generating", "refining", "upscaling"} for j in self._jobs.values())
 
     def history(self, *, query: str = "") -> list[dict[str, Any]]:
