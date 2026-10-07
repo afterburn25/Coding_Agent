@@ -1635,11 +1635,16 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertEqual(row["status"], "paused")
             sup.stop()
 
+    _APPROVAL_TIMEOUT_S = 3600.0
+
     @staticmethod
     def _expire_pending_approval(sup: AutonomousSupervisor) -> None:
         # Deterministic alternative to wall-clock sleeps: the timeout check
         # compares `now - created_at >= timeout`, so backdating the pending
         # row makes the *next* tick fire it — immune to CI scheduling jitter.
+        # The timeout stays huge (1 h) for the whole test so only rows this
+        # helper backdates can ever expire — a fresh approval can never hit
+        # its deadline mid-drive no matter how loaded the CI runner is.
         # (0.0 is falsy and falls back to `now`, so use a small nonzero age.)
         rows = sup.approvals(pending_only=True)
         assert rows, "expected a pending approval to expire"
@@ -1651,7 +1656,6 @@ class SupervisorLifecycleTests(unittest.TestCase):
         # night. Timeout behaves like denial: mark it, replan, continue.
         with tempfile.TemporaryDirectory() as td:
             calls = {"n": 0}
-            timeout = {"v": 0.0}
 
             def executor(m, n, cb):
                 calls["n"] += 1
@@ -1662,7 +1666,8 @@ class SupervisorLifecycleTests(unittest.TestCase):
                 return {"ok": True, "output": "ok"}
 
             sup = make_sup(td, executor=executor,
-                           approval_timeout_seconds=lambda: timeout["v"])
+                           approval_timeout_seconds=lambda:
+                           self._APPROVAL_TIMEOUT_S)
             m = sup.create_mission(
                 objective="x",
                 success_criteria=[{"kind": "all_tasks_completed"}])
@@ -1670,10 +1675,8 @@ class SupervisorLifecycleTests(unittest.TestCase):
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
             self.assertEqual(len(sup.approvals(pending_only=True)), 1)
-            timeout["v"] = 1.0
             self._expire_pending_approval(sup)
             sup.tick()
-            timeout["v"] = 0.0
             final = drive(sup, m["id"], ticks=30)
             self.assertEqual(final["status"], "completed")
             rows = sup.approvals()
@@ -1683,7 +1686,6 @@ class SupervisorLifecycleTests(unittest.TestCase):
     def test_mission_approval_timeouts_are_bounded(self):
         with tempfile.TemporaryDirectory() as td:
             calls = {"n": 0}
-            timeout = {"v": 0.0}
 
             def executor(m, n, cb):
                 calls["n"] += 1
@@ -1694,7 +1696,8 @@ class SupervisorLifecycleTests(unittest.TestCase):
                 return {"ok": True, "output": "ok"}
 
             sup = make_sup(td, executor=executor,
-                           approval_timeout_seconds=lambda: timeout["v"])
+                           approval_timeout_seconds=lambda:
+                           self._APPROVAL_TIMEOUT_S)
             m = sup.create_mission(
                 objective="x",
                 budgets={"max_approval_retries": 2},
@@ -1702,13 +1705,10 @@ class SupervisorLifecycleTests(unittest.TestCase):
             sup.start_mission(m["id"])
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            timeout["v"] = 1.0
             self._expire_pending_approval(sup)
             sup.tick()
-            timeout["v"] = 0.0
             final = drive(sup, m["id"], ticks=15)
             self.assertEqual(final["status"], "waiting_approval")
-            timeout["v"] = 1.0
             self._expire_pending_approval(sup)
             sup.tick()
             final = sup.missions.get(m["id"])
