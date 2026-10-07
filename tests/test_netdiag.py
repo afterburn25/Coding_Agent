@@ -117,8 +117,11 @@ class ClassificationTests(unittest.TestCase):
         self.assertTrue(is_transport_failure(_win_reset()))
         self.assertTrue(is_transport_failure(urllib.error.URLError("x")))
         self.assertFalse(is_transport_failure(ValueError("nope")))
-        self.assertFalse(is_transport_failure(
-            urllib.error.HTTPError("u", 500, "err", {}, None)))
+        err = urllib.error.HTTPError("u", 500, "err", {}, None)
+        try:
+            self.assertFalse(is_transport_failure(err))
+        finally:
+            err.close()
 
     def test_redact_url_strips_credentials_and_query(self):
         self.assertEqual(
