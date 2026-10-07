@@ -1686,6 +1686,58 @@ class ActionNudgeTests(unittest.TestCase):
             self.assertNotIn("speak_text", advertised)
             self.assertNotIn("web_search", advertised)
 
+    def test_schema_set_shrinks_to_minimal_on_small_windows(self):
+        """Oversized schema payloads overflow the context window; the
+        provider's overflow recovery then drops tools entirely and action
+        turns stall into prose. On a small window the advertised set must
+        collapse to the minimal create/read/edit/run core."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = ToolRegistry({})
+            for i in range(60):
+                tools.register(ToolSpec(f"filler_tool_{i}", "t " + "x" * 400, {
+                    "type": "object",
+                    "properties": {f"p{j}": {"type": "string"} for j in range(8)},
+                }, "test.execute", lambda args: "OK", category="coding"))
+            tools.register(ToolSpec("write_file", "t", {
+                "type": "object", "properties": {},
+            }, "test.execute", lambda args: "OK", category="coding"))
+            tools.register(ToolSpec("find_tools", "t", {
+                "type": "object", "properties": {},
+            }, "test.execute", lambda args: "OK", category="utilities"))
+
+            small = ModelProfile(
+                id="small", endpoint="http://unused/v1", model="x",
+                roles=["light_coder"], runtime="external",
+                context_window=12288, max_output_tokens=2048,
+            )
+            config = AgentConfig(
+                models=[small],
+                permissions={"test.execute": "allow"},
+                research_enabled=False,
+                auto_verify_after_changes=False, review_after_changes=False,
+            )
+            index = RepositoryIndex(root); index.build()
+            provider = _StallOnlyProvider()
+            agent = AgentOrchestrator(
+                config, ModelRouter(config.models),
+                tools, _FakeRuntime(),
+                tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+                memory=ProjectMemory(root), repository_index=index,
+            )
+            agent._provider_for = lambda _: provider
+
+            agent.run("summarize the repository layout")
+
+            advertised = {
+                s["function"]["name"] for s in (provider.seen_tools[0] or [])
+            }
+            # 60 filler schemas (~60KB) cannot fit a 12288 window alongside
+            # messages — the set must collapse to the minimal action core.
+            self.assertNotIn("filler_tool_0", advertised)
+            self.assertIn("write_file", advertised)
+            self.assertIn("find_tools", advertised)
+
 
 if __name__ == "__main__":
     unittest.main()

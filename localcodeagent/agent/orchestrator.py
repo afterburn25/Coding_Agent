@@ -121,6 +121,15 @@ _INTENT_TOOL_CATEGORIES: dict[str, frozenset[str]] = {
     "github_status": frozenset({"github", "research", "browsers"}),
     "writing": frozenset({"documents"}),
 }
+# Minimal tool set used when the advertised schema list would otherwise
+# exceed the model's context window — oversized schema payloads are dropped
+# server-side on overflow, which silently turns action turns into prose
+# stalls. Covers create/read/edit/run plus the find_tools discovery hatch.
+_SCHEMA_MINIMAL_TOOLS = frozenset({
+    "write_file", "apply_patch", "read_file", "list_files",
+    "run_shell", "search_text", "search_repo_index",
+    "git_status", "git_diff", "find_tools",
+})
 _TOOL_CATEGORY_KEYWORDS: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"images"}),
      r"\b(image|images|picture|photo|paint|draw|logo|wallpaper|icon|screenshot|inpaint|upscale)\b"),
@@ -172,6 +181,35 @@ _QUESTION_LEAD_RE = re.compile(
     r"^\s*(how|what|why|when|where|which|who|whom|whose|is|are|was|were|"
     r"does|do|did|should|would you explain|explain|describe|tell me)\b",
     re.IGNORECASE)
+
+
+def _session_schemas(registry: ToolRegistry, session: "_AgentSession") -> list[dict[str, Any]]:
+    """Advertised tool schemas bounded against the model's context window.
+
+    An oversized schema payload overflows the prompt; the provider's
+    overflow recovery then drops tools entirely and the model emits prose
+    for action turns (the observed stall). If the category-pruned set is
+    too large for this profile's window, fall back to the minimal
+    create/read/edit/run set — anything else is still reachable via
+    find_tools."""
+    schemas = registry.schemas(session.tool_categories)
+    window = int(getattr(session.profile, "context_window", 0) or 0) or 8192
+    output_reserve = int(getattr(session.profile, "max_output_tokens", 0) or 0) or 2048
+    prompt_tokens = max(2048, window - output_reserve)
+    # Reserve ~55% of the prompt budget for system preamble + messages;
+    # the rest is the schema ceiling (~3.5 chars/token for JSON schemas).
+    schema_budget = int(prompt_tokens * 0.45 * 3.5)
+    size = len(json.dumps(schemas))
+    if size <= schema_budget:
+        session.tool_schema_chars = size
+        return schemas
+    minimal = [s for s in schemas
+               if s["function"]["name"] in _SCHEMA_MINIMAL_TOOLS]
+    if minimal and len(json.dumps(minimal)) < size:
+        session.tool_schema_chars = len(json.dumps(minimal))
+        return minimal
+    session.tool_schema_chars = size
+    return schemas
 
 
 def _task_requires_action(session: "_AgentSession") -> bool:
@@ -258,6 +296,10 @@ class _AgentSession:
     # None = advertise every callable schema; a set prunes the advertised
     # categories (execution stays name-based — find_tools is the escape).
     tool_categories: frozenset[str] | None = None
+    # Serialized size of the schemas currently advertised — _trim_context
+    # subtracts this from the char budget so schemas + messages jointly
+    # fit the model window.
+    tool_schema_chars: int = 0
     started_at: float = field(default_factory=time.time)
 
 
@@ -4068,7 +4110,9 @@ class AgentOrchestrator:
         # code-heavy content than 3.0.
         output_reserve = int(getattr(session.profile, "max_output_tokens", 0) or 0) or 2048
         prompt_tokens = max(2048, budget_tokens - output_reserve)
-        char_budget = max(8000, int(prompt_tokens * 2.6))
+        # Advertised tool schemas ride inside the same window — subtract
+        # their serialized size so messages + schemas jointly fit.
+        char_budget = max(8000, int(prompt_tokens * 2.6) - session.tool_schema_chars)
         msgs = session.messages
         total = sum(len(str(m.get("content") or "")) for m in msgs)
         if total <= char_budget:
@@ -4348,7 +4392,7 @@ class AgentOrchestrator:
                 session.profile,
                 messages=session.messages,
                 tools=None if session.decision.role == "utility"
-                else self.tools.schemas(session.tool_categories),
+                else _session_schemas(self.tools, session),
                 model_events=session.model_events,
                 on_delta=on_delta,
                 event_callback=session.event_callback,
