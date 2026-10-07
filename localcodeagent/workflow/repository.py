@@ -52,6 +52,14 @@ class RepositoryIndex:
         return pattern.findall(text)[:200]
 
     def build(self, max_files: int = 8000, max_file_bytes: int = 1_500_000) -> dict[str, Any]:
+        # Incremental: unchanged files keep their parsed symbols/preview —
+        # only new, modified (mtime or size), or deleted entries are
+        # touched. A full rglob stat pass is cheap; re-reading every file
+        # on a 5k-file tree is not.
+        prior: dict[str, dict[str, Any]] = {}
+        for row in self._data.get("files", []):
+            if isinstance(row, dict) and row.get("path"):
+                prior[row["path"]] = row
         rows: list[dict[str, Any]] = []
         for path in sorted(self.workspace.rglob("*")):
             if len(rows) >= max_files:
@@ -60,14 +68,23 @@ class RepositoryIndex:
                 continue
             if path.suffix.lower() not in TEXT_EXTENSIONS and path.name not in {"Dockerfile", "Makefile", "CMakeLists.txt"}:
                 continue
+            rel = path.relative_to(self.workspace).as_posix()
             try:
                 stat = path.stat()
                 if stat.st_size > max_file_bytes:
                     continue
+            except OSError:
+                continue
+            cached = prior.get(rel)
+            if (cached is not None
+                    and cached.get("mtime") == stat.st_mtime
+                    and cached.get("size") == stat.st_size):
+                rows.append(cached)
+                continue
+            try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            rel = path.relative_to(self.workspace).as_posix()
             rows.append({
                 "path": rel,
                 "size": stat.st_size,
