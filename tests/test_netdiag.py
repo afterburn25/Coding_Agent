@@ -674,8 +674,9 @@ class DiagnosticsEndpointTests(unittest.TestCase):
                     url="http://127.0.0.1:9/v1/chat/completions",
                     model_id="fake", streaming=True))
                 base = f"http://127.0.0.1:{server.server_address[1]}"
-                data = json.loads(urllib.request.urlopen(
-                    f"{base}/api/diagnostics", timeout=10).read())
+                with urllib.request.urlopen(
+                        f"{base}/api/diagnostics", timeout=10) as r:
+                    data = json.loads(r.read())
                 from localcodeagent.version import version as _ver
                 self.assertEqual(data["version"], _ver())
                 self.assertEqual(data["models"][0]["id"], "fake")

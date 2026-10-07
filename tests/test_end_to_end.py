@@ -1081,12 +1081,14 @@ class AutonomyApiTests(unittest.TestCase):
                     base + path, data=json.dumps(body).encode(),
                     headers={"Content-Type": "application/json"},
                     method="POST")
-                return json.loads(urllib.request.urlopen(req, timeout=10).read())
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return json.loads(r.read())
 
             # Signals vocabulary is exposed so the UI can build the event
             # picker without hardcoding.
-            data = json.loads(urllib.request.urlopen(
-                f"{base}/api/triggers", timeout=10).read())
+            with urllib.request.urlopen(
+                    f"{base}/api/triggers", timeout=10) as r:
+                data = json.loads(r.read())
             self.assertIn("file_changed", data["signals"])
             self.assertIn("ci_failed", data["signals"])
 
@@ -1099,15 +1101,17 @@ class AutonomyApiTests(unittest.TestCase):
 
             out = post(f"/api/triggers/{tid}/disable", {})
             self.assertTrue(out["ok"])
-            trig = next(t for t in json.loads(urllib.request.urlopen(
-                f"{base}/api/triggers", timeout=10).read())["triggers"]
-                        if t["id"] == tid)
+            with urllib.request.urlopen(
+                    f"{base}/api/triggers", timeout=10) as r:
+                triggers = json.loads(r.read())["triggers"]
+            trig = next(t for t in triggers if t["id"] == tid)
             self.assertFalse(trig["enabled"])
 
             out = post(f"/api/triggers/{tid}/delete", {})
             self.assertTrue(out["ok"])
-            remaining = json.loads(urllib.request.urlopen(
-                f"{base}/api/triggers", timeout=10).read())["triggers"]
+            with urllib.request.urlopen(
+                    f"{base}/api/triggers", timeout=10) as r:
+                remaining = json.loads(r.read())["triggers"]
             self.assertFalse(any(t["id"] == tid for t in remaining))
 
     def test_schedule_create_validates_kind(self):
@@ -1141,7 +1145,10 @@ class AutonomyApiTests(unittest.TestCase):
                 urllib.request.urlopen(req, timeout=10)
                 self.fail("unknown kind accepted")
             except urllib.error.HTTPError as e:
-                self.assertEqual(e.code, 400)
+                try:
+                    self.assertEqual(e.code, 400)
+                finally:
+                    e.close()
 
     def test_cancel_parked_task_closes_session_and_clears_approval(self):
         """Regression: /api/jobs/cancel on a waiting_approval task left the
@@ -1183,7 +1190,8 @@ class AutonomyApiTests(unittest.TestCase):
                 f"{base}/api/jobs/cancel",
                 data=json.dumps({"job_id": f"task-{task.id}"}).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")
-            out = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            with urllib.request.urlopen(req, timeout=10) as r:
+                out = json.loads(r.read())
             self.assertTrue(out["ok"], out)
 
             self.assertNotIn(task.id, state.agent._sessions)

@@ -138,11 +138,14 @@ class GitHubCodingClient:
                 return data, dict(handle.headers.items())
         except HTTPError as exc:
             try:
-                data = json.loads(exc.read().decode("utf-8", errors="replace"))
-                detail = str(data.get("message") or exc.reason)
-            except Exception:
-                detail = str(exc.reason)
-            raise RuntimeError(f"GitHub API {exc.code}: {detail}") from exc
+                try:
+                    data = json.loads(exc.read().decode("utf-8", errors="replace"))
+                    detail = str(data.get("message") or exc.reason)
+                except Exception:
+                    detail = str(exc.reason)
+                raise RuntimeError(f"GitHub API {exc.code}: {detail}") from exc
+            finally:
+                exc.close()
         except (URLError, TimeoutError, OSError) as exc:
             raise RuntimeError(f"GitHub API unavailable: {exc}") from exc
 

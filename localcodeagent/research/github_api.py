@@ -103,16 +103,19 @@ class GitHubApiClient:
                     rate_resource=str(headers.get("X-RateLimit-Resource") or ""),
                 )
         except HTTPError as exc:
-            remaining = self._int_header(exc.headers, "X-RateLimit-Remaining")
-            reset = self._int_header(exc.headers, "X-RateLimit-Reset")
             try:
-                payload = json.loads(exc.read().decode("utf-8", errors="replace"))
-                detail = str(payload.get("message") or exc.reason)
-            except Exception:
-                detail = str(exc.reason)
-            if exc.code in {403, 429} and remaining == 0:
-                detail = f"GitHub API rate limit exhausted; reset={reset or 'unknown'}"
-            raise GitHubApiError(detail, status=exc.code, rate_remaining=remaining, rate_reset=reset) from exc
+                remaining = self._int_header(exc.headers, "X-RateLimit-Remaining")
+                reset = self._int_header(exc.headers, "X-RateLimit-Reset")
+                try:
+                    payload = json.loads(exc.read().decode("utf-8", errors="replace"))
+                    detail = str(payload.get("message") or exc.reason)
+                except Exception:
+                    detail = str(exc.reason)
+                if exc.code in {403, 429} and remaining == 0:
+                    detail = f"GitHub API rate limit exhausted; reset={reset or 'unknown'}"
+                raise GitHubApiError(detail, status=exc.code, rate_remaining=remaining, rate_reset=reset) from exc
+            finally:
+                exc.close()
         except (URLError, TimeoutError, OSError) as exc:
             self._down_until = time.monotonic() + 120.0
             raise GitHubApiError(f"GitHub API unavailable: {exc}") from exc

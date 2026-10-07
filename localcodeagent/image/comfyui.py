@@ -53,8 +53,11 @@ class ComfyUIBackend(ImageBackend):
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read()
                 return json.loads(raw.decode("utf-8")) if raw else {}
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as exc:
+            try:
+                raise
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
             raise _conn_error(exc, self.endpoint + path, method=method) from exc
 
@@ -105,9 +108,12 @@ class ComfyUIBackend(ImageBackend):
                     return result
                 last=RuntimeError(f"Unexpected ComfyUI upload response: {result}")
             except urllib.error.HTTPError as exc:
-                last=exc
-                if exc.code not in {404,405}:
-                    raise
+                try:
+                    last=exc
+                    if exc.code not in {404,405}:
+                        raise
+                finally:
+                    exc.close()
             except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
                 raise _conn_error(exc, self.endpoint + endpoint_path, method="POST") from exc
         raise RuntimeError(f"ComfyUI image upload failed: {last}")
@@ -160,8 +166,11 @@ class ComfyUIBackend(ImageBackend):
         try:
             with urllib.request.urlopen(req, timeout=max(self.timeout, 30.0)) as resp:
                 data = resp.read()
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as exc:
+            try:
+                raise
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, http.client.HTTPException, TimeoutError) as exc:
             raise _conn_error(exc, self.endpoint + "/view") from exc
         destination.parent.mkdir(parents=True, exist_ok=True)

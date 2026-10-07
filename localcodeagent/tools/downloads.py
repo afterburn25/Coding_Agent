@@ -338,12 +338,15 @@ class ToolDownloadManager:
         try:
             resp = urllib.request.urlopen(req, timeout=60)
         except urllib.error.HTTPError as exc:
-            # 416 = range unsatisfiable — a stale .part bigger than the real
-            # resource. Drop it and restart clean rather than failing forever.
-            if exc.code == 416 and have:
-                archive.unlink(missing_ok=True)
-                return self._download(job_id, url, archive, expected, flag)
-            raise
+            try:
+                # 416 = range unsatisfiable — a stale .part bigger than the real
+                # resource. Drop it and restart clean rather than failing forever.
+                if exc.code == 416 and have:
+                    archive.unlink(missing_ok=True)
+                    return self._download(job_id, url, archive, expected, flag)
+                raise
+            finally:
+                exc.close()
         with resp:
             resumed = have > 0 and resp.status == 206
             done = have if resumed else 0

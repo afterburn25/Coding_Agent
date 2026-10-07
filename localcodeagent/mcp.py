@@ -377,7 +377,10 @@ class MCPHTTPClient:
                     return None
                 body = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
-            raise MCPError(f"MCP HTTP {exc.code}: {exc.read()[:300]!r}") from exc
+            try:
+                raise MCPError(f"MCP HTTP {exc.code}: {exc.read()[:300]!r}") from exc
+            finally:
+                exc.close()
         except OSError as exc:
             from .netdiag import record_failure
             diag = _conn_diag(exc, self.config)

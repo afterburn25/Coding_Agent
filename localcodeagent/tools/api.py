@@ -58,12 +58,15 @@ def register_api_tools(registry: ToolRegistry, *, vault: SecretVault | None = No
                     "truncated": len(raw) > MAX_BODY,
                 }
         except urllib.error.HTTPError as exc:
-            payload = {
-                "status": exc.code,
-                "content_type": "",
-                "body": exc.read(MAX_BODY).decode("utf-8", errors="replace"),
-                "truncated": False,
-            }
+            try:
+                payload = {
+                    "status": exc.code,
+                    "content_type": "",
+                    "body": exc.read(MAX_BODY).decode("utf-8", errors="replace"),
+                    "truncated": False,
+                }
+            finally:
+                exc.close()
         except urllib.error.URLError as exc:
             return json.dumps({"error": f"request failed: {exc.reason}"})
         payload["elapsed_seconds"] = round(time.time() - started, 3)

@@ -591,12 +591,15 @@ class RuntimeManager:
                 body = resp.read().decode("utf-8", errors="replace")
                 return resp.status == 200, self._friendly_health_detail(body)
         except urllib.error.HTTPError as exc:
-            # llama.cpp intentionally returns 503 while a model is loading.
             try:
-                body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                body = str(exc)
-            return False, self._friendly_health_detail(body)
+                # llama.cpp intentionally returns 503 while a model is loading.
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    body = str(exc)
+                return False, self._friendly_health_detail(body)
+            finally:
+                exc.close()
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return False, str(exc)
 

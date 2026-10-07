@@ -144,7 +144,10 @@ class ReliabilityHttpTests(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=15) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}")
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            finally:
+                e.close()
 
     def test_record_and_score_over_http(self):
         for _ in range(5):

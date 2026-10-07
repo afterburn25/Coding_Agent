@@ -839,6 +839,8 @@ def _req(base, method, path, body=None):
             return e.code, json.loads(e.read())
         except Exception:
             return e.code, {}
+        finally:
+            e.close()
 
 
 class TestProfileRoutes(unittest.TestCase):

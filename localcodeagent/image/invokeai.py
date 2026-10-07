@@ -109,8 +109,11 @@ class InvokeAIBackend(ImageBackend):
                     else timeout) as resp:
                 raw = resp.read()
                 return json.loads(raw.decode("utf-8")) if raw else {}
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as exc:
+            try:
+                raise
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, http.client.HTTPException,
                 TimeoutError) as exc:
             raise _conn_error(exc, self.endpoint + path, method=method) from exc
@@ -136,8 +139,11 @@ class InvokeAIBackend(ImageBackend):
                 info = self._json(probe, timeout=min(self.timeout, 1.0))
                 version = info.get("version") or info.get("app_version") or ""
                 return True, f"InvokeAI {version}".strip()
-            except urllib.error.HTTPError:
-                continue  # old version without this route — try the next
+            except urllib.error.HTTPError as exc:
+                try:
+                    continue  # old version without this route — try the next
+                finally:
+                    exc.close()
             except BackendConnectionError as exc:
                 return False, str(exc)
             except Exception as exc:
@@ -173,9 +179,12 @@ class InvokeAIBackend(ImageBackend):
                 data = self._json(base + query)
                 break
             except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    continue
-                return []
+                try:
+                    if exc.code == 404:
+                        continue
+                    return []
+                finally:
+                    exc.close()
             except Exception:
                 return []
         if data is None:
@@ -200,9 +209,12 @@ class InvokeAIBackend(ImageBackend):
                 return self._json(f"{base}?{query}", method="POST",
                                   payload={})
             except urllib.error.HTTPError as exc:
-                if exc.code == 404 and base.startswith("/api/v2"):
-                    continue
-                raise
+                try:
+                    if exc.code == 404 and base.startswith("/api/v2"):
+                        continue
+                    raise
+                finally:
+                    exc.close()
         raise BackendConnectionError(f"{self.endpoint}: no model install endpoint")
 
     def model_install_jobs(self) -> list[dict[str, Any]]:
@@ -211,9 +223,12 @@ class InvokeAIBackend(ImageBackend):
                 data = self._json(base)
                 return data if isinstance(data, list) else []
             except urllib.error.HTTPError as exc:
-                if exc.code == 404 and base.startswith("/api/v2"):
-                    continue
-                return []
+                try:
+                    if exc.code == 404 and base.startswith("/api/v2"):
+                        continue
+                    return []
+                finally:
+                    exc.close()
             except Exception:
                 return []
         return []
@@ -223,11 +238,14 @@ class InvokeAIBackend(ImageBackend):
             try:
                 return self._json(f"{base}/{job_id}")
             except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    if base.startswith("/api/v2"):
-                        continue
+                try:
+                    if exc.code == 404:
+                        if base.startswith("/api/v2"):
+                            continue
+                        return None
                     return None
-                return None
+                finally:
+                    exc.close()
             except Exception:
                 return None
         return None
@@ -238,9 +256,12 @@ class InvokeAIBackend(ImageBackend):
                 self._json(f"{base}/{job_id}", method="DELETE")
                 return True
             except urllib.error.HTTPError as exc:
-                if exc.code == 404 and base.startswith("/api/v2"):
-                    continue
-                return False
+                try:
+                    if exc.code == 404 and base.startswith("/api/v2"):
+                        continue
+                    return False
+                finally:
+                    exc.close()
             except Exception:
                 return False
         return False
@@ -272,8 +293,11 @@ class InvokeAIBackend(ImageBackend):
         try:
             with urllib.request.urlopen(req, timeout=max(self.timeout, 60.0)) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as exc:
+            try:
+                raise
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, http.client.HTTPException,
                 TimeoutError) as exc:
             raise _conn_error(exc, self.endpoint + "/api/v1/images/upload",
@@ -288,8 +312,11 @@ class InvokeAIBackend(ImageBackend):
         try:
             with urllib.request.urlopen(req, timeout=max(self.timeout, 60.0)) as resp:
                 data = resp.read()
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as exc:
+            try:
+                raise
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, http.client.HTTPException,
                 TimeoutError) as exc:
             raise _conn_error(exc, url) from exc
@@ -485,10 +512,13 @@ class InvokeAIBackend(ImageBackend):
             try:
                 items.append(self._item(iid))
             except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    return {"state": "failed",
-                            "error": "InvokeAI queue item not found"}
-                raise
+                try:
+                    if exc.code == 404:
+                        return {"state": "failed",
+                                "error": "InvokeAI queue item not found"}
+                    raise
+                finally:
+                    exc.close()
         statuses = [str(it.get("status") or "").lower() for it in items]
         if any(s == "canceled" for s in statuses):
             return {"state": "cancelled", "progress": 0.0,
@@ -540,10 +570,13 @@ class InvokeAIBackend(ImageBackend):
                     f"/api/v1/queue/{QUEUE}/i/{urllib.parse.quote(iid)}/cancel",
                     method="PUT", payload={})
             except urllib.error.HTTPError as exc:
-                if exc.code in {404, 405, 409}:
-                    pending = True
-                    continue
-                raise
+                try:
+                    if exc.code in {404, 405, 409}:
+                        pending = True
+                        continue
+                    raise
+                finally:
+                    exc.close()
         if pending:
             # Items already in-flight can't be item-cancelled on some
             # versions — clear pending + cancel the batch as a fallback.

@@ -162,55 +162,58 @@ class OpenAICompatibleProvider:
                     raw = json.loads(resp.read().decode("utf-8"))
                 break
             except urllib.error.HTTPError as exc:
-                server_message, raw_body = _http_error_detail(exc)
-                # A server that predates tool_choice="required" rejects the
-                # whole request — degrade to auto once rather than failing
-                # the turn over a hint.
-                if (exc.code == 400 and not choice_degraded
-                        and payload.get("tool_choice") == "required"):
-                    choice_degraded = True
-                    payload["tool_choice"] = "auto"
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
-                    continue
-                # Self-repair: the server tells us exactly how oversized the
-                # request was — shrink the prompt to fit and retry instead
-                # of failing the task.
-                if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
-                    repaired += 1
-                    nums = _OVERFLOW_NUMBERS_RE.search(server_message)
-                    overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
-                    payload["messages"] = _shrink_messages_for_context(messages, overage)
-                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
-                    messages = payload["messages"]
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
-                    continue
-                if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
-                        and not tools_dropped and payload.get("tools")):
-                    # Last resort: system prompt + tool schemas alone can
-                    # exceed the window, leaving message shrinking unable to
-                    # converge. Drop the tools so the turn degrades to a plain
-                    # answer instead of a hard failure.
-                    tools_dropped = True
-                    payload.pop("tools", None)
-                    payload.pop("tool_choice", None)
-                    payload["messages"] = _shrink_messages_for_context(messages, 2048)
-                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
-                    messages = payload["messages"]
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
-                    continue
-                raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+                try:
+                    server_message, raw_body = _http_error_detail(exc)
+                    # A server that predates tool_choice="required" rejects the
+                    # whole request — degrade to auto once rather than failing
+                    # the turn over a hint.
+                    if (exc.code == 400 and not choice_degraded
+                            and payload.get("tool_choice") == "required"):
+                        choice_degraded = True
+                        payload["tool_choice"] = "auto"
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                        continue
+                    # Self-repair: the server tells us exactly how oversized the
+                    # request was — shrink the prompt to fit and retry instead
+                    # of failing the task.
+                    if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
+                        repaired += 1
+                        nums = _OVERFLOW_NUMBERS_RE.search(server_message)
+                        overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
+                        payload["messages"] = _shrink_messages_for_context(messages, overage)
+                        payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                        messages = payload["messages"]
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                        continue
+                    if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
+                            and not tools_dropped and payload.get("tools")):
+                        # Last resort: system prompt + tool schemas alone can
+                        # exceed the window, leaving message shrinking unable to
+                        # converge. Drop the tools so the turn degrades to a plain
+                        # answer instead of a hard failure.
+                        tools_dropped = True
+                        payload.pop("tools", None)
+                        payload.pop("tool_choice", None)
+                        payload["messages"] = _shrink_messages_for_context(messages, 2048)
+                        payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                        messages = payload["messages"]
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                        continue
+                    raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+                finally:
+                    exc.close()
             except urllib.error.URLError as exc:
                 raise BackendConnectionError(
                     exc, subsystem="llm", url=url, model_id=self.profile.id,
@@ -286,54 +289,57 @@ class OpenAICompatibleProvider:
                 resp = urllib.request.urlopen(req, timeout=self.timeout)
                 break
             except urllib.error.HTTPError as exc:
-                server_message, raw_body = _http_error_detail(exc)
-                # A server that predates tool_choice="required" rejects the
-                # whole request — degrade to auto once rather than failing
-                # the turn over a hint.
-                if (exc.code == 400 and not choice_degraded
-                        and payload.get("tool_choice") == "required"):
-                    choice_degraded = True
-                    payload["tool_choice"] = "auto"
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
-                                 "Accept": "text/event-stream"})
-                    continue
-                if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
-                    repaired += 1
-                    nums = _OVERFLOW_NUMBERS_RE.search(server_message)
-                    overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
-                    payload["messages"] = _shrink_messages_for_context(messages, overage)
-                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
-                    messages = payload["messages"]
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
-                                 "Accept": "text/event-stream"})
-                    continue
-                if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
-                        and not tools_dropped and payload.get("tools")):
-                    # Last resort: system prompt + tool schemas alone can
-                    # exceed the window; drop tool schemas and retry so the
-                    # turn still answers instead of hard-failing.
-                    tools_dropped = True
-                    payload.pop("tools", None)
-                    payload.pop("tool_choice", None)
-                    payload["messages"] = _shrink_messages_for_context(messages, 2048)
-                    payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
-                    messages = payload["messages"]
-                    data = json.dumps(payload).encode("utf-8")
-                    req = urllib.request.Request(
-                        url, data=data, method="POST",
-                        headers={"Content-Type": "application/json",
-                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
-                                 "Accept": "text/event-stream"})
-                    continue
-                raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+                try:
+                    server_message, raw_body = _http_error_detail(exc)
+                    # A server that predates tool_choice="required" rejects the
+                    # whole request — degrade to auto once rather than failing
+                    # the turn over a hint.
+                    if (exc.code == 400 and not choice_degraded
+                            and payload.get("tool_choice") == "required"):
+                        choice_degraded = True
+                        payload["tool_choice"] = "auto"
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                     "Accept": "text/event-stream"})
+                        continue
+                    if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
+                        repaired += 1
+                        nums = _OVERFLOW_NUMBERS_RE.search(server_message)
+                        overage = max(256, int(nums.group(1)) - int(nums.group(2)) + 512) if nums else 4096
+                        payload["messages"] = _shrink_messages_for_context(messages, overage)
+                        payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                        messages = payload["messages"]
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                     "Accept": "text/event-stream"})
+                        continue
+                    if (exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message)
+                            and not tools_dropped and payload.get("tools")):
+                        # Last resort: system prompt + tool schemas alone can
+                        # exceed the window; drop tool schemas and retry so the
+                        # turn still answers instead of hard-failing.
+                        tools_dropped = True
+                        payload.pop("tools", None)
+                        payload.pop("tool_choice", None)
+                        payload["messages"] = _shrink_messages_for_context(messages, 2048)
+                        payload["max_tokens"] = min(int(payload["max_tokens"]), 2048)
+                        messages = payload["messages"]
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(
+                            url, data=data, method="POST",
+                            headers={"Content-Type": "application/json",
+                                     "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                     "Accept": "text/event-stream"})
+                        continue
+                    raise ModelHTTPError(url, exc.code, server_message, raw_body) from exc
+                finally:
+                    exc.close()
             except urllib.error.URLError as exc:
                 raise BackendConnectionError(
                     exc, subsystem="llm", url=url, model_id=self.profile.id,

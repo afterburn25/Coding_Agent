@@ -189,7 +189,10 @@ class Phase12HttpTests(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=15) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}")
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            finally:
+                e.close()
 
     def test_trends_benchmarks_over_http(self):
         for i in range(8):

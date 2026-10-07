@@ -160,9 +160,12 @@ def register_project_tools(registry: ToolRegistry, manager) -> None:
                     if resp.status == expect:
                         return json.dumps(last, ensure_ascii=False)
             except urllib.error.HTTPError as exc:
-                last = {"ok": False, "status": exc.code,
-                        "expected": expect, "url": url,
-                        "elapsed_ms": int((time.time() - started) * 1000)}
+                try:
+                    last = {"ok": False, "status": exc.code,
+                            "expected": expect, "url": url,
+                            "elapsed_ms": int((time.time() - started) * 1000)}
+                finally:
+                    exc.close()
             except Exception as exc:
                 last = {"ok": False, "error": f"{type(exc).__name__}: {exc}",
                         "url": url}

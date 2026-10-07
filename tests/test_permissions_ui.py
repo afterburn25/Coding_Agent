@@ -284,7 +284,10 @@ class PermissionApiTests(unittest.TestCase):
             self._get("/api/processes/log?id=nope")
             self.fail("expected 404")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 404)
+            try:
+                self.assertEqual(e.code, 404)
+            finally:
+                e.close()
 
     def test_tools_payload_includes_partials_and_enriched_fields(self):
         data = self._get("/api/tools")
@@ -376,8 +379,11 @@ class PermissionApiTests(unittest.TestCase):
             self._post("/api/runtime/stop", {"model_id": "fake", "approve": True})
             self.fail("expected 400")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 400)
-            self.assertIn("External", e.read().decode())
+            try:
+                self.assertEqual(e.code, 400)
+                self.assertIn("External", e.read().decode())
+            finally:
+                e.close()
 
     def test_resources_payload_includes_process_list(self):
         data = self._get("/api/resources")

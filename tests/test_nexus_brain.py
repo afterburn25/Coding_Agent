@@ -435,8 +435,11 @@ class NexusBrainHttpLifecycleTests(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=15) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
-            raw = e.read() or b"{}"
-            return e.code, json.loads(raw)
+            try:
+                raw = e.read() or b"{}"
+                return e.code, json.loads(raw)
+            finally:
+                e.close()
 
     def test_conversation_learning_and_recall_over_http(self):
         """Real /api/chat turns feed learn_from_user and persist — training
