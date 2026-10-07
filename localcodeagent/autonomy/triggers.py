@@ -163,6 +163,18 @@ class TriggerEngine:
             signal = "image_generation_completed"
             if sub in {"failed", "error"}:
                 signal = "image_generation_completed"
+        elif etype == "ci":
+            # GitHub workflow-run observations — the closing edge of the
+            # git→push→PR→CI loop. Published by the github tools when a
+            # run reaches a terminal conclusion.
+            conclusion = str(event.get("conclusion") or "").lower()
+            if conclusion in {"success"}:
+                signal = "ci_completed"
+            elif conclusion in {"failure", "timed_out", "cancelled",
+                                "action_required"}:
+                signal = "ci_failed"
+        elif etype == "pull_request":
+            signal = "pull_request_updated"
         elif etype == "job" and sub == "failed":
             signal = "custom"
         if signal:

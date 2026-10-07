@@ -1340,6 +1340,32 @@ class TriggerTests(unittest.TestCase):
             self.assertEqual(len(fired), 1)
             sup.stop()
 
+    def test_bus_ci_and_pr_events_map_to_signals(self):
+        """GitHub tool observations reach triggers — the closing edge of
+        the git→push→PR→CI loop."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            fired = []
+            sup.triggers.on_fire = lambda t, p: fired.append(t["event"])
+            sup.triggers.add("ci fail", "ci_failed")
+            sup.triggers.add("ci ok", "ci_completed")
+            sup.triggers.add("pr", "pull_request_updated")
+            sup.triggers.handle_bus_event(
+                {"type": "ci", "conclusion": "failure",
+                 "repository": "a/b", "run_id": 1})
+            sup.triggers.handle_bus_event(
+                {"type": "ci", "conclusion": "success",
+                 "repository": "a/b", "run_id": 2})
+            sup.triggers.handle_bus_event(
+                {"type": "ci", "conclusion": "skipped",
+                 "repository": "a/b", "run_id": 3})
+            sup.triggers.handle_bus_event(
+                {"type": "pull_request", "number": 7, "state": "open"})
+            self.assertEqual(fired,
+                             ["ci_failed", "ci_completed",
+                              "pull_request_updated"])
+            sup.stop()
+
     def test_trigger_fire_materializes_mission(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)

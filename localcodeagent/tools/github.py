@@ -164,7 +164,7 @@ class GitHubCodingClient:
 def register_github_tools(registry: ToolRegistry, workspace: Path,
                           config: AgentConfig, *, vault=None,
                           workspaces=None, client=None,
-                          account=None, journal=None) -> None:
+                          account=None, journal=None, events=None) -> None:
     # `client`: shared GitHubCodingClient — the account service refreshes
     # its token on connect/disconnect, so every surface (tools, connector,
     # API) converges without a restart. Falls back to a private instance
@@ -193,6 +193,60 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
                 mission_id=str(registry.context.get("mission_id", "")
                                or ""),
                 **fields)
+        except Exception:
+            pass
+
+    # CI/PR observations flow onto the event bus so autonomy triggers
+    # (ci_failed / ci_completed / pull_request_updated) can react — that
+    # is what closes the git→push→PR→CI loop without the model polling
+    # in a chat turn. Dedupe: a run's conclusion is terminal, so each
+    # (run, conclusion) fires at most once per process.
+    _seen_ci: set[tuple] = set()
+    _seen_pr: set[tuple] = set()
+
+    def _emit(event: dict) -> None:
+        if events is None:
+            return
+        try:
+            events.publish(str(event.get("type") or "github"), event)
+        except Exception:
+            pass
+
+    def _emit_ci(repo: str, run: dict) -> None:
+        try:
+            if str(run.get("status") or "") != "completed":
+                return
+            conclusion = str(run.get("conclusion") or "")
+            if not conclusion:
+                return
+            key = (repo, int(run.get("id") or 0), conclusion)
+            if key in _seen_ci:
+                return
+            _seen_ci.add(key)
+            if len(_seen_ci) > 500:
+                _seen_ci.clear()
+            _emit({"type": "ci", "repository": repo,
+                   "run_id": key[1], "conclusion": conclusion,
+                   "name": str(run.get("name") or ""),
+                   "sha": str(run.get("head_sha") or ""),
+                   "url": str(run.get("html_url") or "")})
+        except Exception:
+            pass
+
+    def _emit_pr(repo: str, pr: dict) -> None:
+        try:
+            key = (repo, int(pr.get("number") or 0),
+                   str(pr.get("state") or ""))
+            if key in _seen_pr:
+                return
+            _seen_pr.add(key)
+            if len(_seen_pr) > 500:
+                _seen_pr.clear()
+            _emit({"type": "pull_request", "repository": repo,
+                   "number": key[1], "state": key[2],
+                   "merged": bool(pr.get("merged_at") or pr.get("merged")),
+                   "title": str(pr.get("title") or ""),
+                   "url": str(pr.get("html_url") or "")})
         except Exception:
             pass
 
@@ -357,6 +411,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             },
             require_auth=True,
         )
+        _emit_pr(repo, data or {})
         return json.dumps({
             "repository": repo,
             "number": data.get("number"),
@@ -381,6 +436,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         ) or {}
         rows = []
         for run in list(data.get("workflow_runs") or [])[:limit]:
+            _emit_ci(repo, run)
             rows.append({
                 "id": run.get("id"),
                 "name": run.get("name"),
@@ -537,6 +593,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         _ensure_token()
         oq, nq = quote(owner, safe=''), quote(name, safe='')
         pr = client.request("GET", f"/repos/{oq}/{nq}/pulls/{num}") or {}
+        _emit_pr(repo, pr)
         files = client.request(
             "GET", f"/repos/{oq}/{nq}/pulls/{num}/files",
             params={"per_page": 50}) or []
@@ -578,6 +635,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         oq, nq = quote(owner, safe=''), quote(name, safe='')
         run = client.request(
             "GET", f"/repos/{oq}/{nq}/actions/runs/{run_id}") or {}
+        _emit_ci(repo, run)
         jobs = client.request(
             "GET", f"/repos/{oq}/{nq}/actions/runs/{run_id}/jobs",
             params={"per_page": 30}) or {}

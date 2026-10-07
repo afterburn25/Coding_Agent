@@ -691,7 +691,8 @@ class AppState:
                 workspaces=self.workspaces,
                 client=self.github_client,
                 account=self.github_account,
-                journal=self.changes)
+                journal=self.changes,
+                events=self.events)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
