@@ -1,8 +1,28 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.0 is the current release — **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.1 is the current release — **Action-turn reliability patch** on top of 0.28.0: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.28.0 — performance audit pass 2
+## Active version: 0.28.1 — action-turn reliability patch
+
+- **Adaptive schema budgeting** — advertised tool schemas now budget to
+  ~45 % of the model's prompt window and collapse to a minimal
+  action-capable set (`find_tools` preserved) when they wouldn't fit.
+  Root cause of the live action-stall: the ~46 KB pruned schema set
+  overflowed the 8B model's 12288 ctx → provider overflow recovery
+  dropped tools → the model could not emit a tool call.
+- **Action nudge + required tool choice** — imperative action asks that
+  stall into prose get one re-prompt; the retry sends
+  `tool_choice="required"` with a one-shot `auto` fallback. Verified
+  live on the installed 8B build: prompt → `write_file` → approval
+  gate → file on disk.
+- **Verification-denial fix** — a skipped verification command no
+  longer counts as a failure that re-pends the same approval forever.
+- **Windows 8.3 containment fixes** — workspace roots resolve before
+  `is_relative_to` checks in document/media/data/knowledge/codeintel
+  and plugin-install paths (fixes the scheduled soak on `RUNNER~1`
+  CI paths).
+
+### 0.28.0 — performance audit pass 2
 
 - **Startup overlap** — backend spawn runs in parallel with the splash
   WebView2 boot (was a ~2.4 s serial stall); `nexus-core-ready` posts

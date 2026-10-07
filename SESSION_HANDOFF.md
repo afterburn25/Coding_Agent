@@ -2,6 +2,37 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 — v0.28.1: action-turn reliability patch
+
+Post-release dogfood exposed and fixed a real broken path: action
+requests stalled into prose narration with zero tool calls.
+
+- **Root cause** (`ec053642`): the pruned ~46 KB tool-schema set ≈ 14 k
+  tokens overflowed the 8B model's 12288-token window; llama.cpp
+  rejected the request and the provider's overflow recovery dropped
+  tools entirely → the model physically could not emit a tool call.
+  `_session_schemas` now budgets the advertised list at ~45 % of the
+  prompt window and collapses to a minimal write/read/patch/run/search
+  set (with `find_tools`) when it would not fit; `_trim_context`
+  subtracts the serialized schema size from the message budget.
+- **Action nudge** (`5e242840`, `70ddc3a4`): imperative action asks that
+  produce zero tool calls get one re-prompt; the retry sends
+  `tool_choice="required"` (llama.cpp honors it — verified directly),
+  degrading to `auto` once on a 400 from older servers. Questions and
+  fabricated-claim replies are never nudged.
+- **Verification-denial loop** (`f4b258eb`): denying a verification
+  command recorded PERMISSION_DENIED → auto-repair counted it as a
+  failure → same approval re-pended forever. Skipped checks excluded
+  from the failure predicate.
+- **Windows 8.3 paths** (`de981db5`): containment checks compared a
+  resolved child against an unresolved workspace root — broke every
+  document/media/data/knowledge/codeintel file access on `RUNNER~1`
+  paths (the scheduled soak's failure). Roots resolve before
+  comparison now; affected tests normalize tempdir roots.
+- Live dogfood on `D:\Nexus_Core`: `create a file named
+  nexus_probe_v28.txt` → action_nudge → `write_file` call → approval
+  gate → file on disk → verification gate → denial → clean finalize.
+
 ## 2026-10-07 — v0.28.0: performance audit pass 2 (measure → fix → verify)
 
 A full audit-and-fix sweep over startup, hot paths, residency, and
