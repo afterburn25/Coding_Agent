@@ -120,6 +120,10 @@ class Soak:
         if code and (st.get("stopped") or st.get("paused")):
             _api(self.port, "POST", "/api/autonomy/start", {})
             self._event("autonomy_started")
+        # A restart drops every managed runtime — re-start the utility
+        # model or missions sit 'executing' with no model behind them.
+        _api(self.port, "POST", "/api/runtime/start",
+             {"model_id": MODEL_ID, "approve": True}, timeout=30)
 
     # -- soak loop ----------------------------------------------------------
 
