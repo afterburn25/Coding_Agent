@@ -33,6 +33,21 @@ requests stalled into prose narration with zero tool calls.
   nexus_probe_v28.txt` → action_nudge → `write_file` call → approval
   gate → file on disk → verification gate → denial → clean finalize.
 
+Post-release soak-hardening commits on `main` (ride the next patch):
+
+- **Concurrent env probes** (`dde03ee7`): `EnvironmentStore.detect`
+  ran up to 6 serial subprocess probes at 5 s timeout each (~30 s
+  worst case) and blew the soak selftest's 15 s HTTP client timeout on
+  loaded Windows runners. Probes now run on a 4-worker pool.
+- **Approval-create ordering race** (`bc7db5a1`): worker threads
+  transitioned the mission to `waiting_approval` before writing the
+  approval row; a concurrent `_reconcile_approvals` in that window saw
+  a missing row and replanned the gate away (flaky `blocked` instead
+  of `waiting_approval`). Row now writes before the transition,
+  matching the recovery path's existing order.
+- Dispatched soak run `37630507840` green; push CI green on
+  `bc7db5a1`. Both fixes are deployed to `D:\Nexus_Core`.
+
 ## 2026-10-07 — v0.28.0: performance audit pass 2 (measure → fix → verify)
 
 A full audit-and-fix sweep over startup, hot paths, residency, and
