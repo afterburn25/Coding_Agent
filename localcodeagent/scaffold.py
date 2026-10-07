@@ -388,6 +388,369 @@ int main(int argc, char** argv) {
 
 
 # ---------------------------------------------------------------------------
+# flask service
+# ---------------------------------------------------------------------------
+
+_tpl("flask_service", "Flask service",
+     "Minimal Flask app with /health and a unittest suite.",
+     {
+         "app/__init__.py": "",
+         "app/main.py": """from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.get("/health")
+def health():
+    return jsonify(ok=True, service="{{pkg}}")
+
+
+@app.get("/")
+def root():
+    return jsonify(message="welcome to {{name}}")
+""",
+         "tests/__init__.py": "",
+         "tests/test_health.py": """import unittest
+
+from app.main import app
+
+
+class HealthTests(unittest.TestCase):
+    def test_health(self):
+        client = app.test_client()
+        r = client.get("/health")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json()["ok"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+         "requirements.txt": "flask>=3.0\n",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\npip install -r requirements.txt\npython -m unittest discover -s tests\nflask --app app.main run\n```\n",
+     },
+     commands={"test": "python -m unittest discover -s tests",
+               "dev": "flask --app app.main run --port 8000",
+               "deps": "pip install -r requirements.txt"},
+     needs=("python",))
+
+
+# ---------------------------------------------------------------------------
+# django app
+# ---------------------------------------------------------------------------
+
+_tpl("django_app", "Django app",
+     "Django project with one app, a view, and the built-in test runner.",
+     {
+         "manage.py": """#!/usr/bin/env python
+import os
+import sys
+
+if __name__ == "__main__":
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "{{pkg}}.settings")
+    from django.core.management import execute_from_command_line
+    execute_from_command_line(sys.argv)
+""",
+         "{{pkg}}/__init__.py": "",
+         "{{pkg}}/settings.py": """from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+SECRET_KEY = "dev-only-scaffold-key"
+DEBUG = True
+ALLOWED_HOSTS = ["*"]
+INSTALLED_APPS = [
+    "django.contrib.contenttypes",
+    "django.contrib.staticfiles",
+    "web",
+]
+ROOT_URLCONF = "{{pkg}}.urls"
+STATIC_URL = "static/"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3",
+                         "NAME": BASE_DIR / "db.sqlite3"}}
+USE_TZ = True
+""",
+         "{{pkg}}/urls.py": """from django.urls import path
+
+from web.views import health, index
+
+urlpatterns = [
+    path("", index),
+    path("health", health),
+]
+""",
+         "web/__init__.py": "",
+         "web/views.py": """from django.http import JsonResponse
+
+
+def index(request):
+    return JsonResponse({"message": "welcome to {{name}}"})
+
+
+def health(request):
+    return JsonResponse({"ok": True, "service": "{{pkg}}"})
+""",
+         "web/tests.py": """from django.test import Client, TestCase
+
+
+class HealthTests(TestCase):
+    def test_health(self):
+        r = Client().get("/health")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+""",
+         "requirements.txt": "django>=4.2\n",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\npip install -r requirements.txt\npython manage.py test\npython manage.py runserver\n```\n",
+     },
+     commands={"test": "python manage.py test",
+               "dev": "python manage.py runserver",
+               "deps": "pip install -r requirements.txt"},
+     needs=("python",))
+
+
+# ---------------------------------------------------------------------------
+# vue (vite)
+# ---------------------------------------------------------------------------
+
+_tpl("vue_vite", "Vue (Vite)",
+     "Vue 3 app with a Vite build — npm install then npm run dev/build.",
+     {
+         "package.json": """{
+  "name": "{{pkg}}",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.4.0"
+  }
+}
+""",
+         "vite.config.js": """import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+export default defineConfig({ plugins: [vue()] })
+""",
+         "index.html": """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{name}}</title>
+  </head>
+  <body><div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+""",
+         "src/main.js": """import { createApp } from 'vue'
+import App from './App.vue'
+import './styles.css'
+
+createApp(App).mount('#app')
+""",
+         "src/App.vue": """<script setup>
+import { ref } from 'vue'
+const n = ref(0)
+</script>
+
+<template>
+  <main class="page">
+    <h1>{{name}}</h1>
+    <p>Vue scaffolded by Nexus.</p>
+    <button @click="n++">count: {{ n }}</button>
+  </main>
+</template>
+""",
+         "src/styles.css": """body { margin: 0; font-family: system-ui, sans-serif; }
+.page { max-width: 720px; margin: 4rem auto; padding: 0 1.5rem; }
+button { padding: .6rem 1rem; border-radius: 8px; }
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\nnpm install\nnpm run dev\nnpm run build\n```\n",
+     },
+     commands={"deps": "npm install", "dev": "npm run dev",
+               "build": "npm run build"},
+     needs=("node", "npm"))
+
+
+# ---------------------------------------------------------------------------
+# .NET console + web api
+# ---------------------------------------------------------------------------
+
+_tpl("dotnet_console", ".NET console",
+     "C# console project — builds and runs with the dotnet SDK.",
+     {
+         "{{pkg}}.csproj": """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+""",
+         "Program.cs": """Console.WriteLine("hello from {{name}}");
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\ndotnet build\ndotnet run\n```\n",
+     },
+     commands={"build": "dotnet build", "run": "dotnet run"},
+     needs=("dotnet",))
+
+_tpl("dotnet_webapi", ".NET minimal API",
+     "ASP.NET Core minimal API with /health — dotnet run to serve.",
+     {
+         "{{pkg}}.csproj": """<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+""",
+         "Program.cs": """var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+
+app.MapGet("/health", () => Results.Json(new { ok = true }));
+app.MapGet("/", () => Results.Json(new { message = "welcome to {{name}}" }));
+
+app.Run();
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\ndotnet build\ndotnet run\n```\n",
+     },
+     commands={"build": "dotnet build", "dev": "dotnet run"},
+     needs=("dotnet",))
+
+
+# ---------------------------------------------------------------------------
+# go cli
+# ---------------------------------------------------------------------------
+
+_tpl("go_cli", "Go CLI",
+     "Single-module Go command with a go test suite — stdlib only.",
+     {
+         "go.mod": "module {{pkg}}\n\ngo 1.21\n",
+         "main.go": """package main
+
+import "fmt"
+
+func greeting() string {
+	return "hello from {{name}}"
+}
+
+func main() {
+	fmt.Println(greeting())
+}
+""",
+         "main_test.go": """package main
+
+import "testing"
+
+func TestGreeting(t *testing.T) {
+	if greeting() == "" {
+		t.Fatal("empty greeting")
+	}
+}
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\ngo test ./...\ngo run .\n```\n",
+     },
+     commands={"test": "go test ./...", "run": "go run .",
+               "build": "go build -o bin/"},
+     needs=("go",))
+
+
+# ---------------------------------------------------------------------------
+# rust cli
+# ---------------------------------------------------------------------------
+
+_tpl("rust_cli", "Rust CLI",
+     "Cargo binary crate with a unit test — cargo build/test.",
+     {
+         "Cargo.toml": """[package]
+name = "{{pkg}}"
+version = "0.1.0"
+edition = "2021"
+""",
+         "src/main.rs": """fn greeting() -> &'static str {
+    "hello from {{name}}"
+}
+
+fn main() {
+    println!("{}", greeting());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greeting_not_empty() {
+        assert!(!greeting().is_empty());
+    }
+}
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\ncargo test\ncargo run\n```\n",
+     },
+     commands={"test": "cargo test", "build": "cargo build",
+               "run": "cargo run"},
+     needs=("cargo",))
+
+
+# ---------------------------------------------------------------------------
+# python library (pip-installable)
+# ---------------------------------------------------------------------------
+
+_tpl("python_lib", "Python library",
+     "Importable package with pyproject metadata and a unittest suite.",
+     {
+         "{{pkg}}/__init__.py": """\"\"\"{{name}} — {{description}}\"\"\"
+
+__version__ = "0.1.0"
+
+
+def about() -> str:
+    return "{{name}} 0.1.0"
+""",
+         "tests/__init__.py": "",
+         "tests/test_pkg.py": """import unittest
+
+import {{pkg}}
+
+
+class PkgTests(unittest.TestCase):
+    def test_about(self):
+        self.assertIn("{{pkg}}", {{pkg}}.about())
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+         "pyproject.toml": """[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{pkg}}"
+version = "0.1.0"
+description = "{{description}}"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["{{pkg}}*"]
+""",
+         "README.md": "# {{name}}\n\n{{description}}\n\n```\npython -m unittest discover -s tests\npip install -e .\n```\n",
+     },
+     commands={"test": "python -m unittest discover -s tests",
+               "deps": "pip install -e ."},
+     needs=("python",))
+
+
+# ---------------------------------------------------------------------------
 # engine
 # ---------------------------------------------------------------------------
 
