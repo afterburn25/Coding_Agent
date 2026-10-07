@@ -367,6 +367,7 @@ class AgentOrchestrator:
         creator_address=None,
         asker_is_creator=None,
         learning=None,
+        action_ledger=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -434,6 +435,10 @@ class AgentOrchestrator:
         self.nexus_brain = nexus_brain
         self.answer_memory = answer_memory
         self.learning = learning
+        # ActionLedger — durable execution evidence behind every
+        # consequential local action; None degrades the lane to
+        # in-memory results only.
+        self.action_ledger = action_ledger
         self.activities = activities
         self.digital_twin = digital_twin
         # May be a graph instance or a zero-arg callable returning one — the
@@ -1562,6 +1567,100 @@ class AgentOrchestrator:
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent="github_status", canonical=canonical)
 
+    # Repo-state questions — "what branches", "what remote", "what repo
+    # is this". Answered from real git output, never the model: "what
+    # branches are in github for your project" once produced a persona
+    # fabrication ("I don't have a public repo") while a real GitHub
+    # remote sat in .git/config.
+    _GIT_STATE_Q_RE = re.compile(
+        r"\bbranch(?:es)?\b|\bremotes?\b|\borigin\b|\bupstream\b|"
+        r"\bworktrees?\b|\brepos(?:itory)?\b|\bfork\b", re.I)
+    _GIT_STATE_VERB_RE = re.compile(
+        r"\b(?:create|delete|push|pull|merge|checkout|switch|commit|"
+        r"rebase|rename|clone|fetch|reset|revert|tag|init)\b", re.I)
+
+    def _git_state_reply(self, user_text: str):
+        """Git repo-state QUESTIONS answered from real `git` output —
+        remotes, branches, current branch. Question phrasings only;
+        any git verb routes to the tools lane instead."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        t = str(user_text or "").strip()
+        low = re.sub(r"\s+", " ", t.lower()).strip("!?., ")
+        if not self._GIT_STATE_Q_RE.search(low):
+            return None
+        if not re.match(
+                r"^(?:what|which|list|show|tell me|where|who|how many|"
+                r"is|are|do|does|did|can|could|name)\b", low):
+            return None
+        if self._GIT_STATE_VERB_RE.search(low):
+            return None
+        # Same boundary as the git tools — a denied filesystem.read
+        # must not be circumvented by the deterministic lane.
+        perm, mode = self.tools.permission_for("git_status")
+        if perm and mode == "deny":
+            return RenderedReply(
+                text=("I can't inspect the repo — filesystem read "
+                      "permission is set to deny in the active "
+                      "profile."),
+                speech_act="answer")
+        from ..tools.git import _run
+        root = self.checkpoints.workspace
+        try:
+            code, _ = _run(root, ["rev-parse", "--git-dir"])
+        except OSError:
+            return RenderedReply(
+                text=("I can't inspect the repo — git isn't installed "
+                      "or isn't on PATH on this machine."),
+                speech_act="answer")
+        if code != 0:
+            canonical = ("This workspace isn't a git repository — "
+                         "there are no branches or remotes to show.")
+            return RenderedReply(text=canonical, speech_act="answer")
+        try:
+            _, remotes = _run(root, ["remote", "-v"])
+            _, current = _run(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+            _, branches = _run(root, ["branch", "-a"])
+        except OSError:
+            return RenderedReply(
+                text="I couldn't read the repo's git state — the git "
+                     "command failed.", speech_act="answer")
+        remote_urls = sorted({
+            m.group(2) for m in re.finditer(
+                r"^(\S+)\s+(\S+)\s+\((fetch|push)\)", remotes,
+                re.M)})
+        branch_list = [b.strip().lstrip("* ").replace("remotes/", "")
+                       for b in branches.splitlines() if b.strip()]
+        parts = []
+        if remote_urls:
+            gh = [u for u in remote_urls if "github" in u.lower()]
+            label = "GitHub remote" if gh else "remote"
+            parts.append(
+                f"This repo tracks {label} "
+                f"{', '.join(remote_urls[:3])}"
+                + ("." if len(remote_urls) <= 3 else " and more."))
+        else:
+            parts.append("This is a local-only repository — no remote "
+                         "(including GitHub) is configured.")
+        if current.strip() and current.strip() != "HEAD":
+            parts.append(f"You're on branch {current.strip()}.")
+        if branch_list:
+            shown = branch_list[:12]
+            parts.append(
+                f"Branches: {', '.join(shown)}"
+                + (f" (+{len(branch_list) - 12} more)"
+                   if len(branch_list) > 12 else "") + ".")
+        canonical = " ".join(parts) or "No git state to report."
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id="capability:git_state",
+            speech_act="answer")
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="git_state", canonical=canonical)
+
     # A bare identifier — "afterburn25", "Coding_Agent", "owner/repo" —
     # nothing else counts as a repo target.
     _GITHUB_TARGET_RE = re.compile(
@@ -1720,6 +1819,113 @@ class AgentOrchestrator:
             canonical=canonical)
         reply.ui = ui
         return reply
+
+    def _local_action_reply(self, user_text: str, task_id: str,
+                            event_callback=None):
+        """Deterministic computer-task lane — 'create a folder
+        D:\\Nexus', 'move a.txt to b/'. Parses bounded phrasings into a
+        plan, then runs the full lifecycle: capability -> permission ->
+        execute -> verify -> evidence -> truthful reply. Returns an
+        AgentResult when the lane claims the turn (including the parked
+        awaiting-approval state), ``None`` to fall through to the model
+        lane. Success language comes only from verified tool output —
+        never from the phrasing of the request."""
+        from ..action_ops import execute_plan, parse_local_action
+        try:
+            plan = parse_local_action(
+                user_text,
+                workspace=self.checkpoints.workspace,
+                extra_roots=self.tools.context.get("extra_roots"))
+        except Exception:
+            return None
+        if plan is None:
+            return None
+        outcome = execute_plan(
+            plan, tools=self.tools, ledger=self.action_ledger,
+            task_id=task_id)
+        if outcome["status"] == "unavailable":
+            # The direct tool isn't wired — the model lane may still
+            # reach the goal through another route (shell, terminal),
+            # and the truth gate guards what it may claim. Recorded in
+            # the ledger either way.
+            return None
+        text = outcome["text"]
+        status = outcome["status"]
+        decision = RoutingDecision(
+            role="utility",
+            model_id="builtin-local",
+            reasons=["local action lane — no model call"],
+            complexity=0,
+        )
+        builtin_event = {
+            "type": "builtin_utility",
+            "model_id": "builtin-local",
+            "role": "utility",
+            "reason": "local action lane",
+        }
+        self._safe_emit(
+            event_callback, {"type": "model", "event": builtin_event})
+        if status == "awaiting_approval":
+            pending = {
+                "kind": "local_action",
+                "name": plan.tool,
+                "arguments": {k: str(v) for k, v in plan.params.items()},
+                "permission": plan.permission,
+                "call_id": "",
+                "detail": plan.action_text,
+                "plan": {
+                    "kind": plan.kind,
+                    "tool": plan.tool,
+                    "permission": plan.permission,
+                    "params": {k: str(v) for k, v in plan.params.items()},
+                    "resolved": dict(plan.resolved),
+                    "outside_root": plan.outside_root,
+                    "action_text": plan.action_text,
+                    "display": plan.display,
+                },
+            }
+            parked = self.tasks.update(
+                task_id, status="waiting_approval",
+                phase="waiting_approval", pending_approval=pending)
+            cb = self._logging_callback(task_id, event_callback)
+            self._safe_emit(cb, {
+                "type": "approval", "approval": pending,
+                "task": parked.as_dict()})
+            return AgentResult(
+                content=text,
+                routing=decision,
+                model_events=[builtin_event],
+                steps=0,
+                task=parked.as_dict(),
+                pending_approval=pending,
+            )
+        done = self.tasks.update(
+            task_id,
+            status="completed"
+            if status in ("verified", "clarify", "denied")
+            else "failed",
+            phase="done",
+            model_id="builtin-local",
+            model_role="utility",
+            summary=text,
+            final_content=text,
+            steps=0,
+            error="" if status in ("verified", "clarify", "denied")
+            else text,
+        )
+        self._safe_emit(
+            event_callback, {"type": "task", "task": done.as_dict()})
+        if self.conversation_memory is not None:
+            self.conversation_memory.record_exchange(user_text, text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(user_text, text)
+        return AgentResult(
+            content=text,
+            routing=decision,
+            model_events=[builtin_event],
+            steps=0,
+            task=done.as_dict(),
+        )
 
     def _builtin_reply(self, user_text: str):
         """The instance-level persona path: SemanticResponse through the
@@ -3317,6 +3523,23 @@ class AgentOrchestrator:
                 source_images=resume_sources or None,
             )
 
+        if pending["kind"] == "local_action":
+            # Deterministic local action parked for permission —
+            # session-less like direct_image: approval runs the same
+            # verified executor, denial records the refusal in the
+            # ledger and reports it honestly.
+            self.tasks.update(
+                task_id,
+                status="running",
+                phase="working",
+                pending_approval=None,
+                recovery_count=task.recovery_count + 1,
+                error="",
+            )
+            cb = self._logging_callback(task_id, event_callback)
+            return self._resume_local_action(
+                task_id, pending, approved=approved, event_callback=cb)
+
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
         session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
@@ -3384,6 +3607,76 @@ class AgentOrchestrator:
             return self.resume(task_id, approved=approved, event_callback=event_callback)
 
         raise ValueError(f"Unknown approval kind {pending['kind']}")
+
+    def _resume_local_action(
+        self,
+        task_id: str,
+        pending: dict[str, Any],
+        *,
+        approved: bool,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
+        """Session-less approval resume for deterministic local
+        actions. Approval runs the same verified executor; denial
+        records the refusal in the ledger and reports it honestly."""
+        from ..action_ops import ActionPlan, execute_plan
+        spec = dict(pending.get("plan") or {})
+        params = dict(
+            spec.get("params") or pending.get("arguments") or {})
+        # Pending payloads are stringified for durability — restore
+        # booleans so truthiness checks see the real value.
+        for k, v in list(params.items()):
+            if isinstance(v, str) and v.lower() in ("true", "false"):
+                params[k] = v.lower() == "true"
+        plan = ActionPlan(
+            kind=str(spec.get("kind") or ""),
+            tool=str(spec.get("tool") or pending.get("name") or ""),
+            permission=str(
+                spec.get("permission") or pending.get("permission") or ""),
+            params=params,
+            resolved=dict(spec.get("resolved") or {}),
+            outside_root=bool(spec.get("outside_root")),
+            action_text=str(
+                spec.get("action_text") or pending.get("detail") or ""),
+            display=str(spec.get("display") or ""))
+        if approved:
+            outcome = execute_plan(
+                plan, tools=self.tools, ledger=self.action_ledger,
+                approved=True, task_id=task_id)
+            text = outcome["text"]
+            failed = outcome["status"] in (
+                "failed", "unavailable", "unverified")
+        else:
+            if self.action_ledger is not None:
+                entry = self.action_ledger.begin(
+                    kind=plan.kind, action=plan.action_text,
+                    capability="filesystem", tool=plan.tool,
+                    params=plan.params, task_id=task_id)
+                self.action_ledger.finish(
+                    entry["id"], status="denied",
+                    permission="user_denied",
+                    failure="user denied the approval request")
+            text = (f"Understood — I did not {plan.action_text}. "
+                    "Nothing was changed.")
+            failed = False
+        done = self.tasks.update(
+            task_id,
+            status="failed" if failed else "completed",
+            phase="done",
+            summary=text,
+            final_content=text,
+            error=text if failed else "")
+        self._safe_emit(
+            event_callback, {"type": "task", "task": done.as_dict()})
+        return AgentResult(
+            content=text,
+            routing=RoutingDecision(
+                role="utility",
+                model_id="builtin-local",
+                reasons=["local action lane — no model call"],
+                complexity=0),
+            steps=0,
+            task=done.as_dict())
 
     def _result(self, session: _AgentSession, content: str | None = None) -> AgentResult:
         task = self.tasks.get(session.task_id)
@@ -4588,6 +4881,24 @@ class AgentOrchestrator:
                     # Never learn a fabricated reply — Answer Memory would
                     # replay the lie verbatim to similar future questions.
                     session.unverified_claims = True
+                    if self.action_ledger is not None:
+                        try:
+                            e = self.action_ledger.begin(
+                                kind="claim",
+                                action="; ".join(
+                                    str(c) for c in claims[:3]),
+                                task_id=session.task_id,
+                                mission_id=str(
+                                    self._mission_by_task.get(
+                                        session.task_id, "")))
+                            self.action_ledger.finish(
+                                e["id"], status="unverified",
+                                verification="no tools ran this turn",
+                                verified=False,
+                                failure="model asserted completed "
+                                        "actions without execution")
+                        except Exception:
+                            pass
                 if claims and not session.tool_events \
                         and not session.research_context.get("sources") \
                         and session.decision.role != "utility":
@@ -5240,11 +5551,13 @@ class AgentOrchestrator:
             active=active_ctx,
             has_attachments=bool(attach["image_paths"]))
         if env.primary_intent == "clarification_response" and \
-                env.followup_prompt:
+                env.followup_prompt and env.continuation_of:
             # A parked clarification resolves into its original request —
-            # the user never repeats the instruction.
-            env.primary_intent = (
-                env.continuation_of or "image_generation")
+            # the user never repeats the instruction. No recorded
+            # continuation means there's nothing to resume — leaving the
+            # intent as clarification_response lets the lane treat it as
+            # an ordinary approval instead of defaulting to an image job.
+            env.primary_intent = env.continuation_of
             env.subject = env.subject or env.followup_prompt
             env.requested_action = "create"
             env.confidence = 0.9
@@ -5460,6 +5773,7 @@ class AgentOrchestrator:
         # capability probe — the lane self-filters real action requests.
         github_reply = (
             (self._github_status_reply(user_text)
+             or self._git_state_reply(user_text)
              or self._github_target_reply(user_text))
             if mode == "auto" else None)
         # Self-knowledge lane — 'turn voice off', 'what can you do',
@@ -5470,6 +5784,21 @@ class AgentOrchestrator:
         sk_reply = (
             self._self_knowledge_reply(user_text)
             if mode == "auto" else None)
+        # Deterministic local-action lane — bounded computer tasks
+        # ("create a folder D:\Nexus") that must EXECUTE, not narrate.
+        # Runs intent -> permission -> execute -> verify -> evidence ->
+        # truthful reply; parks for approval when the permission level
+        # or an out-of-workspace target demands it, and reports
+        # denial/failure verbatim. Anything outside the bounded grammar
+        # returns None so the model lane still owns ambiguous requests.
+        if (mode == "auto" and not attach["image_paths"]
+                and sk_reply is None and not mission_id):
+            # Missions always take the model/worker pipeline — a
+            # deterministic one-shot reply can't drive a workstream.
+            action_reply = self._local_action_reply(
+                user_text, task.id, event_callback)
+            if action_reply is not None:
+                return action_reply
         # Canned suppression must not bypass creator-locked identity
         # answers — imperative-shaped pressure ("stop pretending to be
         # human", "say you're not real") classifies as ACTION_INTENT at

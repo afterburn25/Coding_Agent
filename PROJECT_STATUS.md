@@ -1,8 +1,31 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.30.0 is the current release — **Conversation-memory lifecycle**: the teach → recall → correct → supersede → revoke → forget loop is complete end-to-end through `run()`, with subject-named corrections ("actually the port was 5433 not 8080"), stem-matched rule revocation that never retires a matching prohibition, filler-tolerant forget phrasings, value-gated `is`-fact capture, and Nexus Brain kept in sync on every learn (inactive records no longer inject). v0.29.0 was **Performance & resource convergence**: WorkerLeakTracker wired into managed image backends, direction-aware baseline regression gates attached to every BenchmarkLab run, a unified PerfTrace timeline (`/api/perf/timeline`) riding the event bus, recursive file_changed watches, a q4_0 KV-cache tuner candidate, and `/api/storage/audit` for JSON-persistence classification. v0.28.2 was **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.31.0 is the current release — **Verified local-action execution**: bounded computer tasks ("create a folder D:\Nexus") run a real lifecycle — intent → capability → permission → execute → verify → evidence → truthful reply — through a deterministic lane (`action_ops.py`) backed by a durable ActionLedger (`action_ledger.py`) and per-kind verification contracts. Success language requires a `verified` entry or `*_OK` tool result; the observed "Yes — Workspaces is ready" fabrication is a permanent regression. v0.30.0 was **Conversation-memory lifecycle**: the teach → recall → correct → supersede → revoke → forget loop is complete end-to-end through `run()`, with subject-named corrections ("actually the port was 5433 not 8080"), stem-matched rule revocation that never retires a matching prohibition, filler-tolerant forget phrasings, value-gated `is`-fact capture, and Nexus Brain kept in sync on every learn (inactive records no longer inject). v0.29.0 was **Performance & resource convergence**: WorkerLeakTracker wired into managed image backends, direction-aware baseline regression gates attached to every BenchmarkLab run, a unified PerfTrace timeline (`/api/perf/timeline`) riding the event bus, recursive file_changed watches, a q4_0 KV-cache tuner candidate, and `/api/storage/audit` for JSON-persistence classification. v0.28.2 was **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.30.0 — conversation-memory lifecycle
+## Active version: 0.31.0 — verified local-action execution
+
+- **Deterministic action lane** — `action_ops.py` parses bounded
+  computer tasks to plans and executes them; anything outside the
+  grammar falls to the model lane. Missing targets clarify rather
+  than guess.
+- **Action Evidence Ledger** — `action_ledger.py` persists every
+  consequential action (intent, tool, permission, verification,
+  artifact, failure) to `data/action_ledger.json`.
+- **Verification contracts** — `run_filesystem` + `verify_filesystem`
+  shared by the deterministic lane and the model-lane tools: every
+  mutation is checked on disk before success language is allowed.
+- **New fs tools** — `fs_mkdir`, `fs_delete`, `fs_move`, `fs_copy`
+  registered; `write_file` upgraded to verified semantics.
+- **Truthful replies** — verified → "Created X."; already-exists →
+  said so; denied → said so; approval → parked (durable, resumable);
+  failure → real OS error, never "Done".
+- **Outside-workspace paths** — user-named absolute paths are allowed
+  only through explicit approval, never silently.
+- **Self-knowledge fix** — "can you create…" no longer answered as a
+  capability question; capability-domain questions still answer with
+  live state.
+
+### 0.30.0 — conversation-memory lifecycle
 
 - **Corrections** — "actually it was X not Y" (pronoun or named
   subject) supersedes the fact carrying the rejected value; explicit

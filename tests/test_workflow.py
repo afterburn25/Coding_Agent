@@ -1675,7 +1675,10 @@ class ActionNudgeTests(unittest.TestCase):
             provider = _StallOnlyProvider()
             agent = self._agent(root, provider, tools)
 
-            agent.run("create a file named x.txt")
+            # Action-shaped but outside the deterministic local-action
+            # grammar — the model lane must own this turn for the
+            # schema-advertising assertion to be meaningful.
+            agent.run("run the cleanup script")
 
             advertised = {
                 s["function"]["name"] for s in (provider.seen_tools[0] or [])

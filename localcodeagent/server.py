@@ -917,6 +917,15 @@ class AppState:
         ))
         self.activities = ActivityStore(runtime_root / "data" / "activity.jsonl")
         self.activities.on_row = lambda row: self.events.publish("activity", row)
+        # Durable execution-evidence ledger — every consequential local
+        # action (verified, denied, failed, awaiting) is recorded here;
+        # success language is only allowed on a 'verified' entry.
+        from .action_ledger import ActionLedger
+        self.action_ledger = ActionLedger(
+            runtime_root / "data" / "action_ledger.json")
+        # File tools registered their roots at construction; the
+        # deterministic action lane reads the live set from context.
+        self.tools.context["extra_roots"] = self.workspaces.allowed_roots
         self.runtime.on_residency_event = self._residency_activity
         self.capability_registry = self._build_capability_registry(config)
         self.agent = AgentOrchestrator(
@@ -953,6 +962,7 @@ class AppState:
             asker_is_creator=lambda: bool(
                 (self.profiles.active() or {}).get("is_creator")),
             learning=self.learning,
+            action_ledger=self.action_ledger,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the
@@ -9069,6 +9079,19 @@ class Handler(BaseHTTPRequestHandler):
                 if task_id:
                     payload["summary"] = self.state.activities.summary(task_id)
             self._json(payload)
+            return
+        if path == "/api/actions":
+            # Action Evidence Ledger — the durable record behind every
+            # action claim. Success language in a reply is only
+            # legitimate when a 'verified' entry exists here.
+            query = parse_qs(urlparse(self.path).query)
+            task_id = query.get("task_id", [""])[0]
+            mission_id = query.get("mission_id", [""])[0]
+            limit = min(int(query.get("recent", ["50"])[0] or 50), 200)
+            self._json({
+                "entries": self.state.action_ledger.recent(
+                    limit, task_id=task_id, mission_id=mission_id),
+            })
             return
         if path == "/api/queue":
             self._json({"items": self.state.queue.list(), "size": len(self.state.queue)})

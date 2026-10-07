@@ -8,7 +8,7 @@ This file is the handoff entry point for Devin. **Do not reconstruct project sta
 - Branch to continue from: `main`
 - Always pull the latest `main` before starting work; do not pin development to a stale documentation head.
 - Devin takeover anchor commit: `21aa4fb0090d7fbd1ef119d5026b5289b6a81e10`
-- Current development version: `0.30.0` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
+- Current development version: `0.31.0` (canonical `VERSION` file; `scripts/sync_version.py` derives all artifacts)
 - Verified unit checkpoint: **1930+ passing** on `milestone/integrated-reliability-closeout` (2 environment skips; count drifts as tests are added — run the suite for the current number)
 - v0.16.0 persona depth: behavior profiles per family, seriousness/topic scaling, effective-persona compiler, relationship + mood dynamics, overlays/modifiers/modes, NL persona commands, persona-aware notices, blending/coherence/versioning/import-export, consistency layer
 - v0.17.0 persona social continuity: social-cue + context-aware sarcasm detection, bounded energy blending, long-session pacing taper, focus/topic-shift tracking, shared-history milestones + relevance-gated callbacks, stated-preference consistency, preferred address, expression saturation dampening, humor feedback adaptation, voice smoothing + gesture timing, self-description/compare/similarity QA (see docs/PERSONALITY.md)
@@ -529,6 +529,16 @@ Before accepting a substantial change, verify these still hold:
 - Time/date comes from the runtime clock.
 - NEXUS activity HUD shows high-level status only, not hidden reasoning.
 - Negative feedback cannot become a positive SFT target.
+- Success language for a local action requires a `verified` ActionLedger
+  entry or a `*_OK` tool result — a plan, a permission grant, or a queued
+  op is not evidence (v0.31.0 invariant).
+- Action-shaped capability phrasings ("can you create a folder X") must
+  not be answered as capability questions — they reach the deterministic
+  `action_ops` lane or the model lane (regression: `D:\Nexus`).
+- Outside-workspace targets named by the user always require approval,
+  regardless of configured filesystem permission level.
+- The deterministic action lane must never intercept mission turns or
+  genuine capability questions ("can you generate images").
 
 ## Immediate next work for Devin
 

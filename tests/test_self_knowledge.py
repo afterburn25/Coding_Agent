@@ -348,5 +348,36 @@ class TestServiceControl(unittest.TestCase):
         self.assertFalse(out["ok"])
 
 
+class TestActionRequestsFallThrough(unittest.TestCase):
+    """Regression — action-shaped capability phrasings must NOT be
+    answered as 'Yes — <feature> is ready'. The observed bug: 'can you
+    create a folder d:\\Nexus' replied 'Yes — Workspaces is ready.
+    workspace writable.' and nothing was created. These turns fall
+    through to the deterministic local-action lane (action_ops) or the
+    model/tools lane instead."""
+
+    def test_can_you_create_folder_not_claimed_as_capability(self):
+        svc, _, _ = make_service()
+        self.assertIsNone(svc.respond(
+            "can you create a folder d:\\Nexus"))
+        self.assertIsNone(svc.respond("can you create a folder"))
+        self.assertIsNone(svc.respond("could you move this file"))
+        self.assertIsNone(svc.respond("can you delete the old backup"))
+
+    def test_leading_imperatives_still_fall_through(self):
+        svc, _, _ = make_service()
+        self.assertIsNone(svc.respond("create a repo"))
+        self.assertIsNone(svc.respond("can you open notepad"))
+
+    def test_genuine_capability_questions_still_answer(self):
+        svc, _, _ = make_service(
+            cap_states={"image_generation": "setup_required",
+                        "image_generation:detail": "no backend"})
+        self.assertIsNotNone(svc.respond("what can you do"))
+        res = svc.respond("can you generate images")
+        self.assertIsNotNone(res)
+        self.assertIn("setup", res.text)
+
+
 if __name__ == "__main__":
     unittest.main()

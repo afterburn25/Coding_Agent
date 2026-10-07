@@ -420,6 +420,31 @@ class TestPersistenceDecay(unittest.TestCase):
         ac.updated_at = time.time() - (7 * 3600)
         self.assertFalse(ac.image_active())
 
+    def test_stale_pending_clarification_does_not_hijack_yes(self):
+        """Regression: an expired parked image clarification must not
+        capture a later 'yes do this' — it belongs to the current
+        offer, not a dead one."""
+        ac = ctx_with_image()
+        ac.park_clarification("adult_subject", intent=IMAGE_GENERATION,
+                              subject="angel", prompt="an angel")
+        ac.updated_at = time.time() - (7 * 3600)
+        env = understand_turn("yes do this", active=ac)
+        self.assertNotEqual(env.primary_intent, "clarification_response")
+
+    def test_topic_shift_clears_pending_clarification(self):
+        """Regression: a topic shift retires the image task AND its
+        parked clarification — 'yes' after the shift resolves the
+        new offer, not the retired image gate."""
+        ac = ctx_with_image()
+        ac.park_clarification("adult_subject", intent=IMAGE_GENERATION,
+                              subject="angel", prompt="an angel")
+        env = understand_turn("what branch am i on", active=ac)
+        self.assertEqual(env.primary_intent, "git_action")
+        ac.record_turn(env)
+        env2 = understand_turn("yes do this", active=ac)
+        self.assertNotEqual(env2.primary_intent, "clarification_response")
+        self.assertEqual(ac.pending_clarification, "")
+
 
 # ---------------------------------------------------------------------------
 # Part B — non-repetitive responses

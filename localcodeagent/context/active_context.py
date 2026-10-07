@@ -119,6 +119,12 @@ class ActiveContext:
                 self.active_image_prompt = ""
                 self.active_image_subject = ""
                 self.image_attributes = []
+            # A parked image clarification dies with its task — a later
+            # "yes" must resolve the CURRENT offer, not the retired one.
+            self.pending_clarification = ""
+            self.pending_intent = ""
+            self.pending_subject = ""
+            self.pending_prompt = ""
             self.active_subject = getattr(env, "subject", "")[:200]
         # conversation/question turns leave task context untouched — a
         # chat aside isn't a topic shift.

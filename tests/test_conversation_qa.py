@@ -268,7 +268,10 @@ class ToolUseQaTests(unittest.TestCase):
             runner = ConversationQaRunner(agent, provider,
                                           conversation_manager=convos)
             scenario = QaScenario("tool-gating", [
-                QaTurn("create a file named notes.txt containing hello",
+                # Action-shaped but outside the deterministic
+                # local-action grammar — the model lane must own this
+                # turn so tool-offering can be measured.
+                QaTurn("save notes.txt into the project",
                        expect={"tool_calls": True}),
                 QaTurn("why is the sky blue", expect={"no_tool_calls": True}),
                 QaTurn("fix the bug in parser.py", expect={"tool_calls": True}),
@@ -288,7 +291,7 @@ class ToolUseQaTests(unittest.TestCase):
             provider = ScriptedProvider(
                 script=["I'll create the file notes.txt for you now."])
             agent, provider, convos = _make(Path(td), provider=provider)
-            agent.run("create a file named notes.txt containing hello")
+            agent.run("save notes.txt into the project")
             self.assertGreaterEqual(len(provider.calls), 2)
             self.assertEqual(provider.calls[1].get("tool_choice"), "required")
 

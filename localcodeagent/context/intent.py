@@ -896,7 +896,15 @@ def _classify_turn(text: str, *, active: Any = None,
         return env
 
     # --- 2. Pending clarification — answer continues the SAME intent.
-    pending = getattr(active, "pending_clarification", "") if active else ""
+    # TTL-gated: a stale parked clarification must not hijack a later
+    # "yes" — "yes do this" hours after an image clarification parked
+    # belongs to the current offer, not the dead one.
+    pending_fn = getattr(active, "pending", None) if active else None
+    pending = (
+        getattr(active, "pending_clarification", "")
+        if active is not None
+        and (pending_fn is None or pending_fn())
+        else "")
     if pending and re.match(
         r"^(?:yes|yeah|yep|yup|sure|ok(?:ay)?|confirm|confirmed|"
         r"she'?s?\s+(?:an?\s+)?adult|he'?s?\s+(?:an?\s+)?adult|"

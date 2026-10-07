@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 IGNORED_DIRS = {".git", ".agent", "node_modules", ".venv", "venv", "__pycache__"}
 
+from ..action_ledger import verify_filesystem
+
 
 def _allowed_roots(workspace: Path, extra_roots=None) -> list[Path]:
     """Primary workspace plus any registered workspace roots (from the
@@ -120,9 +122,14 @@ def register_filesystem_tools(
 
     def write_file(args: dict) -> str:
         path = safe(args["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
         track_mutation(path)
         atomic_write_text(path, args.get("content", ""))
-        return f"WROTE {display_path(path)} ({path.stat().st_size} bytes)"
+        ok, detail = verify_filesystem("write", {"path": str(path)})
+        if not ok:
+            raise RuntimeError(
+                f"verification failed after write: {detail}")
+        return f"WROTE_OK {display_path(path)} — {detail} ({path.stat().st_size} bytes)"
 
     def apply_patch(args: dict) -> str:
         changes = args.get("changes")
@@ -212,6 +219,54 @@ def register_filesystem_tools(
                 pass
         return "\n".join(out) or "NO_MATCHES"
 
+    # -- verified mutating operations ----------------------------------
+    # Every handler mutates, then verifies the post-condition on disk via
+    # the shared verification contracts in action_ledger. The result
+    # string carries the verdict — "MKDIR_OK <path>" is evidence; a bare
+    # model sentence is not.
+
+    def _verified_op(kind: str, params: dict) -> str:
+        from ..action_ledger import run_filesystem
+        run_filesystem(kind, params)
+        ok, detail = verify_filesystem(kind, params)
+        if not ok:
+            raise RuntimeError(
+                f"verification failed after {kind}: {detail}")
+        return detail
+
+    def fs_mkdir(args: dict) -> str:
+        path = safe(args["path"])
+        detail = _verified_op("mkdir", {"path": str(path)})
+        track_mutation(path)
+        return f"MKDIR_OK {display_path(path)} — {detail}"
+
+    def fs_delete(args: dict) -> str:
+        path = safe(args["path"])
+        if not path.exists():
+            raise ValueError(f"target does not exist: {display_path(path)}")
+        rec = args.get("recursive")
+        if not isinstance(rec, bool):
+            rec = str(rec).strip().lower() in ("1", "true", "yes")
+        detail = _verified_op("delete", {
+            "path": str(path), "recursive": rec})
+        track_mutation(path)
+        return f"DELETE_OK {display_path(path)} — {detail}"
+
+    def fs_move(args: dict) -> str:
+        src = safe(args["src"])
+        dst = safe(args["dst"])
+        detail = _verified_op("move", {"src": str(src), "dst": str(dst)})
+        track_mutation(src)
+        track_mutation(dst)
+        return f"MOVE_OK {display_path(src)} -> {display_path(dst)} — {detail}"
+
+    def fs_copy(args: dict) -> str:
+        src = safe(args["src"])
+        dst = safe(args["dst"])
+        detail = _verified_op("copy", {"src": str(src), "dst": str(dst)})
+        track_mutation(dst)
+        return f"COPY_OK {display_path(src)} -> {display_path(dst)} — {detail}"
+
     registry.register(ToolSpec("list_files", "List files and directories in the current workspace.", {
         "type": "object", "properties": {"path": {"type": "string"}, "depth": {"type": "integer"}}
     }, "filesystem.read", list_files))
@@ -254,3 +309,15 @@ def register_filesystem_tools(
     registry.register(ToolSpec("search_text", "Search text across workspace files.", {
         "type": "object", "properties": {"query": {"type": "string"}, "glob": {"type": "string"}}, "required": ["query"]
     }, "filesystem.read", search_text))
+    registry.register(ToolSpec("fs_mkdir", "Create a directory inside the workspace (parents created). Verified on disk before reporting success.", {
+        "type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]
+    }, "filesystem.write", fs_mkdir))
+    registry.register(ToolSpec("fs_delete", "Delete a file or directory inside the workspace. Empty directories only unless recursive=true. Verified absent before reporting success.", {
+        "type": "object", "properties": {"path": {"type": "string"}, "recursive": {"type": "boolean"}}, "required": ["path"]
+    }, "filesystem.delete", fs_delete))
+    registry.register(ToolSpec("fs_move", "Move or rename a file/directory inside the workspace. Verifies the destination exists and the source is gone.", {
+        "type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]
+    }, "filesystem.write", fs_move))
+    registry.register(ToolSpec("fs_copy", "Copy a file or directory inside the workspace. Verifies the destination exists and matches the source size.", {
+        "type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]
+    }, "filesystem.write", fs_copy))

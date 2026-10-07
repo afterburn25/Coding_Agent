@@ -2,6 +2,68 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.31.0 — verified local-action execution
+
+Nexus is an execution agent, not a narrator. The observed failure —
+"can you create a folder d:\Nexus" answered "Yes — Workspaces is
+ready" with nothing created — is fixed at the root and covered by a
+permanent regression.
+
+Architecture (no parallel systems — all reuse exists):
+
+- `localcodeagent/action_ops.py` — deterministic lane. Bounded grammar
+  (mkdir/write/delete/move/rename/copy) → `ActionPlan`; outside the
+  grammar returns None → model lane. Missing targets clarify, never
+  guess. `execute_plan()` runs capability → permission → execute →
+  verify → evidence → truthful reply. Outside-workspace paths the user
+  explicitly named are allowed ONLY via approval, always.
+- `localcodeagent/action_ledger.py` — durable evidence store
+  (`data/action_ledger.json`). `begin()/finish()` per action; statuses
+  recorded/awaiting_approval/denied/failed/verified/unverified/
+  clarify/unavailable. `run_filesystem` + `verify_filesystem` are the
+  shared execution/verification contracts (mkdir⇒is_dir, write⇒exists,
+  copy⇒dest+size parity, move⇒dst exists src gone, delete⇒absent).
+- `localcodeagent/tools/filesystem.py` — `fs_mkdir`, `fs_delete`,
+  `fs_move`, `fs_copy` registered (workspace-bounded, `.agent`
+  protected, mutation-tracked); `write_file` verifies and returns
+  `WROTE_OK`. All mutating handlers verify on disk.
+- `agent/orchestrator.py` — `_local_action_reply()` lane in `run()`
+  after self-knowledge; parks `local_action` pending-approvals on the
+  task; `_resume_local_action` handles approve/deny. Missing direct
+  tool → falls through to model (truth gate still guards).
+- `self_knowledge/service.py` — action-shaped capability phrasings
+  bail to the action lane; capability-domain verbs keep honest
+  live-state answers.
+- `server.py` — `self.action_ledger` wired into the orchestrator;
+  `tools.context["extra_roots"]` exposes registered workspace roots.
+
+Also fixed this session (same release):
+
+- **Git repo-state lane** — `_git_state_reply()` answers "what
+  branches/remotes/repo" from real `git` output. It was the source of
+  a persona fabrication ("I don't have a public repo" with a live
+  GitHub remote in `.git/config`).
+- **Stale-clarification hijack** — a parked image clarification
+  survived task retirement; "yes do this" resolved it as
+  image_generation. Parked clarifications are TTL-gated
+  (`active.pending()`), cleared on topic-shift in `record_turn`, and
+  `clarification_response` with no `continuation_of` no longer
+  defaults to image.
+- **Truth-gate ledger** — unverified action claims now write a
+  `claim`/`unverified` ActionLedger entry.
+- **Desktop shortcut** — repointed `Nexus Core.lnk` to the live
+  install at `D:\Nexus_Core` (it targeted deleted `D:\Nexus_Core_Fresh`).
+
+Rules for the next session:
+
+- NEVER claim an action succeeded without a `verified` ledger entry or
+  tool `*_OK` result. A plan, a permission grant, and a queued op are
+  not evidence.
+- Extend the bounded grammar carefully — every new verb needs tests
+  for: executes+verifies, denied, parked, failed, clarify-vs-guess.
+- The lane must never intercept mission turns (mission_id) or genuine
+  capability questions.
+
 ## v0.30.0 — conversation-memory lifecycle (§24-26 continual QA)
 
 The durable-memory loop is now complete end-to-end through the

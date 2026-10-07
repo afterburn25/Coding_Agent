@@ -723,15 +723,28 @@ class SelfKnowledgeService:
         # 'push to github', 'create a repo', 'run the tests' — an
         # imperative with a matched name must fall through to the
         # tools/model lane; the catalog only answers questions and
-        # control requests it actually resolved.
+        # control requests it actually resolved. Same for the polite
+        # imperative forms — 'can you create a folder', 'could you move
+        # this file', 'would you run the tests' are ACTION requests in
+        # question clothing. Answering them with a capability verdict
+        # ("Yes — Workspaces is ready") narrates success that never
+        # executed — the observed D:\Nexus failure.
+        action = re.sub(
+            r"^(?:please\s+)?(?:can|could|would|will|may)\s+(?:you|u)"
+            r"\s+(?:please\s+)?", "", t)
         if re.search(r"^(?:please\s+)?"
                      r"(?:push|pull|commit|create|clone|merge|branch|"
                      r"deploy|write|build|run|execute|edit|delete|"
-                     r"remove|generate|draw|paint|search|research|"
-                     r"read|summari[sz]e|analy[sz]e|scaffold|add|"
+                     r"remove|scaffold|add|"
                      r"modify|refactor|review|debug|fetch|download|"
-                     r"upload|publish)\b", t):
+                     r"upload|publish|make|move|copy|rename|open|"
+                     r"launch|install|start|stop|kill|fix|update|"
+                     r"change|mkdir|touch|type|click|press)\b", action):
             return None
+        # Capability-domain verbs stay answerable — 'can you generate
+        # images', 'can you search the web' are capability QUESTIONS
+        # whose honest reply is the live feature state. Only concrete
+        # local-action verbs above bail to the action lane.
         if st is not None and (feature is None or
                                not re.search(r"\b(can|could|do|does|"
                                              r"what|why|how|is|are)\b",
