@@ -72,6 +72,15 @@ on verified tool output.
   answers from evidence. `ActionLedger.mission_rollup()` summarizes
   per-mission status counts + last failures/verified actions; served
   at `GET /api/missions/<id>/evidence`.
+- **Requirement-change propagation** — superseded conversation facts
+  now surface through `learn_from_user` (`result["superseded"]`) and
+  propagate to the mission layer: `MissionStore.flag_requirement_change`
+  marks in-flight nodes whose instructions still reference the stale
+  value (`stale_requirement` + `superseded_requirements` metadata +
+  `requirement_changed` history event), the mission executor warns the
+  model which values are dead, and a notification surfaces the drift.
+  Terminal and unrelated nodes stay untouched; completed work keeps
+  its historical context.
 - **Regression coverage** — `tests/test_action_ops.py` (27 tests:
   parse matrix, in-root verified execution, idempotent no-ops, deny/
   ask/approve/denied flows, outside-root always-asks, disabled tool,

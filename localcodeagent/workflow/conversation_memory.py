@@ -263,6 +263,7 @@ class ConversationMemory:
         scope: str = "global",
         scope_id: str = "",
         slot: str = "",
+        superseded_out: list | None = None,
     ) -> bool:
         clean = self._clean(text)
         if not clean:
@@ -289,6 +290,8 @@ class ConversationMemory:
                     row["superseded_at"] = now
                     row["superseded_by"] = row_id
                     row["updated_at"] = now
+                    if superseded_out is not None:
+                        superseded_out.append(str(row.get("text") or ""))
         rows.append({
             "id": row_id,
             "text": clean,
@@ -431,6 +434,7 @@ class ConversationMemory:
             "behavior_rules": [],
             "training_examples": [],
             "forgotten": [],
+            "superseded": [],
         }
         if not self.enabled:
             return result
@@ -658,6 +662,7 @@ class ConversationMemory:
             if fact and self._append_unique(
                     "facts", fact, self.fact_limit,
                     scope=scope, scope_id=scope_id, slot=self._fact_slot(fact),
+                    superseded_out=result["superseded"],
             ):
                 result["facts"].append(fact)
 

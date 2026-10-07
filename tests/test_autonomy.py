@@ -458,6 +458,75 @@ class JobNodeTests(unittest.TestCase):
             self.assertIn("plan_version", cps[-1])
             sup.stop()
 
+    def test_requirement_change_flags_stale_nodes(self):
+        # A superseded conversation fact ("store uses postgresql" ->
+        # sqlite) must mark in-flight nodes that still plan on the old
+        # value — dead requirements must not execute silently.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            mission = sup.missions.create(
+                objective="build the store layer", title="store",
+                scope="one_shot", workspace=td)
+            mid = mission["id"]
+            sup.missions.transition(mid, "ready")
+
+            def _graph(m):
+                m["graph"]["nodes"] = [
+                    new_task("Migrate to PostgreSQL",
+                             "Set up the PostgreSQL schema",
+                             kind="agent"),
+                    new_task("Write docs",
+                             "Document the PostgreSQL schema",
+                             kind="internal"),
+                    new_task("Unrelated", "update the readme",
+                             kind="internal"),
+                ]
+                m["graph"]["nodes"][1]["state"] = "completed"
+            sup.missions.mutate(mid, _graph)
+
+            out = sup.missions.flag_requirement_change(
+                ["store uses postgresql"])
+            self.assertEqual(len(out["flagged"]), 1)
+            self.assertEqual(out["flagged"][0]["mission_id"], mid)
+            self.assertEqual(len(out["flagged"][0]["nodes"]), 1)
+
+            m = sup.missions.get(mid)
+            nodes = m["graph"]["nodes"]
+            self.assertTrue(nodes[0].get("stale_requirement"))
+            self.assertEqual(
+                nodes[0]["metadata"]["superseded_requirements"],
+                ["postgresql"])
+            # Terminal and unrelated nodes are never flagged.
+            self.assertFalse(nodes[1].get("stale_requirement"))
+            self.assertFalse(nodes[2].get("stale_requirement"))
+            # The mission history records the drift.
+            events = [h.get("event") for h in m.get("history") or []]
+            self.assertIn("requirement_changed", events)
+            # Idempotent — a second identical correction flags nothing.
+            again = sup.missions.flag_requirement_change(
+                ["store uses postgresql"])
+            self.assertEqual(again["flagged"], [])
+            sup.stop()
+
+    def test_requirement_change_no_match_is_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            mission = sup.missions.create(
+                objective="paint the bike shed", title="shed",
+                scope="one_shot", workspace=td)
+            sup.missions.transition(mission["id"], "ready")
+            sup.missions.mutate(
+                mission["id"],
+                lambda m: m["graph"]["nodes"].append(
+                    new_task("Pick color", "choose a paint color",
+                             kind="internal")))
+            out = sup.missions.flag_requirement_change(
+                ["store uses postgresql"])
+            self.assertEqual(out["flagged"], [])
+            out = sup.missions.flag_requirement_change([])
+            self.assertEqual(out["flagged"], [])
+            sup.stop()
+
 
 class AdmissionEvictionTests(unittest.TestCase):
     def test_shortfall_calls_release_hook(self):

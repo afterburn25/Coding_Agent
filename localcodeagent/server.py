@@ -983,6 +983,14 @@ class AppState:
         self._sweep_worktree_orphans()
         self._report_prior_crash()
         self.queue.enrich = self._queue_enrich_mission
+        # Requirement-change propagation — a superseded conversation fact
+        # flags in-flight mission nodes that still reference the stale
+        # value, with a notification so the drift is visible.
+        try:
+            self.agent.requirement_change_cb = (
+                self._on_requirement_change)
+        except Exception:
+            pass
         self._boot(92, "SYNCHRONIZING · NEXUS BRAIN", "Wiring cognitive regions onto the corpus callosum")
         try:
             self.brain = self._build_brain(config, runtime_root)
@@ -2773,6 +2781,20 @@ class AppState:
                         return _mission_node_out(mission, node, result)
             instruction = str(
                 node.get("instruction") or node.get("title") or "")
+            if node.get("stale_requirement"):
+                # Requirement-change propagation — the conversation fact
+                # this node was planned against has been superseded. Tell
+                # the executor which values are stale so it re-confirms
+                # rather than building on dead information.
+                stale_vals = sorted(set(
+                    (node.get("metadata") or {}).get(
+                        "superseded_requirements") or []))
+                instruction += (
+                    "\n\nNote: requirements changed since this task was "
+                    "planned — "
+                    + "; ".join(stale_vals)[:300]
+                    + " were superseded. Re-confirm the current values "
+                      "before relying on them.")
             if int(node.get("retries") or 0) > 0:
                 # A retry reruns the same instruction — without feedback the
                 # model repeats the failure (e.g. asserting a file write it
@@ -3468,6 +3490,29 @@ class AppState:
         if not mid:
             return {}
         return {"mission_id": mid, "source": "mission_subtask"}
+
+    def _on_requirement_change(self, superseded: list) -> None:
+        """A conversation fact was superseded — flag in-flight mission
+        nodes still planning on the stale value, and surface it."""
+        try:
+            missions = getattr(self.autonomy, "missions", None)
+            if missions is None:
+                return
+            out = missions.flag_requirement_change(list(superseded or []))
+            flagged = out.get("flagged") or []
+            if flagged:
+                self.autonomy.notifications.notify(
+                    f"{len(flagged)} mission(s) reference facts that "
+                    "were just corrected — affected nodes are flagged "
+                    "stale and will re-plan on the new value.",
+                    level="important",
+                    title="Mission requirements changed",
+                    detail="Superseded: "
+                           + "; ".join(str(s) for s in
+                                       list(superseded or [])[:5]),
+                )
+        except Exception:
+            pass
 
     def _preempt_for_chat(self, current) -> bool:
         """User chat outranks background missions: when a mission-attributed

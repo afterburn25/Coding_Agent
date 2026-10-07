@@ -6,6 +6,7 @@ so older records tolerate new fields without migrations.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -385,3 +386,75 @@ class MissionStore:
     def next_runnable(self) -> list[dict]:
         """Missions the supervisor may drive this tick, priority-ordered."""
         return self.list()
+
+    def flag_requirement_change(self, superseded: list[str]) -> dict:
+        """Requirement-change propagation: when conversation memory
+        supersedes a fact ('store uses PostgreSQL' -> 'store uses
+        SQLite'), in-flight mission nodes whose instructions still
+        reference the old value get flagged `stale_requirement` so the
+        planner/replan path re-derives instead of executing on dead
+        information. Terminal nodes and completed work stay untouched —
+        history records what was believed at the time."""
+        flagged: list[dict] = []
+        needles: list[str] = []
+        for text in superseded or []:
+            t = str(text or "").strip()
+            if not t:
+                continue
+            # Canonical fact shape is "subject uses value" — the value
+            # half is the stale requirement; the subject stays valid.
+            m = re.match(
+                r"^.+?\s+(?:uses?|is|are|was|runs? on|prefers?|should"
+                r" (?:stay|be|remain|use)|must be|will be)\s+(.+?)[.!?]?$",
+                t, flags=re.IGNORECASE)
+            needle = str(m.group(1) if m else t).strip().lower()
+            if len(needle) >= 3:
+                needles.append(needle)
+        if not needles:
+            return {"flagged": flagged}
+        from .task_graph import TERMINAL_TASK_STATES
+        for mission in self.active():
+            hits: list[tuple[dict, list[str]]] = []
+            for node in (mission.get("graph") or {}).get("nodes", []):
+                if (node.get("state") in TERMINAL_TASK_STATES
+                        or node.get("stale_requirement")):
+                    continue
+                hay = (str(node.get("title") or "") + " "
+                       + str(node.get("instruction") or "")).lower()
+                matched = [n for n in needles if n in hay]
+                if matched:
+                    hits.append((node, matched))
+            if not hits:
+                continue
+            hit_map = {str(n.get("id") or ""): matched
+                       for n, matched in hits}
+
+            def _flag(row: dict, _map: dict = hit_map) -> None:
+                stale = sorted({h for ms in _map.values() for h in ms})
+                live = {
+                    str(n.get("id") or ""): n
+                    for n in (row.get("graph") or {}).get("nodes", [])
+                }
+                for nid, matched in _map.items():
+                    node = live.get(nid)
+                    if node is None:
+                        continue
+                    node["stale_requirement"] = True
+                    node.setdefault("metadata", {}).setdefault(
+                        "superseded_requirements", []).extend(matched)
+                row.setdefault("history", []).append({
+                    "ts": time.time(),
+                    "event": "requirement_changed",
+                    "detail": (
+                        f"{len(_map)} node(s) reference superseded "
+                        f"requirement(s): "
+                        + "; ".join(stale))[:400],
+                })
+                row["history"] = row["history"][-200:]
+            updated = self.mutate(str(mission.get("id") or ""), _flag)
+            if updated is not None:
+                flagged.append({
+                    "mission_id": mission.get("id"),
+                    "nodes": [n.get("id") for n, _ in hits],
+                })
+        return {"flagged": flagged}

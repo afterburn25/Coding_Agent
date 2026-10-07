@@ -439,6 +439,10 @@ class AgentOrchestrator:
         # consequential local action; None degrades the lane to
         # in-memory results only.
         self.action_ledger = action_ledger
+        # Requirement-change propagation — AppState wires this to the
+        # mission store so a superseded conversation fact flags
+        # in-flight mission nodes referencing the stale value.
+        self.requirement_change_cb = None
         self.activities = activities
         self.digital_twin = digital_twin
         # May be a graph instance or a zero-arg callable returning one — the
@@ -5669,6 +5673,17 @@ class AgentOrchestrator:
                 self._sync_nexus_brain()
             except Exception:
                 pass
+            # Requirement-change propagation — a superseded fact
+            # invalidates in-flight mission nodes that still reference
+            # the stale value; the mission store flags them for the
+            # planner/replan path.
+            superseded_texts = [
+                str(t) for t in (learned.get("superseded") or []) if t]
+            if superseded_texts and self.requirement_change_cb is not None:
+                try:
+                    self.requirement_change_cb(superseded_texts)
+                except Exception:
+                    pass
 
         # Corrections and positive feedback are the strongest Answer Memory
         # learning signals — apply them before any lookup runs this turn.
