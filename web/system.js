@@ -241,15 +241,62 @@ function renderExperiments(list){
     </div>`).join('')||'<div class="off">No experiments.</div>';
 }
 
+/* ---------- Environment ---------- */
+function renderEnvDetected(d){
+  const comps=(d&&d.components)||{};
+  $('#envDetected').innerHTML=Object.keys(comps).length
+    ? Object.entries(comps).map(([n,c])=>
+      `<div><span class="k">${esc(n)}</span>`+
+      (c.installed?`<span class="pill">installed</span> ${esc(c.version||'version unknown')}`:'<span class="pill">missing</span>')+
+      (c.path?`<div class="meta">${esc(c.path)}</div>`:'')+`</div>`).join('')
+    : '<div class="off">Nothing probed yet.</div>';
+}
+function renderEnvManifest(m){
+  $('#envManifest').innerHTML=m&&m.components
+    ? `<div><span class="k">${esc(m.project_id)}</span>${esc(m.components.length)} components · declared ${fmtTs(m.declared_at)}</div>`+
+      m.components.map(c=>`<div class="meta"><b>${esc(c.name)}</b> ${esc(c.requirement||'(any)')} <span class="pill">${esc(c.kind||'tool')}</span></div>`).join('')
+    : '<div class="off">No manifest declared for this project.</div>';
+}
+function renderEnvVerify(r){
+  $('#envVerifyResult').innerHTML=
+    `<div class="list-row"><b>${esc(r.project_id||'')}</b>
+     <span class="pill">${r.ok?'satisfied':'incomplete'}</span>
+     ${r.reason?`<div class="meta">${esc(r.reason)}</div>`:''}</div>`+
+    (r.satisfied||[]).map(c=>`<div class="list-row"><b>${esc(c.name)}</b> <span class="pill">ok</span> <span class="meta">${esc(c.version||'')}</span></div>`).join('')+
+    (r.mismatched||[]).map(c=>`<div class="list-row"><b>${esc(c.name)}</b> <span class="pill">mismatch</span>
+      <div class="meta">required ${esc(c.required||'')} · installed ${esc(c.installed||'?')}</div></div>`).join('')+
+    (r.missing||[]).map(n=>`<div class="list-row"><b>${esc(n)}</b> <span class="pill">missing</span></div>`).join('');
+}
+
+/* ---------- Secrets ---------- */
+function renderSecrets(list){
+  $('#secretsList').innerHTML=list.map(s=>
+    `<div class="list-row"><b>${esc(s.name)}</b>
+     <div class="meta">${esc(s.description||'')}</div>
+     <div class="meta">created ${fmtTs(s.created_at)} · updated ${fmtTs(s.updated_at)}</div>
+     <div class="actions"><button class="mini-button danger" data-secret-del="${esc(s.name)}">Delete</button></div>
+    </div>`).join('')||'<div class="off">No secrets stored.</div>';
+}
+async function secretsApi(action,body){
+  let r=await api('/api/secrets/'+action,'POST',body);
+  if(r&&r.needs_approval){
+    if(!confirm(`${action} ${body.name||''} requires approval.\nContinue?`))return r;
+    r=await api('/api/secrets/'+action,'POST',{...body,approve:true});
+  }
+  return r;
+}
+
 /* ---------- Load ---------- */
 async function refresh(){
   try{
-    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg,br,tr]=await Promise.all([
+    const [h,t,r,kn,l,sk,co,jb,a,b,ev,ex,dg,br,tr,se]=await Promise.all([
       api('/api/health'),api('/api/twin'),api('/api/rag'),api('/api/knowledge'),api('/api/lsp'),
       api('/api/skills'),api('/api/connectors'),api('/api/jobs'),
       api('/api/artifacts?kind='+encodeURIComponent($('#artifactKind').value)),
       api('/api/backups'),api('/api/eval/history'),api('/api/experiments'),
-      api('/api/diagnostics'),api('/api/brain/status'),api('/api/brain/trace?limit=60')]);
+      api('/api/diagnostics'),api('/api/brain/status'),api('/api/brain/trace?limit=60'),
+      api('/api/secrets')]);
+    renderSecrets(se.secrets||[]);
     renderHealth(h);renderTwin(t);renderRagStats(r);renderKnowledge(kn);renderLsp(l);
     renderDiagnostics(dg);renderBrain(br,tr);
     renderSkills(sk.skills||[]);renderConnectors(co.connectors||[]);
@@ -323,6 +370,10 @@ document.addEventListener('click',async e=>{
   }else if(t.dataset.conclude){
     const c=prompt('Conclusion for this experiment:');if(c==null)return;
     await api('/api/experiments/conclude','POST',{id:t.dataset.conclude,conclusion:c});refresh();
+  }else if(t.dataset.secretDel!==undefined){
+    if(!confirm(`Delete secret ${t.dataset.secretDel}?`))return;
+    const r=await secretsApi('delete',{name:t.dataset.secretDel});
+    if(r.ok)refresh();else if(r.error)alert('Delete failed: '+r.error);
   }
 });
 /* ---------- Simulate ---------- */
@@ -351,5 +402,46 @@ $('#expCreate').onclick=async()=>{
   await api('/api/experiments/create','POST',{hypothesis:h,arms:[{name:'control'},{name:'candidate'}]});
   $('#expHypothesis').value='';refresh();
 };
+
+/* ---------- Environment events ---------- */
+$('#envDetect').onclick=async()=>{
+  $('#envDetected').innerHTML='<div class="off">Probing…</div>';
+  const extra=$('#envProbeNames').value.trim();
+  const qs=extra?'?names='+encodeURIComponent(extra):'';
+  try{renderEnvDetected(await api('/api/environment'+qs));}
+  catch(e){$('#envDetected').innerHTML='<div class="off">'+esc(e.message)+'</div>';}
+};
+$('#envManifestLoad').onclick=async()=>{
+  const pid=$('#envProject').value.trim();if(!pid)return;
+  try{renderEnvManifest(await api('/api/environment/manifest/'+encodeURIComponent(pid)));}
+  catch(e){$('#envManifest').innerHTML='<div class="off">'+esc(e.message)+'</div>';}
+};
+$('#envVerify').onclick=async()=>{
+  const pid=$('#envProject').value.trim();if(!pid)return;
+  $('#envVerifyResult').innerHTML='<div class="off">Verifying…</div>';
+  try{renderEnvVerify(await api('/api/environment/verify/'+encodeURIComponent(pid)));}
+  catch(e){$('#envVerifyResult').innerHTML='<div class="off">'+esc(e.message)+'</div>';}
+};
+$('#envDeclare').onclick=async()=>{
+  const pid=$('#envProject').value.trim();if(!pid){alert('Project id required.');return;}
+  const components=($('#envComponents').value||'').split('\n')
+    .map(l=>l.trim()).filter(Boolean).map(l=>{
+      const m=l.match(/^(\S+)\s*(.*)$/);
+      return {name:m[1],requirement:(m[2]||'').trim(),kind:'tool'};
+    });
+  if(!components.length){alert('List at least one component.');return;}
+  const r=await api('/api/environment/manifest','POST',{project_id:pid,components});
+  if(r.ok){renderEnvManifest(r.manifest);$('#envVerifyResult').innerHTML='';}
+};
+
+/* ---------- Secrets events ---------- */
+$('#secretSet').onclick=async()=>{
+  const name=$('#secretName').value.trim(),value=$('#secretValue').value;
+  if(!name||!value){alert('Name and value required.');return;}
+  const r=await secretsApi('set',{name,value,description:$('#secretDesc').value.trim()});
+  if(r.ok||r.name){$('#secretValue').value='';$('#secretDesc').value='';refresh();}
+  else if(r.error)alert('Store failed: '+r.error);
+};
+
 refresh();
 setInterval(refresh,15000);

@@ -63,6 +63,8 @@
       <a href="#secEval">Evaluation Lab</a>
       <a href="#secExperiments">Experiments</a>
       <a href="#secSimulate">Plan Simulation</a>
+      <a href="#secEnvironment">Environment</a>
+      <a href="#secSecrets">Secrets</a>
     </div>
     <section class="panel" id="secHealth">
       <h2>Health</h2>
@@ -180,6 +182,44 @@
         <button id="simRun" class="mini-button" type="button">Simulate</button>
       </div>
       <div id="simResults" class="scroll-list"></div>
+    </section>
+    <section class="panel" id="secEnvironment">
+      <h2>Environment</h2>
+      <div class="section-title">Host detection</div>
+      <div class="row-actions">
+        <input id="envProbeNames" type="text" placeholder="Extra tools to probe, comma-separated (e.g. ffmpeg, rg)…" />
+        <button id="envDetect" class="mini-button" type="button">Detect</button>
+      </div>
+      <div id="envDetected" class="kv"></div>
+      <div class="section-title">Project manifests</div>
+      <div class="row-actions">
+        <input id="envProject" type="text" placeholder="Project id…" />
+        <button id="envManifestLoad" class="mini-button" type="button">Load</button>
+        <button id="envVerify" class="mini-button" type="button">Verify host</button>
+      </div>
+      <div id="envManifest" class="kv"></div>
+      <div id="envVerifyResult" class="scroll-list"></div>
+      <div class="section-title">Declare / replace manifest</div>
+      <p class="off" style="font-size:12px">One component per line: <code>name requirement</code> — requirement may be empty, <code>&gt;=1.2</code>, <code>==1.2.3</code>, or <code>1.x</code>.</p>
+      <div class="row-actions">
+        <textarea id="envComponents" rows="4" style="flex:1;min-width:280px;background:var(--bg,#0e1116);border:1px solid var(--border,#2a2f3a);border-radius:6px;color:inherit;font-size:12px;font-family:inherit" placeholder="python >=3.11&#10;node 20.x&#10;ffmpeg"></textarea>
+      </div>
+      <div class="row-actions">
+        <button id="envDeclare" class="mini-button" type="button">Save manifest</button>
+      </div>
+    </section>
+    <section class="panel" id="secSecrets">
+      <h2>Secrets</h2>
+      <p class="off" style="font-size:12px">Stored in the encrypted vault — values are write-only and never displayed.</p>
+      <div class="row-actions">
+        <input id="secretName" type="text" placeholder="Name (e.g. OPENAI_API_KEY)…" />
+        <input id="secretDesc" type="text" placeholder="Description (optional)…" />
+      </div>
+      <div class="row-actions">
+        <input id="secretValue" type="password" placeholder="Value — never echoed back…" autocomplete="off" />
+        <button id="secretSet" class="mini-button" type="button">Store</button>
+      </div>
+      <div id="secretsList" class="scroll-list"></div>
     </section>
   </main>
 </div>
