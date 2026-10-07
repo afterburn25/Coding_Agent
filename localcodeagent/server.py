@@ -923,6 +923,13 @@ class AppState:
         from .action_ledger import ActionLedger
         self.action_ledger = ActionLedger(
             runtime_root / "data" / "action_ledger.json")
+        # Entries still 'recorded' across a restart were interrupted —
+        # close them as unverified so open-looking rows never masquerade
+        # as pending work.
+        try:
+            self.action_ledger.recover_orphans()
+        except Exception:
+            pass
         # File tools registered their roots at construction; the
         # deterministic action lane reads the live set from context.
         self.tools.context["extra_roots"] = self.workspaces.allowed_roots

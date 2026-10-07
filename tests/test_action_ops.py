@@ -295,6 +295,27 @@ class TestAvailabilityAndLedger(unittest.TestCase):
         self.assertEqual(
             ledger.mission_rollup("m-none")["actions"], 0)
 
+    def test_recover_orphans_closes_interrupted_entries(self):
+        td, ws, reg, ledger = make_env()
+        self.addCleanup(td.cleanup)
+        # An entry begun but never finished (crash mid-action) must not
+        # survive a restart looking like pending work.
+        e1 = ledger.begin(kind="mkdir", action="create tmp")
+        e2 = ledger.begin(kind="mkdir", action="create gated")
+        ledger.finish(e2["id"], status="awaiting_approval")
+        e3 = ledger.begin(kind="mkdir", action="create done")
+        ledger.finish(e3["id"], status="verified", verified=True)
+        ledger2 = ActionLedger(ledger.path)  # "restart"
+        self.assertEqual(ledger2.recover_orphans(), 1)
+        rows = {r["id"]: r for r in ledger2.recent(10)}
+        self.assertEqual(rows[e1["id"]]["status"], "unverified")
+        self.assertIn("interrupted", rows[e1["id"]]["detail"])
+        # Parked approvals and finished entries are untouched.
+        self.assertEqual(
+            rows[e2["id"]]["status"], "awaiting_approval")
+        self.assertEqual(rows[e3["id"]]["status"], "verified")
+        self.assertEqual(ledger2.recover_orphans(), 0)
+
 
 class TestOrchestratorLane(unittest.TestCase):
     """The lane inside AgentOrchestrator — claims the turn, produces a

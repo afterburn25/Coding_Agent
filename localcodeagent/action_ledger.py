@@ -271,6 +271,29 @@ class ActionLedger:
 
     # -- retrieval -----------------------------------------------------
 
+    def recover_orphans(self) -> int:
+        """Restart reconciliation — an entry still 'recorded' across a
+        process boundary means the action was interrupted before its
+        outcome was written. Leaving it open would read as pending
+        work; close it as unverified so the evidence stays honest.
+        'awaiting_approval' is parked by design and survives restarts."""
+        now = time.time()
+        fixed = 0
+        with self._lock:
+            for e in self.data["entries"]:
+                if e.get("status") == "recorded":
+                    e["status"] = "unverified"
+                    e["ended_at"] = now
+                    e["elapsed_s"] = round(
+                        now - float(e.get("started_at") or now), 3)
+                    e["detail"] = (
+                        "interrupted — process restarted before the "
+                        "outcome was recorded")
+                    fixed += 1
+            if fixed:
+                self._save()
+        return fixed
+
     def get(self, eid: str) -> dict | None:
         r = self._row(eid)
         return dict(r) if r else None
