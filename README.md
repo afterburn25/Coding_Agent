@@ -10,7 +10,7 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 ## Current development version
 
-`0.28.0`
+`0.28.1`
 
 Canonical version lives in `VERSION`; `scripts/sync_version.py` derives
 every downstream artifact (pyproject, installer defaults, .NET project,
