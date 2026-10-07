@@ -257,10 +257,9 @@ _SUFFIXES = (
 )
 
 
-def _looks_like_word(low: str) -> bool:
-    """Vocabulary membership OR a known word plus an inflection."""
-    if low in _vocab():
-        return True
+def _morph_shield(low: str) -> str | None:
+    """Suffix whose stem is a real word — the token *could* be a valid
+    inflection the lexicon lacks ('talks', 'funnier')."""
     for suf in _SUFFIXES:
         if not low.endswith(suf) or len(low) - len(suf) < 3:
             continue
@@ -274,8 +273,13 @@ def _looks_like_word(low: str) -> bool:
                 and len(stem) > 3 and stem[-1] == stem[-2]):
             stems.add(stem[:-1])
         if any(s in _vocab() for s in stems):
-            return True
-    return False
+            return suf
+    return None
+
+
+def _looks_like_word(low: str) -> bool:
+    """Vocabulary membership OR a known word plus an inflection."""
+    return low in _vocab() or _morph_shield(low) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +298,8 @@ def _freq_bonus(word: str) -> float:
     return 1.5 / (1.0 + rank / 35.0)
 
 
-def _candidates(token: str, ctx_words: set[str]) -> list[tuple[str, float]]:
+def _candidates(token: str, ctx_words: set[str], *,
+                decisive_only: bool = False) -> list[tuple[str, float]]:
     """Score every plausible correction for an unknown token."""
     sk = _skeleton(token)
     word_sk = _word_skeletons()
@@ -314,14 +319,22 @@ def _candidates(token: str, ctx_words: set[str]) -> list[tuple[str, float]]:
             continue  # far too long to be this typo
         dl = _dl(token, word, limit=4)
         sim = -1.0
-        if dl <= max_dl:
+        if decisive_only:
+            # Only the near-certain tier: one edit away AND
+            # phonetically identical — a real-word shield must not
+            # block this ('editer' looks like edit+er but 'editor'
+            # exists one keystroke away). Deletions stay shielded:
+            # 'waiter'→'water' is a real word shortened, not a typo.
+            if dl == 1 and sk_eq and len(word) >= len(token):
+                sim = 3.9
+        elif dl <= max_dl:
             if sk_eq and dl == 1:
                 # One-edit-away AND phonetically identical — swaps and
                 # doubled letters land here; near-certain.
                 sim = 3.9
             else:
                 sim = 2.2 - 0.9 * (dl - 1) + (0.3 if sk_eq else 0.0)
-        if phonetic and sk_eq:
+        if not decisive_only and phonetic and sk_eq:
             # Phonetically identical but far on the surface — weaker
             # than a clean one-edit match, still beats no signal.
             sim = max(sim, 1.9 - 0.15 * max(0, dl - 3))
@@ -347,8 +360,9 @@ def _same_stem(a: str, b: str) -> bool:
     return a[:stem] == b[:stem]
 
 
-def _pick(token: str, ctx_words: set[str]) -> str | None:
-    cands = _candidates(token, ctx_words)
+def _pick(token: str, ctx_words: set[str], *,
+          decisive_only: bool = False) -> str | None:
+    cands = _candidates(token, ctx_words, decisive_only=decisive_only)
     if not cands:
         return None
     best, score = cands[0]
@@ -413,9 +427,22 @@ def normalize_user_text(
         if len(low) < 3 or low in vocab or _in_spans(s, spans):
             pieces.append(tok)
             continue
-        if _looks_like_word(low):
-            # Inflected/derived real word not in the lexicon — leave it.
-            pieces.append(tok)
+        shield = _morph_shield(low) if low not in vocab else None
+        if shield is not None:
+            # Inflected/derived real word not in the lexicon — usually
+            # leave it. A -s/-es shield stays absolute (plurals are
+            # almost always real); other shields yield to a decisive
+            # same-skeleton one-edit candidate ('editer' -> 'editor').
+            fixed = None
+            if shield not in ("s", "es"):
+                fixed = _pick(low, ctx_words, decisive_only=True)
+            if fixed is None:
+                pieces.append(tok)
+                continue
+            if tok[0].isupper():
+                fixed = fixed.capitalize()
+            pieces.append(fixed)
+            fixes.append({"raw": tok, "fixed": fixed})
             continue
         prev = out[s - 1] if s > 0 else ""
         nxt = out[e] if e < len(out) else ""

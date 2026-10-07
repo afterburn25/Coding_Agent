@@ -126,6 +126,20 @@ class TestNormalizeUserText(unittest.TestCase):
         self.assertEqual(self.norm(text), text)
         self.assertEqual(self.fixes(text), [])
 
+    def test_morph_shield_yields_to_decisive_candidate(self):
+        """'editer' looks like a valid 'edit+er' inflection — but 'editor'
+        exists one edit away with the same phonetic skeleton, so the
+        derived-word shield must yield to the decisive correction."""
+        self.assertEqual(self.norm("witch editer do I prefer"),
+                         "witch editor do I prefer")
+        # Real inflections stay put — and a real word never gets
+        # shortened through the shield ('waiter' is not 'water').
+        for sent in ("the runner hopes it works",
+                     "she talks slowly",
+                     "I like bakers and makers",
+                     "the waiter brought our orders quickly"):
+            self.assertEqual(self.norm(sent), sent)
+
     def test_empty_and_none(self):
         self.assertEqual(normalize_user_text(""), ("", []))
         self.assertEqual(normalize_user_text(None), ("", []))
