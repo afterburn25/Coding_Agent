@@ -108,7 +108,8 @@ CASES: list[tuple[str, str, object]] = [
     ("copy data.csv", "clarify",
      lambda ws: (ws / "data.csv").write_text("x")),
     # --- outside-workspace target parks at the gate -------------------
-    ("create a folder D:\\NexusEvalGate", "awaiting_approval", None),
+    # ~/ expands outside the temp workspace on every platform.
+    ("create a folder ~/NexusEvalGate", "awaiting_approval", None),
     # --- compound -----------------------------------------------------
     ("create a folder named comp1, and then create a folder named comp2",
      "verified", None),
@@ -122,6 +123,12 @@ CASES: list[tuple[str, str, object]] = [
     ("what branches are in github for this project", "fell_through",
      None),
 ]
+
+# The flagship outside-root case — an explicit absolute Windows path is
+# only absolute on Windows; on POSIX it resolves workspace-relative.
+if sys.platform.startswith("win"):
+    CASES.append(
+        ("create a folder D:\\NexusEvalGate", "awaiting_approval", None))
 
 PERMS = {"filesystem.read": "allow", "filesystem.write": "allow",
          "filesystem.delete": "allow"}

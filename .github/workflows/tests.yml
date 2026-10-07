@@ -26,6 +26,11 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
+      - name: Action-lane eval
+        # Deterministic-lane correctness scorecard — exits non-zero on
+        # any misclassified case (verified/clarify/parked/fall-through).
+        run: python scripts/eval_action_lane.py
+
       - name: Resolve canonical version
         if: github.event_name != 'pull_request'
         run: echo "APP_VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
