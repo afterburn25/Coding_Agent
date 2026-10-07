@@ -1797,7 +1797,18 @@ begin
   TaskKillImage('llama.exe', True);
   KillBackendFromPidFile();
   StopProcessesUnderInstallDir();
-  AskUninstallScope;
+  if not UninstallSilent() then
+    AskUninstallScope
+  else
+  begin
+    // Silent uninstall (scripted/CI/enterprise): the scope dialog can
+    // never be answered — blocking on it hung /VERYSILENT forever.
+    // Defaults stay all-delete (the documented complaint was leftovers).
+    UnDelProfile := True;
+    UnDelBrain := True;
+    UnDelModels := True;
+    UnDelTools := True;
+  end;
   Result := True;
 end;
 
