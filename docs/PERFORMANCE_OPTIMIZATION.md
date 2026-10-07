@@ -87,6 +87,10 @@ Baseline and measurement method: `docs/PERFORMANCE_BASELINE.md`
 - Chat works while voice is cold; voice works while llama is resident
   (7.9 GB total during synth — fits the 12 GB card).
 - No InvokeAI/ComfyUI processes at idle; on-demand only.
+- **Image round-trip verified end-to-end**: a 512² text-to-image job
+  auto-started InvokeAI, generated (real PNG on disk), and released —
+  `vram_before 4.1 GB → vram_after 7.34 GB`, the ~20 GB model process
+  exited, llama-server stayed resident throughout.
 
 ## Not changed (measured first — judged acceptable)
 - Runtime auto-tune: fingerprint-gated, once per boot, waits for an idle
@@ -104,5 +108,6 @@ Baseline and measurement method: `docs/PERFORMANCE_BASELINE.md`
   removed).
 - Startup ~15 s backend boot is dominated by PyInstaller unpack +
   subsystem init; not yet stage-profiled.
-- 50-turn soak and a full image-generation VRAM round-trip were not run
-  end-to-end on the install; 30-turn chat soak was flat.
+- 50-turn soak not run (30-turn was flat at ~641 MB); image generation
+  runs mostly through WDDM shared memory on a busy 12 GB card — slow but
+  correct, and memory returns afterward.
