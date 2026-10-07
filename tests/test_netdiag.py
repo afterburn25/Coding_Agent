@@ -241,6 +241,9 @@ class _FakeRuntime:
     def refresh_hardware(self):
         pass
 
+    def fresh_hardware(self, max_age_s: float = 15.0):
+        return self.refresh_hardware()
+
     def ensure_ready(self, profile):
         return "http://127.0.0.1:1/v1"
 

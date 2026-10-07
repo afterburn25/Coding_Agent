@@ -471,6 +471,9 @@ class _FakeRuntime:
     def refresh_hardware(self):
         return None
 
+    def fresh_hardware(self, max_age_s: float = 15.0):
+        return self.refresh_hardware()
+
     def ensure_ready(self, profile):
         return profile.endpoint
 

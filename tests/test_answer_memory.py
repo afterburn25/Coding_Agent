@@ -637,6 +637,7 @@ class OrchestratorIntegrationTests(unittest.TestCase):
 
         class _RT:
             def refresh_hardware(self): pass
+            def fresh_hardware(self, max_age_s=15.0): return self.refresh_hardware()
             def resident_model_ids(self): return []
             def rewarm_keep_loaded(self): return []
             def ensure_ready(self, p): return "http://127.0.0.1:1/v1"
