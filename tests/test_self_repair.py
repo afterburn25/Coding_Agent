@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -889,6 +890,35 @@ class CoordinatorPolicyTests(unittest.TestCase):
                 error_message="call failed: api_key=sk-livekey123456")
             self.assertNotIn("sk-livekey123456",
                              json.dumps(inc))
+
+
+class StaleIncidentTests(unittest.TestCase):
+    """An open incident untouched for days was parked mid-pipeline —
+    usually because its triggering condition resolved itself. The tick
+    abandons it instead of resuming repairs against a non-issue."""
+
+    def test_stale_open_incident_abandons_on_tick(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo)
+            inc = report_bug(coord, repo)
+            # Simulate an incident parked days ago mid-pipeline.
+            live = coord.get(inc["id"])
+            live["state"] = "patching"
+            live["updated_at"] = time.time() - (4 * 86400)
+            coord._save()
+            coord.tick()
+            self.assertEqual(
+                coord.get(inc["id"])["state"], "abandoned")
+
+    def test_fresh_incident_still_advances_on_tick(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo)
+            inc = report_bug(coord, repo)
+            coord.tick()
+            self.assertEqual(
+                coord.get(inc["id"])["state"], "localizing")
 
 
 if __name__ == "__main__":

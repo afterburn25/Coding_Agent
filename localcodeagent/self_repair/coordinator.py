@@ -775,9 +775,18 @@ class SelfRepairCoordinator:
             with self._lock:
                 self._save()
 
+    # An open incident untouched this long is definitionally stale —
+    # every stage transition stamps updated_at, so a row this old was
+    # parked mid-pipeline across restarts (its condition has usually
+    # resolved itself; a disk-pressure incident from days ago must not
+    # resume "fixing" a non-issue). Abandon it — terminal, reviewable,
+    # and its repair mission retires via the supervisor check.
+    STALE_INCIDENT_S = 3 * 86400.0
+
     def tick(self, now: float | None = None) -> None:
         """Bounded supervisor-tick step: each open incident advances at
         most one stage so a heavy repair cannot stall the supervisor."""
+        now = time.time() if now is None else now
         with self._lock:
             due = [dict(r) for r in self._rows()
                    if r.get("state") in OPEN_REPAIR_STATES
@@ -785,6 +794,12 @@ class SelfRepairCoordinator:
         for snapshot in due:
             inc = self.get(snapshot["id"])  # live row, not the copy
             if inc is None:
+                continue
+            if (now - float(inc.get("updated_at") or 0.0)
+                    > self.STALE_INCIDENT_S):
+                self._set(inc, "abandoned",
+                          "stale — no progress in "
+                          f"{int(self.STALE_INCIDENT_S // 86400)}d")
                 continue
             try:
                 self._advance(inc)
