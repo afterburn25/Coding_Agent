@@ -501,6 +501,41 @@ weakness wealth weapon weave weekly welfare whale wheat wheel
 whereas whiskey whisper wholesale widespread wildlife willingness
 wind wing wisdom withdraw witness wolf workout workshop worldwide
 worm worth wound wrap wrist yield youngster zone
+monday tuesday wednesday thursday friday saturday sunday weekend
+january february march april may june july august september october
+november december
+english american america europe european asia asian africa african
+google microsoft amazon meta netflix youtube wikipedia reddit twitter
+facebook instagram linkedin spotify apple iphone android samsung
+canada mexico brazil argentina chile peru colombia venezuela
+france germany italy spain portugal ireland scotland england britain
+netherlands belgium switzerland austria poland sweden norway denmark
+finland greece turkey russia ukraine china japan korea india pakistan
+australia zealand egypt nigeria kenya ethiopia morocco israel iraq
+iran afghanistan vietnam thailand indonesia malaysia philippines
+singapore taiwan
+alabama alaska arizona arkansas california colorado connecticut
+delaware florida georgia hawaii idaho illinois indiana iowa kansas
+kentucky louisiana maine maryland massachusetts michigan minnesota
+mississippi missouri montana nebraska nevada hampshire jersey
+carolina dakota ohio oklahoma oregon pennsylvania tennessee texas
+utah vermont virginia washington wisconsin wyoming
+austin boston chicago dallas denver houston vegas angeles memphis
+miami nashville orlando phoenix portland seattle atlanta baltimore
+cleveland detroit indianapolis louisville milwaukee minneapolis
+oakland philadelphia phoenix sacramento antonio diego francisco
+jose tucson tulsa wichita
+london paris berlin madrid rome vienna prague warsaw budapest
+amsterdam brussels lisbon dublin stockholm copenhagen oslo helsinki
+athens moscow kyiv beijing tokyo seoul shanghai delhi mumbai bangkok
+sydney melbourne toronto vancouver montreal dubai singapore
+passport plumber carpenter electrician mechanic painter gardener
+barber tailor butcher baker cashier waiter waitress janitor maid
+secretary clerk lawyer judge jury attorney officer soldier sailor
+pilot surgeon physician dentist pharmacist therapist counselor
+accountant engineer scientist professor librarian journalist author
+writer poet artist musician singer dancer actor actress director
+producer photographer designer architect builder contractor
 """.split())
 
 # Nexus/technical vocabulary — protected as-is and preferred as

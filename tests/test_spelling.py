@@ -140,6 +140,23 @@ class TestNormalizeUserText(unittest.TestCase):
                      "the waiter brought our orders quickly"):
             self.assertEqual(self.norm(sent), sent)
 
+    def test_common_proper_nouns_never_mangled(self):
+        """Days/months/names must stay — lowercase or sentence-initial,
+        where capitalization can't shield them."""
+        for word in ("monday", "february", "july", "august", "december",
+                     "europe", "google", "amazon", "microsoft", "netflix"):
+            self.assertEqual(self.norm(word), word, word)
+            self.assertEqual(
+                self.norm(f"the report is due {word}"), f"the report is due {word}", word)
+        for sent in ("see you monday", "February report",
+                     "order it on amazon", "english breakfast",
+                     "microsoft teams meeting"):
+            self.assertEqual(self.norm(sent), sent, sent)
+        # Genuine typos near protected words still correct.
+        self.assertEqual(
+            self.norm("actually the deadlien was friday not monday"),
+            "actually the deadline was friday not monday")
+
     def test_empty_and_none(self):
         self.assertEqual(normalize_user_text(""), ("", []))
         self.assertEqual(normalize_user_text(None), ("", []))
