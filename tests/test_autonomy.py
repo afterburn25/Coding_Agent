@@ -527,6 +527,52 @@ class JobNodeTests(unittest.TestCase):
             self.assertEqual(out["flagged"], [])
             sup.stop()
 
+    def test_stale_node_replans_instead_of_executing(self):
+        # The flag is not just metadata: a node planned on a superseded
+        # fact is skipped and its dependents repoint onto a fresh
+        # recovery path — the stale instruction never reaches a worker.
+        with tempfile.TemporaryDirectory() as td:
+            executed: list[str] = []
+            sup = make_sup(td, executor=lambda m, n, cb: (
+                executed.append(str(n.get("instruction") or "")),
+                {"ok": True, "output": "done"})[1])
+            mission = sup.missions.create(
+                objective="build the store layer", title="store",
+                scope="one_shot", workspace=td)
+            mid = mission["id"]
+            sup.missions.transition(mid, "executing")
+
+            stale_node = new_task("Migrate to PostgreSQL",
+                                  "Set up the PostgreSQL schema",
+                                  kind="agent")
+            dependent = new_task("Seed data", "seed the store tables",
+                                 kind="agent", deps=[stale_node["id"]])
+
+            def _graph(m):
+                stale_node["state"] = "ready"
+                stale_node["stale_requirement"] = True
+                stale_node.setdefault("metadata", {})[
+                    "superseded_requirements"] = ["postgresql"]
+                m["graph"]["nodes"] = [stale_node, dependent]
+            sup.missions.mutate(mid, _graph)
+
+            sup._step_executing(mid)
+
+            m = sup.missions.get(mid)
+            nodes = {n["id"]: n for n in m["graph"]["nodes"]}
+            self.assertEqual(nodes[stale_node["id"]]["state"], "skipped")
+            # Fresh recovery path anchored on the stale node's deps.
+            kinds = [n.get("created_by") for n in nodes.values()]
+            self.assertIn("replan", kinds)
+            # The dependent repointed onto the recovery tail — it is no
+            # longer chained to the dead node.
+            self.assertNotIn(stale_node["id"],
+                             nodes[dependent["id"]].get("deps") or [])
+            self.assertEqual(executed, [])
+            events = [h.get("event") for h in m.get("history") or []]
+            self.assertIn("replan", events)
+            sup.stop()
+
 
 class AdmissionEvictionTests(unittest.TestCase):
     def test_shortfall_calls_release_hook(self):

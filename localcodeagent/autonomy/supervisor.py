@@ -922,6 +922,36 @@ class AutonomousSupervisor:
         for n in graph.running():
             continue  # running workers update their own state
 
+        # Requirement-change propagation — a node planned on a superseded
+        # fact must never execute on the dead value. Replan around it:
+        # the stale node is skipped, dependents repoint onto a fresh
+        # recovery path anchored on its satisfied deps.
+        stale = [n for n in graph.nodes
+                 if n.get("stale_requirement")
+                 and n.get("state") in {"planned", "ready",
+                                        "waiting_dependency",
+                                        "waiting_approval", "blocked"}]
+        if stale:
+            def _replan_stale(row: dict) -> None:
+                rg = TaskGraph(row)
+                live = {n["id"]: n for n in rg.nodes}
+                for sn in stale:
+                    node = live.get(sn["id"])
+                    if (node is None or node.get("state") in
+                            {"running", "completed", "skipped",
+                             "failed", "cancelled"}):
+                        continue
+                    dead = "; ".join(sorted(set(
+                        (node.get("metadata") or {}).get(
+                            "superseded_requirements") or [])))[:200]
+                    self._do_replan(
+                        row,
+                        "requirements changed"
+                        + (f" ({dead})" if dead else ""),
+                        failed_node=node)
+            self.missions.mutate(mission_id, _replan_stale)
+            return
+
         runnable = graph.runnable(limit=8)
         started = 0
         # Admission is hardware-measured, not a fixed mode→count map: each
