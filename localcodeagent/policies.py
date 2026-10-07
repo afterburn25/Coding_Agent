@@ -197,6 +197,12 @@ class ResourcePolicies:
                     "git_push", "create_pr", "outbound_message",
                     "packages"}:
                 return False, "project egress is restricted"
+            if mode == "custom" and action in NETWORK_ACTIONS:
+                # custom is declared but has no per-action rules yet —
+                # fail closed (reads denied too) rather than silently
+                # allowing everything.
+                return False, ("project egress is custom (no rules "
+                               "defined — denying network actions)")
         return True, ""
 
     # -- natural language ---------------------------------------------------

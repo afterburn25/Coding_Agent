@@ -382,7 +382,7 @@ every push/PR action. Nothing merges or pushes silently.
 
 ## Tests
 
-`tests/test_autonomy.py` — 49 tests covering persistence, restart
+`tests/test_autonomy.py` — 106 tests covering persistence, restart
 recovery, corrupt-store quarantine, DAG ordering/parallelism/leases,
 failure classification + bounded playbooks, policy profiles/grants/stop,
 notification policies + quiet hours + dedupe, schedules/triggers/

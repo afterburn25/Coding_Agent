@@ -1,12 +1,12 @@
 # ComfyUI API Workflow Management
 
-Local Code Agent executes image workflows through ComfyUI's prompt API. The runnable artifact is therefore an **API-format prompt graph**, not the normal ComfyUI UI/workflow JSON.
+Nexus Core executes image workflows through ComfyUI's prompt API. The runnable artifact is therefore an **API-format prompt graph**, not the normal ComfyUI UI/workflow JSON.
 
 ## Import a workflow
 
 1. Open or build the desired workflow in ComfyUI.
 2. Export the workflow in **API format** (`Workflow → Export (API)` in current ComfyUI builds).
-3. Open Local Code Agent → **Image workspace**.
+3. Open Nexus Core → **Image workspace**.
 4. Expand the target image model's **Workflows** section.
 5. Choose **Import API** beside the exact operation (`text_to_image`, `edit_image`, `inpaint`, and so on).
 6. Select the exported JSON file.
@@ -25,7 +25,7 @@ The server validates the graph before saving it. A valid prompt graph is a mappi
 
 ## Template variables
 
-Local Code Agent can substitute `${...}` values before execution. Common variables include:
+Nexus Core can substitute `${...}` values before execution. Common variables include:
 
 - `${prompt}` / `${negative_prompt}`
 - `${seed}`

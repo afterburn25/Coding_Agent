@@ -110,6 +110,21 @@ class OfflineAndEgressTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("restricted", why)
 
+    def test_custom_egress_fails_closed_until_rules_exist(self):
+        """`custom` is declared in EGRESS_MODES but has no per-action
+        rules — it must deny network actions rather than silently
+        allowing everything."""
+        with tempfile.TemporaryDirectory() as td:
+            p = make(td)
+            p.set_egress("p3", "custom")
+            ok, why = p.network_allowed(project_id="p3",
+                                        action="research")
+            self.assertFalse(ok)
+            self.assertIn("custom", why)
+            ok, _ = p.network_allowed(project_id="p3",
+                                      action="git_push")
+            self.assertFalse(ok)
+
 
 class AutonomyGateTests(unittest.TestCase):
     """Offline/egress denies flow through AutonomyPolicy.check."""

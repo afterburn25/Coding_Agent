@@ -173,4 +173,5 @@ never sees Profile A's projects.
   uses worktree `job` nodes or future per-worker sessions.
 - Integrator/reviewer are admitted worker *roles*; full merge semantics
   land on top of `merge_back`/`detect_scope_overlap`.
-- Self-update pipeline is a documented flow, not implemented execution.
+- Self-update pipeline is implemented (`selfupdate.py` + deferred-swap
+  flags applied at desktop boot); further hardening is incremental.

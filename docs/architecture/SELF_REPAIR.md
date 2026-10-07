@@ -195,7 +195,7 @@ diagnosing fresh.
 
 ## Tests
 
-`tests/test_self_repair.py` — 27 tests including the five controlled
+`tests/test_self_repair.py` — 48 tests including the five controlled
 fault-injection scenarios: injected code bug repaired end-to-end
 (git worktree → failing-then-passing regression test → review → canary →
 promote → memory), bad patch rejected with stable tree byte-identical,

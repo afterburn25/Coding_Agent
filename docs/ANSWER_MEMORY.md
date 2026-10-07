@@ -47,10 +47,10 @@ activity with match kind, similarity, trust state, and latency.
 - Corruption on open → the file is quarantined to
   `answer_memory.db.corrupt-<timestamp>` (never deleted) and a fresh DB is
   created so chat keeps working.
-- Migrations: `PRAGMA user_version` + `SCHEMA_VERSION` (currently **1**);
+- Migrations: `PRAGMA user_version` + `SCHEMA_VERSION` (currently **2**);
   a `pre-v<N>.bak` copy is made before any migration step.
 
-### Schema (version 1)
+### Schema (version 2)
 
 | table | role |
 |---|---|

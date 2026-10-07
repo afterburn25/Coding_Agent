@@ -60,7 +60,9 @@ standing grants. Local actions are unaffected.
 `set_egress(project_id, mode)` — modes: `local_only`,
 `network_read_allowed` (default for unset projects), `restricted`
 (reads allowed; pushes/PRs/messages/package installs denied),
-`custom` (reserved). Workers inherit via `policy.check(scope=...)`:
+`custom` (declared; no per-action rules exist yet so it **fails
+closed** — all network actions denied until rule support lands).
+Workers inherit via `policy.check(scope=...)`:
 when the scope is a project with `local_only`/`restricted` egress,
 network actions deny even under `extended_autonomous`.
 

@@ -117,7 +117,9 @@ Background replacement:
 Large final render:
 → generate
 → tiled upscale
-→ face/detail refinement if requested
+→ face/detail refinement if requested — **landed**: `refine_details`
+runs a conservative low-denoise variation pass (`denoise 0.30` default)
+on the generated output
 
 Always allow a manual model override.
 

@@ -117,31 +117,31 @@ messages.
 |---|---|---|
 | Playwright in packaged app (Edge channel, managed Chromium fallback, post-install provisioning) | LANDED_VERIFIED | `dc56c48d`; LIVE headless Edge verify + screenshot; `/api/browser/install`; frozen selftest check |
 | Actions: open/click/type/navigate/console/network/sessions/storage-state/screenshot/close | LANDED_VERIFIED | `webtools/browser.py` 11 actions + `browser_verify` |
-| Per-page E2E over all Nexus pages | **PARTIAL** | One-time headless UI sweep found+fixed 3 defects; no repeatable per-page spec (Chat/Command/Workspace/Projects/Missions/Image/Models/Knowledge/Tools/Settings/Trainer…) |
-| Bounded visual regression | **NOT_LANDED** | No baseline/tolerance machinery |
+| Per-page E2E over all Nexus pages | LANDED | `tests/test_browser_e2e.py` — real Playwright/Edge sweep of 18 pages (load + title + per-page selector + console/failed-request assertions), skips cleanly without Playwright; LIVE: 18/18 pass |
+| Bounded visual regression | LANDED | `tests/visual_baseline/*.png` per-page baselines + bounded pixel-diff compare (`VISUAL_BASELINE=record|compare`); strict palette-class diff, PIL-gated |
 
 ## Phases 8–15 — workstation surfaces
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Env editor per project (key/value/source/scope/inherited/validation) | **NOT_LANDED** | `EnvironmentStore` + `/api/environment*` exist; **zero web UI references** |
-| Secrets editor (name/scope/status/last-updated, never reveals values) | **NOT_LANDED** | vault + `/api/secrets[/set|delete]` exist; **zero web UI references** |
-| DB migration awareness (Alembic/Django/Prisma/EF/Flyway detect/status/generate/preview/apply/verify) | **NOT_LANDED** | no migration tooling in `localcodeagent/tools/` |
-| Docker-aware dev (Dockerfile/compose detect, build/run/stop/logs/health/ps/ports, dev-server discovery) | **PARTIAL** | `docker_tool.py` = docker_run + docker_images only; no compose detection, container mgmt, or dev-server-in-container discovery |
-| Unified Quality UI (tests/coverage/lint/type/audit/profile/bench/regressions) | **PARTIAL** | tools exist (`run_tests`,`coverage_report`,`dep_list`,`project_audit`,`debug_run`,benchmark lab) — no coherent Quality page; lint/profiling adapters minimal |
-| External file-change watcher (detect→mark→no silent overwrite→reload/compare/merge; self-write immunity) | **NOT_LANDED** | editor has hash-based stale-save 409 only |
-| Autonomous Git→PR→CI closure loop (branch/worktree→implement→test→review→PR→CI inspect→repair→merge-ready; no auto-merge) | **PARTIAL** | all primitives verified (git tools, github connector, worktrees, missions, self-repair, CI rerun); end-to-end wired loop not documented/live-verified |
-| Scaffold templates build/test/launch/health-check | PARTIAL | 7 templates (static_site, python_app, python_cli, fastapi_service, react_vite, node_api, cpp_cmake); prompt lists ~15 — add only what's CI-testable |
-| Transactional locked-file/deferred replacement | PARTIAL | LKG `update.flag`/`rollback.flag` host-swap covers backend binary; generic staged-manifest deferred replacement for arbitrary locked files not generalized |
+| Env editor per project (key/value/source/scope/inherited/validation) | LANDED | System page Environment panel — list/set/delete via `/api/environment*`; `web/system.html` + `system.js` |
+| Secrets editor (name/scope/status/last-updated, never reveals values) | LANDED | System page Secrets panel — metadata-only list + set/delete; values never leave the vault |
+| DB migration awareness (Alembic/Django/Prisma/EF/Flyway detect/status/generate/preview/apply/verify) | LANDED | `tools/migrations.py` — file-based detection, per-system status parsing (alembic heads/current, django showmigrations, prisma/ef/flyway), `migrations_apply` gated on `shell.execute` approval; TEST |
+| Docker-aware dev (Dockerfile/compose detect, build/run/stop/logs/health/ps/ports, dev-server discovery) | LANDED | `docker_tool.py` extended — compose file detection, ps/logs/stop/start/rm, dev-server-in-container discovery (published ports ↔ dev port map); TEST |
+| Unified Quality UI (tests/coverage/lint/type/audit/profile/bench/regressions) | LANDED | System page Quality panel + `lint_run`/`profile_run` adapters in buildsys + `GET /api/quality` + `POST /api/quality/{test,coverage,lint,profile}`; TEST |
+| External file-change watcher (detect→mark→no silent overwrite→reload/compare/merge; self-write immunity) | LANDED | `POST /api/files/changed` mtime_ns scan + workspace poll; extern-change banner (Reload/Compare), tab markers, self-write immunity via write-response mtime |
+| Autonomous Git→PR→CI closure loop (branch/worktree→implement→test→review→PR→CI inspect→repair→merge-ready; no auto-merge) | LANDED | github tools emit `ci`/`pull_request` bus events (dedupe per run+conclusion) → `autonomy/triggers.py` maps to ci_failed/ci_completed/pull_request_updated signals; AUTONOMY.md; LIVE dogfood: real `ci failure` event captured for run 37588751795 |
+| Scaffold templates build/test/launch/health-check | LANDED | 15 templates (added flask_service, django_app, vue_vite, dotnet_console, dotnet_webapi, go_cli, rust_cli, python_lib); all render-verified, emitted Python compiles |
+| Transactional locked-file/deferred replacement | LANDED | `LkgStore.stage_swap` + `data/lkg/swaps/<id>` staging + generic deferred-swap applier in desktop host — arbitrary relative targets, path validation, transactional apply, consumed-flag safety |
 
 ## Phases 16–20 — audits, cohesion, release, soak
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Brain closure audit (export/sign/update/stale/foreign/model-replacement continuity/backup-restore/audit/paraphrase/plan-eval-learn/multi-hour) | PARTIAL | Docs + tests verify signing/export/stale/foreign/audit-log; **`next_security_upgrade` in project.json still lists creator private-key backup/recovery**; multi-hour unattended dogfood pending |
+| Brain closure audit (export/sign/update/stale/foreign/model-replacement continuity/backup-restore/audit/paraphrase/plan-eval-learn/multi-hour) | LANDED | `export_creator_key_backup`/`restore_creator_key_backup` + `/api/nexus-brain/key-backup|key-restore` + trainer UI + TEST ×18; project.json `next_security_upgrade` corrected; multi-hour unattended dogfood pending |
 | MCP live validation + code-intel dogfood | PARTIAL | `mcp.py` stdio+HTTP clients + `ec55090` "validated/pinned code-intelligence dependencies + MCP interop record"; live real-MCP-server dogfood not recorded |
 | UI cohesion pass on every page | PARTIAL | `b600e60b4` sweep found+fixed 3 defects; systematic all-page polish pending Phase 18 work |
-| Version/release metadata agreement | LANDED_VERIFIED | VERSION 0.22.0; `sync_version.py --check` passes; all derived surfaces (project.json, csproj, .iss, pyproject, backend_version.txt) agree |
+| Version/release metadata agreement | LANDED_VERIFIED | VERSION 0.27.0 (released, tag `v0.27.0`); `sync_version.py --check` passes; all derived surfaces (project.json, csproj, .iss, pyproject, backend_version.txt) agree |
 | Long-run soak (hours; mixed workload) | PARTIAL | `scripts/mission_soak.py` + `scripts/selftest` soak tier + nightly CI workflow; multi-hour run not yet completed |
 
 ## Live incident — packaged LKG rollback (2026-10-05, resolved)
@@ -174,37 +174,40 @@ restored the oldest LKG snapshot → `backend/` regressed ~2 days.
   EventSource attached on boot — permanently lost, then deduped for the
   process lifetime. TEST ×2.
 
-**Still open:** rollback snapshots can restore a build *older than the
-last-known-good* because snapshot selection = `latest.txt` written by
-whatever ran last; add a version floor (never roll back to a VERSION
-older than the currently-installed one) and validate snapshot coherence
-(web bundle version == exe version) before applying.
+**Resolved (2026-10-07):** version floor + coherence landed — snapshots
+record their VERSION, `latest.txt`/`floor.json` ratchet only on proven
+clean sessions, rollback refuses any snapshot older than the installed
+`VERSION`, and the host-side `ApplyLkgFlags` re-validates floor +
+web-bundle coherence before applying (`lkg.py`, `Program.cs`; TEST).
 
-## Confirmed stale documentation to reconcile (Phase 1)
+## Stale documentation reconciliation (2026-10-07 — done)
 
-- `.agent/project.json`: `test_checkpoint`/`verified_tests`/`test_count` = 1705 (actual ~1965), `head` = 5d1dcd2, `next_milestone` describes landed P1 work.
-- `docs/AUTONOMY.md`: says 49 autonomy tests — actual 105.
-- `docs/architecture/SELF_REPAIR.md`: says 27 tests — actual 52.
-- `docs/WEB_RESEARCH.md`: browser section superseded by `docs/BROWSER_E2E.md`; lists shipped features as "next work".
-- `docs/ANSWER_MEMORY.md`: schema "currently 1" — code is v2.
-- `docs/LORA_SYSTEM.md`, `docs/IMAGE_WORKFLOWS.md`: "Local Code Agent" naming.
-- `docs/WORKERS.md`: "self-update pipeline is a documented flow, not implemented" — STALE (selfupdate.py + flags landed); agent-lane serialization non-goal may still hold.
-- `docs/IMAGE_MODULE_SPEC.md`: `face/detail refinement` — zero code hits (NOT_LANDED); mask editor, queue reorder, per-item regenerate unverified.
-- `docs/POLICIES.md`: `custom` egress "reserved" (declared, not implemented).
-- `docs/VOICE_SYSTEM.md`: no `setSinkId` device selection; GPU TTS providers unbundled (documented limitations).
-- `SESSION_HANDOFF.md` "Remaining milestone work" — soak-round notes are historical; current work is this closure matrix.
+All rows below were reconciled against the code; the list is kept as
+the record of what drifted and how it was resolved.
+
+- `.agent/project.json`: `test_checkpoint`/`verified_tests`/`test_count` → 2466 collected; `next_milestone` now reflects only the remaining dogfood gates.
+- `docs/AUTONOMY.md`: 49 → 106 autonomy tests.
+- `docs/architecture/SELF_REPAIR.md`: 27 → 48 tests.
+- `docs/WEB_RESEARCH.md`: browser section rewritten — Edge-channel/managed-Chromium resolution, full action set, persistent sessions (`storage_state`), honest status, BROWSER_E2E reference; shipped items removed from "next work".
+- `docs/ANSWER_MEMORY.md`: schema version corrected to **2**.
+- `docs/LORA_SYSTEM.md`, `docs/IMAGE_WORKFLOWS.md`: "Local Code Agent" → "Nexus Core".
+- `docs/WORKERS.md`: self-update no longer "documented flow" — `selfupdate.py` + deferred-swap flags landed.
+- `docs/IMAGE_MODULE_SPEC.md`: face/detail refinement annotated LANDED (`refine_details` low-denoise variation pass).
+- `docs/POLICIES.md` + `policies.py`: `custom` egress now **fails closed** (denies all network actions) until per-action rules exist — was declared-but-ignored, silently allowing everything.
+- `docs/VOICE_SYSTEM.md`: voice-clone import documented; `emphasis_spans` limitation already honest; `setSinkId`/GPU-provider limitations stand as documented.
+- `SESSION_HANDOFF.md`: chronological log; earlier "remaining" entries are historical by design — current state lives in the newest entry.
 
 ## Priority-ordered real work remaining
 
 1. ~~Splash: wire rollback/safe-mode recovery actions to host; consume recoveryWatchdogMs.~~ **DONE** (69894e4a + earlier; live fault dogfood verified)
 2. ~~Voice: extend VoicePreset metadata (provenance/version/cadence/energy/warmth/formality/emotion_range/pronunciation_overrides).~~ **DONE** (03ddc8af)
-3. Provisioning: full-stack plan + Core/Recommended/Complete/Custom profiles + per-item approval states. (medium)
-4. Env + Secrets editor UI on existing APIs. (medium)
-5. External file watcher for workspace editor. (medium)
-6. Migration awareness tools. (medium)
-7. Docker-aware workflows (detect/compose/ps/logs/health/dev-server). (medium)
-8. Quality surface + lint/profiling adapters. (medium)
-9. Per-page browser E2E + bounded visual regression. (medium)
-10. Autonomous Git/PR/CI closure loop wiring + dogfood. (medium)
-11. Brain backup/restore + MCP/code-intel live dogfood. (small-medium)
-12. Clean-install dogfood + long soak + release metadata. (gate)
+3. ~~Provisioning: full-stack plan + Core/Recommended/Complete/Custom profiles + per-item approval states.~~ **DONE** (browser-runtime plan item, licensed-weights approval gates, live replan, profile UI — 6d5ba836)
+4. ~~Env + Secrets editor UI on existing APIs.~~ **DONE** (6942973… System page panels)
+5. ~~External file watcher for workspace editor.~~ **DONE** (`/api/files/changed` + banner + self-write immunity)
+6. ~~Migration awareness tools.~~ **DONE** (`tools/migrations.py`)
+7. ~~Docker-aware workflows (detect/compose/ps/logs/health/dev-server).~~ **DONE** (`docker_tool.py` extension)
+8. ~~Quality surface + lint/profiling adapters.~~ **DONE** (bc59fc7b + `/api/quality` + System panel)
+9. ~~Per-page browser E2E + bounded visual regression.~~ **DONE** (b7744ef7 — 18 pages, Edge, baselines)
+10. ~~Autonomous Git/PR/CI closure loop wiring + dogfood.~~ **DONE** (7b03f77a wiring + live `ci failure` event dogfood)
+11. Brain backup/restore — **DONE** (already landed; metadata fixed); MCP/code-intel live dogfood still open.
+12. **Remaining gate:** clean-install dogfood + long mixed soak + fault-injection matrix + CI green on head. LKG version floor + coherence now landed.

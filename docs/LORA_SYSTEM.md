@@ -1,6 +1,6 @@
 # Local LoRA System
 
-LoRAs live under `models/image/loras/`. Local Code Agent discovers supported weight files and optional JSON sidecars.
+LoRAs live under `models/image/loras/`. Nexus Core discovers supported weight files and optional JSON sidecars.
 
 ## Sidecar metadata
 
@@ -29,7 +29,7 @@ A workflow that accepts selected LoRAs must expose template slots. For the first
 
 For multiple LoRAs, add numbered slots (`lora_2_name`, `lora_2_strength`, and so on). If a user selects more LoRAs than the imported workflow exposes, the job fails during workflow validation rather than silently ignoring the selection.
 
-The substituted LoRA name is the path relative to `models/image/loras`, which matches the directory exported to ComfyUI through Local Code Agent's extra-model-path configuration.
+The substituted LoRA name is the path relative to `models/image/loras`, which matches the directory exported to ComfyUI through Nexus Core's extra-model-path configuration.
 
 ## Subject profiles
 
