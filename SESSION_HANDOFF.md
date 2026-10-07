@@ -51,6 +51,20 @@ Shipped on top of 0.28.1 so the release tag matches the deployed build
 - Dispatched soak run `37630507840` green; push CI green on
   `bc7db5a1` and `2955b307`.
 
+Post-tag on `main` (rides next patch):
+
+- **HTTPError socket closes** (`b0ef2500`): `urllib.error.HTTPError`
+  IS the response object — every `except HTTPError` site that didn't
+  close it leaked the connection socket until GC (InvokeAI/ComfyUI
+  polling, model providers, MCP, GitHub API, downloads + test helpers).
+  All handlers now `exc.close()` under try/finally; suite is
+  ResourceWarning-clean on the touched paths. Deployed to
+  `D:\Nexus_Core` — note the deploy-swap caveat below.
+- **Deploy caveat**: `InvokeAI`'s python (`tools\InvokeAI\Scripts\…`,
+  `invokeai-web`) side-loads `backend\_internal` VC runtime DLLs and
+  holds them — stop it along with llama-server/host before replacing
+  `backend\`, else Remove-Item fails mid-copy. It respawns on demand.
+
 ## 2026-10-07 — v0.28.0: performance audit pass 2 (measure → fix → verify)
 
 A full audit-and-fix sweep over startup, hot paths, residency, and
