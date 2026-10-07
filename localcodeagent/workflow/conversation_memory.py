@@ -462,7 +462,11 @@ class ConversationMemory:
             result.setdefault("locked", []).append(locked_refusal(topic))
             return result
 
-        forget_match = re.match(r"^forget(?:\s+that)?[,:]?\s*(.+)$", raw, flags=re.IGNORECASE)
+        forget_match = re.match(
+            r"^(?:forget(?:\s+(?:that|about))?|nevermind(?:\s+about)?|"
+            r"stop\s+remembering|delete\s+(?:the\s+)?facts?"
+            r"(?:\s+about)?)[,:]?\s*(.+)$",
+            raw, flags=re.IGNORECASE)
         if forget_match:
             forgotten = self.forget(forget_match.group(1))
             result["forgotten"].extend(forgotten)
@@ -736,7 +740,13 @@ class ConversationMemory:
 
     def forget(self, query: str) -> list[dict[str, Any]]:
         target = self._clean(query).casefold()
-        if not target:
+        # "the editor fact" / "about my editor" — filler words around the
+        # real referent must not break the substring match.
+        normalized = re.sub(
+            r"^(?:(?:the|that|about|my|our|a|an|fact|facts|memory)\s+)+",
+            "", target).strip()
+        probes = [p for p in (target, normalized) if p]
+        if not probes:
             return []
         forgotten: list[dict[str, Any]] = []
         with self._lock:
@@ -745,7 +755,8 @@ class ConversationMemory:
                     if not isinstance(row, dict) or not row.get("active", True):
                         continue
                     text = str(row.get("text", ""))
-                    if target in text.casefold() or text.casefold() in target:
+                    folded = text.casefold()
+                    if any(p in folded or folded in p for p in probes):
                         row["active"] = False
                         row["updated_at"] = time.time()
                         forgotten.append(dict(row))

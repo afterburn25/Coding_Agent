@@ -744,6 +744,39 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "correction: the port is 5433")
             self.assertEqual(learned["facts"], ["the port is 5433"])
 
+    def test_forget_variants_retire_the_referent(self):
+        """'forget about X' / 'stop remembering X' retire the fact —
+        'the'/'my'/'about' filler must not break the substring probe,
+        and bare 'forget the facts' must not nuke memory."""
+        for phrasing in (
+            "forget that my editor is emacs",
+            "forget about the editor",
+            "nevermind about my editor",
+            "stop remembering my editor",
+            "delete the fact about my editor",
+        ):
+            with tempfile.TemporaryDirectory() as td:
+                memory = ConversationMemory(Path(td) / "memory.json")
+                memory.learn_from_user("remember that my editor is emacs")
+                memory.learn_from_user("Project Orion uses SQLite.")
+                out = memory.learn_from_user(phrasing)
+                self.assertEqual(
+                    [r["text"] for r in out["forgotten"]],
+                    ["my editor is emacs"], phrasing)
+                active = [f["text"] for f in memory.snapshot()["facts"]
+                          if f["active"]]
+                self.assertEqual(active, ["Orion uses SQLite"], phrasing)
+
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("remember that my editor is emacs")
+            out = memory.learn_from_user("forget the facts")
+            self.assertEqual(out["forgotten"], [])
+            out = memory.learn_from_user(
+                "remember to forget nothing important")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(memory.snapshot()["facts"][0]["active"])
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")
