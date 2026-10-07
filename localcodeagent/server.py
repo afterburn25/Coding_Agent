@@ -8837,10 +8837,16 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": str(exc)}, 400)
                     return
                 import hashlib as _hl
+                try:
+                    st = p.stat()
+                    mtime_ns = st.st_mtime_ns
+                except OSError:
+                    mtime_ns = 0
                 self._json({
                     "path": str(p), "content": text,
                     "sha": _hl.sha1(text.encode("utf-8")).hexdigest(),
                     "size": len(raw_bytes), "truncated": truncated,
+                    "mtime_ns": mtime_ns,
                 })
                 return
             if path == "/api/git/status":
@@ -10893,10 +10899,38 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError as exc:
                         self._json({"error": str(exc)}, 400)
                         return
+                    try:
+                        st = p.stat()
+                        mtime_ns, size = st.st_mtime_ns, st.st_size
+                    except OSError:
+                        mtime_ns, size = 0, len(content)
                     self._json({
                         "ok": True, "path": str(p),
                         "sha": _hl.sha1(content.encode("utf-8"))
-                        .hexdigest()})
+                        .hexdigest(),
+                        "mtime_ns": mtime_ns, "size": size})
+                    return
+                if path == "/api/fs/stat":
+                    # Cheap watcher feed: the workspace page polls open
+                    # tabs and only re-reads files whose mtime/size moved.
+                    stats = {}
+                    for raw_p in list(body.get("paths") or [])[:200]:
+                        raw_p = str(raw_p)
+                        try:
+                            p = _wb_root(raw_p)
+                        except ValueError:
+                            stats[raw_p] = {"exists": False,
+                                            "error": "outside workspaces"}
+                            continue
+                        try:
+                            st = p.stat()
+                            stats[raw_p] = {
+                                "exists": p.is_file(),
+                                "size": st.st_size,
+                                "mtime_ns": st.st_mtime_ns}
+                        except OSError:
+                            stats[raw_p] = {"exists": False}
+                    self._json({"stats": stats})
                     return
                 if path == "/api/fs/mkdir":
                     try:

@@ -63,11 +63,27 @@
 .tab.active { color: var(--text, #e8eaf0); background: #1e2330;
   border-color: var(--border, #262c3a); }
 .tab .t-dot { color: #f0b45c; }
+.tab .t-ext { color: #7ec8ff; }
 .tab .t-close { border: none; background: none; color: inherit;
   cursor: pointer; padding: 0 2px; font-size: 13px; }
 .tab .t-close:hover { color: #ff7b72; }
 
-.editor-wrap { flex: 1; position: relative; min-height: 0; display: flex; }
+.editor-wrap { flex: 1; position: relative; min-height: 0; display: flex;
+  flex-direction: column; }
+.extern-bar {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 6px 10px; font-size: 12px; color: #f0b45c;
+  background: #2a2415; border-bottom: 1px solid #4a3d20;
+}
+.extern-bar[hidden], .extern-diff[hidden] { display: none; }
+.extern-bar .extern-msg { flex: 1; }
+.extern-diff {
+  position: absolute; inset: 40px 12px 12px; z-index: 5; margin: 0;
+  overflow: auto; padding: 10px; border-radius: 8px;
+  background: #141720; border: 1px solid var(--border, #262c3a);
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+  color: var(--text, #e8eaf0);
+}
 .editor-empty {
   margin: auto; color: var(--muted, #8b93a5); font-size: 13px;
   max-width: 460px; text-align: center; padding: 40px;

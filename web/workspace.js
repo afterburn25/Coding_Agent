@@ -221,6 +221,7 @@ function renderTabs() {
     el.innerHTML =
       `<span>${esc(fileName(t.path))}</span>` +
       (t.dirty ? '<span class="t-dot">●</span>' : '') +
+      (t.external ? '<span class="t-ext" title="Changed on disk">↻</span>' : '') +
       '<button class="t-close" type="button" title="Close">×</button>';
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('t-close')) return;
@@ -246,6 +247,7 @@ async function openFile(path) {
   state.tabs.push({
     path, content: data.content, sha: data.sha, dirty: false,
     truncated: !!data.truncated,
+    mtime_ns: data.mtime_ns || 0, size: data.size || 0, external: '',
   });
   activateTab(state.tabs.length - 1);
 }
@@ -268,7 +270,10 @@ function showActiveTab() {
   }
   ed.dataset.path = tab.path;
   ed.readOnly = !!tab.truncated;
+  const diff = $('externDiff');
+  if (diff) diff.hidden = true;
   refreshGutterAndHl();
+  updateExternBar();
 }
 
 function refreshGutterAndHl() {
@@ -311,7 +316,121 @@ async function saveActive() {
   }
   if (res.error) { alert(res.error); return; }
   tab.content = content; tab.sha = res.sha; tab.dirty = false;
-  renderTabs(); refreshGit();
+  // Record the post-write stat so the watcher ignores our own save.
+  tab.mtime_ns = res.mtime_ns || 0; tab.size = res.size || 0;
+  tab.external = '';
+  renderTabs(); refreshGit(); updateExternBar();
+}
+
+/* -------------------------------------------------- external-change watch */
+/* Poll stat-only for open tabs; a moved mtime/size re-reads the file and
+   compares sha — pure touches never flag. Our own saves update the tab's
+   recorded stat, so self-writes are immune by construction. */
+
+async function pollExternal() {
+  if (document.hidden || !state.tabs.length) return;
+  const res = await api.post('/api/fs/stat',
+    { paths: state.tabs.map((t) => t.path) });
+  const stats = (res && res.stats) || {};
+  let flagged = false;
+  for (const tab of state.tabs) {
+    const s = stats[tab.path];
+    if (!s || s.error) continue;
+    if (!s.exists) {
+      if (tab.external !== 'deleted') { tab.external = 'deleted'; flagged = true; }
+      continue;
+    }
+    if (s.mtime_ns === tab.mtime_ns && s.size === tab.size) continue;
+    // Moved on disk — confirm it's a content change, not a touch.
+    try {
+      const d = await api.get(
+        `/api/fs/file?path=${encodeURIComponent(tab.path)}`);
+      tab.mtime_ns = d.mtime_ns || s.mtime_ns;
+      tab.size = d.size || s.size;
+      if (!d.error && d.sha && d.sha !== tab.sha
+          && tab.external !== 'changed') {
+        tab.external = 'changed'; flagged = true;
+      }
+    } catch (e) { /* transient stat — retry next tick */ }
+  }
+  if (flagged) { renderTabs(); updateExternBar(); }
+}
+
+function updateExternBar() {
+  const bar = $('externBar');
+  const tab = state.tabs[state.activeTab];
+  if (!bar) return;
+  if (!tab || !tab.external) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const msg = tab.external === 'deleted'
+    ? `${fileName(tab.path)} was deleted on disk`
+    : `${fileName(tab.path)} changed on disk`;
+  bar.innerHTML =
+    `<span class="extern-msg">⚠ ${esc(msg)}` +
+    (tab.dirty ? ' — you also have unsaved edits' : '') + '</span>' +
+    (tab.external === 'changed'
+      ? '<button id="externReload" class="mini-button" type="button">Reload</button>' +
+        '<button id="externCompare" class="mini-button" type="button">Compare</button>'
+      : '') +
+    '<button id="externDismiss" class="mini-button" type="button">Keep mine</button>';
+  const reload = $('externReload');
+  if (reload) reload.addEventListener('click', async () => {
+    if (tab.dirty && !confirm(
+      `${fileName(tab.path)}: reload discards your unsaved edits — continue?`)) return;
+    const d = await api.get(
+      `/api/fs/file?path=${encodeURIComponent(tab.path)}`);
+    if (d.error) { alert(d.error); return; }
+    tab.content = d.content; tab.sha = d.sha; tab.dirty = false;
+    tab.mtime_ns = d.mtime_ns || 0; tab.size = d.size || 0;
+    tab.external = '';
+    $('editor').value = d.content;
+    renderTabs(); refreshGutterAndHl(); updateExternBar();
+  });
+  const cmp = $('externCompare');
+  if (cmp) cmp.addEventListener('click', async () => {
+    const d = await api.get(
+      `/api/fs/file?path=${encodeURIComponent(tab.path)}`);
+    if (d.error) { alert(d.error); return; }
+    const ed = $('editor');
+    const mine = (ed.dataset.path === tab.path) ? ed.value : tab.content;
+    $('externDiff').hidden = false;
+    $('externDiff').textContent = lineDiff(d.content, mine);
+  });
+  $('externDismiss').addEventListener('click', () => {
+    tab.external = '';
+    $('externDiff').hidden = true;
+    renderTabs(); updateExternBar();
+  });
+}
+
+function lineDiff(diskText, mineText) {
+  const a = String(diskText || '').split('\n');
+  const b = String(mineText || '').split('\n');
+  if (a.length > 3000 || b.length > 3000) {
+    let i = 0;
+    while (i < Math.min(a.length, b.length) && a[i] === b[i]) i++;
+    return `(file too large for full diff — first difference at line ${i + 1})`;
+  }
+  // Classic LCS over lines — bounded by the 3000-line cap above.
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push('  ' + a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push('- ' + a[i]); i++; }
+    else { out.push('+ ' + b[j]); j++; }
+  }
+  while (i < n) out.push('- ' + a[i++]);
+  while (j < m) out.push('+ ' + b[j++]);
+  return out.join('\n');
 }
 
 /* ---------------------------------------------------------------- terminal */
@@ -598,6 +717,7 @@ function wire() {
   if (window.NexusTaskBar && window.NexusTaskBar.init) {
     window.NexusTaskBar.init();
   }
+  setInterval(pollExternal, 6000);
   loadWorkspaces();
 
   // Deep link — the Ctrl+K palette navigates here with ?file=<path>.
