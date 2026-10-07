@@ -103,8 +103,23 @@ class Soak:
         ok = self._wait_alive()
         if ok:
             self.stats["recoveries"] += 1
+            self._ensure_autonomy_on()
         self._event("backend_restart", ok=ok)
         return ok
+
+    def _ensure_autonomy_on(self) -> None:
+        """The soak workspace persists across runs — a control flag left
+        by a previous session (stop, safe mode) would silently park every
+        mission 'ready' while the soak reports timeouts. Restore the
+        operating posture the soak assumes."""
+        code, sm = _api(self.port, "GET", "/api/safemode")
+        if code and sm.get("active"):
+            _api(self.port, "POST", "/api/safemode/exit", {})
+            self._event("safemode_exited")
+        code, st = _api(self.port, "GET", "/api/autonomy/status")
+        if code and (st.get("stopped") or st.get("paused")):
+            _api(self.port, "POST", "/api/autonomy/start", {})
+            self._event("autonomy_started")
 
     # -- soak loop ----------------------------------------------------------
 
@@ -191,6 +206,7 @@ class Soak:
         if not self._wait_alive(timeout=180):
             self._event("boot_failed")
             return 1
+        self._ensure_autonomy_on()
         # Managed-start the utility model so the first mission doesn't
         # eat the cold-boot cost inside its timeout.
         _api(self.port, "POST", "/api/runtime/start",
