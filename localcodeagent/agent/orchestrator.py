@@ -6327,15 +6327,41 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else ""
         )
+        # Envelope advisories — markers intent.py detects (unresolved
+        # references, temporal anchors, comparisons, conditionals,
+        # alternatives, compound clauses) were write-only metadata.
+        # Surfaced to the model so it clarifies/honors them instead of
+        # silently flattening the request.
+        advisories: list[str] = []
         if env.ambiguity:
-            # Ambiguity surfacing — the envelope detected unresolved
-            # references; the model should ask rather than guess when
-            # the missing referent changes the answer.
-            intent_context += (
-                "\n\nAmbiguity notice: "
+            advisories.append(
+                "Ambiguity notice: "
                 + "; ".join(str(a) for a in env.ambiguity[:3])
                 + ". If the missing referent changes the answer, ask one"
                   " short clarifying question instead of guessing.")
+        if env.temporal_context:
+            advisories.append(
+                f"Temporal marker: {env.temporal_context} — resolve it "
+                "against the real current time before answering.")
+        if env.comparison and env.comparison_targets:
+            advisories.append(
+                "Comparison requested between "
+                + " and ".join(env.comparison_targets[:4])
+                + " — answer comparatively, not as separate blurbs.")
+        for cond in env.conditionals[:2]:
+            advisories.append(
+                "Conditional clause detected — honor the stated "
+                f"condition ({cond}) rather than flattening the request.")
+        if env.alternatives:
+            advisories.append(
+                "Alternatives offered — address the options or ask "
+                "which to take; do not silently pick one.")
+        if env.compound:
+            advisories.append(
+                "Compound request — it contains multiple clauses; "
+                "address each part explicitly.")
+        if advisories:
+            intent_context += "\n\n" + "\n".join(advisories)
         knowledge_parts: list[str] = []
         if self.knowledge_memory is not None:
             remembered = self.knowledge_memory.prompt_context(user_text)
