@@ -865,8 +865,10 @@ class MCPHTTPTests(unittest.TestCase):
 
         server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.shutdown)
+        # Cleanups run LIFO — shutdown must stop serve_forever's select
+        # before server_close pulls the socket out from under it.
         self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
         return f"http://127.0.0.1:{server.server_port}/mcp", captured_headers
 
     def test_http_transport_connects_and_calls(self):
