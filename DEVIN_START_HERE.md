@@ -43,6 +43,7 @@ Read in this order:
 14. `docs/DESKTOP_CONTROL.md` for permission-gated local desktop control, audit boundaries, and validation rules.
 15. `docs/AVATAR.md` for the canonical portrait, avatar state channels, gesture bridge, and lip-sync boundaries.
 16. `TOOLS.md` for plugin manifests and managed skill-package lifecycle.
+17. `docs/ACTION_LANE.md` for the deterministic local-action lane — bounded grammar, verified execution, the ActionLedger evidence contract, compound sequencing, and the eval gate. Success language requires a `verified` ledger entry or `*_OK` tool result.
 
 ## Product direction that must be preserved
 
