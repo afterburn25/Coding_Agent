@@ -120,6 +120,7 @@ function renderDetail(){
   const dag=nodes.map(n=>
     `<div class="dag-node" data-state="${n.state}"><span class="nstate">${n.state}</span>`+
     `<b>${esc(n.title)}</b> <span style="color:#4d5f7c">· ${esc(n.kind)}</span>`+
+    (n.stale_requirement?` <span class="mstatus blocked" title="Planned on a superseded requirement: ${esc(((n.metadata||{}).superseded_requirements||[]).join(', ')||'requirement changed')} — will re-plan on the new value">stale</span>`:'')+
     (n.result&&n.result.output?`<div class="nresult">${esc(String(n.result.output).slice(0,300))}</div>`:'')+
     `</div>`).join('')||'<div class="criterion"><span class="dot unknown"></span><span>No plan yet</span></div>';
   const hist=(m.history||[]).slice(-25).reverse().map(h=>
@@ -140,11 +141,13 @@ function renderDetail(){
     (stages?`<div class="detail-section"><h3>Pipeline</h3><div class="stage-strip">${stages}</div></div>`:'')+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
+    `<div class="detail-section"><h3>Evidence</h3><div id="missionEvidence"><div class="hist-row">loading…</div></div></div>`+
     (m.blocked_reason?`<div class="detail-section"><h3>Blocked</h3><div class="objective">${esc(m.blocked_reason)}</div></div>`:'')+
     (m.completion?`<div class="detail-section"><h3>Completion</h3><div class="objective">Elapsed: ${m.completion.elapsed_s}s · ${m.completion.state}</div></div>`:'')+
     `<div class="detail-section"><h3>History</h3>${hist||'<div class="hist-row">empty</div>'}</div>`);
   loadMissionActivity(m.id);
   loadMissionRequirements(m.id);
+  loadMissionEvidence(m.id);
 }
 
 const REQ_MARKS={verified:'✓',implemented:'◐',in_progress:'~',planned:'~',
@@ -188,6 +191,27 @@ async function loadMissionActivity(mid){
   }catch(e){
     const el=$('#missionActivity');
     if(el&&selected===mid)setHtml(el,'<div class="hist-row">activity unavailable</div>');
+  }
+}
+
+async function loadMissionEvidence(mid){
+  // Action Evidence Ledger rollup — what the mission verifiably did
+  // (status counts + last verified/failed actions), not narration.
+  try{
+    const r=await api('/api/missions/'+encodeURIComponent(mid)+'/evidence');
+    const el=$('#missionEvidence');
+    if(!el||selected!==mid)return;
+    const counts=Object.entries(r.statuses||{})
+      .map(([s,c])=>`<span class="mstatus ${s==='verified'?'done':s==='failed'?'failed':s==='awaiting_approval'?'waiting_approval':'executing'}">${esc(s)} ${c}</span>`)
+      .join(' ');
+    const vf=(r.recent_verified||[]).map(a=>`<div class="hist-row"><b>verified</b> ${esc(a)}</div>`).join('');
+    const ff=(r.recent_failures||[]).map(a=>`<div class="hist-row"><b>failed</b> ${esc(a)}</div>`).join('');
+    setHtml(el,(r.actions?
+      `<div class="hist-row">${counts}</div>${vf}${ff}`:
+      '<div class="hist-row">no recorded actions</div>'));
+  }catch(e){
+    const el=$('#missionEvidence');
+    if(el&&selected===mid)setHtml(el,'<div class="hist-row">evidence unavailable</div>');
   }
 }
 
