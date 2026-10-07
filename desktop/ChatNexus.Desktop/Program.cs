@@ -10,6 +10,44 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace ChatNexus.Desktop;
 
+/// <summary>
+/// Process-start-anchored boot trace. Writes `[boot-trace] <label> <ms>`
+/// lines (ms measured from process StartTime, so CLR load → Main entry is
+/// captured too) to backend-host.log. Zero-cost when never Init()ed.
+/// </summary>
+internal static class BootTrace
+{
+    private static readonly DateTimeOffset _t0;
+    private static string? _path;
+
+    static BootTrace()
+    {
+        try { _t0 = Process.GetCurrentProcess().StartTime; }
+        catch { _t0 = DateTimeOffset.Now; }
+    }
+
+    public static void Init(string appDir) =>
+        _path = Path.Combine(appDir, "data", "logs", "boot-trace.log");
+
+    public static void Mark(string label)
+    {
+        var path = _path;
+        if (path is null) return;
+        try
+        {
+            var ms = (long)(DateTimeOffset.Now - _t0).TotalMilliseconds;
+            // Dedicated file — appending to backend-host.log races the
+            // backend's stdout writer during the health-wait window and
+            // drops marks silently.
+            using var fs = new FileStream(
+                path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var sw = new StreamWriter(fs);
+            sw.Write($"{ms} {label}{Environment.NewLine}");
+        }
+        catch { }
+    }
+}
+
 internal static class Program
 {
     [STAThread]
@@ -34,6 +72,8 @@ internal static class Program
             earlyLogDir = Path.Combine(appDir, "data", "logs");
             Directory.CreateDirectory(earlyLogDir);
             BackendProcess.NoteStartup(earlyLogDir, $"host process started (pid {Environment.ProcessId})");
+            BootTrace.Init(appDir);
+            BootTrace.Mark("main_entry");
         }
         catch { }
 
@@ -75,6 +115,7 @@ internal static class Program
             }
 
             ApplicationConfiguration.Initialize();
+            BootTrace.Mark("winforms_init");
             Application.Run(new NexusCoreApplicationContext(appDir, testFault, testFaultLate));
             return 0;
         }
@@ -976,8 +1017,10 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         _appDir = appDir;
         _testFault = testFault;
         _testFaultLate = testFaultLate;
+        BootTrace.Mark("context_ctor");
         _progress = CreateProgress();
         _splash = new SplashForm(appDir, _progress);
+        BootTrace.Mark("splash_ctor");
         _splash.RetryRequested += OnRetry;
         _splash.ExitRequested += () => Application.Exit();
         // Throwing (instead of ?? Task.CompletedTask) routes the narrator
@@ -1007,6 +1050,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             if (MainForm is null) Application.Exit();
         };
         _splash.Show();
+        BootTrace.Mark("splash_shown");
         // Launched from a shell/IDE we may not hold foreground rights —
         // TopMost keeps the splash above other windows, but it still needs
         // an explicit Activate or it opens behind the focused app.
@@ -1014,6 +1058,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         // Narration starts alongside startup — never blocks it. First
         // launch speaks the welcome; later launches the short line.
         _narrator.StartupBegan(() => _main?.BackendUrl);
+        BootTrace.Mark("narrator_started");
         _ = RunStartupAsync();
     }
 
@@ -1182,8 +1227,19 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
 
     private async Task RunStartupAsync()
     {
+        // Backend spawn is independent of the splash WebView boot —
+        // start it immediately so process launch / orphan sweep / LKG
+        // flag application overlap the cinematic surface coming up
+        // (measured ~1s spawn + ~1.5s health hidden under ~2.4s webview
+        // boot on the reference machine). Declared outside the try so a
+        // fault before PrepareAsync consumes it can still reap the
+        // spawned process instead of orphaning it during the recovery
+        // window.
+        Task<BackendProcess>? backendSpawn = null;
         try
         {
+            backendSpawn = Task.Run(() => BackendProcess.Start(_appDir));
+
             // Cold start: the cinematic surface must be on screen before any
             // real progress accrues — otherwise the bar first paints at ~50%
             // on a warm backend. The native fallback is already visible while
@@ -1194,6 +1250,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             {
                 await Task.Delay(40);
             }
+            BootTrace.Mark("splash_web_ready");
 
             _progress.Report(0.06, "desktop_init");
 
@@ -1212,6 +1269,7 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
             // Build the real main window now, still invisible.
             _main = new MainForm(_appDir);
             _main.CreateControl(); // handle exists without showing the window
+            BootTrace.Mark("mainform_created");
             // Shutdown narration: "Shutting down the core." + the persona
             // farewell — the window holds until playback actually ends.
             _main.FarewellHook = () =>
@@ -1220,7 +1278,9 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
                 ?? Task.CompletedTask;
 
             _progress.Report(0.15, "backend_launch");
-            await _main.PrepareAsync(_progress);
+            var consumed = backendSpawn;
+            backendSpawn = null;
+            await _main.PrepareAsync(_progress, consumed);
 
             // Core is online — verify the app will genuinely load before
             // the splash comes down. A dead backend or an unservable UI
@@ -1328,6 +1388,19 @@ internal sealed class NexusCoreApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
+            // A prespawned backend that PrepareAsync never consumed (fault
+            // before backend_launch) would orphan holding ports/VRAM for
+            // the whole recovery window — reap it once the spawn finishes.
+            if (backendSpawn is { IsCompleted: false } unconsumed)
+            {
+                _ = unconsumed.ContinueWith(
+                    t => { if (t is { IsCompletedSuccessfully: true }) t.Result.Dispose(); },
+                    TaskContinuationOptions.OnlyOnRanToCompletion);
+            }
+            else if (backendSpawn is { IsCompletedSuccessfully: true })
+            {
+                try { backendSpawn.Result.Dispose(); } catch { }
+            }
             // Fault narration supersedes any friendly line immediately —
             // then recovery diagnostics are already running. The exception
             // itself MUST reach the host log — a silent catch leaves a
@@ -2687,12 +2760,18 @@ internal sealed class MainForm : Form
         catch { }
     }
 
-    public async Task PrepareAsync(StartupProgress progress)
+    public async Task PrepareAsync(StartupProgress progress,
+                                   Task<BackendProcess>? prespawnedBackend = null)
     {
         // BackendProcess.Start does file waits (Defender/LKG settle) that can
-        // block for tens of seconds — keep it off the UI thread so the splash
-        // and recovery surface stay alive while it runs.
-        var backend = await Task.Run(() => BackendProcess.Start(_appDir));
+        // block for tens of seconds — the caller may already have one in
+        // flight (RunStartupAsync fires it before the cinematic gate so the
+        // spawn overlaps the splash WebView boot); otherwise start it here
+        // on a worker thread.
+        BootTrace.Mark("backend_start_begin");
+        var backend = await (prespawnedBackend
+            ?? Task.Run(() => BackendProcess.Start(_appDir)));
+        BootTrace.Mark("backend_spawned");
         AttachBackend(backend);
         // Backend-internal init phases arrive on stdout as [nexus-boot] markers
         // while the HTTP server is still coming up; map them into the band the
@@ -2724,15 +2803,22 @@ internal sealed class MainForm : Form
         // exceed 60s even when the backend is healthy — the PyInstaller
         // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
         await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
+        BootTrace.Mark("backend_healthy");
         progress.Report(0.55, "runtime_sync");
 
         var environment = await environmentTask;
+        BootTrace.Mark("webview_env_ready");
 
         await _webView.EnsureCoreWebView2Async(environment);
+        BootTrace.Mark("webview_core_ready");
         ConfigureWebView();
         await ClearStaleWebCacheAsync(userDataFolder);
+        BootTrace.Mark("webcache_cleared");
         progress.Report(0.72, "webview_init");
 
+        var core = _webView.CoreWebView2;
+        core.DOMContentLoaded += (_, _) => BootTrace.Mark("dom_content_loaded");
+        core.NavigationCompleted += (_, _) => BootTrace.Mark("navigation_completed");
         var ready = WaitForInterfaceReadyAsync();
         _webView.Source = new Uri(_backend.BaseUrl);
         progress.Report(0.85, "interface_nav");
@@ -2971,6 +3057,7 @@ internal sealed class MainForm : Form
                     : null;
                 if (type == "nexus-core-ready")
                 {
+                    BootTrace.Mark("interface_ready_signal");
                     _interfaceReady.TrySetResult(true);
                 }
                 else if (type == "voice-state" &&

@@ -1039,9 +1039,14 @@ connectAgentEvents();
 const _npWait=window.NexusProfile?Promise.resolve(window.NexusProfile.refresh?.()):new Promise(r=>{const t=()=>r(window.NexusProfile?window.NexusProfile.refresh():null);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',t,{once:true});else t();});
 _npWait.catch(()=>{}).finally(()=>{
 loadConversations().then(convos=>{const active=convos?.active;if(active?.messages?.length)renderConversationHistory(active.messages);});});
+// Readiness handshake: the desktop host holds the splash screen until the
+// main shell is genuinely interactive. Post it after the first paint —
+// status/readiness/memory hydrate panels asynchronously and don't gate
+// interactivity (measured ~1.8s of nav→ready was these API calls).
+requestAnimationFrame(()=>requestAnimationFrame(()=>{
+  try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
+}));
 Promise.allSettled([loadStatus(),loadReadiness(),loadConversationMemory()]).finally(()=>{
-  // Readiness handshake: the desktop host holds the splash screen until the
-  // main shell has actually initialized, so the user never sees a blank window.
   try{window.chrome?.webview?.postMessage({type:'nexus-core-ready'});}catch{}
 });input.focus();
 
