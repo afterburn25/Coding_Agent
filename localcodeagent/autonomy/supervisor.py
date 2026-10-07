@@ -1071,12 +1071,15 @@ class AutonomousSupervisor:
         if verdict == EvalVerdict.COMPLETE.value:
             self._complete_mission(mission_id, warnings=False)
         elif verdict == EvalVerdict.NEEDS_USER.value:
-            self.missions.transition(mission_id, "waiting_approval")
+            # Create the approval row BEFORE the status transition —
+            # _reconcile_approvals treats waiting_approval with no
+            # pending row as a missing record and replans immediately.
             self._create_approval(
                 mission_id, "",
                 {"name": "mission_decision", "kind": "mission",
                  "detail": "; ".join(result.get("reasons") or
                                       ["mission needs user direction"])})
+            self.missions.transition(mission_id, "waiting_approval")
         elif verdict == EvalVerdict.NEEDS_REPLAN.value:
             reason = self.recovery.budgets_exceeded(m)
             if reason:
@@ -1443,8 +1446,11 @@ class AutonomousSupervisor:
         self._receipt(mission_id, node_id, "task_finished", result)
 
         if pending_approval:
-            self.missions.transition(mission_id, "waiting_approval")
+            # Row before status — a tick interleaving between the two
+            # would see waiting_approval with no pending approval and
+            # replan around a gate that was just created.
             self._create_approval(mission_id, node_id, pending_approval)
+            self.missions.transition(mission_id, "waiting_approval")
             return
 
         m2 = self.missions.get(mission_id)
