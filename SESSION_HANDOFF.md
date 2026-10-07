@@ -62,6 +62,34 @@ Also fixed this session (same release):
 - **Desktop shortcut** — repointed `Nexus Core.lnk` to the live
   install at `D:\Nexus_Core` (it targeted deleted `D:\Nexus_Core_Fresh`).
 
+Convergence increments landed on top (`main` @ `282f0878`):
+
+- **Stale-node replan** — `_step_executing` replans around
+  `stale_requirement` nodes instead of dispatching dead-requirement
+  work (`76f3a5de`).
+- **Ledger orphan reconciliation** — `recover_orphans()` closes
+  crash-interrupted `recorded` entries as `unverified` at boot
+  (`ae5bc72e`).
+- **Mission UI** — stale-requirement badge on DAG nodes + evidence
+  rollup section consuming `/api/missions/<id>/evidence` (`5ff96620`).
+- **Ambiguity/envelope surfacing** — `env.ambiguity` and sibling
+  markers (temporal/comparison/conditional/alternative/compound)
+  reach the model as prompt advisories and render as UI hint chips
+  (`da6ea8d7`, `f67f60ee`).
+- **Answer Memory invalidation** — superseded facts retire learned
+  answers carrying the dead value so memory can't serve it with a
+  trusted badge (`928f4a87`).
+- **Compound local actions** — fully-parsed clause sequences execute
+  through the same verified lane; stops at first gate/failure;
+  approval resume continues the parked tail, denial cancels it;
+  unparseable clause → whole turn to model (`b02118e5`, `b48c7d7c`).
+- **Replan artifact recheck** — a failed `internal:artifact_exists`
+  criterion now produces a recovery path that names the missing
+  target, demands real file-write output, and re-checks the artifact
+  before re-verify — declared criteria are never retired unverified
+  (bounded-soak finding: missions timed out in a prose-instead-of-
+  write loop; `282f0878`).
+
 Rules for the next session:
 
 - NEVER claim an action succeeded without a `verified` ledger entry or
