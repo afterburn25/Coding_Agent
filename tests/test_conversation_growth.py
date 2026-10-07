@@ -777,6 +777,36 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(out["forgotten"], [])
             self.assertTrue(memory.snapshot()["facts"][0]["active"])
 
+    def test_rule_revocation_retires_mandates_not_prohibitions(self):
+        """'stop X' lifts a mandate; 'do not X anymore' must never retire
+        a rule that already prohibits X, and stores the prohibition when
+        nothing was mandated."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("always respond in JSON")
+            memory.learn_from_user("never use emojis")
+
+            out = memory.learn_from_user("stop responding in JSON")
+            self.assertEqual([r["text"] for r in out["forgotten"]],
+                             ["Always respond in JSON"])
+            # The matching prohibition must survive untouched.
+            active = [r["text"] for r in memory.snapshot()["behavior_rules"]
+                      if r["active"]]
+            self.assertEqual(active, ["Never use emojis"])
+
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("do not use emojis anymore")
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]]
+            self.assertEqual(rules, ["Never use emojis"])
+
+            # Vague revocations must not wipe rules.
+            memory.learn_from_user("always respond politely")
+            out = memory.learn_from_user("stop it")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(all(
+                r["active"] for r in memory.snapshot()["behavior_rules"]))
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")

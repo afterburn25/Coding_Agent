@@ -635,6 +635,32 @@ class ConversationMemory:
             ):
                 result["facts"].append(fact)
 
+            # Rule revocation — "stop responding in JSON", "don't use
+            # emojis anymore" retires the matching active rule rather
+            # than leaving a contradiction live in every prompt.
+            revoke = re.match(
+                r"^(?:stop|quit)\s+(.+?)(?:\s+please)?[.!?]?$"
+                r"|^(?:do\s+not|don't|dont|please\s+do\s+not)\s+(.+?)\s+anymore[.!?]?$"
+                r"|^no\s+longer\s+(.+?)[.!?]?$"
+                r"|^you\s+can\s+stop\s+(.+?)[.!?]?$",
+                raw, flags=re.IGNORECASE)
+            if revoke:
+                action = next(g for g in revoke.groups() if g)
+                revoked = self._revoke_rules(action)
+                result["forgotten"].extend(revoked)
+                if not revoked and self._rule_terms(action):
+                    # Nothing to retract — the phrase is itself a durable
+                    # prohibition ("stop responding in JSON" with no prior
+                    # mandate means "never do that").
+                    rule = f"Never {action.strip()}"
+                    if not locked_topic(rule) and self._append_unique(
+                            "behavior_rules", rule, self.rule_limit,
+                            scope=scope, scope_id=scope_id):
+                        result["behavior_rules"].append(rule)
+                if any(result.values()):
+                    self._save()
+                return result
+
             rule: str | None = None
             for kind, pattern in (
                 ("from_now_on", r"^from\s+now\s+on[,:]?\s*(.+)$"),
@@ -737,6 +763,69 @@ class ConversationMemory:
                     self._save()
                     return dict(row)
         raise KeyError(item_id)
+
+    _RULE_STEMS_DROP = {
+        "in", "the", "a", "an", "to", "and", "or", "of", "my", "your",
+        "with", "on", "for", "it", "that", "this", "be", "is", "are",
+        "me", "you", "always", "never", "from", "now", "please",
+    }
+
+    @staticmethod
+    def _stem_token(token: str) -> str:
+        if token.endswith("ing") and len(token) > 4:
+            return token[:-3]
+        if token.endswith("ed") and len(token) > 4:
+            return token[:-2]
+        if token.endswith("es") and len(token) > 4:
+            return token[:-2]
+        if token.endswith("s") and len(token) > 3 and not token.endswith("ss"):
+            return token[:-1]
+        return token
+
+    @staticmethod
+    def _stem_norm(stem: str) -> str:
+        # 'us'=='use', 'writ'=='write', 'runn'=='run' — silent-e and
+        # doubled-final-consonant differences must not split a match.
+        stem = stem.rstrip("e")
+        while len(stem) > 2 and stem[-1] == stem[-2] and stem[-1].isalpha():
+            stem = stem[:-1]
+        return stem
+
+    def _rule_terms(self, text: str) -> set[str]:
+        return {
+            stem for token in re.findall(r"[a-z0-9]+", text.casefold())
+            if (stem := self._stem_token(token))
+            and stem not in self._RULE_STEMS_DROP
+        }
+
+    def _revoke_rules(self, action: str) -> list[dict[str, Any]]:
+        """Retire active behavior rules whose terms cover every content
+        stem of the revoked action. Requires real specificity — 'stop it'
+        must not wipe rules."""
+        terms = self._rule_terms(action)
+        if not terms or (len(terms) == 1 and len(next(iter(terms))) < 4):
+            return []
+        normed = {self._stem_norm(t) for t in terms}
+        revoked: list[dict[str, Any]] = []
+        for row in self._data.get("behavior_rules", []):
+            if not isinstance(row, dict) or not row.get("active", True):
+                continue
+            text = str(row.get("text", ""))
+            # A rule that already *prohibits* the action agrees with the
+            # revocation — retiring it would silently permit the action.
+            if re.match(
+                    r"^(?:never|no\b|not\b|don't|do\s+not|avoid|stop|"
+                    r"refrain|without)", text.strip(), flags=re.IGNORECASE):
+                continue
+            rule_normed = {
+                self._stem_norm(t)
+                for t in self._rule_terms(text)
+            }
+            if normed <= rule_normed:
+                row["active"] = False
+                row["updated_at"] = time.time()
+                revoked.append(dict(row))
+        return revoked
 
     def forget(self, query: str) -> list[dict[str, Any]]:
         target = self._clean(query).casefold()
