@@ -58,6 +58,8 @@ class ImageManager:
         self.consents = ConsentStore(self.data_dir / "consent_records.json")
         self.policy = ImageSafetyPolicy(self.consents)
         self.adult_content_allowed: Callable[[], bool] | None = None
+        self._summary_probe_lock = threading.Lock()
+        self._summary_probe_cache: tuple[float, tuple[dict, dict]] | None = None
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
         self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
         # InvokeAI — the preferred primary engine for standard generation/
@@ -399,6 +401,48 @@ class ImageManager:
     # are stable state while on-demand autostart owns the lifecycle.
     _SUMMARY_PROBE_TTL = 30.0
 
+    def _probe_backends(self) -> tuple[dict, dict]:
+        """Live health probe of both image backends. The two are
+        independent objects — run them in parallel so serialized
+        dead-endpoint timeouts don't stack."""
+        probed: dict[str, dict] = {}
+        threads = [
+            threading.Thread(
+                target=lambda n, fn: probed.__setitem__(n, fn()),
+                args=(name, fn), daemon=True)
+            for name, fn in (("comfyui", self.backend_runtime.probe),
+                             ("invokeai", self.invokeai_runtime.probe))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        return (
+            probed.get("comfyui") or {
+                "healthy": False, "error": "probe timed out"},
+            probed.get("invokeai") or {
+                "healthy": False, "error": "probe timed out"})
+
+    def _kick_probe_refresh(self, cache_ts: float) -> None:
+        """Single-flight background refresh of the stale probe cache."""
+        with self._summary_probe_lock:
+            cached = self._summary_probe_cache
+            if cached is None or cached[0] != cache_ts:
+                return  # another caller already refreshed
+            # Stamp the refresh-in-flight marker as "now" — concurrent
+            # stale callers see a fresh-enough entry and don't spawn
+            # duplicate refresh threads; if the thread dies before
+            # writing, the cache goes stale again after one TTL.
+            self._summary_probe_cache = (time.time(), cached[1])
+        def _run() -> None:
+            try:
+                result = self._probe_backends()
+            except Exception:
+                result = ({"healthy": False, "error": "probe failed"},
+                          {"healthy": False, "error": "probe failed"})
+            with self._summary_probe_lock:
+                self._summary_probe_cache = (time.time(), result)
+        threading.Thread(target=_run, daemon=True).start()
+
     def summary(self) -> dict[str, Any]:
         # probe() does a live HTTP health check per backend — a dead
         # endpoint can cost its full connect timeout (measured ~0.75 s
@@ -407,36 +451,28 @@ class ImageManager:
         # brief caching keeps dead backends from taxing every status call.
         # Active backends always probe fresh — state transitions during
         # a job must not lag behind the cache.
-        busy = (getattr(self.backend_runtime, "_process", None) is not None
-                or getattr(self.invokeai_runtime, "_process", None)
-                is not None)
-        cached = getattr(self, "_summary_probe_cache", None)
-        if not busy and cached is not None \
-                and time.time() - cached[0] < self._SUMMARY_PROBE_TTL:
+        # _process retains the dead Popen after a backend exits — "busy"
+        # must mean a live process or the cache is bypassed forever.
+        def _live(rt) -> bool:
+            p = getattr(rt, "_process", None)
+            return p is not None and p.poll() is None
+        busy = _live(self.backend_runtime) or _live(self.invokeai_runtime)
+        cached = self._summary_probe_cache
+        if not busy and cached is not None:
             backend_runtime, invoke_runtime = cached[1]
+            if time.time() - cached[0] >= self._SUMMARY_PROBE_TTL:
+                # Stale-while-revalidate: serve the last snapshot now and
+                # refresh in the background — otherwise every post-chat
+                # status poll (>30 s apart) pays the dead-endpoint probe.
+                self._kick_probe_refresh(cached[0])
         else:
-            # The two probes are independent objects — run them in
-            # parallel so serialized dead-endpoint timeouts don't stack.
-            probed: dict[str, dict] = {}
-            threads = [
-                threading.Thread(
-                    target=lambda n, fn: probed.__setitem__(n, fn()),
-                    args=(name, fn), daemon=True)
-                for name, fn in (("comfyui", self.backend_runtime.probe),
-                                 ("invokeai", self.invokeai_runtime.probe))]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(timeout=10)
-            backend_runtime = probed.get("comfyui") or {
-                "healthy": False, "error": "probe timed out"}
-            invoke_runtime = probed.get("invokeai") or {
-                "healthy": False, "error": "probe timed out"}
+            backend_runtime, invoke_runtime = self._probe_backends()
             self._summary_probe_cache = (
                 time.time(), (backend_runtime, invoke_runtime))
         healthy = bool(backend_runtime.get("healthy"))
         detail = str(backend_runtime.get("error") or "")
-        invoke_models = self._invokeai_models()
+        invoke_models = self._invokeai_models(
+            backend_healthy=bool(invoke_runtime.get("healthy")))
         return {
             "enabled": bool(getattr(self.config, "image_enabled", True)),
             "backend": {"type": "comfyui", "endpoint": self.backend.endpoint, "healthy": healthy, "detail": detail[:300], "runtime": backend_runtime},
@@ -589,14 +625,20 @@ class ImageManager:
             return False, "InvokeAI is not installed"
         return False, "InvokeAI is offline"
 
-    def _invokeai_models(self, *, force: bool = False) -> list[dict[str, Any]]:
-        """InvokeAI's own model registry, 30s-cached; empty when offline."""
+    def _invokeai_models(self, *, force: bool = False,
+                         backend_healthy: bool | None = None) -> list[dict[str, Any]]:
+        """InvokeAI's own model registry, 30s-cached; empty when offline.
+        ``backend_healthy`` threads in a just-probed health result so a
+        summary() call that already probed doesn't pay a second live
+        health request on cache expiry."""
         now = time.time()
         if not force and self._invokeai_models_ts and now - self._invokeai_models_ts < 30.0:
             return self._invokeai_model_cache
         rows: list[dict[str, Any]] = []
         try:
-            if self._backend_up("invokeai"):
+            up = backend_healthy if backend_healthy is not None \
+                else self._backend_up("invokeai")
+            if up:
                 rows = self.invokeai_backend.models()
             elif self.invokeai_runtime.discover()[0] is not None:
                 # Backend installed but stopped: read InvokeAI's own model
