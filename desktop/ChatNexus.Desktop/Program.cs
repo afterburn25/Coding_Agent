@@ -1914,9 +1914,11 @@ internal sealed class BackendProcess : IDisposable
 
     public async Task WaitUntilHealthyAsync(TimeSpan timeout)
     {
-        // Per-request timeout must tolerate a warming backend: /api/status
-        // can take 10s+ while model services spin up, and aborting early
-        // just queues more work on an already busy server.
+        // Readiness = the HTTP stack answers — /api/health is the cheap
+        // in-memory component probe, not the full /api/status aggregate
+        // (which runs live image-backend HTTP probes on first call).
+        // Per-request timeout must tolerate a warming backend: aborting
+        // early just queues more work on an already busy server.
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         var deadline = DateTime.UtcNow + timeout;
         string? last = null;
@@ -1933,7 +1935,7 @@ internal sealed class BackendProcess : IDisposable
 
             try
             {
-                using var response = await client.GetAsync($"{BaseUrl}api/status");
+                using var response = await client.GetAsync($"{BaseUrl}api/health");
                 if (response.IsSuccessStatusCode)
                 {
                     return;
@@ -1949,7 +1951,7 @@ internal sealed class BackendProcess : IDisposable
             // log; note what the health probe is actually seeing.
             if (DateTime.UtcNow - lastLogged > TimeSpan.FromSeconds(15))
             {
-                WriteLog("HOST", $"still waiting for /api/status on port {Port}: {last}");
+                WriteLog("HOST", $"still waiting for /api/health on port {Port}: {last}");
                 lastLogged = DateTime.UtcNow;
             }
 

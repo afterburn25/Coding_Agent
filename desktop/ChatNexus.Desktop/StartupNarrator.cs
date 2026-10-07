@@ -430,7 +430,9 @@ internal sealed class StartupNarrator
                             continue;
                         }
                         using var ping = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                        var r = await _http.GetAsync(baseUrl + "/api/status", ping.Token);
+                        // /api/health — readiness only; the full status
+                        // aggregate does live backend probes per call.
+                        var r = await _http.GetAsync(baseUrl + "/api/health", ping.Token);
                         if (r.IsSuccessStatusCode)
                         {
                             // One-shot synthesis was the old behavior — if
