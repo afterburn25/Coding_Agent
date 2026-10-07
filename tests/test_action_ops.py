@@ -464,6 +464,52 @@ class TestOrchestratorLane(unittest.TestCase):
         self.assertEqual(task.status, "waiting_approval")
         self.assertIn("approval", result.content.lower())
 
+    def test_compound_approval_resume_continues_tail(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow",
+                 "filesystem.delete": "ask"})
+        self.addCleanup(td2.cleanup)
+        (ws / "gone.txt").write_text("x")
+        (ws / "keep.txt").write_text("y")
+        result = orch.run(
+            "create a folder named seqdir, and then "
+            "delete gone.txt, and then move keep.txt to moved.txt",
+            event_callback=None)
+        task = tasks.get(result.task["id"])
+        self.assertEqual(task.status, "waiting_approval")
+        # Approve the gate — the sequence continues through the tail
+        # instead of dropping it.
+        resumed = orch.resume(task.id, approved=True)
+        self.assertFalse((ws / "gone.txt").exists())
+        self.assertTrue((ws / "moved.txt").exists())
+        self.assertIn("Deleted", resumed.content)
+
+    def test_compound_denial_cancels_tail(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ws = Path(td.name) / "ws"
+        ws.mkdir()
+        td2, orch, tasks, ledger = self._orch(
+            ws, {"filesystem.read": "allow",
+                 "filesystem.write": "allow",
+                 "filesystem.delete": "ask"})
+        self.addCleanup(td2.cleanup)
+        (ws / "a.txt").write_text("x")
+        (ws / "b.txt").write_text("y")
+        result = orch.run(
+            "delete a.txt, and then delete b.txt",
+            event_callback=None)
+        task = tasks.get(result.task["id"])
+        resumed = orch.resume(task.id, approved=False)
+        self.assertTrue((ws / "a.txt").exists())
+        self.assertTrue((ws / "b.txt").exists())
+        self.assertIn("cancelled", resumed.content.lower())
+
     def test_compound_unparseable_clause_falls_through(self):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)

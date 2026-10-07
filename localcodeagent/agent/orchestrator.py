@@ -1959,7 +1959,8 @@ class AgentOrchestrator:
         )
 
     def _local_action_multi(self, plans: list, task_id: str,
-                            event_callback=None):
+                            event_callback=None,
+                            prior_text: str = ""):
         """Sequential execution of a fully-parsed compound request.
         Each clause runs the same verify+ledger lifecycle; the sequence
         stops at the first gate (approval, failure, denial, clarify,
@@ -1988,15 +1989,17 @@ class AgentOrchestrator:
                 stopped_early = True
                 break
         remaining = len(plans) - len(lines)
+        tail_plans = plans[len(plans) - remaining:] if remaining else []
         if parked_plan is None and stopped_early and remaining > 0:
             lines.append(
                 f"I stopped there — {remaining} more step(s) are waiting"
                 " on this before they can run.")
         elif parked_plan is not None and remaining > 0:
             lines.append(
-                f"{remaining} more step(s) queued behind that approval —"
-                " approve it and ask me to continue.")
+                f"{remaining} more step(s) queued behind that approval.")
         text = " ".join(lines)
+        if prior_text:
+            text = (prior_text + " " + text).strip()
         decision = RoutingDecision(
             role="utility",
             model_id="builtin-local",
@@ -2030,6 +2033,18 @@ class AgentOrchestrator:
                     "outside_root": parked_plan.outside_root,
                     "action_text": parked_plan.action_text,
                     "display": parked_plan.display,
+                    # Tail clauses park with the gate — approval resume
+                    # continues the sequence instead of dropping it.
+                    "remaining": [{
+                        "kind": p.kind, "tool": p.tool,
+                        "permission": p.permission,
+                        "params": {k: str(v)
+                                   for k, v in p.params.items()},
+                        "resolved": dict(p.resolved),
+                        "outside_root": p.outside_root,
+                        "action_text": p.action_text,
+                        "display": p.display,
+                    } for p in tail_plans],
                 },
             }
             parked = self.tasks.update(
@@ -3794,6 +3809,30 @@ class AgentOrchestrator:
             text = outcome["text"]
             failed = outcome["status"] in (
                 "failed", "unavailable", "unverified")
+            # Compound sequences park their tail with the gate — an
+            # approved step continues the remaining clauses through the
+            # same verified loop (each may gate again independently).
+            tail_specs = list(spec.get("remaining") or [])
+            if not failed and tail_specs:
+                tail = [ActionPlan(
+                    kind=str(t.get("kind") or ""),
+                    tool=str(t.get("tool") or ""),
+                    permission=str(t.get("permission") or ""),
+                    params={k: (v.lower() == "true"
+                                if isinstance(v, str) and
+                                v.lower() in ("true", "false") else v)
+                            for k, v in
+                            (t.get("params") or {}).items()},
+                    resolved=dict(t.get("resolved") or {}),
+                    outside_root=bool(t.get("outside_root")),
+                    action_text=str(t.get("action_text") or ""),
+                    display=str(t.get("display") or ""))
+                    for t in tail_specs]
+                chained = self._local_action_multi(
+                    tail, task_id, event_callback=event_callback,
+                    prior_text=text)
+                if chained is not None:
+                    return chained
         else:
             if self.action_ledger is not None:
                 entry = self.action_ledger.begin(
@@ -3806,6 +3845,9 @@ class AgentOrchestrator:
                     failure="user denied the approval request")
             text = (f"Understood — I did not {plan.action_text}. "
                     "Nothing was changed.")
+            if spec.get("remaining"):
+                text += (" The remaining step(s) in the sequence were "
+                         "cancelled too.")
             failed = False
         done = self.tasks.update(
             task_id,
