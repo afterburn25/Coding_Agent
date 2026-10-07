@@ -157,6 +157,33 @@ class TestNormalizeUserText(unittest.TestCase):
             self.norm("actually the deadlien was friday not monday"),
             "actually the deadline was friday not monday")
 
+    def test_dictionary_words_never_mangled(self):
+        """The protective dictionary (SCOWL-60 + proper names) shields
+        real words the curated vocab never listed — 'threw', 'spilled',
+        'dinosaur' used to become 'throw', 'spelled', 'dancer'."""
+        for sent in (
+            "the museum has a dinosaur exhibit",
+            "the quarterback threw a touchdown pass",
+            "the toddler spilled juice on the carpet",
+            "we hiked the mountain trail near asheville",
+            "the volcano erupted last year",
+            "the faucet has a leaky gasket",
+            "mosquitoes swarm near the swamp",
+            "when did the titanic sink",
+            "hurricanes form over warm ocean water",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
+    def test_dictionary_layer_does_not_block_real_typos(self):
+        """Protection never becomes a candidate — nonwords still
+        resolve to the curated vocab, and a same-skeleton decisive
+        correction still beats a plausible-looking stem ('editer')."""
+        self.assertEqual(self.norm("witch editer do I prefer"),
+                         "witch editor do I prefer")
+        self.assertEqual(self.norm("thsi taht"), "this that")
+        self.assertEqual(self.norm("recieve teh pacakge"),
+                         "receive the package")
+
     def test_empty_and_none(self):
         self.assertEqual(normalize_user_text(""), ("", []))
         self.assertEqual(normalize_user_text(None), ("", []))

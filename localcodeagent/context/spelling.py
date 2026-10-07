@@ -32,6 +32,7 @@ _WORD_RANK: dict[str, int] = {}
 for _i, _w in enumerate(COMMON_WORDS):
     _WORD_RANK.setdefault(_w, _i)  # first occurrence wins — dupes exist
 _VOCAB: frozenset[str] | None = None
+_KNOWN: frozenset[str] | None = None
 _WORD_SK: dict[str, str] | None = None
 
 
@@ -40,6 +41,30 @@ def _vocab() -> frozenset[str]:
     if _VOCAB is None:
         _VOCAB = set(COMMON_WORDS) | DOMAIN_WORDS | CONTRACTIONS | HARVESTED_WORDS
     return _VOCAB
+
+
+def _known() -> frozenset[str]:
+    """Protective lexicon — real words that must never be "corrected".
+
+    ``words_en_scowl.txt`` is a SCOWL-60-derived dictionary (~94k
+    entries incl. proper names). It is protection-only: membership
+    shields a token but never makes it a correction *candidate*, so
+    obscure dictionary entries can't become typo magnets. This layer
+    exists because the curated vocab can't enumerate English — a real
+    word absent from it ('dinosaur', 'threw', 'spilled') would
+    otherwise be mangled to a nearby candidate ('dancer', 'throw',
+    'spelled').
+    """
+    global _KNOWN
+    if _KNOWN is None:
+        from pathlib import Path
+        path = Path(__file__).with_name("words_en_scowl.txt")
+        try:
+            data = path.read_text(encoding="utf-8")
+        except OSError:
+            data = ""
+        _KNOWN = frozenset(data.split()) | _vocab()
+    return _KNOWN
 
 
 def _skeleton(word: str) -> str:
@@ -278,8 +303,8 @@ def _morph_shield(low: str) -> str | None:
 
 
 def _looks_like_word(low: str) -> bool:
-    """Vocabulary membership OR a known word plus an inflection."""
-    return low in _vocab() or _morph_shield(low) is not None
+    """Real word (dictionary), vocab member, or inflection of one."""
+    return low in _known() or _morph_shield(low) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +447,7 @@ def normalize_user_text(
     ctx_words = {str(w).lower() for w in context_words if w}
     ctx_words |= _message_context_words(out)
     vocab = _vocab()
+    known = _known()
 
     pieces: list[str] = []
     last = 0
@@ -433,7 +459,7 @@ def normalize_user_text(
         low = tok.lower().replace("’", "'")
 
         # --- protection gates ------------------------------------------------
-        if len(low) < 3 or low in vocab or _in_spans(s, spans):
+        if len(low) < 3 or low in known or _in_spans(s, spans):
             pieces.append(tok)
             continue
         if "'" in low:

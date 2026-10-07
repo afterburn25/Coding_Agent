@@ -576,6 +576,15 @@ transmission radiator muffler alternator ignition carburetor
 injector supercharger suspension absorber strut differential
 driveline chassis grille fender
 faucet swarm swarming swarmed erupt erupts erupted erupting titanic
+asheville akron allentown amarillo augusta boise bridgeport brownsville
+carlsbad cary chesapeake chulavista clovis downey erie escondido
+bakersfield beaumont chattanooga gainesville huntsville knoxville
+modesto ontario oxnard palmdale peoria provo reno salem shreveport
+spokane springfield stockton syracuse tacoma tallahassee tempe topeka
+vallejo visalia waco yonkers abilene arvada corona dayton durham
+fremont gresham hayward henderson irving joliet lakewood lansing
+murrieta naperville norman oceanside pasadena pueblo richmond riverside
+rockford rialto savannah scranton simivalley thornton tyler wichita
 """.split())
 
 # Nexus/technical vocabulary — protected as-is and preferred as
