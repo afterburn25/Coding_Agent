@@ -2,6 +2,18 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 — v0.27.0 shipped: performance/residency milestone released
+
+Performance/residency + startup/status work (18 commits since v0.26.1)
+released as **v0.27.0** — `VERSION` bumped, `scripts/sync_version.py`
+regenerated all derived artifacts (pyproject, installer iss, csproj,
+backend_version.txt, `.agent/project.json`), README/DEVIN_START_HERE/
+PROJECT_STATUS updated, tag `v0.27.0`, GitHub Release live.
+Final live numbers on `D:\Nexus_Core`: total startup **~7.0 s**
+(warm), `/api/status` **~20–50 ms** steady-state (SWR probe cache),
+`backend_health` ~1.56 s, warm chat ~1.1–1.4 s, idle 3 processes /
+~4.5 GB VRAM. Full detail in the 0.27.0 `CHANGELOG.md` entry.
+
 ## 2026-10-07 — Performance/residency milestone + startup profiling (v0.26.1, `9abc9de`, CI green)
 
 **Full story:** `docs/PERFORMANCE_OPTIMIZATION.md` (root causes, diffs,
