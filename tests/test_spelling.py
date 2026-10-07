@@ -184,6 +184,42 @@ class TestNormalizeUserText(unittest.TestCase):
         self.assertEqual(self.norm("recieve teh pacakge"),
                          "receive the package")
 
+    def test_confusion_rules_cover_real_word_typos(self):
+        """dont/cant/wont/your/their/its/whether are real words, so only
+        an unambiguous grammar slot may flip them."""
+        pairs = {
+            "i dont know": "i don't know",
+            "why cant it work": "why can't it work",
+            "it wont start": "it won't start",
+            "the stuff that dont work": "the stuff that don't work",
+            "your the best": "you're the best",
+            "your welcome to join us": "you're welcome to join us",
+            "their going to love it": "they're going to love it",
+            "their not coming": "they're not coming",
+            "its a nice day": "it's a nice day",
+            "its been a while": "it's been a while",
+            "its time to go": "it's time to go",
+            "the whether outside": "the weather outside",
+            "weather or not you go": "whether or not you go",
+        }
+        for raw, want in pairs.items():
+            self.assertEqual(self.norm(raw), want, raw)
+
+    def test_confusion_rules_leave_legit_uses(self):
+        """The same words in possessive/grammatical slots stay put."""
+        for sent in (
+            "your idea was great",
+            "your welcome mat is dirty",
+            "their house is nice",
+            "their right side",
+            "the dog wags its tail",
+            "check its time zone",
+            "whether you like it or not",
+            "the weather is nice",
+            "cantilever the cant of the beam",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
     def test_empty_and_none(self):
         self.assertEqual(normalize_user_text(""), ("", []))
         self.assertEqual(normalize_user_text(None), ("", []))

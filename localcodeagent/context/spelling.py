@@ -232,6 +232,38 @@ _CONFUSION_RULES = (
                 r"like|forecast|report|is|looks|now|here|in|tomorrow)\b)"),
      "weather"),
     (re.compile(r"(?<=\bthe\s)wether\b|(?<=\bin\s)wether\b"), "weather"),
+    # "whether" is a real word, so the dictionary shields it — but
+    # "the whether"/"whether outside" is never grammatical as written.
+    (re.compile(r"\bwhether\b(?=\s+(?:outside|today|tomorrow|tonight|"
+                r"forecast|report)\b)"), "weather"),
+    (re.compile(r"(?<=\bthe\s)whether\b|(?<=\bin\s)whether\b"), "weather"),
+    # Reverse direction: "weather or not" is nearly always "whether".
+    (re.compile(r"\bweather\b(?=\s+(?:or\s+not|you|he|she|they|we|i)\b)"),
+     "whether"),
+    # Missing apostrophes on real words — "dont"/"cant"/"wont" are
+    # dictionary words, so only an unambiguous grammar slot may flip
+    # them: after a subject (or relative) pronoun, or inversion-style
+    # before one ("dont you", "cant it").
+    (re.compile(r"\b(i|you|we|they|he|she|it|that|who|which)\s+"
+                r"(dont|cant|wont)\b"),
+     lambda m: m.group(1) + " " + {
+         "dont": "don't", "cant": "can't", "wont": "won't"}[m.group(2)]),
+    (re.compile(r"\b(dont|cant|wont)\b(?=\s+(?:you|we|they|he|she|it|i)\b)"),
+     lambda m: {"dont": "don't", "cant": "can't", "wont": "won't"}[m.group(1)]),
+    # "your the/a/an/not/welcome/going" is never possessive — it's
+    # "you're" every time. Same for "their -ing"/"their not" and
+    # "its a/the/not/been/going".
+    (re.compile(r"\byour\b(?=\s+(?:the|a|an|not|going)\b)"), "you're"),
+    (re.compile(r"\byour\b(?=\s+welcome(?:\s*(?:[.!?,]|$)|"
+                r"\s+(?:to|for)\b))"), "you're"),
+    (re.compile(r"\btheir\b(?=\s+(?:[a-z]+ing|not)\b)"), "they're"),
+    (re.compile(r"\bits\b(?=\s+(?:a|an|the|not|been|going|still|just|"
+                r"really|very|so|also|probably|actually|worth|fine|ok|"
+                r"okay|good|great|better|best|important|hard|easy|"
+                r"possible|true|right|clear|obvious|safe|ready|done|"
+                r"over|here|now|today|working|broken|new|old)\b)"),
+     "it's"),
+    (re.compile(r"\bits\b(?=\s+time\s+(?:to|for)\b)"), "it's"),
 )
 
 
@@ -437,8 +469,9 @@ def normalize_user_text(
         def _sub(m: re.Match) -> str:
             if _in_spans(m.start(), spans):
                 return m.group(0)
-            fixes.append({"raw": m.group(0), "fixed": rep})
-            return rep
+            r = rep(m) if callable(rep) else rep
+            fixes.append({"raw": m.group(0), "fixed": r})
+            return r
 
         out = ci.sub(_sub, out)
 
