@@ -120,12 +120,16 @@ class ProvisioningManager:
                  install_tool_hook: Callable[..., dict] | None = None,
                  tool_installed_hook: Callable[[str], bool] | None = None,
                  job_lookup: Callable[[str], Any] | None = None,
-                 capability_registry: Any = None) -> None:
+                 capability_registry: Any = None,
+                 browser_install_hook: Callable[..., dict] | None = None,
+                 browser_status_hook: Callable[[], dict] | None = None) -> None:
         self.runtime_root = Path(runtime_root)
         self.config = config
         self.image_manager = image_manager
         self._install_tool = install_tool_hook
         self._tool_installed = tool_installed_hook
+        self._browser_install = browser_install_hook
+        self._browser_status = browser_status_hook
         self._job_lookup = job_lookup
         self.capabilities = capability_registry
         self._state_path = self.runtime_root / "data" / "provisioning" / "plan.json"
@@ -198,6 +202,15 @@ class ProvisioningManager:
             kind="tool", priority=35, provides="stt", tier="core",
             est_bytes=10 * 1024 ** 2, est_disk_bytes=10 * 1024 ** 2,
             payload={"tool_id": "whisper"}))
+        # Managed Chromium via Playwright — only downloads when no
+        # system channel (Edge) resolves; a present browser verifies
+        # instantly.
+        items.append(ProvisionItem(
+            id="browser-runtime", label="Browser runtime (Chromium)",
+            kind="browser_runtime", priority=45,
+            provides="browser_preview", tier="recommended",
+            est_bytes=170 * 1024 ** 2,
+            est_disk_bytes=480 * 1024 ** 2))
         items.append(ProvisionItem(
             id="invokeai", label="InvokeAI image backend",
             kind="tool", priority=20, provides="image_generation",
@@ -219,6 +232,9 @@ class ProvisioningManager:
                 est_bytes=int(spec["size_bytes"]),
                 est_disk_bytes=int(spec["size_bytes"]) + 64 * 1024 ** 2,
                 heavy=True,
+                # Licensed weights — approval records informed consent;
+                # the license name rides the payload for the UI.
+                requires_approval=bool(spec.get("license_name")),
                 payload={"fleet_id": fid, "source": spec["invokeai_source"],
                          "sha256": spec["sha256"],
                          "license": spec["license_name"]}))
@@ -274,7 +290,13 @@ class ProvisioningManager:
                 kind="image_model", priority=70 + idx * 10,
                 depends_on=["comfyui"], provides="image_model",
                 est_bytes=size, est_disk_bytes=size + 64 * 1024 ** 2,
-                heavy=True, payload={"model_id": profile.id}))
+                heavy=True,
+                # Same licensed-weights consent rule as the InvokeAI fleet.
+                requires_approval=bool(getattr(
+                    profile, "license_name", "")),
+                payload={"model_id": profile.id,
+                         "license": getattr(
+                             profile, "license_name", "") or ""}))
         return items
 
     def _profile_includes(self, it: ProvisionItem) -> bool:
@@ -341,6 +363,43 @@ class ProvisioningManager:
         # healthy components but uninstalled ones get requeued honestly.
         self._inventory()
         self._save()
+
+    def replan(self) -> dict[str, Any]:
+        """Re-evaluate the declared plan after a profile/include/exclude
+        change. Newly included items join the queue (approval-gated ones
+        enter waiting_approval); newly excluded items are dropped —
+        running ones are cancelled first. Item state for ids still in
+        scope is preserved."""
+        added, removed = [], []
+        with self._lock:
+            declared = {it.id: it for it in self._declared_plan()}
+            for iid, item in declared.items():
+                if iid in self._items or not self._profile_includes(item):
+                    continue
+                if item.requires_approval:
+                    item.state = "waiting_approval"
+                    item.detail = "needs approval to install"
+                self._items[iid] = item
+                added.append(iid)
+            for iid in list(self._items):
+                if iid in declared and self._profile_includes(
+                        self._items[iid]):
+                    continue
+                it = self._items.pop(iid)
+                if it.state in {"running", "queued", "verifying",
+                                "waiting"}:
+                    it.state = "cancelled"
+                    it.detail = "removed by profile change"
+                    it.finished_at = time.time()
+                removed.append(iid)
+            self._save()
+        self._wake.set()
+        for iid in removed:
+            self._emit(None, "item_removed")
+        return {"added": added, "removed": removed,
+                "profile": str(getattr(self.config,
+                                       "provisioning_profile",
+                                       "recommended"))}
 
     def _save(self) -> None:
         try:
@@ -429,6 +488,14 @@ class ProvisioningManager:
                     if not present:
                         it.state, it.verified = "waiting", False
                         it.detail = "model missing from InvokeAI registry — requeued"
+                except Exception:
+                    pass
+            elif it.kind == "browser_runtime":
+                try:
+                    if self._browser_status is not None \
+                            and not self._browser_ready():
+                        it.state, it.verified = "waiting", False
+                        it.detail = "browser channel missing — requeued"
                 except Exception:
                     pass
             elif it.kind == "image_model":
@@ -613,8 +680,12 @@ class ProvisioningManager:
                 "provisioning_exclude": list(getattr(
                     self.config, "provisioning_exclude", []) or []),
             },
-            "complete": len(done) + len([i for i in items
-                                         if i["state"] == "skipped"]) == len(items),
+            # waiting_approval doesn't block completion — it's a pending
+            # user decision, not pending work (same rule as
+            # _check_all_done).
+            "complete": len(done) + len(awaiting) + len(
+                [i for i in items if i["state"] == "skipped"]
+            ) == len(items),
         }
 
     # ------------------------------------------------------------------ loop
@@ -772,6 +843,8 @@ class ProvisioningManager:
                 self._run_chatterbox_runtime(it)
             elif it.kind == "chatterbox_model":
                 self._run_chatterbox_model(it)
+            elif it.kind == "browser_runtime":
+                self._run_browser_runtime(it)
             else:
                 raise ValueError(f"unknown provision kind '{it.kind}'")
             self._finish(it, verified=True)
@@ -871,6 +944,59 @@ class ProvisioningManager:
                     raise _ProvisionCancelled()
                 raise RuntimeError(str(getattr(job, "error", "") or
                                        "install job failed"))
+            time.sleep(1.5)
+
+    def _browser_ready(self) -> bool:
+        if self._browser_status is None:
+            return False
+        try:
+            st = self._browser_status() or {}
+        except Exception:
+            return False
+        return bool(st.get("ready") or st.get("channel")
+                    or st.get("state") == "verified")
+
+    def _run_browser_runtime(self, it: ProvisionItem) -> None:
+        """Managed Chromium — a resolvable system channel means the
+        download never happens; otherwise the install hook submits the
+        tracked playwright job and we follow it like a tool install."""
+        if self._browser_install is None:
+            raise RuntimeError("browser runtime installer not wired")
+        if self._browser_ready():
+            return
+        result = self._browser_install(approve=True)
+        if not result.get("ok"):
+            raise RuntimeError(str(result.get("error")
+                                   or "browser install rejected"))
+        if result.get("already_present") or result.get("channel"):
+            return
+        job_id = str(result.get("job_id") or "")
+        if not job_id:
+            if self._browser_ready():
+                return
+            raise RuntimeError("browser install returned no job")
+        while not self._stop.is_set():
+            self._check_cancel(it)
+            try:
+                job = self._job_lookup(job_id) if self._job_lookup else None
+            except KeyError:
+                job = None
+            if job is None:
+                raise RuntimeError("browser install job disappeared")
+            state = getattr(job, "state", "")
+            it.detail = str(getattr(job, "status", "") or "installing")
+            self._emit(it, "progress")
+            if state == "completed":
+                self._set(it, "verifying", detail="verifying browser")
+                if not self._browser_ready():
+                    raise RuntimeError(
+                        "browser install finished but no channel resolves")
+                return
+            if state in {"failed", "cancelled"}:
+                if state == "cancelled":
+                    raise _ProvisionCancelled()
+                raise RuntimeError(str(getattr(job, "error", "") or
+                                       "browser install failed"))
             time.sleep(1.5)
 
     def _verify_tool(self, it: ProvisionItem) -> None:

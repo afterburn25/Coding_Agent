@@ -1634,6 +1634,8 @@ class AppState:
                 tool_installed_hook=self._tool_installed,
                 job_lookup=lambda jid: self.jobs.get(jid),
                 capability_registry=self.capability_registry,
+                browser_install_hook=self.install_browser_runtime,
+                browser_status_hook=self._browser_runtime_status,
             )
         except Exception:
             import logging
@@ -1802,6 +1804,17 @@ class AppState:
             "browser_state": self._browser_state,
         }
         return CapabilityRegistry(env)
+
+    def _browser_runtime_status(self) -> dict:
+        """Browser-runtime probe for the provisioning plan — verified
+        only when a usable channel actually resolves."""
+        runner = getattr(self, "browser_runner", None)
+        if runner is None:
+            return {"ready": False, "state": "missing"}
+        try:
+            return runner.status()
+        except Exception:
+            return {"ready": False, "state": "error"}
 
     def _browser_state(self) -> str:
         """Honest browser-automation state for the capability probe:
@@ -7108,7 +7121,17 @@ class Handler(BaseHTTPRequestHandler):
             if prov is not None and "provisioning_enabled" in changed:
                 (prov.resume if changed["provisioning_enabled"]
                  else prov.pause)()
-            self._json({"ok": True, "changed": sorted(changed)})
+            out = {"ok": True, "changed": sorted(changed)}
+            # Profile/scope changes re-evaluate the plan immediately —
+            # new items queue, excluded ones cancel out.
+            if prov is not None and changed.keys() & {
+                    "provisioning_profile", "provisioning_include",
+                    "provisioning_exclude"}:
+                try:
+                    out["replan"] = prov.replan()
+                except Exception as exc:
+                    out["replan_error"] = str(exc)
+            self._json(out)
             return True
         if path == "/api/lkg/snapshot":
             self._json(self.state.lkg.snapshot(

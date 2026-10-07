@@ -477,6 +477,18 @@
       toggle("Automatic retry on transient failures", "provisioning_auto_retry", cfg.provisioning_auto_retry !== false) +
       toggle("Voice setup notifications", "provisioning_voice_notifications", cfg.provisioning_voice_notifications !== false) +
       `</div>` +
+      `<div class="settings-section"><div class="section-title">Install profile</div>` +
+      `<div class="kv"><div class="row"><span class="k">Profile</span><span class="v">` +
+      `<select id="provProfile">` +
+      ["core", "recommended", "complete", "custom"].map((p) =>
+        `<option value="${p}" ${String(cfg.provisioning_profile || "recommended") === p ? "selected" : ""}>${p}</option>`).join("") +
+      `</select></span></div>` +
+      (String(cfg.provisioning_profile) === "custom"
+        ? `<div class="row"><span class="k">Include ids</span><span class="v"><input id="provInclude" class="text-input" style="width:240px" value="${esc((cfg.provisioning_include || []).join(","))}" placeholder="comma-separated"></span></div>` +
+          `<div class="row"><span class="k">Exclude ids</span><span class="v"><input id="provExclude" class="text-input" style="width:240px" value="${esc((cfg.provisioning_exclude || []).join(","))}" placeholder="comma-separated"></span></div>` +
+          `<div class="row"><span class="k"></span><span class="v"><button id="provScopeSave" class="mini-button">Apply scope</button></span></div>`
+        : `<div class="row"><span class="k">Items</span><span class="v muted">core = lean · recommended = typical workstation · complete = everything · custom = pick ids below</span></div>`) +
+      `</div></div>` +
       `<div class="settings-section"><div class="section-title">Components</div><div class="kv">` +
       (items.map((it) =>
         `<div class="row"><span class="k">${esc(it.label)}</span><span class="v">${esc(it.state)}${it.error_code ? ` · ${esc(it.error_code)}` : ""}</span></div>`).join("") ||
@@ -489,6 +501,25 @@
           await post("/api/provisioning/config", { [el.dataset.prov]: el.checked });
         } catch (e) { alert(e.message); el.checked = !el.checked; }
       }));
+    const prof = host.querySelector("#provProfile");
+    if (prof) prof.addEventListener("change", async () => {
+      try {
+        await post("/api/provisioning/config", { provisioning_profile: prof.value });
+        renderSetup(host);
+      } catch (e) { alert(e.message); }
+    });
+    const scopeBtn = host.querySelector("#provScopeSave");
+    if (scopeBtn) scopeBtn.addEventListener("click", async () => {
+      const csv = (id) => (host.querySelector(id).value || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      try {
+        await post("/api/provisioning/config", {
+          provisioning_include: csv("#provInclude"),
+          provisioning_exclude: csv("#provExclude"),
+        });
+        renderSetup(host);
+      } catch (e) { alert(e.message); }
+    });
   }
 
   function renderPlain(host) {

@@ -94,13 +94,17 @@ async function refresh(){
         :['running','verifying','queued'].includes(it.state)?'cc-warn':'cc-ver';
       const acts=(it.state==='failed'||it.state==='skipped'||it.state==='cancelled')
         ?` <button class="mini-button" data-pv-retry="${esc(it.id)}">Retry</button>`:'';
+      const ap=(it.state==='waiting_approval')
+        ?` <button class="mini-button" data-pv-approve="${esc(it.id)}">Approve</button>`:'';
+      const lic=(it.state==='waiting_approval'&&it.payload&&it.payload.license)
+        ?` · license ${esc(it.payload.license)}`:'';
       const cx=(it.state==='waiting'||it.state==='queued'||it.state==='running')
         ?` <button class="mini-button" data-pv-cancel="${esc(it.id)}">Cancel</button>`:'';
       const bar=(it.state==='running'&&frac!=null)
         ?`<div class="bar"><span style="width:${Math.round(frac*100)}%"></span></div>`:'';
       return `<div class="hist-row"><span class="cc-badge ${badge}">${esc(it.blocked_reason?'blocked':it.state)}</span> `+
         `${esc(it.label)}`+
-        `<small>${it.detail?' · '+esc(it.detail):''}${speed}${eta}${it.error_code?' · '+esc(it.error_code):''}${it.blocked_reason?' · '+esc(it.blocked_reason):''}</small>${acts}${cx}${bar}</div>`;
+        `<small>${it.detail?' · '+esc(it.detail):''}${lic}${speed}${eta}${it.error_code?' · '+esc(it.error_code):''}${it.blocked_reason?' · '+esc(it.blocked_reason):''}</small>${ap}${acts}${cx}${bar}</div>`;
     }).join('')||'<div class="hist-row">nothing to set up</div>';
   }
 
@@ -117,9 +121,11 @@ $('#ccRefresh').addEventListener('click',refresh);
 $('#ccSetupPause').addEventListener('click',async()=>{await api('/api/provisioning/pause',{});refresh();});
 $('#ccSetupResume').addEventListener('click',async()=>{await api('/api/provisioning/resume',{});refresh();});
 $('#ccSetupItems').addEventListener('click',async e=>{
-  const r=e.target.closest('[data-pv-retry]'),c=e.target.closest('[data-pv-cancel]');
+  const r=e.target.closest('[data-pv-retry]'),c=e.target.closest('[data-pv-cancel]'),
+    a=e.target.closest('[data-pv-approve]');
   if(r){await api('/api/provisioning/retry',{id:r.dataset.pvRetry});refresh();}
   if(c){await api('/api/provisioning/cancel',{id:c.dataset.pvCancel});refresh();}
+  if(a){await api('/api/provisioning/approve',{id:a.dataset.pvApprove});refresh();}
 });
 $('#ccPlan').addEventListener('click',async()=>{
   const m=$('#ccUpdateMsg');if(m)m.textContent='Checking source…';

@@ -572,5 +572,93 @@ class ComfyImageModelItemTests(unittest.TestCase):
             self.assertTrue(it.verified)
 
 
+class ReplanTests(unittest.TestCase):
+    """Profile/scope changes re-evaluate the live plan."""
+
+    def test_replan_adds_and_removes(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            m.config.provisioning_profile = "custom"
+            m.config.provisioning_include = []
+            m.config.provisioning_exclude = ["invokeai"]
+            out = m.replan()
+            self.assertIn("invokeai", out["removed"])
+            self.assertNotIn("invokeai", m._items)
+            # Widening scope adds the item back.
+            m.config.provisioning_exclude = []
+            out = m.replan()
+            self.assertIn("invokeai", out["added"])
+            self.assertIn("invokeai", m._items)
+            # Narrowing again drops it.
+            m.config.provisioning_exclude = ["invokeai"]
+            out = m.replan()
+            self.assertIn("invokeai", out["removed"])
+            self.assertNotIn("invokeai", m._items)
+
+    def test_replan_preserves_existing_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            it = m._items["invokeai"]
+            it.state = "completed"
+            it.verified = True
+            m.replan()
+            self.assertEqual(m._items["invokeai"].state, "completed")
+
+    def test_licensed_fleet_models_require_approval(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            licensed = [it for it in m._items.values()
+                        if it.kind == "invokeai_model"]
+            self.assertTrue(licensed)
+            for it in licensed:
+                self.assertTrue(it.requires_approval)
+                self.assertEqual(it.state, "waiting_approval")
+                self.assertTrue(it.payload.get("license"))
+
+    def test_approve_requeues(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            it = next(i for i in m._items.values()
+                      if i.kind == "invokeai_model")
+            self.assertTrue(m.approve_item(it.id))
+            self.assertEqual(it.state, "waiting")
+
+
+class BrowserRuntimeItemTests(unittest.TestCase):
+    def test_already_present_verifies_without_job(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(
+                Path(td),
+                browser_install_hook=lambda approve=False: {
+                    "ok": True, "channel": "edge",
+                    "already_present": True},
+                browser_status_hook=lambda: {"ready": True})
+            it = _item("browser-runtime", kind="browser_runtime",
+                       payload={})
+            m._items = {"browser-runtime": it}
+            m._run_item("browser-runtime")
+            self.assertEqual(it.state, "completed")
+
+    def test_install_job_tracked_and_verified(self):
+        job = SimpleNamespace(state="running", status="downloading",
+                              error="", metadata={})
+
+        with tempfile.TemporaryDirectory() as td:
+            def _install(approve=False):
+                job.state = "completed"
+                return {"ok": True, "job_id": "j9"}
+            m = _manager(
+                Path(td),
+                browser_install_hook=_install,
+                browser_status_hook=lambda: {"ready": False},
+                job_lookup=lambda jid: job)
+            it = _item("browser-runtime", kind="browser_runtime",
+                       payload={})
+            m._items = {"browser-runtime": it}
+            # Status hook stays false → completion must fail honestly.
+            m._run_item("browser-runtime")
+            self.assertEqual(it.state, "failed")
+
+
 if __name__ == "__main__":
     unittest.main()
