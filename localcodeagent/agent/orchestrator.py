@@ -5346,6 +5346,14 @@ class AgentOrchestrator:
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
+        if any(learned.values()):
+            # Keep Nexus Brain's durable records in lockstep — otherwise
+            # superseded/forgotten facts drift out of sync until a manual
+            # sync endpoint call.
+            try:
+                self._sync_nexus_brain()
+            except Exception:
+                pass
 
         # Corrections and positive feedback are the strongest Answer Memory
         # learning signals — apply them before any lookup runs this turn.
