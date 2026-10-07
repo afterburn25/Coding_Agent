@@ -1,8 +1,18 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.1 is the current release — **Action-turn reliability patch** on top of 0.28.0: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.28.2 is the current release — **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.28.1 — action-turn reliability patch
+## Active version: 0.28.2 — soak-hardening patch
+
+- **Concurrent environment probes** — `EnvironmentStore.detect` runs
+  its independent subprocess probes on a 4-worker pool instead of
+  serially (worst case ~30 s → ~5 s; the soak's 15 s client timeout
+  was being exceeded on loaded Windows runners).
+- **Approval-row ordering** — the approval row now writes before the
+  `waiting_approval` transition so a concurrent reconcile tick can't
+  mistake a just-created gate for a missing record and replan it away.
+
+### 0.28.1 — action-turn reliability patch
 
 - **Adaptive schema budgeting** — advertised tool schemas now budget to
   ~45 % of the model's prompt window and collapse to a minimal
