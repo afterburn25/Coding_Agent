@@ -612,6 +612,57 @@ class JobNodeTests(unittest.TestCase):
             self.assertIn("replan", events)
             sup.stop()
 
+    def test_repair_mission_retires_when_incident_terminal(self):
+        # A self-repair mission resuming after its incident already
+        # closed would execute a plan against a resolved condition —
+        # e.g. a restart days after a transient disk-pressure event.
+        # The step must retire it instead of dispatching.
+        class _RepairStub:
+            def __init__(self, incidents): self._inc = incidents
+            def get(self, iid): return self._inc.get(iid)
+
+        with tempfile.TemporaryDirectory() as td:
+            for inc_state in ("resolved", "needs_human", None):
+                sup = make_sup(
+                    td, repair=_RepairStub(
+                        {} if inc_state is None
+                        else {"ri-x": {"id": "ri-x", "state": inc_state}}))
+                mission = sup.missions.create(
+                    objective="fix it", title="repair",
+                    scope="one_shot", workspace=td,
+                    source="self_repair", source_id="ri-x")
+                node = new_task("patch", "apply fix", kind="agent")
+                sup.missions.mutate(
+                    mission["id"],
+                    lambda m: m["graph"].update(nodes=[node]))
+                sup.missions.transition(mission["id"], "executing")
+                sup._step_mission(mission["id"])
+                self.assertEqual(
+                    sup.missions.get(mission["id"])["status"], "cancelled",
+                    inc_state)
+                sup.stop()
+
+        # Open incident → mission still steps normally.
+        with tempfile.TemporaryDirectory() as td:
+            ran: list[str] = []
+            sup = make_sup(
+                td, repair=_RepairStub(
+                    {"ri-y": {"id": "ri-y", "state": "patching"}}),
+                executor=lambda m, n, cb: (
+                    ran.append(n["id"]), {"ok": True})[1])
+            mission = sup.missions.create(
+                objective="fix it", title="repair",
+                scope="one_shot", workspace=td,
+                source="self_repair", source_id="ri-y")
+            node = new_task("patch", "apply fix", kind="agent")
+            sup.missions.mutate(
+                mission["id"], lambda m: m["graph"].update(nodes=[node]))
+            sup.missions.transition(mission["id"], "executing")
+            sup._step_mission(mission["id"])
+            self.assertNotEqual(
+                sup.missions.get(mission["id"])["status"], "cancelled")
+            sup.stop()
+
     def test_non_executor_nodes_write_ledger_evidence(self):
         # Verify/internal nodes bypass agent.run — without their own
         # ledger writes the mission evidence rollup was blind to the

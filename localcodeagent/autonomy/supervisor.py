@@ -791,6 +791,20 @@ class AutonomousSupervisor:
             return
         status = str(m.get("status"))
 
+        # A self-repair mission whose incident already closed has no
+        # reason to run — a stale resume would execute a plan against a
+        # resolved condition (and could "fix" a non-issue in a stale
+        # worktree). Retire it instead of dispatching.
+        if (status not in TERMINAL_MISSION_STATUSES
+                and str(m.get("source")) == "self_repair"
+                and self.repair is not None):
+            inc = self.repair.get(str(m.get("source_id") or ""))
+            if inc is None or str(inc.get("state")) in TERMINAL_REPAIR_STATES:
+                self.missions.transition(
+                    mission_id, "cancelled",
+                    detail="repair incident already terminal or gone")
+                return
+
         # Budget gate first — overspend pauses with a notification.
         budget = self.budgets.check(m)
         if not budget["ok"]:
