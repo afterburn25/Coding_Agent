@@ -1354,6 +1354,7 @@ class AutonomousSupervisor:
         try:
             res = result or {}
             ok = bool(res.get("ok"))
+            parked = bool(res.get("pending_approval"))
             entry = ledger.begin(
                 kind="mission_node",
                 action=str(node.get("title") or node.get("instruction")
@@ -1365,10 +1366,11 @@ class AutonomousSupervisor:
             output = str(res.get("output") or res.get("error") or "")
             ledger.finish(
                 entry["id"],
-                status="verified" if ok else "failed",
+                status=("awaiting_approval" if parked
+                        else "verified" if ok else "failed"),
                 verification=output[:300] if ok else "",
                 verified=ok,
-                failure="" if ok else output[:300])
+                failure="" if ok or parked else output[:300])
         except Exception:
             pass
 
