@@ -2,6 +2,78 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 (late) — roadmap remainder landed: 12 more items + dogfood sweep
+
+Finished every open roadmap-closure item post-0.27.0 (commits
+`ce7d1110`…`70f539f4`, CI green on head):
+
+- **LKG rollback floor** (`ce7d1110`): `latest.txt`+`rollback.flag`
+  selection now enforced by `min_version.txt` floor (ratcheted on
+  clean-exit session marker) + `_internal/VERSION` coherence check —
+  rollback can no longer regress below the installed version.
+- **System page panels** (`6942973`): Environment editor
+  (`/api/environment*`) + Secrets editor (`/api/secrets`,
+  metadata-only) — the APIs existed with zero UI.
+- **External file-change watcher**: `POST /api/files/changed`
+  mtime_ns scan + workspace poll; editor banner (Reload/Compare),
+  tab markers, self-write immunity via write-response mtime.
+- **DB migration awareness** (`tools/migrations.py`): file-based
+  detect for Alembic/Django/Prisma/EF/Flyway, per-system status
+  parsing, `migrations_apply` gated on `shell.execute` approval.
+- **Docker-aware dev** (`docker_tool.py`): compose detection,
+  ps/logs/stop/start/rm, dev-server-in-container discovery.
+- **Unified Quality UI** (`bc59fc7b`+): System page Quality panel +
+  `lint_run`/`profile_run` adapters + `GET /api/quality` +
+  `POST /api/quality/{test,coverage,lint,profile}`.
+- **Provisioning completion**: Playwright as declared plan item,
+  license-gating on fleet+image models, `approve_item`, `replan()`
+  for live profile changes, UI Approve button.
+- **Scaffolds 7→15**: flask_service, django_app, vue_vite,
+  dotnet_console, dotnet_webapi, go_cli, rust_cli, python_lib —
+  render-verified, emitted Python compiles.
+- **Deferred locked-file replacement**: `LkgStore.stage_swap` +
+  `data/lkg/swaps/<id>` staging + generic swap applier in the
+  desktop host (`Program.cs`).
+- **Git→PR→CI closure loop** (`7b03f77a`): github tools emit
+  deduped `ci`/`pull_request` bus events → triggers map to
+  ci_failed/ci_completed/pull_request_updated signals; live dogfood
+  captured a real `ci failure` event.
+- **refine_details** (`ab1cda3f`): real low-denoise post-upscale
+  pass (own `refine_denoise_strength` knob — inheriting the
+  advisor-filled `denoise_strength=1.0` would regenerate, not
+  refine).
+- **Browser E2E** (`b7744ef7`): per-page Playwright/Edge sweep
+  (18 pages) + bounded PIL pixel-diff visual baselines; skips
+  cleanly without Playwright.
+- **Voice clone import** (`0e2a3253`): `import_voice` WAV/sample
+  registration via `prepare_reference()` canonicalization —
+  zero-shot reference, not training; UI card on Speech Lab.
+- **Silent uninstall fix** (`5c1bdeeb`): `InitializeUninstall`
+  called the modal `AskUninstallScope` unconditionally →
+  `/VERYSILENT` hung forever on an invisible dialog. Found by live
+  clean-install dogfood of the real `NexusCore-Setup-0.27.0`
+  artifact (install→serve→uninstall verified).
+- **Policy fail-closed** (`a6ac3ccb`): `custom` egress treated as
+  `restricted` until per-action rules exist.
+- **Selftest deflake** (`70f539f4`): isolated smoke retries
+  endpoints once + names failed checks in the error.
+- **Stale-doc sweep** (`a6ac3ccb`): test checkpoint 2466
+  (`project.json`, `test_version.py`, README, DEVIN_START_HERE,
+  PROJECT_STATUS) + autonomy/self-repair counts + roadmap-closure
+  rows rewritten to audited state.
+- **MCP live dogfood**: real `@modelcontextprotocol/server-filesystem`
+  over stdio — 14 tools imported, real calls green, boundary
+  enforcement confirmed.
+- **Bounded mission soak** (`D:\nexus-dogfood`, port 8902):
+  kill-mid-mission → backend restart → mission resume → approvals
+  re-granted — persistence + recovery verified. Missions timeout
+  honestly when the utility model answers prose instead of emitting
+  file-write tool calls (model-capability gap, not an executor bug).
+
+Open: multi-hour mixed soak (harness exists, bounded run done),
+full live fault-injection matrix (kill/restart leg verified;
+network-cut/Defender/disk legs untested live).
+
 ## 2026-10-07 — v0.27.0 shipped: performance/residency milestone released
 
 Performance/residency + startup/status work (18 commits since v0.26.1)
