@@ -366,9 +366,18 @@ def _pick(token: str, ctx_words: set[str], *,
     if not cands:
         return None
     best, score = cands[0]
-    runner = next(
-        (s for w, s in cands[1:] if not _same_stem(best, w)), 0.0)
+    runner_word, runner = next(
+        ((w, s) for w, s in cands[1:] if not _same_stem(best, w)),
+        ("", 0.0))
     if score >= 1.5 and (score - runner >= 0.5 or score >= runner * 1.25):
+        return best
+    if (
+        score >= 1.5 and runner_word
+        and _dl(token, best) < _dl(token, runner_word)
+    ):
+        # The winner needs strictly fewer edits than every unrelated
+        # rival — 'reccomend'->'recommend' (dl1) must not be blocked by
+        # a same-score dl2 rival like 'richmond'.
         return best
     return None  # ambiguous or too weak — leave it
 
@@ -425,6 +434,12 @@ def normalize_user_text(
 
         # --- protection gates ------------------------------------------------
         if len(low) < 3 or low in vocab or _in_spans(s, spans):
+            pieces.append(tok)
+            continue
+        if "'" in low:
+            # Possessives/contractions ("cat's", "dogs'") — the tail
+            # after an apostrophe is grammar, not part of the stem, and
+            # must never look like an editable typo.
             pieces.append(tok)
             continue
         shield = _morph_shield(low) if low not in vocab else None
