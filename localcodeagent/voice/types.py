@@ -117,6 +117,11 @@ class VoicePreset:
     # Output
     limiter_ceiling: float = 0.89
     output_gain_db: float = 0.0
+    # Off by default so existing presets keep their approved level;
+    # new presets opt in explicitly.
+    normalize_loudness: bool = False  # BS.1770 gain stage before limiter
+    loudness_target_lufs: float = -17.0
+    limiter_enabled: bool = True
     ambience_ms: float = 0.0      # short room-style tail
     highpass_hz: float = 60.0
     lowpass_hz: float = 0.0       # 0 = no extra LPF

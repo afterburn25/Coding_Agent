@@ -72,6 +72,11 @@ def _bootstrap() -> None:
         register_engine("kokoro", KokoroEngine)
     except Exception:
         pass
+    try:
+        from .chatterbox import ChatterboxEngine
+        register_engine("chatterbox", ChatterboxEngine)
+    except Exception:
+        pass
 
 
 _bootstrap()

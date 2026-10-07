@@ -486,8 +486,99 @@ class KokoroVocalizationAdapter(VocalizationAdapter):
         return standard
 
 
+# Chatterbox Turbo: the tokenizer natively supports bracketed
+# paralinguistic tags which the cloned voice renders *in-character* —
+# far better than spelled-out respellings. Verbal fillers (hmm, uh-huh)
+# render naturally in the clone voice and stay as plain text.
+_CHATTERBOX_TAG_MAP: dict[str, str] = {
+    "laugh": "[laugh]", "soft_laugh": "[chuckle]",
+    "giggle": "[chuckle]", "chuckle": "[chuckle]",
+    "snicker": "[chuckle]", "warm_laugh": "[laugh]",
+    "tee_hee": "[chuckle]", "hehe": "[chuckle]",
+    "heh": "[chuckle]", "hihi": "[chuckle]",
+    "haha": "[laugh]", "bwahaha": "[laugh]", "snort": "[chuckle]",
+    "sigh": "[sigh]", "sigh_soft": "[sigh]", "sigh_deep": "[sigh]",
+    "sigh_relieved": "[sigh]", "sigh_tired": "[sigh]",
+    "sigh_frustrated": "[sigh]", "sigh_content": "[sigh]",
+    "gasp": "[gasp]", "sharp_inhale": "[gasp]", "perk_up": "[gasp]",
+    "cough": "[cough]", "throat_clear": "[clear throat]",
+    "ahem": "[clear throat]", "groan": "[groan]",
+    "sniff": "[sniff]", "shush": "[shush]", "psst": "[shush]",
+}
+
+# Verified upstream turbo tokenizer tags — a shipped-runtime probe can
+# further restrict this via ``supported``.
+_CHATTERBOX_ALL_TAGS = frozenset({
+    "laugh", "chuckle", "sigh", "gasp", "cough", "groan",
+    "sniff", "shush", "clear throat",
+})
+
+
+class ChatterboxVocalizationAdapter(VocalizationAdapter):
+    """Turbo adapter — emits native bracketed tags for paralinguistic
+    sounds (cloned-voice synthesis, not canned samples) and plain-text
+    forms for verbal fillers the voice already pronounces naturally.
+    ``supported`` restricts tags to those confirmed on the actual
+    runtime (capability probe); None = assume all known tags."""
+
+    name = "chatterbox"
+
+    def __init__(self, supported: set[str] | None = None):
+        self.supported = (_CHATTERBOX_ALL_TAGS if supported is None
+                          else set(supported))
+
+    def render(self, voc: Vocalization, *, adult: bool = False) -> str | None:
+        tag = _CHATTERBOX_TAG_MAP.get(voc.style)
+        if tag and tag.strip("[]") in self.supported:
+            return tag
+        # Verbal fillers + fallback text forms — turbo voices these
+        # naturally in the clone voice.
+        text_forms = {
+            "mm_hmm": "mm-hmm.", "mm_affirm": "mm-hmm.",
+            "uh_huh": "uh-huh.", "mm_mm": "mm-mm.", "uh_uh": "uh-uh.",
+            "hmm": "hmm…", "um": "um…", "uhh": "uhh…", "erm": "erm…",
+            "hm": "hm.", "mmm_pleased": "hmmm…", "aha": "aha!",
+            "ah": "ahh…", "oh": "oh.", "ooh": "ooh!", "whoa": "whoa.",
+            "wow": "wow.", "huh": "huh?", "eh": "eh.", "phew": "phew.",
+            "ugh": "ugh.", "oof": "oof.", "ow": "ow!", "ngh": "ungh.",
+            "hup": "hup!", "tsk": "tsk tsk.", "scoff": "humph.",
+            "pfft": "pft.", "meh": "meh.", "aww": "awww…",
+            "yep": "yep.", "mkay": "mm-kay.", "gotcha": "gotcha.",
+            "nope": "nope.", "uh_oh": "uh-oh.", "welp": "welp.",
+            "sheesh": "sheesh.", "jeez": "jeez.", "yikes": "yikes.",
+            "whew": "whew.", "dang": "dang.", "gosh": "gosh.",
+            "hmph": "hmph.", "oops": "oops.", "yay": "yay!",
+            "woo": "woo!", "whee": "whee!", "yawn": "haah…",
+            "aight": "a'ight.", "ohh_yes": "ohh, yes.",
+            "inhale": "hmm…", "deep_breath": "hah…",
+            "exhale": "hah…", "long_exhale": "haahh…",
+            "breath": "hah…", "hum": "hmm hmm…", "smile": "hmm.",
+            "pause": "…", "nervous": "hmm…", "mutter": "hmm…",
+            "whisper": "hmm…", "shiver": "brr.", "whistle": "hmm hmm.",
+            "smirk": "heh.", "wince": "hmm.", "nod": "mm-hmm.",
+            "head_shake": "mm-mm.", "eyebrow_raise": "hmm?",
+            "grin": "heh.", "lean_in": "hmm?", "lean_back": "hmm…",
+            "eye_roll": "huh.", "stretch": "mmh…",
+            "soft_moan": "hmm-mm…", "mwah": "mwah.",
+            "sniff": "sniff.", "gasp": "ah!", "sharp_inhale": "ah!",
+            "throat_clear": "ahem.", "ahem": "ahem.", "cough": "ahem.",
+            "groan": "ughhh.", "shush": "shh.", "psst": "psst.",
+            "laugh": "ha ha!", "chuckle": "heh heh.",
+            "sigh": "ahh…", "sigh_soft": "ahh…", "sigh_deep": "ahhh…",
+            "sigh_relieved": "ahhh… phew.", "sigh_tired": "haaah…",
+            "sigh_frustrated": "ugh, ahhh…", "sigh_content": "ahhh…",
+        }
+        if voc.style in text_forms:
+            return text_forms[voc.style]
+        fallback = {"agreement": "mm-hmm.", "thinking": "hmm…",
+                    "amusement": "heh.", "sigh": "ahh…",
+                    "breathing": "hah…"}
+        return fallback.get(voc.category)
+
+
 _ADAPTERS: dict[str, Callable[[], VocalizationAdapter]] = {
     "kokoro": KokoroVocalizationAdapter,
+    "chatterbox": ChatterboxVocalizationAdapter,
 }
 
 

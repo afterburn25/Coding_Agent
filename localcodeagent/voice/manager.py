@@ -5,6 +5,7 @@ and segment ids so stale/dup speech is suppressed across reconnects.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
@@ -21,6 +22,8 @@ from .speech_filter import SpeechTextFilter
 from .streamer import SentenceStreamer, split_for_speech
 from .types import VoicePreset
 from .vocalizations import VocalizationEngine, adapter_for
+
+log = logging.getLogger(__name__)
 
 
 class SpeechJob:
@@ -124,8 +127,81 @@ class VoiceManager:
             eng = get_engine(name)
             if self.asset_dir is not None and hasattr(eng, "asset_dir"):
                 eng.asset_dir = Path(self.asset_dir)
+            if name == "chatterbox" and hasattr(eng, "runtime_dir"):
+                eng.synth_timeout_s = float(getattr(
+                    self.config, "voice_chatterbox_synth_timeout_s", 120.0))
+                # Isolated runtime resolves like the asset dir: relative
+                # paths anchor at the install root (asset_dir's parent).
+                rd = str(getattr(self.config,
+                                 "voice_chatterbox_runtime_dir",
+                                 "runtime/voice/chatterbox"))
+                rpath = Path(rd)
+                if not rpath.is_absolute() and self.asset_dir is not None:
+                    rpath = Path(self.asset_dir).parent.parent / rpath
+                eng.runtime_dir = rpath
+                eng.device_pref = str(getattr(
+                    self.config, "voice_chatterbox_device", "auto"))
+                eng.min_free_vram_mb = float(getattr(
+                    self.config, "voice_chatterbox_min_free_vram_mb",
+                    3200))
             self._engines[name] = eng
+            if name == (self.current_preset().engine
+                        if self.current_preset() else ""):
+                self._write_startup_sig(eng)
         return self._engines[name]
+
+    def _startup_sig_raw(self, eng) -> str:
+        preset = self.current_preset()
+        return "|".join([
+            getattr(eng, "name", ""), getattr(eng, "version", ""),
+            dsp.DSP_VERSION, preset.id if preset else ""])
+
+    def _write_startup_sig(self, eng) -> None:
+        """Publish the active engine signature for StartupNarrator.cs —
+        it salts its per-line wav cache with this so switching engine /
+        preset / DSP can never replay a stale clip of the wrong voice."""
+        try:
+            raw = self._startup_sig_raw(eng)
+            import hashlib
+            sig = hashlib.sha256(raw.encode()).hexdigest()[:12]
+            self._last_sig_raw = raw
+            target = Path(getattr(self.config, "voice_cache_dir",
+                                  "data/voice/cache"))
+            if not target.is_absolute() and self.asset_dir is not None:
+                target = Path(self.asset_dir).parent.parent / target
+            startup = target.parent / "startup"
+            startup.mkdir(parents=True, exist_ok=True)
+            preset = self.current_preset()
+            (startup / "engine.json").write_text(json.dumps({
+                "sig": sig, "engine": getattr(eng, "name", ""),
+                "engine_version": getattr(eng, "version", ""),
+                "preset_id": preset.id if preset else "",
+            }), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _sync_adapter(self, engine_name: str = "") -> None:
+        """Vocalization adapter follows the active preset's engine —
+        enqueue-time resolve happens before _synthesize picks the engine,
+        so the binding has to live here, not in _synthesize."""
+        try:
+            name = engine_name or (self.current_preset().engine
+                                   if self.current_preset()
+                                   else getattr(self.config, "voice_engine",
+                                                "kokoro"))
+            if name == getattr(self.vocal.adapter, "name", ""):
+                return
+            adapter = adapter_for(name)
+            if (name == "chatterbox"
+                    and hasattr(adapter, "supported")
+                    and "chatterbox" in self._engines):
+                caps = getattr(self._engines["chatterbox"],
+                               "supported_tags", None)
+                if caps:
+                    adapter.supported = set(caps)
+            self.vocal.adapter = adapter
+        except Exception:
+            pass
 
     # -- mute / playback control ------------------------------------------
     def repeat_last(self) -> bool:
@@ -183,6 +259,7 @@ class VoiceManager:
         """filter → vocalization resolution → final TTS input. The direct
         paths (speak, preview, tools) share this so every spoken surface
         gets the same non-verbal handling."""
+        self._sync_adapter()
         spoken = self.filter.filter(text)
         if not spoken:
             return ""
@@ -307,6 +384,9 @@ class VoiceManager:
             return None
         if vocalize:
             try:
+                self._sync_adapter(
+                    self.presets.get(preset_id).engine
+                    if preset_id and self.presets.get(preset_id) else "")
                 vres = self.vocal.resolve(text, task_id=task_id,
                                           ctx=self._persona_ctx())
                 text, events = vres.speech_text, vres.events
@@ -359,6 +439,7 @@ class VoiceManager:
         preset = self.current_preset()
         if preset is None:
             return None
+        self._sync_adapter(preset.engine)
         spoken = self.filter.filter(text)
         if not spoken:
             return None
@@ -589,6 +670,9 @@ class VoiceManager:
                 text = re.sub(rf"\b{re.escape(str(src))}\b",
                               str(overrides[src]), text)
         engine = self.engine(preset.engine)
+        if self._startup_sig_raw(engine) != getattr(
+                self, "_last_sig_raw", None):
+            self._write_startup_sig(engine)
         preset_json = preset.to_json()
         key = AudioCache.key(text, preset.engine,
                              f"{engine.version}|dsp{dsp.DSP_VERSION}",
@@ -602,11 +686,52 @@ class VoiceManager:
                 frames, sr = w.getnframes(), w.getframerate()
             pcm = Path(hit).read_bytes()  # placeholder shape for caller
             return _CachedAudio(frames), sr, hit
-        audio, sr = engine.synthesize(text, voice=preset.base_voice,
-                                      speed=speed,
-                                      lang=_lang_tag(preset.language))
+        fallback = False
+        try:
+            audio, sr = engine.synthesize(
+                text, voice=preset.base_voice, speed=speed,
+                lang=_lang_tag(preset.language))
+        except VoiceEngineError:
+            # Chatterbox unavailable (runtime/model missing, worker
+            # dead, VRAM floor not met) — degrade to the legacy engine
+            # rather than dropping speech entirely.
+            if preset.engine == "kokoro":
+                raise
+            log.warning("engine %s failed — falling back to kokoro",
+                        preset.engine, exc_info=True)
+            self._publish("voice", {
+                "event": "engine_fallback", "engine": preset.engine,
+                "fallback": "kokoro"})
+            audio, sr = self.engine("kokoro").synthesize(
+                text, voice=preset.base_voice, speed=speed,
+                lang=_lang_tag(preset.language))
+            fallback = True
+        # Global loudness settings apply as preset overrides — the preset
+        # stays the single source of truth for the DSP chain and
+        # dsp.process keeps its stable signature.
+        import dataclasses as _dc
+        overrides: dict[str, Any] = {}
+        if not getattr(self.config, "voice_normalize_loudness", True):
+            overrides["normalize_loudness"] = False
+        _tgt = float(getattr(self.config, "voice_target_lufs", -17.0))
+        if abs(_tgt + 17.0) > 0.01:
+            overrides["loudness_target_lufs"] = _tgt
+        if not getattr(self.config, "voice_limiter_enabled", True):
+            overrides["limiter_enabled"] = False
+        if overrides:
+            preset = _dc.replace(preset, **overrides)
         stereo = dsp.process(audio, sr, preset)
         wav = dsp.wav_bytes(stereo, sr)
+        # Fallback audio is cached under the *kokoro* engine key — a
+        # degraded render must never masquerade as chatterbox output,
+        # and it keeps its own lifetime so real chatterbox audio
+        # replaces it naturally once the engine recovers.
+        if fallback:
+            key = AudioCache.key(
+                text, "kokoro",
+                f"{self.engine('kokoro').version}|dsp{dsp.DSP_VERSION}",
+                preset.base_voice,
+                AudioCache.preset_hash(preset_json), speed)
         path = self.cache.put(key, wav)
         return stereo, sr, path
 
@@ -643,7 +768,9 @@ class VoiceManager:
         preset = self.current_preset()
         eng = None
         try:
-            eng = self.engine()
+            # Report the engine the active preset actually uses — the
+            # config default may differ when a preset pins its own.
+            eng = self.engine(preset.engine if preset else "")
         except Exception:
             pass
         with self._lock:

@@ -248,15 +248,54 @@ internal sealed class StartupNarrator
         }
     }
 
+    private string? _engineSig;
+    private bool _engineSigRead;
+
+    /// <summary>Engine signature written by the backend
+    /// (data/voice/startup/engine.json) — salts every cache filename so
+    /// a voice-engine or preset switch can never replay a clip rendered
+    /// by a different voice. Empty when the backend hasn't published one
+    /// yet (first boot), which maps to the original unsalted filenames.</summary>
+    private string EngineSig()
+    {
+        if (_engineSigRead) return _engineSig ?? "";
+        _engineSigRead = true;
+        try
+        {
+            var p = Path.Combine(_cacheDir, "engine.json");
+            if (File.Exists(p))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(p));
+                _engineSig = doc.RootElement.TryGetProperty("sig", out var s)
+                    ? s.GetString() ?? "" : "";
+            }
+        }
+        catch { }
+        return _engineSig ?? "";
+    }
+
     private string CachePath(string key) =>
-        Path.Combine(_cacheDir, key + ".wav");
+        Path.Combine(_cacheDir,
+            EngineSig() is { Length: > 0 } s ? $"{key}-{s}.wav" : key + ".wav");
 
     private byte[]? Cached(string key)
     {
         try
         {
             var p = CachePath(key);
-            return File.Exists(p) ? File.ReadAllBytes(p) : null;
+            if (File.Exists(p)) return File.ReadAllBytes(p);
+            // Emergency only: unsalted legacy clips still serve fault and
+            // recovery lines — silent crash narration is worse than a clip
+            // rendered by the previous voice engine. Normal lines NEVER
+            // fall through: they must synthesize under the active engine.
+            if (key.StartsWith("fault") || key.StartsWith("recovery"))
+            {
+                var legacy = Path.Combine(_cacheDir, key + ".wav");
+                if (!string.Equals(legacy, p, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(legacy))
+                    return File.ReadAllBytes(legacy);
+            }
+            return null;
         }
         catch { return null; }
     }
