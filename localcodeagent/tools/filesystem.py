@@ -125,7 +125,10 @@ def register_filesystem_tools(
         path.parent.mkdir(parents=True, exist_ok=True)
         track_mutation(path)
         atomic_write_text(path, args.get("content", ""))
-        ok, detail = verify_filesystem("write", {"path": str(path)})
+        verify_params = {"path": str(path)}
+        if args.get("expected_size") is not None:
+            verify_params["expected_size"] = args["expected_size"]
+        ok, detail = verify_filesystem("write", verify_params)
         if not ok:
             raise RuntimeError(
                 f"verification failed after write: {detail}")
