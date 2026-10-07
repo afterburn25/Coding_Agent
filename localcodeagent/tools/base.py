@@ -135,13 +135,21 @@ class ToolRegistry:
     def get(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
 
-    def schemas(self) -> list[dict[str, Any]]:
+    def schemas(self, categories: set[str] | None = None) -> list[dict[str, Any]]:
+        """OpenAI tool schemas. ``categories`` scopes the advertised set —
+        tools outside the set stay callable by name (execute() does not
+        consult this list); find_tools remains the model's discovery path.
+        ``find_tools`` itself is always included so pruned sessions can
+        still reach everything."""
         return [
             t.openai_schema()
             for t in self._tools.values()
             if t.name not in self._disabled
             and self._plugin_meta.get(t.name, {}).get("invocable", True)
             and t.install_status != "missing"
+            and (categories is None
+                 or t.category in categories
+                 or t.name == "find_tools")
         ]
 
     def names(self) -> list[str]:

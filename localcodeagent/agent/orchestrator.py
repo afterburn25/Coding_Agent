@@ -103,6 +103,53 @@ IMAGE_TOOL_NAMES = {
     "create_image_variations",
 }
 
+# Tool-schema pruning (Phase 14): ~174 callable schemas ≈ 76 KB is a real
+# per-call prompt tax and contributes to tool-choice confusion. Coding-core
+# categories are always advertised; media/document/GitHub-API/research
+# categories are added only when the detected intent or the prompt text
+# suggests they're relevant. Pruned tools remain callable by name and
+# discoverable via find_tools, so a mid-task need is never blocked.
+_TOOL_CORE_CATEGORIES = frozenset({
+    "coding", "workspace", "git", "utilities", "data", "devops", "deploy",
+})
+_INTENT_TOOL_CATEGORIES: dict[str, frozenset[str]] = {
+    "image_generation": frozenset({"images"}),
+    "image_edit": frozenset({"images"}),
+    "image_followup": frozenset({"images"}),
+    "research": frozenset({"research", "browsers", "external_apis"}),
+    "git_action": frozenset({"github"}),
+    "github_status": frozenset({"github", "research", "browsers"}),
+    "writing": frozenset({"documents"}),
+}
+_TOOL_CATEGORY_KEYWORDS: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"images"}),
+     r"\b(image|images|picture|photo|paint|draw|logo|wallpaper|icon|screenshot|inpaint|upscale)\b"),
+    (frozenset({"voice", "audio"}),
+     r"\b(voice|speak|speech|tts|audio|music|song|podcast|narrate|aloud)\b"),
+    (frozenset({"video"}), r"\b(video|animation|clip|footage)\b"),
+    (frozenset({"3d"}), r"\b(3d|blender|mesh|model3d)\b"),
+    (frozenset({"documents"}),
+     r"\b(pdf|docx|document|spreadsheet|workbook|slides|powerpoint|epub)\b"),
+    (frozenset({"github"}),
+     r"\b(github|pull request|pr |issue|issues|release)\b"),
+    (frozenset({"research", "browsers", "external_apis"}),
+     r"\b(research|search the web|look up|latest version|web search|browse)\b"),
+)
+
+
+def _session_tool_categories(intent: str | None, user_text: str) -> frozenset[str] | None:
+    """Choose which tool categories to advertise for a session.
+    Returns None (all tools) only when nothing is known; otherwise the
+    coding core plus whatever the intent/keywords imply. find_tools is
+    always included by ToolRegistry.schemas()."""
+    cats = set(_TOOL_CORE_CATEGORIES)
+    cats |= _INTENT_TOOL_CATEGORIES.get(intent or "", frozenset())
+    lower = (user_text or "").lower()[:4000]
+    for categories, pattern in _TOOL_CATEGORY_KEYWORDS:
+        if re.search(pattern, lower):
+            cats |= categories
+    return frozenset(cats)
+
 REVIEW_PROMPT = """You are the reviewer for a local coding agent. Review the supplied task and patch for correctness,
 regressions, missed requirements, security problems, and test gaps. Be concise and concrete. If you find no material issue,
 start the response with PASS. Otherwise start with FINDINGS and list the important issues. Do not invent files or behavior not
@@ -167,6 +214,9 @@ class _AgentSession:
     tool_activities: dict[str, str] = field(default_factory=dict)
     attachments_meta: list[dict[str, Any]] = field(default_factory=list)
     unverified_claims: bool = False
+    # None = advertise every callable schema; a set prunes the advertised
+    # categories (execution stays name-based — find_tools is the escape).
+    tool_categories: frozenset[str] | None = None
     started_at: float = field(default_factory=time.time)
 
 
@@ -3137,6 +3187,7 @@ class AgentOrchestrator:
             }],
             verification_round_start=len(task.verification),
             research_context=dict(task.research),
+            tool_categories=_session_tool_categories(None, task.prompt),
         )
         return session
 
@@ -4250,7 +4301,8 @@ class AgentOrchestrator:
                 session.provider,
                 session.profile,
                 messages=session.messages,
-                tools=None if session.decision.role == "utility" else self.tools.schemas(),
+                tools=None if session.decision.role == "utility"
+                else self.tools.schemas(session.tool_categories),
                 model_events=session.model_events,
                 on_delta=on_delta,
                 event_callback=session.event_callback,
@@ -6159,6 +6211,8 @@ class AgentOrchestrator:
             model_events=model_events,
             research_context=research_context,
             event_callback=event_callback,
+            tool_categories=_session_tool_categories(
+                env.primary_intent, user_text),
             attachments_meta=list(attach["meta"]),
             max_tokens=(
                 int(getattr(self.config, "fast_general_long_output_tokens", 2048))
