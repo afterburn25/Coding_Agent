@@ -225,11 +225,21 @@ def validate_self_update(
                     ("briefing_api", "/api/briefing", '"meaningful"'),
                     ("browser_api", "/api/browser/status", '"playwright"'),
                 ):
-                    try:
-                        code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")
-                        checks[name] = {"ok": code == 200 and marker in body, "status": code}
-                    except Exception as exc:
-                        checks[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                    # First-hit endpoints pay one-time lazy init; under parallel
+                    # test load a single 2s probe can flake. Retry once, then
+                    # record the precise failure for diagnosis.
+                    last_exc: Exception | None = None
+                    for _attempt in range(2):
+                        try:
+                            code, _content_type, body = _get(f"http://127.0.0.1:{port}{path}")
+                            checks[name] = {"ok": code == 200 and marker in body, "status": code}
+                            last_exc = None
+                            break
+                        except Exception as exc:
+                            last_exc = exc
+                            time.sleep(0.3)
+                    if last_exc is not None:
+                        checks[name] = {"ok": False, "error": f"{type(last_exc).__name__}: {last_exc}"}
                 # The shared event bus is a long-lived SSE stream — verify the
                 # handshake headers and first bytes rather than reading to EOF.
                 try:
@@ -238,8 +248,13 @@ def validate_self_update(
                     checks["events_bus"] = {"ok": sse_ok}
                 except Exception as exc:
                     checks["events_bus"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-                if not all(bool(item.get("ok")) for item in checks.values()):
-                    error = error or "One or more isolated smoke checks failed."
+                failed = [k for k, item in checks.items() if not item.get("ok")]
+                if failed:
+                    detail = ", ".join(
+                        f"{k}={checks[k].get('error') or checks[k].get('status')}"
+                        for k in failed[:6])
+                    error = error or (
+                        f"Isolated smoke checks failed ({len(failed)}): {detail}")
             result["smoke"] = {
                 "port": port,
                 "checks": checks,
