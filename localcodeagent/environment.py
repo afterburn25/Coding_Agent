@@ -9,6 +9,7 @@ probe); `verify(project_id)` reports missing/mismatched components so
 """
 from __future__ import annotations
 
+import concurrent.futures as cf
 import json
 import platform
 import re
@@ -129,15 +130,25 @@ class EnvironmentStore:
 
     # -- live detection ----------------------------------------------------------
     def detect(self, names: list[str] | None = None) -> dict:
-        """Probe the host for the requested (or built-in) components."""
+        """Probe the host for the requested (or built-in) components.
+
+        Probes run concurrently: each is an independent subprocess with
+        its own timeout, and serial execution stacks worst case to
+        len(targets) × probe timeout — beyond typical client timeouts.
+        """
         targets = names or sorted(_BUILTIN_PROBES)
         out = {}
-        for name in targets[:50]:
+
+        def _one(name: str) -> dict:
             try:
-                out[name] = self._probe(name)
+                return self._probe(name)
             except Exception:
-                out[name] = {"installed": False, "version": "",
-                             "path": ""}
+                return {"installed": False, "version": "", "path": ""}
+
+        with cf.ThreadPoolExecutor(max_workers=4) as pool:
+            for name, det in zip(targets[:50],
+                                 pool.map(_one, targets[:50])):
+                out[name] = det
         return {"detected_at": time.time(), "components": out,
                 "os": platform.platform()}
 
