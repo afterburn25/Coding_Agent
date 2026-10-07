@@ -2545,13 +2545,6 @@ internal sealed class MainForm : Form
         // host owns between "backend launched" and "backend healthy".
         _backend!.BootPhase += (pct, primary, secondary) =>
             progress.Report(0.30 + Math.Clamp(pct, 0.0, 100.0) / 100.0 * 0.24, primary, secondary);
-        progress.Report(0.30, "backend_health");
-        // Cold starts on machines scanning a fresh unsigned exe (AV) can
-        // exceed 60s even when the backend is healthy — the PyInstaller
-        // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
-        await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
-        progress.Report(0.55, "runtime_sync");
-
         var userDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ChatNexus",
@@ -2562,12 +2555,24 @@ internal sealed class MainForm : Form
         // Desktop app, not a browser tab — greeting and voice playback
         // should not have to wait for a user gesture. The default autoplay
         // policy silently held queued voice segments until the first click.
-        var environment = await CoreWebView2Environment.CreateAsync(
+        // Environment bootstrap doesn't touch the backend — start it now
+        // so the msedgewebview2 process spawn overlaps the health wait
+        // instead of stacking after it.
+        var environmentTask = CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null,
             userDataFolder: userDataFolder,
             options: new CoreWebView2EnvironmentOptions(
                 additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required")
         );
+
+        progress.Report(0.30, "backend_health");
+        // Cold starts on machines scanning a fresh unsigned exe (AV) can
+        // exceed 60s even when the backend is healthy — the PyInstaller
+        // bundle with onnxruntime/kokoro/numpy is ~200MB to scan.
+        await _backend!.WaitUntilHealthyAsync(TimeSpan.FromSeconds(180));
+        progress.Report(0.55, "runtime_sync");
+
+        var environment = await environmentTask;
 
         await _webView.EnsureCoreWebView2Async(environment);
         ConfigureWebView();
