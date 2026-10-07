@@ -248,6 +248,10 @@ class AgentResult:
     # Self-knowledge lane UI payload — action cards, deep links, and
     # inline controls for the chat renderer.
     ui: dict[str, Any] = field(default_factory=dict)
+    # Ambiguity markers detected on the user's envelope — surfaced so
+    # the UI can render a clarification hint instead of burying the
+    # signal that the turn had unresolved references.
+    ambiguity: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -6323,6 +6327,15 @@ class AgentOrchestrator:
             if self.conversation_manager is not None
             else ""
         )
+        if env.ambiguity:
+            # Ambiguity surfacing — the envelope detected unresolved
+            # references; the model should ask rather than guess when
+            # the missing referent changes the answer.
+            intent_context += (
+                "\n\nAmbiguity notice: "
+                + "; ".join(str(a) for a in env.ambiguity[:3])
+                + ". If the missing referent changes the answer, ask one"
+                  " short clarifying question instead of guessing.")
         knowledge_parts: list[str] = []
         if self.knowledge_memory is not None:
             remembered = self.knowledge_memory.prompt_context(user_text)
@@ -6743,7 +6756,10 @@ class AgentOrchestrator:
         self._sessions[task.id] = session
         routed_task = self.tasks.update(task.id, model_id=decision.model_id, model_role=decision.role)
         self._safe_emit(event_callback, {"type": "task", "task": routed_task.as_dict()})
-        return self._drive_or_error(session)
+        final = self._drive_or_error(session)
+        if env.ambiguity:
+            final.ambiguity = list(env.ambiguity)[:4]
+        return final
 
     def recover(
         self,

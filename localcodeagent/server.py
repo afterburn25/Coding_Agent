@@ -9514,6 +9514,7 @@ class Handler(BaseHTTPRequestHandler):
             "response_source": getattr(result, "response_source", ""),
             "memory": getattr(result, "memory", {}),
             "ui": getattr(result, "ui", {}),
+            "ambiguity": list(getattr(result, "ambiguity", []) or []),
             "image_jobs": self._agent_image_jobs(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         }

@@ -2068,6 +2068,20 @@ body[data-gesture="look_away"] .nexus-presence > img {
   letter-spacing:.2px;
 }
 
+/* Ambiguity surfacing — envelope-detected unresolved references */
+.ambiguity-hint {
+  display:block;
+  margin-top:6px;
+  padding:2px 8px;
+  border-radius:9px;
+  border:1px solid #3a341d;
+  background:#1f1a0d;
+  color:#d3b45d;
+  font-size:11px;
+  letter-spacing:.2px;
+}
+.ambiguity-hint .muted{color:#d3b45d;}
+
 /* Live research card — action status while Nexus searches/reads sources */
 .research-live-card {
   margin:0 0 10px;
