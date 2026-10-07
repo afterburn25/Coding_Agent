@@ -105,6 +105,7 @@ Write-Host "Building hidden Python agent backend..."
     --collect-all playwright `
     --collect-all greenlet `
     --add-data "$Root\localcodeagent\voice\official;localcodeagent/voice/official" `
+    --add-data "$Root\localcodeagent\voice\chatterbox_voices;localcodeagent/voice/chatterbox_voices" `
     --hidden-import pybcj --hidden-import pyppmd --hidden-import pyzstd `
     --hidden-import brotli --hidden-import Brotli --hidden-import inflate64 `
     --hidden-import multivolumefile --hidden-import Cryptodome `

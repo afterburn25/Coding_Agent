@@ -889,5 +889,438 @@ class TestSpeechToTextConfig(unittest.TestCase):
             self.assertIsNone(AppState.stt_engine(state))
 
 
+# --------------------------------------------------------------------------
+# loudness (BS.1770 gain stage)
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+class TestLoudness(unittest.TestCase):
+    def _sine(self, amp=0.1, secs=1.0, sr=24000, freq=220.0):
+        t = np.arange(int(sr * secs)) / sr
+        return (amp * np.sin(2 * np.pi * freq * t)).astype(np.float32), sr
+
+    def test_integrated_lufs_sane_for_sine(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.1)
+        lufs = loudness.integrated_lufs(x, sr)
+        # 0.1 sine ≈ -23 dBFS RMS → K-weighted lands near there, not inf.
+        self.assertTrue(np.isfinite(lufs))
+        self.assertGreater(lufs, -30.0)
+        self.assertLess(lufs, -10.0)
+
+    def test_silence_is_negative_infinite(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.0)
+        self.assertEqual(loudness.integrated_lufs(x, sr), -np.inf)
+
+    def test_normalize_hits_target(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.05)
+        y, gain = loudness.normalize_lufs(x, sr, -17.0)
+        post = loudness.integrated_lufs(y, sr)
+        self.assertAlmostEqual(post, -17.0, delta=0.5)
+        self.assertGreater(gain, 0.0)
+
+    def test_normalize_caps_gain(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.001)
+        _, gain = loudness.normalize_lufs(x, sr, -17.0, max_gain_db=12.0)
+        self.assertEqual(gain, 12.0)
+
+    def test_normalize_silence_passthrough(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.0)
+        y, gain = loudness.normalize_lufs(x, sr, -17.0)
+        self.assertEqual(gain, 0.0)
+        self.assertTrue(np.array_equal(x, y))
+
+    def test_stereo_measurement(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.1)
+        st = np.stack([x, x], axis=1)
+        lufs = loudness.integrated_lufs(st, sr)
+        self.assertTrue(np.isfinite(lufs))
+
+    def test_short_clip_no_crash(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.1, secs=0.05)
+        loudness.integrated_lufs(x, sr)   # must not raise
+        loudness.normalize_lufs(x, sr, -17.0)
+
+    def test_process_respects_normalize_flag(self):
+        from localcodeagent.voice import loudness
+        x, sr = self._sine(0.05)
+        p = VoicePreset(id="t", name="t", synthetic=0.0,
+                        normalize_loudness=True,
+                        loudness_target_lufs=-17.0)
+        out = dsp.process(x, sr, p)
+        lufs = loudness.integrated_lufs(out, sr)
+        self.assertAlmostEqual(lufs, -17.0, delta=1.5)
+        self.assertLessEqual(np.abs(out).max(), p.limiter_ceiling + 1e-6)
+
+    def test_process_normalize_off_by_default(self):
+        x, sr = self._sine(0.05)
+        p = VoicePreset(id="t", name="t", synthetic=0.0)
+        out = dsp.process(x, sr, p)
+        raw_peak = np.abs(x).max()
+        self.assertAlmostEqual(np.abs(out).max(), raw_peak, delta=0.05)
+
+    def test_limiter_flag_gates_invocation(self):
+        x, sr = self._sine(0.5)
+        calls = []
+        orig = dsp.limiter
+        dsp.limiter = lambda *a, **k: (calls.append(1), a[0])[1]
+        try:
+            p = VoicePreset(id="t", name="t", synthetic=0.0,
+                            limiter_enabled=True)
+            dsp.process(x, sr, p)
+            self.assertEqual(len(calls), 2)   # L + R
+            calls.clear()
+            p2 = VoicePreset(id="t2", name="t2", synthetic=0.0,
+                             limiter_enabled=False)
+            dsp.process(x, sr, p2)
+            self.assertEqual(calls, [])
+        finally:
+            dsp.limiter = orig
+
+
+# --------------------------------------------------------------------------
+# chatterbox vocalization adapter
+
+class TestChatterboxAdapter(unittest.TestCase):
+    def setUp(self):
+        from localcodeagent.voice.vocalizations import (
+            ChatterboxVocalizationAdapter, Vocalization)
+        self.V = Vocalization
+        self.adapter = ChatterboxVocalizationAdapter()
+
+    def test_gesture_styles_render_native_tags(self):
+        for style, tag in (("chuckle", "[chuckle]"), ("laugh", "[laugh]"),
+                           ("sigh", "[sigh]"), ("gasp", "[gasp]"),
+                           ("groan", "[groan]"), ("sniff", "[sniff]"),
+                           ("throat_clear", "[clear throat]"),
+                           ("shush", "[shush]")):
+            voc = self.V(category="amusement", style=style,
+                         intensity=0.5, token=style)
+            self.assertEqual(self.adapter.render(voc), tag, style)
+
+    def test_verbal_fillers_stay_text(self):
+        voc = self.V(category="thinking", style="hmm",
+                     intensity=0.3, token="hmm")
+        out = self.adapter.render(voc)
+        self.assertEqual(out, "hmm…")
+        self.assertNotIn("[", out)
+
+    def test_unsupported_tag_falls_back_to_text(self):
+        from localcodeagent.voice.vocalizations import (
+            ChatterboxVocalizationAdapter)
+        ad = ChatterboxVocalizationAdapter(supported={"laugh"})
+        voc = self.V(category="sigh", style="sigh",
+                     intensity=0.5, token="sigh")
+        out = ad.render(voc)
+        self.assertIsNotNone(out)
+        self.assertNotEqual(out, "[sigh]")
+        # And a supported one still renders as a tag.
+        voc2 = self.V(category="amusement", style="laugh",
+                      intensity=0.5, token="laugh")
+        self.assertEqual(ad.render(voc2), "[laugh]")
+
+    def test_adapter_registry(self):
+        from localcodeagent.voice.vocalizations import (
+            ChatterboxVocalizationAdapter, KokoroVocalizationAdapter,
+            adapter_for)
+        self.assertIsInstance(adapter_for("chatterbox"),
+                              ChatterboxVocalizationAdapter)
+        self.assertIsInstance(adapter_for("kokoro"),
+                              KokoroVocalizationAdapter)
+        self.assertIsInstance(adapter_for("unknown-engine"),
+                              KokoroVocalizationAdapter)
+
+
+# --------------------------------------------------------------------------
+# chatterbox engine (worker mocked / paths only — no torch in tests)
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+class TestChatterboxEngine(unittest.TestCase):
+    def setUp(self):
+        from localcodeagent.voice.chatterbox import ChatterboxEngine
+        self.tmp = tempfile.TemporaryDirectory()
+        self.assets = Path(self.tmp.name) / "models" / "voice"
+        self.runtime = Path(self.tmp.name) / "runtime"
+        self.eng = ChatterboxEngine(asset_dir=self.assets,
+                                    runtime_dir=self.runtime)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_unavailable_without_runtime_and_model(self):
+        self.assertFalse(self.eng.available())
+
+    def test_unavailable_runtime_only(self):
+        model = self.assets / "chatterbox"
+        model.mkdir(parents=True)
+        for f in ("ve.safetensors", "t3_turbo_v1.safetensors",
+                  "s3gen_meanflow.safetensors", "conds.pt",
+                  "tokenizer_config.json", "vocab.json", "merges.txt"):
+            (model / f).write_bytes(b"x")
+        self.assertFalse(self.eng.available())
+
+    def test_load_raises_when_unavailable(self):
+        from localcodeagent.voice.engine import VoiceEngineError
+        with self.assertRaises(VoiceEngineError):
+            self.eng.load()
+
+    def test_official_isabella_voice_listed(self):
+        voices = {v["id"]: v for v in self.eng.voices()}
+        self.assertIn("isabella", voices)
+        self.assertTrue(voices["isabella"]["installed"])
+        self.assertTrue(voices["isabella"]["official"])
+
+    def test_voice_meta_reads_profile(self):
+        meta = self.eng.voice_meta("isabella")
+        self.assertEqual(meta["engine"], "chatterbox")
+        self.assertEqual(meta["reference"], "reference.wav")
+
+    def test_status_shape(self):
+        st = self.eng.status()
+        self.assertEqual(st["name"], "chatterbox")
+        self.assertFalse(st["loaded"])
+        self.assertFalse(st["available"])
+        self.assertIn("model", st)
+
+    def test_manager_falls_back_to_kokoro(self):
+        """A chatterbox preset whose engine fails must still speak —
+        the kokoro engine renders it and the event is published."""
+        from localcodeagent.voice.engine import VoiceEngineError
+        published = []
+        m = VoiceManager(_Cfg(), preset_dir=Path(self.tmp.name) / "pres",
+                         cache_dir=Path(self.tmp.name) / "cache",
+                         publish=lambda k, p: published.append(p))
+
+        class DeadChatterbox:
+            name, version, sample_rate = "chatterbox", "x", 24000
+            def synthesize(self, *a, **k):
+                raise VoiceEngineError("worker not installed")
+            def voices(self): return []
+            def status(self): return {"name": "chatterbox", "loaded": False}
+
+        m._engines["chatterbox"] = DeadChatterbox()
+        m._engines["kokoro"] = _FakeEngine()
+        preset = VoicePreset(id="cb", name="cb", engine="chatterbox",
+                             base_voice="isabella")
+        m.presets.save(preset)
+        pcm, sr, path = m._synthesize("hello", preset, 1.0)
+        self.assertGreater(pcm.size, 0)
+        self.assertTrue(any(e.get("event") == "engine_fallback"
+                            for e in published))
+
+    def test_cache_keys_separate_engines(self):
+        """Same text under kokoro vs chatterbox must never share a cache
+        entry — the engine name + version fold into the key."""
+        from localcodeagent.voice.cache import AudioCache
+        k1 = AudioCache.key("hello", "kokoro", "v1|dsp1", "bf_isabella",
+                            "ph", 1.0)
+        k2 = AudioCache.key("hello", "chatterbox", "v1|dsp1", "isabella",
+                            "ph", 1.0)
+        k3 = AudioCache.key("hello", "chatterbox", "v2|dsp1", "isabella",
+                            "ph", 1.0)
+        self.assertNotEqual(k1, k2)
+        self.assertNotEqual(k2, k3)
+
+
+# --------------------------------------------------------------------------
+# reference audio validation
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+class TestReferenceValidation(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _wav(self, name, secs, amp=0.3, sr=24000, clip=False):
+        import wave
+        t = np.arange(int(sr * secs)) / sr
+        x = np.sin(2 * np.pi * 220 * t) * amp
+        if clip:
+            x = np.clip(x * 5.0, -1.0, 1.0)
+        path = self.dir / name
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((x * 32767).astype(np.int16).tobytes())
+        return path
+
+    def test_good_reference_passes(self):
+        from localcodeagent.voice.reference import validate_reference
+        rep = validate_reference(self._wav("ok.wav", 8.0))
+        self.assertTrue(rep.ok, rep.errors)
+        self.assertAlmostEqual(rep.duration_s, 8.0, delta=0.05)
+
+    def test_short_reference_rejected(self):
+        from localcodeagent.voice.reference import validate_reference
+        rep = validate_reference(self._wav("short.wav", 2.0))
+        self.assertFalse(rep.ok)
+        self.assertTrue(any("short" in e for e in rep.errors))
+
+    def test_clipped_reference_rejected(self):
+        from localcodeagent.voice.reference import validate_reference
+        rep = validate_reference(self._wav("clip.wav", 8.0, clip=True))
+        self.assertFalse(rep.ok)
+        self.assertTrue(any("clip" in e for e in rep.errors))
+
+    def test_silent_reference_rejected(self):
+        from localcodeagent.voice.reference import validate_reference
+        rep = validate_reference(self._wav("sil.wav", 8.0, amp=0.0))
+        self.assertFalse(rep.ok)
+
+    def test_missing_file_reported(self):
+        from localcodeagent.voice.reference import validate_reference
+        rep = validate_reference(self.dir / "nope.wav")
+        self.assertFalse(rep.ok)
+        self.assertTrue(any("not found" in e for e in rep.errors))
+
+    def test_non_wav_container_rejected(self):
+        from localcodeagent.voice.reference import validate_reference
+        p = self.dir / "ref.mp3"
+        p.write_bytes(b"not audio")
+        rep = validate_reference(p)
+        self.assertFalse(rep.ok)
+        self.assertTrue(any("container" in e for e in rep.errors))
+
+    def test_prepare_reference_caches_and_preserves_original(self):
+        from localcodeagent.voice.reference import (
+            prepare_reference, validate_reference)
+        src = self._wav("src.wav", 8.0, sr=48000)
+        before = src.read_bytes()
+        dest, rep = prepare_reference(src, self.dir / "refcache")
+        self.assertTrue(dest.exists())
+        self.assertEqual(src.read_bytes(), before)
+        import wave
+        with wave.open(str(dest), "rb") as w:
+            self.assertEqual(w.getframerate(), 24000)
+        # Idempotent — second call reuses the same cached file.
+        dest2, _ = prepare_reference(src, self.dir / "refcache")
+        self.assertEqual(dest, dest2)
+
+
+# --------------------------------------------------------------------------
+# chatterbox assets / provisioning
+
+class TestChatterboxAssets(unittest.TestCase):
+    def test_model_status_reports_missing(self):
+        from localcodeagent.voice.chatterbox_assets import model_status
+        with tempfile.TemporaryDirectory() as td:
+            st = model_status(Path(td))
+            self.assertEqual(len(st), 9)
+            self.assertFalse(any(e["present"] for e in st.values()))
+
+    def test_model_status_detects_present_unverified(self):
+        from localcodeagent.voice.chatterbox_assets import (
+            model_ready, model_status)
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "conds.pt").write_bytes(b"fake")
+            st = model_status(d)
+            self.assertTrue(st["conds.pt"]["present"])
+            self.assertFalse(st["conds.pt"]["verified"])
+            self.assertFalse(model_ready(d))
+
+    def test_runtime_status_missing(self):
+        from localcodeagent.voice.chatterbox_runtime import runtime_status
+        with tempfile.TemporaryDirectory() as td:
+            st = runtime_status(Path(td))
+            self.assertFalse(st["python_present"])
+            self.assertFalse(st["verified"])
+
+    def test_provisioning_plan_includes_chatterbox(self):
+        from localcodeagent.config import AgentConfig
+        from localcodeagent.provisioning import ProvisioningManager
+        with tempfile.TemporaryDirectory() as td:
+            pm = ProvisioningManager(Path(td), AgentConfig())
+            kinds = {it.id: it.kind for it in pm._items.values()}
+            self.assertEqual(kinds.get("chatterbox-runtime"),
+                             "chatterbox_runtime")
+            self.assertEqual(kinds.get("chatterbox-model"),
+                             "chatterbox_model")
+
+
+# --------------------------------------------------------------------------
+# chatterbox config fields
+
+class TestChatterboxConfig(unittest.TestCase):
+    def test_defaults(self):
+        from localcodeagent.config import AgentConfig
+        c = AgentConfig()
+        self.assertEqual(c.voice_chatterbox_runtime_dir,
+                         "runtime/voice/chatterbox")
+        self.assertEqual(c.voice_chatterbox_device, "auto")
+        self.assertTrue(c.voice_normalize_loudness)
+        self.assertTrue(c.voice_limiter_enabled)
+        self.assertAlmostEqual(c.voice_target_lufs, -17.0)
+
+    def test_parse_and_clamp(self):
+        from localcodeagent.config import load_config
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "config.json"
+            p.write_text(json.dumps({
+                "voice_chatterbox_runtime_dir": "custom/rt",
+                "voice_chatterbox_device": "bogus",
+                "voice_chatterbox_min_free_vram_mb": 5000,
+                "voice_target_lufs": -99.0,
+                "voice_normalize_loudness": False,
+            }), encoding="utf-8")
+            c = load_config(p)
+            self.assertEqual(c.voice_chatterbox_runtime_dir, "custom/rt")
+            self.assertEqual(c.voice_chatterbox_device, "auto")  # clamped
+            self.assertEqual(c.voice_chatterbox_min_free_vram_mb, 5000.0)
+            self.assertEqual(c.voice_target_lufs, -40.0)  # clamped
+            self.assertFalse(c.voice_normalize_loudness)
+
+
+# --------------------------------------------------------------------------
+# worker protocol (integration — needs the real runtime; skips without it)
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+class TestChatterboxWorkerProtocol(unittest.TestCase):
+    """End-to-end JSONL check against the real isolated runtime when it
+    exists on this machine — skipped in CI where it won't."""
+
+    def setUp(self):
+        from localcodeagent.voice.chatterbox import (
+            ChatterboxEngine, _venv_python)
+        self.py = _venv_python(Path("runtime/voice/chatterbox"))
+        if not self.py.exists():
+            self.skipTest("isolated voice runtime not installed")
+        self.eng = ChatterboxEngine(
+            asset_dir=Path("models/voice"),
+            runtime_dir=Path("runtime/voice/chatterbox"))
+
+    def tearDown(self):
+        try:
+            self.eng.unload()
+        except Exception:
+            pass
+
+    def test_ping_and_capabilities(self):
+        resp = self.eng._request({"cmd": "ping"}, timeout=15)
+        self.assertTrue(resp["ok"])
+        # capabilities before model load — all tags false, no crash.
+        caps = self.eng._request({"cmd": "capabilities"}, timeout=15)
+        self.assertTrue(caps["ok"])
+        self.assertIn("tags", caps)
+
+    def test_load_and_status(self):
+        if not self.eng.available():
+            self.skipTest("chatterbox model not provisioned")
+        self.eng.load()
+        st = self.eng.status()
+        self.assertTrue(st["loaded"])
+        self.assertIn(st["device"], ("cuda", "cpu"))
+        self.assertIn("laugh", st["supported_tags"])
+
+
 if __name__ == "__main__":
     unittest.main()

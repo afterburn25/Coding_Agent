@@ -32,8 +32,8 @@
     renderPresetList();
   }
 
-  async function loadVoices() {
-    const d = await api('/api/voice/voices');
+  async function loadVoices(engine) {
+    const d = await api('/api/voice/voices' + (engine ? '?engine=' + encodeURIComponent(engine) : ''));
     const sel = $('#baseVoice');
     sel.innerHTML = (d.voices || []).map(v =>
       `<option value="${esc(v.id)}">${esc(v.id)} — ${esc(v.label)}${v.lang ? ' · ' + esc(v.lang) : ''}</option>`).join('')
@@ -47,20 +47,28 @@
     const eng = s.engine || {};
     const assets = eng.assets || {};
     const missing = Object.entries(assets).filter(([, a]) => !a.verified).map(([k]) => k);
+    const isCb = eng.name === 'chatterbox';
     el.innerHTML =
       `<div><b>${esc(eng.name || 'kokoro')}</b> ${esc(eng.version || '')}</div>` +
-      `<div>${eng.loaded ? '✓ model loaded' : '○ model cold'} · ${eng.load_time_s || 0}s load</div>` +
-      (missing.length ? `<div class="voice-warn">Missing assets: ${esc(missing.join(', '))} — press Setup engine</div>`
-                      : '<div>✓ assets verified</div>') +
-      (eng.rtf ? `<div>RTF ${eng.rtf} · ${eng.synth_audio_s}s audio in ${eng.synth_cpu_s}s</div>` : '');
+      `<div>${eng.loaded ? '✓ model loaded' : '○ model cold'} · ${eng.load_time_s || 0}s load` +
+      (isCb ? ` · ${esc(eng.device || 'auto')} device` : '') + `</div>` +
+      (isCb
+        ? (eng.available
+          ? `<div>✓ runtime + model ready${eng.worker_alive ? ' · worker live' : ''}</div>`
+          : '<div class="voice-warn">Chatterbox runtime or model not installed — provisioning handles setup</div>')
+        : (missing.length ? `<div class="voice-warn">Missing assets: ${esc(missing.join(', '))} — press Setup engine</div>`
+                          : '<div>✓ assets verified</div>')) +
+      (eng.rtf ? `<div>RTF ${eng.rtf} · ${eng.synth_audio_s}s audio in ${eng.synth_cpu_s || eng.synth_gen_s || 0}s</div>` : '');
     const m = $('#voiceMetrics');
     m.innerHTML =
       `Engine: ${esc(eng.name || '-')} ${esc(eng.version || '')}<br>` +
-      `Loaded: ${eng.loaded ? 'yes' : 'no'} · load ${eng.load_time_s || 0}s<br>` +
-      `Synthesis calls: ${eng.synth_calls || 0} · RTF ${eng.rtf ?? '—'}<br>` +
+      `Loaded: ${eng.loaded ? 'yes' : 'no'} · load ${eng.load_time_s || 0}s` +
+      (eng.device ? ` · ${esc(eng.device)}` : '') + `<br>` +
+      `Synthesis calls: ${eng.synth_calls || 0} · RTF ${eng.rtf ?? '—'}` +
+      (eng.vram_alloc_mb ? ` · VRAM ${eng.vram_alloc_mb} MB` : '') + `<br>` +
       `Cache: ${(s.cache && (s.cache.bytes / 1048576).toFixed(1)) || 0} MB / ${s.cache ? s.cache.entries : 0} files<br>` +
       `Queue: ${s.queue || 0} · Muted: ${s.muted ? 'yes' : 'no'} · Mode: ${esc(s.mode || '')}<br>` +
-      `Upstream: ${esc(((eng.upstream || {}).model_repo) || '')} (${esc(((eng.upstream || {}).license) || '')})`;
+      `Upstream: ${esc(((eng.upstream || {}).model_repo) || eng.model || '')} (${esc(((eng.upstream || {}).license) || '')})`;
     $('#autoRead').checked = s.mode === 'responses' || s.mode === 'responses_activity';
     $('#voiceEnabled').checked = !!s.enabled;
   }
@@ -76,16 +84,22 @@
   function selectPreset(id) {
     const p = presets.find(x => x.id === id);
     if (!p) return;
+    const prevEngine = current && current.engine;
     current = JSON.parse(JSON.stringify(p));
     dirty = false;
     $('#presetBadge').textContent = p.name + (p.official ? ' · official' : '');
+    if (p.engine !== prevEngine) loadVoices(p.engine).then(() => {
+      $('#baseVoice').value = p.base_voice;
+    });
     syncControls();
     renderPresetList();
+    loadLab(p.engine);
   }
 
   // -- controls <-> preset ------------------------------------------------
   function syncControls() {
     const p = current;
+    $('#presetEngine').value = p.engine || 'kokoro';
     $('#baseVoice').value = p.base_voice;
     set('pitch', p.pitch_semitones); set('tempo', p.tempo);
     EQ_SLOTS.forEach(s => {
@@ -108,6 +122,9 @@
     set('formantPreserve', p.formant_preserve ?? 0.4);
     set('limiter', p.limiter_ceiling ?? 0.89);
     set('outGain', p.output_gain_db ?? 0);
+    set('targetLufs', p.loudness_target_lufs ?? -17);
+    $('#normLoudness').checked = !!p.normalize_loudness;
+    $('#limiterOn').checked = p.limiter_enabled !== false;
   }
 
   function set(id, v) {
@@ -125,11 +142,13 @@
     if (id.startsWith('eq')) return (v > 0 ? '+' : '') + v.toFixed(1) + ' dB';
     if (id === 'limiter') return v.toFixed(2) + ' fs';
     if (id === 'outGain') return (v > 0 ? '+' : '') + v.toFixed(1) + ' dB';
+    if (id === 'targetLufs') return v.toFixed(1) + ' LUFS';
     return String(v);
   }
 
   function pullControls() {
     const p = current;
+    p.engine = $('#presetEngine').value;
     p.base_voice = $('#baseVoice').value;
     p.pitch_semitones = +$('#pitch').value;
     p.tempo = +$('#tempo').value;
@@ -154,6 +173,9 @@
     p.formant_preserve = +$('#formantPreserve').value;
     p.limiter_ceiling = +$('#limiter').value;
     p.output_gain_db = +$('#outGain').value;
+    p.normalize_loudness = $('#normLoudness').checked;
+    p.loudness_target_lufs = +$('#targetLufs').value;
+    p.limiter_enabled = $('#limiterOn').checked;
   }
 
   // -- preview --------------------------------------------------------------
@@ -189,6 +211,57 @@
     $('#previewStatus').textContent = 'A/B…';
     await preview(true);
     setTimeout(() => preview(false), 500);
+  }
+
+  // -- voice lab --------------------------------------------------------------
+  const LAB_TAGS = ['laugh', 'chuckle', 'sigh', 'gasp', 'groan', 'sniff',
+    'shush', 'clear throat', 'happy', 'sarcastic', 'whispering',
+    'surprised', 'dramatic', 'narration', 'angry', 'fear'];
+
+  async function loadLab(engineName) {
+    const card = $('#voiceLabCard');
+    if (!card) return;
+    if (engineName !== 'chatterbox') { card.hidden = true; return; }
+    const st = $('#voiceLabStatus');
+    try {
+      const caps = await api('/api/voice/capabilities');
+      const cb = (caps.engines || {}).chatterbox || {};
+      const supported = new Set(cb.supported_tags || []);
+      card.hidden = false;
+      if (supported.size) {
+        $('#voiceLabTags').innerHTML = LAB_TAGS.filter(t => supported.has(t))
+          .map(t => `<button class="mini-button lab-tag" data-tag="${esc(t)}" type="button">${esc(t)}</button>`).join('')
+          || '<span class="muted">runtime reports no supported tags</span>';
+      } else {
+        $('#voiceLabTags').innerHTML = cb.available
+          ? '<button class="mini-button" id="voiceLabProbe" type="button">Probe engine (loads model ~15s)</button>'
+          : '<span class="muted">chatterbox not provisioned</span>';
+      }
+      st.textContent = cb.available
+        ? (supported.size ? `${supported.size} tags confirmed` : 'engine cold — probe to load + verify tags')
+        : 'chatterbox not provisioned';
+    } catch (e) {
+      card.hidden = false;
+      st.textContent = 'capabilities probe failed: ' + e.message;
+    }
+  }
+
+  async function auditionTag(tag) {
+    const st = $('#voiceLabStatus');
+    st.textContent = `rendering [${tag}]…`;
+    try {
+      pullControls();
+      const out = await api('/api/voice/preview', {
+        preset: current, text: `[${tag}]`,
+      });
+      if (out.url) {
+        lastSegment = out.segment_id;
+        NexusVoice.enqueue(out.url, { preview: true });
+        st.textContent = `[${tag}] · ${out.seconds}s`;
+      } else {
+        st.textContent = out.error || 'audition failed';
+      }
+    } catch (e) { st.textContent = 'audition failed: ' + e.message; }
   }
 
   // -- preset CRUD ----------------------------------------------------------
@@ -302,14 +375,50 @@
     ['pitch', 'tempo', 'eqWarmth', 'eqPresence', 'eqAir', 'exciter', 'compRatio',
       'synthetic', 'neuralMix', 'glassMix', 'microMix', 'stereoWidth',
       'neuralBits', 'neuralWet', 'neuralDecay', 'neuralAM', 'glassPitch',
-      'microPitch', 'formantPreserve', 'limiter', 'outGain'].forEach(id => {
+      'microPitch', 'formantPreserve', 'limiter', 'outGain', 'targetLufs'].forEach(id => {
       $('#' + id).addEventListener('input', e => {
         $('#' + id + 'Val').textContent = fmt(id, e.target.value);
         dirty = true;
         renderPresetList();
       });
     });
+    $('#presetEngine').addEventListener('change', e => {
+      if (!current) return;
+      current.engine = e.target.value;
+      dirty = true;
+      loadVoices(current.engine).then(() => {
+        const sel = $('#baseVoice');
+        if (sel.options.length) {
+          // engine voices differ — snap to that engine's first voice
+          // unless the preset's voice exists there already.
+          const found = [...sel.options].some(o => o.value === current.base_voice);
+          sel.value = found ? current.base_voice : sel.options[0].value;
+          current.base_voice = sel.value;
+        }
+      });
+      loadLab(current.engine);
+      renderPresetList();
+    });
     $('#baseVoice').addEventListener('change', () => { dirty = true; });
+    ['normLoudness', 'limiterOn'].forEach(id => {
+      const el = $('#' + id);
+      if (el) el.addEventListener('change', () => { dirty = true; renderPresetList(); });
+    });
+    const lab = $('#voiceLabTags');
+    if (lab) lab.addEventListener('click', async e => {
+      const b = e.target.closest('.lab-tag');
+      if (b) { auditionTag(b.dataset.tag); return; }
+      if (e.target.closest('#voiceLabProbe')) {
+        const st = $('#voiceLabStatus');
+        st.textContent = 'probing engine — loading model…';
+        try {
+          await api('/api/voice/capabilities?probe=1');
+        } catch (err) {
+          st.textContent = 'probe failed: ' + err.message;
+        }
+        if (current) loadLab(current.engine);
+      }
+    });
     $('#previewA').addEventListener('click', () => preview(true));
     $('#previewB').addEventListener('click', () => preview(false));
     $('#previewAB').addEventListener('click', ab);

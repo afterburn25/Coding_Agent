@@ -230,6 +230,23 @@ class ProvisioningManager:
         items.append(self._tool("piper", "Piper voice engine",
                                 priority=62, tier="recommended", mb=60,
                                 provides="tts_fallback"))
+        # Chatterbox Turbo — isolated Python 3.12 runtime (torch+CUDA +
+        # chatterbox-tts ~4.5GB disk) then the pinned turbo model (~3.3GB).
+        # Kokoro stays the always-there fallback; these land in the
+        # default (recommended) profile so upgrades never strand a
+        # chatterbox-preset user without speech.
+        items.append(ProvisionItem(
+            id="chatterbox-runtime", label="Chatterbox voice runtime",
+            kind="chatterbox_runtime", priority=63, tier="recommended",
+            provides="tts_chatterbox",
+            est_bytes=2 * _GB + 800 * 1024 ** 2,
+            est_disk_bytes=5 * _GB, heavy=True))
+        items.append(ProvisionItem(
+            id="chatterbox-model", label="Chatterbox Turbo voice model",
+            kind="chatterbox_model", priority=64, tier="recommended",
+            depends_on=["chatterbox-runtime"], provides="tts_chatterbox",
+            est_bytes=int(3.4 * _GB), est_disk_bytes=int(3.4 * _GB),
+            heavy=True))
         # Heavyweight OS-level installs — explicit consent required;
         # they sit in `waiting_approval` until the user approves.
         items.append(self._tool("docker", "Docker Desktop",
@@ -372,6 +389,23 @@ class ProvisioningManager:
                         it.detail = "assets missing — requeued"
                 except Exception:
                     pass
+            elif it.kind == "chatterbox_runtime":
+                try:
+                    from .voice.chatterbox_runtime import runtime_status
+                    if not runtime_status(
+                            self._chatterbox_runtime_dir())["verified"]:
+                        it.state, it.verified = "waiting", False
+                        it.detail = "runtime missing — requeued"
+                except Exception:
+                    pass
+            elif it.kind == "chatterbox_model":
+                try:
+                    from .voice.chatterbox_assets import model_ready
+                    if not model_ready(self._chatterbox_model_dir()):
+                        it.state, it.verified = "waiting", False
+                        it.detail = "model files missing — requeued"
+                except Exception:
+                    pass
             elif it.kind == "invokeai_model":
                 # InvokeAI's model registry is a local SQLite file — it
                 # can be re-verified while the backend is stopped. When
@@ -424,6 +458,16 @@ class ProvisioningManager:
             or "data/voice/assets"))
         return configured if configured.is_absolute() \
             else self.runtime_root / configured
+
+    def _chatterbox_runtime_dir(self) -> Path:
+        configured = Path(str(getattr(
+            self.config, "voice_chatterbox_runtime_dir",
+            "runtime/voice/chatterbox") or "runtime/voice/chatterbox"))
+        return configured if configured.is_absolute() \
+            else self.runtime_root / configured
+
+    def _chatterbox_model_dir(self) -> Path:
+        return self._voice_asset_dir() / "chatterbox"
 
     # ------------------------------------------------------------- lifecycle
 
@@ -718,6 +762,10 @@ class ProvisioningManager:
                 self._run_invokeai_model(it)
             elif it.kind == "image_model":
                 self._run_image_model(it)
+            elif it.kind == "chatterbox_runtime":
+                self._run_chatterbox_runtime(it)
+            elif it.kind == "chatterbox_model":
+                self._run_chatterbox_model(it)
             else:
                 raise ValueError(f"unknown provision kind '{it.kind}'")
             self._finish(it, verified=True)
@@ -744,6 +792,36 @@ class ProvisioningManager:
         bad = [k for k, v in status.items() if not v.get("verified")]
         if bad:
             raise RuntimeError(f"voice assets failed verification: {bad}")
+
+    def _run_chatterbox_runtime(self, it: ProvisionItem) -> None:
+        from .voice.chatterbox_runtime import ensure_runtime
+
+        def _progress(name: str, done: int) -> None:
+            it.progress = {"current_file": name, "bytes_done": done,
+                           "bytes_total": None}
+            self._emit(it, "progress")
+        ensure_runtime(self._chatterbox_runtime_dir(), progress=_progress)
+        self._set(it, "verifying", detail="verifying chatterbox runtime")
+        from .voice.chatterbox_runtime import runtime_status
+        st = runtime_status(self._chatterbox_runtime_dir())
+        if not st["verified"]:
+            raise RuntimeError(
+                f"chatterbox runtime failed verification: {st['detail']}")
+
+    def _run_chatterbox_model(self, it: ProvisionItem) -> None:
+        from .voice.chatterbox_assets import ensure_model, model_status
+
+        def _progress(name: str, done: int) -> None:
+            it.progress = {"current_file": name, "bytes_done": done,
+                           "bytes_total": None}
+            self._emit(it, "progress")
+        ensure_model(self._chatterbox_model_dir(), progress=_progress)
+        self._set(it, "verifying", detail="verifying chatterbox model")
+        status = model_status(self._chatterbox_model_dir())
+        bad = [k for k, v in status.items() if not v.get("verified")]
+        if bad:
+            raise RuntimeError(
+                f"chatterbox model failed verification: {bad}")
 
     def _run_tool(self, it: ProvisionItem) -> None:
         tool_id = str(it.payload.get("tool_id") or "")
