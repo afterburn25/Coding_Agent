@@ -127,7 +127,7 @@ class OpenAICompatibleProvider:
         self.timeout = timeout
         self.endpoint = (endpoint or profile.endpoint).rstrip("/")
 
-    def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int | None = None) -> ProviderResponse:
+    def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, max_tokens: int | None = None, tool_choice: str = "auto") -> ProviderResponse:
         if not self.endpoint:
             raise RuntimeError(f"No endpoint is available for model profile '{self.profile.id}'.")
         url = self.endpoint + "/chat/completions"
@@ -140,7 +140,7 @@ class OpenAICompatibleProvider:
         }
         if tools and self.profile.tool_calling:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -154,6 +154,7 @@ class OpenAICompatibleProvider:
         started_at = time.monotonic()
         repaired = 0
         tools_dropped = False
+        choice_degraded = False
         request_id = secrets.token_hex(6)
         while True:
             try:
@@ -162,6 +163,19 @@ class OpenAICompatibleProvider:
                 break
             except urllib.error.HTTPError as exc:
                 server_message, raw_body = _http_error_detail(exc)
+                # A server that predates tool_choice="required" rejects the
+                # whole request — degrade to auto once rather than failing
+                # the turn over a hint.
+                if (exc.code == 400 and not choice_degraded
+                        and payload.get("tool_choice") == "required"):
+                    choice_degraded = True
+                    payload["tool_choice"] = "auto"
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}"})
+                    continue
                 # Self-repair: the server tells us exactly how oversized the
                 # request was — shrink the prompt to fit and retry instead
                 # of failing the task.
@@ -225,6 +239,7 @@ class OpenAICompatibleProvider:
         tools: list[dict[str, Any]] | None = None,
         on_delta: Callable[[str], None] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         """Stream a chat completion and reconstruct content plus tool calls."""
         if not self.endpoint:
@@ -240,7 +255,7 @@ class OpenAICompatibleProvider:
         }
         if tools and self.profile.tool_calling:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -264,6 +279,7 @@ class OpenAICompatibleProvider:
         first_token_at = 0.0
         repaired = 0
         tools_dropped = False
+        choice_degraded = False
         request_id = secrets.token_hex(6)
         while True:
             try:
@@ -271,6 +287,20 @@ class OpenAICompatibleProvider:
                 break
             except urllib.error.HTTPError as exc:
                 server_message, raw_body = _http_error_detail(exc)
+                # A server that predates tool_choice="required" rejects the
+                # whole request — degrade to auto once rather than failing
+                # the turn over a hint.
+                if (exc.code == 400 and not choice_degraded
+                        and payload.get("tool_choice") == "required"):
+                    choice_degraded = True
+                    payload["tool_choice"] = "auto"
+                    data = json.dumps(payload).encode("utf-8")
+                    req = urllib.request.Request(
+                        url, data=data, method="POST",
+                        headers={"Content-Type": "application/json",
+                                 "Authorization": f"Bearer {self.profile.api_key or 'local'}",
+                                 "Accept": "text/event-stream"})
+                    continue
                 if exc.code == 400 and _CONTEXT_OVERFLOW_RE.search(server_message) and repaired < 2:
                     repaired += 1
                     nums = _OVERFLOW_NUMBERS_RE.search(server_message)

@@ -252,6 +252,9 @@ class _AgentSession:
     # where the model narrates a plan instead of calling write_file.
     intent: str = ""
     action_nudged: bool = False
+    # Set by the action nudge — the next model call runs with
+    # tool_choice="required" so a stalling model must emit a call.
+    force_tool_call: bool = False
     # None = advertise every callable schema; a set prunes the advertised
     # categories (execution stays name-based — find_tools is the escape).
     tool_categories: frozenset[str] | None = None
@@ -2577,6 +2580,7 @@ class AgentOrchestrator:
         on_delta: Callable[[str], None] | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str = "auto",
     ):
         attempts = 0
         last_ctx_target = 0
@@ -2585,12 +2589,14 @@ class AgentOrchestrator:
             streaming = on_delta is not None and hasattr(provider, "complete_stream")
             method = provider.complete_stream if streaming else provider.complete
             cap: dict[str, Any] = {}
-            if max_tokens is not None:
+            for name, value in (("max_tokens", max_tokens), ("tool_choice", tool_choice)):
+                if value is None or (name == "tool_choice" and not tools):
+                    continue
                 try:
-                    if "max_tokens" in inspect.signature(method).parameters:
-                        cap["max_tokens"] = max_tokens
+                    if name in inspect.signature(method).parameters:
+                        cap[name] = value
                 except (ValueError, TypeError):
-                    cap["max_tokens"] = max_tokens
+                    cap[name] = value
             try:
                 if streaming:
                     result = method(messages=messages, tools=tools, on_delta=on_delta, **cap)
@@ -4335,6 +4341,8 @@ class AgentOrchestrator:
                 else:
                     stream_piece(piece)
             self._trim_context(session)
+            force_call = session.force_tool_call
+            session.force_tool_call = False
             response = self._complete_with_recovery(
                 session.provider,
                 session.profile,
@@ -4345,6 +4353,7 @@ class AgentOrchestrator:
                 on_delta=on_delta,
                 event_callback=session.event_callback,
                 max_tokens=session.max_tokens,
+                tool_choice="required" if force_call else "auto",
             )
             tail = coalescer.flush()
             if tail:
@@ -4597,6 +4606,7 @@ class AgentOrchestrator:
                     and _task_requires_action(session)
                 ):
                     session.action_nudged = True
+                    session.force_tool_call = True
                     session.main_content = ""
                     session.messages.append({
                         "role": "system",

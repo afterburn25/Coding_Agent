@@ -1525,12 +1525,14 @@ class _StallThenToolProvider:
         self.calls = 0
         self.all_messages = []
         self.seen_tools = []
+        self.seen_tool_choice = []
         self.tool_name = tool_name
 
-    def complete(self, *, messages, tools=None, max_tokens=None):
+    def complete(self, *, messages, tools=None, max_tokens=None, tool_choice="auto"):
         self.calls += 1
         self.all_messages.append(list(messages))
         self.seen_tools.append(tools)
+        self.seen_tool_choice.append(tool_choice)
         if self.calls == 1:
             return ProviderResponse(message={
                 "role": "assistant",
@@ -1612,6 +1614,11 @@ class ActionNudgeTests(unittest.TestCase):
 
             self.assertEqual(provider.calls, 3)          # stall → nudge → tool → final
             self.assertEqual(ran, [True])                # the tool actually ran
+            # The nudge retry must force a tool call at the protocol level —
+            # a weak model that ignores the text nudge still has to emit one.
+            self.assertEqual(provider.seen_tool_choice[0], "auto")
+            self.assertEqual(provider.seen_tool_choice[1], "required")
+            self.assertEqual(provider.seen_tool_choice[2], "auto")
             nudged = [
                 m for call in provider.all_messages[1] for m in [call]
                 if m.get("role") == "system" and "no tool calls" in str(m.get("content", ""))
