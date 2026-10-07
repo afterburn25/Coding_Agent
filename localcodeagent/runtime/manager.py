@@ -1376,7 +1376,8 @@ class RuntimeManager:
                     }).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
-                urllib.request.urlopen(req, timeout=120).read()
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    resp.read()
             except Exception:
                 pass
 
