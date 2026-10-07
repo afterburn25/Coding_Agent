@@ -150,6 +150,39 @@ def _session_tool_categories(intent: str | None, user_text: str) -> frozenset[st
             cats |= categories
     return frozenset(cats)
 
+
+# Intents that inherently require tool execution — plus an imperative-verb
+# backstop, because the classifier can score a canonical file-creation
+# prompt as low-confidence "conversation". "coding" is deliberately NOT
+# here: repo-inspection/summarize requests classify as coding yet prose
+# answers are legitimate; the verb gate catches real action asks.
+_ACTION_INTENTS = frozenset({
+    "file_edit", "tool_action", "git_action",
+    "image_generation", "image_edit",
+})
+_ACTION_REQUEST_RE = re.compile(
+    r"\b(create|write|edit|fix|delete|remove|add|build|run|execute|update|"
+    r"change|modify|rename|move|generate|commit|push|deploy|install|"
+    r"scaffold|refactor|patch|apply|make a|make an)\b",
+    re.IGNORECASE)
+# Interrogative openers — "how do I create X" is a question, not a
+# request; nudging it could make the model perform unwanted work.
+# "can you / could you / please" stay eligible — polite imperatives.
+_QUESTION_LEAD_RE = re.compile(
+    r"^\s*(how|what|why|when|where|which|who|whom|whose|is|are|was|were|"
+    r"does|do|did|should|would you explain|explain|describe|tell me)\b",
+    re.IGNORECASE)
+
+
+def _task_requires_action(session: "_AgentSession") -> bool:
+    """True when the request clearly asks for executed work, not words."""
+    if session.intent in _ACTION_INTENTS:
+        return True
+    text = session.user_text or ""
+    if _QUESTION_LEAD_RE.match(text):
+        return False
+    return bool(_ACTION_REQUEST_RE.search(text))
+
 REVIEW_PROMPT = """You are the reviewer for a local coding agent. Review the supplied task and patch for correctness,
 regressions, missed requirements, security problems, and test gaps. Be concise and concrete. If you find no material issue,
 start the response with PASS. Otherwise start with FINDINGS and list the important issues. Do not invent files or behavior not
@@ -214,6 +247,11 @@ class _AgentSession:
     tool_activities: dict[str, str] = field(default_factory=dict)
     attachments_meta: list[dict[str, Any]] = field(default_factory=list)
     unverified_claims: bool = False
+    # Detected turn intent + one-shot nudge flag for the "action request
+    # produced zero tool calls" retry — the documented soak failure mode
+    # where the model narrates a plan instead of calling write_file.
+    intent: str = ""
+    action_nudged: bool = False
     # None = advertise every callable schema; a set prunes the advertised
     # categories (execution stays name-based — find_tools is the escape).
     tool_categories: frozenset[str] | None = None
@@ -4545,6 +4583,45 @@ class AgentOrchestrator:
                     # unverified so Answer Memory doesn't replay it as a
                     # trusted answer; no visible annotation.
                     session.unverified_claims = True
+                # Action request, zero tools ran, one-shot nudge: the
+                # documented soak failure is a model narrating a plan
+                # ("let me check…", "just let me know") instead of calling
+                # a tool. Re-prompt once with an explicit execute
+                # directive; if it still produces no tool calls the reply
+                # finalizes as usual (already marked unverified above).
+                if (
+                    not session.tool_events
+                    and not session.action_nudged
+                    and not claims
+                    and session.decision.role != "utility"
+                    and _task_requires_action(session)
+                ):
+                    session.action_nudged = True
+                    session.main_content = ""
+                    session.messages.append({
+                        "role": "system",
+                        "content": (
+                            "The user's request asks you to DO something "
+                            "(create/modify/run/delete/execute), but your "
+                            "last reply produced no tool calls — plans and "
+                            "promises do not execute. Call the tool now "
+                            "(e.g. write_file for file creation, "
+                            "apply_patch for edits). If the needed tool "
+                            "isn't in your list, call find_tools to "
+                            "discover it, then call it by name. If you "
+                            "genuinely cannot act, name the concrete "
+                            "blocker (missing tool, permission denied, no "
+                            "workspace) instead of narrating."
+                        ),
+                    })
+                    nudge_event = {
+                        "type": "action_nudge",
+                        "model_id": session.profile.id,
+                        "intent": session.intent or "keyword",
+                    }
+                    session.model_events.append(nudge_event)
+                    self._emit(session, "model", event=nudge_event)
+                    continue
                 final = self._finalize(session)
                 if final is not None:
                     return final
@@ -6213,6 +6290,7 @@ class AgentOrchestrator:
             event_callback=event_callback,
             tool_categories=_session_tool_categories(
                 env.primary_intent, user_text),
+            intent=str(env.primary_intent or ""),
             attachments_meta=list(attach["meta"]),
             max_tokens=(
                 int(getattr(self.config, "fast_general_long_output_tokens", 2048))

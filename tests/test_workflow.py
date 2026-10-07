@@ -1516,5 +1516,169 @@ class AutonomousContinuationTests(unittest.TestCase):
             self.assertIn("· run_shell ok", log)
 
 
+class _StallThenToolProvider:
+    """First reply narrates a plan with no tool call (the documented soak
+    failure); after the action-nudge system message it emits a real call,
+    then finishes."""
+
+    def __init__(self, tool_name: str = "probe_tool"):
+        self.calls = 0
+        self.all_messages = []
+        self.seen_tools = []
+        self.tool_name = tool_name
+
+    def complete(self, *, messages, tools=None, max_tokens=None):
+        self.calls += 1
+        self.all_messages.append(list(messages))
+        self.seen_tools.append(tools)
+        if self.calls == 1:
+            return ProviderResponse(message={
+                "role": "assistant",
+                "content": "Let me check the repository layout first — I'll create the file right after.",
+            }, raw={})
+        if self.calls == 2:
+            return ProviderResponse(message={
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call1", "type": "function",
+                    "function": {"name": self.tool_name, "arguments": "{}"},
+                }],
+            }, raw={})
+        return ProviderResponse(message={
+            "role": "assistant", "content": "done",
+        }, raw={})
+
+
+class _StallOnlyProvider:
+    """Always narrates, never calls a tool — used to prove questions are
+    not nudged and that the nudge fires at most once."""
+
+    def __init__(self):
+        self.calls = 0
+        self.all_messages = []
+        self.seen_tools = []
+
+    def complete(self, *, messages, tools=None, max_tokens=None):
+        self.calls += 1
+        self.all_messages.append(list(messages))
+        self.seen_tools.append(tools)
+        return ProviderResponse(message={
+            "role": "assistant",
+            "content": "Let me look into that for you — one moment.",
+        }, raw={})
+
+
+class ActionNudgeTests(unittest.TestCase):
+    """An action-shaped request that produces zero tool calls gets one
+    explicit execute-nudge before the reply is allowed to finalize — the
+    'model narrates a plan instead of calling write_file' soak failure."""
+
+    def _agent(self, root, provider, tools=None):
+        profile = ModelProfile(
+            id="local", endpoint="http://unused/v1", model="x",
+            roles=["utility", "fast_coder", "primary_coder", "light_coder"],
+            runtime="external",
+        )
+        config = AgentConfig(
+            models=[profile],
+            permissions={"test.execute": "allow", "filesystem.read": "allow"},
+            research_enabled=False,
+            auto_verify_after_changes=False, review_after_changes=False,
+        )
+        index = RepositoryIndex(root); index.build()
+        agent = AgentOrchestrator(
+            config, ModelRouter(config.models),
+            tools or ToolRegistry(config.permissions), _FakeRuntime(),
+            tasks=TaskStore(root), checkpoints=CheckpointManager(root),
+            memory=ProjectMemory(root), repository_index=index,
+        )
+        agent._provider_for = lambda _: provider
+        return agent
+
+    def test_stall_on_action_request_nudges_once_and_executes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ran = []
+            tools = ToolRegistry({"test.execute": "allow"})
+            tools.register(ToolSpec("probe_tool", "test probe", {
+                "type": "object", "properties": {},
+            }, "test.execute", lambda args: ran.append(True) or "OK",
+                category="coding"))
+            provider = _StallThenToolProvider()
+            agent = self._agent(root, provider, tools)
+
+            result = agent.run("Create a file named soak_verify.txt containing hello")
+
+            self.assertEqual(provider.calls, 3)          # stall → nudge → tool → final
+            self.assertEqual(ran, [True])                # the tool actually ran
+            nudged = [
+                m for call in provider.all_messages[1] for m in [call]
+                if m.get("role") == "system" and "no tool calls" in str(m.get("content", ""))
+            ]
+            self.assertEqual(len(nudged), 1)
+            self.assertEqual(result.task["status"], "completed")
+
+    def test_question_shape_is_not_nudged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = ToolRegistry({"test.execute": "allow"})
+            tools.register(ToolSpec("probe_tool", "test probe", {
+                "type": "object", "properties": {},
+            }, "test.execute", lambda args: "OK", category="coding"))
+            provider = _StallOnlyProvider()
+            agent = self._agent(root, provider, tools)
+
+            result = agent.run("how do I create files in Python")
+
+            # An interrogative with a stall reply finalizes without a nudge.
+            self.assertEqual(provider.calls, 1)
+            self.assertEqual(result.task["status"], "completed")
+
+    def test_nudge_fires_at_most_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = ToolRegistry({"test.execute": "allow"})
+            tools.register(ToolSpec("probe_tool", "test probe", {
+                "type": "object", "properties": {},
+            }, "test.execute", lambda args: "OK", category="coding"))
+            provider = _StallOnlyProvider()
+            agent = self._agent(root, provider, tools)
+
+            result = agent.run("create a file named x.txt")
+
+            # Exactly one action-nudge event regardless of how many times
+            # other retry machinery re-prompts — the stalled reply still
+            # finalizes instead of looping forever.
+            nudges = [e for e in result.model_events if e.get("type") == "action_nudge"]
+            self.assertEqual(len(nudges), 1)
+            self.assertEqual(result.task["status"], "completed")
+
+    def test_schema_pruning_limits_advertised_categories(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = ToolRegistry({})
+            for name, cat in (("write_file", "coding"), ("read_file", "workspace"),
+                              ("git_status", "git"), ("shell_run", "utilities"),
+                              ("generate_image", "images"), ("speak_text", "voice"),
+                              ("web_search", "research"), ("find_tools", "utilities")):
+                tools.register(ToolSpec(name, "t", {
+                    "type": "object", "properties": {},
+                }, "test.execute", lambda args: "OK", category=cat))
+            provider = _StallOnlyProvider()
+            agent = self._agent(root, provider, tools)
+
+            agent.run("create a file named x.txt")
+
+            advertised = {
+                s["function"]["name"] for s in (provider.seen_tools[0] or [])
+            }
+            self.assertIn("write_file", advertised)
+            self.assertIn("find_tools", advertised)   # discovery escape hatch always present
+            self.assertNotIn("generate_image", advertised)
+            self.assertNotIn("speak_text", advertised)
+            self.assertNotIn("web_search", advertised)
+
+
 if __name__ == "__main__":
     unittest.main()
