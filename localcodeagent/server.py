@@ -6436,11 +6436,38 @@ class AppState:
             ],
         }
 
-    def task_payload(self) -> dict:
+    def task_payload(self, *, slim: bool = False) -> dict:
         current = self.tasks.current()
+        recent = self.tasks.recent(12)
+        if slim:
+            # /api/status is a boot probe + UI poll. Recent tasks embed the
+            # full research plan (env snapshot ~19KB each) — the task card
+            # only renders plan.mode/needed/reasons, so trim to those.
+            slimmed = []
+            for t in recent:
+                t = dict(t)
+                # Body fields are never rendered for ledger rows — the
+                # click-through fetches /api/task-log for full detail.
+                t.pop("final_content", None)
+                t.pop("intel", None)
+                if len(str(t.get("summary") or "")) > 400:
+                    t["summary"] = str(t["summary"])[:400]
+                research = t.get("research")
+                if isinstance(research, dict) and research:
+                    plan = research.get("plan")
+                    t["research"] = {
+                        "task": research.get("task"),
+                        "mode": research.get("mode"),
+                        "status": research.get("status"),
+                        "summary": research.get("summary"),
+                        "plan": {k: (plan or {}).get(k)
+                                 for k in ("mode", "needed", "reasons")},
+                    }
+                slimmed.append(t)
+            recent = slimmed
         return {
             "current": current.as_dict() if current else None,
-            "recent": self.tasks.recent(12),
+            "recent": recent,
             "queue": self.queue.list(),
         }
 
@@ -8533,15 +8560,16 @@ class Handler(BaseHTTPRequestHandler):
                     lambda: self.state.nexus_brain.summary()),
                 "nexus_brain_seed": dict(self.state.brain_seed_status),
                 "runtime": runtime,
-                "tasks": _timed("tasks", lambda: self.state.task_payload()),
+                "tasks": _timed("tasks",
+                    lambda: self.state.task_payload(slim=True)),
                 "repository_index": _timed("repo_index",
                     lambda: self.state.repository_index.summary()),
                 "research": _timed("research",
-                    lambda: self.state.research.summary()),
+                    lambda: self.state.research.summary(slim=True)),
                 "model_telemetry": _timed("model_telemetry",
                     lambda: self.state.model_telemetry.summary()),
                 "image": _timed("image",
-                    lambda: self.state.images.summary()),
+                    lambda: self.state.images.summary(slim=True)),
                 # Lets the UI skip flat canned replies when a named persona
                 # is driving delivery — the model answers in character.
                 "persona_active": self.state.agent._persona_active(),

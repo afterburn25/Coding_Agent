@@ -443,7 +443,7 @@ class ImageManager:
                 self._summary_probe_cache = (time.time(), result)
         threading.Thread(target=_run, daemon=True).start()
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, *, slim: bool = False) -> dict[str, Any]:
         # probe() does a live HTTP health check per backend — a dead
         # endpoint can cost its full connect timeout (measured ~0.75 s
         # each on this box where refused localhost connects take ~2 s).
@@ -471,6 +471,22 @@ class ImageManager:
                 time.time(), (backend_runtime, invoke_runtime))
         healthy = bool(backend_runtime.get("healthy"))
         detail = str(backend_runtime.get("error") or "")
+        if slim:
+            # /api/status shape: backend health + counts only. The jobs
+            # list, model inventory, and library verification belong to
+            # /api/image — status consumers never render them, and the
+            # payloads dwarf everything else in the status blob.
+            return {
+                "enabled": bool(getattr(self.config, "image_enabled", True)),
+                "backend": {"type": "comfyui", "endpoint": self.backend.endpoint, "healthy": healthy, "detail": detail[:300]},
+                "backend_preference": str(getattr(self.config, "image_backend", "auto") or "auto"),
+                "backends": {
+                    "invokeai": {"healthy": bool(invoke_runtime.get("healthy"))},
+                    "comfyui": {"healthy": healthy},
+                },
+                "jobs": len(self._jobs),
+                "resource_mode": getattr(self.config, "image_resource_mode", "balanced"),
+            }
         invoke_models = self._invokeai_models(
             backend_healthy=bool(invoke_runtime.get("healthy")))
         return {

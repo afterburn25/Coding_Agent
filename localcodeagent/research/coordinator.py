@@ -548,6 +548,22 @@ class ResearchCoordinator:
             sessions = [s for s in sessions if q in json.dumps(s, ensure_ascii=False).lower()]
         return {"cache": self.cache.stats(), "sessions": sessions}
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, *, slim: bool = False) -> dict[str, Any]:
         github = {"api_enabled": self.github_api is not None, "authenticated": bool(self.github_api and self.github_api.client.authenticated), "token_env": str(getattr(self.config, "research_github_token_env", "GITHUB_TOKEN"))}
-        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, "github": github, "provider_stats": self.provider_stats(), **self.cache.stats(), "recent": self.cache.recent_sessions(8)}
+        recent = self.cache.recent_sessions(8)
+        if slim:
+            # /api/status is the boot probe + UI poll — session payloads
+            # carry plans/sources/evidence that status consumers never
+            # read; the research page fetches /api/research for the full
+            # records.
+            recent = [{
+                "id": s.get("id"),
+                "task": str(s.get("task") or "")[:120],
+                "mode": s.get("mode"), "status": s.get("status"),
+                "started_at": s.get("started_at"),
+                "finished_at": s.get("finished_at"),
+                "sources": len(s.get("sources") or []),
+                "findings": len(s.get("findings") or []),
+                "summary": str(s.get("summary") or "")[:300],
+            } for s in recent]
+        return {"enabled": bool(getattr(self.config, "research_enabled", True)), "mode": getattr(self.config, "research_mode", "auto"), "last_plan": self._last_plan, "github": github, "provider_stats": self.provider_stats(), **self.cache.stats(), "recent": recent}
