@@ -151,6 +151,13 @@ def _path_tail(raw: str) -> str:
     return raw
 
 
+# Windows-style absolute paths (drive-letter or UNC) are absolute even
+# when the host OS disagrees — on POSIX Path("D:\\x").is_absolute() is
+# False, which would wrongly resolve the path INSIDE the workspace and
+# skip the outside-root approval gate.
+_WIN_ABS_RE = re.compile(r"^(?:[a-zA-Z]:[\\/]|\\\\)")
+
+
 def _resolve(raw: str, workspace: Path,
              extra_roots: Callable | None) -> tuple[Path, bool]:
     """Absolute → itself; ~/ → home; bare → workspace-relative.
@@ -161,8 +168,12 @@ def _resolve(raw: str, workspace: Path,
         cand = Path(raw).expanduser().resolve()
     else:
         p = Path(raw)
-        cand = p.resolve() if p.is_absolute() else \
-            (Path(workspace) / p).resolve()
+        if p.is_absolute():
+            cand = p.resolve()
+        elif _WIN_ABS_RE.match(raw):
+            cand = p  # verbatim — cannot be inside this workspace
+        else:
+            cand = (Path(workspace) / p).resolve()
     return cand, _path_base(workspace, cand, extra_roots) is not None
 
 
