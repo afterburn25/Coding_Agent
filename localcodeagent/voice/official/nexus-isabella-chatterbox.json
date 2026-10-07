@@ -1,0 +1,83 @@
+{
+  "id": "nexus-isabella-chatterbox",
+  "name": "Nexus Isabella — Chatterbox Turbo",
+  "description": "Official Nexus Core voice on Chatterbox Turbo: the approved V6 synthetic Isabella cloned from the post-DSP reference, with a light texture top-up and loudness normalization.",
+  "engine": "chatterbox",
+  "base_voice": "isabella",
+  "language": "en-GB",
+  "schema_version": 1,
+  "official": true,
+  "pitch_semitones": 0.0,
+  "tempo": 1.0,
+  "formant_preserve": 0.0,
+  "eq": [
+    {"freq_hz": 220, "gain_db": -1.5, "q": 1.1},
+    {"freq_hz": 3400, "gain_db": 2.8, "q": 1.4},
+    {"freq_hz": 7200, "gain_db": 1.6, "q": 1.0}
+  ],
+  "exciter": 0.2,
+  "compression": {
+    "threshold_db": -18.0,
+    "ratio": 2.0,
+    "attack_ms": 5.0,
+    "release_ms": 80.0,
+    "makeup_db": 1.0
+  },
+  "neural": {
+    "enabled": true,
+    "hpf_hz": 700,
+    "lpf_hz": 6900,
+    "bit_depth": 9,
+    "wet": 0.4,
+    "anti_alias": 0.58,
+    "sample_reduction": 1.55,
+    "delay_ms": 1.8,
+    "decay": 0.28,
+    "mod_rate_hz": 0.48,
+    "am_rate_hz": 38,
+    "am_depth": 0.16,
+    "mix": 0.12
+  },
+  "glass": {
+    "enabled": true,
+    "pitch_factor": 1.245,
+    "formant_preserve": 0.8,
+    "hpf_hz": 1900,
+    "lpf_hz": 9200,
+    "delay_ms": 8,
+    "echo": 0.10,
+    "mix": 0.04
+  },
+  "micro": {
+    "enabled": true,
+    "pitch_factor": 0.965,
+    "formant_preserve": 0.8,
+    "hpf_hz": 900,
+    "lpf_hz": 4800,
+    "bit_depth": 12,
+    "wet": 0.15,
+    "delay_ms": 15,
+    "mix": 0.03
+  },
+  "stereo_width": 1.5,
+  "synthetic": 0.45,
+  "normalize_loudness": true,
+  "loudness_target_lufs": -17.0,
+  "limiter_enabled": true,
+  "provenance": "chatterbox-turbo clone of isabella-nexus-v6 (Kokoro bf_isabella + Nexus DSP), light texture top-up",
+  "version": "1.0",
+  "cadence": "measured",
+  "energy": "calm, quietly confident",
+  "warmth": "warm with a cool technical edge",
+  "formality": "conversational-professional",
+  "emotion_range": "steady, subtly expressive",
+  "pronunciation_overrides": {
+    "UI": "you eye",
+    "Devin": "dev in"
+  },
+  "limiter_ceiling": 0.89,
+  "output_gain_db": 0.0,
+  "ambience_ms": 0.0,
+  "highpass_hz": 60.0,
+  "lowpass_hz": 0.0
+}
