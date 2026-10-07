@@ -51,6 +51,14 @@ Also fixed this session (same release):
   defaults to image.
 - **Truth-gate ledger** — unverified action claims now write a
   `claim`/`unverified` ActionLedger entry.
+- **Mission evidence** — every mission node outcome writes a
+  `mission_node` ledger entry; `ActionLedger.mission_rollup(mid)`
+  powers `GET /api/missions/<id>/evidence`.
+- **Requirement-change propagation** — `learn_from_user` surfaces
+  `superseded` facts → `requirement_change_cb` →
+  `MissionStore.flag_requirement_change` marks in-flight nodes
+  `stale_requirement`; the mission executor prepends a dead-value
+  warning to the node's instruction. Terminal nodes untouched.
 - **Desktop shortcut** — repointed `Nexus Core.lnk` to the live
   install at `D:\Nexus_Core` (it targeted deleted `D:\Nexus_Core_Fresh`).
 
