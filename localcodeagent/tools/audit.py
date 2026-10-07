@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 
@@ -174,6 +175,7 @@ def register_audit_tools(registry: ToolRegistry, workspace: Path, *,
                 proc = subprocess.run(
                     spec["argv"], cwd=str(root),
                     capture_output=True, text=True, timeout=120,
+                    creationflags=no_window_flags(),
                     shell=(spec["exe"] == "npm" and
                            __import__("os").name == "nt"))
             except subprocess.TimeoutExpired:

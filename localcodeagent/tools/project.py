@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 from ..scaffold import catalog, scaffold
 
@@ -24,7 +25,8 @@ def _run_step(root: Path, cmd: str, timeout: int = 600) -> dict:
     started = time.time()
     try:
         proc = subprocess.run(cmd, cwd=str(root), shell=True, text=True,
-                              capture_output=True, timeout=timeout)
+                              capture_output=True, timeout=timeout,
+                              creationflags=no_window_flags())
         return {"command": cmd, "exit_code": proc.returncode,
                 "tail": ((proc.stdout or "") + "\n" + (proc.stderr or ""))
                 .strip()[-MAX_OUT:],

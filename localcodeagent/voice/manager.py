@@ -727,8 +727,8 @@ class VoiceManager:
         overrides: dict[str, Any] = {}
         if not getattr(self.config, "voice_normalize_loudness", True):
             overrides["normalize_loudness"] = False
-        _tgt = float(getattr(self.config, "voice_target_lufs", -17.0))
-        if abs(_tgt + 17.0) > 0.01:
+        _tgt = float(getattr(self.config, "voice_target_lufs", -14.0))
+        if abs(_tgt + 14.0) > 0.01:
             overrides["loudness_target_lufs"] = _tgt
         if not getattr(self.config, "voice_limiter_enabled", True):
             overrides["limiter_enabled"] = False

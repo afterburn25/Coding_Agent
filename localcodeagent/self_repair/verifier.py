@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
+
 
 def run_unittest(workdir: Path, target: str, *, timeout_s: float = 300.0,
                  extra_env: dict | None = None) -> dict[str, Any]:
@@ -32,7 +34,8 @@ def run_unittest(workdir: Path, target: str, *, timeout_s: float = 300.0,
             cwd=str(workdir), capture_output=True, text=True,
             timeout=timeout_s,
             env=None if extra_env is None else
-            {**__import__("os").environ, **extra_env})
+            {**__import__("os").environ, **extra_env},
+            creationflags=no_window_flags())
         tail = (r.stdout + r.stderr)[-4000:]
         return {"ok": r.returncode == 0, "returncode": r.returncode,
                 "elapsed_s": round(time.time() - t0, 2),

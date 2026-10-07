@@ -374,12 +374,14 @@ class ModelGrowthLab:
                 raise ValueError("trainer_command produced an empty command")
             log_path = self.jobs_dir / f"{job_id}.log"
             log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
+            from ..procutil import no_window_flags
             process = subprocess.Popen(
                 args,
                 cwd=str(self.root),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 text=True,
+                creationflags=no_window_flags(),
             )
             self._processes[job_id] = process
             job["status"] = "running"

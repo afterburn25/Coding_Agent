@@ -94,8 +94,12 @@ def production_launcher(*, state_parent: Path,
         # exports PYTHONPATH to run the suite, e.g. selftest).
         env["PYTHONPATH"] = str(worktree)
         kwargs: dict[str, Any] = {}
+        from ..procutil import no_window_flags
+        flags = no_window_flags()
         if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+        if flags:
+            kwargs["creationflags"] = flags
         proc = subprocess.Popen(
             [exe, "-m", "localcodeagent",
              "--workspace", str(worktree),

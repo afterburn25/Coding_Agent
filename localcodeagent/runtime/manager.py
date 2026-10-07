@@ -16,6 +16,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import AgentConfig, ModelProfile
+from ..procutil import no_window_flags
 from .hardware import HardwareSnapshot, detect_hardware
 from .catalog import CodingModelCatalogManager
 
@@ -704,6 +705,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
+                    creationflags=no_window_flags(),
                 ).stdout
                 for line in out.splitlines():
                     parts = line.split()
@@ -731,6 +733,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                     capture_output=True, text=True, timeout=10,
+                    creationflags=no_window_flags(),
                 ).stdout.strip()
                 if out.startswith('"'):
                     return out.split('","')[0].strip('"')
@@ -746,6 +749,7 @@ class RuntimeManager:
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(pid)],
                     capture_output=True, timeout=10,
+                    creationflags=no_window_flags(),
                 )
             else:
                 os.kill(pid, 9)
@@ -815,7 +819,8 @@ class RuntimeManager:
                 r = subprocess.run(
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-Process -Id {pid}).WorkingSet64"],
-                    capture_output=True, text=True, timeout=5)
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=no_window_flags())
                 if r.returncode == 0 and r.stdout.strip().isdigit():
                     out["ram_used_gb"] = round(int(r.stdout.strip()) / 1e9, 2)
             else:
@@ -829,7 +834,8 @@ class RuntimeManager:
             r = subprocess.run(
                 ["nvidia-smi", "--query-compute-apps=pid,used_memory",
                  "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5)
+                capture_output=True, text=True, timeout=5,
+                creationflags=no_window_flags())
             if r.returncode == 0:
                 for line in r.stdout.splitlines():
                     parts = [p.strip() for p in line.split(",")]

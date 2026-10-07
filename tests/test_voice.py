@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 
@@ -1295,7 +1296,7 @@ class TestChatterboxConfig(unittest.TestCase):
         self.assertEqual(c.voice_chatterbox_device, "auto")
         self.assertTrue(c.voice_normalize_loudness)
         self.assertTrue(c.voice_limiter_enabled)
-        self.assertAlmostEqual(c.voice_target_lufs, -17.0)
+        self.assertAlmostEqual(c.voice_target_lufs, -14.0)
 
     def test_parse_and_clamp(self):
         from localcodeagent.config import load_config
@@ -1356,6 +1357,72 @@ class TestChatterboxWorkerProtocol(unittest.TestCase):
         self.assertTrue(st["loaded"])
         self.assertIn(st["device"], ("cuda", "cpu"))
         self.assertIn("laugh", st["supported_tags"])
+
+
+# --------------------------------------------------------------------------
+# idle unload covers every registered engine (regression: only kokoro was
+# checked — a resident chatterbox worker held ~3 GB VRAM indefinitely)
+
+class TestVoiceIdleUnload(unittest.TestCase):
+    """server._unload_idle_voice_engine must release GPU engines too."""
+
+    def _server(self, engines, idle_s=600.0):
+        from localcodeagent.server import AppState
+        srv = AppState.__new__(AppState)
+        srv.config = types.SimpleNamespace(
+            voice_idle_unload_seconds=idle_s)
+        srv.voice = types.SimpleNamespace(_engines=engines)
+        published = []
+        srv._voice_publish = lambda p: published.append(p)
+        srv._published = published
+        return srv
+
+    def _fake_worker_engine(self, *, device="cuda", last_used=None):
+        class _Proc:
+            def poll(self):
+                return None
+        eng = types.SimpleNamespace(
+            _proc=_Proc(), _loaded=True, _device=device,
+            min_free_vram_mb=3200.0,
+            _last_used=(time.time() if last_used is None else last_used),
+            unload=lambda: setattr(eng, "unloaded", True))
+        eng.unloaded = False
+        return eng
+
+    def test_chatterbox_idle_unloads(self):
+        eng = self._fake_worker_engine(
+            last_used=time.time() - 9999)
+        srv = self._server({"chatterbox": eng}, idle_s=600.0)
+        srv._unload_idle_voice_engine()
+        self.assertTrue(eng.unloaded)
+
+    def test_chatterbox_active_stays_loaded(self):
+        eng = self._fake_worker_engine()  # just used
+        srv = self._server({"chatterbox": eng}, idle_s=600.0)
+        srv._unload_idle_voice_engine()
+        self.assertFalse(eng.unloaded)
+
+    def test_kokoro_still_unloads(self):
+        eng = types.SimpleNamespace(
+            _model=object(), _loaded_at=0.0, _last_used=0.0,
+            unload=lambda: setattr(eng, "unloaded", True))
+        eng.unloaded = False
+        srv = self._server({"kokoro": eng}, idle_s=600.0)
+        srv._unload_idle_voice_engine()
+        self.assertTrue(eng.unloaded)
+
+    def test_vram_pressure_unloads_gpu_engine(self):
+        eng = self._fake_worker_engine()  # actively used, but VRAM tight
+        srv = self._server({"chatterbox": eng}, idle_s=600.0)
+        import localcodeagent.runtime.hardware as hw
+        orig = hw.detect_hardware
+        try:
+            hw.detect_hardware = lambda: types.SimpleNamespace(
+                gpus=[types.SimpleNamespace(free_vram_mb=900)])
+            srv._unload_idle_voice_engine()
+        finally:
+            hw.detect_hardware = orig
+        self.assertTrue(eng.unloaded)
 
 
 if __name__ == "__main__":

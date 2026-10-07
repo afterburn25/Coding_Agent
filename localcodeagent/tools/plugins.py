@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 # Declarative tool/plugin manifest format (JSON). Manifests let external tools
@@ -368,6 +369,7 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return f"ERROR: executable not found: {cmd[0]}"
@@ -397,7 +399,7 @@ def _make_health_check(manifest: PluginManifest, *, install_root: Path | None = 
             try:
                 run_cmd = list(command)
                 run_cmd[0] = resolve_executable(run_cmd[0], install_root, manifest.id)
-                proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15)
+                proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15, creationflags=no_window_flags())
             except FileNotFoundError:
                 return {"ok": False, "status": "missing", "detail": f"health command not found: {command[0]}"}
             except subprocess.TimeoutExpired:

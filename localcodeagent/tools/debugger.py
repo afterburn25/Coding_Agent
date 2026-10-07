@@ -17,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from ..procutil import no_window_flags
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +185,7 @@ def register_debug_tools(registry: ToolRegistry, workspace: Path, *,
             try:
                 proc = subprocess.run(
                     cmd, cwd=target.parent, capture_output=True, text=True,
-                    timeout=timeout)
+                    timeout=timeout, creationflags=no_window_flags())
                 timed_out = False
             except subprocess.TimeoutExpired as exc:
                 proc = None

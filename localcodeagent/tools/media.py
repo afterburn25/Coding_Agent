@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 MAX_STDOUT = 20000
@@ -44,7 +45,8 @@ def _run_ffmpeg(argv: list[str], workspace: Path, timeout: int) -> dict[str, Any
     started = time.time()
     try:
         proc = subprocess.run([exe, "-hide_banner", "-y", *argv], cwd=str(workspace),
-                              capture_output=True, text=True, timeout=timeout)
+                              capture_output=True, text=True, timeout=timeout,
+                              creationflags=no_window_flags())
     except subprocess.TimeoutExpired:
         raise TimeoutError(f"ffmpeg timed out after {timeout}s")
     return {
@@ -64,7 +66,8 @@ def probe_media(workspace: Path, raw: str) -> dict[str, Any]:
     if src is None:
         raise ValueError("file must exist inside the workspace")
     proc = subprocess.run([exe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(src)],
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60,
+                          creationflags=no_window_flags())
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or "ffprobe failed")[-300:])
     return json.loads(proc.stdout or "{}")

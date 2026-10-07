@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..fsutil import atomic_write_text
+from ..procutil import no_window_flags
 from typing import Any, Callable
 
 from ..config import AgentConfig, ModelProfile
@@ -162,6 +163,7 @@ class RuntimeTuner:
                     try:
                         proc = subprocess.run(
                             [exe, "--help"], capture_output=True, text=True, timeout=PROBE_TIMEOUT,
+                            creationflags=no_window_flags(),
                         )
                         help_text = (proc.stdout or "") + (proc.stderr or "")
                         break
@@ -180,7 +182,7 @@ class RuntimeTuner:
                     if re.search(token, help_text, re.IGNORECASE):
                         supported.add(flag)
                 caps["supported"] = supported
-                ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=PROBE_TIMEOUT)
+                ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=PROBE_TIMEOUT, creationflags=no_window_flags())
                 caps["build"] = ((ver.stdout or "") + (ver.stderr or "")).strip().splitlines()[0] if (ver.stdout or ver.stderr) else "unknown"
             except Exception:
                 caps["build"] = "unavailable"

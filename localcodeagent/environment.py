@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .fsutil import atomic_write_text
+from .procutil import no_window_flags
 
 MAX_COMPONENTS = 200
 
@@ -52,7 +53,7 @@ def _probe_builtin(name: str, timeout: float = 5.0) -> dict:
     try:
         out = subprocess.run(
             [exe] + list(args), capture_output=True, text=True,
-            timeout=timeout)
+            timeout=timeout, creationflags=no_window_flags())
         text = (out.stdout or "") + (out.stderr or "")
         m = re.search(pattern, text)
         return {"installed": True,

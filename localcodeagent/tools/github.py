@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from ..config import AgentConfig
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 
@@ -22,6 +23,7 @@ def _run_git(workspace: Path, args: list[str], *, timeout: int = 60, check: bool
         text=True,
         capture_output=True,
         timeout=timeout,
+        creationflags=no_window_flags(),
     )
     output = (proc.stdout + proc.stderr).strip()
     if check and proc.returncode != 0:
@@ -223,6 +225,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             cwd=workspace,
             capture_output=True,
             text=True,
+            creationflags=no_window_flags(),
         )
         if staged.returncode == 0:
             raise RuntimeError("No staged changes to commit")
@@ -511,7 +514,8 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
                      ).decode()]
         argv += ["clone", url, str(dest)]
         proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=600)
+                              timeout=600,
+                              creationflags=no_window_flags())
         if proc.returncode != 0:
             raise RuntimeError(
                 f"git clone failed: {(proc.stderr or proc.stdout)[-2000:]}")

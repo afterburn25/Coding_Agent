@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from ..jobs import JobManager
+from ..procutil import no_window_flags
 
 # Archive-based tool installs (manifest "install": {"method": "archive"}).
 # Downloads a remote archive/file to a .part file, verifies SHA-256, extracts it
@@ -499,7 +500,8 @@ class ToolDownloadManager:
                 continue
             try:
                 out = subprocess.run(
-                    [cand, "--version"], capture_output=True, text=True, timeout=15)
+                    [cand, "--version"], capture_output=True, text=True, timeout=15,
+                    creationflags=no_window_flags())
             except (OSError, subprocess.TimeoutExpired):
                 continue
             banner = f"{out.stdout or ''} {out.stderr or ''}".lower()
@@ -515,7 +517,8 @@ class ToolDownloadManager:
         import subprocess
         try:
             listing = subprocess.run(
-                [tar, "-tf", str(archive)], capture_output=True, text=True, timeout=120)
+                [tar, "-tf", str(archive)], capture_output=True, text=True, timeout=120,
+                creationflags=no_window_flags())
             if listing.returncode != 0:
                 return False
         except (OSError, subprocess.TimeoutExpired):
@@ -529,7 +532,8 @@ class ToolDownloadManager:
         try:
             proc = subprocess.Popen(
                 [tar, "-xvf", str(archive), "-C", str(dest)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                creationflags=no_window_flags())
         except OSError:
             return False
         try:

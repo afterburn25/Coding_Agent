@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from .invokeai import InvokeAIBackend
 from ..fsutil import atomic_write_text
+from ..procutil import no_window_flags
 
 
 @dataclass(slots=True)
@@ -178,13 +179,15 @@ class InvokeAIRuntime:
                         probe = subprocess.run(
                             [str(py), "-c",
                              "from invokeai.app.run_app import run_app"],
-                            capture_output=True, timeout=30)
+                            capture_output=True, timeout=30,
+                            creationflags=no_window_flags())
                         if probe.returncode == 0:
                             return home.resolve(), [str(py.resolve()), "-c",
                                                     "from invokeai.app.run_app import run_app; run_app()"]
                         probe = subprocess.run(
                             [str(py), "-c", "from invokeai.app.run import invoke_ai_api"],
-                            capture_output=True, timeout=30)
+                            capture_output=True, timeout=30,
+                            creationflags=no_window_flags())
                         if probe.returncode == 0:
                             return home.resolve(), [str(py.resolve()), "-c",
                                                     "from invokeai.app.run import invoke_ai_api; invoke_ai_api()"]
@@ -204,13 +207,15 @@ class InvokeAIRuntime:
             try:
                 probe = subprocess.run(
                     [py, "-c", "from invokeai.app.run_app import run_app"],
-                    capture_output=True, timeout=30)
+                    capture_output=True, timeout=30,
+                    creationflags=no_window_flags())
                 if probe.returncode == 0:
                     return scripts.parent.resolve(), [py, "-c",
                                                       "from invokeai.app.run_app import run_app; run_app()"]
                 probe = subprocess.run(
                     [py, "-c", "from invokeai.app.run import invoke_ai_api"],
-                    capture_output=True, timeout=30)
+                    capture_output=True, timeout=30,
+                    creationflags=no_window_flags())
                 if probe.returncode == 0:
                     return scripts.parent.resolve(), [py, "-c",
                                                       "from invokeai.app.run import invoke_ai_api; invoke_ai_api()"]
@@ -326,6 +331,7 @@ class InvokeAIRuntime:
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
                     capture_output=True, text=True, timeout=10,
+                    creationflags=no_window_flags(),
                 ).stdout
             else:
                 raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -338,7 +344,8 @@ class InvokeAIRuntime:
         try:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                               capture_output=True, timeout=10)
+                               capture_output=True, timeout=10,
+                               creationflags=no_window_flags())
             else:
                 os.kill(pid, 9)
         except Exception:
@@ -452,7 +459,8 @@ class InvokeAIRuntime:
             if p and p.poll() is None:
                 if os.name == "nt":
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
-                                   capture_output=True, timeout=15)
+                                   capture_output=True, timeout=15,
+                                   creationflags=no_window_flags())
                 else:
                     p.terminate()
                 try:

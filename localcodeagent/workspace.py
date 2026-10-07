@@ -28,6 +28,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from .procutil import no_window_flags
 from typing import Any, Callable
 
 from .fsutil import atomic_write_text
@@ -58,7 +60,8 @@ def _git(root: Path, *args: str, timeout: int = 5) -> str | None:
     try:
         proc = subprocess.run(
             ["git", *args], cwd=root, text=True,
-            capture_output=True, timeout=timeout)
+            capture_output=True, timeout=timeout,
+            creationflags=no_window_flags())
     except Exception:
         return None
     if proc.returncode != 0:

@@ -17,6 +17,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
+from ..procutil import no_window_flags
+
 _FRAME_RX = re.compile(
     r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+), in (?P<func>[\w<>]+)',
     re.M)
@@ -40,7 +42,8 @@ class Localizer:
     def _run_git(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["git", "-C", str(self.repo_root), *args],
-            capture_output=True, text=True, timeout=15)
+            capture_output=True, text=True, timeout=15,
+            creationflags=no_window_flags())
 
     def _in_repo(self, path: str) -> str:
         """Map a traceback path to a repo-relative path, or ''.

@@ -23,6 +23,13 @@ def is_chat_nexus_tree(workspace: Path) -> bool:
     )
 
 
+def _no_window() -> int:
+    """CREATE_NO_WINDOW on Windows — runs standalone, so no package import."""
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return int(subprocess.CREATE_NO_WINDOW)
+    return 0
+
+
 def _free_loopback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -105,6 +112,7 @@ def validate_self_update(
                 errors="replace",
                 capture_output=True,
                 timeout=max(30, int(test_timeout)),
+                creationflags=_no_window(),
             )
         except subprocess.TimeoutExpired as exc:
             result["tests"] = {"ok": False, "timeout": True}
@@ -151,6 +159,7 @@ def validate_self_update(
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=_no_window(),
         )
         error = ""
         status_payload: dict[str, Any] | None = None

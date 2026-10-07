@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 DEFAULT_MAX_RESULTS = 200
@@ -35,7 +36,7 @@ def _run_rg(workspace: Path, argv: list[str]) -> tuple[list[str], int]:
     if not rg:
         return [], -1
     try:
-        proc = subprocess.run([rg, *argv], cwd=str(workspace), capture_output=True, text=True, timeout=60)
+        proc = subprocess.run([rg, *argv], cwd=str(workspace), capture_output=True, text=True, timeout=60, creationflags=no_window_flags())
     except (OSError, subprocess.TimeoutExpired):
         return [], -1
     return proc.stdout.splitlines(), proc.returncode

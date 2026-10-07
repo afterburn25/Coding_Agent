@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 MAX_CODE_CHARS = 50000
@@ -45,6 +46,7 @@ def run_python(code: str, sandbox_dir: Path, *, timeout: int = DEFAULT_TIMEOUT) 
             [sys.executable, "-I", "-u", str(script)],
             cwd=str(sandbox_dir), env=_sandbox_env(),
             capture_output=True, text=True, timeout=timeout,
+            creationflags=no_window_flags(),
         )
         return {
             "exit_code": proc.returncode,

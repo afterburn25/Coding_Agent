@@ -16,12 +16,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 
 def _git(root: Path, *argv: str, timeout: int = 120) -> tuple[int, str]:
     proc = subprocess.run(["git", *argv], cwd=str(root), text=True,
-                          capture_output=True, timeout=timeout)
+                          capture_output=True, timeout=timeout,
+                          creationflags=no_window_flags())
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -224,7 +226,8 @@ def register_deploy_tools(registry: ToolRegistry, workspace: Path, *,
             cmd.append("--prerelease")
         try:
             proc = subprocess.run(cmd, cwd=str(probe), capture_output=True,
-                                  text=True, timeout=180)
+                                  text=True, timeout=180,
+                                  creationflags=no_window_flags())
         except subprocess.TimeoutExpired:
             return json.dumps({"error": "gh release create timed out"})
         if proc.returncode:

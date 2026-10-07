@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ttl
+from ..procutil import no_window_flags
 
 
 def config_fingerprint(config: Any) -> str:
@@ -70,6 +71,7 @@ def repo_head(workspace: str | Path) -> str:
         head = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5,
+            creationflags=no_window_flags(),
         )
         return head.stdout.strip()[:40] if head.returncode == 0 else ""
     except Exception:

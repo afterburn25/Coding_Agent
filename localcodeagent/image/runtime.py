@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from .comfyui import ComfyUIBackend
 from ..fsutil import atomic_write_text
+from ..procutil import no_window_flags
 
 
 @dataclass(slots=True)
@@ -128,6 +129,7 @@ class ComfyUIRuntime:
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
                     capture_output=True, text=True, timeout=10,
+                    creationflags=no_window_flags(),
                 ).stdout
             else:
                 raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -140,7 +142,8 @@ class ComfyUIRuntime:
         try:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                               capture_output=True, timeout=10)
+                               capture_output=True, timeout=10,
+                               creationflags=no_window_flags())
             else:
                 os.kill(pid, 9)
         except Exception:
@@ -269,7 +272,8 @@ class ComfyUIRuntime:
                     # Kill the whole tree — the embedded python may re-exec a
                     # child that would otherwise survive and hold port 8188.
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
-                                   capture_output=True, timeout=15)
+                                   capture_output=True, timeout=15,
+                                   creationflags=no_window_flags())
                 else:
                     p.terminate()
                 try:

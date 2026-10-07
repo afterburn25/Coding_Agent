@@ -128,6 +128,7 @@ class ChatterboxEngine(TTSEngine):
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._loaded = False
+        self._last_used = 0.0
         self._device = ""
         self._load_time_s = 0.0
         self._sr = self.sample_rate
@@ -256,6 +257,7 @@ class ChatterboxEngine(TTSEngine):
                 except json.JSONDecodeError:
                     continue
                 if resp.get("ok"):
+                    self._last_used = time.time()
                     return resp
                 raise VoiceEngineError(str(resp.get("error") or
                                            "chatterbox request failed"))

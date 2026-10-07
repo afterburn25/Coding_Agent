@@ -1975,10 +1975,12 @@ class AutonomousSupervisor:
             except Exception as exc:
                 return {"ok": False, "output": f"{name}: sandbox failed — {exc}"}
         try:
+            from ..procutil import no_window_flags
             proc = subprocess.run(
                 command, shell=True, cwd=str(self.workspace),
                 capture_output=True, text=True, timeout=900,
-                errors="replace")
+                errors="replace",
+                creationflags=no_window_flags())
             ok = proc.returncode == 0
             tail = (proc.stdout or "")[-3000:] + (proc.stderr or "")[-1500:]
             return {"ok": ok, "output": f"{name}: rc={proc.returncode}\n{tail}"}

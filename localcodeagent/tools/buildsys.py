@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 MAX_OUTPUT = 20000
@@ -208,7 +209,7 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         timeout = max(1, min(int(args.get("timeout_seconds", default_timeout)), 3600))
         started = time.time()
         try:
-            proc = subprocess.run(cmd, cwd=str(root), shell=True, capture_output=True, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, cwd=str(root), shell=True, capture_output=True, text=True, timeout=timeout, creationflags=no_window_flags())
             payload = {"system": entry["id"], "command": cmd, "exit_code": proc.returncode,
                        "stdout": (proc.stdout or "")[-MAX_OUTPUT:], "stderr": (proc.stderr or "")[-8000:],
                        "timed_out": False}

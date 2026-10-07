@@ -359,7 +359,7 @@ class AgentConfig:
     # Output loudness management — applied in the DSP chain before the
     # peak limiter so normalized speech never clips.
     voice_normalize_loudness: bool = True
-    voice_target_lufs: float = -17.0
+    voice_target_lufs: float = -14.0
     voice_limiter_enabled: bool = True
 
     # Local speech-to-text. Faster-whisper handles push-to-talk/file

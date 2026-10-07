@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
 
+from ..procutil import no_window_flags
+
 
 @dataclass(slots=True)
 class GPUInfo:
@@ -177,6 +179,7 @@ def _detect_nvidia() -> tuple[bool, list[GPUInfo]]:
             errors="replace",
             timeout=5,
             check=False,
+            creationflags=no_window_flags(),
         )
         if proc.returncode != 0:
             return True, []

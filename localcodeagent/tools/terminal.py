@@ -226,6 +226,7 @@ class TerminalTracker:
                         subprocess.run(
                             ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                             capture_output=True, timeout=10,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
                         )
                     except Exception:
                         pass
@@ -309,6 +310,7 @@ def run_process_streaming(
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                     capture_output=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             except Exception:
                 pass

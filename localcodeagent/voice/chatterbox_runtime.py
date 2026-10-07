@@ -28,6 +28,7 @@ import urllib.request
 from pathlib import Path
 
 from ..fsutil import replace_with_retry
+from ..procutil import no_window_flags
 from .chatterbox_assets import sha256_file
 
 # Pinned relocatable CPython — digest published by the upstream release
@@ -63,7 +64,8 @@ def _has_nvidia() -> bool:
         try:
             return subprocess.run(
                 [cand, "-L"], capture_output=True,
-                timeout=15).returncode == 0
+                timeout=15,
+                creationflags=no_window_flags()).returncode == 0
         except Exception:
             continue
     return False

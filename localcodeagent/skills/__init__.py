@@ -30,6 +30,7 @@ from typing import Any
 
 from ..fsutil import atomic_write_text
 from ..permissions import KNOWN_PERMISSIONS
+from ..procutil import no_window_flags
 
 _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
@@ -507,6 +508,7 @@ class SkillRegistry:
                 capture_output=True,
                 text=True,
                 timeout=max(1, min(int(check.get("timeout_seconds", 30)), 120)),
+                creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return {"ok": False, "status": "missing", "detail": f"health executable not found: {exe}"}

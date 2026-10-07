@@ -129,12 +129,14 @@ class Sandbox:
         started = time.time()
         job = None
         try:
+            from ..procutil import no_window_flags
             proc = subprocess.Popen(
                 [str(a) for a in argv], cwd=str(cwd or self.root),
                 env=_clean_env(allow_network),
                 stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace")
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=no_window_flags())
             job = _assign_job_limits(proc, mem_mb)
             try:
                 out, err = proc.communicate(input=stdin or None,

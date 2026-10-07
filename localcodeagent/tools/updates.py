@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 from ..fsutil import atomic_write_text
+from ..procutil import no_window_flags
 from typing import Any
 
 log = logging.getLogger("chatnexus.updates")
@@ -60,7 +61,8 @@ class ToolUpdateChecker:
         out = subprocess.run(
             ["winget", "upgrade", "--id", package, "-e",
              "--accept-source-agreements"],
-            capture_output=True, text=True, timeout=120)
+            capture_output=True, text=True, timeout=120,
+            creationflags=no_window_flags())
         text = f"{out.stdout}\n{out.stderr}"
         if "No applicable upgrade" in text or out.returncode in (-1978335189,):
             return "current"
@@ -84,7 +86,8 @@ class ToolUpdateChecker:
             return None
         out = subprocess.run(
             [python, "-m", "pip", "index", "versions", package],
-            capture_output=True, text=True, timeout=120)
+            capture_output=True, text=True, timeout=120,
+            creationflags=no_window_flags())
         m = re.search(r"\(([^)]+)\)", out.stdout or "")
         return m.group(1) if m else None
 

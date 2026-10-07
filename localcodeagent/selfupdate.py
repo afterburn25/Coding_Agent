@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .fsutil import atomic_write_text
+from .procutil import no_window_flags
 
 # Mirrors the PyInstaller invocation in packaging/build_windows.ps1 —
 # backend-only; the desktop host and installer are not rebuilt here.
@@ -41,7 +42,8 @@ _BUILD_COLLECT_ALL = [
 def _git(source: Path, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(source), *args],
-        capture_output=True, text=True, timeout=timeout)
+        capture_output=True, text=True, timeout=timeout,
+        creationflags=no_window_flags())
 
 
 class SelfUpdate:
@@ -56,7 +58,8 @@ class SelfUpdate:
     def _default_runner(cmd: list[str], cwd: Path, timeout: int) -> dict:
         try:
             p = subprocess.run(cmd, cwd=str(cwd), capture_output=True,
-                               text=True, timeout=timeout)
+                               text=True, timeout=timeout,
+                               creationflags=no_window_flags())
             return {"rc": p.returncode,
                     "out": (p.stdout or "")[-20000:],
                     "err": (p.stderr or "")[-20000:]}

@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .procutil import no_window_flags
+
 
 class GitBisector:
     def __init__(self, repo_root: Path | str, *,
@@ -26,7 +28,7 @@ class GitBisector:
         return subprocess.run(
             ["git", *args], cwd=str(cwd or self.repo_root),
             capture_output=True, text=True, timeout=timeout,
-            errors="replace")
+            errors="replace", creationflags=no_window_flags())
 
     def run(self, *, good: str, bad: str, test_command: str,
             timeout_s: float = 600.0, step_timeout_s: float = 120.0,
@@ -73,7 +75,8 @@ class GitBisector:
                     r = subprocess.run(
                         test_command, shell=True, cwd=str(wt),
                         capture_output=True, text=True,
-                        timeout=step_timeout_s, errors="replace")
+                        timeout=step_timeout_s, errors="replace",
+                        creationflags=no_window_flags())
                     ok = r.returncode == 0
                     tail = (r.stdout + r.stderr).strip()[-300:]
                 except subprocess.TimeoutExpired:

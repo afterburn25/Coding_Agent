@@ -53,9 +53,11 @@ class LspClient:
 
     def start(self) -> bool:
         try:
+            from ..procutil import no_window_flags
             self._proc = subprocess.Popen(
                 self.cmd, cwd=self.root, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=no_window_flags())
         except OSError:
             return False
         self._alive = True

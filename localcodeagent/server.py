@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any, Callable
 
 from .fsutil import atomic_write_text
+from .procutil import no_window_flags
 from . import netdiag
 from .policies import EGRESS_MODES, RESOURCE_MODES, ResourcePolicies
 from .release import SECTIONS as SECTIONS_RC
@@ -2536,7 +2537,8 @@ class AppState:
             def git(*args: str) -> subprocess.CompletedProcess:
                 return subprocess.run(
                     ["git", "-C", str(self.workspace), *args],
-                    capture_output=True, text=True, timeout=120)
+                    capture_output=True, text=True, timeout=120,
+                    creationflags=no_window_flags())
             try:
                 head = git("rev-parse", "--abbrev-ref", "HEAD")
                 if head.returncode != 0 or head.stdout.strip() != "main":
@@ -4652,7 +4654,7 @@ class AppState:
             def check() -> dict:
                 if shutil.which(executable):
                     try:
-                        proc = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10)
+                        proc = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10, creationflags=no_window_flags())
                         version = (proc.stdout or proc.stderr or "").strip().splitlines()[0] if (proc.stdout or proc.stderr) else "ok"
                     except Exception:
                         version = "ok"
@@ -4764,8 +4766,15 @@ class AppState:
         self._autonomy_watchdog()
 
     def _unload_idle_voice_engine(self) -> None:
-        """Release the TTS model after voice_idle_unload_seconds of silence —
-        keeps overnight sessions lean without losing anything."""
+        """Release TTS engines after voice_idle_unload_seconds of silence —
+        keeps overnight sessions lean without losing anything.
+
+        Every registered engine is covered, not just Kokoro: a resident
+        GPU engine that never unloads holds VRAM the LLM lane needs —
+        on a 12 GB card a stuck 3 GB voice worker pushes generation into
+        WDDM paging (hundreds of ms per token). GPU engines also unload
+        immediately when free VRAM drops below their declared floor, so
+        model generation always wins."""
         voice = self.voice
         if voice is None:
             return
@@ -4773,15 +4782,40 @@ class AppState:
         if idle_s <= 0:
             return
         try:
-            eng = voice._engines.get("kokoro") or next(
-                iter(voice._engines.values()), None)
-            if eng is None or getattr(eng, "_model", None) is None:
-                return
-            last = getattr(eng, "_last_used", getattr(eng, "_loaded_at", 0.0))
-            if time.time() - last > idle_s:
-                eng.unload()
-                self._voice_publish({"event": "engine_idle_unload",
-                                     "engine": "kokoro"})
+            now = time.time()
+            engines = list(voice._engines.items())
+            gpu_loaded = [
+                eng for _n, eng in engines
+                if getattr(eng, "_loaded", False)
+                and getattr(eng, "_device", "") == "cuda"]
+            free_vram: float | None = None
+            if gpu_loaded and any(
+                    getattr(eng, "min_free_vram_mb", 0.0) > 0
+                    for eng in gpu_loaded):
+                from .runtime.hardware import detect_hardware
+                free_vram = max(
+                    (g.free_vram_mb for g in detect_hardware().gpus),
+                    default=None)
+            for name, eng in engines:
+                loaded = getattr(eng, "_model", None) is not None or (
+                    getattr(eng, "_loaded", False)
+                    and getattr(eng, "_proc", None) is not None
+                    and eng._proc.poll() is None)
+                if not loaded:
+                    continue
+                under_pressure = (
+                    free_vram is not None
+                    and getattr(eng, "_device", "") == "cuda"
+                    and free_vram < float(
+                        getattr(eng, "min_free_vram_mb", 0.0)))
+                last = getattr(eng, "_last_used",
+                               getattr(eng, "_loaded_at", 0.0))
+                if under_pressure or now - last > idle_s:
+                    eng.unload()
+                    self._voice_publish({
+                        "event": "engine_idle_unload", "engine": name,
+                        "reason": "vram_pressure" if under_pressure
+                                  else "idle"})
         except Exception:
             pass
 
@@ -6013,7 +6047,7 @@ class AppState:
             import subprocess
             self.jobs.update(job.id, state="running", detail=" ".join(cmd[:3]))
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags())
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed", detail=(proc.stdout or "")[-300:])
                 else:
@@ -6072,7 +6106,8 @@ class AppState:
                     continue
                 try:
                     chk = subprocess.run(probe_args + ["--version"],
-                                         capture_output=True, timeout=30)
+                                         capture_output=True, timeout=30,
+                                         creationflags=no_window_flags())
                 except Exception:
                     continue
                 if chk.returncode != 0:
@@ -6081,7 +6116,8 @@ class AppState:
                 if os.name == "nt":
                     out = subprocess.run(
                         probe_args + ["-c", "import sys; print(sys.executable)"],
-                        capture_output=True, text=True, timeout=30)
+                        capture_output=True, text=True, timeout=30,
+                        creationflags=no_window_flags())
                     exe = (out.stdout or "").strip()
                     if exe and Path(exe).is_file():
                         return exe
@@ -6098,7 +6134,8 @@ class AppState:
                 self.jobs.update(job.id, state="running",
                                  detail=f"creating virtualenv at {root} (python: {py})")
                 proc = subprocess.run([py, "-m", "venv", str(root)],
-                                      capture_output=True, text=True, timeout=600)
+                                      capture_output=True, text=True, timeout=600,
+                                      creationflags=no_window_flags())
                 if proc.returncode != 0:
                     self.jobs.update(job.id, state="failed",
                                      error=(proc.stderr or "venv creation failed")[-300:])
@@ -6106,7 +6143,8 @@ class AppState:
                 self.jobs.update(job.id, detail=f"pip install {package}")
                 proc = subprocess.run(
                     [str(pip), "install"] + pip_args + [package],
-                    capture_output=True, text=True, timeout=7200)
+                    capture_output=True, text=True, timeout=7200,
+                    creationflags=no_window_flags())
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed",
                                      detail=(proc.stdout or "")[-300:])
@@ -6227,7 +6265,7 @@ class AppState:
             self.jobs.update(job.id, state="running", status="removing",
                              detail=" ".join(cmd[:3]))
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags())
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed", status="finished",
                                      progress=1.0, detail=(proc.stdout or "")[-300:])

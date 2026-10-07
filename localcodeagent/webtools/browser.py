@@ -153,9 +153,11 @@ class BrowserRunner:
                 return ch
             env = dict(os.environ)
             env["PLAYWRIGHT_BROWSERS_PATH"] = str(self.browsers_dir)
+            from ..procutil import no_window_flags
             proc = subprocess.run(
                 [str(node), str(cli), "install", "chromium"],
-                env=env, capture_output=True, text=True, timeout=self.INSTALL_TIMEOUT_S)
+                env=env, capture_output=True, text=True, timeout=self.INSTALL_TIMEOUT_S,
+                creationflags=no_window_flags())
             if proc.returncode != 0:
                 tail = (proc.stderr or proc.stdout or "").strip()[-300:]
                 raise RuntimeError(f"browser provisioning failed: {tail}")

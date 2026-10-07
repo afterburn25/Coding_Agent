@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from ..procutil import no_window_flags
+
 
 class WorktreeError(RuntimeError):
     pass
@@ -27,7 +29,8 @@ class Patcher:
     def _run_git(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["git", "-C", str(self.repo_root), *args],
-            capture_output=True, text=True, timeout=30)
+            capture_output=True, text=True, timeout=30,
+            creationflags=no_window_flags())
 
     def _git_ok(self, *args: str) -> bool:
         try:
@@ -88,7 +91,8 @@ class Patcher:
             try:
                 out = subprocess.run(
                     ["git", "-C", str(wt), "status", "--porcelain"],
-                    capture_output=True, text=True, timeout=15).stdout
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=no_window_flags()).stdout
                 files = []
                 for line in out.splitlines():
                     if not line.strip():
@@ -116,11 +120,13 @@ class Patcher:
         if self.is_git_repo() and (wt / ".git").exists():
             r = subprocess.run(
                 ["git", "-C", str(wt), "diff", "HEAD", "--binary"],
-                capture_output=True, timeout=30)
+                capture_output=True, timeout=30,
+                creationflags=no_window_flags())
             if r.returncode == 0 and r.stdout.strip():
                 ap = subprocess.run(
                     ["git", "-C", str(self.repo_root), "apply", "--whitespace=nowarn"],
-                    input=r.stdout, capture_output=True, timeout=30)
+                    input=r.stdout, capture_output=True, timeout=30,
+                    creationflags=no_window_flags())
                 if ap.returncode == 0:
                     # git diff excludes untracked additions (e.g. a new
                     # regression test) — copy anything still differing.
