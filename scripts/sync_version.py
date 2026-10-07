@@ -113,6 +113,19 @@ def sync(check: bool = False) -> list[str]:
         ROOT / ".agent" / "project.json",
         [(r'"version": "[^"]+"', f'"version": "{v}"')], check))
 
+    # README "Current development version" block — the line is a bare
+    # backticked version on its own line under the heading.
+    record(ROOT / "README.md", _rewrite(
+        ROOT / "README.md",
+        [(r"(?m)(## Current development version\n\n)`[^`]+`",
+          rf"\g<1>`{v}`")], check))
+
+    # DEVIN_START_HERE current-version bullet.
+    record(ROOT / "DEVIN_START_HERE.md", _rewrite(
+        ROOT / "DEVIN_START_HERE.md",
+        [(r"(- Current development version: `)[^`]+(`)",
+          rf"\g<1>{v}\g<2>")], check))
+
     return out_of_sync
 
 
