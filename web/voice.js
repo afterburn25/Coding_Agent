@@ -445,6 +445,46 @@
       $('#engineStatus').textContent = 'Downloading Kokoro assets…';
       await api('/api/voice/assets/install', {});
     });
+    $('#pickCloneFile').addEventListener('click', () => $('#cloneFile').click());
+    $('#cloneFile').addEventListener('change', e => {
+      const f = e.target.files[0];
+      $('#cloneStatus').textContent = f ? f.name : '';
+      if (f && !$('#cloneName').value)
+        $('#cloneName').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+    });
+    $('#importVoice').addEventListener('click', async () => {
+      const st = $('#cloneStatus');
+      const f = $('#cloneFile').files[0];
+      const name = $('#cloneName').value.trim();
+      if (!f) { st.textContent = 'pick an audio clip first'; return; }
+      const id = (name || f.name.replace(/\.[^.]+$/, ''))
+        .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '');
+      if (!id) { st.textContent = 'need a usable voice name'; return; }
+      st.textContent = 'validating + importing…';
+      try {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result).split(',')[1] || '');
+          r.onerror = () => rej(new Error('could not read file'));
+          r.readAsDataURL(f);
+        });
+        const out = await api('/api/voice/voice/import', {
+          voice_id: id, name, filename: f.name, audio_b64: b64,
+          engine: 'chatterbox',
+        });
+        if (!out.ok) {
+          st.textContent = 'import failed: ' + (out.error || 'unknown error');
+          return;
+        }
+        const warns = (out.warnings || []).join('; ');
+        st.textContent = 'imported "' + (out.voice?.name || id) + '"' +
+          (warns ? ' — ' + warns : '');
+        $('#cloneFile').value = '';
+        loadVoices('chatterbox');
+      } catch (err) {
+        st.textContent = 'import failed: ' + err.message;
+      }
+    });
     $('#autoRead').addEventListener('change', e => {
       api('/api/voice/config', { voice_mode: e.target.checked ? 'responses' : 'manual' });
     });

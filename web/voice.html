@@ -71,6 +71,17 @@
           <label class="voice-check"><input type="checkbox" id="autoRead"> Read responses aloud</label>
           <label class="voice-check"><input type="checkbox" id="voiceEnabled" checked> Voice enabled</label>
         </section>
+        <section class="card">
+          <div class="section-title">Clone a voice</div>
+          <div class="muted" style="font-size:11px;margin-bottom:6px">Zero-shot cloning — pick a clean ≥5s clip. No model retraining.</div>
+          <input id="cloneName" class="voice-input" placeholder="Display name" style="margin-bottom:4px">
+          <div class="side-actions">
+            <button id="pickCloneFile" class="mini-button" type="button">Pick audio…</button>
+            <button id="importVoice" class="mini-button primary" type="button">Import</button>
+          </div>
+          <div id="cloneStatus" class="muted" style="font-size:11px;margin-top:4px"></div>
+          <input id="cloneFile" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" hidden>
+        </section>
       </div>
 
       <section class="voice-preview card">

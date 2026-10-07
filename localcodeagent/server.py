@@ -8016,6 +8016,58 @@ class Handler(BaseHTTPRequestHandler):
                 p = voice.presets.import_json(str(body.get("json", "")))
                 self._json({"ok": True, "preset": p.as_dict()})
                 return
+            if path == "/api/voice/voice/import":
+                eng = (voice.engine("chatterbox") if voice else None)
+                if eng is None or not hasattr(eng, "import_voice"):
+                    self._json({"error": "voice import requires the "
+                                "Chatterbox engine"}, 503)
+                    return
+                tmp_path = None
+                try:
+                    source = str(body.get("source_path", ""))
+                    b64 = str(body.get("audio_b64", ""))
+                    if b64:
+                        import base64 as _b64
+                        raw = _b64.b64decode(b64, validate=False)
+                        if not raw or len(raw) > 60 * 1024 * 1024:
+                            self._json({"error": "audio upload is empty or "
+                                        "over 60 MB"}, 400)
+                            return
+                        fname = str(body.get("filename", "clip.wav"))
+                        ext = Path(fname).suffix.lower() or ".wav"
+                        if not re.fullmatch(r"\.[a-z0-9]{1,8}", ext):
+                            ext = ".wav"
+                        imp_dir = Path(getattr(
+                            self.state.config, "voice_cache_dir",
+                            "data/voice/cache"))
+                        if not imp_dir.is_absolute():
+                            imp_dir = (Path(self.state.config_path).parent
+                                       / imp_dir)
+                        imp_dir = imp_dir / "imports"
+                        imp_dir.mkdir(parents=True, exist_ok=True)
+                        import uuid as _uuid
+                        tmp_path = (imp_dir /
+                                    f"upload-{_uuid.uuid4().hex[:12]}{ext}")
+                        tmp_path.write_bytes(raw)
+                        source = str(tmp_path)
+                    out = eng.import_voice(
+                        body.get("voice_id"), source,
+                        name=str(body.get("name", "")),
+                        description=str(body.get("description", "")),
+                        language=str(body.get("language", "en")),
+                        gender=str(body.get("gender", "")),
+                        overwrite=bool(body.get("overwrite")))
+                except Exception as exc:
+                    self._json({"error": str(exc)[:300]}, 400)
+                    return
+                finally:
+                    if tmp_path is not None:
+                        try:
+                            tmp_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                self._json(out, 200 if out.get("ok") else 400)
+                return
             if path == "/api/voice/export":
                 import re as _re
                 seg_id = str(body.get("segment_id", ""))

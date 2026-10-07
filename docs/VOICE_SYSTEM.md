@@ -95,6 +95,14 @@ pumped separately so diagnostics can never corrupt protocol lines.
   Reference audio must validate (`reference.py`: >5 s, no clipping, no
   silence-dominated or corrupt files). Turbo's conditionals are global —
   the worker re-prepares on every voice switch.
+- **Import**: `ChatterboxEngine.import_voice` + `POST
+  /api/voice/voice/import` (path or base64 upload) register a voice —
+  validate → canonicalize (mono 24 kHz, loudness-normalized, peak-safe)
+  → `voices/<id>/reference.wav` + `voice.json`. Non-WAV sources decode
+  through ffmpeg (a provisioned tool); a failed import leaves no voice
+  dir behind. Voice Studio's "Clone a voice" card drives it. Zero-shot
+  cloning means no training step exists to wire up — "training a voice"
+  *is* registering a validated reference.
 - **Turbo caveats**: `exaggeration`/`cfg`/`min_p` are ignored by the model
   (`emotion_adv=False`); emotion delivery is tokenizer tags + temperature.
   `[laugh] [chuckle] [sigh] [gasp] [cough] [groan] [sniff] [shush]

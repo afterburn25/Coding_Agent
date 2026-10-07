@@ -1149,6 +1149,55 @@ class TestChatterboxEngine(unittest.TestCase):
         self.assertFalse(st["available"])
         self.assertIn("model", st)
 
+    def _wav(self, seconds: float, sr: int = 24000,
+             amp: float = 0.3) -> Path:
+        import wave as _wave
+        t = np.arange(int(seconds * sr), dtype=np.float32) / sr
+        pcm = (amp * np.sin(2 * np.pi * 220 * t) * 32767).astype(np.int16)
+        p = Path(self.tmp.name) / f"src-{seconds}-{amp}.wav"
+        with _wave.open(str(p), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(pcm.tobytes())
+        return p
+
+    def test_import_voice_registers_valid_clip(self):
+        out = self.eng.import_voice("My Voice!", self._wav(6.0),
+                                    name="My Voice")
+        self.assertTrue(out["ok"], out.get("error"))
+        self.assertEqual(out["voice"]["id"], "my-voice")
+        vdir = self.eng.voices_dir / "my-voice"
+        self.assertTrue((vdir / "reference.wav").is_file())
+        meta = json.loads((vdir / "voice.json").read_text())
+        self.assertEqual(meta["name"], "My Voice")
+        self.assertEqual(meta["reference_sha256"],
+                         out["voice"]["reference_sha256"])
+        # imported voice shows up in the listing, shadowing-capable
+        voices = {v["id"]: v for v in self.eng.voices()}
+        self.assertTrue(voices["my-voice"]["installed"])
+        self.assertFalse(voices["my-voice"]["official"])
+
+    def test_import_voice_rejects_short_clip(self):
+        out = self.eng.import_voice("tiny", self._wav(2.0))
+        self.assertFalse(out["ok"])
+        self.assertIn("validation", out["error"])
+        self.assertFalse((self.eng.voices_dir / "tiny").exists())
+
+    def test_import_voice_refuses_clobber_without_overwrite(self):
+        self.assertTrue(
+            self.eng.import_voice("dup", self._wav(6.0))["ok"])
+        out = self.eng.import_voice("dup", self._wav(6.0))
+        self.assertFalse(out["ok"])
+        self.assertTrue(self.eng.import_voice(
+            "dup", self._wav(6.0), overwrite=True)["ok"])
+
+    def test_import_voice_bad_inputs(self):
+        self.assertFalse(self.eng.import_voice("!!!", self._wav(6.0))["ok"])
+        self.assertFalse(self.eng.import_voice(
+            "x", Path(self.tmp.name) / "missing.wav")["ok"])
+        self.assertFalse(self.eng.import_voice("x", "")["ok"])
+
     def test_status_poll_does_not_extend_idle_lease(self):
         """Introspection must not bump _last_used — otherwise any UI
         status poll resets the idle-unload timer and pins ~2 GB of VRAM

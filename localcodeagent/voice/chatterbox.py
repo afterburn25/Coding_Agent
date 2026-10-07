@@ -20,6 +20,8 @@ import json
 import logging
 import os
 import queue
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -170,6 +172,104 @@ class ChatterboxEngine(TTSEngine):
         except Exception:
             meta = {}
         return meta
+
+    # -- voice import ----------------------------------------------------
+    #
+    # Chatterbox is zero-shot — "training" a voice is registering a
+    # validated reference clip; no fine-tuning exists to wire up.
+
+    _IMPORT_ID_RE = re.compile(r"[^a-z0-9_-]+")
+
+    def _to_wav(self, src: Path, tmp_dir: Path) -> Path:
+        """Non-WAV sources decode through ffmpeg (a provisioned tool);
+        WAV passes through untouched."""
+        if src.suffix.lower() == ".wav":
+            return src
+        ffmpeg = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+        if not ffmpeg:
+            raise VoiceEngineError(
+                f"{src.suffix or 'that file'} needs conversion to WAV — "
+                "install ffmpeg (provisioning plan) or supply a .wav")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        out = tmp_dir / f"import-{src.stem[:40]}.wav"
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-i", str(src), "-ac", "1", "-ar", "24000",
+             "-f", "wav", str(out)],
+            capture_output=True, text=True, timeout=120)
+        if proc.returncode != 0 or not out.exists():
+            raise VoiceEngineError(
+                "ffmpeg could not decode the reference audio: "
+                + (proc.stderr or "")[-200:])
+        return out
+
+    def import_voice(self, voice_id: str, source_path: str | Path, *,
+                     name: str = "", description: str = "",
+                     language: str = "en", gender: str = "",
+                     overwrite: bool = False) -> dict[str, Any]:
+        """Register a cloned voice from a reference audio file.
+
+        Validates the clip (duration/clipping/silence), canonicalizes it
+        (mono 24 kHz, loudness-normalized, peak-safe) into the user
+        voices dir, and writes a voice.json. Originals are never
+        modified and a half-finished import never leaves a voice dir."""
+        from .reference import prepare_reference, validate_reference
+
+        vid = self._IMPORT_ID_RE.sub("-", str(voice_id or "").lower()) \
+            .strip("-_")
+        if not vid:
+            return {"ok": False, "error": "voice_id is required "
+                    "(letters, digits, - and _)"}
+        dest = self.voices_dir / vid
+        if dest.exists() and not overwrite:
+            return {"ok": False, "error":
+                    f"voice '{vid}' already exists — pass overwrite "
+                    "to replace it"}
+        src = Path(str(source_path or "").strip())
+        if not src.is_file():
+            return {"ok": False, "error": f"source audio not found: {src}"}
+        tmp = dest.parent / f".importing-{vid}"
+        try:
+            wav = self._to_wav(src, tmp)
+            rep = validate_reference(wav)
+            if not rep.ok:
+                return {"ok": False,
+                        "error": "reference failed validation: "
+                                 + "; ".join(rep.errors),
+                        "report": rep.as_dict()}
+            if tmp.exists():
+                shutil.rmtree(tmp, ignore_errors=True)
+            dest.mkdir(parents=True, exist_ok=True)
+            prepared, rep = prepare_reference(wav, dest)
+            ref = dest / "reference.wav"
+            if prepared.name != ref.name:
+                if ref.exists():
+                    ref.unlink()
+                prepared.replace(ref)
+            meta = {
+                "id": vid,
+                "name": str(name or vid.replace("-", " ").title()),
+                "engine": "chatterbox",
+                "language": str(language or "en"),
+                "gender": str(gender or ""),
+                "description": str(description or
+                                   "Imported cloned voice"),
+                "reference": "reference.wav",
+                "reference_sha256": rep.sha256,
+                "provenance": f"imported from {src.name}",
+                "exaggeration": 0.5, "temperature": 0.72,
+                "top_p": 0.95, "top_k": 1000,
+                "repetition_penalty": 1.2, "normalization": True,
+            }
+            (dest / "voice.json").write_text(
+                json.dumps(meta, indent=2), encoding="utf-8")
+            return {"ok": True, "voice": meta,
+                    "warnings": rep.warnings}
+        except VoiceEngineError as exc:
+            return {"ok": False, "error": str(exc)}
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "error": str(exc)[:300]}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     # -- availability --------------------------------------------------------
     def available(self) -> bool:
