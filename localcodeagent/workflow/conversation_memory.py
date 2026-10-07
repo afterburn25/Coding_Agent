@@ -218,7 +218,7 @@ class ConversationMemory:
         """Question/command-shaped openings are not fact subjects."""
         if not subj:
             return False
-        return subj.split()[0] not in {
+        return subj.split()[0].casefold() not in {
             "i", "we", "you", "they", "he", "she", "it",
             "what", "which", "who", "why", "how", "when", "where",
             "does", "do", "did", "can", "could", "should", "would",
@@ -242,7 +242,8 @@ class ConversationMemory:
         m = re.match(
             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
             r"(uses?|runs on|is built on|is written in|depends on|prefers?|"
-            r"should stay|should be|must be|will be|shall be|stays?|remains?)\b",
+            r"should stay|should be|must be|will be|shall be|stays?|remains?|"
+            r"is|are)\b",
             t,
         )
         if m:
@@ -612,7 +613,7 @@ class ConversationMemory:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                             r"(uses?|runs on|is built on|is written in|"
-                            r"depends on|prefers?)\s+(.+)$",
+                            r"depends on|prefers?|is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
@@ -623,6 +624,18 @@ class ConversationMemory:
                                 value = self._clean_value(decl.group(3))
                                 if value:
                                     fact = f"{subj} {pred} {value}"
+                                if (pred in {"is", "are"} and value
+                                        and not (
+                                            re.search(
+                                                r"[\dA-Z/\\]|(?:^|\s)v\d",
+                                                decl.group(3).strip())
+                                            or len(value.split()) >= 2)):
+                                    # Bare 'is' only captures values that
+                                    # look like facts — "the port is 5433",
+                                    # "the deadline is Friday" — not
+                                    # adjectives ("the movie is great",
+                                    # "the answer is no").
+                                    fact = None
                 if fact is None and corr_body:
                     fact = corr_body
             if fact and locked_topic(fact):

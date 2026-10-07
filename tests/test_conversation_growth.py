@@ -742,7 +742,7 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(learned["facts"], ["store uses Redis"])
             learned = memory.learn_from_user(
                 "correction: the port is 5433")
-            self.assertEqual(learned["facts"], ["the port is 5433"])
+            self.assertEqual(learned["facts"], ["port is 5433"])
 
     def test_forget_variants_retire_the_referent(self):
         """'forget about X' / 'stop remembering X' retire the fact —
@@ -806,6 +806,42 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(out["forgotten"], [])
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["behavior_rules"]))
+
+    def test_definite_is_facts_capture_with_value_gate(self):
+        """'the port is 5433'-style technical facts capture and supersede;
+        adjective/interjection values must not."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user("the port is 5433")
+            self.assertEqual(learned["facts"], ["port is 5433"])
+            # Same slot supersedes.
+            learned = memory.learn_from_user("the port is 8080")
+            self.assertEqual(learned["facts"], ["port is 8080"])
+            rows = memory.snapshot()["facts"]
+            self.assertEqual(
+                [r["active"] for r in rows if "port" in r["text"]],
+                [False, True])
+
+            learned = memory.learn_from_user(
+                "the draft deadline is Friday")
+            self.assertEqual(learned["facts"],
+                             ["draft deadline is Friday"])
+
+            for noise in ("the answer is no", "the movie is great",
+                          "it is Friday"):
+                self.assertEqual(
+                    memory.learn_from_user(noise)["facts"], [], noise)
+
+            # Conversation-scoped facts isolate correctly.
+            memory.learn_from_user(
+                "for this conversation: the ticket id is 42",
+                conversation_id="conv1")
+            self.assertIn(
+                "42", memory.prompt_context(
+                    query="ticket id", conversation_id="conv1"))
+            self.assertNotIn(
+                "42", memory.prompt_context(
+                    query="ticket id", conversation_id="conv2"))
 
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
