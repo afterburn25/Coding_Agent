@@ -171,17 +171,31 @@ class BaselineStore:
                 "threshold": round(max(m["mean"] * (1 + self.SLACK),
                                        m["mean"] + self.SIGMA * std), 4)}
 
-    def check(self, metric: str, value: float) -> dict:
-        """Regression = new value exceeds the bounded threshold. Below
-        MIN_SAMPLES the answer is honest 'insufficient data'."""
+    def check(self, metric: str, value: float, *,
+              direction: str = "higher") -> dict:
+        """Regression = new value drifts past the bounded threshold in the
+        bad direction — 'higher' for latency/memory, 'lower' for
+        throughput. Below MIN_SAMPLES the answer is honest
+        'insufficient data'."""
         b = self.baseline(metric)
         v = float(value)
         if b is None:
             return {"metric": metric, "value": v,
                     "regression": False, "confidence": "insufficient"}
-        reg = v > b["threshold"]
+        if str(direction).lower() == "lower":
+            floor = min(b["mean"] * (1 - self.SLACK),
+                        b["mean"] - self.SIGMA * math.sqrt(
+                            self.data["metrics"][str(metric)]["m2"]
+                            / max(self.data["metrics"][str(metric)]["n"] - 1, 1)))
+            reg = v < floor
+            result = {"floor": round(floor, 4)}
+        else:
+            reg = v > b["threshold"]
+            result = {}
         return {"metric": metric, "value": v, "regression": reg,
+                "direction": str(direction).lower(),
                 "baseline_mean": b["mean"], "threshold": b["threshold"],
+                **result,
                 "ratio": round(v / b["mean"], 3) if b["mean"] else 0.0,
                 "confidence": "high" if b["n"] >= 20 else "moderate"}
 

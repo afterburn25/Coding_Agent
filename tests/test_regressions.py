@@ -89,6 +89,31 @@ class BaselineStoreTests(unittest.TestCase):
         self.assertFalse(r["regression"])
         self.assertEqual(r["confidence"], "insufficient")
 
+    def test_lower_direction_flags_throughput_drop(self):
+        """§19 — a throughput *drop* is a regression even though the
+        number went down."""
+        for v in (10.0, 10.2, 9.8, 10.1, 10.0, 10.3, 9.9):
+            self.base.record("tok_per_s", v)
+        self.assertTrue(
+            self.base.check("tok_per_s", 2.0,
+                            direction="lower")["regression"])
+        self.assertFalse(
+            self.base.check("tok_per_s", 9.5,
+                            direction="lower")["regression"])
+        # Upward drift is fine for throughput.
+        self.assertFalse(
+            self.base.check("tok_per_s", 15.0,
+                            direction="lower")["regression"])
+
+    def test_benchmark_lab_attaches_regression_check(self):
+        from localcodeagent.benchmarks import BenchmarkLab
+        lab = BenchmarkLab(Path(self.td.name) / "lab.json",
+                           baselines=self.base)
+        for _ in range(7):
+            lab.record_result("startup", latency_ms=10.0)
+        row = lab.record_result("startup", latency_ms=40.0)
+        self.assertTrue(row["regression"]["latency_ms"]["regression"])
+
 
 class GitBisectTests(unittest.TestCase):
     def test_finds_first_bad_commit(self):

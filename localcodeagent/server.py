@@ -343,6 +343,12 @@ class AppState:
             jobs_path = runtime_root / jobs_path
         self.jobs = JobManager(jobs_path)
         self.events = EventBus()
+        # §20 — unified perf timeline riding the event bus (chat/voice/gpu
+        # lanes) plus explicit boot marks on the startup lane.
+        from .perftrace import PerfTrace
+        self.perf = PerfTrace()
+        self.perf.boot_mark("state-init")
+        self.events.observe(self.perf.route_event)
         self._shutdown = threading.Event()  # set by stop_state — long-lived workers check this
         self._stream_sinks: list = []  # live chat SSE queues that also want voice events
         # Self-knowledge service — built lazily at the end of __init__ once
@@ -2451,6 +2457,8 @@ class AppState:
             action = str(event.get("action") or "")
             model_id = str(event.get("model_id") or "")
             reason = str(event.get("reason") or "")
+            self.perf.mark("gpu", action or "residency",
+                           detail=f"{model_id} — {reason}".strip(" —"))
             current = self.tasks.current()
             task_id = current.id if current is not None else "system"
             if action == "evict":
@@ -9197,6 +9205,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/nexus/state":
             self._json(self.state.operational_state())
+            return
+        if path == "/api/perf/timeline":
+            q = parse_qs(urlparse(self.path).query)
+            lane = (q.get("lane") or [None])[0]
+            self._json({"timeline": self.state.perf.timeline(
+                lane=lane), "summary": self.state.perf.summary()})
+            return
+        if path == "/api/storage/audit":
+            from .storage_audit import audit_storage
+            self._json(audit_storage(self.state.runtime_root))
             return
         if path == "/api/briefing":
             self._json(self.state.return_briefing())

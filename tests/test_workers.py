@@ -322,5 +322,82 @@ class TestProjects(unittest.TestCase):
         self.assertIn("fixed race in app.js", s["completed_work"])
 
 
+class WorkerLeakTrackerTests(unittest.TestCase):
+    """§17 — before/peak/after residuals surface repeat-leaking workers."""
+
+    def _tracker(self, script):
+        """script: callable -> (free_ram_gb, free_vram_gb) sequence."""
+        it = iter(script)
+        from localcodeagent.workers import WorkerLeakTracker
+        return WorkerLeakTracker(lambda: next(it, (40.0, 10.0)))
+
+    def test_run_records_before_peak_after_residual(self):
+        # begin(48/11) -> sample(40/8: peak use 8/3) -> end(46/10.5)
+        t = self._tracker([(48.0, 11.0), (40.0, 8.0), (46.0, 10.5)])
+        t.begin("comfyui")
+        t.sample("comfyui")
+        run = t.end("comfyui")
+        self.assertEqual(run.ram_free_before_gb, 48.0)
+        self.assertEqual(run.vram_used_peak_gb, 3.0)
+        self.assertEqual(run.residual_ram_gb, 2.0)
+        self.assertEqual(run.residual_vram_gb, 0.5)
+
+    def test_no_suspect_under_threshold(self):
+        t = self._tracker(iter([]))  # probe always returns 40/10
+        for _ in range(4):
+            t.begin("stt")
+            t.end("stt")
+        self.assertEqual(t.leak_suspects(), [])
+
+    def test_repeated_residual_flags_suspect(self):
+        # Each run leaves ~2 GB unreclaimed.
+        script = []
+        for _ in range(3):
+            script += [(40.0, 10.0), (38.0, 10.0)]  # begin, end
+        t = self._tracker(iter(script))
+        for _ in range(3):
+            t.begin("chatterbox")
+            t.end("chatterbox")
+        suspects = t.leak_suspects()
+        self.assertEqual(len(suspects), 1)
+        self.assertEqual(suspects[0]["worker"], "chatterbox")
+        self.assertEqual(suspects[0]["reason"], "repeated_residual")
+
+    def test_rising_trend_flags_suspect(self):
+        # Residuals climb 0.2 -> 0.6 -> 1.2 across three runs.
+        script = []
+        for start, finish in [(40.0, 39.8), (39.8, 39.2), (39.2, 38.0)]:
+            script += [(start, 10.0), (finish, 10.0)]
+        t = self._tracker(iter(script))
+        for _ in range(3):
+            t.begin("trainer")
+            t.end("trainer")
+        suspects = t.leak_suspects()
+        self.assertEqual(len(suspects), 1)
+        self.assertEqual(suspects[0]["reason"], "rising_residual")
+
+    def test_end_unknown_worker_is_noop(self):
+        t = self._tracker(iter([]))
+        self.assertIsNone(t.end("ghost"))
+
+    def test_history_bounded(self):
+        t = self._tracker(iter([]))
+        t._max_runs = 5
+        for _ in range(8):
+            t.begin("w")
+            t.end("w")
+        self.assertEqual(len(t.history("w")), 5)
+
+    def test_probe_failure_is_safe(self):
+        from localcodeagent.workers import WorkerLeakTracker
+
+        def bad():
+            raise RuntimeError("no gpu")
+        t = WorkerLeakTracker(bad)
+        t.begin("x")
+        run = t.end("x")
+        self.assertEqual(run.residual_vram_gb, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

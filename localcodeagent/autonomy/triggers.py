@@ -182,6 +182,44 @@ class TriggerEngine:
 
     # -- file watching ----------------------------------------------------
 
+    _WATCH_MAX_FILES = 5000
+    _WATCH_MAX_DEPTH = 8
+    _WATCH_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv",
+                        "venv", "dist", "build"}
+
+    def _tree_mtime(self, root: Path) -> float:
+        """Newest file mtime under `root`, recursive but bounded.
+
+        Replaces a one-level glob so edits in nested project files fire
+        the watch. Bounded by file count and depth — a huge tree falls
+        back to the dir's own mtime signal (which still shifts when
+        entries appear or vanish)."""
+        import os
+        newest = 0.0
+        seen = 0
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack and seen < self._WATCH_MAX_FILES:
+            current, depth = stack.pop()
+            try:
+                entries = list(os.scandir(current))
+            except OSError:
+                continue
+            for entry in entries:
+                seen += 1
+                if seen >= self._WATCH_MAX_FILES:
+                    break
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if (depth < self._WATCH_MAX_DEPTH
+                                and entry.name not in self._WATCH_SKIP_DIRS):
+                            stack.append((Path(entry.path), depth + 1))
+                    elif entry.is_file(follow_symlinks=False):
+                        newest = max(newest, entry.stat(
+                            follow_symlinks=False).st_mtime)
+                except OSError:
+                    continue
+        return newest
+
     def check_watches(self) -> list[dict]:
         """Poll configured file_changed watches (scoped paths only) — cheap
         mtime check per trigger, debounced by the trigger record itself."""
@@ -206,8 +244,7 @@ class TriggerEngine:
                     continue
             try:
                 if path.is_dir():
-                    mtime = max((p.stat().st_mtime for p in path.glob("*")
-                                 if p.is_file()), default=0.0)
+                    mtime = self._tree_mtime(path)
                 else:
                     mtime = path.stat().st_mtime
             except OSError:

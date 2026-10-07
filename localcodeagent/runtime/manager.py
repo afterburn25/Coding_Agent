@@ -137,6 +137,11 @@ class RuntimeManager:
         # workers). Called — best-effort — when a managed model launch needs
         # VRAM and reclaiming them is cheaper than evicting a resident LLM.
         self.vram_releasers: list[Callable[[], None]] = []
+        # §17 — per-worker RAM/VRAM ledger (before/peak/after + residual).
+        # Image backends wire begin/sample/end around their managed
+        # processes; leak_suspects() surfaces repeat-leakers to recycle.
+        from ..workers.leaks import WorkerLeakTracker
+        self.leaks = WorkerLeakTracker(self._leak_probe)
         from .tuner import RuntimeTuner
         self.tuner = RuntimeTuner(self.base_dir, config, runtime=self)
         for model in config.models:
@@ -209,6 +214,12 @@ class RuntimeManager:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind((host, 0))
             return int(sock.getsockname()[1])
+
+    def _leak_probe(self) -> tuple[float, float]:
+        # TTL-bounded probe — a _wait_ready loop samples every 0.5s and
+        # must not spawn nvidia-smi on every tick.
+        hw = self.fresh_hardware(max_age_s=2.0)
+        return hw.available_ram_gb, hw.free_vram_gb
 
     def refresh_hardware(self) -> HardwareSnapshot:
         self.hardware = detect_hardware()

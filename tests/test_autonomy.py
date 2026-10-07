@@ -1340,6 +1340,26 @@ class TriggerTests(unittest.TestCase):
             self.assertEqual(len(fired), 1)
             sup.stop()
 
+    def test_file_changed_watch_sees_nested_files(self):
+        """§22 — a directory watch must notice edits below the top level,
+        not just immediate children."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            fired = []
+            sup.triggers.on_fire = lambda t, p: fired.append(t)
+            nested = Path(td) / "src" / "pkg" / "deep.py"
+            nested.parent.mkdir(parents=True)
+            nested.write_text("v1")
+            sup.triggers.add("watch", "file_changed", watch="src",
+                             debounce_s=0)
+            sup.triggers.check_watches()   # baseline
+            self.assertEqual(fired, [])
+            time.sleep(0.02)
+            nested.write_text("v2")
+            sup.triggers.check_watches()
+            self.assertEqual(len(fired), 1)
+            sup.stop()
+
     def test_bus_ci_and_pr_events_map_to_signals(self):
         """GitHub tool observations reach triggers — the closing edge of
         the git→push→PR→CI loop."""

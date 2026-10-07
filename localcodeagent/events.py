@@ -19,7 +19,14 @@ class EventBus:
         self._history: deque[dict[str, Any]] = deque(maxlen=max(10, history))
         self._subscribers: set[queue.Queue] = set()
         self._queue_size = max(10, subscriber_queue)
+        self._observers: list = []
         self._lock = threading.RLock()
+
+    def observe(self, fn) -> None:
+        """Register a side-channel observer (perf trace, metrics). Called
+        with (event_type, event) for every publish — must be cheap and
+        never raise."""
+        self._observers.append(fn)
 
     def publish(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         event = {"type": event_type, "ts": time.time(), **dict(payload)}
@@ -41,6 +48,11 @@ class EventBus:
             else:
                 self._history.append(event)
             subscribers = list(self._subscribers)
+        for fn in list(self._observers):
+            try:
+                fn(event_type, event)
+            except Exception:
+                pass
         for sub in subscribers:
             try:
                 sub.put_nowait(dict(event))

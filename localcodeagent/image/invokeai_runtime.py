@@ -54,7 +54,8 @@ class InvokeRuntimeStatus:
 class InvokeAIRuntime:
     """Optionally owns a local InvokeAI process while also supporting external servers."""
 
-    def __init__(self, *, base_dir: Path, backend: InvokeAIBackend, config) -> None:
+    def __init__(self, *, base_dir: Path, backend: InvokeAIBackend, config, leak_tracker=None) -> None:
+        self.leak_tracker = leak_tracker
         self.base_dir = base_dir.resolve()
         self.backend = backend
         self.config = config
@@ -430,6 +431,11 @@ class InvokeAIRuntime:
             state="loading", pid=self._process.pid, managed=True, healthy=False,
             log_path=str(log_path), restarts=self.status.restarts,
             started_at=time.time())
+        if self.leak_tracker is not None:
+            try:
+                self.leak_tracker.begin("invokeai")
+            except Exception:
+                pass
 
     def _wait_ready(self) -> None:
         started = self.status.started_at or time.time()
@@ -442,12 +448,22 @@ class InvokeAIRuntime:
                 self.status.state = "error"
                 self.status.error = f"InvokeAI exited with code {code}; see {self.status.log_path}"
                 self.status.pid = None
+                if self.leak_tracker is not None:
+                    try:
+                        self.leak_tracker.end("invokeai")
+                    except Exception:
+                        pass
                 raise RuntimeError(self.status.error)
             healthy, last = self.backend.health()
             if healthy:
                 self.status.state = "running"
                 self.status.healthy = True
                 return
+            if self.leak_tracker is not None:
+                try:
+                    self.leak_tracker.sample("invokeai")
+                except Exception:
+                    pass
             time.sleep(0.5)
         self.status.error = f"InvokeAI is still starting: {last[:300]}"
         raise TimeoutError(self.status.error)
@@ -475,6 +491,11 @@ class InvokeAIRuntime:
                 self._managed_marker_path().unlink(missing_ok=True)
             except OSError:
                 pass
+            if self.leak_tracker is not None:
+                try:
+                    self.leak_tracker.end("invokeai")
+                except Exception:
+                    pass
             self.status.state = "stopped"
             self.status.healthy = False
             self.status.pid = None

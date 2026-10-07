@@ -44,7 +44,8 @@ class ComfyRuntimeStatus:
 class ComfyUIRuntime:
     """Optionally owns a local ComfyUI process while also supporting external ComfyUI."""
 
-    def __init__(self, *, base_dir: Path, backend: ComfyUIBackend, config, extra_model_paths_config: Path | None = None) -> None:
+    def __init__(self, *, base_dir: Path, backend: ComfyUIBackend, config, extra_model_paths_config: Path | None = None, leak_tracker=None) -> None:
+        self.leak_tracker = leak_tracker
         self.base_dir = base_dir.resolve()
         self.backend = backend
         self.config = config
@@ -234,6 +235,11 @@ class ComfyUIRuntime:
         except OSError:
             pass
         self.status = ComfyRuntimeStatus(state="loading", pid=self._process.pid, managed=True, healthy=False, log_path=str(log_path), restarts=self.status.restarts, started_at=time.time())
+        if self.leak_tracker is not None:
+            try:
+                self.leak_tracker.begin("comfyui")
+            except Exception:
+                pass
 
     def _wait_ready(self) -> None:
         # Wait out the full boot budget (2x startup timeout since spawn) so a
@@ -249,12 +255,22 @@ class ComfyUIRuntime:
                 self.status.state = "error"
                 self.status.error = f"ComfyUI exited with code {code}; see {self.status.log_path}"
                 self.status.pid = None
+                if self.leak_tracker is not None:
+                    try:
+                        self.leak_tracker.end("comfyui")
+                    except Exception:
+                        pass
                 raise RuntimeError(self.status.error)
             healthy, last = self.backend.health()
             if healthy:
                 self.status.state = "running"
                 self.status.healthy = True
                 return
+            if self.leak_tracker is not None:
+                try:
+                    self.leak_tracker.sample("comfyui")
+                except Exception:
+                    pass
             time.sleep(0.5)
         # The process is alive but not yet serving — leave it booting (state
         # stays "loading") so the next request attaches to the same cold boot
@@ -288,6 +304,11 @@ class ComfyUIRuntime:
                 self._managed_marker_path().unlink(missing_ok=True)
             except OSError:
                 pass
+            if self.leak_tracker is not None:
+                try:
+                    self.leak_tracker.end("comfyui")
+                except Exception:
+                    pass
             self.status.state = "stopped"
             self.status.healthy = False
             self.status.pid = None

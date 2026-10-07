@@ -43,17 +43,27 @@ class BenchmarkLab:
             rows.append(row)
             del rows[:-MAX_RESULTS]
             self._save()
-        # Feed the shared regression detector.
+        # Feed the shared regression detector. §19 — check the new value
+        # against the *prior* baseline first so a slow run is flagged by
+        # the data that trained the gate, then record it so the baseline
+        # tracks legit drift.
         if self.baselines is not None:
             try:
                 if row.get("success"):
+                    regression: dict[str, Any] = {}
+                    latency = float(row["latency_ms"])
+                    regression["latency_ms"] = self.baselines.check(
+                        f"bench.{name}.latency_ms", latency)
                     self.baselines.record(
-                        f"bench.{name}.latency_ms",
-                        float(row["latency_ms"]))
+                        f"bench.{name}.latency_ms", latency)
                     if row.get("throughput"):
+                        tput = float(row["throughput"])
+                        regression["throughput"] = self.baselines.check(
+                            f"bench.{name}.throughput", tput,
+                            direction="lower")
                         self.baselines.record(
-                            f"bench.{name}.throughput",
-                            float(row["throughput"]))
+                            f"bench.{name}.throughput", tput)
+                    row["regression"] = regression
             except Exception:
                 pass
         return dict(row)

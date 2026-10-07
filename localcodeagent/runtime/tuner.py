@@ -444,7 +444,12 @@ class RuntimeTuner:
             flags(512, 256, max(physical + 1, logical - 1)),  # more threads
         ]
         if kv:
-            candidates.append(flags(512, 256, physical, kv))  # KV-quantized
+            candidates.append(flags(512, 256, physical, kv))  # KV-quantized q8
+            # §15 — q4/q4 halves KV memory again vs q8; the sweep measures
+            # whether the quality/stability tradeoff is acceptable, so it
+            # runs as a candidate rather than an adopted default.
+            kv4 = ["--cache-type-k", "q4_0", "--cache-type-v", "q4_0"]
+            candidates.append(flags(512, 256, physical, kv4))
         if fa:
             candidates.append([a for a in flags(512, 256, physical)
                                if a not in {"--flash-attn", "auto"}])

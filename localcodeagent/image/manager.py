@@ -61,14 +61,18 @@ class ImageManager:
         self._summary_probe_lock = threading.Lock()
         self._summary_probe_cache: tuple[float, tuple[dict, dict]] | None = None
         self.backend = ComfyUIBackend(getattr(config, "comfyui_endpoint", "http://127.0.0.1:8188"))
-        self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths)
+        # §17 — the runtime manager's per-worker memory ledger; image
+        # backends record begin/sample/end around their managed processes.
+        self.leaks = getattr(runtime, "leaks", None)
+        self.backend_runtime = ComfyUIRuntime(base_dir=self.base_dir, backend=self.backend, config=config, extra_model_paths_config=self.comfy_extra_paths, leak_tracker=self.leaks)
         # InvokeAI — the preferred primary engine for standard generation/
         # editing; ComfyUI stays the advanced/custom-workflow fallback. Both
         # hang off the same contract so jobs/route/history stay uniform.
         self.invokeai_backend = InvokeAIBackend(
             getattr(config, "invokeai_endpoint", "http://127.0.0.1:9090"))
         self.invokeai_runtime = InvokeAIRuntime(
-            base_dir=self.base_dir, backend=self.invokeai_backend, config=config)
+            base_dir=self.base_dir, backend=self.invokeai_backend, config=config,
+            leak_tracker=self.leaks)
         self.router = ImageRouter(models, resource_fit=self._resource_fit)
         from .sampling import SamplingAdvisor
         self.sampling_advisor = SamplingAdvisor(self.data_dir / "sampling_stats.json")
