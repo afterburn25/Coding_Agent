@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from .speech_filter import SPEAK, SpeechTextFilter
+from .speech_filter import LIST_ITEM, SPEAK, SpeechTextFilter
 
 _SENT_END = re.compile(r"[.!?…](?=\s|$)")
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -59,6 +59,11 @@ class SentenceStreamer:
         self._in_fence = False
         self._emitted = 0
         self._skipped_blocks = 0
+        # List items are held until the run ends: a run of >= 3 is
+        # structured data (recipe steps, ingredient lists) and collapses
+        # to one spoken mention; shorter runs are spoken normally.
+        self._list_run: list[str] = []
+        self._list_mentioned = False
 
     @property
     def emitted_count(self) -> int:
@@ -78,8 +83,11 @@ class SentenceStreamer:
                 if _FENCE.match(head):
                     self._in_fence = True
                     break
-                if self.filter.classify_line(head) == SPEAK:
+                cls = self.filter.classify_line(head)
+                if cls == SPEAK:
                     self._text += self.filter._sanitize_prose(head)
+                elif cls == LIST_ITEM:
+                    self._list_run.append(head)
                 m = _SENT_END.search(self._raw)
             # A run-on paragraph with no sentence end would otherwise sit in
             # _raw until the model finally punctuates — pull clause-stable
@@ -93,8 +101,11 @@ class SentenceStreamer:
                     cut = sp + 1 if sp > 0 else 0
                 if cut:
                     head, self._raw = self._raw[:cut], self._raw[cut:]
-                    if self.filter.classify_line(head) == SPEAK:
+                    cls = self.filter.classify_line(head)
+                    if cls == SPEAK:
                         self._text += self.filter._sanitize_prose(head)
+                    elif cls == LIST_ITEM:
+                        self._list_run.append(head)
         out.extend(self._pop_ready())
         return out
 
@@ -103,6 +114,7 @@ class SentenceStreamer:
         if self._raw:
             out.extend(self._handle_line(self._raw))
             self._raw = ""
+        self._flush_list_run()
         out.extend(self._pop_ready(force_all=True))
         self._text = ""
         return out
@@ -110,6 +122,7 @@ class SentenceStreamer:
     # -- internals ------------------------------------------------------
     def _handle_line(self, line: str) -> list[str]:
         if _FENCE.match(line):
+            self._flush_list_run()
             out = self._pop_ready(force_all=True)
             self._text = ""
             self._in_fence = not self._in_fence
@@ -118,9 +131,26 @@ class SentenceStreamer:
             return out
         if self._in_fence:
             return []
-        if self.filter.classify_line(line) == SPEAK:
+        cls = self.filter.classify_line(line)
+        if cls == LIST_ITEM:
+            self._list_run.append(line)
+            return []
+        self._flush_list_run()
+        if cls == SPEAK:
             self._text += self.filter._sanitize_prose(line)
         return []
+
+    def _flush_list_run(self) -> None:
+        if not self._list_run:
+            return
+        items, self._list_run = self._list_run, []
+        if len(items) >= self.filter.LIST_SUMMARIZE_MIN:
+            if not self._list_mentioned:
+                self._list_mentioned = True
+                self._text += " The details are listed below."
+            return
+        for line in items:
+            self._text += self.filter._sanitize_prose(line)
 
     def _pop_ready(self, force_all: bool = False) -> list[str]:
         out: list[str] = []

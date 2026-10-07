@@ -134,6 +134,39 @@ class TestSpeechFilter(unittest.TestCase):
         self.assertNotIn("File", out)
         self.assertIn("Done digging", out)
 
+    def test_long_list_runs_summarized_not_dictated(self):
+        # Recipe/structured answers: prose intro is voiced, the ingredient
+        # and step lists are not read aloud line by line.
+        text = (
+            "Heh — yeah, absolutely. Seafood gumbo is one of my favorites.\n\n"
+            "**Ingredients**\n"
+            "- 2 tablespoons olive oil\n"
+            "- 1 large onion, diced\n"
+            "- 1 lb shrimp, peeled\n"
+            "- 1 lb crab meat\n\n"
+            "**Steps**\n"
+            "1. Sauté the aromatics for five minutes\n"
+            "2. Build the roux and stir constantly\n"
+            "3. Add the seafood and simmer\n"
+            "4. Serve hot with rice\n\n"
+            "Want me to tweak it for a gluten-free version?")
+        out = self.f.filter(text)
+        self.assertIn("one of my favorites", out)
+        self.assertIn("gluten-free", out)
+        self.assertNotIn("olive oil", out)
+        self.assertNotIn("Sauté", out)
+        self.assertIn("listed", out.lower())
+
+    def test_short_lists_still_speak(self):
+        out = self.f.filter(
+            "Two things stand out:\n"
+            "- The scheduler fix worked\n"
+            "- Memory pressure is gone\n"
+            "That's the story.")
+        self.assertIn("scheduler fix", out)
+        self.assertIn("Memory pressure", out)
+        self.assertIn("the story", out)
+
 
 # --------------------------------------------------------------------------
 # streaming segmentation
@@ -186,6 +219,34 @@ class TestSentenceStreamer(unittest.TestCase):
         out = s.feed(words)
         self.assertGreater(len(out), 0)
         self.assertTrue(all(len(p) <= s.max_clause for p in out))
+
+    def test_streamer_skips_long_list_runs(self):
+        s = SentenceStreamer()
+        got = s.feed(
+            "Here is the recipe.\n\n"
+            "- 2 tablespoons olive oil\n"
+            "- 1 onion, diced\n"
+            "- 1 lb shrimp\n"
+            "- 1 lb crab\n\n"
+            "Enjoy it.\n")
+        got += s.flush()
+        joined = " ".join(got)
+        self.assertIn("Here is the recipe.", joined)
+        self.assertIn("Enjoy it.", joined)
+        self.assertNotIn("olive oil", joined)
+        self.assertIn("listed below", joined)
+
+    def test_streamer_speaks_short_lists(self):
+        s = SentenceStreamer()
+        got = s.feed(
+            "Two findings.\n"
+            "- the scheduler recovered\n"
+            "- the cache stayed warm\n"
+            "Done.\n")
+        got += s.flush()
+        joined = " ".join(got)
+        self.assertIn("scheduler recovered", joined)
+        self.assertIn("cache stayed warm", joined)
 
     def test_clause_breaks_stay_under_limit(self):
         s = SentenceStreamer()

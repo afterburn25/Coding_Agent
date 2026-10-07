@@ -16,6 +16,7 @@ from .vocalizations import canonicalize_vocals
 SPEAK = "speak"
 SUMMARIZE = "summarize"
 SKIP = "skip"
+LIST_ITEM = "list_item"
 
 
 class SpeechTextFilter:
@@ -43,6 +44,12 @@ class SpeechTextFilter:
     BOLD_RE = re.compile(r"(\*\*|__)(.+?)\1")
     ITALIC_RE = re.compile(r"(\*|_)([^*_]+)\1")
     LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.M)
+    LIST_ITEM_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+    # A contiguous run of at least this many list items is structured data
+    # (recipes, steps, inventories) — summarized with a single spoken
+    # mention instead of dictating every line. Shorter runs stay speakable
+    # so conversational bullets still reach the user.
+    LIST_SUMMARIZE_MIN = 3
     QUOTE_RE = re.compile(r"^\s*>\s?")
     # Status glyphs are verdicts — never read the glyph name ("check mark").
     # Items whose text already states the result are spoken as-is; opaque
@@ -145,6 +152,8 @@ class SpeechTextFilter:
             return SKIP
         if self.LOGISH_RE.match(s):
             return SKIP
+        if self.LIST_ITEM_LINE_RE.match(s):
+            return LIST_ITEM
         if self.TABLE_ROW_RE.match(s):
             return SUMMARIZE
         if self.BASE64_RE.search(s) or self.HASH_RE.search(s):
@@ -172,10 +181,23 @@ class SpeechTextFilter:
         in_fence = False
         fence_lang = ""
         table_seen = 0
+        list_seen = 0
+        list_run: list[str] = []
         skipped_kinds: set[str] = set()
+
+        def flush_list() -> None:
+            nonlocal list_seen
+            if not list_run:
+                return
+            if len(list_run) >= self.LIST_SUMMARIZE_MIN:
+                list_seen += 1
+            else:
+                out.extend(x.rstrip() for x in list_run)
+            list_run.clear()
 
         for line in text.split("\n"):
             if self.FENCE_RE.match(line) or self.TILDE_FENCE_RE.match(line):
+                flush_list()
                 if not in_fence:
                     in_fence = True
                     fence_lang = line.strip("`~ \n")[:20] or "code"
@@ -187,16 +209,21 @@ class SpeechTextFilter:
                 continue
 
             cls = self.classify_line(line)
+            if cls == LIST_ITEM:
+                list_run.append(line)
+                continue
+            flush_list()
             if cls == SKIP:
                 continue
             if cls == SUMMARIZE:
                 table_seen += 1
                 continue
             out.append(line.rstrip())
+        flush_list()
 
         prose = "\n".join(out)
         prose = self._sanitize_prose(prose)
-        if fence_lang or skipped_kinds or table_seen:
+        if fence_lang or skipped_kinds or table_seen or list_seen:
             if prose.strip():
                 prose += " "
             bits = []
@@ -204,6 +231,8 @@ class SpeechTextFilter:
                 bits.append("I've included the code in the response.")
             if table_seen:
                 bits.append("The details are shown in the table.")
+            if list_seen:
+                bits.append("The details are listed below.")
             prose += " ".join(bits)
         return prose.strip()
 
