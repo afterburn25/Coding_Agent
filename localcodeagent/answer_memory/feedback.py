@@ -10,6 +10,7 @@ import re
 
 _CORRECTION_PATTERNS = [
     r"^no[,.]?\s+that's\s+(?:wrong|incorrect|not right|outdated)",
+    r"^no[,.]?\s+that\s+is\s+(?:wrong|incorrect|not\s+right|outdated)",
     r"^that'?s\s+(?:wrong|incorrect|not right|outdated|not correct)\b",
     r"^you'?re\s+wrong\b",
     r"^wrong\b",
@@ -17,9 +18,14 @@ _CORRECTION_PATTERNS = [
     r"^that'?s\s+not\s+(?:right|correct|true)\b",
     r"^actually[,]?\s+",
     r"^no[, ]+the\s+answer\s+is",
+    r"^no[,.]?\s+i\s+meant\b",
+    r"^i\s+meant\b",
     r"^the\s+(?:correct|right)\s+answer\s+is",
     r"^it\s+should\s+be",
     r"^correction\s*:",
+    # "X is/was Y not Z" — an explicit replacement assertion.
+    r"^(?:it|that|this)\s+(?:is|was)\s+.+\s+not\s+\S",
+    r"^the\s+\w[\w .-]{0,30}?\s+(?:is|was)\s+.+\s+not\s+\S",
     r"^that'?s\s+outdated\b",
     r"^don'?t\s+answer\s+that\s+again\b",
 ]

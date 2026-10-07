@@ -284,6 +284,16 @@ class LearningAndCorrectionTests(unittest.TestCase):
         self.assertFalse(feedback.is_correction("what did I do wrong in this code?"))
         self.assertTrue(feedback.is_correction("that's wrong"))
         self.assertTrue(feedback.is_correction("no, the answer is 42"))
+        # Uncontracted + 'X not Y' replacement forms must flag too.
+        self.assertTrue(feedback.is_correction("no that is wrong"))
+        self.assertTrue(feedback.is_correction("no, i meant the store uses Redis"))
+        self.assertTrue(feedback.is_correction("i meant Redis"))
+        self.assertTrue(feedback.is_correction("it was emacs not vim"))
+        self.assertTrue(feedback.is_correction("the port was 5433 not 8080"))
+        # Plain statements stay unflagged.
+        self.assertFalse(feedback.is_correction("it was a good movie"))
+        self.assertFalse(feedback.is_correction("the report is done"))
+        self.assertFalse(feedback.is_correction("the plan is Postgres"))
 
     def test_noise_not_recorded(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
