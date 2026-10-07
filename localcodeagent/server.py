@@ -6626,7 +6626,7 @@ class Handler(BaseHTTPRequestHandler):
                           "/api/dependencies",
                           "/api/environment", "/api/trends",
                           "/api/cleanup", "/api/benchmarks",
-                          "/api/provisioning",
+                          "/api/provisioning", "/api/quality",
                           "/api/specialists")
 
     _AUDIT_MANIFESTS = ("requirements.txt", "pyproject.toml",
