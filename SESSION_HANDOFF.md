@@ -92,6 +92,34 @@ Convergence increments landed on top (`main` @ `282f0878`):
   (bounded-soak finding: missions timed out in a prose-instead-of-
   write loop; `282f0878`).
 
+Post-release hardening (`main` @ `4f980702`, all CI-gated):
+
+- **POSIX Windows-path gate** — `action_ops._resolve` treats `D:\` /
+  UNC paths as absolute on any host so outside-root approvals can't be
+  bypassed by running on Linux (`50e45d29`).
+- **Splash WebView2 profile** — splash UDF moved off the app-dir
+  `data\` junction to LocalAppData (+ temp fallback); the animated
+  fault surface can no longer die with a broken state redirect
+  (`fc041550`). Root cause of a deploy-created junction pointing at
+  `D:\C:\...` (MSYS path mangling) — junctions must be recreated with
+  `mklink /J "<link>" "<target>"` via cmd, never bash paths.
+- **Credential-learning guard** — `learn_from_user` refuses
+  credential-shaped learning writes (passcode/password/API key/PIN
+  families) before any store/Brain/prompt path; forget/revoke and
+  ordinary credential *questions* still work (`97211f08`, `45d94d5c`).
+- **Self-repair staleness chain** — three layers: mission step
+  retires when its incident is terminal (`98a101bc`); open incidents
+  untouched >3d abandon at coordinator tick (`0c270e3c`); the
+  retirement sweep runs pre-gate every tick so stopped autonomy can't
+  strand a stale mission 'active' (`583f26ab`). Verified live in the
+  soak: 4 stale repair missions cancelled at first tick.
+- **Safe Mode surfacing** — `/api/status` reports `safe_mode`; the
+  main topbar shows a persistent badge (was Command-Center-only — the
+  live install sat in safe mode ~2 days unnoticed, `795dbbd3`).
+- **Soak posture** — `mission_soak.py` exits safe mode and starts
+  autonomy after every backend (re)start; persisted control flags can
+  no longer silently park all missions (`4f980702`).
+
 Rules for the next session:
 
 - NEVER claim an action succeeded without a `verified` ledger entry or
