@@ -196,6 +196,59 @@ def _supported_tags(tts) -> list[str]:
     return out
 
 
+def _conds_cache_path(ref: str, exag: float, norm: bool) -> Path | None:
+    """Per-voice conditioning cache file, keyed on everything that makes
+    the conds unique: reference audio content, exaggeration, loudness
+    normalization, model dtype and revision. Lives beside the reference
+    wav so each voice dir carries its own cache."""
+    try:
+        import hashlib
+        digest = hashlib.sha256(Path(ref).read_bytes()).hexdigest()[:16]
+        key = "-".join((
+            digest, f"e{exag:.4f}", f"n{int(norm)}",
+            str(_state.get("dtype") or "fp32"),
+            MODEL_REVISION[:8]))
+        return Path(ref).parent / f"conds-{key}.pt"
+    except Exception:
+        return None
+
+
+def _apply_conditionals(tts, ref: str, exag: float, norm: bool) -> None:
+    """Install per-voice conditioning — a torch.load from the on-disk
+    cache when one exists (voice switch, worker restart after idle
+    unload), else the full librosa/S3Gen/VE encode persisted for next
+    time. A stale or unreadable cache always falls through to recompute.
+    """
+    cache = _conds_cache_path(ref, exag, norm)
+    if cache is not None and cache.exists():
+        try:
+            from chatterbox.tts_turbo import Conditionals
+            tts.conds = Conditionals.load(
+                cache, map_location=getattr(tts, "device", "cpu"))
+            return
+        except Exception:
+            pass
+    tts.prepare_conditionals(ref, exaggeration=exag,
+                             norm_loudness=norm)
+    # prepare_conditionals rebuilds conds in fp32 — recast so the T3
+    # conditioning matches the model dtype.
+    conds = getattr(tts, "conds", None)
+    if conds is not None and hasattr(conds, "t3"):
+        dt = _DTYPES.get(str(_state.get("dtype") or ""))
+        if dt:
+            conds.t3 = conds.t3.to(dtype=getattr(_torch(), dt))
+    if cache is not None and conds is not None:
+        try:
+            conds.save(cache)
+            # One cache file per voice dir — a changed reference or
+            # param set leaves the old key orphaned.
+            for stale in cache.parent.glob("conds-*.pt"):
+                if stale != cache:
+                    stale.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def _cmd_prepare_voice(req: dict) -> None:
     tts = _state["tts"]
     if tts is None:
@@ -209,15 +262,7 @@ def _cmd_prepare_voice(req: dict) -> None:
     exag = float(req.get("exaggeration") or 0.5)
     norm = bool(req.get("norm_loudness", True))
     try:
-        tts.prepare_conditionals(ref, exaggeration=exag,
-                                 norm_loudness=norm)
-        # prepare_conditionals rebuilds conds in fp32 — recast so the T3
-        # conditioning matches the model dtype.
-        conds = getattr(tts, "conds", None)
-        if conds is not None and hasattr(conds, "t3"):
-            dt = _DTYPES.get(str(_state.get("dtype") or ""))
-            if dt:
-                conds.t3 = conds.t3.to(dtype=getattr(_torch(), dt))
+        _apply_conditionals(tts, ref, exag, norm)
     except AssertionError as exc:
         _err(f"reference rejected: {exc}")
         return
@@ -252,13 +297,7 @@ def _cmd_synthesize(req: dict) -> None:
             _err(f"voice {voice_id!r} not prepared")
             return
         try:
-            tts.prepare_conditionals(spec[0], exaggeration=spec[1],
-                                     norm_loudness=spec[2])
-            conds = getattr(tts, "conds", None)
-            if conds is not None and hasattr(conds, "t3"):
-                dt = _DTYPES.get(str(_state.get("dtype") or ""))
-                if dt:
-                    conds.t3 = conds.t3.to(dtype=getattr(_torch(), dt))
+            _apply_conditionals(tts, spec[0], spec[1], spec[2])
             _state["current_voice"] = voice_id
         except Exception as exc:
             _err(f"voice switch to {voice_id!r} failed: {exc}")
