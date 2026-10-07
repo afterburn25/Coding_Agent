@@ -259,6 +259,36 @@ class LearningAndCorrectionTests(unittest.TestCase):
             self.assertEqual(m.answer["answer_text"], "Correct answer")
             am.store.close()
 
+    def test_superseded_fact_invalidates_answers_carrying_it(self):
+        # 'We switched to SQLite' must retire every learned answer still
+        # asserting PostgreSQL — otherwise the memory fast path keeps
+        # serving the dead value with a 'trusted answer' badge.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.learn("What database does the store use?",
+                     "The store uses PostgreSQL.")
+            am.learn("What is the capital of France?",
+                     "Paris is the capital of France.")
+            self.assertEqual(
+                am.invalidate_superseded(["store uses postgresql"]), 1)
+            rows = am.store.query(
+                "SELECT * FROM answers ORDER BY id")
+            dead = [r for r in rows if r["invalidated"]]
+            live = [r for r in rows if not r["invalidated"]]
+            self.assertEqual(len(dead), 1)
+            self.assertIn("superseded fact", dead[0]["invalidation_reason"])
+            self.assertIn("Paris", live[0]["answer_text"])
+            # The dead answer can no longer bypass to a reply.
+            m = am.lookup("What database does the store use?")
+            self.assertFalse(
+                m.hit and "postgres" in str(
+                    (m.answer or {}).get("answer_text") or "").lower())
+            # Empty/no-match calls are harmless.
+            self.assertEqual(am.invalidate_superseded([]), 0)
+            self.assertEqual(
+                am.invalidate_superseded(["unrelated fact"]), 0)
+            am.store.close()
+
     def test_positive_feedback_promotes(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)

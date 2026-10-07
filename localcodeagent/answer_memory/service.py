@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any, Callable
@@ -105,6 +106,44 @@ class AnswerMemory:
     def close(self) -> None:
         if self.store is not None:
             self.store.close()
+
+    def invalidate_superseded(self, superseded: list[str]) -> int:
+        """Retire learned answers carrying a value the user just
+        corrected — 'we switched to SQLite' must stop the memorized
+        'PostgreSQL' answer from serving on the next lookup."""
+        if not self.available or self.store is None:
+            return 0
+        needles: list[str] = []
+        for text in superseded or []:
+            t = str(text or "").strip()
+            if not t:
+                continue
+            # Canonical fact shape "subject uses value" — the value half
+            # is the dead requirement.
+            m = re.match(
+                r"^.+?\s+(?:uses?|is|are|was|runs? on|prefers?|should"
+                r" (?:stay|be|remain|use)|must be|will be)\s+(.+?)[.!?]?$",
+                t, flags=re.IGNORECASE)
+            needle = str(m.group(1) if m else t).strip().lower()
+            if len(needle) >= 3:
+                needles.append(needle)
+        if not needles:
+            return 0
+        fixed = 0
+        try:
+            rows = self.store.query(
+                "SELECT id, answer_text FROM answers WHERE invalidated=0")
+            for row in rows:
+                hay = str(row.get("answer_text") or "").lower()
+                hits = [n for n in needles if n in hay]
+                if hits:
+                    learning.invalidate_answer(
+                        self.store, row["id"],
+                        "superseded fact: " + "; ".join(hits))
+                    fixed += 1
+        except Exception:
+            pass
+        return fixed
 
     # -- dependency fingerprints --------------------------------------------
 

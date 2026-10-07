@@ -3506,6 +3506,14 @@ class AppState:
             if missions is None:
                 return
             out = missions.flag_requirement_change(list(superseded or []))
+            # Learned answers carrying the dead value must stop serving
+            # — same correction, same authority.
+            try:
+                if self.answer_memory is not None:
+                    self.answer_memory.invalidate_superseded(
+                        list(superseded or []))
+            except Exception:
+                pass
             flagged = out.get("flagged") or []
             if flagged:
                 self.autonomy.notifications.notify(
