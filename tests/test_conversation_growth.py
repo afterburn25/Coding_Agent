@@ -909,6 +909,25 @@ class CrossChatMemoryTests(unittest.TestCase):
                 state,
                 {"port is 8080": False, "the port is 9090": True})
 
+    def test_pending_options_survive_until_selection_or_new_list(self):
+        """An optionless reply must not wipe a pending option list; a
+        resolved selection consumes it; a new list replaces it."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.record_exchange(
+                "which db", "Options:\n1. SQLite\n2. PostgreSQL")
+            memory.record_exchange("what time is it", "It is noon.")
+            self.assertEqual(
+                memory.resolve_option_selection("the second option"),
+                "Option 2 — PostgreSQL")
+            # Consumed — the same list must not resolve twice.
+            self.assertIsNone(
+                memory.resolve_option_selection("the first option"))
+            memory.record_exchange("again", "Pick:\n1. Redis\n2. Kafka")
+            self.assertEqual(
+                memory.resolve_option_selection("option 1"),
+                "Option 1 — Redis")
+
     def test_update_forms_of_the_same_slot(self):
         with tempfile.TemporaryDirectory() as td:
             memory = ConversationMemory(Path(td) / "memory.json")
