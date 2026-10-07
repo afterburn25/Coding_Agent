@@ -1,8 +1,8 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.26.0 on `feature/chatterbox-voice-engine` adds the **Chatterbox Turbo voice engine** — an isolated-runtime TTS provider behind the existing `TTSEngine` interface: approved Isabella V6 clone on CUDA, BS.1770 loudness normalization, native paralinguistic tags via the vocalization planner, Kokoro fallback, verified runtime+model provisioning. Committed on the branch; not yet pushed/merged — full suite 2417 green locally. v0.25.3 remains the latest shipped release on `main`: voice trailing-syllable noise-tail fix (Kokoro's post-phoneme breath bed shaved; `dsp.DSP_VERSION` invalidates stale cached audio), on top of v0.25.2 (double-spoken unterminated replies) and v0.25.1 (chat streaming layout — message adjuncts pinned out of the 42px avatar grid track). v0.25.0 was the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.26.1 is the current release — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core` (Chatterbox synthesizing on CUDA through the frozen backend; two frozen-build fixes in 0.26.1). v0.25.3 was the prior release: voice trailing-syllable noise-tail fix (Kokoro's post-phoneme breath bed shaved; `dsp.DSP_VERSION` invalidates stale cached audio), on top of v0.25.2 (double-spoken unterminated replies) and v0.25.1 (chat streaming layout — message adjuncts pinned out of the 42px avatar grid track). v0.25.0 was the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## In progress: 0.26.0 — Chatterbox Turbo voice engine (`feature/chatterbox-voice-engine`)
+## Active version: 0.26.1 — Chatterbox Turbo voice engine (merged + deployed)
 
 - **Engine** — `ChatterboxEngine` drives `chatterbox_worker.py` in the
   isolated `runtime/voice/chatterbox` runtime (Python 3.12, torch
@@ -19,17 +19,19 @@
   turbo tags (`[laugh]` … `[clear throat]` + emotion tokens) in the
   cloned voice; tokenizer-probed capability table; Voice Lab auditions
   only confirmed tags.
-- **Safety** — engine failure degrades to Kokoro with separate cache
-  keys; StartupNarrator cache salted with an engine signature; worker
-  stderr isolated from the JSONL protocol.
+- **Safety** — engine failure degrades to Kokoro (voice id remapped —
+  `bf_isabella` — after v0.26.1) with separate cache keys;
+  StartupNarrator cache salted with an engine signature; worker stderr
+  isolated from the JSONL protocol.
 - **Provisioning** — verified items for the standalone CPython runtime
   (pinned pbs, sha256) and turbo model (9 files, sha256, idempotent);
-  official voices ship via PyInstaller `--add-data`.
-- **Verified** — full suite 2417 green; 104 voice tests incl. live
-  worker protocol; real manager-path samples at −17 LUFS / peak ≤0.89
-  in `samples/chatterbox-isabella/` (gitignored).
-- **Remaining** — push + CI, production installer build + clean/upgrade
-  dogfooding, then merge to `main`.
+  official voices + worker script ship via PyInstaller `--add-data`
+  (v0.26.1 — `.py` files don't land on disk otherwise).
+- **Verified** — PR #8 merged, CI green on `main` (tests + Inno
+  installer + install/update smoke); deployed install synthesized
+  Chatterbox on CUDA through the frozen backend (RTF 0.35, 19 tags);
+  real production provisioning ran end-to-end; samples at
+  `samples/chatterbox-isabella/` (gitignored).
 
 ## Previous version: 0.25.3 — Reliability + Dogfooding (+voice/chat patches)
 

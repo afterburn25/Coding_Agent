@@ -46,7 +46,14 @@ Module layout (`localcodeagent/voice/`):
 | `manager.py` | queue, mute/cancel, segment registry, export, metrics |
 | `stt.py` | microphone enumeration, Vosk/faster-whisper engines, hands-free session |
 | `tools.py` | ToolRegistry entries (`voice_*`, `audio.*` permissions) |
-| `official/` | shipped presets (`nexus-synthetic-isabella.json`) |
+| `official/` | shipped presets (`nexus-synthetic-isabella.json`, `nexus-isabella-chatterbox.json`) |
+| `chatterbox.py` | `ChatterboxEngine` — drives the isolated runtime over JSONL stdio |
+| `chatterbox_worker.py` | self-contained worker for the isolated runtime (ships as data; run by the runtime's python, not the backend's) |
+| `chatterbox_assets.py` | pinned turbo model manifest (SHA-256 verified, idempotent) |
+| `chatterbox_runtime.py` | relocatable CPython runtime provisioning (pinned pbs, torch+CUDA, pip) |
+| `chatterbox_voices/` | shipped clone voices (Isabella reference + metadata) |
+| `loudness.py` | pure-numpy BS.1770 loudness measurement/normalization |
+| `reference.py` | clone reference-audio validation (duration/clipping/silence/format) |
 
 ## Engine
 
@@ -62,6 +69,59 @@ Module layout (`localcodeagent/voice/`):
   - Source: `github.com/thewh1teagle/kokoro-onnx` `model-files-v1.0` release.
 - Default device: **CPU** (`voice_device=cpu`) so TTS never evicts a coding
   model from VRAM. Model load ≈0.8 s, warm synthesis RTF ≈0.43 (measured).
+
+## Second engine: Chatterbox Turbo (v0.26.x)
+
+Chatterbox is a **cloned-voice engine**, not a bundled dependency: torch +
+`chatterbox-tts==0.1.7` are far too heavy for the frozen backend, so the
+provider spawns a persistent worker (`chatterbox_worker.py`) inside an
+isolated runtime at `runtime/voice/chatterbox` (relocatable CPython 3.12 +
+torch 2.6.0+CU124, provisioned by `chatterbox_runtime.py` — no system
+Python required) and talks **JSONL over stdin/stdout**. Commands: `ping`,
+`load`, `prepare_voice`, `synthesize`, `capabilities`, `status`, `unload`,
+`shutdown`; failures return `{"ok": false, "error": ...}` and stderr is
+pumped separately so diagnostics can never corrupt protocol lines.
+
+- **Model**: `ResembleAI/chatterbox-turbo` rev `749d1c1a` — 9 pinned files,
+  SHA-256 verified (`chatterbox_assets.MODEL_FILES`).
+- **Device policy**: `voice_chatterbox_device=auto` picks CUDA only when
+  ≥ `voice_chatterbox_min_free_vram_mb` (default 3200 MB) is free — the
+  LLM/image lanes own the GPU first. Measured on RTX 3080 Ti: ~8.5 s cold
+  load, ~2.8 GB VRAM resident, RTF ≈0.3.
+- **Voices**: the preset's `base_voice` selects a clone voice directory.
+  Official voices ship in `localcodeagent/voice/chatterbox_voices/<id>/`
+  (voice.json + reference.wav, like official presets); user-installed
+  voices under `models/voice/chatterbox/voices/<id>/` merge and shadow.
+  Reference audio must validate (`reference.py`: >5 s, no clipping, no
+  silence-dominated or corrupt files). Turbo's conditionals are global —
+  the worker re-prepares on every voice switch.
+- **Turbo caveats**: `exaggeration`/`cfg`/`min_p` are ignored by the model
+  (`emotion_adv=False`); emotion delivery is tokenizer tags + temperature.
+  `[laugh] [chuckle] [sigh] [gasp] [cough] [groan] [sniff] [shush]
+  [clear throat]` plus emotion/delivery tokens are probed per-runtime —
+  a tag only counts when the tokenizer encodes it as a dedicated single
+  token.
+- **Loudness**: raw turbo output is quiet (~−27 LUFS after its reference
+  conditioning). `loudness.py` applies BS.1770 normalization to a target
+  (default −17 LUFS, `voice_target_lufs`) after output gain and before
+  the limiter. Presets opt in via `normalize_loudness`; the master switch
+  is `voice_normalize_loudness`.
+- **Fallback**: a `VoiceEngineError` from Chatterbox (missing runtime,
+  dead worker, VRAM floor) degrades to Kokoro rather than dropping speech.
+  The Kokoro voice is remapped (`isabella` → `bf_isabella`, the approved
+  reference's own source) and cached under a separate engine key so it
+  never masquerades as Chatterbox output.
+- **Packaging**: `chatterbox_worker.py` ships via explicit `--add-data`
+  (.py files otherwise vanish into the PYZ and the worker can't spawn —
+  the v0.26.1 fix). Official voices ride the same mechanism.
+- **Vocalizations**: `ChatterboxVocalizationAdapter` maps the planner's
+  semantic styles to native tags where the runtime confirms them,
+  natural text forms otherwise; the adapter follows the active preset's
+  engine. `/api/voice/capabilities` exposes the per-engine tag table;
+  `?probe=1` forces the live probe (loads the model, ~15 s cold).
+- **Voice Studio**: engine selector, per-engine voice list, loudness +
+  limiter controls, and Voice Lab (tag audition buttons gated by the
+  runtime capability probe).
 
 ## Speech-to-text
 
@@ -269,6 +329,13 @@ mutations honor permission levels; official presets are protected.
 `voice_cache_max_mb`, `voice_device`, `voice_max_concurrency`,
 `voice_idle_unload_seconds`, `stt_backend`, `stt_model`, `vosk_model_path`,
 `stt_auto_submit`.
+
+Chatterbox (v0.26.x): `voice_chatterbox_runtime_dir`
+(`runtime/voice/chatterbox`), `voice_chatterbox_device` (auto|cpu|cuda),
+`voice_chatterbox_min_free_vram_mb` (3200),
+`voice_chatterbox_synth_timeout_s` (240). Loudness:
+`voice_normalize_loudness`, `voice_target_lufs` (−17),
+`voice_limiter_enabled`.
 
 ## Installer / upgrades
 

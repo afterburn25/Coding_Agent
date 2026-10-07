@@ -2,13 +2,41 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 — v0.26.1 shipped: Chatterbox Turbo live on the deployed install
+
+**Shipped.** PR #8 merged → `c77718d0`, CI run 37552146081 fully green
+(tests 3m23s + windows-desktop 9m11s Inno installer + install/update
+smoke), tagged `v0.26.0`, GitHub Release live. **Deploy dogfooding
+caught two real bugs the source tree hides**, fixed in `554e551a`
+(v0.26.1, pushed, CI pending at write time):
+
+1. **Worker script missing in frozen builds.** `.py` files compile into
+   the PYZ — `chatterbox_worker.py` never landed on disk, so the spawned
+   runtime died instantly ("worker exited unexpectedly"). Now shipped
+   via explicit `--add-data`; `_spawn` fails loudly if absent.
+2. **Kokoro fallback passed a foreign voice id.** `isabella` isn't a
+   Kokoro voice — degraded renders failed a second time. Fallback now
+   maps to `bf_isabella` (the approved reference's own Kokoro source)
+   or the first available voice.
+
+**Deployed + verified live** at `D:\Nexus_Core` (old backend parked at
+`backend-pre-v0260`, old exe at `NexusCore.exe.pre-v0260`):
+`/api/status` → 0.26.1-equivalent backend, provisioning ran the real
+`ensure_runtime` path end-to-end (pbs sha256 → extract → pip torch
+2.6.0+cu124 + chatterbox-tts 0.1.7 → import probe → marker), model
+copied in and sha256-verified. `/api/voice/preview` synthesized
+"[chuckle] Chatterbox is live on the deployed install." — 3.45 s on
+CUDA, RTF 0.35, 3.1 GB VRAM, 19 tags confirmed on the live tokenizer.
+Kokoro stays loaded as fallback.
+
 ## 2026-10-06 — v0.26.0 (branch): Chatterbox Turbo voice engine integrated
 
 **State.** `feature/chatterbox-voice-engine` holds 4 commits
 (`556e0816` engine+runtime, `ea99b948` integration, `fc5c1423`
-provisioning+UI+tests, `d01879da` release 0.26.0). **Not yet pushed /
-not on `main`** — push, CI, and a production installer build are the
-next gate. Full suite: **2417 passed** locally; voice suite 104/104.
+provisioning+UI+tests, `d01879da` release 0.26.0). **Merged same
+evening — see the v0.26.1 entry above for the shipped state + the two
+frozen-build fixes the dogfood caught.** Full suite: **2417 passed**
+locally; voice suite 104/104.
 
 **Architecture.** Second registered `TTSEngine`. `ChatterboxEngine`
 (`voice/chatterbox.py`) spawns `voice/chatterbox_worker.py` inside the
