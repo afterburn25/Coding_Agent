@@ -395,6 +395,45 @@ class JobNodeTests(unittest.TestCase):
         self.assertIn("verify failed", last["reason"])
         self.assertEqual(len(tasks), 3)  # diagnose → fix → re-verify
 
+    def test_replan_on_artifact_failure_rechecks_the_artifact(self):
+        # Soak finding: a failed artifact_exists criterion produced a
+        # generic diagnose→fix→verify path and the criterion was never
+        # re-checked — a mission could "succeed" while its declared
+        # artifact stayed missing. The recovery path must name the
+        # artifact, demand real file output, and re-check it.
+        from localcodeagent.autonomy.planner import MissionPlanner
+        p = MissionPlanner()
+        mission = {"objective": "write a report", "scope": "one_shot",
+                   "budgets": {"max_task_retries": 2}}
+        failed = {"title": "Check artifact: docs/report.md",
+                  "instruction": "internal:artifact_exists:docs/report.md",
+                  "deps": [], "result": {"output": "docs/report.md: missing"}}
+        tasks = p.replan(mission, failed, "artifact missing")
+        kinds = [t["kind"] for t in tasks]
+        self.assertEqual(len(tasks), 4)  # diagnose → fix → check → verify
+        fix = next(t for t in tasks if t["title"].startswith("Recover:"))
+        self.assertIn("docs/report.md", fix["instruction"])
+        self.assertIn("file-write", fix["instruction"])
+        checks = [t for t in tasks if t["instruction"].startswith(
+            "internal:artifact_exists:")]
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["deps"], [fix["id"]])
+        verify = tasks[-1]
+        self.assertEqual(verify["kind"], "verify")
+        self.assertIn(checks[0]["id"], verify["deps"])
+
+    def test_replan_generic_failure_unchanged(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        p = MissionPlanner()
+        mission = {"objective": "fix crash", "scope": "one_shot",
+                   "budgets": {"max_task_retries": 2}}
+        failed = {"title": "Work", "instruction": "do the work",
+                  "deps": [], "result": {"output": "boom"}}
+        tasks = p.replan(mission, failed, "boom")
+        self.assertEqual(len(tasks), 3)
+        self.assertFalse(any(t["instruction"].startswith(
+            "internal:artifact_exists:") for t in tasks))
+
     def test_project_context_flows_into_plan(self):
         # A project-linked mission embeds the bounded digest — goals,
         # decisions — in work instructions, not the whole project history.

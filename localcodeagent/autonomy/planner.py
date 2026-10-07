@@ -322,6 +322,18 @@ class MissionPlanner:
         deps = list((failed_node or {}).get("deps") or [])
         tasks: list[dict] = []
 
+        # A failed artifact_exists criterion needs a recovery path that
+        # actually produces the file — the generic "apply the diagnosis"
+        # instruction let prose-only agent output sail past the missing
+        # artifact (bounded-soak finding: every mission timed out in that
+        # loop). Name the target explicitly and re-check it after the fix
+        # so the criterion is never retired unverified.
+        artifact_target = ""
+        failed_instr = str((failed_node or {}).get("instruction") or "")
+        if failed_instr.startswith("internal:artifact_exists:"):
+            artifact_target = failed_instr.split(
+                "internal:artifact_exists:", 1)[1].strip()
+
         diagnose = new_task(
             f"Diagnose failure ({mission['repair_loops']}): "
             f"{(failed_node or {}).get('title', 'task')[:60]}",
@@ -333,24 +345,47 @@ class MissionPlanner:
             model_role="utility", verify="none", max_retries=1,
             created_by="replan",
         )
+        if artifact_target:
+            fix_instruction = (
+                f"The declared mission artifact does not exist: "
+                f"{artifact_target}. Produce it for real — call the "
+                "file-write tool with complete, concrete content. A prose "
+                "summary or a description of the file does NOT satisfy "
+                "this; the artifact must exist on disk. Objective: "
+                + str(mission.get("objective") or "")
+                + self._constraints_text(mission))
+        else:
+            fix_instruction = (
+                "Apply the diagnosis to make progress on the mission "
+                "objective. Objective: "
+                + str(mission.get("objective") or "")
+                + self._constraints_text(mission))
         fix = new_task(
             f"Recover: {(failed_node or {}).get('title', 'task')[:80]}",
-            ("Apply the diagnosis to make progress on the mission objective. "
-             "Objective: " + str(mission.get("objective") or "") +
-             self._constraints_text(mission)),
+            fix_instruction,
             kind="agent", deps=[diagnose["id"]], priority=20,
             verify="none",
             max_retries=int((mission.get("budgets") or {}).get(
                 "max_task_retries", 2)),
             created_by="replan",
         )
+        tasks += [diagnose, fix]
+        verify_deps = [fix["id"]]
+        if artifact_target:
+            recheck = new_task(
+                f"Check artifact: {artifact_target}",
+                f"internal:artifact_exists:{artifact_target}",
+                kind="internal", deps=[fix["id"]], priority=30,
+                verify="none", max_retries=0, created_by="replan")
+            tasks.append(recheck)
+            verify_deps.append(recheck["id"])
         verify = new_task(
             f"Re-verify ({mission['repair_loops']})",
             "Re-run verification for the recovered work and report pass/fail.",
-            kind="verify", deps=[fix["id"]], priority=40,
+            kind="verify", deps=verify_deps, priority=40,
             verify="auto", max_retries=1, created_by="replan",
         )
-        tasks += [diagnose, fix, verify]
+        tasks.append(verify)
         version = int(mission.get("plan_version") or 0) + 1
         mission["plan_version"] = version
         mission.setdefault("plan_history", []).append({
