@@ -2,6 +2,26 @@
 
 > **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.26.1 is the current release — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core` (Chatterbox synthesizing on CUDA through the frozen backend; two frozen-build fixes in 0.26.1). v0.25.3 was the prior release: voice trailing-syllable noise-tail fix (Kokoro's post-phoneme breath bed shaved; `dsp.DSP_VERSION` invalidates stale cached audio), on top of v0.25.2 (double-spoken unterminated replies) and v0.25.1 (chat streaming layout — message adjuncts pinned out of the 42px avatar grid track). v0.25.0 was the **Reliability + Dogfooding** release: learning dashboard, dead-backend honesty fix, study research + selftest fixes, verified Tier-3 soak, green CI on `main`. v0.24.0 landed the **Intelligence Governor + Continual Learning** milestone. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
+## Unreleased on main — performance/residency milestone (deployed to D:\Nexus_Core)
+
+- **Demand-driven GPU residency** — Chatterbox loads bf16 (~2.3 GB vs
+  ~3.3 GB fp32), warms only on a cache-miss speech enqueue (never on
+  task begin), and self-unloads after `voice_gpu_idle_unload_seconds`
+  (120 s) or under VRAM pressure; status/capability polls no longer
+  extend the lease (they used to pin the worker forever).
+- **VRAM brokerage** — `RuntimeManager.vram_releasers` lets an incoming
+  LLM launch stop idle InvokeAI/ComfyUI and idle CUDA voice engines
+  before evicting a resident model; runs even when no other LLM is
+  resident.
+- **Hot path** — per-message `nvidia-smi` spawn replaced with 15 s
+  cached telemetry; task-bar poll 4 s→15 s; all subprocess spawns
+  `CREATE_NO_WINDOW` (no console flashes); InvokeAI auto-start off.
+- **Verified live** — engine unloads at 120 s idle (VRAM −2.3 GB);
+  image gen round-trips on demand (vram 4.1→7.34 GB freed post-job);
+  30-turn soak flat ~641 MB; idle = 3 processes / ~4.5 GB VRAM.
+- Evidence: `docs/PERFORMANCE_BASELINE.md`, `docs/PERFORMANCE_OPTIMIZATION.md`,
+  `scripts/benchmark.py`.
+
 ## Active version: 0.26.1 — Chatterbox Turbo voice engine (merged + deployed)
 
 - **Engine** — `ChatterboxEngine` drives `chatterbox_worker.py` in the
