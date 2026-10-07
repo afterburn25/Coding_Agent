@@ -3817,7 +3817,9 @@ class AgentOrchestrator:
             fresh = self.tasks.get(session.task_id)
             round_items = fresh.verification[session.verification_round_start:] if fresh.verification else []
             passed = sum(1 for it in round_items if "EXIT_CODE=0" in str(it.get("result", "")))
-            failed = len(round_items) - passed
+            failed = sum(1 for it in round_items
+                         if "EXIT_CODE=0" not in str(it.get("result", ""))
+                         and "PERMISSION_DENIED" not in str(it.get("result", "")))
             self._act_update(
                 session.task_id, {"id": group_id},
                 state="failed" if failed else "completed",
@@ -3916,7 +3918,14 @@ class AgentOrchestrator:
 
         task = self.tasks.get(session.task_id)
         current_round = task.verification[session.verification_round_start:] if task.verification else []
-        verification_failed = any("EXIT_CODE=0" not in str(item.get("result", "")) for item in current_round)
+        # A user-skipped check (PERMISSION_DENIED) is not a failure — it
+        # must not trigger an auto-repair round that re-pends the same
+        # approval forever.
+        verification_failed = any(
+            "EXIT_CODE=0" not in str(item.get("result", ""))
+            and "PERMISSION_DENIED" not in str(item.get("result", ""))
+            for item in current_round
+        )
         if (
             verification_failed
             and session.repair_cycles < self.config.max_auto_repair_cycles
