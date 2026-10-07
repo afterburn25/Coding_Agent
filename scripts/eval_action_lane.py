@@ -119,6 +119,9 @@ CASES: list[tuple[str, str, object]] = [
     ("move it", "fell_through", None),     # pronoun — no resolvable target
     ("write 'orphan'", "fell_through", None),  # ambiguous — write vs write-file
     ("refactor the parser to use iterparse", "fell_through", None),
+    # classifier-missed compound — must not create a literal path
+    # named 'alpha and make dir beta'; whole utterance goes to model.
+    ("create folder alpha and make dir beta", "fell_through", None),
     ("can you generate images", "fell_through", None),
     ("what branches are in github for this project", "fell_through",
      None),

@@ -82,6 +82,18 @@ _ONE_ARG_OP_RE = re.compile(
 # resolvable target, so they fall through instead of clarifying.
 _PRONOUN_ONLY_RE = re.compile(
     r"^(?:it|that|this|them|him|her|one|something)\b", re.I)
+# A path tail that contains a second action clause (verb + object type)
+# means the intent classifier missed a compound — "create folder alpha
+# and make dir beta" must not execute a literal path named 'alpha and
+# make dir beta'. Bail to the model lane for the whole utterance.
+_EMBEDDED_OP_RE = re.compile(
+    r"\b(?:create|make|mkdir|delete|remove|erase|move|copy|duplicate|"
+    r"rename|touch|write|save)\s+(?:a\s+|an\s+|the\s+|new\s+)?"
+    r"(?:folder|directory|dir|file|note|txt|doc)\b", re.I)
+
+
+def _embedded_op(raw: str) -> bool:
+    return bool(_EMBEDDED_OP_RE.search(raw or ""))
 _CONTENT_RE = re.compile(
     r"\s+(?:with\s+content|containing|that\s+says?|saying)\s+"
     r"[\"']?(.*?)[\"']?\s*$", re.I | re.S)
@@ -189,6 +201,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
     # write/save with quoted content — 'write "hello" to note.txt'.
     m = _WRITE_TO_RE.search(t)
     if m:
+        if _embedded_op(m.group(2)):
+            return None
         content, dst_raw = m.group(1), _path_tail(m.group(2))
         if not dst_raw:
             return ActionPlan(
@@ -209,6 +223,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
         m = rx.search(t)
         if not m:
             continue
+        if _embedded_op(m.group(1)) or _embedded_op(m.group(2)):
+            return None
         src_raw = _path_tail(m.group(1))
         dst_raw = _path_tail(m.group(2))
         if not src_raw:
@@ -235,6 +251,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
     if m:
         verb = m.group(1).lower()
         tail = m.group(2).strip()
+        if _embedded_op(tail):
+            return None
         if not _PRONOUN_ONLY_RE.match(tail):
             kind = "copy" if verb in ("copy", "duplicate") else \
                 ("rename" if verb == "rename" else "move")
@@ -259,6 +277,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
         body = m.group(1)
         recursive = bool(_RECURSIVE_RE.search(body))
         body = _RECURSIVE_RE.sub("", body)
+        if _embedded_op(body):
+            return None
         raw = _path_tail(body)
         if not raw:
             return ActionPlan(
@@ -273,6 +293,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
     m = (_CREATE_DIR_RE.search(t) or _CREATE_REVERSED_RE.search(t)
          or _MKDIR_RE.search(t))
     if m:
+        if _embedded_op(m.group(1)):
+            return None
         raw = _path_tail(m.group(1))
         if not raw:
             return ActionPlan(
@@ -292,6 +314,8 @@ def parse_local_action(text: str, *, workspace: Path | str,
         if cm:
             content = cm.group(1)
             body = body[:cm.start()]
+        if _embedded_op(body):
+            return None
         raw = _path_tail(body)
         if not raw:
             return ActionPlan(
