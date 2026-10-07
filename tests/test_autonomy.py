@@ -663,6 +663,42 @@ class JobNodeTests(unittest.TestCase):
                 sup.missions.get(mission["id"])["status"], "cancelled")
             sup.stop()
 
+    def test_orphaned_repair_retires_while_stopped(self):
+        # Autonomy stopped must not strand a stale repair mission in
+        # 'active' — the retirement sweep is housekeeping, not mission
+        # work, so it runs before the stopped gate.
+        class _RepairStub:
+            def __init__(self, incidents): self._inc = incidents
+            def get(self, iid): return self._inc.get(iid)
+            def tick(self, now): pass
+
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(
+                td, repair=_RepairStub(
+                    {"ri-z": {"id": "ri-z", "state": "needs_human"}}))
+            mission = sup.missions.create(
+                objective="fix it", title="repair",
+                scope="one_shot", workspace=td,
+                source="self_repair", source_id="ri-z")
+            sup.missions.transition(mission["id"], "executing")
+            sup.policy.set_stopped(True)
+            sup._retire_orphaned_repairs()
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "cancelled")
+            # A live repair mission is untouched.
+            sup2 = make_sup(
+                td, repair=_RepairStub(
+                    {"ri-w": {"id": "ri-w", "state": "patching"}}))
+            m2 = sup2.missions.create(
+                objective="fix it", title="repair2",
+                scope="one_shot", workspace=td,
+                source="self_repair", source_id="ri-w")
+            sup2.missions.transition(m2["id"], "executing")
+            sup2._retire_orphaned_repairs()
+            self.assertNotEqual(
+                sup2.missions.get(m2["id"])["status"], "cancelled")
+            sup.stop()
+
     def test_non_executor_nodes_write_ledger_evidence(self):
         # Verify/internal nodes bypass agent.run — without their own
         # ledger writes the mission evidence rollup was blind to the

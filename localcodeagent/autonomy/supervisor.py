@@ -711,6 +711,12 @@ class AutonomousSupervisor:
         # not leave a mission parked forever while nobody is watching.
         self._reconcile_approvals(now)
 
+        # 3d. orphaned repair missions — a self-repair mission whose
+        # incident is already terminal has nothing to fix. Retire it as
+        # housekeeping (not mission work) so it can't sit 'active' while
+        # autonomy is stopped and dispatch the moment it resumes.
+        self._retire_orphaned_repairs()
+
         # 4. drive live missions
         if self.policy.is_stopped() or self.policy.is_paused():
             return
@@ -785,6 +791,24 @@ class AutonomousSupervisor:
     # ------------------------------------------------------------------
     # per-mission step
 
+    def _retire_orphaned_repairs(self) -> None:
+        """Housekeeping sweep: cancel self-repair missions whose linked
+        incident is already terminal (or gone). Runs before the stopped
+        gate so a stale mission can't sit 'active' while autonomy is
+        off and then dispatch the moment it resumes."""
+        if self.repair is None:
+            return
+        for m in self.missions.list():
+            if (str(m.get("status")) in TERMINAL_MISSION_STATUSES
+                    or str(m.get("source")) != "self_repair"):
+                continue
+            inc = self.repair.get(str(m.get("source_id") or ""))
+            if inc is None or str(inc.get("state")) in \
+                    TERMINAL_REPAIR_STATES:
+                self.missions.transition(
+                    m["id"], "cancelled",
+                    detail="repair incident already terminal or gone")
+
     def _step_mission(self, mission_id: str) -> None:
         m = self.missions.get(mission_id)
         if m is None or m.get("stop_requested"):
@@ -794,7 +818,9 @@ class AutonomousSupervisor:
         # A self-repair mission whose incident already closed has no
         # reason to run — a stale resume would execute a plan against a
         # resolved condition (and could "fix" a non-issue in a stale
-        # worktree). Retire it instead of dispatching.
+        # worktree). Retire it instead of dispatching. The pre-gate
+        # sweep covers the normal case; this guards a mission that goes
+        # stale mid-tick.
         if (status not in TERMINAL_MISSION_STATUSES
                 and str(m.get("source")) == "self_repair"
                 and self.repair is not None):
