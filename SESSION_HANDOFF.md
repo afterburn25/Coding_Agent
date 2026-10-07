@@ -2,6 +2,39 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-07 — Performance/residency milestone + startup profiling (v0.26.1, `9abc9de`, CI green)
+
+**Full story:** `docs/PERFORMANCE_OPTIMIZATION.md` (root causes, diffs,
+before/after numbers) + `docs/PERFORMANCE_BASELINE.md` (method +
+baseline). Repeatable measurement: `scripts/benchmark.py`.
+
+**Residency fixes** (`44c0de30` + `bb2b3660`, CI run 37565669510 green):
+Chatterbox bf16 (~2.29 GB resident, was ~3.3 fp32), 120 s GPU idle
+unload that actually fires (`touch=` separates real work from status
+polls), warm only on cache-miss speech enqueue, `vram_releasers`
+reverse reclaim (LLM launch frees idle image/voice before evicting
+residents), cached hardware telemetry (no per-message nvidia-smi),
+`invokeai_auto_start` off, `CREATE_NO_WINDOW` on all spawns.
+
+**Startup fixes** (`9abc9de`, CI run 37569421150 green): `[nexus-init]`
+step timers pinned a 9.4 s boot gap to `ProvisioningManager._inventory`
+running synchronously in `AppState.__init__` — torch import probe
+(~5 s), full-registry manifest refresh per tool item, sha256 over
+3.3 GB of voice weights + 400 MB of Kokoro assets. Fixed via
+`runtime_status(deep=False)` shallow boot check, scoped
+`refresh_install_status(name)`, and verified-content caches
+(`.nexus-model-verified.json` / `.nexus-assets-verified.json` —
+size+mtime+sha256 signatures skip rehashing unchanged files).
+**provisioning init 8.35 s → 65 ms; total startup ~21.4 s → ~12.7 s.**
+
+**Soak:** 50 turns flat at ~6.1 GB backend RAM (~1.2 s/turn). Image
+round-trip verified end-to-end (InvokeAI on-demand start → PNG →
+VRAM released, llama resident throughout).
+
+**Handy diagnostics:** `backend-host.log` now carries `[nexus-init]
+<step> <ms>` lines per boot stage + `inventory/<id> <ms>` for any
+item probe over 100 ms.
+
 ## 2026-10-07 — v0.26.1 shipped: Chatterbox Turbo live on the deployed install
 
 **Shipped.** PR #8 merged → `c77718d0`, CI run 37552146081 fully green

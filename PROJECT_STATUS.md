@@ -16,11 +16,17 @@
 - **Hot path** — per-message `nvidia-smi` spawn replaced with 15 s
   cached telemetry; task-bar poll 4 s→15 s; all subprocess spawns
   `CREATE_NO_WINDOW` (no console flashes); InvokeAI auto-start off.
+- **Startup** — `[nexus-init]` stage timers found provisioning
+  `_inventory` blocking boot 8.35 s (torch import probe + per-item
+  full-registry manifest scans + sha256 over GBs of weights). Now:
+  shallow `runtime_status(deep=False)`, scoped per-manifest refresh,
+  verified-content caches (size+mtime+sha256). Provisioning init
+  **8.35 s → 65 ms**; total startup **~21.4 s → ~12.7 s**.
 - **Verified live** — engine unloads at 120 s idle (VRAM −2.3 GB);
   image gen round-trips on demand (vram 4.1→7.34 GB freed post-job);
-  30-turn soak flat ~641 MB; idle = 3 processes / ~4.5 GB VRAM.
+  **50-turn soak flat ~6.1 GB**; idle = 3 processes / ~4.5 GB VRAM.
 - Evidence: `docs/PERFORMANCE_BASELINE.md`, `docs/PERFORMANCE_OPTIMIZATION.md`,
-  `scripts/benchmark.py`.
+  `scripts/benchmark.py`. CI green on `main` through `9abc9de`.
 
 ## Active version: 0.26.1 — Chatterbox Turbo voice engine (merged + deployed)
 
