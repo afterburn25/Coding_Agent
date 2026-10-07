@@ -551,8 +551,15 @@ def process(x: np.ndarray, sr: int, preset: VoicePreset,
     gain = 10.0 ** (float(preset.output_gain_db) / 20.0)
     if gain != 1.0:
         stereo = stereo * gain
-    stereo[:, 0] = limiter(stereo[:, 0], sr, preset.limiter_ceiling)
-    stereo[:, 1] = limiter(stereo[:, 1], sr, preset.limiter_ceiling)
+    if getattr(preset, "normalize_loudness", False):
+        from . import loudness as _loud
+        stereo, _ = _loud.normalize_lufs(
+            stereo, sr,
+            float(getattr(preset, "loudness_target_lufs", -17.0)),
+            max_gain_db=15.0)
+    if getattr(preset, "limiter_enabled", True):
+        stereo[:, 0] = limiter(stereo[:, 0], sr, preset.limiter_ceiling)
+        stereo[:, 1] = limiter(stereo[:, 1], sr, preset.limiter_ceiling)
     return stereo.astype(np.float32)
 
 

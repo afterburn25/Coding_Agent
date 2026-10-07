@@ -33,3 +33,12 @@ input[type=range]{accent-color:var(--info)}
 .side-toggle.muted{color:var(--muted);border-color:var(--line)}
 .voice-toggle.muted{opacity:.6}
 .voice-preset-list .vp.dirty::after{content:" •modified";color:var(--warn);font-size:9px}
+
+.voice-lab-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.voice-lab-grid .lab-tag {
+  text-transform: capitalize;
+}

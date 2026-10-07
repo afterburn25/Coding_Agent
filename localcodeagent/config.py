@@ -350,6 +350,17 @@ class AgentConfig:
     voice_device: str = "cpu"              # cpu | gpu (best-effort ORT provider)
     voice_max_concurrency: int = 1
     voice_idle_unload_seconds: float = 600.0
+    # Chatterbox Turbo — isolated runtime (runtime/voice/chatterbox venv)
+    # driven over stdio by the chatterbox engine provider.
+    voice_chatterbox_runtime_dir: str = "runtime/voice/chatterbox"
+    voice_chatterbox_device: str = "auto"  # auto | cpu | cuda
+    voice_chatterbox_min_free_vram_mb: float = 3200.0
+    voice_chatterbox_synth_timeout_s: float = 240.0
+    # Output loudness management — applied in the DSP chain before the
+    # peak limiter so normalized speech never clips.
+    voice_normalize_loudness: bool = True
+    voice_target_lufs: float = -17.0
+    voice_limiter_enabled: bool = True
 
     # Local speech-to-text. Faster-whisper handles push-to-talk/file
     # transcription; a configured Vosk model can provide streaming partials.
@@ -778,6 +789,24 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.voice_device = str(raw.get("voice_device", cfg.voice_device))
     cfg.voice_max_concurrency = max(1, int(raw.get("voice_max_concurrency", cfg.voice_max_concurrency)))
     cfg.voice_idle_unload_seconds = max(0.0, float(raw.get("voice_idle_unload_seconds", cfg.voice_idle_unload_seconds)))
+    cfg.voice_chatterbox_runtime_dir = str(raw.get(
+        "voice_chatterbox_runtime_dir", cfg.voice_chatterbox_runtime_dir))
+    _cb_dev = str(raw.get("voice_chatterbox_device",
+                          cfg.voice_chatterbox_device)).strip().lower()
+    cfg.voice_chatterbox_device = _cb_dev if _cb_dev in {
+        "auto", "cpu", "cuda"} else "auto"
+    cfg.voice_chatterbox_min_free_vram_mb = max(0.0, float(raw.get(
+        "voice_chatterbox_min_free_vram_mb",
+        cfg.voice_chatterbox_min_free_vram_mb)))
+    cfg.voice_chatterbox_synth_timeout_s = max(30.0, float(raw.get(
+        "voice_chatterbox_synth_timeout_s",
+        cfg.voice_chatterbox_synth_timeout_s)))
+    cfg.voice_normalize_loudness = bool(raw.get(
+        "voice_normalize_loudness", cfg.voice_normalize_loudness))
+    cfg.voice_target_lufs = max(-40.0, min(-6.0, float(raw.get(
+        "voice_target_lufs", cfg.voice_target_lufs))))
+    cfg.voice_limiter_enabled = bool(raw.get(
+        "voice_limiter_enabled", cfg.voice_limiter_enabled))
     stt_backend = str(raw.get("stt_backend", cfg.stt_backend)).strip().lower()
     cfg.stt_backend = stt_backend if stt_backend in {
         "auto", "faster-whisper", "whisper", "vosk", "off", "none"} else "auto"

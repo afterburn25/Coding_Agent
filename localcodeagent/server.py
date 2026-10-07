@@ -7706,6 +7706,7 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(preset_raw, dict):
                     preset = VoicePreset.from_dict(preset_raw)
                     preset.id = preset.id or "_preview"
+                    voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
@@ -7747,6 +7748,7 @@ class Handler(BaseHTTPRequestHandler):
                     rawp["id"] = "_preview_overlay"
                     rawp["official"] = False
                     preset = VoicePreset.from_dict(rawp)
+                    voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
                         max(0.5, min(2.0, float(body.get("speed") or 1.0))),
@@ -7766,10 +7768,17 @@ class Handler(BaseHTTPRequestHandler):
                 changed = {}
                 for key in ("voice_enabled", "voice_muted", "voice_mode",
                             "voice_preset_id", "voice_engine",
-                            "voice_output_device", "voice_device"):
+                            "voice_output_device", "voice_device",
+                            "voice_chatterbox_runtime_dir",
+                            "voice_chatterbox_device",
+                            "voice_normalize_loudness",
+                            "voice_limiter_enabled"):
                     if key in body:
                         changed[key] = body[key]
-                for key in ("voice_volume", "voice_speed"):
+                for key in ("voice_volume", "voice_speed",
+                            "voice_chatterbox_min_free_vram_mb",
+                            "voice_chatterbox_synth_timeout_s",
+                            "voice_target_lufs"):
                     if key in body:
                         changed[key] = float(body[key])
                 for k, v in changed.items():
@@ -8794,10 +8803,66 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/voice/voices":
             try:
-                eng = self.state.voice.engine() if self.state.voice else None
-                self._json({"voices": eng.voices() if eng else []})
+                q = parse_qs(urlparse(self.path).query)
+                engine_name = (q.get("engine", [""])[0]
+                               or (self.state.voice.current_preset().engine
+                                   if self.state.voice
+                                   and self.state.voice.current_preset()
+                                   else ""))
+                eng = (self.state.voice.engine(engine_name)
+                       if self.state.voice else None)
+                self._json({"voices": eng.voices() if eng else [],
+                            "engine": eng.name if eng else ""})
             except Exception as exc:
                 self._json({"voices": [], "error": str(exc)})
+            return
+        if path == "/api/voice/capabilities":
+            # Voice Lab capability table — which engines exist and which
+            # tags/controls each actually supports on this install.
+            v = self.state.voice
+            # ?probe=1 forces the live capability probe — for chatterbox
+            # that loads the model (~15 s cold) so Voice Lab only calls
+            # it on an explicit user action.
+            probe = parse_qs(urlparse(self.path).query).get(
+                "probe", [""])[0] in ("1", "true", "yes")
+            out: dict = {"engines": {}}
+            try:
+                from .voice.engine import engine_names
+                for name in engine_names():
+                    entry: dict = {"registered": True}
+                    try:
+                        eng = v.engine(name) if v else None
+                    except Exception:
+                        eng = None
+                    if eng is None:
+                        entry["registered"] = False
+                    else:
+                        try:
+                            entry.update(eng.status())
+                        except Exception as exc:
+                            entry["error"] = str(exc)
+                        if (probe and eng is not None
+                                and hasattr(eng, "capabilities")
+                                and not entry.get("supported_tags")):
+                            try:
+                                caps = eng.capabilities()
+                                entry.update(eng.status())
+                                if isinstance(caps.get("tags"), dict):
+                                    entry["tag_probe"] = caps["tags"]
+                            except Exception as exc:
+                                entry["probe_error"] = str(exc)
+                    out["engines"][name] = entry
+            except Exception as exc:
+                out["error"] = str(exc)
+            try:
+                out["vocalizations"] = {
+                    "adapter": getattr(v.vocal.adapter, "name", ""),
+                    "supported_tags": sorted(getattr(
+                        v.vocal.adapter, "supported", []) or []),
+                } if v else {}
+            except Exception:
+                pass
+            self._json(out)
             return
         if path == "/api/voice/vocalizations":
             # Preview catalog for Personality Studio — style → sample

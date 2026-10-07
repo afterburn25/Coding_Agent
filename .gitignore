@@ -82,3 +82,7 @@ NUL
 .repair-worktrees/
 Devinchat-nexus/
 .dogfood/
+runtime/
+
+# generated listening samples (deliverable on disk, not in git)
+samples/
