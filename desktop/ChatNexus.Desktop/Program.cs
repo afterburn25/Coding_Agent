@@ -317,11 +317,36 @@ internal sealed class SplashForm : Form
             // Same autoplay exemption the main WebView2 gets — the
             // cinematic is unattended, so AudioContext must not start
             // suspended waiting for a user gesture that never comes.
-            var env = await CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null,
-                userDataFolder: Path.Combine(_appDir, "data", "webview2-splash"),
-                options: new CoreWebView2EnvironmentOptions(
-                    additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required"));
+            // The user-data folder lives under the per-user root
+            // directly, never through appDir/data — that path is a
+            // state-redirect junction, and a broken junction must not
+            // take down the fault surface (a dead backend is exactly
+            // when the animated failure screen is needed).
+            CoreWebView2Environment? env = null;
+            var splashUdf = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "NexusCore", "webview2-splash");
+            try
+            {
+                env = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: splashUdf,
+                    options: new CoreWebView2EnvironmentOptions(
+                        additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required"));
+            }
+            catch
+            {
+                // Last-resort scratch profile — a wedged primary folder
+                // still gets the cinematic + fault UI instead of the
+                // static fallback.
+                env = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: Path.Combine(
+                        Path.GetTempPath(),
+                        "nexus-splash-" + Guid.NewGuid().ToString("N")),
+                    options: new CoreWebView2EnvironmentOptions(
+                        additionalBrowserArguments: "--autoplay-policy=no-user-gesture-required"));
+            }
             if (IsDisposed) return;
             _web = new WebView2
             {
