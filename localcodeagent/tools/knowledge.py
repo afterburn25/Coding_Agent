@@ -74,6 +74,7 @@ class KnowledgeIndex:
         atomic_write_text(self.path, json.dumps(payload))
 
     def index_workspace(self, workspace: Path, *, subpath: str = "") -> dict[str, Any]:
+        workspace = workspace.resolve()
         root = (workspace / subpath).resolve()
         if not root.is_relative_to(workspace) or not root.exists():
             raise ValueError("index path must stay inside the workspace")

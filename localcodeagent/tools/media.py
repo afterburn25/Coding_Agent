@@ -31,7 +31,7 @@ def find_ffprobe() -> str | None:
 
 def _resolve(workspace: Path, raw: str, *, must_exist: bool = True) -> Path | None:
     p = (workspace / str(raw or "")).resolve()
-    if not p.is_relative_to(workspace):
+    if not p.is_relative_to(workspace.resolve()):
         return None
     if must_exist and not p.exists():
         return None

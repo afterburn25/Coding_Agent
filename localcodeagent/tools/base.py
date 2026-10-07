@@ -272,7 +272,7 @@ class ToolRegistry:
         install = meta.get("install") or {}
         if spec is None:
             return ""
-        root = self.install_root
+        root = self.install_root.resolve() if self.install_root else None
         # Prefer the common top-level dir declared by detect.files — e.g.
         # `ComfyUI_windows_portable/...` resolves to that payload directory even
         # when install.dest is the app root itself.

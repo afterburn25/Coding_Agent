@@ -33,7 +33,7 @@ def find_duckdb() -> str | None:
 
 def _resolve(workspace: Path, raw: str) -> Path | None:
     p = (workspace / str(raw or "")).resolve()
-    return p if p.is_relative_to(workspace) else None
+    return p if p.is_relative_to(workspace.resolve()) else None
 
 
 def _load_into_sqlite(source: Path) -> sqlite3.Connection:

@@ -69,7 +69,7 @@ class CodingReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, patch(
             "localcodeagent.runtime.manager.detect_hardware", return_value=hardware()
         ):
-            root = Path(td)
+            root = Path(td).resolve()
             (root / "models").mkdir()
             model = root / "models" / "coder.gguf"
             model.write_bytes(b"GGUF")

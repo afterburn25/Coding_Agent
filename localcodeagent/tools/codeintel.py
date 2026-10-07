@@ -318,6 +318,7 @@ def impact_of(workspace: Path, symbol: str = "", *,
     module's own public symbols are sampled (cap 12) and each is checked
     for external references; importers of the module name count too.
     """
+    workspace = workspace.resolve()
     tests_hint = re.compile(r"(^|[/\\])tests?[/\\]|^test_|_test\.|_spec\.")
 
     def _is_test(rel: str) -> bool:

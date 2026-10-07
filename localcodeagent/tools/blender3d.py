@@ -98,7 +98,7 @@ def register_blender_tools(registry: ToolRegistry, workspace: Path, *, jobs=None
 
     def _resolve_out(raw: str) -> Path | None:
         p = (workspace / str(raw or "")).resolve()
-        if not p.is_relative_to(workspace):
+        if not p.is_relative_to(workspace.resolve()):
             return None
         return p
 

@@ -97,7 +97,7 @@ class RuntimeManagerTests(unittest.TestCase):
 
     def test_build_llama_command(self):
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             models = root / "models"
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
@@ -1287,7 +1287,7 @@ class UnifiedLlamaRuntimeTests(unittest.TestCase):
 
     def test_unified_llama_build_command_inserts_serve_subcommand(self):
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             model = root / "model.gguf"
             model.write_bytes(b"GGUF")
             llama = root / "llama"

@@ -47,7 +47,7 @@ class LaunchCommandTests(unittest.TestCase):
 
     def test_mmproj_flag_emitted_when_configured(self):
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             (root / "models").mkdir()
             (root / "models" / "m.gguf").write_bytes(b"x")
             (root / "models" / "mm.gguf").write_bytes(b"y")

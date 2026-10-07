@@ -918,7 +918,7 @@ class BrowserRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             runner = BrowserRunner(artifacts_dir=Path(td))
             p = runner.session_path("my session/../evil")
-            self.assertEqual(p.parent, Path(td))
+            self.assertEqual(p.parent, Path(td).resolve())
             self.assertNotIn("..", p.name)
             with self.assertRaises(ValueError):
                 runner.session_path("")
