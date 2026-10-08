@@ -553,6 +553,47 @@ class TestVoiceManager(unittest.TestCase):
         self.assertIsNone(self.m.enqueue("t", "text"))
         self.m.set_muted(False)
 
+    def test_begin_task_prewarms_engine(self):
+        """The ~9s worker spawn should overlap model thinking, not the
+        first spoken sentence — begin_task kicks the warm."""
+        eng = _FakeEngine()
+        eng.loads = 0
+        orig_load = eng.load
+        def _load():
+            eng.loads += 1
+            orig_load()
+        eng.load = _load
+        self.m._engines["kokoro"] = eng
+        self.m.begin_task("t-warm")
+        deadline = time.time() + 3
+        while time.time() < deadline and not eng.loads:
+            time.sleep(0.05)
+        self.assertGreaterEqual(eng.loads, 1)
+
+    def test_begin_task_no_warm_when_muted(self):
+        eng = _FakeEngine()
+        eng.loads = 0
+        eng.load = lambda: setattr(eng, "loads", eng.loads + 1)
+        self.m._engines["kokoro"] = eng
+        self.m.set_muted(True)
+        self.m.begin_task("t-nowarm")
+        time.sleep(0.4)
+        self.assertEqual(eng.loads, 0)
+        self.m.set_muted(False)
+
+    def test_begin_task_no_warm_when_mode_off(self):
+        class Off(_Cfg):
+            voice_mode = "off"
+        m = VoiceManager(Off(), preset_dir=Path(self.tmp.name) / "p2",
+                         cache_dir=Path(self.tmp.name) / "c2")
+        eng = _FakeEngine()
+        eng.loads = 0
+        eng.load = lambda: setattr(eng, "loads", eng.loads + 1)
+        m._engines["kokoro"] = eng
+        m.begin_task("t-off")
+        time.sleep(0.4)
+        self.assertEqual(eng.loads, 0)
+
     def test_enqueue_vocalize_false_preserves_text(self):
         # Persona notice lead-ins like "Oof — …" must survive verbatim:
         # re-resolving them could strip the lead-in as a vocalization.
@@ -1676,11 +1717,13 @@ class TestChatterboxWorkerProtocol(unittest.TestCase):
 class TestVoiceIdleUnload(unittest.TestCase):
     """server._unload_idle_voice_engine must release GPU engines too."""
 
-    def _server(self, engines, idle_s=600.0):
+    def _server(self, engines, idle_s=600.0, gpu_idle_s=None):
         from localcodeagent.server import AppState
         srv = AppState.__new__(AppState)
         srv.config = types.SimpleNamespace(
-            voice_idle_unload_seconds=idle_s)
+            voice_idle_unload_seconds=idle_s,
+            **({"voice_gpu_idle_unload_seconds": gpu_idle_s}
+               if gpu_idle_s is not None else {}))
         srv.voice = types.SimpleNamespace(_engines=engines)
         published = []
         srv._voice_publish = lambda p: published.append(p)
@@ -1731,13 +1774,23 @@ class TestVoiceIdleUnload(unittest.TestCase):
         self.assertTrue(eng.unloaded)
 
     def test_gpu_idle_floor_beats_cpu_timeout(self):
-        # A cuda engine idles out on the GPU leash (default 120 s) long
-        # before the 600 s CPU-engine window.
+        # An explicit GPU leash still wins over the CPU window — the
+        # floor is configurable, the default just stopped being 120 s.
+        eng = self._fake_worker_engine(
+            last_used=time.time() - 200)
+        srv = self._server({"chatterbox": eng}, idle_s=600.0,
+                           gpu_idle_s=120.0)
+        srv._unload_idle_voice_engine()
+        self.assertTrue(eng.unloaded)
+
+    def test_gpu_default_leash_is_six_hundred(self):
+        # Default 600 s: a reply after a ~3-minute pause must not re-pay
+        # the ~9 s worker spawn. VRAM pressure is the real guardrail.
         eng = self._fake_worker_engine(
             last_used=time.time() - 200)
         srv = self._server({"chatterbox": eng}, idle_s=600.0)
         srv._unload_idle_voice_engine()
-        self.assertTrue(eng.unloaded)
+        self.assertFalse(eng.unloaded)
 
     def test_gpu_engine_inside_floor_stays(self):
         eng = self._fake_worker_engine(

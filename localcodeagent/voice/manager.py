@@ -302,6 +302,12 @@ class VoiceManager:
                     self._spoken_tasks.pop(k, None)
         if stale:
             self.stop_all(reason="new_response")
+        # Start warming the active preset's engine while the model is
+        # still thinking/streaming — the ~9 s worker spawn overlaps the
+        # turn instead of stalling the first spoken sentence. Warming
+        # is async and bounded by the VRAM-pressure unload, so a turn
+        # that ends up unspoken only costs a re-loadable worker.
+        self._warm_on_first_speech()
 
     def _warm_engine(self) -> None:
         try:
@@ -311,12 +317,13 @@ class VoiceManager:
             pass
 
     def _warm_on_first_speech(self) -> None:
-        """Pre-warm the TTS engine when speech is actually pending — the
-        first emitted sentence starts the ~1–9s load in parallel with the
-        rest of the model's reply instead of paying it at enqueue time.
-        begin_task must NOT warm: a plain-text turn or a fully filtered
-        reply (code-only, long lists) would otherwise load a ~3 GB GPU
-        voice model that never speaks."""
+        """Pre-warm the TTS engine for a task that will likely speak.
+
+        Called at task start (the ~1–9 s worker spawn then overlaps
+        model thinking/streaming) and defensively again at first
+        enqueue. Guarded by enabled/muted/mode and a one-flight flag;
+        the VRAM-pressure idle unloader reclaims a worker warmed for a
+        turn that never speaks."""
         if getattr(self, "_warming", False):
             return
         if not (self.enabled() and not self.muted()

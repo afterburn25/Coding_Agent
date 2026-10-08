@@ -775,6 +775,7 @@ class AppState:
         # model gets evicted — restarting them later is cheaper than
         # reloading a multi-GB LLM mid-session.
         self.runtime.vram_releasers.append(self._release_idle_gpu_consumers)
+        self._prewarm_voice_engine()
         # Operational state — last user interaction drives the "away"
         # briefing and the idle/away signal in /api/nexus/state.
         self._last_interaction_at = time.time()
@@ -5001,6 +5002,59 @@ class AppState:
             except Exception:
                 pass
 
+    def _prewarm_voice_engine(self) -> None:
+        """Warm the active TTS preset's engine in the background so the
+        first spoken response doesn't stall on a ~9 s worker spawn.
+
+        Waits past boot grace and for real VRAM headroom — the orphan
+        sweep and model autodetect get first claim on the GPU, and an
+        engine forced onto CPU by contention is slower than a cold GPU
+        spawn. Skipped entirely when voice is off/muted or the mode
+        never speaks responses."""
+        voice = self.voice
+        if voice is None:
+            return
+        try:
+            if not (voice.enabled() and not voice.muted()
+                    and voice.mode() in {"responses",
+                                         "responses_activity"}):
+                return
+        except Exception:
+            return
+
+        def _run() -> None:
+            try:
+                time.sleep(8)  # let the orphan sweep + autodetect settle
+                deadline = time.time() + 180
+                while time.time() < deadline:
+                    try:
+                        preset = voice.current_preset()
+                        eng = voice.engine(
+                            preset.engine if preset is not None else "")
+                        if getattr(eng, "_model", None) is not None or \
+                                getattr(eng, "_loaded", False):
+                            return
+                        floor = float(getattr(eng, "min_free_vram_mb", 0))
+                        free = None
+                        rt = getattr(self, "runtime", None)
+                        if floor > 0 and rt is not None:
+                            snap = rt.fresh_hardware()
+                            free = max((g.free_vram_mb for g in
+                                        getattr(snap, "gpus", [])),
+                                       default=None)
+                        if floor <= 0 or free is None or \
+                                free >= floor + 512:
+                            voice._warm_engine()
+                            return
+                    except Exception:
+                        return
+                    time.sleep(5)
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, name="nexus-voice-prewarm",
+                         daemon=True).start()
+
     def _unload_idle_voice_engine(self) -> None:
         """Release TTS engines after voice_idle_unload_seconds of silence —
         keeps overnight sessions lean without losing anything.
@@ -5015,11 +5069,13 @@ class AppState:
         if voice is None:
             return
         idle_s = float(getattr(self.config, "voice_idle_unload_seconds", 600.0))
-        # GPU-resident engines get a much shorter leash — a ~3 GB voice
-        # worker held for the full CPU-engine timeout is a permanent tax
-        # on a 12 GB card between utterances.
+        # GPU-resident engines get a shorter leash — a ~3 GB voice worker
+        # held overnight is a permanent tax on a 12 GB card — but short
+        # enough leashes make every reply after a pause re-pay the ~9 s
+        # worker spawn, so the default tracks the CPU-engine timeout.
+        # The VRAM-pressure path below stays the real guardrail.
         gpu_idle_s = float(getattr(
-            self.config, "voice_gpu_idle_unload_seconds", 120.0))
+            self.config, "voice_gpu_idle_unload_seconds", 600.0))
         if idle_s <= 0 and gpu_idle_s <= 0:
             return
         try:

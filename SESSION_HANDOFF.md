@@ -3030,7 +3030,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2762 tests` passing (2 environment skips).
+Expected at this checkpoint: `2855 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
@@ -3645,6 +3645,33 @@ build contained the break and has been replaced.
   avatar) + update.flag rewritten. NOTE: data/lkg/rollback.flag is also
   pending ("5 consecutive unclean boots" → snap-1791165159653) — it
   applies first at next launch, then update.flag swaps in backend-new.
+
+## 2026-10-08 — v0.34.0 Full Verified Computer Control + voice warmup fix
+
+**Action lane increments (all verified, deterministic):**
+- App control: resolve_app (path/PATH/well-known/App Paths/Start Menu),
+  launch/close/restart/status/window with pid+window evidence; live
+  dogfood: 'close notepad' parked on application.manage, approved,
+  WM_CLOSE, process gone.
+- Durable downloads: UserDownloadManager (.part + Range resume +
+  sha256 + cancel + JobManager progress); 'download <url> [to X]'.
+- File discovery: find/search/inspect/hash intents; fs_stat,
+  fs_archive, fs_extract (zip-slip + self-containment guarded).
+- Installer lane: 'install <path|product>', 'run the installer';
+  ShellExecute for elevation (UAC to the user), pid+image monitoring,
+  uninstall-registry diff as install proof.
+- UIA layer: computer_ui_observe/find/click/set_text/wait via bounded
+  PowerShell UIAutomationClient; patterns before pixels; LoopGuard;
+  screen-fingerprint re-observe; base64-JSON transport.
+- Queue fix: waiting_approval no longer wedges dequeue/chat gates.
+
+**Voice latency fix (user-reported):** worker spawn now overlaps model
+thinking — begin_task prewarms the active preset's engine, boot
+prewarms once VRAM headroom is confirmed (post orphan-sweep), and the
+GPU idle leash default rose 120s -> 600s so replies after short pauses
+don't re-pay the ~9s spawn. VRAM-pressure unload still wins.
+
+Checkpoint: 2859 tests (2856 passed + 3 env skips).
 
 ## 2026-10-05 — GitHub account API + voice-drain close + windowing (LIVE dogfooded)
 

@@ -60,16 +60,18 @@ class TestHelpers(unittest.TestCase):
         r = uia._run_ps("echo hi")
         self.assertFalse(r["ok"])
 
-    def test_control_chars_sanitized(self):
-        # UIA element names can embed \x07 etc. — must not break JSON.
-        import subprocess
-        script = ("[Console]::Out.WriteLine('{\"name\":\"a\x07b\"}')")
+    def test_control_chars_and_quotes_safe(self):
+        # The transport is base64'd UTF-8 JSON — element names carrying
+        # control chars, quotes, or em-dashes must never break parsing.
+        import base64
         from localcodeagent.computer_use.uia import _run_ps
         if os.name != "nt":
             self.skipTest("windows only")
-        r = _run_ps(script)
+        payload = json.dumps({"name": "a\x07b — \"quoted\""})
+        b64 = base64.b64encode(payload.encode("utf-8")).decode()
+        r = _run_ps(f"[Console]::Out.WriteLine('{b64}')")
         self.assertTrue(r["ok"])
-        self.assertIn("a", r["data"]["name"])
+        self.assertEqual(r["data"]["name"], 'a\x07b — "quoted"')
 
 
 @unittest.skipUnless(os.name == "nt", "Windows-only")

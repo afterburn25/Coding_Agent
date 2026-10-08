@@ -48,13 +48,16 @@ def _run_ps(script: str, timeout_s: float = 20.0) -> dict[str, Any]:
     out = (r.stdout or "").strip()
     if not out:
         return {"ok": True, "data": None}
-    # Element names can carry raw control chars (\x07 etc.) that break
-    # strict JSON; neutralize them before parsing.
-    out = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "\ufffd", out)
+    # Payload is base64'd UTF-8 JSON — immune to console-codepage
+    # mangling, control chars, and embedded quotes in element names.
     try:
-        return {"ok": True, "data": json.loads(out)}
-    except ValueError:
-        return {"ok": False, "error": f"unparseable UIA output: {out[:160]}"}
+        import base64
+        raw = base64.b64decode(out.strip()).decode("utf-8",
+                                                 errors="replace")
+        return {"ok": True, "data": json.loads(raw)}
+    except Exception:
+        return {"ok": False,
+                "error": f"unparseable UIA output: {out[:160]}"}
 
 
 def _ps_escape(value: str) -> str:
@@ -79,8 +82,9 @@ def _hwnd_source(hwnd: int, title_substr: str) -> str:
         f"Get-Process | Where-Object {{$_.MainWindowTitle -like '*{needle}*'"
         " -and $_.MainWindowHandle -ne 0} | "
         "Select-Object -First 1 | ForEach-Object {$hwnd=$_.MainWindowHandle}; "
-        "if ($hwnd -eq 0) { Write-Output '{\"ok\":false,\"error\":\"no "
-        "matching window\"}'; exit }; "
+        "if ($hwnd -eq 0) { [Console]::Out.WriteLine([Convert]::"
+        "ToBase64String([Text.Encoding]::UTF8.GetBytes("
+        "'{\"ok\":false,\"error\":\"no matching window\"}'))); exit }; "
         "$root=[System.Windows.Automation.AutomationElement]::FromHandle("
         "$hwnd);")
 
@@ -114,9 +118,11 @@ foreach ($e in $all) {{
   $i++;
 }}
 $wt=$root.Current.Name;
-[Console]::Out.WriteLine((@{{ok=$true; window=@{{title=[string]$wt;
+$json=(@{{ok=$true; window=@{{title=[string]$wt;
   hwnd=[int64]$root.Current.NativeWindowHandle}};
-  elements=$items; count=$i}} | ConvertTo-Json -Depth 4 -Compress));
+  elements=$items; count=$i}} | ConvertTo-Json -Depth 4 -Compress);
+[Console]::Out.WriteLine([Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes($json)));
 """)
     res = _run_ps(script, timeout_s=25.0)
     if not res.get("ok"):
@@ -193,7 +199,9 @@ foreach ($e in $all) {{
   }}
 }}
 if ($null -eq $target) {{
-  Write-Output '{{"ok":false,"error":"no element matching"}}'; exit }}
+  [Console]::Out.WriteLine([Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes(
+      '{{"ok":false,"error":"no element matching"}}'))); exit }}
 $r=$target.Current.BoundingRectangle;
 $out=@{{ok=$false; action='{act}';
   element=@{{name=[string]$target.Current.Name;
@@ -237,8 +245,10 @@ switch ('{act}') {{
     catch {{ }} }}
 }}
 $out.ok=$done; $out.pattern=$used;
-if (-not $done) {{ $out.error='no supported pattern — use rect_hint' }}
-[Console]::Out.WriteLine(($out | ConvertTo-Json -Depth 4 -Compress));
+if (-not $done) {{ $out.error='no supported pattern - use rect_hint' }}
+[Console]::Out.WriteLine([Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    ($out | ConvertTo-Json -Depth 4 -Compress))));
 """)
     res = _run_ps(script, timeout_s=25.0)
     if not res.get("ok"):
