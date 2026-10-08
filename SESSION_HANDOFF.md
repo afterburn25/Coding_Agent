@@ -2,6 +2,71 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.35.0 — Artifact Handoff & GitHub File Delivery
+
+Nexus hands produced files to the user directly in chat as verified
+download cards, and publishes/retrieves them through GitHub. Commit
+`4f18301`; deployed `D:\Nexus_Core` at 0.35.0.
+
+- `localcodeagent/artifacts.py` — `client_view()` (safe projection, no
+  absolute paths; `download_url`, `remote`, `retention`, `pinned`),
+  `attach_remote()` (https-only, key-allowlisted remote copies),
+  `find()` (name/kind/id/latest resolution), `pin()`,
+  `RETENTION_CLASSES` (temporary/cached/user/release/pinned — publish
+  promotes to `release`).
+- `GET /api/artifacts/<id>` + `/api/artifacts/<id>/download` —
+  re-verifies SHA-256 before streaming (409 tamper / 404 missing),
+  `Content-Disposition` attachment, `X-Content-SHA256`, artifact-id
+  only (never a client path).
+- Auto-recognition — `fs_archive` and `package_release` register; the
+  response payload carries `artifacts[]` (JSON `artifact_id` fields and
+  `artifact_id=art-…` text markers both extracted in
+  `orchestrator._artifact_ids_from_events` / `server._agent_artifacts`);
+  durable `UserDownloadManager.on_done` → `_download_artifact_done`
+  registers completed downloads (with `extract_zip` for Actions
+  artifacts — traversal-safe member check).
+- Cards — `renderArtifactCards` in `web/app.js` (+`styles.css`):
+  compact card (icon/name/size/verified), expandable details (id,
+  sha256, mime, timestamps, task), actions Download / View on GitHub /
+  From GitHub; `_safeLink` allows `/api/` or `https:` only; per-host
+  id-dedupe; deleted file → "Local copy unavailable" while GitHub
+  links persist.
+- Durable history — `record_exchange(..., artifact_ids=…)` persists ids
+  on the assistant message; `renderConversationHistory` refetches
+  `/api/artifacts/<id>` so cards rehydrate with fresh verification.
+- GitHub tools (`localcodeagent/tools/github.py`) —
+  `github_list_releases`, `github_get_release`, `github_create_release`,
+  `github_list_release_assets`, `github_upload_release_asset`
+  (streaming `_ProgressReader` upload, duplicate refusal unless
+  `replace=true`, read-back verify, remote provenance, ActionLedger
+  journal), `github_download_release_asset` (durable manager with
+  `Accept: octet-stream` + Bearer header — stripped on cross-host
+  redirect), `github_delete_release_asset` (`confirm=true` required),
+  `github_list_run_artifacts` / `github_download_run_artifact`
+  (latest-successful run, expired artifacts refused honestly).
+  `repo` arg wins over the workspace remote.
+- Action lane (`action_ops.py`) — `artifact_show` ("give me the
+  file/zip/installer", pronouns → latest), `github_upload`,
+  `github_download`, `github_file` intents incl. explicit
+  `repo owner/name` + `release vN` parsing.
+- Permissions — uploads/deletes `github.write` (pause → approve resumes
+  the exact op; deny uploads nothing — verified live), fetches
+  `github.read`.
+- Mission gating — `MissionEvaluator` accepts an `ArtifactManager`
+  (`sup.evaluator.artifacts = self.artifacts`); `artifact_verified`
+  criterion requires a registry hit that passes hash verification.
+- Dogfood (live, deployed 0.35.0): chat → approval → zip → card →
+  `/download` hash match; "give me the zip" re-attaches card;
+  GitHub connect via vault; chat-driven upload to
+  `afterburn25/nexus-dogfood` release v0.0.1 verified with GitHub-side
+  digest match; download-back via durable manager registered with
+  `release_asset` provenance; 48MB asset cancel at ~42MB → `.part` →
+  resume → hash match → `.part` cleaned; denial produced no upload.
+  Note: `nexus-dogfood` is a private test repo left on the account
+  (token lacks `delete_repo` scope) — delete via GitHub settings if
+  unwanted. GitHub token lives in the Nexus vault (user's own gh
+  credential, connected for dogfood).
+
 ## v0.33.0 — Interactive Chat Permissions
 
 Permission requests render inline in chat as a backend-authoritative
