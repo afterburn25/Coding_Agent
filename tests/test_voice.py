@@ -1225,7 +1225,7 @@ class TestChatterboxEngine(unittest.TestCase):
     def test_voice_meta_reads_profile(self):
         meta = self.eng.voice_meta("isabella")
         self.assertEqual(meta["engine"], "chatterbox")
-        self.assertEqual(meta["reference"], "reference.wav")
+        self.assertEqual(meta["reference"], "reference-source.mp3")
 
     def test_status_shape(self):
         st = self.eng.status()
