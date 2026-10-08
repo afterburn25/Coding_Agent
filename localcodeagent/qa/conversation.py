@@ -27,6 +27,9 @@ from .corpus import CorpusEntry, FailureCorpus
 #   task_status                            — result.task["status"] (default "completed")
 #   tool_calls / no_tool_calls             — provider received/omitted tools=...
 #   context_contains / not_contains        — any message (any role) content
+#   memory_contains / not_contains         — durable store's injected
+#                                            block for this query (no
+#                                            transcript contamination)
 #   max_sentences                          — response sentence budget
 #   max_chars                              — response length budget
 #   no_leading_filler                      — no stock opener ("Let me
@@ -261,6 +264,20 @@ class ConversationQaRunner:
         _need("context_not_contains", tr.all_content, "context", negate=True)
         _need("response_contains", tr.response, "response")
         _need("response_not_contains", tr.response, "response", negate=True)
+
+        # Memory-side asserts — the durable store's injected block for
+        # THIS query, independent of transcript history (which may
+        # legitimately contain obsolete values the user just corrected).
+        if "memory_contains" in expect or "memory_not_contains" in expect:
+            mem_block = ""
+            mem = getattr(self.agent, "conversation_memory", None)
+            if mem is not None:
+                try:
+                    mem_block = str(mem.prompt_context(turn.text) or "")
+                except Exception:
+                    mem_block = ""
+            _need("memory_contains", mem_block, "memory")
+            _need("memory_not_contains", mem_block, "memory", negate=True)
 
         if "source" in expect and tr.response_source != expect["source"]:
             out.append(f"source: expected {expect['source']!r}, got {tr.response_source!r}")
@@ -623,6 +640,14 @@ def generate_scope_scenarios(
 
     # Persona disclosure ladder — existence → name → open invitation.
     out.append(QaScenario(f"{scenario_prefix}-father-ladder", [
+        # Existence is the requested fact — the name is the next rung.
+        QaTurn("do you have a father?", conversation_id="scope-f",
+               expect={
+                   "response_not_contains": [
+                       "john hamburn", "john", "hamburn", "nexus core"],
+                   "max_sentences": 2,
+                   "no_trailing_question": True,
+               }),
         QaTurn("who is your father?", conversation_id="scope-f", expect={
             "response_contains": "john hamburn",
             "max_sentences": 3,
@@ -662,6 +687,78 @@ def generate_scope_scenarios(
                    "context_contains": "8090",
                    "context_not_contains": "8080",
                }),
+    ]))
+
+    # Compound self-correction — "I like red. Actually no, blue. Never
+    # mind, make it green." The settled value is the only live fact;
+    # obsolete values retire even though they have no supersession slot.
+    out.append(QaScenario(f"{scenario_prefix}-correction-chain", [
+        QaTurn("i like red. actually no, blue. never mind, make it green",
+               conversation_id="scope-cc"),
+        QaTurn("what do i like?", conversation_id="scope-cc2",
+               expect={
+                   "memory_contains": "i like green",
+                   "memory_not_contains": ["i like red", "i like blue"],
+               }),
+    ]))
+
+    # Stacked markers — "wait, actually make that monday" chains two
+    # discourse markers before the reset verb.
+    out.append(QaScenario(f"{scenario_prefix}-correction-stacked", [
+        QaTurn("the deadline is friday. wait, actually make that monday",
+               conversation_id="scope-cs"),
+        QaTurn("when is the deadline?", conversation_id="scope-cs2",
+               expect={
+                   "memory_contains": "monday",
+                   "memory_not_contains": "friday",
+               }),
+    ]))
+
+    # Cross-form preference supersession — "my favorite color is blue"
+    # then "actually i prefer green now" re-states the same attribute
+    # with different phrasing; the slot still supersedes.
+    out.append(QaScenario(f"{scenario_prefix}-correction-crossform", [
+        QaTurn("my favorite color is blue",
+               conversation_id="scope-cf1"),
+        QaTurn("actually i prefer green now", conversation_id="scope-cf1"),
+        QaTurn("what's my favorite color?", conversation_id="scope-cf2",
+               expect={
+                   "memory_contains": "green",
+                   "memory_not_contains": "blue",
+               }),
+    ]))
+
+    # Repeated questions answer cleanly every time — no "I already
+    # said", no escalation, no extra disclosure on the repeat.
+    out.append(QaScenario(f"{scenario_prefix}-repeat-question", [
+        QaTurn("when is your birthday?", conversation_id="scope-rq",
+               expect={"response_contains": "september 30"}),
+        QaTurn("what was your birthday again?", conversation_id="scope-rq",
+               expect={
+                   "response_contains": "september 30",
+                   "response_not_contains": ["already", "i said",
+                                             "i told you", "as i said"],
+                   "no_trailing_question": True,
+               }),
+    ]))
+
+    # Exact-fact breadth — informal/typo forms resolve the same slot
+    # with the same discipline.
+    out.append(QaScenario(f"{scenario_prefix}-exact-informal", [
+        QaTurn("how old r u", conversation_id="scope-ei", expect={
+            "response_contains": "days old",
+            "response_not_contains": ["september", "birthday", "born"],
+            "no_leading_filler": True,
+        }),
+        QaTurn("when were u born", conversation_id="scope-ei", expect={
+            "response_contains": "september 30",
+            "response_not_contains": ["days old", "years old"],
+        }),
+        QaTurn("who built you", conversation_id="scope-ei", expect={
+            "response_contains": "john hamburn",
+            "no_leading_filler": True,
+            "no_trailing_question": True,
+        }),
     ]))
 
     # The scope directive must actually reach the model — an EXACT

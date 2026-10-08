@@ -21,7 +21,8 @@ NEXUS_FATHER = "John Hamburn"
 
 # Identity questions only resolve when the subject is Nexus herself — a
 # question about someone else's birthday/creator is not a locked fact.
-_SUBJECT = re.compile(r"\b(?:you|your|yours|yourself|nexus(?:\s+core)?)\b", re.I)
+_SUBJECT = re.compile(
+    r"\b(?:you|your|yours|yourself|u|ya|nexus(?:\s+core)?)\b", re.I)
 _BIRTHDAY = re.compile(r"\b(?:birth\s*day|born|birth\s*date)\b", re.I)
 _AGE = re.compile(
     r"\bhow\s+old\s+(?:are|r)\s+(?:you|u|ya)\b"
@@ -391,6 +392,32 @@ _PARENTAGE_DENIAL_VARIANTS = (
     "up for debate.",
 )
 
+# Existence questions — "do you have a father / mother / family".
+# Yes/no only: existence is the requested fact; the name is the next
+# rung of the disclosure ladder ("who is he?", "what's his name?").
+# Revealing John Hamburn here would answer a question nobody asked.
+_HAVE_QUESTION = re.compile(
+    r"\b(?:do|did)\s+you\s+(?:have|got)\s+(?:a|an|any)?\s*"
+    r"(?:father|dad|daddy|mother|mom|parents?|family|siblings?|"
+    r"brothers?|sisters?|children|kids|creator|maker)\b"
+    r"|\bhave\s+you\s+got\s+(?:a|an|any)\s*"
+    r"(?:father|dad|daddy|mother|mom|parents?|family|siblings?|"
+    r"brothers?|sisters?|creator|maker)\b",
+    re.I,
+)
+_HAVE_FATHER_WORDS = re.compile(
+    r"\b(?:father|dad|daddy|creator|maker)\b", re.I)
+_HAVE_FATHER_VARIANTS = (
+    "Yes, I do.",
+    "I do, yes.",
+    "Yes — I have a father.",
+)
+_HAVE_OTHER_FAMILY_VARIANTS = (
+    "No — just my father.",
+    "I have a father — that's the whole family.",
+    "Just my father.",
+)
+
 _CREATOR_DENIAL = re.compile(
     r"\b(?:didn'?t|did not|don'?t|do not)\s+(?:make|create|build|"
     r"design|program|write)\s+(?:you|nexus)\b"
@@ -722,6 +749,12 @@ def response_for(text: str, *, asker_is_creator: bool | None = None
     # they're statements about her ("didn't make you", "you're not
     # real"), never requests for work, so a stray verb like make/build
     # inside them must not bounce the turn to the model.
+    if _HAVE_QUESTION.search(t):
+        # Existence only — "do you have a father" gets yes/no; the
+        # name stays on the next rung of the disclosure ladder.
+        if _HAVE_FATHER_WORDS.search(t):
+            return _pick(_HAVE_FATHER_VARIANTS)
+        return _pick(_HAVE_OTHER_FAMILY_VARIANTS)
     if _PARENTAGE_QUESTION.search(t):
         if asker_is_creator is False:
             return _pick(_PARENTAGE_NO_VARIANTS)

@@ -189,33 +189,105 @@ class ConversationMemory:
             words.pop()
         return " ".join(words).strip()
 
-    def _retarget_latest_fact(self, new_value: str) -> str | None:
-        """'make that X' / 'set it to X' — a bare re-set of the most
-        recently stated value. The referent is the newest active fact;
-        its subject+predicate is kept and only the value tail changes,
-        so slot supersession retires the stale row.
+    # Preference-class facts — a restated preference ("i prefer green")
+    # or a marker-only bare value ("actually no, blue") corrects a
+    # preference, never a device/entity fact like "port is 8080".
+    _PREFERENCE_FACT_RE = re.compile(
+        r"^(?:i\s+(?:like|prefer|love)\b|my\s+favou?rite\b|"
+        r"my\s+preferred\b)", re.IGNORECASE)
 
-        Returns None when there is no fact to retarget or the value
-        doesn't look like a short stated value — a bare imperative must
-        never guess at unrelated facts."""
+    # Value classes — a bare correction names its attribute's family:
+    # "green" belongs with the color fact, never the food fact. New
+    # classes can join here; uncovered values fall back to the
+    # single-candidate rule (a bare value with several possible
+    # referents is genuinely ambiguous — never guess).
+    _VALUE_CLASSES: tuple[frozenset, ...] = (
+        frozenset({
+            "red", "orange", "yellow", "green", "blue", "purple",
+            "pink", "black", "white", "gray", "grey", "brown", "teal",
+            "magenta", "cyan", "violet", "maroon", "beige", "indigo",
+            "turquoise", "gold", "silver",
+        }),
+    )
+
+    _RETARGET_PREDICATE_RE = re.compile(
+        r"^(.+?\b(?:is|are|was|were|uses?|runs on|prefers?|likes?|"
+        r"loves?|should stay|should be|must be|will be|stays?|"
+        r"remains?)\s+)(.+?)$", re.IGNORECASE)
+
+    def _retarget_latest_fact(
+        self, new_value: str, superseded_out: list | None = None,
+        *, preference_only: bool = False,
+    ) -> str | None:
+        """'make that X' / 'set it to X' — a bare re-set of the most
+        recently stated value. The referent's subject+predicate is kept
+        and only the value tail changes; the old row is retired
+        directly so stale values never resurface (slotless facts like
+        "i like tea" carry no supersession slot).
+
+        ``preference_only`` restricts referents to preference-class
+        facts ("i like X", "my favorite X is Y") — a restated
+        preference must never rewrite an entity fact. Within those, a
+        value in a known class (colors) picks the fact whose value is
+        in the same class; otherwise exactly one preference fact must
+        exist. Returns None when the referent is genuinely ambiguous —
+        a bare correction must never guess."""
         new = self._clean_value(new_value)
         if not new or len(new.split()) > 4:
             return None
+        pred = self._RETARGET_PREDICATE_RE
         with self._lock:
             rows = [
                 row for row in self._data.get("facts", [])
                 if isinstance(row, dict) and row.get("active", True)
             ]
-        if not rows:
-            return None
-        text = str(rows[-1].get("text") or "").strip()
-        m = re.match(
-            r"^(.+?\b(?:is|are|was|were|uses?|runs on|prefers?|"
-            r"should stay|should be|must be|will be|stays?|remains?)\s+)"
-            r"(.+?)$",
-            text, flags=re.IGNORECASE)
-        if not m:
-            return None
+            target = None
+            m = None
+            if preference_only:
+                cands = [
+                    row for row in reversed(rows)
+                    if self._PREFERENCE_FACT_RE.search(
+                        str(row.get("text") or ""))
+                    and pred.match(str(row.get("text") or ""))
+                ]
+                cls = next((c for c in self._VALUE_CLASSES
+                            if new.lower() in c), None)
+                if cls is not None:
+                    cands = [
+                        row for row in cands
+                        if (m2 := pred.match(str(row.get("text") or "")))
+                        and m2.group(2).strip().lower() in cls
+                        and m2.group(2).strip().lower() != new.lower()
+                    ]
+                else:
+                    cands = [
+                        row for row in cands
+                        if not str(row.get("text") or "")
+                        .strip().lower().endswith(new.lower())
+                    ]
+                if len(cands) != 1:
+                    return None
+                target = cands[0]
+                m = pred.match(str(target.get("text") or ""))
+            else:
+                for row in reversed(rows):
+                    m = pred.match(str(row.get("text") or ""))
+                    if m:
+                        if (str(row.get("text") or "").strip().lower()
+                                .endswith(new.lower())):
+                            return None  # already the stated value
+                        target = row
+                        break
+            if target is None or m is None:
+                return None
+            now = time.time()
+            old_text = str(target.get("text") or "")
+            target["active"] = False
+            target["superseded"] = True
+            target["superseded_at"] = now
+            target["updated_at"] = now
+            if superseded_out is not None:
+                superseded_out.append(old_text)
         return f"{m.group(1)}{new}"
 
     def _correct_fact_value(self, old_value: str, new_value: str) -> str | None:
@@ -433,6 +505,41 @@ class ConversationMemory:
             return None
         return f"Option {number} — {options[number - 1]}"
 
+    # Acknowledgements must never be learned as fact values —
+    # "actually, sure" is agreement, not a correction to the last fact.
+    _BARE_CORRECTION_STOPWORDS = frozenset({
+        "yes", "yeah", "yep", "sure", "ok", "okay", "thanks",
+        "thank you", "great", "good", "fine", "nice", "cool", "true",
+        "right", "exactly", "agreed", "maybe", "correct", "perfect",
+        "sounds good", "that works", "nothing", "never mind",
+    })
+
+    @staticmethod
+    def _correction_clauses(text: str) -> list[str]:
+        """Split a compound self-correction into ordered clauses.
+
+        "I like red. Actually no, blue. Never mind, make it green."
+        carries three intent statements where the LAST one is live —
+        the earlier clauses exist only to be superseded. Feeding each
+        clause through the pipeline in order composes the supersession
+        instead of storing the whole chain verbatim (which would bank
+        every obsolete value into one retrievable fact).
+
+        Returns [] for ordinary statements — the existing pipeline
+        handles them unchanged.
+        """
+        parts = [p.strip() for p in
+                 re.split(r"(?<=[.!?])\s+|\s*;\s*", text) if p.strip()]
+        if len(parts) < 2:
+            return []
+        marker = re.compile(
+            r"^(?:actually|no|wait|instead|sorry|never\s*mind|nevermind|"
+            r"scratch\s+that|on\s+second\s+thought|i\s+mean|i\s+meant|"
+            r"correction)\b", re.IGNORECASE)
+        if not any(marker.search(p) for p in parts[1:]):
+            return []
+        return parts
+
     def _previous_exchange(self) -> tuple[str, str]:
         messages = self._data.get("messages", [])
         previous_user = ""
@@ -532,6 +639,22 @@ class ConversationMemory:
                 "Brain unlock lives in the Trainer page instead.")
             return result
 
+        # Compound self-corrections — "I like red. Actually no, blue.
+        # Never mind, make it green." Each clause is an intent statement
+        # in sequence; feeding them through this same pipeline lets
+        # retarget/supersession compose so only the settled value stays
+        # active instead of banking the whole chain verbatim.
+        clauses = self._correction_clauses(raw)
+        if clauses:
+            for clause in clauses:
+                sub = self.learn_from_user(
+                    clause,
+                    project_id=project_id,
+                    conversation_id=conversation_id)
+                for key, value in sub.items():
+                    result.setdefault(key, []).extend(value)
+            return result
+
         with self._lock:
             fact: str | None = None
             for pattern in (
@@ -547,7 +670,8 @@ class ConversationMemory:
             ):
                 match = re.match(pattern, raw, flags=re.IGNORECASE)
                 if match:
-                    fact = match.group(1).strip() if match.lastindex else raw
+                    fact = (match.group(1).strip() if match.lastindex
+                            else raw.rstrip(".!?"))
                     break
             if fact is None:
                 # Declarative entity-attribute statements — "Project Orion
@@ -701,7 +825,18 @@ class ConversationMemory:
                                             re.search(
                                                 r"[\dA-Z/\\]|(?:^|\s)v\d",
                                                 decl.group(3).strip())
-                                            or len(value.split()) >= 2)):
+                                            or len(value.split()) >= 2
+                                            or re.match(
+                                                r"^(?:mon|tues|wednes|"
+                                                r"thurs|fri|satur|sun)"
+                                                r"day\b|^(?:jan|feb|mar|"
+                                                r"apr|may|jun|jul|aug|"
+                                                r"sep|oct|nov|dec)"
+                                                r"[a-z]*\b|^(?:tomorrow|"
+                                                r"tonight|today|eod|eow)"
+                                                r"\b",
+                                                value,
+                                                flags=re.IGNORECASE))):
                                     # Bare 'is' only captures values that
                                     # look like facts — "the port is 5433",
                                     # "the deadline is Friday" — not
@@ -743,16 +878,74 @@ class ConversationMemory:
                 if fact is None:
                     # Bare re-set of the last stated value — "actually
                     # make that 8090", "no, set it to 9000". The newest
-                    # active fact is the referent; its slot carries the
-                    # supersession.
+                    # active fact is the referent; the retarget retires
+                    # it directly so stale values never resurface.
+                    # 'use X' retargets only literal-looking values —
+                    # "use the dark theme" is a new instruction, not a
+                    # re-set of the last fact.
                     reset = re.match(
-                        r"^(?:(?:actually|no|wait|instead)[,]?\s+)?"
+                        r"^(?:(?:actually|no|wait|instead|never\s*mind|"
+                        r"scratch\s+that|on\s+second\s+thought|sorry)"
+                        r"[,]?\s+)*"
                         r"(?:make\s+(?:it|that|them)|set\s+(?:it|that)"
-                        r"\s+to|change\s+(?:it|that)\s+to|use)\s+"
+                        r"\s+to|change\s+(?:it|that)\s+to)\s+"
                         r"(.+?)[.!?]?$",
-                        body, flags=re.IGNORECASE)
+                        raw, flags=re.IGNORECASE)
+                    if not reset:
+                        use_reset = re.match(
+                            r"^(?:(?:actually|no|wait|instead)[,]?\s+)*"
+                            r"use\s+(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if use_reset and re.search(
+                                r"[\d_+./\\#-]", use_reset.group(1)):
+                            reset = use_reset
                     if reset:
-                        fact = self._retarget_latest_fact(reset.group(1))
+                        val = reset.group(1)
+                        # A class-known value ("green") prefers the
+                        # preference fact in the same class over the
+                        # generically-newest predicate fact.
+                        if any(val.strip().lower() in c
+                               for c in self._VALUE_CLASSES):
+                            fact = self._retarget_latest_fact(
+                                val, result["superseded"],
+                                preference_only=True)
+                        if fact is None:
+                            fact = self._retarget_latest_fact(
+                                val, result["superseded"])
+                if fact is None:
+                    # Bare value after a correction marker — "actually
+                    # no, blue" or "actually i prefer green now" restates
+                    # a value with no attribute named. Preference
+                    # restatements only ever retarget preference facts;
+                    # a marker-only bare value tries preference
+                    # referents first, then the generic newest-value
+                    # path. A stopword guard keeps plain
+                    # acknowledgements ("actually, sure") from rewriting
+                    # unrelated facts.
+                    bare = re.match(
+                        r"^(?:actually|no|wait|instead|sorry)[,]?\s+"
+                        r"(?:no[,]?\s+|i\s+meant?\s+|that\s+is[,]?\s+)?"
+                        r"(?:i\s+(?:prefer|like|love)\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,20}?)"
+                        r"(?:\s+(?:now|instead|today|this\s+time))?[.!?]?$",
+                        raw, flags=re.IGNORECASE)
+                    if bare and bare.group(1).strip().lower() not in (
+                            self._BARE_CORRECTION_STOPWORDS):
+                        val = bare.group(1)
+                        pref = re.search(
+                            r"\bi\s+(prefer|like|love)\b", raw,
+                            flags=re.IGNORECASE)
+                        fact = self._retarget_latest_fact(
+                            val, result["superseded"],
+                            preference_only=True)
+                        if fact is None and not pref:
+                            fact = self._retarget_latest_fact(
+                                val, result["superseded"])
+                        if fact is None and pref:
+                            # Genuinely ambiguous referent — bank the
+                            # restated preference itself instead of
+                            # corrupting an unrelated fact.
+                            fact = f"i {pref.group(1).lower()} {val}"
                 if fact is None and corr_body:
                     fact = corr_body
             if fact and locked_topic(fact):
@@ -800,7 +993,8 @@ class ConversationMemory:
             for kind, pattern in (
                 ("from_now_on", r"^from\s+now\s+on[,:]?\s*(.+)$"),
                 ("always", r"^always\s+(.+)$"),
-                ("never", r"^never\s+(.+)$"),
+                # 'never mind' is a discourse marker, not a prohibition
+                ("never", r"^never\s+(?!mind\b)(.+)$"),
                 ("want_always", r"^i\s+want\s+you\s+to\s+always\s+(.+)$"),
                 ("want", r"^i\s+want\s+you\s+to\s+(.+)$"),
                 ("teach", r"^(?:teach|training)\s*:\s*(.+)$"),

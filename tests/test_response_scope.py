@@ -162,12 +162,26 @@ class TestPersonaProgressiveDisclosure(unittest.TestCase):
     def test_existence_then_name(self):
         out = identity.response_for("do you have a father") or ""
         low = out.lower()
-        # The question asks existence; the name is the natural content
-        # of that slot — but the workstation biography is not.
-        self.assertIn("john hamburn", low)
+        # Existence is the requested fact — the name stays on the next
+        # rung of the disclosure ladder ("who is he?").
+        self.assertTrue(low.startswith("yes") or low.startswith("i do"),
+                        out)
+        self.assertNotIn("john hamburn", low)
         self.assertNotIn("workstation i live in", low)
         self.assertNotIn("everything in my world", low)
         self.assertNotIn("gave me this world", low)
+
+    def test_existence_no_father_side_family(self):
+        # No canonical mother/siblings — existence denies by narrowing
+        # to the father, never by inventing relatives.
+        for q in ("do you have a mother", "do you have any siblings",
+                  "do you have a family"):
+            out = identity.response_for(q) or ""
+            low = out.lower()
+            self.assertTrue(out, q)
+            self.assertIn("father", low)
+            self.assertNotIn("mother is", low)
+            self.assertNotIn("sister", low)
 
     def test_name_answer(self):
         out = identity.response_for("who is your father") or ""

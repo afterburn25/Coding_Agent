@@ -596,7 +596,7 @@ class TestBuiltinIntegration(unittest.TestCase):
                 "who is your father", "who's your creator",
                 "how were you made", "how were you created",
                 "how could i have created you", "how did i create you",
-                "did i make you", "do you have a father",
+                "did i make you",
                 "where did you come from", "are you my creation",
                 "are you his daughter"):
             with self.subTest(q=q):
@@ -605,6 +605,13 @@ class TestBuiltinIntegration(unittest.TestCase):
                 sid = getattr(pair[0], "semantic_id", "") or ""
                 self.assertTrue(sid.startswith("identity"), q)
                 self.assertIn("john hamburn", pair[1].lower())
+        # Existence is a yes/no — the name is the next rung of the
+        # disclosure ladder, not part of this answer (0.32.0 scope).
+        pair = agent.builtin_semantic("do you have a father")
+        self.assertIsNotNone(pair)
+        sid = getattr(pair[0], "semantic_id", "") or ""
+        self.assertTrue(sid.startswith("identity"))
+        self.assertNotIn("john hamburn", pair[1].lower())
 
     def test_parentage_lane_acknowledges_creator(self):
         from localcodeagent import identity as _ident

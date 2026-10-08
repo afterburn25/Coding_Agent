@@ -2826,17 +2826,27 @@ class AgentOrchestrator:
         locked = learned.get("locked") or []
         if not (facts or rules or examples or forgotten or locked):
             return None
-        parts = ["Got it."]
+        parts = []
         if locked:
             parts.append(str(locked[0]))
         if facts:
-            parts.append("I saved that to persistent memory.")
+            # Echo the landed value — "Got it — 8090." both confirms the
+            # correction and proves the new value superseded; narrating
+            # the storage mechanism ("I saved that to persistent
+            # memory") is internals the user didn't ask for.
+            if len(facts) == 1:
+                parts.append(f"Got it — {facts[0]}.")
+            else:
+                parts.append(f"Got it — noted {len(facts)} things.")
+        elif not parts:
+            parts.append("Got it.")
         if rules:
-            parts.append("I saved that as an operating rule and will apply it in future chats.")
+            parts.append("I'll apply that as an operating rule going "
+                         "forward.")
         if examples:
-            parts.append("I saved your correction as a reviewable training example.")
+            parts.append("Saved your correction for review.")
         if forgotten:
-            parts.append(f"I deactivated {len(forgotten)} matching learned item(s).")
+            parts.append(f"Forgot {len(forgotten)} matching item(s).")
         return " ".join(parts)
 
     @staticmethod
