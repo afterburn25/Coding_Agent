@@ -438,5 +438,57 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("my favorite color is blue", ack)
 
 
+class TestFactsRecallLane(unittest.TestCase):
+    """'What do you know about me' is a deterministic memory-inspection
+    lane — live dogfood showed the model improvising persona lore
+    instead of listing the user's taught facts."""
+
+    def _mem(self):
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        return ConversationMemory(
+            Path(self._td.name) / "cm.json")
+
+    def test_recall_regex_covers_inspection_forms(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        rx = AgentOrchestrator._FACTS_RECALL_RE
+        for q in ("what do you know about me",
+                  "what do you know about me?",
+                  "what do you remember about me",
+                  "what do you remember",
+                  "what have you learned about me",
+                  "what have i told you"):
+            self.assertTrue(rx.search(q), q)
+        for q in ("whats my favorite color",
+                  "what do you know about python",
+                  "tell me about your father"):
+            self.assertFalse(rx.search(q), q)
+
+    def test_second_person_conversion(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        conv = AgentOrchestrator._second_person_fact
+        self.assertEqual(conv("my favorite color is blue"),
+                         "your favorite color is blue")
+        self.assertEqual(conv("i like green"), "you like green")
+        self.assertEqual(conv("i have an rtx 3080"),
+                         "you have an rtx 3080")
+        self.assertEqual(conv("deadline is friday"),
+                         "deadline is friday")
+
+    def test_active_facts_lists_only_active(self):
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("actually i prefer green now")
+        cm.learn_from_user("the deadline is friday")
+        facts = cm.active_facts()
+        self.assertIn("my favorite color is green", facts)
+        self.assertIn("deadline is friday", facts)
+        self.assertNotIn("my favorite color is blue", facts)
+
+
 if __name__ == "__main__":
     unittest.main()

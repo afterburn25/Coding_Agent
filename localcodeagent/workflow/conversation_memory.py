@@ -1359,6 +1359,8 @@ class ConversationMemory:
                 "numbers, identifiers, code, commands, URLs, product titles, or quoted text). If the user explicitly asks "
                 "what they said verbatim or asks for an exact quote, the stored wording may be quoted exactly.",
                 "Do not announce that you are reading memory or recite the memory list unless the user asks about memory itself.",
+                "First-person wording in a stored fact belongs to the user — 'my X' describes the user's X, never yours; "
+                "answer with 'your …', not 'my …'.",
                 f"Recall expression cue for this turn: {recall_style}",
                 "Remembered facts/preferences (canonical meaning):",
             ])
@@ -1367,6 +1369,34 @@ class ConversationMemory:
             lines.append("User-taught operating rules:")
             lines.extend(f"- {item}" for item in rules)
         return "\n".join(lines)
+
+    def active_facts(
+        self,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> list[str]:
+        """Active fact texts in scope — for explicit 'what do you
+        remember about me' inspection lanes."""
+        def applies(row: dict[str, Any]) -> bool:
+            if not row.get("active", True):
+                return False
+            scope = str(row.get("scope") or "global")
+            scope_id = str(row.get("scope_id") or "")
+            if scope == "global":
+                return True
+            if scope == "project":
+                return bool(project_id) and scope_id == project_id
+            if scope == "conversation":
+                return bool(conversation_id) and scope_id == conversation_id
+            return False
+
+        with self._lock:
+            return [
+                str(row.get("text", ""))
+                for row in self._data.get("facts", [])
+                if isinstance(row, dict) and applies(row)
+            ]
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

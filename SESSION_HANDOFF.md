@@ -110,13 +110,20 @@ llama.cpp + real persona/memory at `D:\Devin\nexus_dogfood`, port
   `I hear you.`/`I do occasionally get things right.` on exact facts.
 - Verified live: correction chains, forget + honest empty-state,
   informal identity, repeat-variation, clean recalls.
+- `what do you know about me?` was answered with improvised persona
+  lore — now a deterministic `memory:facts_recall` lane listing active
+  user-taught facts in second person (`active_facts()` accessor,
+  `_FACTS_RECALL_RE`, `bare=True`, honest empty state).
+- Memory prompt block gained the attribution rule: first-person
+  wording in stored facts belongs to the user — recalls now say
+  "your favorite color", not "my favorite color".
 
 Known live limits (model lane, not regressions): the 4B adds persona
 flourish beyond BRIEF budgets, attributes user facts as its own on
 recall, and invents weather instead of declining — the scope
 directive helps but a small model's discipline is soft.
 
-Checkpoint: **2710 tests** passing (2 environment skips).
+Checkpoint: **2713 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
 acceptance matrix, real-model benchmark numbers on the deployed
@@ -1747,7 +1754,7 @@ workspace UI → `f33b173` paste-attachments):
 ### P1 progress — dev-server, pipeline, interactive priority
 
 **Last verified: `a45c24c` — GitHub Actions `Nexus Core Tests` green
-on main.** Commits `b2d2ea8` → `5c2710b` → `a45c24c`:
+on main.** Commits `b2d2ea8` → `5c2713b` → `a45c24c`:
 
 - **Dev-server manager** — `localcodeagent/devserver.py` +
   `tools/devserver.py`: workspace-bound start/list/wait/stop, URL
@@ -2922,7 +2929,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2710 tests` passing (2 environment skips).
+Expected at this checkpoint: `2713 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

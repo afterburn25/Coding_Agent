@@ -1843,6 +1843,55 @@ class AgentOrchestrator:
         reply.ui = ui
         return reply
 
+    _FACTS_RECALL_RE = re.compile(
+        r"\bwhat do you (?:know|remember|have)(?:\s+learned)?\s+"
+        r"about me\b|\bwhat do you remember\b|\bwhat have you "
+        r"(?:learned|remembered)(?:\s+about me)?\b|\bwhat have i "
+        r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
+        r"me\b", re.IGNORECASE)
+
+    @staticmethod
+    def _second_person_fact(text: str) -> str:
+        t = str(text or "").strip()
+        t = re.sub(r"^i'm\b", "you're", t, flags=re.IGNORECASE)
+        t = re.sub(r"^i\b", "you", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bmy\b", "your", t, flags=re.IGNORECASE)
+        return t
+
+    def _facts_recall_reply(self, user_text: str, conversation_id: str,
+                            project_id: str):
+        """'What do you know/remember about me' — explicit memory
+        inspection. Lists active user-taught facts in second person;
+        never narrates storage internals. → RenderedReply | None."""
+        if not self._FACTS_RECALL_RE.search(user_text or ""):
+            return None
+        if self.conversation_memory is None:
+            return None
+        facts = self.conversation_memory.active_facts(
+            project_id=project_id, conversation_id=conversation_id)
+        if not facts:
+            canonical = ("Nothing yet — you haven't taught me anything "
+                         "to keep.")
+        elif len(facts) == 1:
+            canonical = (f"I remember one thing — "
+                         f"{self._second_person_fact(facts[0])}.")
+        else:
+            items = [self._second_person_fact(f) for f in facts]
+            canonical = ("Here's what I remember — "
+                         + ", ".join(items[:-1])
+                         + f", and {items[-1]}.")
+        from ..context.realize import RenderedReply, SemanticResponse
+        sem = SemanticResponse(
+            facts=[canonical], semantic_id="memory:facts_recall",
+            speech_act="answer", bare=True)
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="memory_facts_recall",
+            canonical=canonical)
+
     def _local_action_reply(self, user_text: str, task_id: str,
                             event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
@@ -6032,6 +6081,12 @@ class AgentOrchestrator:
         sk_reply = (
             self._self_knowledge_reply(user_text)
             if mode == "auto" else None)
+        # 'What do you know about me' — explicit memory inspection is a
+        # deterministic list of user-taught facts, not a model answer.
+        facts_reply = (
+            self._facts_recall_reply(user_text, conversation_id,
+                                     project_id)
+            if mode == "auto" else None)
         # Deterministic local-action lane — bounded computer tasks
         # ("create a folder D:\Nexus") that must EXECUTE, not narrate.
         # Runs intent -> permission -> execute -> verify -> evidence ->
@@ -6062,7 +6117,7 @@ class AgentOrchestrator:
                 user_text,
                 asker_is_creator=self._resolve_asker_is_creator())
             is not None)
-        builtin_reply = github_reply or sk_reply or (
+        builtin_reply = github_reply or sk_reply or facts_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -6073,6 +6128,7 @@ class AgentOrchestrator:
             builtin_response is not None
             and github_reply is None
             and sk_reply is None
+            and facts_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):
