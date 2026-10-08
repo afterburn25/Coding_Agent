@@ -66,6 +66,18 @@ class Canonicalization(unittest.TestCase):
         self.assertIn("mmm", out)
         self.assertIn("that worked", out)
 
+    def test_stage_wrappers_survive_italic_unwrap(self):
+        # *laughs*/*whispers* are vocalization cues, not emphasis — the
+        # filter must keep the wrapper so detect() still sees them;
+        # unwrapped "laughs" matched no token and spoke literally.
+        self.assertEqual(self.f.filter("*laughs* Nice."),
+                         "*laughs* Nice.")
+        self.assertEqual(self.f.filter("*whispers* hey"),
+                         "*whispers* hey")
+        # ordinary italics still unwrap
+        self.assertEqual(self.f.filter("an *interesting* idea"),
+                         "an interesting idea")
+
 
 class Rendering(unittest.TestCase):
     """Semantic → TTS-safe text through the Kokoro adapter."""

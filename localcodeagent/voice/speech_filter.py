@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .vocalizations import canonicalize_vocals
+from .vocalizations import canonicalize_vocals, _STAGE
 
 SPEAK = "speak"
 SUMMARIZE = "summarize"
@@ -259,7 +259,14 @@ class SpeechTextFilter:
         t = self.HASH_RE.sub("the checksum", t)
         t = self.INLINE_CODE_RE.sub(lambda m: self._speakable_code(m.group(1)), t)
         t = self.BOLD_RE.sub(r"\2", t)
-        t = self.ITALIC_RE.sub(r"\2", t)
+        # *stage directions* are vocalization cues, not emphasis — keep
+        # the wrapper when the inner phrase is a known stage action so
+        # the VocalizationEngine still sees it (unwrapped "laughs" is not
+        # a token and used to be spoken literally).
+        t = self.ITALIC_RE.sub(
+            lambda m: m.group(0)
+            if re.sub(r"\s+", " ", m.group(2).strip().lower()) in _STAGE
+            else m.group(2), t)
         t = self.HEADING_RE.sub("", t)
         t = self.QUOTE_RE.sub("", t)
         t = self.LIST_MARKER_RE.sub("", t)
