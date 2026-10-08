@@ -701,6 +701,54 @@ def _inherit_markers(outer: IntentEnvelope, inner: IntentEnvelope) -> None:
             inner.evidence.append(e)
 
 
+# Bare anaphora that MUST have a referent to mean anything — "make that
+# bigger", "change it", "what's his name". When nothing resolved them
+# the right move is one clarifying question, not a guess at an invented
+# target.
+_ANAPHORA_OBJECT_RE = re.compile(
+    r"\b(?:make|change|set|update|edit|fix|delete|remove|move|rename|"
+    r"redo|open|close|restart|stop|start|use|pick|choose|select|"
+    r"check|try|retry|undo|save|load|send|show|hide|shrink|grow|"
+    r"enlarge|widen|lighten|darken|shorten|lengthen|speed\s+up|"
+    r"slow\s+down|turn\s+(?:on|off|up|down)|bring\s+back)\s+"
+    r"(?:it|that|this|them|those|these|that\s+one|this\s+one)\b",
+    re.IGNORECASE)
+_ANAPHORA_STANDALONE_RE = re.compile(
+    r"^(?:it|that|this|them|that\s+one|this\s+one|those|these|"
+    r"the\s+other\s+one)\s*[.!?]?$",
+    re.IGNORECASE)
+_ANAPHORA_POSSESSIVE_RE = re.compile(
+    r"\b(?:his|her|its|their)\s+[a-z][a-z'-]+", re.IGNORECASE)
+_ANAPHORA_SUBJECT_RE = re.compile(
+    r"\b(?:he|she|they)\s+(?:do|does|did|is|was|were|has|have|had|"
+    r"like|likes|love|loves|work|works|live|lives|look|looks|make|"
+    r"makes|built|build|wrote|write|say|said|think|thinks|want|wants)\b",
+    re.IGNORECASE)
+
+
+def _unresolved_anaphora(text: str, env: IntentEnvelope) -> list[str]:
+    """Referent-bearing anaphora the envelope left unbound.
+
+    Resolved terms live in env.references — anything still unbound in
+    a referent position is a genuine clarification case, not a guess.
+    Common-function 'it'/'that' subjects ("it works", "that's fine")
+    are deliberately NOT flagged — they carry their own context.
+    """
+    t = " " + _low(text) + " "
+    resolved = {str(k).lower() for k in env.references}
+    out: list[str] = []
+    for rx in (_ANAPHORA_OBJECT_RE, _ANAPHORA_STANDALONE_RE,
+               _ANAPHORA_POSSESSIVE_RE, _ANAPHORA_SUBJECT_RE):
+        for m in rx.finditer(t):
+            term = m.group(0).strip()
+            words = set(term.lower().split())
+            if words & resolved:
+                continue  # the pronoun resolved against active context
+            if term not in out:
+                out.append(term)
+    return out
+
+
 def understand_turn(text: str, *, active: Any = None,
                     has_attachments: bool = False) -> IntentEnvelope:
     """Classify one turn, then resolve its references against active
@@ -721,6 +769,10 @@ def understand_turn(text: str, *, active: Any = None,
                     env.ambiguity.append(note)
         except Exception:
             pass
+    for term in _unresolved_anaphora(text, env):
+        note = f"unresolved referent {term!r}: no candidate in context"
+        if note not in env.ambiguity:
+            env.ambiguity.append(note)
     return env
 
 

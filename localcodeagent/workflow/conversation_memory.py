@@ -233,7 +233,9 @@ class ConversationMemory:
         exist. Returns None when the referent is genuinely ambiguous —
         a bare correction must never guess."""
         new = self._clean_value(new_value)
-        if not new or len(new.split()) > 4:
+        if (not new or len(new.split()) > 4
+                or new.lower() in self._RESET_MODIFIERS
+                or new.lower() in self._BARE_CORRECTION_STOPWORDS):
             return None
         pred = self._RETARGET_PREDICATE_RE
         with self._lock:
@@ -512,6 +514,35 @@ class ConversationMemory:
         "thank you", "great", "good", "fine", "nice", "cool", "true",
         "right", "exactly", "agreed", "maybe", "correct", "perfect",
         "sounds good", "that works", "nothing", "never mind",
+    })
+
+    # Referent-relative modifiers — "make that bigger" adjusts a
+    # TARGET, it doesn't state a value. Letting a comparative land in a
+    # fact's value slot produces nonsense ("my favorite color is
+    # bigger") and swallows the user's actual command.
+    _RESET_MODIFIERS = frozenset({
+        "bigger", "smaller", "larger", "darker", "lighter", "longer",
+        "shorter", "faster", "slower", "higher", "lower", "wider",
+        "narrower", "louder", "quieter", "warmer", "cooler", "hotter",
+        "colder", "brighter", "dimmer", "stronger", "weaker", "more",
+        "less", "up", "down", "on", "off", "back", "again", "thicker",
+        "thinner", "deeper", "shallower", "taller", "heavier", "easier",
+        "harder", "softer", "firmer", "looser", "tighter", "cheaper",
+        "closer", "further", "farther", "better", "worse", "bolder",
+        "smoother", "rougher", "simpler", "fuller", "emptier",
+    })
+
+    # Single-word values that ARE facts in 'X is Y' statements —
+    # settings/mode/units vocabulary ("the theme is dark", "units are
+    # metric") that the adjective guard would otherwise reject. Pure
+    # evaluations ("the movie is great") still don't learn.
+    _SETTINGS_VALUES = frozenset({
+        "light", "dark", "auto", "automatic", "manual", "default",
+        "system", "metric", "imperial", "celsius", "fahrenheit",
+        "enabled", "disabled", "portrait", "landscape", "compact",
+        "silent", "normal", "verbose", "debug", "release", "beta",
+        "stable", "nightly", "production", "staging", "development",
+        "high", "medium", "low", "on", "off",
     })
 
     @staticmethod
@@ -826,6 +857,8 @@ class ConversationMemory:
                                                 r"[\dA-Z/\\]|(?:^|\s)v\d",
                                                 decl.group(3).strip())
                                             or len(value.split()) >= 2
+                                            or value.lower() in
+                                            self._SETTINGS_VALUES
                                             or re.match(
                                                 r"^(?:mon|tues|wednes|"
                                                 r"thurs|fri|satur|sun)"

@@ -296,5 +296,92 @@ class TestScopeMetrics(unittest.TestCase):
         self.assertEqual(m["leading_filler"], "")
 
 
+class TestCorrectionChains(unittest.TestCase):
+    """Compound self-corrections and retarget safety — each case is an
+    adversarial sequence from the milestone spec."""
+
+    def _mem(self):
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        return ConversationMemory(
+            Path(self._td.name) / "cm.json")
+
+    def _active(self, cm):
+        return [f["text"] for f in cm.snapshot()["facts"]
+                if f.get("active")]
+
+    def test_compound_chain_settles_last_value(self):
+        cm = self._mem()
+        cm.learn_from_user(
+            "i like red. actually no, blue. never mind, make it green")
+        self.assertEqual(self._active(cm), ["i like green"])
+
+    def test_stacked_markers_retarget(self):
+        cm = self._mem()
+        cm.learn_from_user(
+            "the deadline is friday. wait, actually make that monday")
+        self.assertEqual(self._active(cm), ["deadline is monday"])
+
+    def test_crossform_preference_supersedes_slot(self):
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("actually i prefer green now")
+        self.assertEqual(self._active(cm), ["my favorite color is green"])
+
+    def test_value_class_picks_same_class_referent(self):
+        # 'green' corrects the COLOR preference even when a newer
+        # preference fact (food) and an entity fact sit on top.
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("my favorite food is steak")
+        cm.learn_from_user("i have an rtx 3080")
+        cm.learn_from_user("actually i prefer green now")
+        active = self._active(cm)
+        self.assertIn("my favorite color is green", active)
+        self.assertIn("my favorite food is steak", active)
+        self.assertNotIn("my favorite color is blue", active)
+
+    def test_modifier_is_not_a_value(self):
+        # 'make that bigger' adjusts a target — it must never land in a
+        # fact's value slot ("my favorite color is bigger").
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        learned = cm.learn_from_user("make that bigger")
+        self.assertEqual(learned["facts"], [])
+        self.assertEqual(self._active(cm), ["my favorite color is blue"])
+
+    def test_acknowledgements_never_rewrite_facts(self):
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        for turn in ("actually, sure", "no, thanks", "actually, great"):
+            learned = cm.learn_from_user(turn)
+            self.assertEqual(learned["facts"], [], turn)
+        self.assertEqual(self._active(cm), ["my favorite color is blue"])
+
+    def test_nonliteral_use_is_not_a_reset(self):
+        cm = self._mem()
+        cm.learn_from_user("the theme is light")
+        learned = cm.learn_from_user("use the dark theme")
+        self.assertEqual(learned["facts"], [])
+        self.assertEqual(self._active(cm), ["theme is light"])
+
+    def test_ambiguous_preference_restatement_banks_itself(self):
+        # Two preference facts of the same class → a bare 'i prefer
+        # green' can't pick — it stores the restatement and corrupts
+        # nothing.
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("my favorite team color is green")
+        cm.learn_from_user("actually i prefer black now")
+        active = self._active(cm)
+        self.assertIn("my favorite color is blue", active)
+        self.assertIn("my favorite team color is green", active)
+        self.assertIn("i prefer black", active)
+
+
 if __name__ == "__main__":
     unittest.main()

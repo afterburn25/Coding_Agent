@@ -542,5 +542,56 @@ class TestLongSession(unittest.TestCase):
         self.assertTrue(all(v == IMAGE_FOLLOWUP for v in intents_seen))
 
 
+class TestUnresolvedAnaphora(unittest.TestCase):
+    """Bare anaphora with no referent must flag ambiguity — the model
+    asks one clarifying question instead of inventing a target
+    (0.32.0 conversation-intelligence milestone)."""
+
+    def test_object_anaphora_flags(self):
+        for q in ("make that bigger", "change it", "delete them",
+                  "enlarge it", "pick that one"):
+            env = understand_turn(q)
+            self.assertTrue(
+                any("unresolved referent" in a for a in env.ambiguity),
+                f"{q!r} produced ambiguity={env.ambiguity}")
+
+    def test_possessive_and_subject_anaphora_flag(self):
+        for q in ("what's his name", "what does he do",
+                  "where does she live", "what is their plan"):
+            env = understand_turn(q)
+            self.assertTrue(
+                any("unresolved referent" in a for a in env.ambiguity),
+                f"{q!r} produced ambiguity={env.ambiguity}")
+
+    def test_content_bearing_pronouns_do_not_flag(self):
+        # "it"/"that" in non-referent positions carry their own
+        # context — flagging them would over-ask.
+        for q in ("it works", "that is fine", "it's raining",
+                  "that's a good idea", "it depends"):
+            env = understand_turn(q)
+            self.assertFalse(
+                any("unresolved referent" in a for a in env.ambiguity),
+                f"{q!r} over-flagged: {env.ambiguity}")
+
+    def test_resolved_referent_suppresses_flag(self):
+        # An active image gives 'it' a binding — no ambiguity.
+        ac = ActiveContext()
+        ac.active_image_subject = "a lighthouse"
+        ac.active_image_prompt = "a lighthouse at dusk"
+        ac.active_intent = IMAGE_GENERATION
+        ac.touch()
+        env = understand_turn("make it brighter", active=ac)
+        self.assertFalse(
+            any("unresolved referent" in a for a in env.ambiguity),
+            env.ambiguity)
+
+    def test_ambiguity_surfaces_clarify_rule(self):
+        from localcodeagent.context.scope import (
+            classify_scope, scope_directive)
+        env = understand_turn("make that bigger")
+        directive = scope_directive(classify_scope("make that bigger", env), env)
+        self.assertIn("clarifying question", directive)
+
+
 if __name__ == "__main__":
     unittest.main()

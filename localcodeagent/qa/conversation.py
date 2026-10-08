@@ -742,6 +742,35 @@ def generate_scope_scenarios(
                }),
     ]))
 
+    # Genuine ambiguity — a bare anaphora with no referent in context
+    # must surface the unresolved-referent advisory AND the scoped
+    # clarify rule so the model asks one question instead of guessing.
+    out.append(QaScenario(f"{scenario_prefix}-ambiguity-fresh", [
+        QaTurn("make that bigger", conversation_id="scope-am",
+               expect={
+                   "context_contains": ["unresolved referent",
+                                        "clarifying"],
+               }),
+        QaTurn("what's his name?", conversation_id="scope-am2",
+               expect={
+                   "context_contains": ["unresolved referent",
+                                        "clarifying"],
+               }),
+    ]))
+
+    # Pronoun with an established referent — the transcript carries the
+    # father answer forward, so 'his name' is resolvable from history
+    # even though the durable store holds nothing.
+    out.append(QaScenario(f"{scenario_prefix}-pronoun-followup", [
+        QaTurn("who is your father?", conversation_id="scope-pf",
+               expect={"response_contains": "john hamburn"}),
+        QaTurn("what is his name?", conversation_id="scope-pf",
+               expect={
+                   "context_contains": "john hamburn",
+                   "task_status": "completed",
+               }),
+    ]))
+
     # Exact-fact breadth — informal/typo forms resolve the same slot
     # with the same discipline.
     out.append(QaScenario(f"{scenario_prefix}-exact-informal", [
@@ -789,4 +818,97 @@ def generate_scope_scenarios(
             "no_reasoning_narration": True,
         }),
     ]))
+
+    # Long conversation — 60+ turns mixing exact questions, topic
+    # switches, corrections, and callbacks in one chat. Per-turn
+    # invariants hold the WHOLE session: exact facts stay bare,
+    # superseded values never inject, and every question turn carries
+    # its scope directive. This is the harness-side half of the
+    # 50+-turn dogfood requirement.
+    out.append(_long_conversation_scenario(f"{scenario_prefix}-long"))
     return out
+
+
+def _long_conversation_scenario(scenario_id: str) -> QaScenario:
+    """Interleaved long-session scenario — deterministic, ~64 turns."""
+    turns: list[QaTurn] = []
+    cid = "scope-long"
+    # Act 1 — establish facts and topics.
+    turns.append(QaTurn("my favorite color is blue", conversation_id=cid))
+    turns.append(QaTurn("use port 8080", conversation_id=cid))
+    turns.append(QaTurn("Project Orion uses PostgreSQL",
+                        conversation_id=cid))
+    turns.append(QaTurn("how old are you?", conversation_id=cid, expect={
+        "response_contains": "days old",
+        "response_not_contains": ["september", "birthday", "born"],
+        "no_leading_filler": True,
+        "no_trailing_question": True,
+    }))
+    # Act 2 — distractor churn (topic drift must not resurrect facts
+    # the turn never asked about).
+    distractors = [
+        "what's a good weeknight dinner",
+        "explain the difference between viruses and bacteria",
+        "how do I reverse a string in python",
+        "what's the weather usually like in lisbon in april",
+        "electric vs gas cars for a 15 mile commute",
+        "what would happen if the moon disappeared",
+        "how much ram does a browser use",
+        "tell me something about jazz",
+    ]
+    for i in range(24):
+        q = distractors[i % len(distractors)]
+        turns.append(QaTurn(q, conversation_id=cid, expect={
+            # Every question turn must carry its answer-size budget.
+            "context_contains": "Answer scope",
+        }))
+    # Act 3 — corrections mid-session.
+    turns.append(QaTurn("actually use port 9000", conversation_id=cid))
+    turns.append(QaTurn("my favorite color is blue. actually i prefer "
+                        "green now", conversation_id=cid))
+    # Act 4 — recall: settled values only, never the superseded ones.
+    turns.append(QaTurn("what port are we using?", conversation_id=cid,
+                        expect={
+                            "context_contains": "9000",
+                            "context_not_contains": "8080",
+                        }))
+    turns.append(QaTurn("what's my favorite color?", conversation_id=cid,
+                        expect={
+                            "context_contains": "green",
+                            "context_not_contains": "steak",
+                        }))
+    turns.append(QaTurn("what database does Orion use?",
+                        conversation_id=cid,
+                        expect={
+                            "context_contains": "PostgreSQL",
+                            "context_not_contains": ["SQLite", "steak"],
+                        }))
+    # Act 5 — identity facts stay disciplined deep into the session.
+    turns.append(QaTurn("how old are you?", conversation_id=cid, expect={
+        "response_contains": "days old",
+        "response_not_contains": ["september", "birthday", "born",
+                                  "already", "i said"],
+        "no_leading_filler": True,
+        "no_trailing_question": True,
+    }))
+    turns.append(QaTurn("when is your birthday?", conversation_id=cid,
+                        expect={
+                            "response_contains": "september 30",
+                            "response_not_contains": "days old",
+                        }))
+    # Act 6 — more churn, then a callback to the FIRST act's port.
+    for i in range(24):
+        turns.append(QaTurn(distractors[(i + 3) % len(distractors)],
+                            conversation_id=cid))
+    turns.append(QaTurn("remind me — what port did we settle on?",
+                        conversation_id=cid,
+                        expect={
+                            "context_contains": "9000",
+                            "context_not_contains": "8080",
+                        }))
+    turns.append(QaTurn("how old are ya", conversation_id=cid, expect={
+        "response_contains": "days old",
+        "response_not_contains": ["birthday", "september"],
+        "no_leading_filler": True,
+    }))
+    return QaScenario(scenario_id, turns, default_conversation_id=cid)
