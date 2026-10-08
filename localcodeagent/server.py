@@ -2919,6 +2919,10 @@ class AppState:
                 required_ram_gb=float(gb),
                 busy_models=self._busy_model_ids()),
             "stop_models": lambda: self.runtime.stop_all(),
+            "restart_model": lambda: self.runtime.restart_unhealthy_managed(),
+            # Marker — the executor's per-request auto-fallback already
+            # excludes a failed model; nothing for the supervisor to do.
+            "fallback_model": lambda: True,
             "restart_service": lambda: True,   # process watchdog owns restarts
             "health_probe": lambda: bool(self.runtime.summary()),
             "reduce_context": lambda: True,     # marker: retry runs leaner

@@ -921,6 +921,40 @@ class RuntimeManagerTests(unittest.TestCase):
             bad = manager.tuner._data.get("bad_results", {}).get(profile.id, [])
             self.assertFalse(any(tuple(r.get("args") or ()) == tuple(tuned) for r in bad))
 
+    def test_restart_unhealthy_managed_only_stops_dead_or_unhealthy(self):
+        # Recovery playbook's restart_model: dead/unhealthy managed models are
+        # stopped so they re-serve on next demand; healthy ones untouched.
+        with tempfile.TemporaryDirectory() as td:
+            dead = self._profile(id="dead")
+            alive = self._profile(id="alive")
+            manager = RuntimeManager(
+                AgentConfig(models=[dead, alive]), base_dir=Path(td))
+            p_dead = _attach_fake_managed(manager, dead)
+            p_alive = _attach_fake_managed(manager, alive)
+            p_dead.alive = False  # crashed
+            restarted = manager.restart_unhealthy_managed()
+            self.assertEqual(restarted, ["dead"])
+            self.assertNotIn("dead", manager._managed)
+            self.assertIn("alive", manager._managed)
+            self.assertFalse(p_alive.terminated)
+            # Second call is a no-op — nothing unhealthy left.
+            self.assertEqual(manager.restart_unhealthy_managed(), [])
+            self.assertIn("alive", manager._managed)
+
+    def test_restart_unhealthy_managed_targets_flagged_unhealthy(self):
+        # A managed model flagged unhealthy (bad health probe) but still
+        # polling alive is restarted too — not just dead processes.
+        with tempfile.TemporaryDirectory() as td:
+            profile = self._profile()
+            manager = RuntimeManager(
+                AgentConfig(models=[profile]), base_dir=Path(td))
+            proc = _attach_fake_managed(manager, profile)
+            manager._status[profile.id].healthy = False
+            restarted = manager.restart_unhealthy_managed()
+            self.assertEqual(restarted, [profile.id])
+            self.assertTrue(proc.terminated)
+            self.assertNotIn(profile.id, manager._managed)
+
     def test_launch_fallback_bare_when_heuristic_also_fails(self):
         with tempfile.TemporaryDirectory() as td:
             profile = self._profile()

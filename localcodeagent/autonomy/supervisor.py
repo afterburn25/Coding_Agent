@@ -1686,7 +1686,7 @@ class AutonomousSupervisor:
                     row, f"{action} for {failure.get('class')}",
                     failed_node=TaskGraph(row).get(node_id)))
         else:
-            # Unknown/hook-less step (fallback_model, redownload, …) —
+            # Unknown/hook-less step (redownload, …) —
             # treat as escalate to stay bounded.
             self.missions.transition(mission_id, "blocked",
                                      detail=f"no handler for recovery step '{action}'")

@@ -810,6 +810,20 @@ class RuntimeManager:
             for model_id in list(self._managed):
                 self._stop_managed(model_id)
 
+    def restart_unhealthy_managed(self) -> list[str]:
+        """Stop managed runtimes that are dead or failed their last
+        health probe, so the next request cold-starts them fresh via
+        the single-flight launch path. Returns the stopped model ids."""
+        stopped: list[str] = []
+        with self._lock:
+            for model_id, item in list(self._managed.items()):
+                status = self._status.get(model_id)
+                dead = item.process.poll() is not None
+                if dead or not (status and status.healthy):
+                    self._stop_managed(model_id)
+                    stopped.append(model_id)
+        return stopped
+
     def resident_model_ids(self) -> list[str]:
         with self._lock:
             return [mid for mid, item in self._managed.items() if item.process.poll() is None]

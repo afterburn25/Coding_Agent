@@ -699,6 +699,46 @@ class JobNodeTests(unittest.TestCase):
                 sup2.missions.get(m2["id"])["status"], "cancelled")
             sup.stop()
 
+    def test_hooked_recovery_steps_run_instead_of_blocking(self):
+        # Playbook actions like restart_model/fallback_model reach
+        # _apply_recovery_step only through runtime_hooks — an unwired
+        # step used to block the mission outright even though a handler
+        # existed conceptually.
+        with tempfile.TemporaryDirectory() as td:
+            called: list[str] = []
+            sup = make_sup(td, runtime_hooks={
+                "restart_model": lambda: called.append("restart_model") or ["m1"],
+                "fallback_model": lambda: called.append("fallback_model") or True,
+            })
+            mission = sup.missions.create(
+                objective="x", title="m", scope="one_shot", workspace=td,
+                source="test")
+            node = new_task("t1", "work", kind="agent")
+            sup.missions.mutate(
+                mission["id"], lambda m: m["graph"].update(nodes=[node]))
+            for st in ("ready", "active", "executing"):
+                sup.missions.transition(mission["id"], st)
+            failure = {"class": "MODEL_CRASH", "error": "boom"}
+            sup._apply_recovery_step(
+                sup.missions.get(mission["id"]), node["id"],
+                {"action": "restart_model"}, failure)
+            self.assertEqual(called, ["restart_model"])
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "executing")
+            sup._apply_recovery_step(
+                sup.missions.get(mission["id"]), node["id"],
+                {"action": "fallback_model"}, failure)
+            self.assertEqual(called, ["restart_model", "fallback_model"])
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "executing")
+            # An action with no hook still blocks honestly.
+            sup._apply_recovery_step(
+                sup.missions.get(mission["id"]), node["id"],
+                {"action": "redownload"}, failure)
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "blocked")
+            sup.stop()
+
     def test_non_executor_nodes_write_ledger_evidence(self):
         # Verify/internal nodes bypass agent.run — without their own
         # ledger writes the mission evidence rollup was blind to the
