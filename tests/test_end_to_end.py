@@ -353,6 +353,37 @@ class EndToEndAgentTests(unittest.TestCase):
                     break
                 time.sleep(0.05)
 
+    def test_waiting_approval_does_not_wedge_queue(self):
+        # Regression: a task parked on an approval card holds no driver
+        # thread — it must not block unrelated queued work (observed: a
+        # stale waiting_approval row froze every queued prompt until the
+        # user happened to resolve it).
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            parked = state.tasks.create(
+                prompt="parked approval from an earlier session",
+                mode="auto")
+            state.tasks.update(parked.id, status="waiting_approval",
+                               phase="waiting_approval")
+            state.queue.enqueue("queued while a card waits")
+            state._dequeue_next()
+            deadline = time.time() + 30
+            while len(state.queue) and time.time() < deadline:
+                time.sleep(0.1)
+            self.assertEqual(len(state.queue), 0)
+            parked = [t for t in state.tasks.recent(10)
+                      if t.get("status") == "waiting_approval"]
+            self.assertEqual(len(parked), 1)  # still parked, undisturbed
+            workers = [t for t in threading.enumerate()
+                       if t.name.startswith("queue-") and t.is_alive()]
+            deadline = time.time() + 10
+            while workers and time.time() < deadline:
+                time.sleep(0.05)
+                workers = [t for t in threading.enumerate()
+                           if t.name.startswith("queue-") and t.is_alive()]
+
     def test_queued_chat_counts_as_interactive_lane_demand(self):
         # A user prompt waiting in the queue must register as interactive
         # lane demand — otherwise mission nodes keep dispatching while the

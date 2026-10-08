@@ -5887,8 +5887,11 @@ class AppState:
         if not self._dequeue_lock.acquire(timeout=2 if blocking else 0):
             return
         try:
+            # waiting_approval is a parked state — it holds no driver
+            # thread and the user may take minutes to decide. A parked
+            # card must not wedge unrelated queued work.
             if self.tasks.by_status(
-                    "running", "verifying", "reviewing", "waiting_approval"):
+                    "running", "verifying", "reviewing"):
                 return
             # Ledger position isn't authoritative — enough newer rows can
             # push an active task out of the recent window. A live driver
@@ -6055,7 +6058,7 @@ class AppState:
                 return
             now = time.time()
             if self.tasks.by_status(
-                    "running", "verifying", "reviewing", "waiting_approval"):
+                    "running", "verifying", "reviewing"):
                 return
             # Same single-flight backstop as _dequeue_next — a live driver
             # is authoritative no matter how deep in the ledger its task is.
@@ -10969,7 +10972,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()
-                if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
+                if current is not None and current.status in {"running", "verifying", "reviewing"}:
                     if not getattr(self.state.config, "chat_queue_when_busy", True):
                         self._json({
                             "error": "A task is already running. Enable chat_queue_when_busy to auto-queue, or wait for it to finish.",
@@ -11215,7 +11218,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not message:
                     message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()
-                if current is not None and current.status in {"running", "verifying", "reviewing", "waiting_approval"}:
+                if current is not None and current.status in {"running", "verifying", "reviewing"}:
                     if not getattr(self.state.config, "chat_queue_when_busy", True):
                         self._json({
                             "error": "A task is already running. Enable chat_queue_when_busy to auto-queue, or wait for it to finish.",
