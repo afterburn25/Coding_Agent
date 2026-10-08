@@ -797,7 +797,7 @@ class VoiceManager:
         # re-generate up to `voice_chatterbox_quality_retries` times and
         # the best draw wins.
         retries = max(0, int(getattr(
-            self.config, "voice_chatterbox_quality_retries", 2)))
+            self.config, "voice_chatterbox_quality_retries", 3)))
         # Paralinguistic-tag segments legitimately fail the speech band —
         # a laugh measures "dark + echoey" (1591 Hz / 0.91 live) without
         # being a bad draw. Skip gating when tags are present.
@@ -819,7 +819,10 @@ class VoiceManager:
                 centroid = dsp.spectral_centroid_hz(mono, sr)
                 echo = dsp.echo_lag_corr(mono, sr)
                 boom = dsp.band_share_db(mono, sr, 100.0, 200.0)
-                score = centroid / 4400.0 - echo
+                # Best-of scoring must penalize every gated axis —
+                # otherwise an all-fail round can keep the boomy draw.
+                score = (centroid / 4400.0 - echo
+                         - max(0.0, boom + 16.0) / 10.0)
                 if best is None or score > best[0]:
                     best = (score, audio, sr, trial)
                 if (centroid >= 3400.0 and echo <= 0.55

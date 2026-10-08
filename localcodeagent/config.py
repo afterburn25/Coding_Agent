@@ -363,9 +363,10 @@ class AgentConfig:
     voice_chatterbox_dtype: str = "bf16"
     voice_chatterbox_synth_timeout_s: float = 240.0
     # Stochastic-draw quality gate: Chatterbox sampling can land dark /
-    # reverberant renders (audible "barrel"), most often on short text.
-    # Failed draws are re-generated up to this many times; 0 disables.
-    voice_chatterbox_quality_retries: int = 2
+    # reverberant / boomy renders (audible "barrel"), most often on
+    # short text where consecutive draws correlate. Failed draws are
+    # re-generated up to this many times; 0 disables.
+    voice_chatterbox_quality_retries: int = 3
     # Output loudness management — applied in the DSP chain before the
     # peak limiter so normalized speech never clips.
     voice_normalize_loudness: bool = True
