@@ -393,6 +393,10 @@ class AgentOrchestrator:
         # follow-up reuse so "what changed?" resolves against the topic
         # already researched rather than issuing an unrelated search.
         self._last_research: dict[str, dict[str, Any]] = {}
+        # Per-conversation response-scope trace (context/scope.py) — the
+        # classified depth/budget for the latest turn, for the debug
+        # inspector. Never user-visible.
+        self._turn_scope: dict[str, dict[str, Any]] = {}
         # Deterministic slash commands — strict leading-"/" messages bypass
         # intent inference, routing, and every model; they execute against
         # registered commands → existing services (never a second executor).
@@ -632,7 +636,7 @@ class AgentOrchestrator:
                 out = _BUILTIN_RENDERER.render_semantic(
                     SemanticResponse(
                         semantic_id="am:" + fingerprint(pair),
-                        speech_act="answer"),
+                        speech_act="answer", bare=True),
                     genome, ctx, intent="answer_memory",
                     canonical=answer_text)
                 answer_text = out.text
@@ -1337,6 +1341,15 @@ class AgentOrchestrator:
             pass
         return None
 
+    def turn_scope(self, conversation_id: str = "") -> dict:
+        """Debug inspector — the response-scope plan for the latest turn
+        in a conversation (depth, slots, budgets). {} when unclassified."""
+        try:
+            return dict(self._turn_scope.get(str(conversation_id or ""))
+                        or {})
+        except Exception:
+            return {}
+
     def _resolve_asker_is_creator(self) -> bool | None:
         """Resolve the active profile's is_creator flag — None when no
         resolver is wired (tests, bare construction) so identity answers
@@ -1361,10 +1374,11 @@ class AgentOrchestrator:
         clock = cls.current_time_snapshot()
 
         def _sem(sid: str, act: str, text: str,
-                 *spans: str, frame=None) -> tuple:
+                 *spans: str, frame=None, bare: bool = False) -> tuple:
             return (SemanticResponse(
                 facts=[text], semantic_id=sid, speech_act=act,
-                exact_spans=[s for s in spans if s], frame=frame), text)
+                exact_spans=[s for s in spans if s], frame=frame,
+                bare=bare), text)
 
         time_queries = {
             "what time is it", "what is the time", "what's the time",
@@ -1391,7 +1405,7 @@ class AgentOrchestrator:
                 "datetime", "answer",
                 f"It is {clock['human_date']} at {clock['human_time']} "
                 f"{clock['timezone']} ({utc}).",
-                clock["human_time"], clock["human_date"])
+                clock["human_time"], clock["human_date"], bare=True)
         if normalized in time_queries:
             offset = clock["utc_offset"]
             utc = f"UTC{offset}" if offset else "local time"
@@ -1399,22 +1413,23 @@ class AgentOrchestrator:
                 "time", "answer",
                 f"The current local time is {clock['human_time']} "
                 f"{clock['timezone']} ({utc}).",
-                clock["human_time"])
+                clock["human_time"], bare=True)
         if normalized in date_queries or normalized in day_queries:
             return _sem("date", "answer",
                         f"Today is {clock['human_date']}.",
-                        clock["human_date"])
+                        clock["human_date"], bare=True)
 
         # Creator-locked identity facts (birthday, age, creator) — answered
         # deterministically so no model output or stored memory can
-        # contradict them. The genome may color the envelope; the fact
-        # text itself passes through verbatim.
+        # contradict them. The fact is scope-planned upstream (minimum-
+        # sufficient reveal); `bare` keeps the persona envelope from
+        # padding it with acknowledgements or closings.
         from .. import identity
         identity_answer = identity.response_for(
             normalized, asker_is_creator=asker_is_creator)
         if identity_answer is not None:
             return _sem(f"identity:{normalized[:40]}", "answer",
-                        identity_answer)
+                        identity_answer, bare=True)
 
         greetings = {
             "hi", "hello", "hey", "hey there", "good morning",
@@ -6563,6 +6578,28 @@ class AgentOrchestrator:
                 "address each part explicitly.")
         if advisories:
             intent_context += "\n\n" + "\n".join(advisories)
+        # Response scope — the per-turn answer-size budget and reveal
+        # rule (context/scope.py). Deterministic, injected beside the
+        # intent advisory so every model turn carries the contract:
+        # answer the question asked, not the context retrieved.
+        try:
+            from ..context.scope import classify_scope, scope_directive
+            turn_scope = classify_scope(user_text, env)
+            if turn_scope is not None:
+                scope_text = scope_directive(turn_scope, env)
+                if scope_text:
+                    intent_context += "\n\n" + scope_text
+        except Exception:
+            turn_scope = None
+        # Debug surface — the classified scope for this turn is recorded
+        # per conversation so the inspector/API can show WHY a turn got
+        # the answer budget it did (never user-visible).
+        if turn_scope is not None:
+            try:
+                self._turn_scope[str(conversation_id or "")] = \
+                    turn_scope.to_dict()
+            except Exception:
+                pass
         knowledge_parts: list[str] = []
         if self.knowledge_memory is not None:
             remembered = self.knowledge_memory.prompt_context(user_text)
@@ -6781,6 +6818,10 @@ class AgentOrchestrator:
                 # otherwise consume the shared budget and truncate it.
                 personality_context,
                 persistent_context,
+                # Envelope advisories + the response-scope directive —
+                # utility turns are where ordinary questions land, so the
+                # per-turn answer budget must reach this lane too.
+                intent_context,
                 brain_skill_context,
                 brain_behavior_context,
                 knowledge_context,

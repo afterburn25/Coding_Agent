@@ -17,6 +17,7 @@ from .conversation import (
     ScriptedProvider,
     generate_scenarios,
     generate_hard_scenarios,
+    generate_scope_scenarios,
 )
 from .corpus import FailureCorpus, CorpusEntry
 
@@ -29,6 +30,7 @@ __all__ = [
     "ScriptedProvider",
     "generate_scenarios",
     "generate_hard_scenarios",
+    "generate_scope_scenarios",
     "FailureCorpus",
     "CorpusEntry",
 ]

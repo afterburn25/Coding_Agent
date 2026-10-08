@@ -189,6 +189,35 @@ class ConversationMemory:
             words.pop()
         return " ".join(words).strip()
 
+    def _retarget_latest_fact(self, new_value: str) -> str | None:
+        """'make that X' / 'set it to X' — a bare re-set of the most
+        recently stated value. The referent is the newest active fact;
+        its subject+predicate is kept and only the value tail changes,
+        so slot supersession retires the stale row.
+
+        Returns None when there is no fact to retarget or the value
+        doesn't look like a short stated value — a bare imperative must
+        never guess at unrelated facts."""
+        new = self._clean_value(new_value)
+        if not new or len(new.split()) > 4:
+            return None
+        with self._lock:
+            rows = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+            ]
+        if not rows:
+            return None
+        text = str(rows[-1].get("text") or "").strip()
+        m = re.match(
+            r"^(.+?\b(?:is|are|was|were|uses?|runs on|prefers?|"
+            r"should stay|should be|must be|will be|stays?|remains?)\s+)"
+            r"(.+?)$",
+            text, flags=re.IGNORECASE)
+        if not m:
+            return None
+        return f"{m.group(1)}{new}"
+
     def _correct_fact_value(self, old_value: str, new_value: str) -> str | None:
         """'X not Y' correction — rewrite the fact that ends in Y.
 
@@ -679,6 +708,51 @@ class ConversationMemory:
                                     # adjectives ("the movie is great",
                                     # "the answer is no").
                                     fact = None
+                if fact is None:
+                    # Imperative value-sets — "use port 8080", "set the
+                    # theme to dark". Canonical "subject is value" keeps
+                    # the supersession slot identical to declarative
+                    # updates ("the port is 8090").
+                    imp = re.match(
+                        r"^(?:use|set|pick|choose|go\s+with|go\s+for)\s+"
+                        r"(?:the\s+|our\s+|a\s+|an\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,28}?)\s+"
+                        r"(?:to|as|is|=)\s+(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE)
+                    if imp:
+                        subj = self._clean_subject(imp.group(1))
+                        value = self._clean_value(imp.group(2))
+                        if self._fact_subject_ok(subj) and value:
+                            fact = f"{subj} is {value}"
+                    else:
+                        # Bare "use X <literal>" — the literal must look
+                        # like a stated value (digits, versions, paths,
+                        # identifiers) or "use the dark theme" parses as
+                        # 'dark is theme'.
+                        imp2 = re.match(
+                            r"^(?:use|set|pick|choose|go\s+with|go\s+for)\s+"
+                            r"(?:the\s+|our\s+)?([a-z0-9]{2,24})\s+"
+                            r"([a-z0-9][a-z0-9 _+./\\#:-]{0,38}?)[.!?]?$",
+                            body, flags=re.IGNORECASE)
+                        if imp2 and re.search(r"[\d_+./\\#-]",
+                                              imp2.group(2)):
+                            subj = self._clean_subject(imp2.group(1))
+                            value = self._clean_value(imp2.group(2))
+                            if self._fact_subject_ok(subj) and value:
+                                fact = f"{subj} is {value}"
+                if fact is None:
+                    # Bare re-set of the last stated value — "actually
+                    # make that 8090", "no, set it to 9000". The newest
+                    # active fact is the referent; its slot carries the
+                    # supersession.
+                    reset = re.match(
+                        r"^(?:(?:actually|no|wait|instead)[,]?\s+)?"
+                        r"(?:make\s+(?:it|that|them)|set\s+(?:it|that)"
+                        r"\s+to|change\s+(?:it|that)\s+to|use)\s+"
+                        r"(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE)
+                    if reset:
+                        fact = self._retarget_latest_fact(reset.group(1))
                 if fact is None and corr_body:
                     fact = corr_body
             if fact and locked_topic(fact):
@@ -935,6 +1009,24 @@ class ConversationMemory:
                 self._save()
         return forgotten
 
+    _GENERIC_RELATION_TERMS = frozenset({
+        "favorite", "favourite", "prefer", "prefers", "preferred",
+        "like", "likes", "loved", "love", "loves",
+    })
+
+    @classmethod
+    def _fact_query_terms(cls, text: str, slot: str) -> set[str]:
+        """Relevance-matchable terms for one stored fact.
+
+        'my:'-slot facts strip generic relation words so only the
+        distinguishing noun can match a query — 'favorite' matching
+        'favorite' would otherwise leak unrelated personal facts into
+        every preference question."""
+        terms = cls._content_terms(text)
+        if slot.startswith("my:"):
+            terms -= cls._GENERIC_RELATION_TERMS
+        return terms
+
     def prompt_context(
         self,
         query: str = "",
@@ -962,6 +1054,10 @@ class ConversationMemory:
         # share a content term with it enter the prompt — the whole store must
         # not ride every message. An empty query returns the full scoped view
         # for explicit memory inspection/management paths.
+        # Personal-fact rows ("my:" slots) must match on their
+        # DISTINGUISHING noun — generic relation words (favorite, prefer,
+        # like) shared with the query don't count, or "my favorite food
+        # is steak" rides a "favorite color" question into the prompt.
         q_terms = self._content_terms(query)
         with self._lock:
             fact_rows = [
@@ -971,7 +1067,9 @@ class ConversationMemory:
             if q_terms:
                 fact_rows = [
                     row for row in fact_rows
-                    if self._content_terms(str(row.get("text", ""))) & q_terms
+                    if self._fact_query_terms(str(row.get("text", "")),
+                                              str(row.get("slot") or ""))
+                    & q_terms
                 ]
             facts = [str(row.get("text", "")) for row in fact_rows][-12:]
             rules = [

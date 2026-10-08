@@ -1007,10 +1007,14 @@ class VocalizationEngine:
             else:
                 # Dropped STAGE wrappers strip — speaking "*sighs*" as
                 # words is worse than silence. A dropped plain-word token
-                # keeps its surface text: the clone voices "oh"/"hmm"
-                # naturally, and deleting a word the user sees in the
-                # reply reads as the sentence skipping.
-                if voc.token.lstrip()[:1] in "*([": 
+                # keeps its surface text: the clone voices "oh" naturally,
+                # and deleting a word the user sees in the reply reads as
+                # the sentence skipping. Exception: a thinking-filler
+                # dropped by the hesitation gate IS the hesitation — the
+                # persona that doesn't hesitate must not voice it.
+                if voc.token.lstrip()[:1] in "*([" or (
+                        voc.category == "thinking"
+                        and not c["hesitation_ok"]):
                     out = out[:start] + " " + out[end:]
                 decision["tts_form"] = None
                 res.decisions.append(decision)

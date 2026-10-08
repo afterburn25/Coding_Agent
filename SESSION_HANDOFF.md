@@ -2,6 +2,46 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.32.0 — Conversation Intelligence phase 1: response scope
+
+New milestone (relevance/scope/concision/multi-turn). Observed defect:
+`How old are you?` → *"Let me think. I hear you. Counting from
+September 30th, 2026 — my birthday — I'm 7 days old."* — three causes,
+fixed as general architecture:
+
+- `localcodeagent/context/scope.py` (new) — `classify_scope()` →
+  `ResponseDepth` (exact/brief/explanatory/detailed/open_ended),
+  requested-vs-supporting slots, reasoning visibility, size budgets;
+  `scope_directive()` injected per-turn beside the intent advisory;
+  `scope_metrics()` measures responses (filler, narration, sentences,
+  trailing question, over-budget). `AgentOrchestrator.turn_scope(cid)`
+  exposes the per-turn plan for the debug inspector.
+- `identity.py` slot discipline — `_AGE_VARIANTS`/`_BIRTHDAY_VARIANTS`
+  reveal only the requested fact; parentage/denial lanes no longer leak
+  the birth date; creator trimmed to name + one clause; new
+  `_AGE_HOW_QUESTION` lane ("how did you calculate your age") reveals
+  the derivation as requested content; informal `r u`/`are ya` forms.
+- `SemanticResponse.bare` — exact deterministic answers (identity,
+  clock, answer-memory) suppress the genome envelope (micro/opening/
+  closing/address); body still re-realizes via MeaningFrame.
+- `conversation_memory.py` — `use port 8080`/`set X to Y` imperative
+  value-sets now store slotted facts; `actually make that 8090`
+  retargets the newest fact and supersedes in-slot; `my:`-slot facts
+  require distinguishing-noun overlap (favorite-food no longer leaks
+  into favorite-color prompts). Both caught by new scope scenarios.
+- `qa/conversation.py` — `generate_scope_scenarios()` + asserts
+  (`max_sentences`, `no_leading_filler`, `no_reasoning_narration`,
+  `no_trailing_question`, `scope`) + per-turn metrics.
+- `tests/test_response_scope.py` — permanent regression for the
+  observed defect + disclosure ladders + classifier matrix.
+- Regression fixed en route: hesitation-gated `thinking` vocalizations
+  strip again (v0.31.8 word-keep side-effect).
+
+Remaining milestone work (next increments): broader scenario corpus
+(200+), 50+ turn dogfood, before/after benchmark, topic-shift decay
+tuning, ambiguity→clarify calibration, richer slot model on the model
+lane, inspector UI surface.
+
 ## v0.31.10 — low-mid "barrel" carve + boom-aware gate
 
 User still heard barrel after the tonal retune → fine-band diff of 29
@@ -2801,7 +2841,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2662 tests` passing (2 environment skips).
+Expected at this checkpoint: `2690 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

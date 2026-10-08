@@ -630,8 +630,9 @@ class TestBuiltinIntegration(unittest.TestCase):
 
     def test_birth_lane_phrasings(self):
         agent = self._agent()
-        for q in ("when were you born", "how old are you",
-                  "what's your birthday", "when is your birthday"):
+        # Birthday questions reveal the birthday — the requested slot.
+        for q in ("when were you born", "what's your birthday",
+                  "when is your birthday"):
             with self.subTest(q=q):
                 pair = agent.builtin_semantic(q)
                 self.assertIsNotNone(pair, q)
@@ -639,6 +640,15 @@ class TestBuiltinIntegration(unittest.TestCase):
                 self.assertTrue(sid.startswith("identity"), q)
                 # Canonical NEXUS_BIRTHDAY — not a model guess.
                 self.assertIn("september 30", pair[1].lower())
+        # Age questions reveal the age — the birthday is supporting
+        # context and must NOT appear (response-scope contract).
+        for q in ("how old are you", "what's your age"):
+            with self.subTest(q=q):
+                pair = agent.builtin_semantic(q)
+                self.assertIsNotNone(pair, q)
+                self.assertIn("old", pair[1].lower())
+                self.assertNotIn("september 30", pair[1].lower())
+                self.assertNotIn("birthday", pair[1].lower())
 
     def test_identity_lane_no_model_confabulation(self):
         from localcodeagent import identity as _ident

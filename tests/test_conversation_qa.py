@@ -362,6 +362,24 @@ class SeededGenerationTests(unittest.TestCase):
             [(s.scenario_id, [t.text for t in s.turns]) for s in a],
             [(s.scenario_id, [t.text for t in s.turns]) for s in b])
 
+    def test_scope_scenarios_end_to_end(self):
+        """Response-scope milestone — the observed 'How old are you?'
+        defect plus the disclosure ladders, run through the real
+        pipeline. Identity turns are deterministic (no provider), so
+        these assert the shipped contract, not scripted behavior."""
+        from localcodeagent.qa import generate_scope_scenarios
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            failures = []
+            for scenario in generate_scope_scenarios():
+                run = runner.run(scenario)
+                if not run.ok:
+                    failures.extend(f"{run.scenario_id}: {f}"
+                                    for f in run.failures)
+            self.assertEqual(failures, [])
+
 
 class FailureCorpusTests(unittest.TestCase):
     def test_failures_recorded_and_closeable(self):

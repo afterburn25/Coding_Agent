@@ -27,6 +27,16 @@ from .corpus import CorpusEntry, FailureCorpus
 #   task_status                            — result.task["status"] (default "completed")
 #   tool_calls / no_tool_calls             — provider received/omitted tools=...
 #   context_contains / not_contains        — any message (any role) content
+#   max_sentences                          — response sentence budget
+#   max_chars                              — response length budget
+#   no_leading_filler                      — no stock opener ("Let me
+#                                          think", "I hear you", "Certainly")
+#   no_reasoning_narration                 — no "counting from...",
+#                                          "I determined that" narration
+#   no_trailing_question                   — response must not end with "?"
+#   scope                                  — expected context/scope depth
+#                                          ("exact", "brief", "explanatory",
+#                                          "detailed", "open_ended")
 # Values may be a string or list of strings.
 
 
@@ -59,6 +69,7 @@ class TurnResult:
     task_status: str = ""
     tool_calls: int = 0
     elapsed_ms: float = 0.0
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -196,6 +207,16 @@ class ConversationQaRunner:
                 tr.response_source = str(getattr(result, "response_source", "") or "")
                 task = getattr(result, "task", {}) or {}
                 tr.task_status = str(task.get("status", ""))
+            # Scope metrics — measured on the final response; assert keys
+            # below turn them into failures. These diagnose scope
+            # behavior; they never rewrite the answer.
+            try:
+                from ..context.scope import (
+                    classify_scope, scope_metrics)
+                tr.metrics = scope_metrics(
+                    tr.response, classify_scope(turn.text))
+            except Exception:
+                tr.metrics = {}
             if called:
                 tr.user_content = self.provider.last_user_content
                 tr.system_content = self.provider.last_system_content
@@ -247,6 +268,36 @@ class ConversationQaRunner:
             out.append("tool_calls: expected provider to receive tools")
         if expect.get("no_tool_calls") and tr.tool_calls:
             out.append("no_tool_calls: provider received tools unexpectedly")
+
+        # --- scope metrics asserts (context/scope.py) -----------------
+        m = tr.metrics or {}
+        if "max_sentences" in expect:
+            got = int(m.get("sentences") or 0)
+            if got > int(expect["max_sentences"]):
+                out.append(
+                    f"max_sentences: expected <={expect['max_sentences']}, "
+                    f"got {got}")
+        if "max_chars" in expect:
+            got = int(m.get("chars") or 0)
+            if got > int(expect["max_chars"]):
+                out.append(
+                    f"max_chars: expected <={expect['max_chars']}, got {got}")
+        if expect.get("no_leading_filler") and m.get("leading_filler"):
+            out.append(
+                f"no_leading_filler: response opens with "
+                f"{m['leading_filler']!r}")
+        if expect.get("no_reasoning_narration") \
+                and m.get("reasoning_narration"):
+            out.append(
+                f"no_reasoning_narration: found "
+                f"{m['reasoning_narration']!r}")
+        if expect.get("no_trailing_question") \
+                and m.get("trailing_question"):
+            out.append("no_trailing_question: response ends with '?'")
+        if "scope" in expect and m.get("depth") != expect["scope"]:
+            out.append(
+                f"scope: expected depth {expect['scope']!r}, "
+                f"classified {m.get('depth')!r}")
         return out
 
     def _record(self, scenario: QaScenario, run: QaRunResult,
@@ -518,4 +569,127 @@ def generate_hard_scenarios(
                        "task_status": "completed",
                    }),
         ], seed=seed))
+    return out
+
+
+# ----------------------------------------------------------------------
+# Response-scope scenarios (context/scope.py milestone)
+#
+# Composed multi-turn sequences that test the reveal contract: requested
+# facts appear, supporting facts stay hidden, disclosure is progressive,
+# superseded values never resurface, and exact answers carry no filler.
+# ----------------------------------------------------------------------
+
+def generate_scope_scenarios(
+    *,
+    scenario_prefix: str = "scope",
+) -> list[QaScenario]:
+    """Fixed scope-ladder scenarios — permanent regressions, not seeds.
+
+    Deterministic identity answers mean these assert the REAL shipped
+    contract end-to-end (no scripted model involved on the identity
+    turns — they bypass the provider entirely).
+    """
+    out: list[QaScenario] = []
+
+    # The observed defect — permanent regression. Age question reveals
+    # ONLY the age; birthday/calculation/filler are all forbidden.
+    out.append(QaScenario(f"{scenario_prefix}-age-ladder", [
+        QaTurn("how old are you?", conversation_id="scope-a", expect={
+            "response_contains": "old",
+            "response_not_contains": [
+                "september 30", "birthday", "born", "counting",
+                "let me think", "i hear you", "sept 30"],
+            "max_sentences": 2,
+            "no_leading_filler": True,
+            "no_reasoning_narration": True,
+            "no_trailing_question": True,
+            "task_status": "completed",
+        }),
+        # Disclosure is progressive — the same fact revealed on request.
+        QaTurn("when is your birthday?", conversation_id="scope-a",
+               expect={
+                   "response_contains": "september 30",
+                   "response_not_contains": ["days old", "years old",
+                                             "months old"],
+                   "no_trailing_question": True,
+               }),
+        # And the derivation on request — reasoning becomes content.
+        QaTurn("how did you calculate your age?",
+               conversation_id="scope-a", expect={
+                   "response_contains": "september 30",
+               }),
+    ]))
+
+    # Persona disclosure ladder — existence → name → open invitation.
+    out.append(QaScenario(f"{scenario_prefix}-father-ladder", [
+        QaTurn("who is your father?", conversation_id="scope-f", expect={
+            "response_contains": "john hamburn",
+            "max_sentences": 3,
+            "no_trailing_question": True,
+        }),
+        QaTurn("tell me about your father", conversation_id="scope-f",
+               expect={
+                   "response_contains": ["nexus core", "built"],
+                   "task_status": "completed",
+               }),
+    ]))
+
+    # Memory single-fact recall — teach facts across separate chats so
+    # the query chat's transcript carries only the question; whatever
+    # reaches the model comes from durable memory retrieval. The
+    # relevance gate must surface the color and keep steak/GPU off.
+    out.append(QaScenario(f"{scenario_prefix}-memory-scope", [
+        QaTurn("my favorite color is blue", conversation_id="scope-m1"),
+        QaTurn("my favorite food is steak", conversation_id="scope-m2"),
+        QaTurn("i have an rtx 3080", conversation_id="scope-m3"),
+        QaTurn("what's my favorite color?", conversation_id="scope-m4",
+               expect={
+                   "context_contains": "blue",
+                   "context_not_contains": ["steak", "rtx 3080"],
+                   "no_trailing_question": True,
+               }),
+    ]))
+
+    # Corrections supersede — teach+supersede in c1, recall in c2 so the
+    # recall transcript carries neither value; injected memory must hold
+    # the new value only.
+    out.append(QaScenario(f"{scenario_prefix}-correction", [
+        QaTurn("use port 8080", conversation_id="scope-c1"),
+        QaTurn("actually make that 8090", conversation_id="scope-c1"),
+        QaTurn("what port are we using?", conversation_id="scope-c2",
+               expect={
+                   "context_contains": "8090",
+                   "context_not_contains": "8080",
+               }),
+    ]))
+
+    # The scope directive must actually reach the model — an EXACT
+    # question carries the one-fact budget into the prompt.
+    out.append(QaScenario(f"{scenario_prefix}-directive-injected", [
+        QaTurn("what's the capital of France?", conversation_id="scope-d",
+               expect={
+                   "context_contains": "Answer scope",
+                   "task_status": "completed",
+               }),
+    ]))
+
+    # Exact-fact turns must not get filler openers or forced questions
+    # even when the model lane answers them.
+    out.append(QaScenario(f"{scenario_prefix}-filler-discipline", [
+        QaTurn("what time is it?", conversation_id="scope-t", expect={
+            "no_leading_filler": True,
+            "no_trailing_question": True,
+            "max_sentences": 2,
+        }),
+        QaTurn("what's today's date?", conversation_id="scope-t", expect={
+            "no_leading_filler": True,
+            "no_trailing_question": True,
+        }),
+        QaTurn("who created you?", conversation_id="scope-t", expect={
+            "response_contains": "john hamburn",
+            "no_leading_filler": True,
+            "no_reasoning_narration": True,
+        }),
+    ]))
     return out

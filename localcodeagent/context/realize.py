@@ -93,6 +93,12 @@ class SemanticResponse:
     # treated as meaning, not wording.
     frame: Any = None
     canonical: str = ""
+    # Scope contract (context/scope.py): a minimum-sufficient answer —
+    # the genome envelope (micro-reactions, acknowledgement openers,
+    # closings, address) must not decorate it. The BODY still realizes
+    # fresh through the MeaningFrame so wording varies; nothing is
+    # prepended or appended around the requested fact.
+    bare: bool = False
 
 
 @dataclass
@@ -564,18 +570,26 @@ class PersonaRenderer:
         repeat = max(self._repeat_idx.get(rep_key, 0),
                      self.ledger.repeat_index(rep_key))
 
-        open_fam, opening = self._pick_opening(g, act, serious, ctx,
-                                             repeat)
+        # Scope contract: bare responses carry the requested fact and
+        # nothing else — no micro-reaction, no opener, no address, no
+        # closing. This is a scope decision made upstream, not a style
+        # preference the genome may override.
+        bare = bool(getattr(sem, "bare", False))
+        if bare:
+            open_fam, opening = "direct_answer", ""
+        else:
+            open_fam, opening = self._pick_opening(g, act, serious, ctx,
+                                                   repeat)
         if canonical and act in ("greet", "farewell"):
             # The canonical body already IS the greeting/farewell.
             open_fam, opening = act, ""
         # A reaction-family opening already IS the micro-reaction —
         # stacking both reads as noise.
-        micro = "" if open_fam == "reaction" else self._maybe_micro(
+        micro = "" if bare or open_fam == "reaction" else self._maybe_micro(
             g, act, serious, ctx)
         # Greeting/farewell slot clauses carry their own address
         # placement — the generic address injector would double it.
-        address = "" if act in ("greet", "farewell") \
+        address = "" if bare or act in ("greet", "farewell") \
             else self._maybe_address(g, act, ctx)
         canon = canonical or getattr(sem, "canonical", "") or ""
         meta: dict[str, Any] = {"tier": "a", "rerenders": 0,
@@ -590,7 +604,9 @@ class PersonaRenderer:
                 and act not in ("greet", "farewell")):
             ack = self._choose(REPEAT_ACKS, "opening", g)
             body = f"{ack} {body}".strip() if ack else body
-        close_fam, closing = self._pick_closing(g, act, serious, sem, ctx)
+        close_fam, closing = (
+            ("hard_stop", "") if bare
+            else self._pick_closing(g, act, serious, sem, ctx))
 
         # Order: [micro] [opening] [address] body [closing]
         head = " ".join(x for x in (micro, opening) if x).strip()

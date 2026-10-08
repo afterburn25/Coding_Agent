@@ -33,10 +33,16 @@ class TestIdentityAnswers(unittest.TestCase):
 
     def test_age_answer_uses_today(self):
         out = identity.response_for("how old are you")
-        self.assertIn("September 30th, 2026", out)
         self.assertIn("old", out)
         # computed live — must match the real elapsed age today
         self.assertIn(identity.age_phrase(date.today()), out)
+        # Scope contract: the birthday is SUPPORTING context, not answer
+        # content — it stays hidden until the user asks for it (see
+        # tests/test_response_scope.py for the full disclosure ladder).
+        self.assertNotIn("September 30", out)
+        self.assertNotIn("birthday", out)
+        self.assertNotIn("born", out)
+        self.assertNotIn("counting", out)
 
     def test_creator_questions(self):
         for q in ("who is your father", "who created you", "who made you",
