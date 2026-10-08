@@ -6645,6 +6645,16 @@ class AgentOrchestrator:
             advisories.append(
                 "Compound request — it contains multiple clauses; "
                 "address each part explicitly.")
+        if env.topic_shift and env.followup_of == "topic_return":
+            advisories.append(
+                f"Topic return — the user is circling back to "
+                f"'{env.topic_target or 'the earlier topic'}'; resume "
+                "that context rather than the most recent subject.")
+        elif env.topic_shift:
+            advisories.append(
+                "Topic shift — the user moved to a new subject; answer "
+                "the new turn on its own and only carry prior context "
+                "where it is directly relevant.")
         if advisories:
             intent_context += "\n\n" + "\n".join(advisories)
         # Response scope — the per-turn answer-size budget and reveal

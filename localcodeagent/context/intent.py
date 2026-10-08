@@ -757,7 +757,12 @@ def understand_turn(text: str, *, active: Any = None,
     the active image."""
     env = _classify_turn(text, active=active,
                          has_attachments=has_attachments)
-    if active is not None:
+    # Topic-shift decay: an explicit forward shift ("new topic — …")
+    # abandons the old subject — "it"/"that" must not silently bind to
+    # the abandoned topic's entities. Topic RETURNS ("back to the
+    # angel image") keep active context; resuming is their point.
+    shifted = env.topic_shift and env.followup_of != "topic_return"
+    if active is not None and not shifted:
         try:
             from .references import resolve_with_report
             report = resolve_with_report(text, active)

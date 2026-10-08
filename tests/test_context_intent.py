@@ -592,6 +592,35 @@ class TestUnresolvedAnaphora(unittest.TestCase):
         directive = scope_directive(classify_scope("make that bigger", env), env)
         self.assertIn("clarifying question", directive)
 
+    def test_forward_shift_decays_active_referents(self):
+        # "new topic — change it" must NOT bind 'it' to the abandoned
+        # topic's entity — the shift explicitly dropped that subject.
+        ac = ActiveContext()
+        ac.active_image_subject = "a lighthouse"
+        ac.active_image_prompt = "a lighthouse at dusk"
+        ac.active_intent = IMAGE_GENERATION
+        ac.touch()
+        env = understand_turn("new topic — change it", active=ac)
+        self.assertTrue(env.topic_shift)
+        self.assertTrue(
+            any("unresolved referent" in a for a in env.ambiguity),
+            env.ambiguity)
+
+    def test_topic_return_keeps_active_context(self):
+        # "back to the lighthouse" is a return, not a shift — retained
+        # entities still resolve.
+        ac = ActiveContext()
+        ac.active_image_subject = "a lighthouse"
+        ac.active_image_prompt = "a lighthouse at dusk"
+        ac.active_intent = IMAGE_GENERATION
+        ac.touch()
+        env = understand_turn("back to that lighthouse image", active=ac)
+        self.assertTrue(env.topic_shift)
+        self.assertEqual(env.followup_of, "topic_return")
+        self.assertFalse(
+            any("unresolved referent" in a for a in env.ambiguity),
+            env.ambiguity)
+
 
 if __name__ == "__main__":
     unittest.main()
