@@ -176,6 +176,43 @@ telephone. Initial DSP recipe (all preset-tunable):
 voice, 0.8 = the approved Nexus character. It is **not** a single wet/dry
 knob.
 
+## Official preset: `nexus-isabella-chatterbox` (Isabella V7)
+
+Same V6-approved synthetic character, delivered through Chatterbox Turbo
+instead of Kokoro. The chain is fixed and must stay this way:
+
+```
+dry bf_isabella  →  Chatterbox Turbo  →  V7 DSP once
+                 →  loudness normalize (−12.5 LUFS)  →  limiter (−1 dBFS)
+```
+
+- **Conditioning**: `chatterbox_voices/isabella/reference-source.mp3` —
+  the dry public Kokoro `bf_isabella` sample. Never the processed
+  `reference.wav`, never the synthetic golden excerpt. Conditioning cache
+  `conds-<sha-prefix>-<exag>-<norm>-<dtype>-<modelrev>.pt` keys on the
+  reference bytes, so a reference swap invalidates stale conditionals.
+- **Golden A/B target**: `docs/reference/audio/isabella-v7-approved-
+  golden-2s.mp3` (+`.json` metadata, target signature
+  `approved-v7-v6-character-louder`). Acoustic target only — explicitly
+  not conditioning audio. `scripts/eval_isabella_v7.py` measures any WAV
+  (or synthesizes through the real pipeline) against it: LUFS, peak,
+  clip, centroid, band distribution, stereo correlation, side/mid,
+  echo/barrel proxies.
+- **DSP deltas vs the Kokoro preset**: `stereo_width 0` and
+  `ambience_ms 0` (the old 1.5 widening + processed-reference
+  double-coloration produced the "in a barrel" hollow); loudness target
+  −12.5 LUFS (was −14); `synthetic 0.8`. Everything else — pitch +1.25 st,
+  tempo 0.98, EQ (−3 dB @220, +5.8 @3.4k, +3.2 @7.2k), exciter 0.44, the
+  Neural/Glass/Micro layers — is the approved V6 character carried over.
+- **Single-pass guarantee**: `dsp.process()` runs exactly once inside
+  `_synthesize()`; audio cache keys embed `DSP_VERSION` + full preset
+  hash so preset/DSP changes invalidate cached speech without touching
+  unrelated entries.
+- **Verified live (v0.31.4)**: 6 `/api/voice/speak` segments on the
+  deployed install — −13.0…−13.3 LUFS, peak −1.0 dBFS, clip 0, corr
+  1.000, warm RTF ~0.3–0.4, ~3.2 GB VRAM busy, worker detached (survives
+  backend restarts). See SESSION_HANDOFF.
+
 ## SpeechTextFilter
 
 Block-level classifier — never dictates code. SPEAK: prose, headings,

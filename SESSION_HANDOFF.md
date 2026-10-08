@@ -2,6 +2,49 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.31.4 — Isabella V7 live-verified on the deployed install
+
+`v0.31.4` tagged `33e84162`, backend rebuilt from repo root and deployed
+to `D:\Nexus_Core` (previous at `backend-pre-0.31.4`). Live config flipped
+to `voice_engine: chatterbox` + `voice_preset_id: nexus-isabella-chatterbox`.
+
+**Verified live (execution evidence, not config claims):**
+
+- `/api/status`: `0.31.4`, safe_mode False.
+- `/api/voice/status`: engine `chatterbox 0.1.7/turbo-749d1c1`,
+  worker alive, `device: cuda`, preset `nexus-isabella-chatterbox`.
+- Conditioning cache generated in deployed bundle:
+  `conds-eec47eff41960369-*.pt` — prefix matches sha256 of the dry
+  `reference-source.mp3`. No `reference.wav` in the bundle.
+- 6 live `/api/voice/speak` segments measured with
+  `scripts/eval_isabella_v7.py --wav`: LUFS −13.0…−13.3 (target −12.5),
+  peak −1.0 dBFS, clip 0.0000, corr 1.000, side/mid 0.0000, echo proxy
+  0.25–0.41, all pass vs golden (`docs/reference/audio/isabella-v7-
+  approved-golden-2s.mp3`); golden delta +1.7…+2.0 LU louder as approved.
+- Warm synthesis RTF 0.33–0.43 (aggregate 0.293); cold first-call ~14 s
+  incl. worker spawn + model load (8.77 s) + conditioning.
+- VRAM ~3.2 GB during synthesis (GPU total 825 MiB idle → 3999 MiB busy);
+  worker is a detached process that survives backend restarts.
+- Structured-speech filter verified live: code fence + list items were
+  skipped ("I've included the code in the response." / "The details are
+  listed below."); only prose spoken.
+- Repo pipeline eval (5 scripts, CUDA): all pass, rtf 0.624 aggregate,
+  vram ~1994 MB worker-reported.
+
+**Not yet verified:** audible playback + text-release sync in the UI is
+client-side (`web/voice_global.js` play-events); the segment/URL contract
+is verified over HTTP but listening confirmation is the user's.
+
+**Fixed this session:** `_warm_on_first_speech`/`_warm_engine` warmed the
+config-default engine instead of the active preset's (a Chatterbox preset
+pre-warmed Kokoro). Generated `conds-*.pt` caches are now gitignored and
+were scrubbed from the frozen bundle (they regenerate on first prepare).
+
+**Caveat:** during deploy testing the supervisor respawned the backend a
+few times (instance replacement on relaunch + dynamic-port churn while
+probing). No WER crash records; final instance (PID 12776) stable.
+Keep an eye on whether backend respawns recur under normal use.
+
 ## v0.31.2 — autonomy/self-repair liveness + v0.31.1 evidence & reliability convergence
 
 v0.31.2 (see CHANGELOG `[0.31.2]`) patches the v0.31.1 base — which itself patched v0.31.0 — see CHANGELOG `[0.31.1]`.
