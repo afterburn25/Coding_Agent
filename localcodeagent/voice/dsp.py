@@ -312,7 +312,8 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
                        pad_ms: float = 8.0,
                        end_slack_ms: float = 350.0,
                        noise_tail_ms: float = 140.0,
-                       decay_ms: float = 90.0) -> np.ndarray:
+                       decay_ms: float = 90.0,
+                       shave_noise_tail: bool = True) -> np.ndarray:
     """Reattach a detached final phoneme — the Kokoro boundary artifact
     heard as a trailing "t"/"d" after a beat of silence at the end of an
     utterance. The island is a real final consonant emitted late: speech
@@ -332,6 +333,10 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     audible as a trailing hiss. Everything after the last -22 dB run is
     below the level any real consonant reaches, so a residue longer than
     ``noise_tail_ms`` is pure artifact and gets shaved to a short decay.
+    The shave is Kokoro-specific: engines whose tails decay to true
+    silence (e.g. Chatterbox) keep real soft consonant releases below
+    -22 dB, so callers pass ``shave_noise_tail=False`` to keep the
+    island splice while skipping the shave.
     Syllable-length detached islands are deliberately NOT cut: real
     quiet final words are DSP-indistinguishable from stray syllables,
     and eating a real word is worse than leaving an artifact."""
@@ -363,7 +368,7 @@ def trim_tail_artifact(x: np.ndarray, sr: int, *,
     # Everything after the last strong run is below -22 dB (no real
     # consonant lives down there), so a long residue is pure artifact:
     # shave it to a short natural decay, then judge what remains.
-    if (last - last_strong) * 10 > noise_tail_ms:
+    if shave_noise_tail and (last - last_strong) * 10 > noise_tail_ms:
         keep = last_strong * frame + int(sr * decay_ms / 1000.0)
         keep = min(keep, x.size)
         tail_len = min(keep - 1, int(sr * 0.03))

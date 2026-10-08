@@ -963,6 +963,27 @@ class TestDSP(unittest.TestCase):
         y = dsp.trim_tail_artifact(x, sr)
         self.assertEqual(y.size, x.size)
 
+    def test_trim_tail_artifact_shave_flag_keeps_soft_consonant(self):
+        # Chatterbox tails decay to true silence — a long soft final
+        # consonant (e.g. the /t/ release of "...that") lives below
+        # -22 dB for hundreds of ms and is real speech, not a Kokoro
+        # breath bed. shave_noise_tail=False must preserve it; the
+        # Kokoro default still shaves the same fixture.
+        sr = 24000
+        rng = np.random.default_rng(0)
+        speech = 0.3 * np.sin(2 * np.pi * 150 * np.arange(sr) / sr)
+        # 350 ms decaying release: below -22 dB of the speech peak but
+        # above the -42 dB voice floor for ~260 ms — real quiet speech,
+        # long enough to trip the Kokoro noise-bed shave.
+        n = int(sr * 0.35)
+        release = (0.006 * np.sin(2 * np.pi * 300 * np.arange(n) / sr)
+                   * np.linspace(1.0, 0.1, n)).astype(np.float32)
+        x = np.concatenate([speech, release])
+        kept = dsp.trim_tail_artifact(x, sr, shave_noise_tail=False)
+        self.assertEqual(kept.size, x.size)
+        shaved = dsp.trim_tail_artifact(x, sr)
+        self.assertLess(shaved.size, int(sr * 1.15))
+
 
 # --------------------------------------------------------------------------
 # speech-to-text configuration/provisioning contract

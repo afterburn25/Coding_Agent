@@ -497,7 +497,10 @@ class ChatterboxEngine(TTSEngine):
             pcm = dsp.pitch_tempo(pcm, sr, 0.0,
                                   max(0.5, min(2.0, speed)),
                                   formant_preserve=0.8)
-        pcm = dsp.trim_tail_artifact(pcm, sr)
+        # Kokoro's noise-tail shave would eat Chatterbox's quiet final
+        # consonants — its tails decay to true silence, so only the
+        # detached-phoneme island splice applies.
+        pcm = dsp.trim_tail_artifact(pcm, sr, shave_noise_tail=False)
         self._last_status = resp
         return pcm, sr
 
