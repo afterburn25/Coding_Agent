@@ -271,6 +271,7 @@ class ConversationManager:
         intent: str = "conversation",
         model_id: str = "",
         image_job_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
         response_source: str = "",
         attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -301,6 +302,12 @@ class ConversationManager:
                     row["active_context"] = ctx.to_dict()
                 except Exception:
                     pass
+            if artifact_ids:
+                # Artifact download cards re-render from these ids —
+                # the registry resolves fresh views (verification state
+                # may change between sessions).
+                assistant_message["artifact_ids"] = [
+                    str(a) for a in artifact_ids if str(a)][:12]
             if response_source:
                 assistant_message["response_source"] = response_source
             user_message = {"id": uuid.uuid4().hex[:12], "role": "user",

@@ -13,7 +13,7 @@ function memoryBadge(src){if(src!=='answer_memory')return '';return '<div class=
 function attachmentUrl(a){if(!a)return'';if(a.data_url)return a.data_url;const p=String(a.path||'');if(!p)return'';return'/api/attachment/'+encodeURIComponent(p.split(/[\\/]/).pop());}
 function attachHtml(atts){if(!atts||!atts.length)return'';const items=atts.map(a=>{const url=attachmentUrl(a);return a&&a.kind==='image'&&url?`<img class="msg-attach-img" src="${esc(url)}" alt="${esc(a.name||'attachment')}" loading="lazy">`:`<span class="msg-attach-file">📎 ${esc(a&&a.name||'file')}</span>`;}).join('');return`<div class="msg-attach">${items}</div>`;}
 function addMessage(role,text,messageId='',responseSource='',attachments,voiceTaskId=''){const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();const el=document.createElement('div');el.className=`message ${role}`;if(messageId)el.dataset.messageId=messageId;if(voiceTaskId)el.dataset.voiceTaskId=voiceTaskId;const _uav=(window.NexusProfile&&window.NexusProfile.userAvatar&&role==='user'?window.NexusProfile.userAvatar():role==='assistant'?'/api/nexus/avatar?size=64':'');const atts=attachHtml(attachments);const bubble=text||atts?`<div class="bubble">${atts}${esc(text)}</div>`:'';el.innerHTML=(_uav?`<div class="role has-avatar" style="background-image:url('${esc(_uav)}')"></div>`:`<div class="role">${esc(role)}</div>`)+`${bubble}${memoryBadge(responseSource)}${role==='assistant'?feedbackControls(messageId):''}`;chat.appendChild(el);scrollChat(true);}
-async function renderConversationHistory(history=[]){chat.innerHTML='';imageJobEls.clear();approvalCards.forEach(r=>r.el.remove());approvalCards.clear();if(!history.length){chat.innerHTML=welcomeHtml();restoreApprovalCards();return;}await Promise.all(history.map(async m=>{if(!['user','assistant'].includes(m.role))return;addMessage(m.role,m.content||'',m.id||'',m.response_source||'',m.attachments);const msgEl=chat.lastElementChild;await Promise.all((m.image_job_ids||[]).map(async jobId=>{try{const res=await fetch(`/api/image/job/${encodeURIComponent(jobId)}`);const data=await res.json();if(res.ok&&data.job)renderImageJobs([data.job],msgEl);}catch{}}));}));restoreApprovalCards();}
+async function renderConversationHistory(history=[]){chat.innerHTML='';imageJobEls.clear();approvalCards.forEach(r=>r.el.remove());approvalCards.clear();if(!history.length){chat.innerHTML=welcomeHtml();restoreApprovalCards();return;}await Promise.all(history.map(async m=>{if(!['user','assistant'].includes(m.role))return;addMessage(m.role,m.content||'',m.id||'',m.response_source||'',m.attachments);const msgEl=chat.lastElementChild;await Promise.all((m.image_job_ids||[]).map(async jobId=>{try{const res=await fetch(`/api/image/job/${encodeURIComponent(jobId)}`);const data=await res.json();if(res.ok&&data.job)renderImageJobs([data.job],msgEl);}catch{}}));const arts=await Promise.all((m.artifact_ids||[]).map(async aid=>{try{const res=await fetch(`/api/artifacts/${encodeURIComponent(aid)}`);if(res.ok)return await res.json();}catch{}return null;}));renderArtifactCards(arts.filter(Boolean),msgEl);}));restoreApprovalCards();}
 function renderConversationList(rows=[]){const box=$('#conversationList');if(!box)return;box.innerHTML=rows.length?rows.map(row=>`<button class="conversation-row ${row.active?'active':''}" data-conversation="${esc(row.id)}" type="button"><strong>${esc(row.title||'New chat')}</strong><small>${esc(row.message_count||0)} messages${row.summary?' · '+esc(String(row.summary).slice(0,60)):''}</small></button>`).join(''):'<span class="muted">No conversations yet.</span>';}
 async function loadConversations(query=''){try{const url='/api/conversations'+(query?'?q='+encodeURIComponent(query):'');const res=await fetch(url);const data=await res.json();if(!res.ok)throw new Error(data.error||'Conversation lookup failed');if(query){renderConversationList((data.results||[]).map(x=>({...x,message_count:'',active:false})));return data;}renderConversationList(data.conversations||[]);return data;}catch(e){const box=$('#conversationList');if(box)box.textContent='Conversation history unavailable';return null;}}
 async function selectConversation(id){const res=await fetch('/api/conversations/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:id})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not open conversation');renderConversationHistory(data.history||[]);await loadConversations();input.focus();}
@@ -257,12 +257,47 @@ function paintImageJob(el,job){
 }
 async function pollImageJob(id){const el=imageJobEls.get(id);if(!el)return;try{const res=await fetch(`/api/image/job/${encodeURIComponent(id)}`);const data=await res.json();if(!res.ok)throw new Error(data.error||'Image job lookup failed');paintImageJob(el,data.job);if(IMAGE_ACTIVE(data.job))setTimeout(()=>pollImageJob(id),1000);}catch(e){el.classList.add('failed');const t=el.querySelector('.gallery-thumb em');if(t)t.textContent=e.message;}}
 function renderImageJobs(jobs=[],afterEl=null){let appended=false;for(const job of jobs){let el=imageJobEls.get(job.id);if(!el){const gal=imageGalleryFor(afterEl);el=document.createElement('div');el.className='gallery-slot';gal.querySelector('.gallery-thumbs').appendChild(el);imageJobEls.set(job.id,el);appended=true;}paintImageJob(el,job);if(IMAGE_ACTIVE(job))setTimeout(()=>pollImageJob(job.id),500);}scrollChat(appended);}
+// Artifact handoff — file cards under the assistant bubble. Download
+// links are artifact-id routes only (no client-supplied paths); remote
+// links must be https — anything else is dropped, never rendered.
+const _ART_ICON={installer:'⬇',archive:'▣',image:'◻',audio:'♪',video:'▶',pdf:'▤',spreadsheet:'▦',presentation:'▤',report:'▤',code:'</>',dataset:'▦',file:'▤'};
+function _safeLink(u){const s=String(u||'');if(s.startsWith('/api/'))return s;try{const p=new URL(s);return p.protocol==='https:'?s:'';}catch{return '';}}
+function renderArtifactCards(cards,host){
+  if(!cards||!cards.length||!host)return;
+  // Same card may arrive via ui.artifacts and the top-level artifacts
+  // channel — render each id once per message.
+  host._artIds=host._artIds||new Set();
+  const wrap=document.createElement('div');wrap.className='artifact-cards';
+  for(const a of cards){
+    if(!a||!a.id||host._artIds.has(a.id))continue;
+    host._artIds.add(a.id);
+    const card=document.createElement('div');
+    card.className='artifact-card'+(a.verified?' verified':'')+(a.available===false?' unavailable':'');
+    const icon=_ART_ICON[a.kind]||_ART_ICON.file;
+    const remote=a.remote||{};
+    const size=a.size?formatBytes(a.size):'';
+    const status=a.available===false?'Local copy unavailable':(a.verified?'SHA-256 verified':'Unverified');
+    const ver=a.version>1?` · v${a.version}`:'';
+    const dl=_safeLink(a.download_url||`/api/artifacts/${encodeURIComponent(a.id)}/download`);
+    const ghView=_safeLink(remote.release_url||remote.web_url||'');
+    const ghDl=_safeLink(remote.download_url||'');
+    let actions='';
+    if(a.available!==false&&dl)actions+=`<a class="mini-button artifact-dl" href="${esc(dl)}" download="${esc(a.filename||'')}">Download</a>`;
+    if(ghView)actions+=`<a class="mini-button" href="${esc(ghView)}" target="_blank" rel="noopener noreferrer">View on GitHub</a>`;
+    if(ghDl&&ghDl!==ghView)actions+=`<a class="mini-button" href="${esc(ghDl)}" target="_blank" rel="noopener noreferrer" download>From GitHub</a>`;
+    const det=[a.id,a.sha256?`sha256 ${a.sha256}`:'',a.mime,a.created_at?`created ${new Date(a.created_at*1000).toLocaleString()}`:'',a.task_id?`task ${a.task_id}`:'',remote.repository?`github: ${remote.repository}${remote.tag?'@'+remote.tag:''}`:''].filter(Boolean).join('\n');
+    card.innerHTML=`<span class="artifact-icon">${icon}</span><div class="artifact-body"><div class="artifact-name">${esc(a.filename||a.id)}</div><div class="artifact-meta">${esc([size+ver,status].filter(Boolean).join(' · '))}</div><details class="artifact-details"><summary>Details</summary><pre>${esc(det)}</pre></details></div><div class="artifact-actions">${actions}</div>`;
+    wrap.appendChild(card);
+  }
+  if(wrap.childNodes.length)host.appendChild(wrap);
+}
 // Self-knowledge lane UI — action cards, deep links, and inline controls
 // rendered under the assistant bubble. Every action id is backend-
 // validated (POST /api/actions/execute); navigation uses the page
 // registry's canonical routes.
 function renderChatUI(ui,host){
   if(!ui||!host)return;
+  renderArtifactCards(ui.artifacts,host);
   const wrap=document.createElement('div');wrap.className='chat-ui';
   (ui.actions||[]).forEach(a=>{
     const b=document.createElement('button');b.type='button';
@@ -279,8 +314,12 @@ function renderChatUI(ui,host){
     wrap.appendChild(b);
   });
   (ui.links||[]).forEach(l=>{
+    const url=l.url?_safeLink(l.url):(l.route||'#');
+    if(!url)return;
     const a=document.createElement('a');a.className='chat-link';
-    a.href=l.route||'#';a.textContent=l.label||l.route;wrap.appendChild(a);
+    a.href=url;a.textContent=l.label||l.route||l.url;
+    if(url.startsWith('http')){a.target='_blank';a.rel='noopener noreferrer';}
+    wrap.appendChild(a);
   });
   (ui.controls||[]).forEach(c=>{
     const row=document.createElement('div');row.className='chat-control';
@@ -323,7 +362,7 @@ function renderAmbiguity(list,host){
   hint.innerHTML=`<span class="muted">⚠ Ambiguous: ${esc(list.join(' · '))}</span>`;
   host.appendChild(hint);
 }
-function renderAgentResult(data,{addAssistant=true}={}){let msgEl=null;if(addAssistant){addMessage('assistant',data.content,'','',[],data.voice_task_id||'');msgEl=chat.lastElementChild;}if(data.ui&&msgEl)renderChatUI(data.ui,msgEl);if(msgEl)renderAmbiguity(data.ambiguity,msgEl);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
+function renderAgentResult(data,{addAssistant=true}={}){let msgEl=null;if(addAssistant){addMessage('assistant',data.content,'','',[],data.voice_task_id||'');msgEl=chat.lastElementChild;}if(data.ui&&msgEl)renderChatUI(data.ui,msgEl);if(msgEl)renderArtifactCards(data.artifacts,msgEl);if(msgEl)renderAmbiguity(data.ambiguity,msgEl);addRoute(data.routing,data.model_events);renderImageJobs(data.image_jobs||[]);const logs=[];if(data.model_events?.length)logs.push('MODEL EVENTS\n'+data.model_events.map((x,i)=>`${i+1}. ${JSON.stringify(x)}`).join('\n'));if(data.tool_events?.length)logs.push('TOOL EVENTS\n'+data.tool_events.map((x,i)=>`${i+1}. ${x.name} ${JSON.stringify(x.arguments)}\n${x.result}`).join('\n\n'));if(logs.length){activity.textContent=logs.join('\n\n');setUtilityPanel('terminal');}renderTask(data.task);}
 async function resumeTask(approved){if(!lastTask)return;send.disabled=true;try{const res=await fetch('/api/tasks/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:lastTask.id,approved})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not resume task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Resume error: ${err.message}`);}finally{send.disabled=false;}}
 async function recoverTask(taskId){send.disabled=true;try{addMessage('assistant','Recovering the interrupted task from its saved workspace/checkpoint state…');const res=await fetch('/api/tasks/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not recover task');renderAgentResult(data);await loadStatus(false);}catch(err){addMessage('assistant',`Recovery error: ${err.message}`);}finally{send.disabled=false;}}
 const nexusPhaseCopy={
@@ -704,7 +743,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({offer_id:'imgjob:'+String(data.job.id||''),ts:data.job.finished_at||data.job.created_at||0,tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
   if(name==='install_offer'){renderInstallOffer(data,state);return;}
-  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.voice_task_id)state.wrap.dataset.voiceTaskId=data.voice_task_id;if(data.ui)renderChatUI(data.ui,state.wrap);if(data.ambiguity)renderAmbiguity(data.ambiguity,state.wrap);if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
+  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.voice_task_id)state.wrap.dataset.voiceTaskId=data.voice_task_id;if(data.ui)renderChatUI(data.ui,state.wrap);if(data.artifacts)renderArtifactCards(data.artifacts,state.wrap);if(data.ambiguity)renderAmbiguity(data.ambiguity,state.wrap);if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
   if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
 }
 function attachRetry(state){

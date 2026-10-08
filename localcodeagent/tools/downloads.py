@@ -8,6 +8,7 @@ import tarfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -101,6 +102,35 @@ def _sevenzip_progress(on_file: Callable[[str, int], None]):
     return _Progress()
 
 
+class _AuthScopedRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirect handler that never forwards Authorization (or any
+    request credential header) across hosts — GitHub asset downloads
+    302 to a signed CDN URL that must NOT receive the bearer token."""
+
+    _STRIP = ("authorization", "proxy-authorization", "cookie")
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        try:
+            old_host = urllib.parse.urlsplit(req.full_url).hostname
+            new_host = urllib.parse.urlsplit(newurl).hostname
+        except Exception:
+            old_host = new_host = None
+        if old_host and new_host and old_host.lower() != new_host.lower():
+            for key in list(new.headers):
+                if key.lower() in self._STRIP:
+                    new.headers.pop(key, None)
+            for key in list(getattr(new, "unredirected_hdrs", {}) or {}):
+                if key.lower() in self._STRIP:
+                    new.unredirected_hdrs.pop(key, None)
+        return new
+
+
+_AUTH_SAFE_OPENER = urllib.request.build_opener(_AuthScopedRedirect())
+
+
 _WIN_RESERVED = {
     "con", "prn", "aux", "nul",
     *(f"com{i}" for i in range(1, 10)),
@@ -132,11 +162,19 @@ class UserDownloadManager:
         self.jobs = jobs
         self.download_dir = Path(download_dir)
         self._cancel_flags: dict[str, threading.Event] = {}
+        # Per-job request headers (e.g. GitHub asset auth) live only in
+        # memory — never in job metadata, the ledger, or logs.
+        self._job_headers: dict[str, dict[str, str]] = {}
+        # Optional completion hook: fn(job_record_metadata) — AppState
+        # registers finished downloads as artifacts through it.
+        self.on_done: Callable[[dict], None] | None = None
 
     # -- API -----------------------------------------------------------------
 
     def start(self, url: str, dest: str = "", *,
-              sha256: str = "", expected_size: int = 0) -> dict[str, Any]:
+              sha256: str = "", expected_size: int = 0,
+              headers: dict | None = None,
+              artifact: dict | None = None) -> dict[str, Any]:
         try:
             url = _safe_url(url)
         except ValueError as exc:
@@ -159,11 +197,18 @@ class UserDownloadManager:
                         "path": str(target), "size": expected_size}
             target = self._unique(target)
 
+        meta = {"url": url, "dest": str(target), "phase": "queued"}
+        if artifact:
+            # Non-secret registration hints (kind, provenance, tool) —
+            # consumed by the on_done hook when the bytes land.
+            meta["artifact"] = dict(artifact)
         record = self.jobs.submit(
             "user_download", f"Download {target.name}",
-            metadata={"url": url, "dest": str(target), "phase": "queued"})
+            metadata=meta)
         flag = threading.Event()
         self._cancel_flags[record.id] = flag
+        if headers:
+            self._job_headers[record.id] = dict(headers)
         threading.Thread(
             target=self._run,
             args=(record.id, url, target, sha256.lower(),
@@ -285,13 +330,18 @@ class UserDownloadManager:
             if sha256 and digest != sha256:
                 raise ValueError(f"SHA-256 mismatch for {dest.name}")
             part.replace(dest)
+            meta = self.jobs.get(job_id).metadata | {
+                "phase": "finished", "verified": True,
+                "size": size, "sha256": digest,
+                "dest": str(dest)}
             self.jobs.update(
                 job_id, state="completed", status="finished",
-                progress=1.0, detail=str(dest),
-                metadata=self.jobs.get(job_id).metadata | {
-                    "phase": "finished", "verified": True,
-                    "size": size, "sha256": digest,
-                    "dest": str(dest)})
+                progress=1.0, detail=str(dest), metadata=meta)
+            if self.on_done is not None:
+                try:
+                    self.on_done(dict(meta))
+                except Exception:
+                    pass
         except _Cancelled:
             try:
                 self.jobs.update(job_id, state="cancelled",
@@ -308,6 +358,7 @@ class UserDownloadManager:
                 pass
         finally:
             self._cancel_flags.pop(job_id, None)
+            self._job_headers.pop(job_id, None)
 
     def _fetch(self, job_id: str, url: str, part: Path,
                expected_size: int, flag: threading.Event) -> None:
@@ -315,6 +366,7 @@ class UserDownloadManager:
         if expected_size and have >= expected_size:
             return  # a previous attempt already fetched everything
         headers = {"User-Agent": "chat-nexus-download"}
+        headers.update(self._job_headers.get(job_id) or {})
         if have:
             headers["Range"] = f"bytes={have}-"
         last_exc: Exception | None = None
@@ -323,7 +375,7 @@ class UserDownloadManager:
                 raise _Cancelled()
             try:
                 req = urllib.request.Request(url, headers=headers)
-                resp = urllib.request.urlopen(req, timeout=60)
+                resp = _AUTH_SAFE_OPENER.open(req, timeout=60)
                 break
             except urllib.error.HTTPError as exc:
                 # 416: stale .part bigger than the resource — restart clean.

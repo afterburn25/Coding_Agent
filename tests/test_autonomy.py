@@ -1840,6 +1840,41 @@ class EvaluatorTests(unittest.TestCase):
             self.assertTrue(any("artifact_exists" in r for r in out["reasons"]))
             sup.stop()
 
+    def test_artifact_verified_criterion_uses_registry(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            from localcodeagent.artifacts import ArtifactManager
+            mgr = ArtifactManager(Path(td) / "arts")
+            f = Path(td) / "out.zip"
+            f.write_bytes(b"payload")
+            rec = mgr.register(f, kind="archive")
+            sup.evaluator.artifacts = mgr
+
+            def _mission(target):
+                m = sup.create_mission(
+                    objective="x",
+                    success_criteria=[{"kind": "artifact_verified",
+                                       "target": target}])
+                def _fn(r):
+                    g = TaskGraph(r)
+                    n = g.add(new_task("A", "a"))
+                    g.mark(n["id"], "completed")
+                    r["status"] = "evaluating"
+                sup.missions.mutate(m["id"], _fn)
+                return sup.evaluator.evaluate(sup.missions.get(m["id"]))
+
+            # Registered + hash-verified → complete.
+            self.assertEqual(_mission("out.zip")["verdict"],
+                             EvalVerdict.COMPLETE.value)
+            # Tampered file fails verification → replan, not success.
+            f.write_bytes(b"tampered")
+            out = _mission("out.zip")
+            self.assertEqual(out["verdict"], EvalVerdict.NEEDS_REPLAN.value)
+            # Unregistered target → unmet.
+            self.assertEqual(_mission("ghost.bin")["verdict"],
+                             EvalVerdict.NEEDS_REPLAN.value)
+            sup.stop()
+
     def test_evaluation_records_history(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)

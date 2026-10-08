@@ -9,6 +9,7 @@ artifact bytes live wherever the producer wrote them (or under
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 import shutil
 import threading
 import time
@@ -19,6 +20,11 @@ from typing import Any
 from .fsutil import atomic_write_text
 
 MAX_REGISTRY = 2000
+
+# Retention classes — cleanup must never treat user/release/pinned
+# artifacts like scratch. Nothing deletes from the registry today, but
+# every record declares its class so a future sweeper can distinguish.
+RETENTION_CLASSES = {"temporary", "cached", "user", "release", "pinned"}
 
 _KIND_BY_EXT = {
     ".py": "code", ".js": "code", ".ts": "code", ".cs": "code",
@@ -79,6 +85,7 @@ class ArtifactManager:
                  requirement_ids: list[str] | None = None,
                  metadata: dict | None = None,
                  provenance: dict | None = None,
+                 retention: str = "",
                  store: bool = False) -> dict[str, Any]:
         """Register an existing file (or copy it into the artifact store
         when store=True). Returns the artifact record."""
@@ -112,6 +119,14 @@ class ArtifactManager:
             "created_at": time.time(),
             "metadata": dict(metadata or {}),
             "provenance": dict(provenance or {}),
+            # Published remote copies — {provider, repository, kind,
+            # release_id, asset_id, tag, web_url, download_url,
+            # uploaded_at}. A local artifact and its GitHub copy stay
+            # associated through this field.
+            "remote": {},
+            "retention": (retention if retention in RETENTION_CLASSES
+                          else "user"),
+            "pinned": retention == "pinned",
         }
         with self._lock:
             self._rows.append(row)
@@ -177,3 +192,106 @@ class ArtifactManager:
         if row.get("sha256") and self._sha256(p) != row["sha256"]:
             return {"ok": False, "reason": "hash mismatch (modified)"}
         return {"ok": True}
+
+    _REMOTE_KEYS = (
+        "provider", "repository", "kind", "release_id", "release_url",
+        "asset_id", "tag", "name", "size", "web_url", "download_url",
+        "uploaded_at", "run_id", "artifact_name", "expires_at",
+    )
+
+    def attach_remote(self, artifact_id: str, remote: dict) -> dict | None:
+        """Record a published remote copy on an existing artifact —
+        e.g. the GitHub release asset produced by uploading it. Keeps
+        only safe, non-secret fields; URLs must be https."""
+        with self._lock:
+            for row in self._rows:
+                if row.get("id") != artifact_id:
+                    continue
+                clean: dict[str, Any] = {}
+                for key in self._REMOTE_KEYS:
+                    val = remote.get(key)
+                    if val in (None, ""):
+                        continue
+                    if key.endswith("_url") or key == "web_url":
+                        if not str(val).lower().startswith("https://"):
+                            continue
+                        val = str(val)
+                    clean[key] = val
+                merged = dict(row.get("remote") or {})
+                merged.update(clean)
+                row["remote"] = merged
+                # A published copy is a release artifact — outlives
+                # ordinary cleanup unless the user pinned it already.
+                if not row.get("pinned"):
+                    row["retention"] = "release"
+                self._save()
+                return dict(row)
+        return None
+
+    def pin(self, artifact_id: str, pinned: bool = True) -> dict | None:
+        """Pin/unpin an artifact — pinned records are exempt from any
+        retention sweep, present or future."""
+        with self._lock:
+            for row in self._rows:
+                if row.get("id") != artifact_id:
+                    continue
+                row["pinned"] = bool(pinned)
+                row["retention"] = "pinned" if pinned else "user"
+                self._save()
+                return dict(row)
+        return None
+
+    def find(self, name_or_id: str = "", *,
+             task_id: str = "", limit: int = 12) -> list[dict]:
+        """Resolve 'the installer', 'the zip', an id, or latest —
+        name matching is case-insensitive substring on the filename."""
+        key = str(name_or_id or "").strip().lower()
+        with self._lock:
+            rows = [r for r in self._rows
+                    if not task_id or r.get("task_id") == task_id]
+        if key.startswith("art-"):
+            hit = [r for r in rows if r.get("id") == key]
+            return [dict(r) for r in hit]
+        if not key or key in ("file", "it", "that", "artifact",
+                              "latest", "the file", "the artifact"):
+            return [dict(r) for r in rows[-limit:]][::-1]
+        matched = [r for r in rows if key in str(r.get("name", "")).lower()]
+        if not matched:
+            # Token-wise fallback: 'installer' should find
+            # 'NexusCore-Setup.exe' via kind too.
+            matched = [r for r in rows
+                       if key == str(r.get("kind", "")).lower()]
+        return [dict(r) for r in matched[-limit:]][::-1]
+
+    def client_view(self, artifact) -> dict | None:
+        """Safe client-facing projection — never exposes absolute
+        filesystem paths. Accepts an id or a record dict."""
+        row = self.get(artifact) if isinstance(artifact, str) \
+            else dict(artifact)
+        if not row:
+            return None
+        aid = str(row.get("id") or "")
+        path = Path(str(row.get("path") or ""))
+        exists = path.is_file()
+        verified = bool(exists and self.verify(aid).get("ok"))
+        return {
+            "id": aid,
+            "filename": str(row.get("name") or path.name),
+            "kind": str(row.get("kind") or "file"),
+            "size": int(row.get("size") or 0),
+            "mime": mimetypes.guess_type(
+                str(row.get("name") or path.name))[0]
+                or "application/octet-stream",
+            "sha256": str(row.get("sha256") or ""),
+            "verified": verified,
+            "available": exists,
+            "version": int(row.get("version") or 1),
+            "created_at": float(row.get("created_at") or 0),
+            "task_id": str(row.get("task_id") or ""),
+            "mission_id": str(row.get("mission_id") or ""),
+            "creator": str(row.get("creator") or ""),
+            "download_url": f"/api/artifacts/{aid}/download",
+            "remote": dict(row.get("remote") or {}),
+            "retention": str(row.get("retention") or "user"),
+            "pinned": bool(row.get("pinned")),
+        }

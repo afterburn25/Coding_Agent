@@ -16,6 +16,30 @@ from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 
+class _ProgressReader:
+    """File-object wrapper that reports bytes-sent to a callback —
+    http.client streams request bodies via read(blocksize), so this
+    gives live upload progress without buffering the file."""
+
+    def __init__(self, fh, total: int, callback) -> None:
+        self._fh = fh
+        self._total = total
+        self._done = 0
+        self._cb = callback
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._fh.read(size)
+        self._done += len(chunk)
+        try:
+            self._cb(self._done, self._total)
+        except Exception:
+            pass
+        return chunk
+
+    def close(self) -> None:
+        pass  # caller owns the real handle
+
+
 def _run_git(workspace: Path, args: list[str], *, timeout: int = 60, check: bool = True) -> str:
     proc = subprocess.run(
         ["git", *args],
@@ -163,11 +187,69 @@ class GitHubCodingClient:
             require_auth=require_auth)
         return data
 
+    def api_url(self, path: str) -> str:
+        """Absolute API URL for a path — the durable download manager
+        needs a full URL; tokens travel as headers, never in the URL."""
+        if not path.startswith("/"):
+            path = "/" + path
+        return self.base_url + path
+
+    def upload_file(self, url: str, path, *, content_type: str,
+                    progress=None) -> dict:
+        """POST a file body to an absolute upload URL (the release
+        ``upload_url`` host — uploads.github.com). Streams from disk in
+        blocks; ``progress(done, total)`` fires per block for job UI."""
+        if not self.authenticated:
+            raise RuntimeError(
+                f"GitHub upload requires a token in environment variable "
+                f"{self.token_env} or github_connect")
+        file_path = Path(path)
+        size = file_path.stat().st_size
+        headers = self._headers()
+        headers["Content-Type"] = content_type or "application/octet-stream"
+        headers["Content-Length"] = str(size)
+        fh = file_path.open("rb")
+        try:
+            body = _ProgressReader(fh, size, progress) if progress else fh
+            request = Request(url, data=body, headers=headers,
+                              method="POST")
+            try:
+                if self._opener is None:
+                    response = urlopen(request, timeout=max(self.timeout, 300))
+                else:
+                    response = self._opener(request, max(self.timeout, 300))
+                with response as handle:
+                    raw = handle.read()
+                    return json.loads(raw.decode("utf-8")) if raw else {}
+            except HTTPError as exc:
+                try:
+                    try:
+                        data = json.loads(
+                            exc.read().decode("utf-8", errors="replace"))
+                        detail = str(data.get("message") or exc.reason)
+                        errors = data.get("errors") or []
+                        if errors:
+                            detail += " — " + "; ".join(
+                                str(e.get("code") or e)
+                                for e in errors[:3] if isinstance(e, dict))
+                    except Exception:
+                        detail = str(exc.reason)
+                    raise RuntimeError(
+                        f"GitHub upload failed {exc.code}: {detail}") from exc
+                finally:
+                    exc.close()
+            except (URLError, TimeoutError, OSError) as exc:
+                raise RuntimeError(
+                    f"GitHub upload unavailable: {exc}") from exc
+        finally:
+            fh.close()
+
 
 def register_github_tools(registry: ToolRegistry, workspace: Path,
                           config: AgentConfig, *, vault=None,
                           workspaces=None, client=None,
-                          account=None, journal=None, events=None) -> None:
+                          account=None, journal=None, events=None,
+                          artifacts=None, downloads=None) -> None:
     # `client`: shared GitHubCodingClient — the account service refreshes
     # its token on connect/disconnect, so every surface (tools, connector,
     # API) converges without a restart. Falls back to a private instance
@@ -723,6 +805,484 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"checked_out": branch, "pr": num,
                            "output": out[-2000:]}, indent=2)
 
+    # -- releases, release assets, Actions artifacts -------------------------
+
+    def _slug(args: dict) -> tuple[str, str, str, str]:
+        """Resolve the repository — explicit 'owner/repo' (or GitHub URL)
+        wins; otherwise the workspace's configured git remote."""
+        slug = str(args.get("repo") or "").strip().rstrip("/")
+        if slug.endswith(".git"):
+            slug = slug[:-4]
+        if "github.com" in slug:
+            slug = slug.split("github.com/", 1)[-1] \
+                .split("github.com:", 1)[-1].lstrip("/")
+        if not slug or "/" not in slug:
+            remote = str(args.get("remote") or remote_default).strip()
+            slug = _repo_slug(workspace, remote)
+        owner, name = slug.split("/", 1)
+        return slug, quote(owner, safe=""), quote(name, safe="")
+
+    def _release(oq: str, nq: str, args: dict) -> dict:
+        """Resolve a release by id, tag, or 'latest'."""
+        rid = int(args.get("release_id") or 0)
+        tag = str(args.get("tag") or args.get("release") or "").strip()
+        if rid > 0:
+            data = client.request(
+                "GET", f"/repos/{oq}/{nq}/releases/{rid}") or {}
+        elif tag and tag.lower() not in ("latest", ""):
+            data = client.request(
+                "GET", f"/repos/{oq}/{nq}/releases/tags/"
+                f"{quote(tag, safe='')}") or {}
+        else:
+            data = client.request(
+                "GET", f"/repos/{oq}/{nq}/releases/latest") or {}
+        if not data.get("id"):
+            raise RuntimeError(
+                "no matching GitHub release "
+                f"(tag={tag or 'latest'}, id={rid or '—'})")
+        return data
+
+    def _asset_view(a: dict) -> dict:
+        return {
+            "id": a.get("id"), "name": a.get("name"),
+            "size": a.get("size"), "state": a.get("state"),
+            "content_type": a.get("content_type"),
+            "download_count": a.get("download_count"),
+            "url": a.get("browser_download_url"),
+            "api_url": a.get("url"),
+        }
+
+    def github_list_releases(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        limit = max(1, min(30, int(args.get("limit") or 10)))
+        rows = client.request(
+            "GET", f"/repos/{oq}/{nq}/releases",
+            params={"per_page": limit}) or []
+        return json.dumps({"repository": slug, "releases": [{
+            "id": r.get("id"), "tag": r.get("tag_name"),
+            "name": r.get("name"), "draft": r.get("draft"),
+            "prerelease": r.get("prerelease"),
+            "url": r.get("html_url"),
+            "published_at": r.get("published_at"),
+            "assets": [_asset_view(a) for a in
+                       (r.get("assets") or [])[:20]],
+        } for r in rows[:limit]]}, indent=2)
+
+    def github_get_release(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        rel = _release(oq, nq, args)
+        return json.dumps({
+            "repository": slug, "id": rel.get("id"),
+            "tag": rel.get("tag_name"), "name": rel.get("name"),
+            "draft": rel.get("draft"),
+            "prerelease": rel.get("prerelease"),
+            "url": rel.get("html_url"),
+            "published_at": rel.get("published_at"),
+            "assets": [_asset_view(a)
+                       for a in (rel.get("assets") or [])],
+        }, indent=2)
+
+    def github_create_release(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        tag = str(args.get("tag") or "").strip()
+        if not tag:
+            raise ValueError("tag is required")
+        data = client.request(
+            "POST", f"/repos/{oq}/{nq}/releases",
+            body={
+                "tag_name": tag,
+                "name": str(args.get("name") or tag),
+                "body": str(args.get("body") or ""),
+                "draft": bool(args.get("draft", False)),
+                "prerelease": bool(args.get("prerelease", False)),
+            }, require_auth=True) or {}
+        _journal("github_release_create", f"release '{tag}'",
+                 after={"id": data.get("id"), "tag": tag},
+                 reversible=False, risk="medium",
+                 description=f"Created GitHub release {tag}")
+        return json.dumps({
+            "repository": slug, "id": data.get("id"),
+            "tag": data.get("tag_name"), "name": data.get("name"),
+            "url": data.get("html_url"),
+            "draft": data.get("draft")}, indent=2)
+
+    def github_list_release_assets(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        rel = _release(oq, nq, args)
+        assets = client.request(
+            "GET", f"/repos/{oq}/{nq}/releases/{rel['id']}/assets",
+            params={"per_page": 100}) or []
+        return json.dumps({
+            "repository": slug, "release_id": rel.get("id"),
+            "tag": rel.get("tag_name"),
+            "assets": [_asset_view(a) for a in assets]}, indent=2)
+
+    def _local_artifact_or_path(args: dict):
+        """Resolve (label, Path, artifact_row|None) from artifact_id,
+        name, or a user-supplied path."""
+        aid = str(args.get("artifact_id") or "").strip()
+        name = str(args.get("name") or "").strip()
+        raw_path = str(args.get("path") or "").strip()
+        row = None
+        if artifacts is not None:
+            try:
+                if aid:
+                    row = artifacts.get(aid)
+                elif name:
+                    hits = artifacts.find(name)
+                    row = hits[0] if hits else None
+            except Exception:
+                row = None
+        if row is not None:
+            p = Path(str(row.get("path") or ""))
+            if not p.is_file():
+                raise RuntimeError(
+                    f"artifact {row.get('id')} local file is missing — "
+                    "regenerate it or upload a different copy")
+            return str(row.get("name") or p.name), p, row
+        target = raw_path or name
+        if not target:
+            raise ValueError(
+                "artifact_id, name, or path is required — nothing to "
+                "upload")
+        p = Path(target).expanduser()
+        if not p.is_absolute():
+            p = (workspace / p).resolve()
+        if not p.is_file():
+            raise RuntimeError(f"no such file or artifact: {target}")
+        return p.name, p, None
+
+    def github_upload_release_asset(args: dict) -> str:
+        _ensure_token()
+        if not client.authenticated:
+            raise RuntimeError(
+                "GitHub upload requires a connected account — connect "
+                "GitHub first (github_connect).")
+        slug, oq, nq = _slug(args)
+        rel = _release(oq, nq, args)
+        label, path, row = _local_artifact_or_path(args)
+        asset_name = str(args.get("asset_name") or label).strip() or label
+        # Verify local integrity before publishing — never upload a
+        # file whose registered hash no longer matches.
+        if row is not None:
+            chk = artifacts.verify(str(row.get("id") or ""))
+            if not chk.get("ok"):
+                raise RuntimeError(
+                    f"artifact integrity check failed: "
+                    f"{chk.get('reason', 'unknown')} — refusing upload")
+        size = path.stat().st_size
+        existing = client.request(
+            "GET", f"/repos/{oq}/{nq}/releases/{rel['id']}/assets",
+            params={"per_page": 100}, require_auth=True) or []
+        dupe = next((a for a in existing
+                     if str(a.get("name")) == asset_name), None)
+        if dupe is not None and not bool(args.get("replace")):
+            return json.dumps({
+                "ok": False, "repository": slug,
+                "error": f"asset '{asset_name}' already exists on "
+                         f"release {rel.get('tag_name')}",
+                "existing_asset": _asset_view(dupe),
+                "hint": "pass replace=true to overwrite (requires "
+                        "explicit approval)"}, indent=2)
+        if dupe is not None:
+            client.request(
+                "DELETE",
+                f"/repos/{oq}/{nq}/releases/assets/{dupe['id']}",
+                require_auth=True)
+            _journal("github_asset_delete",
+                     f"asset '{asset_name}' (replaced)",
+                     risk="high", reversible=False,
+                     irreversible_reason="replaced asset bytes are "
+                                         "unrecoverable",
+                     description=f"Deleted duplicate asset {asset_name}")
+        template = str(rel.get("upload_url") or "").split("{")[0]
+        if not template:
+            raise RuntimeError("release has no upload endpoint")
+        up_url = template + "?" + urlencode({"name": asset_name})
+        import mimetypes as _mt
+        ctype = _mt.guess_type(asset_name)[0] or "application/octet-stream"
+        resp = client.upload_file(up_url, path, content_type=ctype)
+        # Verify the remote accepted the bytes — never claim success on
+        # the HTTP status alone.
+        asset_id = resp.get("id")
+        ok = bool(asset_id) and resp.get("state") == "uploaded" and \
+            int(resp.get("size") or -1) == size and \
+            str(resp.get("name")) == asset_name
+        if not ok:
+            raise RuntimeError(
+                "upload response failed verification "
+                f"(state={resp.get('state')}, size={resp.get('size')}, "
+                f"expected={size})")
+        # Second read-back: the asset must actually exist on the release.
+        check = client.request(
+            "GET",
+            f"/repos/{oq}/{nq}/releases/assets/{asset_id}",
+            require_auth=True) or {}
+        if check.get("id") != asset_id or \
+                int(check.get("size") or -1) != size:
+            raise RuntimeError(
+                "uploaded asset failed read-back verification")
+        remote = {
+            "provider": "github", "repository": slug,
+            "kind": "release_asset",
+            "release_id": rel.get("id"),
+            "release_url": rel.get("html_url"),
+            "asset_id": asset_id, "tag": rel.get("tag_name"),
+            "name": asset_name, "size": size,
+            "web_url": check.get("browser_download_url"),
+            "download_url": check.get("browser_download_url"),
+            "uploaded_at": check.get("updated_at")
+            or check.get("created_at"),
+        }
+        if row is not None:
+            try:
+                artifacts.attach_remote(str(row["id"]), remote)
+            except Exception:
+                pass
+        _journal("github_upload", f"asset '{asset_name}' → {slug}@{rel.get('tag_name')}",
+                 after={"asset_id": asset_id, "size": size},
+                 reversible=False,
+                 irreversible_reason="remote asset can't be un-published by undo",
+                 risk="medium",
+                 description=f"Uploaded {asset_name} ({size} bytes)")
+        return json.dumps({
+            "ok": True, "verified": True, "repository": slug,
+            "artifact_id": str((row or {}).get("id") or ""),
+            "asset": _asset_view(check),
+            "release": {"id": rel.get("id"), "tag": rel.get("tag_name"),
+                        "url": rel.get("html_url")}}, indent=2)
+
+    def github_download_release_asset(args: dict) -> str:
+        _ensure_token()
+        if downloads is None:
+            raise RuntimeError("download manager unavailable")
+        slug, oq, nq = _slug(args)
+        rel = _release(oq, nq, args)
+        assets = client.request(
+            "GET", f"/repos/{oq}/{nq}/releases/{rel['id']}/assets",
+            params={"per_page": 100}) or []
+        asset = _pick_asset(assets, args)
+        if asset is None:
+            raise RuntimeError(
+                "no matching asset on release "
+                f"{rel.get('tag_name')} — {len(assets)} available")
+        url = client.api_url(
+            f"/repos/{oq}/{nq}/releases/assets/{asset['id']}")
+        headers = {"Accept": "application/octet-stream"}
+        if client.token:
+            headers["Authorization"] = f"Bearer {client.token}"
+        res = downloads.start(
+            url, str(asset.get("name") or ""),
+            expected_size=int(asset.get("size") or 0),
+            headers=headers,
+            artifact={
+                "tool": "github_download_release_asset",
+                "remote": {
+                    "provider": "github", "repository": slug,
+                    "kind": "release_asset",
+                    "release_id": rel.get("id"),
+                    "release_url": rel.get("html_url"),
+                    "asset_id": asset.get("id"),
+                    "tag": rel.get("tag_name"),
+                    "name": asset.get("name"),
+                    "size": asset.get("size"),
+                    "web_url": asset.get("browser_download_url"),
+                    "download_url": asset.get("browser_download_url"),
+                }})
+        res["release"] = {"id": rel.get("id"), "tag": rel.get("tag_name"),
+                          "url": rel.get("html_url")}
+        res["repository"] = slug
+        return json.dumps(res, indent=2)
+
+    def github_delete_release_asset(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        if not bool(args.get("confirm")):
+            raise ValueError(
+                "deleting a release asset is permanent — pass "
+                "confirm=true")
+        asset_id = int(args.get("asset_id") or 0)
+        if asset_id <= 0:
+            rel = _release(oq, nq, args)
+            assets = client.request(
+                "GET", f"/repos/{oq}/{nq}/releases/{rel['id']}/assets",
+                params={"per_page": 100}) or []
+            asset = _pick_asset(assets, args)
+            if asset is None:
+                raise RuntimeError("no matching asset to delete")
+            asset_id = int(asset["id"])
+        client.request(
+            "DELETE",
+            f"/repos/{oq}/{nq}/releases/assets/{asset_id}",
+            require_auth=True)
+        _journal("github_asset_delete", f"asset {asset_id}",
+                 risk="high", reversible=False,
+                 irreversible_reason="deleted asset bytes are "
+                                     "unrecoverable",
+                 description=f"Deleted release asset {asset_id}")
+        return json.dumps({"ok": True, "deleted": asset_id,
+                           "repository": slug}, indent=2)
+
+    def _pick_asset(assets: list, args: dict):
+        want = str(args.get("asset") or args.get("name")
+                   or "").strip().lower()
+        aid = int(args.get("asset_id") or 0)
+        for a in assets:
+            if aid and int(a.get("id") or 0) == aid:
+                return a
+            if want and str(a.get("name") or "").lower() == want:
+                return a
+        if not want and not aid and len(assets) == 1:
+            return assets[0]
+        return None
+
+    def github_list_run_artifacts(args: dict) -> str:
+        _ensure_token()
+        slug, oq, nq = _slug(args)
+        run_id = int(args.get("run_id") or 0)
+        run = None
+        if run_id <= 0:
+            runs = client.request(
+                "GET", f"/repos/{oq}/{nq}/actions/runs",
+                params={"status": "success", "per_page": 1}) or {}
+            items = list(runs.get("workflow_runs") or [])
+            if not items:
+                raise RuntimeError("no successful Actions runs found")
+            run = items[0]
+            run_id = int(run.get("id") or 0)
+        data = client.request(
+            "GET", f"/repos/{oq}/{nq}/actions/runs/{run_id}/artifacts",
+            params={"per_page": 50}) or {}
+        rows = [{
+            "id": a.get("id"), "name": a.get("name"),
+            "size": a.get("size_in_bytes"),
+            "expired": bool(a.get("expired")),
+            "expires_at": a.get("expires_at"),
+            "created_at": a.get("created_at"),
+        } for a in (data.get("artifacts") or [])[:50]]
+        out = {"repository": slug, "run_id": run_id,
+               "artifacts": rows}
+        if run is not None:
+            out["run"] = {"id": run.get("id"),
+                          "name": run.get("name"),
+                          "title": run.get("display_title"),
+                          "url": run.get("html_url")}
+        return json.dumps(out, indent=2)
+
+    def github_download_run_artifact(args: dict) -> str:
+        _ensure_token()
+        if downloads is None:
+            raise RuntimeError("download manager unavailable")
+        slug, oq, nq = _slug(args)
+        aid = int(args.get("artifact_id") or 0)
+        artifact = None
+        run_id = int(args.get("run_id") or 0)
+        if aid <= 0 or run_id <= 0:
+            # Resolve through a run's artifact list so 'expired' is
+            # checked before a doomed download starts.
+            want = str(args.get("name") or "").strip().lower()
+            if run_id <= 0:
+                runs = client.request(
+                    "GET", f"/repos/{oq}/{nq}/actions/runs",
+                    params={"status": "success", "per_page": 1}) or {}
+                items = list(runs.get("workflow_runs") or [])
+                if not items:
+                    raise RuntimeError("no successful Actions runs found")
+                run = items[0]
+                run_id = int(run.get("id") or 0)
+            data = client.request(
+                "GET",
+                f"/repos/{oq}/{nq}/actions/runs/{run_id}/artifacts",
+                params={"per_page": 50}) or {}
+            for a in (data.get("artifacts") or []):
+                if aid and int(a.get("id") or 0) == aid or \
+                        (want and str(a.get("name") or "").lower()
+                         == want):
+                    artifact = a
+                    break
+            if artifact is None and aid <= 0 and not want:
+                rows = list(data.get("artifacts") or [])
+                if len(rows) == 1:
+                    artifact = rows[0]
+            if artifact is None:
+                raise RuntimeError(
+                    f"no matching artifact on run {run_id}")
+            if artifact.get("expired"):
+                raise RuntimeError(
+                    f"artifact '{artifact.get('name')}' expired on "
+                    f"{artifact.get('expires_at')} — GitHub deletes "
+                    "retention-expired artifacts permanently")
+            aid = int(artifact["id"])
+        name = str((artifact or {}).get("name")
+                   or f"artifact-{aid}")
+        url = client.api_url(
+            f"/repos/{oq}/{nq}/actions/artifacts/{aid}/zip")
+        headers = {}
+        if client.token:
+            headers["Authorization"] = f"Bearer {client.token}"
+        res = downloads.start(
+            url, f"{name}.zip",
+            expected_size=int((artifact or {}).get("size_in_bytes") or 0),
+            headers=headers,
+            artifact={
+                "tool": "github_download_run_artifact",
+                "extract_zip": True,
+                "remote": {
+                    "provider": "github", "repository": slug,
+                    "kind": "run_artifact", "run_id": run_id,
+                    "asset_id": aid, "artifact_name": name,
+                    "expires_at": (artifact or {}).get("expires_at"),
+                }})
+        res["repository"] = slug
+        res["run_id"] = run_id
+        return json.dumps(res, indent=2)
+
+    def github_get_repo_file(args: dict) -> str:
+        _ensure_token()
+        if downloads is None:
+            raise RuntimeError("download manager unavailable")
+        slug, oq, nq = _slug(args)
+        rel = str(args.get("path") or "").strip().lstrip("/")
+        if not rel or ".." in Path(rel).parts:
+            raise ValueError("a repository file path is required")
+        params = {}
+        ref = str(args.get("ref") or "").strip()
+        if ref:
+            params["ref"] = ref
+        data = client.request(
+            "GET", f"/repos/{oq}/{nq}/contents/{quote(rel)}",
+            params=params) or {}
+        if isinstance(data, list):
+            raise ValueError(
+                f"'{rel}' is a directory — name a file path")
+        raw = str(data.get("download_url") or "")
+        if not raw:
+            raise RuntimeError(
+                f"no download URL for '{rel}' (it may be too large or "
+                "a submodule)")
+        headers = {}
+        if client.token:
+            headers["Authorization"] = f"Bearer {client.token}"
+        res = downloads.start(
+            raw, Path(rel).name,
+            expected_size=int(data.get("size") or 0),
+            headers=headers,
+            artifact={
+                "tool": "github_get_repo_file",
+                "remote": {
+                    "provider": "github", "repository": slug,
+                    "kind": "repo_file", "name": Path(rel).name,
+                    "web_url": data.get("html_url"),
+                    "download_url": raw,
+                }})
+        res["repository"] = slug
+        return json.dumps(res, indent=2)
+
+
     registry.register(ToolSpec("git_current_branch", "Show the current local Git branch.", {
         "type": "object", "properties": {}
     }, "filesystem.read", git_current_branch))
@@ -895,3 +1455,132 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         "required": ["number"],
     }, "git.execute", github_checkout_pr, category="github",
         capabilities=["github_pr", "checkout_pr"]))
+
+    registry.register(ToolSpec("github_list_releases", "List GitHub releases (tag, url, assets) for the repository.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string",
+                     "description": "owner/name or GitHub URL (default: workspace remote)"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 30},
+        },
+    }, "github.read", github_list_releases, category="github",
+        capabilities=["github_release", "list_releases"]))
+
+    registry.register(ToolSpec("github_get_release", "Inspect one GitHub release by tag, id, or 'latest' — includes its assets.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "release_id": {"type": "integer"},
+        },
+    }, "github.read", github_get_release, category="github",
+        capabilities=["github_release", "inspect_release"]))
+
+    registry.register(ToolSpec("github_create_release", "Create a GitHub release for a tag (requires authorization). Only for explicit publish requests.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "name": {"type": "string"},
+            "body": {"type": "string"},
+            "draft": {"type": "boolean"},
+            "prerelease": {"type": "boolean"},
+        },
+        "required": ["tag"],
+    }, "github.write", github_create_release, category="github",
+        capabilities=["github_release", "create_release"]))
+
+    registry.register(ToolSpec("github_list_release_assets", "List the files attached to a GitHub release.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "release_id": {"type": "integer"},
+        },
+    }, "github.read", github_list_release_assets, category="github",
+        capabilities=["github_release", "list_assets"]))
+
+    registry.register(ToolSpec("github_upload_release_asset", "Upload a local file or registered artifact to a GitHub release. Streams the bytes, then verifies the remote asset (name+size+read-back). Duplicate names are refused unless replace=true.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "release_id": {"type": "integer"},
+            "artifact_id": {"type": "string"},
+            "name": {"type": "string",
+                     "description": "artifact filename to look up, or file name"},
+            "path": {"type": "string",
+                     "description": "explicit file path when not a registered artifact"},
+            "asset_name": {"type": "string"},
+            "replace": {"type": "boolean"},
+        },
+    }, "github.write", github_upload_release_asset, category="github",
+        capabilities=["github_release", "upload_asset"]))
+
+    registry.register(ToolSpec("github_download_release_asset", "Download a GitHub release asset through the durable download manager (resume, size verify, progress). Registers the result as an artifact.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "release_id": {"type": "integer"},
+            "asset": {"type": "string",
+                      "description": "asset filename"},
+            "asset_id": {"type": "integer"},
+        },
+    }, "github.read", github_download_release_asset, category="github",
+        capabilities=["github_release", "download_asset"]))
+
+    registry.register(ToolSpec("github_delete_release_asset", "Permanently delete a release asset (requires confirm=true and authorization).", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "tag": {"type": "string"},
+            "release_id": {"type": "integer"},
+            "asset": {"type": "string"},
+            "asset_id": {"type": "integer"},
+            "confirm": {"type": "boolean"},
+        },
+        "required": ["confirm"],
+    }, "github.write", github_delete_release_asset, category="github",
+        capabilities=["github_release", "delete_asset"]))
+
+    registry.register(ToolSpec("github_list_run_artifacts", "List GitHub Actions artifacts for a run — or the latest successful run when run_id is omitted.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "run_id": {"type": "integer"},
+        },
+    }, "github.read", github_list_run_artifacts, category="github",
+        capabilities=["github_actions", "list_artifacts"]))
+
+    registry.register(ToolSpec("github_download_run_artifact", "Download a GitHub Actions artifact (the standard ZIP) through the durable download manager and extract it. Expired artifacts are reported, not fetched.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "run_id": {"type": "integer"},
+            "artifact_id": {"type": "integer"},
+            "name": {"type": "string"},
+        },
+    }, "github.read", github_download_run_artifact, category="github",
+        capabilities=["github_actions", "download_artifact"]))
+
+    registry.register(ToolSpec("github_get_repo_file", "Download a single file from the repository (raw contents) into Downloads and register it as an artifact.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
+            "path": {"type": "string"},
+            "ref": {"type": "string"},
+        },
+        "required": ["path"],
+    }, "github.read", github_get_repo_file, category="github",
+        capabilities=["github_file", "download_file"]))

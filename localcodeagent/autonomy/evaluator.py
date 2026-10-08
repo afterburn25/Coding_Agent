@@ -21,8 +21,11 @@ class EvalVerdict(str, Enum):
 
 
 class MissionEvaluator:
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, artifacts: Any = None) -> None:
         self.workspace = Path(workspace)
+        # ArtifactManager handle — set by AppState so deliverable
+        # criteria check the registry (hash-verified), not just the FS.
+        self.artifacts = artifacts
 
     # -- criteria checks ------------------------------------------------
 
@@ -50,19 +53,38 @@ class MissionEvaluator:
             out["detail"] = (f"{len(ok)} passing verification(s)"
                              if ok else "no passing verification recorded")
 
-        elif kind in {"artifact_exists", "file_exists"}:
+        elif kind in {"artifact_exists", "file_exists",
+                      "artifact_verified"}:
             raw = str(crit.get("target") or "")
-            try:
-                p = Path(raw)
-                if not p.is_absolute():
-                    p = self.workspace / raw
-                p = p.resolve()
-                p.relative_to(self.workspace.resolve())  # confine to workspace
-                out["met"] = p.exists()
-                out["detail"] = f"{raw}: {'exists' if out['met'] else 'missing'}"
-            except (OSError, ValueError):
+            # Registered artifacts win: verify hash + presence through the
+            # ArtifactManager — an artifact that exists on disk but fails
+            # its SHA-256 is not a satisfied deliverable.
+            rows = []
+            if self.artifacts is not None and raw:
+                try:
+                    rows = self.artifacts.find(raw)
+                except Exception:
+                    rows = []
+            if rows:
+                ver = self.artifacts.verify(str(rows[0].get("id") or ""))
+                out["met"] = bool(ver.get("ok"))
+                out["detail"] = (f"{rows[0].get('name')}: "
+                                 f"{ver.get('reason') or 'verified'}")
+            elif kind == "artifact_verified":
                 out["met"] = False
-                out["detail"] = f"{raw}: path outside workspace or invalid"
+                out["detail"] = f"{raw or '?'}: not in artifact registry"
+            else:
+                try:
+                    p = Path(raw)
+                    if not p.is_absolute():
+                        p = self.workspace / raw
+                    p = p.resolve()
+                    p.relative_to(self.workspace.resolve())  # confine to workspace
+                    out["met"] = p.exists()
+                    out["detail"] = f"{raw}: {'exists' if out['met'] else 'missing'}"
+                except (OSError, ValueError):
+                    out["met"] = False
+                    out["detail"] = f"{raw}: path outside workspace or invalid"
 
         elif kind == "metric":
             metrics = mission.get("metrics") or {}

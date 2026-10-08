@@ -109,6 +109,68 @@ _FALSE_POSITIVE_RE = re.compile(
     r"\b(?:how do|how to|what is|what's|why|explain|show me|tell me|"
     r"should i|would it|does it|did you|have you)\b", re.I)
 
+# Artifact handoff + GitHub delivery — 'give me the file', 'upload the
+# installer to github', 'download X from the latest build'. These claim
+# before the plain-URL download lane: 'download X from github' has no
+# URL and would otherwise fall through to the model.
+_ARTIFACT_GIVE_RE = re.compile(
+    r"^\s*(?:give|hand|send|get)\s+me\s+"
+    r"(?:the\s+|a\s+|an\s+|my\s+|that\s+)?(.+?)\s*$", re.I | re.S)
+_ARTIFACT_ASK_RE = re.compile(
+    r"^\s*where(?:'s|\s+is)\s+(?:the\s+|my\s+|that\s+)?(.+?)\s*$",
+    re.I | re.S)
+_GH_UPLOAD_RE = re.compile(
+    r"^\s*(?:upload|publish|share)\s+(.+?)\s+(?:to|onto)\s+"
+    r"(?:the\s+)?github\b\s*(.*)$", re.I | re.S)
+_GH_PUT_RELEASE_RE = re.compile(
+    r"^\s*put\s+(.+?)\s+on\s+(?:the\s+)?(?:github\s+)?release\b\s*(.*)$",
+    re.I | re.S)
+_GH_DOWNLOAD_RE = re.compile(
+    r"^\s*(?:download|get|fetch|grab|retrieve)\s+"
+    r"(?:the\s+|a\s+|an\s+|my\s+|that\s+)?(.+?)\s+from\s+"
+    r"(?:the\s+)?github\b\s*(.*)$", re.I | re.S)
+_GH_RUN_ART_RE = re.compile(
+    r"^\s*(?:download|get|fetch|grab)\s+(?:the\s+)?(.+?)\s+"
+    r"(?:artifact\s+)?from\s+(?:the\s+)?(?:latest\s+|last\s+)?"
+    r"(?:successful\s+)?(?:build|ci|workflow(?:\s+run)?|"
+    r"actions(?:\s+run)?|run)s?\s*$", re.I | re.S)
+_GH_REPO_FILE_RE = re.compile(
+    r"^\s*(?:get|fetch|download|retrieve)\s+(?:the\s+)?"
+    r"([\w.\-/\\]+\.[\w.]+)\s+from\s+(?:the\s+)?"
+    r"(?:repo|repository|github)\b\s*$", re.I)
+_GH_RELEASE_TAG_RE = re.compile(
+    r"(?:release\s+|tag\s+|v)?(v?\d[\w.-]*)", re.I)
+# 'to github repo owner/name' — explicit target repo wins over the
+# workspace's connected remote.
+_GH_REPO_SPEC_RE = re.compile(
+    r"(?:repo|repository)\s+([\w.-]+/[\w.-]+)", re.I)
+# Words that make a bare 'give me X' an artifact request — a name with
+# an extension or a known output noun. Everything else falls through.
+_ARTIFACT_WORDS = {
+    "file", "files", "artifact", "artifacts", "installer", "setup",
+    "zip", "archive", "report", "log", "logs", "pdf", "doc", "docx",
+    "xlsx", "csv", "json", "txt", "exe", "msi", "image", "picture",
+    "photo", "screenshot", "audio", "video", "build", "package",
+    "release", "spreadsheet", "presentation", "readme", "download",
+    "downloads", "output", "export",
+}
+_ARTIFACT_PRONOUN_RE = re.compile(
+    r"^(?:it|that|this|them|the\s+(?:file|artifact)s?)\s*$", re.I)
+
+
+def _artifactish(tail: str) -> bool:
+    """True when a 'give me X' tail plausibly names a produced file —
+    an extension, an art- id, or an output noun. Bounded so 'give me a
+    hint'/'hand me a wrench' stay with the model lane."""
+    low = tail.strip().lower()
+    if not low:
+        return False
+    if low.startswith("art-") or re.fullmatch(
+            r"[\w.\- ]+\.[a-z0-9]{1,6}", low):
+        return True
+    words = set(re.findall(r"[a-z]+", low))
+    return bool(words & _ARTIFACT_WORDS)
+
 # Application lifecycle — resolve at plan time so the approval card and
 # ledger carry the real executable, not just the user's words.
 _APP_OPEN_RE = re.compile(
@@ -478,6 +540,114 @@ def parse_local_action(text: str, *, workspace: Path | str,
         if plan:
             return plan
 
+    # GitHub delivery — upload / download / repo-file fetch. Placed
+    # before the download lane: 'download X from github' has no URL.
+    m = _GH_UPLOAD_RE.match(t) or _GH_PUT_RELEASE_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
+        rest = (m.group(2) or "").strip()
+        repo_m = _GH_REPO_SPEC_RE.search(rest)
+        # Strip the repo spec before tag search — 'afterburn25' would
+        # otherwise satisfy the leading 'v?\d' tag fragment.
+        rest_nt = _GH_REPO_SPEC_RE.sub("", rest) if repo_m else rest
+        tag_m = _GH_RELEASE_TAG_RE.search(rest_nt)
+        tag = tag_m.group(1) if tag_m else ""
+        name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else \
+            re.sub(r"^(?:the|a|an|my)\s+", "", tail, flags=re.I)
+        if not name:
+            name = "latest"
+        params = {"name": name}
+        if tag:
+            params["tag"] = tag
+        if repo_m:
+            params["repo"] = repo_m.group(1)
+        return ActionPlan(
+            kind="github_upload", tool="github_upload_release_asset",
+            permission="github.write", params=params,
+            action_text=f"upload {name} to github"
+                        + (f" (release {tag})" if tag else ""),
+            display=name)
+    m = _GH_RUN_ART_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
+        name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else \
+            re.sub(r"^(?:the|a|an|my)\s+|artifact\s*$", "",
+                   tail, flags=re.I)
+        return ActionPlan(
+            kind="github_download", tool="github_download_run_artifact",
+            permission="github.read",
+            params={"name": name},
+            action_text=f"download the {name or 'build'} artifact "
+                        "from the latest successful run",
+            display=name or "build artifact")
+    m = _GH_DOWNLOAD_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
+        rest = (m.group(2) or "").strip()
+        repo_m = _GH_REPO_SPEC_RE.search(rest)
+        rest_nt = _GH_REPO_SPEC_RE.sub("", rest) if repo_m else rest
+        tag_m = _GH_RELEASE_TAG_RE.search(rest_nt)
+        tag = tag_m.group(1) if tag_m else ""
+        # 'get README.md from github' — a repo file, not a release asset.
+        if "/" in tail or re.fullmatch(r"[\w.\-]+\.[a-z0-9]{1,5}",
+                                       tail, re.I):
+            if not tag:
+                return ActionPlan(
+                    kind="github_file", tool="github_get_repo_file",
+                    permission="github.read", params={"path": tail},
+                    action_text=f"get {tail} from the repository",
+                    display=tail)
+        name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else \
+            re.sub(r"^(?:the|a|an|my)\s+", "", tail, flags=re.I)
+        params = {"name": name}
+        if tag:
+            params["tag"] = tag
+        if repo_m:
+            params["repo"] = repo_m.group(1)
+        return ActionPlan(
+            kind="github_download",
+            tool="github_download_release_asset",
+            permission="github.read", params=params,
+            action_text=f"download {name or 'the asset'} from github"
+                        + (f" release {tag}" if tag else ""),
+            display=name or "release asset")
+    m = _GH_REPO_FILE_RE.match(t)
+    if m:
+        rel = m.group(1).strip()
+        return ActionPlan(
+            kind="github_file", tool="github_get_repo_file",
+            permission="github.read", params={"path": rel},
+            action_text=f"get {rel} from the repository", display=rel)
+
+    # Artifact handoff — 'give me the file', 'send me the zip',
+    # "where's the installer". Pronouns resolve to the latest artifact.
+    m = _ARTIFACT_ASK_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
+        if _artifactish(tail):
+            name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else tail
+            return ActionPlan(
+                kind="artifact_show", tool="artifact_show",
+                permission="filesystem.read",
+                params={"name": name or "latest"},
+                action_text=f"hand over {name or 'the latest artifact'}",
+                display=name or "latest artifact")
+        return None
+    m = _ARTIFACT_GIVE_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
+        tail = re.sub(r"^(?:a\s+)?download\s+(?:link\s+for\s+|of\s+)",
+                      "", tail, flags=re.I).strip() or tail
+        if not _artifactish(tail):
+            return None
+        name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else tail
+        return ActionPlan(
+            kind="artifact_show", tool="artifact_show",
+            permission="filesystem.read",
+            params={"name": name or "latest"},
+            action_text=f"hand over {name or 'the latest artifact'}",
+            display=name or "latest artifact")
+
     # Installers — 'install <path|product>', 'run the installer [I
     # downloaded]'. The artifact must already exist on disk; a bare
     # product name resolves only against Downloads, never a URL guess.
@@ -840,19 +1010,23 @@ def parse_local_action(text: str, *, workspace: Path | str,
 
 def execute_plan(plan: ActionPlan, *, tools, ledger=None,
                  approved: bool = False, task_id: str = "",
-                 mission_id: str = "") -> dict[str, Any]:
+                 mission_id: str = "", artifacts=None) -> dict[str, Any]:
     """Run a plan. Returns {status, text, entry, tool_result}.
 
     statuses: verified | awaiting_approval | denied | failed |
               clarify | unavailable
     ``text`` is always truthful — it describes what actually happened,
     never what was intended.
+    ``artifacts`` (an ArtifactManager) resolves artifact ids found in
+    tool results into chat download-card payloads on the outcome.
     """
     entry = ledger.begin(
         kind=plan.kind, action=plan.action_text,
         capability=_CAPABILITY.get(plan.kind, "filesystem"),
         tool=plan.tool, params=plan.params,
         task_id=task_id, mission_id=mission_id) if ledger else None
+
+    holder = {"result": "", "cards": []}
 
     def _close(status: str, text: str, *, permission: str = "",
                verification: str = "", verified=None, artifact: str = "",
@@ -862,8 +1036,13 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
                 entry["id"], status=status, permission=permission,
                 verification=verification, verified=verified,
                 artifact=artifact, failure=failure)
-        return {"status": status, "text": text,
-                "entry": entry, "tool_result": tool_result}
+        out = {"status": status, "text": text,
+               "entry": entry, "tool_result": tool_result}
+        cards = holder["cards"] or _artifact_cards(
+            tool_result or holder["result"], artifacts)
+        if cards:
+            out["artifacts"] = cards
+        return out
 
     if plan.clarify:
         return _close("clarify", plan.clarify)
@@ -945,6 +1124,7 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
                 permission="approved", failure=str(exc))
 
     result = tools.execute(plan.tool, plan.params, approved=approved)
+    holder["result"] = result
     if result.startswith("APPROVAL_REQUIRED"):
         return _close(
             "awaiting_approval",
@@ -1003,6 +1183,94 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
             permission="approved" if approved else "policy",
             verification=summary, verified=False,
             failure=error or result[:160], tool_result=result)
+    if plan.kind in _GH_KINDS or plan.kind == "artifact_show":
+        # Artifact/GitHub tools return a JSON evidence payload; the
+        # card data rides inside it.
+        try:
+            data = json.loads(result)
+        except (ValueError, TypeError):
+            data = {}
+        if plan.kind == "artifact_show":
+            arts = [a for a in (data.get("artifacts") or [])
+                    if isinstance(a, dict)]
+            if data.get("ok") and arts:
+                names = ", ".join(str(a.get("filename", "?"))
+                                  for a in arts[:3])
+                if len(arts) > 1:
+                    text = (f"{len(arts)} artifacts match — "
+                            f"{names}{'…' if len(arts) > 3 else ''}. "
+                            "Cards are attached; pick one.")
+                else:
+                    a = arts[0]
+                    if a.get("available"):
+                        text = f"Here's {a.get('filename')}."
+                    else:
+                        text = (f"{a.get('filename')} — the local copy "
+                                "is unavailable"
+                                + (", but the GitHub link still works."
+                                   if (a.get("remote") or {})
+                                   .get("web_url") else "."))
+                holder["cards"] = arts
+                return _close(
+                    "verified", text,
+                    permission="approved" if approved else "policy",
+                    verification="artifact resolved", verified=True,
+                    tool_result=result)
+            return _close(
+                "failed",
+                str(data.get("error") or "I don't have a matching "
+                    "artifact — nothing has been produced yet."),
+                verification=result[:160], tool_result=result)
+        if plan.kind == "github_upload":
+            if data.get("ok"):
+                asset = data.get("asset") or {}
+                rel = data.get("release") or {}
+                url = str(rel.get("url") or asset.get("url") or "")
+                text = (f"Published {asset.get('name') or plan.display} "
+                        f"to {data.get('repository')} release "
+                        f"{rel.get('tag', '')} — verified "
+                        f"({asset.get('size', '?')} bytes). {url}").strip()
+                return _close(
+                    "verified", text,
+                    permission="approved" if approved else "policy",
+                    verification=f"asset {asset.get('id')} read-back "
+                                 f"size={asset.get('size')}",
+                    verified=True,
+                    artifact=str(asset.get("name") or ""),
+                    tool_result=result)
+            return _close(
+                "failed",
+                "The GitHub upload didn't complete: "
+                f"{data.get('error') or result[:160]}",
+                verification=result[:160], verified=False,
+                failure=str(data.get("error") or result[:160]),
+                tool_result=result)
+        if plan.kind in ("github_download", "github_file"):
+            if data.get("ok"):
+                dest = data.get("path") or "your Downloads folder"
+                if data.get("deduplicated"):
+                    return _close(
+                        "verified",
+                        f"Already downloaded — the existing file "
+                        f"verified: {dest}.",
+                        permission="approved" if approved else "policy",
+                        verification="dedupe match", verified=True,
+                        artifact=str(dest), tool_result=result)
+                return _close(
+                    "verified",
+                    f"Downloading {plan.display} to {dest} — job "
+                    f"{data.get('job_id', '')}. It registers as an "
+                    "artifact when it lands; watch Tasks for progress.",
+                    permission="approved" if approved else "policy",
+                    verification="download job started", verified=True,
+                    artifact=str(dest), tool_result=result)
+            return _close(
+                "failed",
+                "The GitHub download couldn't start: "
+                f"{data.get('error') or result[:160]}",
+                verification=result[:160], verified=False,
+                failure=str(data.get("error") or result[:160]),
+                tool_result=result)
     if plan.kind in _READ_KINDS:
         # Read intents are their own evidence — the tool result IS the
         # verified answer (stat output, match list).
@@ -1029,10 +1297,55 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
 _APP_KINDS = {"launch", "close", "restart", "status", "window",
               "download", "download_cancel", "install"}
 _READ_KINDS = {"search", "search_text", "inspect"}
+_GH_KINDS = {"github_upload", "github_download", "github_file"}
+_ART_ID_RE = re.compile(r"art-[0-9a-f]{12}")
+
+
+def _artifact_cards(result: str, artifacts) -> list[dict]:
+    """Resolve artifact ids / embedded views in a tool result into
+    client-facing card payloads via the ArtifactManager."""
+    if not result:
+        return []
+    ids: list[str] = []
+    views: list[dict] = []
+    try:
+        data = json.loads(result)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        if isinstance(data.get("artifact_id"), str):
+            ids.append(data["artifact_id"])
+        for a in data.get("artifacts") or []:
+            if isinstance(a, dict) and a.get("id"):
+                if a.get("filename"):
+                    views.append(a)
+                else:
+                    ids.append(str(a["id"]))
+            elif isinstance(a, str):
+                ids.append(a)
+    else:
+        ids.extend(_ART_ID_RE.findall(result))
+    if artifacts is not None:
+        for aid in ids[:8]:
+            try:
+                view = artifacts.client_view(aid)
+            except Exception:
+                view = None
+            if view:
+                views.append(view)
+    # Dedupe, preserve order.
+    out, seen = [], set()
+    for v in views:
+        if str(v.get("id")) not in seen:
+            seen.add(str(v.get("id")))
+            out.append(v)
+    return out[:8]
 _CAPABILITY = {k: "application" for k in
                ("launch", "close", "restart", "status", "window")}
 _CAPABILITY.update({"download": "network", "download_cancel": "network",
                     "install": "application"})
+_CAPABILITY.update({"artifact_show": "filesystem"})
+_CAPABILITY.update({k: "github" for k in _GH_KINDS})
 _CAPABILITY.update({k: "filesystem" for k in
                     ("mkdir", "write", "delete", "move", "rename",
                      "copy", "archive", "extract")})

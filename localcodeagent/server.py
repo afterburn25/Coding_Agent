@@ -466,7 +466,8 @@ class AppState:
         register_filesystem_tools(
             self.tools, self.workspace, checkpoints=self.checkpoints,
             tasks=self.tasks, extra_roots=self.workspaces.allowed_roots,
-            journal=self.changes)
+            journal=self.changes,
+            artifacts=lambda: self.artifacts)
         register_shell_tools(
             self.tools, self.workspace,
             extra_roots=self.workspaces.allowed_roots)
@@ -711,6 +712,16 @@ class AppState:
                            journal=self.changes)
         from .tools.queue import register_queue_tools
         register_queue_tools(self.tools, self.queue)
+        # User-facing durable downloads — 'download <url>' from chat and
+        # the transport for GitHub release/Actions artifact fetches.
+        # Created before github tools so they can hand it authenticated
+        # downloads; on_done registers finished downloads as artifacts.
+        from .tools.downloads import (
+            UserDownloadManager, register_download_tools)
+        self.user_downloads = UserDownloadManager(
+            self.jobs, Path.home() / "Downloads")
+        self.user_downloads.on_done = self._download_artifact_done
+        register_download_tools(self.tools, self.user_downloads)
         if config.github_enabled:
             register_github_tools(
                 self.tools, self.workspace, config,
@@ -719,7 +730,9 @@ class AppState:
                 client=self.github_client,
                 account=self.github_account,
                 journal=self.changes,
-                events=self.events)
+                events=self.events,
+                artifacts=self.artifacts,
+                downloads=self.user_downloads)
         register_repository_tools(self.tools, self.repository_index)
         if config.research_enabled:
             register_research_tools(self.tools, self.research)
@@ -807,12 +820,6 @@ class AppState:
             }
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
-        # User-facing durable downloads — 'download <url>' from chat.
-        from .tools.downloads import (
-            UserDownloadManager, register_download_tools)
-        self.user_downloads = UserDownloadManager(
-            self.jobs, Path.home() / "Downloads")
-        register_download_tools(self.tools, self.user_downloads)
         # tool_downloads/jobs exist now — safe to re-enter a setup that was
         # mid-flight when the app last exited.
         self.images.resume_setup()
@@ -998,6 +1005,7 @@ class AppState:
                 (self.profiles.active() or {}).get("is_creator")),
             learning=self.learning,
             action_ledger=self.action_ledger,
+            artifacts=self.artifacts,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the
@@ -3014,6 +3022,9 @@ class AppState:
         # Evidence for non-executor node kinds (verify/internal/job) —
         # executor kinds write their own entries in _mission_node_out.
         sup.action_ledger = self.action_ledger
+        # Deliverable criteria consult the registry — a mission never marks
+        # an artifact_verified deliverable complete on a stale/tampered file.
+        sup.evaluator.artifacts = self.artifacts
         sup.repair = self._build_self_repair(config, sup, runtime_root,
                                              hooks, emit)
         self._wire_signal_sources(sup, runtime_root)
@@ -4003,6 +4014,82 @@ class AppState:
         except Exception:
             pass
         return rec
+
+    def _download_artifact_done(self, meta: dict) -> None:
+        """UserDownloadManager completion hook — a finished durable
+        download becomes a registered artifact (with provenance/remote
+        copy info when the fetch carried GitHub metadata). Actions
+        artifact ZIPs extract beside the archive."""
+        dest = Path(str(meta.get("dest") or ""))
+        if not dest.is_file():
+            return
+        spec = dict(meta.get("artifact") or {})
+        if not spec and not meta.get("auto_register"):
+            return
+        prov = {"source_url": str(meta.get("url") or ""),
+                "downloaded_at": time.time()}
+        rec = self._register_output_artifact(
+            dest, task_id=str(meta.get("task_id") or ""),
+            tool=str(spec.get("tool") or "download_file"))
+        if spec.get("remote"):
+            try:
+                self.artifacts.attach_remote(str(rec.get("id") or ""),
+                                             dict(spec["remote"]))
+            except Exception:
+                pass
+        if spec.get("extract_zip") and dest.suffix.lower() == ".zip":
+            self._extract_download_zip(dest, spec, rec)
+
+    def _extract_download_zip(self, dest: Path, spec: dict,
+                              zip_rec: dict) -> None:
+        """GitHub Actions artifacts arrive as a zip wrapper — extract
+        beside the archive and register the real deliverables."""
+        from .tools.downloads import _safe_member_name
+        import shutil
+        import zipfile
+        out_dir = dest.with_suffix("")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        count, written = 0, 0
+        try:
+            with zipfile.ZipFile(dest) as zf:
+                for info in zf.infolist():
+                    if count >= 200 or written > 512 * 1024 * 1024:
+                        break
+                    rel = _safe_member_name(info.filename)
+                    if not rel:
+                        continue
+                    target = (out_dir / rel).resolve()
+                    if not target.is_relative_to(out_dir.resolve()):
+                        continue
+                    if info.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src, target.open("wb") as out:
+                        shutil.copyfileobj(src, out, 1 << 20)
+                    written += target.stat().st_size
+                    count += 1
+                    frec = self._register_output_artifact(
+                        target,
+                        tool=str(spec.get("tool")
+                                 or "github_download_run_artifact"))
+                    if spec.get("remote"):
+                        try:
+                            self.artifacts.attach_remote(
+                                str(frec.get("id") or ""),
+                                dict(spec["remote"]))
+                        except Exception:
+                            pass
+        except (OSError, zipfile.BadZipFile):
+            return
+        try:
+            self.artifacts.attach_remote(
+                str(zip_rec.get("id") or ""),
+                {"provider": "github",
+                 "kind": "run_artifact_extracted",
+                 "name": f"{count} files in {out_dir.name}/"})
+        except Exception:
+            pass
 
     def _mission_research(self, mission: dict, node: dict) -> dict:
         """Run a mission 'research' node through the real coordinator —
@@ -7075,6 +7162,57 @@ class Handler(BaseHTTPRequestHandler):
                         "versions": self.state.artifacts.versions(name),
                         "latest": self.state.artifacts.latest(name)})
             return True
+        if path.startswith("/api/artifacts/"):
+            # Artifact-addressed routes only — the id, never a client
+            # path, identifies the file (no traversal surface).
+            rest = unquote(path[len("/api/artifacts/"):]).strip("/")
+            download = rest.endswith("/download")
+            aid = rest[:-len("/download")].strip("/") if download else rest
+            if not re.fullmatch(r"art-[0-9a-f]{12}", aid):
+                self._json({"error": "unknown artifact"}, 404)
+                return True
+            rec = self.state.artifacts.get(aid)
+            if rec is None:
+                self._json({"error": "unknown artifact"}, 404)
+                return True
+            if not download:
+                self._json(self.state.artifacts.client_view(rec))
+                return True
+            target = Path(str(rec.get("path") or ""))
+            if not target.is_file():
+                self._json({"error": "local copy unavailable",
+                            "remote": dict(rec.get("remote") or {})},
+                           404)
+                return True
+            chk = self.state.artifacts.verify(aid)
+            if not chk.get("ok"):
+                self._json({"error": "integrity check failed — "
+                            "registered file no longer matches its "
+                            f"recorded hash ({chk.get('reason')})"}, 409)
+                return True
+            name = str(rec.get("name") or target.name)
+            safe_name = re.sub(r'["\\\r\n]', "_", name)[:150] or "file"
+            mime = mimetypes.guess_type(name)[0] or \
+                "application/octet-stream"
+            size = target.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{safe_name}"; '
+                f"filename*=UTF-8''{quote(name)}")
+            self.send_header("X-Artifact-Id", aid)
+            self.send_header("X-Content-SHA256",
+                             str(rec.get("sha256") or ""))
+            self.end_headers()
+            try:
+                with target.open("rb") as fh:
+                    import shutil as _sh
+                    _sh.copyfileobj(fh, self.wfile, 1 << 20)
+            except (BrokenPipeError, ConnectionError, OSError):
+                pass
+            return True
         if path == "/api/safemode":
             self._json(self.state.safemode.status())
             return True
@@ -8629,6 +8767,73 @@ class Handler(BaseHTTPRequestHandler):
                 continue
         return rows
 
+    def _agent_artifacts(self, result) -> list[dict]:
+        """Artifacts produced or surfaced this turn → chat file cards.
+        Sources: artifact ids embedded in tool results, artifacts
+        registered against the task, and ui.artifacts resolved by the
+        local-action lane."""
+        ids: list[str] = []
+        seen: set[str] = set()
+
+        def _collect(value) -> None:
+            if isinstance(value, str) and \
+                    re.fullmatch(r"art-[0-9a-f]{12}", value):
+                if value not in seen:
+                    seen.add(value)
+                    ids.append(value)
+            elif isinstance(value, dict):
+                _collect(value.get("id") or value.get("artifact_id"))
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    _collect(item)
+
+        for event in getattr(result, "tool_events", []) or []:
+            raw = str(event.get("result") or "")
+            try:
+                payload = json.loads(raw)
+            except (ValueError, TypeError):
+                payload = None
+            if isinstance(payload, dict):
+                _collect(payload.get("artifact_id"))
+                _collect(payload.get("artifact_ids"))
+                arts = payload.get("artifacts")
+                if isinstance(arts, list):
+                    for a in arts:
+                        _collect(a.get("id") if isinstance(a, dict) else a)
+            else:
+                # Marker form: '... artifact_id=art-xxxxxxxxxxxx'
+                for aid in re.findall(r"art-[0-9a-f]{12}", raw):
+                    _collect(aid)
+        task_id = str((getattr(result, "task", None) or {})
+                      .get("id") or "")
+        if task_id:
+            try:
+                for row in self.state.artifacts.list(
+                        task_id=task_id, limit=12):
+                    _collect(row.get("id"))
+            except Exception:
+                pass
+        # The deterministic lane resolves card payloads itself — merge
+        # them by id so nothing duplicates.
+        ui_arts = list((getattr(result, "ui", {}) or {})
+                       .get("artifacts") or [])
+        out: list[dict] = []
+        emitted: set[str] = set()
+        for view in ui_arts:
+            if isinstance(view, dict) and view.get("id"):
+                out.append(view)
+                emitted.add(str(view["id"]))
+        for aid in ids[:12]:
+            if aid in emitted:
+                continue
+            try:
+                view = self.state.artifacts.client_view(aid)
+            except Exception:
+                view = None
+            if view:
+                out.append(view)
+        return out[:12]
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         # Onboarding lock: until a profile exists, only onboarding-safe
@@ -9842,6 +10047,7 @@ class Handler(BaseHTTPRequestHandler):
             "ui": getattr(result, "ui", {}),
             "ambiguity": list(getattr(result, "ambiguity", []) or []),
             "image_jobs": self._agent_image_jobs(result),
+            "artifacts": self._agent_artifacts(result),
             "runtime": self.state.runtime.summary(probe_external=False),
         }
         if voice_task_id:

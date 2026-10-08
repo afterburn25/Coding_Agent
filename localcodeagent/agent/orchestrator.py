@@ -373,6 +373,7 @@ class AgentOrchestrator:
         asker_is_creator=None,
         learning=None,
         action_ledger=None,
+        artifacts=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -448,6 +449,9 @@ class AgentOrchestrator:
         # consequential local action; None degrades the lane to
         # in-memory results only.
         self.action_ledger = action_ledger
+        # ArtifactManager — local-action results that produced
+        # downloadable files attach their client-view cards through it.
+        self.artifacts = artifacts
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -2024,7 +2028,7 @@ class AgentOrchestrator:
             return None
         outcome = execute_plan(
             plan, tools=self.tools, ledger=self.action_ledger,
-            task_id=task_id)
+            task_id=task_id, artifacts=self.artifacts)
         if outcome["status"] == "unavailable":
             # The direct tool isn't wired — the model lane may still
             # reach the goal through another route (shell, terminal),
@@ -2103,13 +2107,18 @@ class AgentOrchestrator:
         if self.conversation_memory is not None:
             self.conversation_memory.record_exchange(user_text, text)
         if self.conversation_manager is not None:
-            self.conversation_manager.record_exchange(user_text, text)
+            self.conversation_manager.record_exchange(
+                user_text, text,
+                artifact_ids=[str(a.get("id")) for a in
+                              (outcome.get("artifacts") or [])
+                              if a.get("id")])
         return AgentResult(
             content=text,
             routing=decision,
             model_events=[builtin_event],
             steps=0,
             task=done.as_dict(),
+            ui=(self._artifact_ui(outcome.get("artifacts") or [])),
         )
 
     def _local_action_multi(self, plans: list, task_id: str,
@@ -2126,10 +2135,12 @@ class AgentOrchestrator:
         parked_plan = None
         stopped_early = False
         last_status = "verified"
+        cards: list[dict] = []
         for plan in plans:
             outcome = execute_plan(
                 plan, tools=self.tools, ledger=self.action_ledger,
-                task_id=task_id)
+                task_id=task_id, artifacts=self.artifacts)
+            cards.extend(outcome.get("artifacts") or [])
             status = outcome["status"]
             last_status = status
             if status == "unavailable" and not lines:
@@ -2255,7 +2266,13 @@ class AgentOrchestrator:
             model_events=[builtin_event],
             steps=0,
             task=done.as_dict(),
+            ui=self._artifact_ui(cards),
         )
+
+    def _artifact_ui(self, cards: list) -> dict:
+        """Artifact card payloads resolved by execute_plan — attached to
+        ui so the chat renderer draws download cards under the reply."""
+        return {"artifacts": list(cards)} if cards else {}
 
     def _builtin_reply(self, user_text: str):
         """The instance-level persona path: SemanticResponse through the
@@ -3985,7 +4002,7 @@ class AgentOrchestrator:
         if approved:
             outcome = execute_plan(
                 plan, tools=self.tools, ledger=self.action_ledger,
-                approved=True, task_id=task_id)
+                approved=True, task_id=task_id, artifacts=self.artifacts)
             text = outcome["text"]
             failed = outcome["status"] in (
                 "failed", "unavailable", "unverified")
@@ -4054,7 +4071,10 @@ class AgentOrchestrator:
                 reasons=["local action lane — no model call"],
                 complexity=0),
             steps=0,
-            task=done.as_dict())
+            task=done.as_dict(),
+            ui=self._artifact_ui(
+                (outcome.get("artifacts") or [])
+                if approved else []))
 
     def _result(self, session: _AgentSession, content: str | None = None) -> AgentResult:
         task = self.tasks.get(session.task_id)
@@ -4227,6 +4247,22 @@ class AgentOrchestrator:
                 if job_id and job_id not in ids:
                     ids.append(job_id)
         return ids
+
+    _ARTIFACT_ID_RE = re.compile(r"art-[0-9a-f]{12}")
+
+    @staticmethod
+    def _artifact_ids_from_events(tool_events: list[dict[str, Any]]) -> list[str]:
+        """Artifact ids surfaced in tool results — JSON payloads
+        (artifact_id/artifacts[]) or marker text (artifact_id=art-…)."""
+        ids: list[str] = []
+        for event in tool_events:
+            raw = str(event.get("result") or "")
+            for aid in AgentOrchestrator._ARTIFACT_ID_RE.findall(raw):
+                if aid not in ids:
+                    ids.append(aid)
+            if len(ids) >= 12:
+                break
+        return ids[:12]
 
     @staticmethod
     def _call_signature(name: str, args: dict[str, Any]) -> str:
@@ -4789,6 +4825,7 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
+                artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
         if self.answer_memory is not None and not session.unverified_claims:
@@ -5512,6 +5549,7 @@ class AgentOrchestrator:
                 intent=self.conversation_manager.classify_intent(session.user_text),
                 model_id=session.profile.id,
                 image_job_ids=self._image_job_ids_from_events(session.tool_events),
+                artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
         self._close_session(session.task_id)

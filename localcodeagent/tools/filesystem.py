@@ -61,8 +61,26 @@ def register_filesystem_tools(
     tasks: TaskStore | None = None,
     extra_roots=None,
     journal=None,
+    artifacts=None,
 ) -> None:
     root = workspace.resolve()
+
+    def _register_artifact(path: Path, *, tool: str) -> dict:
+        """Register a produced file as a downloadable artifact —
+        best-effort (the accessor may be None or lazy)."""
+        if artifacts is None:
+            return {}
+        try:
+            mgr = artifacts() if callable(artifacts) else artifacts
+            tls = registry.context.get("task_tls")
+            return mgr.register(
+                path, tool=tool,
+                task_id=str(getattr(tls, "task_id", "") or
+                            registry.context.get("task_id", "") or ""),
+                mission_id=str(registry.context.get("mission_id", "")
+                               or ""))
+        except Exception:
+            return {}
 
     def safe(raw: str) -> Path:
         return _safe_path(workspace, raw, extra_roots)
@@ -337,7 +355,10 @@ def register_filesystem_tools(
         if count != len(members):
             raise RuntimeError(
                 f"verification failed: archive has {count} members, expected {len(members)}")
-        return f"ARCHIVE_OK {display_path(dst)} — {count} files, {dst.stat().st_size} bytes"
+        rec = _register_artifact(dst, tool="fs_archive")
+        aid = f" artifact_id={rec['id']}" if rec.get("id") else ""
+        return (f"ARCHIVE_OK {display_path(dst)} — {count} files, "
+                f"{dst.stat().st_size} bytes{aid}")
 
     def fs_extract(args: dict) -> str:
         import zipfile

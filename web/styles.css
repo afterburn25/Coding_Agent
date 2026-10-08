@@ -3401,3 +3401,19 @@ select option {
 .perm-resolved{font-size:12px;color:#9fd8a8;padding:7px 10px;background:rgba(90,170,110,.1);border:1px solid rgba(90,170,110,.3);border-radius:8px;margin-top:8px}
 .perm-resolved.negative{color:#d3a08f;background:rgba(190,90,70,.1);border-color:rgba(190,90,70,.3)}
 .perm-disabled{font-size:12px;color:var(--text-dim);padding:7px 0}
+
+/* --- Artifact handoff cards -------------------------------------------------- */
+.artifact-cards{display:flex;flex-direction:column;gap:6px;margin:8px 0;max-width:560px}
+.artifact-card{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel2);border-radius:11px;padding:10px 12px;min-width:0}
+.artifact-card.verified{border-color:rgba(110,180,130,.45)}
+.artifact-card.unavailable{opacity:.75}
+.artifact-icon{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:rgba(120,160,220,.12);border:1px solid var(--line);font-size:15px;color:#a9c4e8;flex:none}
+.artifact-body{flex:1;min-width:0}
+.artifact-name{font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.artifact-meta{font-size:11px;color:var(--text-dim);margin-top:2px}
+.artifact-card.verified .artifact-meta{color:#9fd8a8}
+.artifact-details{margin-top:4px}
+.artifact-details summary{font-size:10px;color:var(--text-dim);cursor:pointer}
+.artifact-details pre{font-size:10px;color:var(--text-dim);background:rgba(0,0,0,.25);border-radius:7px;padding:6px 8px;margin-top:5px;white-space:pre-wrap;word-break:break-all}
+.artifact-actions{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.artifact-actions .mini-button{text-decoration:none}

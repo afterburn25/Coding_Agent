@@ -132,3 +132,63 @@ def register_release_tools(registry: ToolRegistry, workspace: Path, *,
         category="coding",
         capabilities=["release_verify", "package_release"],
     ))
+
+    def artifact_show(args: dict[str, Any]) -> str:
+        """Resolve an artifact the user asks for by id, name fragment,
+        or 'latest' — returns the client-facing card payload."""
+        mgr = artifacts()
+        name = str(args.get("name") or args.get("artifact_id")
+                   or "").strip()
+        task_id = str(args.get("task_id") or "").strip()
+        hits = mgr.find(name, task_id=task_id)
+        if not hits:
+            return json.dumps({
+                "ok": False,
+                "error": "no matching artifact — nothing has been "
+                         "produced yet, or it was cleaned up"})
+        views = [mgr.client_view(r) for r in hits]
+        views = [v for v in views if v]
+        return json.dumps({"ok": True, "artifacts": views[:8]},
+                          ensure_ascii=False)
+
+    def artifact_list(args: dict[str, Any]) -> str:
+        mgr = artifacts()
+        rows = mgr.list(
+            kind=str(args.get("kind") or ""),
+            limit=max(1, min(50, int(args.get("limit") or 20))))
+        views = [v for v in (mgr.client_view(r) for r in rows) if v]
+        return json.dumps({"artifacts": views},
+                          ensure_ascii=False)
+
+    registry.register(ToolSpec(
+        "artifact_show",
+        "Hand the user a previously produced artifact — resolves by id, filename fragment ('installer', 'report'), or latest. Returns the download card payload.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "filename fragment, artifact id, or 'latest'"},
+                "artifact_id": {"type": "string"},
+                "task_id": {"type": "string"},
+            },
+        },
+        "filesystem.read",
+        artifact_show,
+        category="coding",
+        capabilities=["artifact_handoff", "file_delivery"],
+    ))
+    registry.register(ToolSpec(
+        "artifact_list",
+        "List registered artifacts (downloadable outputs) with verification status.",
+        {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+        },
+        "filesystem.read",
+        artifact_list,
+        category="coding",
+        capabilities=["artifact_handoff", "file_delivery"],
+    ))

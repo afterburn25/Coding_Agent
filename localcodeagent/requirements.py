@@ -43,7 +43,8 @@ REQUIREMENT_PRIORITIES = {"critical", "high", "normal", "low"}
 
 # Verification kinds understood by autonomy.evaluator.MissionEvaluator.
 EVALUATOR_KINDS = {"all_tasks_completed", "verify_passed", "artifact_exists",
-                   "file_exists", "metric", "no_failures"}
+                   "file_exists", "artifact_verified", "metric",
+                   "no_failures"}
 
 
 def _rid() -> str:
