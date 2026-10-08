@@ -43,6 +43,17 @@ decision card — no Tasks-panel detour, no typing `yes`/`continue`:
   and e2e park→decide→exact-once resume. Live Windows dogfood on a
   sandboxed backend verified the full loop including restart restore.
 
+**DEPLOYED** — v0.33.0 is live on the workstation install
+(`backend-pre-0.33.0` preserves the 0.32.0 backend). Verified live:
+`/api/approvals` on the deployed backend immediately surfaced a
+pre-deploy `waiting_approval` task as a restored pending card
+(`Filesystem · Write files`, full decision set) — durable restart
+restore working on real state. Note: a fresh gated chat turn needs a
+runnable coding model; at deploy time readiness reported 1.7 GB free
+VRAM (models idle-unloaded), so the model lane returned the standard
+readiness 409 — environment state, not a permissions defect. The full
+park→decide→resume matrix was dogfooded on the sandboxed source build.
+
 Checkpoint: **2749 tests** passing (2 environment skips).
 
 ## v0.32.0 — Conversation Intelligence phase 1: response scope
