@@ -1582,7 +1582,7 @@ class AgentOrchestrator:
         sem = SemanticResponse(
             facts=[canonical],
             semantic_id=f"capability:github:{state}",
-            speech_act="answer")
+            speech_act="answer", bare=True)
         sp = self._speech(user_text)
         if not sp:
             return RenderedReply(text=canonical, speech_act="answer")
@@ -1676,7 +1676,7 @@ class AgentOrchestrator:
         sem = SemanticResponse(
             facts=[canonical],
             semantic_id="capability:git_state",
-            speech_act="answer")
+            speech_act="answer", bare=True)
         sp = self._speech(user_text)
         if not sp:
             return RenderedReply(text=canonical, speech_act="answer")
@@ -1760,7 +1760,7 @@ class AgentOrchestrator:
         sem = SemanticResponse(
             facts=[canonical],
             semantic_id="capability:github:target",
-            speech_act="answer")
+            speech_act="answer", bare=True)
         sp = self._speech(user_text)
         if not sp:
             return RenderedReply(text=canonical, speech_act="answer")
@@ -1830,7 +1830,7 @@ class AgentOrchestrator:
         sem = SemanticResponse(
             facts=[canonical],
             semantic_id=f"self_knowledge:{res.intent or res.kind}",
-            speech_act="answer")
+            speech_act="answer", bare=True)
         sp = self._speech(user_text)
         if not sp:
             return RenderedReply(text=canonical, speech_act="answer",
@@ -2824,7 +2824,8 @@ class AgentOrchestrator:
         examples = learned.get("training_examples") or []
         forgotten = learned.get("forgotten") or []
         locked = learned.get("locked") or []
-        if not (facts or rules or examples or forgotten or locked):
+        restated = learned.get("restated") or []
+        if not (facts or rules or examples or forgotten or locked or restated):
             return None
         parts = []
         if locked:
@@ -2838,6 +2839,8 @@ class AgentOrchestrator:
                 parts.append(f"Got it — {facts[0]}.")
             else:
                 parts.append(f"Got it — noted {len(facts)} things.")
+        elif restated:
+            parts.append(f"Already noted — {restated[0]}.")
         elif not parts:
             parts.append("Got it.")
         if rules:

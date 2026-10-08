@@ -90,11 +90,37 @@ every fix below is a defect the new scenarios actually caught):
   `TestCorrectionChains` (9 adversarial memory cases),
   `test_scope_metrics_aggregate` (rate ceilings as regression gate).
 
-Checkpoint: **2705 tests** passing (2 environment skips).
+Increment 4 — live dogfood on a sandboxed source backend (real
+llama.cpp + real persona/memory at `D:\Devin\nexus_dogfood`, port
+58580) surfaced and fixed:
+
+- Fact restatement fell through to a rambling model essay —
+  `learned["restated"]` now acks `Already noted — X.`; re-teaching a
+  superseded value re-lands fresh (inactive-twin dedupe fix).
+- `where ... you are` matched the UI-nav regex → "Chat is under
+  Chat." Person-directed wheres now fall through.
+- Incidental feature-alias hits anywhere in a compound sentence
+  (`let's talk ... what's the weather` → 'talk' → Chat explain) —
+  aliases must live in the interrogative clause.
+- `change it to the dark one` and `no, dont do that` landed referent/
+  imperative phrases in fact value slots (`color is the dark one`,
+  `color is dont do that`) — `_REFERENT_VALUE_RE` +
+  `_IMPERATIVE_VALUE_RE` guards reject them.
+- Self-knowledge + GitHub capability lanes are `bare` — no more
+  `I hear you.`/`I do occasionally get things right.` on exact facts.
+- Verified live: correction chains, forget + honest empty-state,
+  informal identity, repeat-variation, clean recalls.
+
+Known live limits (model lane, not regressions): the 4B adds persona
+flourish beyond BRIEF budgets, attributes user facts as its own on
+recall, and invents weather instead of declining — the scope
+directive helps but a small model's discipline is soft.
+
+Checkpoint: **2710 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
-acceptance matrix, live-backend dogfood + real-model benchmark,
-topic-shift decay tuning, richer slot model on the model lane,
+acceptance matrix, real-model benchmark numbers on the deployed
+build, topic-shift decay tuning, richer slot model on the model lane,
 inspector UI surface, then release/docs/deploy.
 
 ## v0.31.10 — low-mid "barrel" carve + boom-aware gate
@@ -2896,7 +2922,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2705 tests` passing (2 environment skips).
+Expected at this checkpoint: `2710 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -676,6 +676,23 @@ class SelfKnowledgeService:
         """'Can you X', 'what is X', 'why can't you X', 'how do I X'."""
         feature = self.catalog.find(t)
         st = self.settings.find(t)
+        if feature is not None or st is not None:
+            # Incidental-alias guard: in a compound sentence the matched
+            # alias must live in the interrogative clause — "let's talk
+            # about something else — what's the weather like where you
+            # are" must not resolve 'Chat' via the 'talk' alias.
+            qmarks = list(re.finditer(
+                r"\b(whats?|who|whom|whose|when|where|why|how|which|"
+                r"tell|explain|describe|can|could|do|does|is|are|am)\b",
+                t))
+            if qmarks:
+                span = f" {t[qmarks[-1].start():]} "
+                if feature is not None and not any(
+                        f" {a} " in span for a in feature.aliases):
+                    feature = None
+                if st is not None and not any(
+                        f" {a} " in span for a in st.aliases):
+                    st = None
         if feature is None and st is None:
             return None
         # "X isn't working/connected" — a state assertion about a
@@ -1002,6 +1019,13 @@ class SelfKnowledgeService:
         where = re.search(r"\bwhere\b.{0,20}\b(is|are|do i|can i|would "
                           r"i|the)\b|\bhow do i (get to|find|open)\b|"
                           r"\bwhich page\b|\bwhere in\b", t)
+        # Person-directed wheres ("where are you", "where you live") are
+        # about the assistant, not UI navigation — "what's the weather
+        # like where you are" must never resolve to a feature route.
+        if where and not nav and re.search(
+                r"\bwhere\s+(?:are\s+you|you\s+(?:are|live|work|stay|"
+                r"from|based|located)|u\b)", t):
+            where = None
         if not nav and not where:
             return None
         section = self.pages.find_section(t)

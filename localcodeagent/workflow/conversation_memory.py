@@ -235,7 +235,9 @@ class ConversationMemory:
         new = self._clean_value(new_value)
         if (not new or len(new.split()) > 4
                 or new.lower() in self._RESET_MODIFIERS
-                or new.lower() in self._BARE_CORRECTION_STOPWORDS):
+                or new.lower() in self._BARE_CORRECTION_STOPWORDS
+                or self._REFERENT_VALUE_RE.match(new)
+                or self._IMPERATIVE_VALUE_RE.match(new)):
             return None
         pred = self._RETARGET_PREDICATE_RE
         with self._lock:
@@ -372,8 +374,13 @@ class ConversationMemory:
         if not clean:
             return False
         rows = self._data.setdefault(key, [])
+        # Only an ACTIVE identical row dedupes. A superseded/forgotten
+        # twin must not block re-teaching the same fact later — the new
+        # row lands fresh and supersedes nothing.
         if any(
-            isinstance(row, dict) and self._same(str(row.get("text", "")), clean)
+            isinstance(row, dict)
+            and row.get("active", True)
+            and self._same(str(row.get("text", "")), clean)
             for row in rows
         ):
             return False
@@ -406,6 +413,16 @@ class ConversationMemory:
         })
         self._data[key] = rows[-limit:]
         return True
+
+    def _fact_is_active(self, text: str) -> bool:
+        clean = self._clean(text)
+        rows = self._data.get("facts", [])
+        return any(
+            isinstance(row, dict)
+            and row.get("active", True)
+            and self._same(str(row.get("text", "")), clean)
+            for row in rows
+        )
 
     def history(self, limit: int = 24) -> list[dict[str, str]]:
         if not self.enabled:
@@ -532,6 +549,20 @@ class ConversationMemory:
         "smoother", "rougher", "simpler", "fuller", "emptier",
     })
 
+    # Referent phrases, not literal values — "change it to the dark
+    # one"/"the first one" name a prior entity, so landing them in a
+    # fact's value slot produces "my favorite color is the dark one".
+    _REFERENT_VALUE_RE = re.compile(
+        r"^the\s+\w+\s+one$|^the\s+(?:other|same|first|second|third|"
+        r"last|previous|next)\b", re.IGNORECASE)
+
+    # Imperative/negation openings — "no, don't do that" rejects an
+    # action; its tail is an instruction, never a stated value.
+    _IMPERATIVE_VALUE_RE = re.compile(
+        r"^(?:don'?t|do\s+not|dont|stop|quit|never|please|let'?s|let|"
+        r"keep|avoid|forget|cancel|skip|leave|hold|wait|try|go|move|"
+        r"delete|remove|undo|revert)\b", re.IGNORECASE)
+
     # Single-word values that ARE facts in 'X is Y' statements —
     # settings/mode/units vocabulary ("the theme is dark", "units are
     # metric") that the adjective guard would otherwise reject. Pure
@@ -602,6 +633,7 @@ class ConversationMemory:
             "training_examples": [],
             "forgotten": [],
             "superseded": [],
+            "restated": [],
         }
         if not self.enabled:
             return result
@@ -991,6 +1023,11 @@ class ConversationMemory:
                     superseded_out=result["superseded"],
             ):
                 result["facts"].append(fact)
+            elif fact and self._fact_is_active(fact):
+                # Restating a known fact isn't a no-op conversationally —
+                # the ack lane still confirms so the turn doesn't fall
+                # through to an open-ended model essay.
+                result["restated"].append(fact)
 
             # Rule revocation — "stop responding in JSON", "don't use
             # emojis anymore" retires the matching active rule rather

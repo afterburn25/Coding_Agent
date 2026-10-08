@@ -250,6 +250,23 @@ class TestServiceControl(unittest.TestCase):
             self.assertIsNone(svc.respond(q), q)
         self.assertEqual(store["github_enabled"], True)
 
+    def test_person_directed_where_falls_through(self):
+        # "Where you are" asks about the assistant — not a UI route.
+        # The where-regex must not swallow it and answer with a page
+        # ("Chat is under Chat." — live dogfood regression).
+        svc, store, _ = make_service()
+        for q in ("what's the weather like where you are",
+                  "where are you", "where do you live",
+                  "where are you located"):
+            res = svc.respond(q)
+            self.assertFalse(
+                res is not None and res.kind in {"answer", "navigate"},
+                f"{q!r} -> {getattr(res, 'text', None)!r}")
+        # Real UI-where questions still resolve.
+        res = svc.respond("where is the speech lab")
+        self.assertIsNotNone(res)
+        self.assertIn("Speech Lab", res.text)
+
     def test_confirm_risk_proposes_first(self):
         svc, store, calls = make_service()
         res = svc.respond("turn autonomy off")

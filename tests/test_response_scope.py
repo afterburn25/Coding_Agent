@@ -222,8 +222,12 @@ class TestBareRenderer(unittest.TestCase):
             self.assertIn("7 days old", out.text)
 
     def test_non_bare_keeps_envelope(self):
+        # opening_weights pinned to a non-reaction family — a random
+        # "reaction" opening would suppress the micro-reaction slot and
+        # make this assertion flaky.
         genome = {"micro_reactions": {"rate": 1.0, "pools": {
-            "thinking": ["Let me think."]}}}
+            "thinking": ["Let me think."]}},
+            "pragmatics": {"opening_weights": {"acknowledgement": 1.0}}}
         r = PersonaRenderer()
         sem = SemanticResponse(
             facts=["Done."], semantic_id="plain:x",
@@ -354,6 +358,24 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertEqual(learned["facts"], [])
         self.assertEqual(self._active(cm), ["my favorite color is blue"])
 
+    def test_referent_phrase_is_not_a_value(self):
+        # "the dark one" refers back to a prior entity — it must not
+        # land in a value slot ("my favorite color is the dark one").
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        for turn in ("change it to the dark one",
+                     "make it the first one",
+                     "actually set it to the other",
+                     # Action negation — the tail is an instruction, not
+                     # a value ("my favorite color is dont do that" was
+                     # a live dogfood corruption).
+                     "no, dont do that",
+                     "no, stop that",
+                     "wait, forget it"):
+            learned = cm.learn_from_user(turn)
+            self.assertEqual(learned["facts"], [], turn)
+        self.assertEqual(self._active(cm), ["my favorite color is blue"])
+
     def test_acknowledgements_never_rewrite_facts(self):
         cm = self._mem()
         cm.learn_from_user("my favorite color is blue")
@@ -381,6 +403,39 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("my favorite color is blue", active)
         self.assertIn("my favorite team color is green", active)
         self.assertIn("i prefer black", active)
+
+    def test_restatement_reports_restated_not_new(self):
+        # Re-teaching an already-active fact must surface as a
+        # restatement so the ack lane still answers — otherwise the
+        # turn falls through to an open model essay (live dogfood).
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        learned = cm.learn_from_user("my favorite color is blue")
+        self.assertEqual(learned["facts"], [])
+        self.assertEqual(learned["restated"],
+                         ["my favorite color is blue"])
+        self.assertEqual(self._active(cm), ["my favorite color is blue"])
+
+    def test_superseded_twin_does_not_block_reteach(self):
+        # Re-teaching a value that was superseded earlier must land as
+        # a fresh active fact — the inactive twin must not dedupe it.
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("actually i prefer green now")
+        learned = cm.learn_from_user("my favorite color is blue")
+        self.assertIn("my favorite color is blue", learned["facts"])
+        active = self._active(cm)
+        self.assertIn("my favorite color is blue", active)
+        self.assertNotIn("my favorite color is green", active)
+
+    def test_restatement_acknowledgement(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        ack = AgentOrchestrator.training_acknowledgement(
+            {"facts": [], "behavior_rules": [], "training_examples": [],
+             "forgotten": [], "superseded": [],
+             "restated": ["my favorite color is blue"]})
+        self.assertIsNotNone(ack)
+        self.assertIn("my favorite color is blue", ack)
 
 
 if __name__ == "__main__":
