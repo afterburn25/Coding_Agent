@@ -298,7 +298,8 @@ class VoiceManager:
 
     def _warm_engine(self) -> None:
         try:
-            self.engine().load()
+            preset = self.current_preset()
+            self.engine(preset.engine if preset is not None else "").load()
         except Exception:
             pass
 
@@ -315,7 +316,12 @@ class VoiceManager:
                 and self.mode() in {"responses", "responses_activity"}):
             return
         try:
-            eng = self.engine()
+            # Warm the engine the active preset actually uses — warming
+            # the config default instead loads the wrong stack entirely
+            # (e.g. Kokoro while a Chatterbox preset still cold-starts
+            # its worker at synthesis time).
+            preset = self.current_preset()
+            eng = self.engine(preset.engine if preset is not None else "")
             if getattr(eng, "_model", None) is not None or getattr(
                     eng, "_loaded", False):
                 return

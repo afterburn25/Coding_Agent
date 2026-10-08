@@ -86,3 +86,8 @@ runtime/
 
 # generated listening samples (deliverable on disk, not in git)
 samples/
+
+# Chatterbox conditioning cache — recomputed per reference bytes, must
+# never ship inside a frozen bundle or be committed alongside voices
+localcodeagent/voice/chatterbox_voices/**/conds-*.pt
+models/voice/chatterbox/voices/**/conds-*.pt
