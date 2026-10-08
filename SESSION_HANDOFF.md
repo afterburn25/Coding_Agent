@@ -33,11 +33,14 @@ carriers, both fixed and verified live:
 - A/B audition ladder preserved at `%TEMP%\isabella-ab\` (raw, V7,
   delay-removals, brightness variants b1–b5, excited-line variants) —
   b3 ≈ shipped retune, b5 is the over-bright reference point.
-- Caveat: Chatterbox dry-ref generation is intrinsically warm/reverberant
-  (raw echo 0.47, centroid ~2430). If listening still flags residual
-  hollowness, next lever is conditioning-side (reference segment
-  selection) — flagged, not applied: the dry `reference-source.mp3`
-  stays the locked conditioning input.
+- Reference-window experiment (closed): a tight 7.5 s VAD-cleaned window
+  conditioned raw echo 0.40 vs full-ref 0.47 — marginally drier but
+  *darker* (2202 vs 2433 Hz raw; post-DSP 3912 vs live 4398). Not a win;
+  the retuned DSP already lands +7 Hz of golden. The dry
+  `reference-source.mp3` stays the locked conditioning input — a
+  replacement would need to be brighter, not just cleaner.
+- Renders preserved: `raw-trim7.5.wav` / `v7-trim7.5.wav` in
+  `%TEMP%\isabella-ab\` alongside the rest of the ladder.
 
 ## v0.31.4 — Isabella V7 live-verified on the deployed install
 
