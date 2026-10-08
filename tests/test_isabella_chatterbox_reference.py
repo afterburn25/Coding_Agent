@@ -359,3 +359,16 @@ def test_startup_sig_changes_with_preset_content() -> None:
     assert sig_old != sig_new, "same-id preset retune must re-salt narrator cache"
     # id/identity fields stay in the sig for readability of engine.json
     assert "cb-v7" in sig_new and "chatterbox" in sig_new
+
+
+def test_v7_preset_keeps_air_band_for_anti_barrel_tone() -> None:
+    """The 2026-10-07 live diagnosis: 'barrel' perception was TONAL — the
+    dry-ref generation is ~1000 Hz darker than the approved golden
+    (centroid 4391 Hz, air band 0.129). The air/presence EQ is the guard:
+    removing it re-darkens the voice into the hollow sound without
+    touching any echo path."""
+    p = json.loads(PRESET_PATH.read_text(encoding="utf-8"))
+    air = [b for b in p["eq"]
+           if b["freq_hz"] >= 9000 and b["gain_db"] >= 4.0]
+    assert air, "V7 preset must keep a >=9 kHz air band (golden-matched)"
+    assert p["exciter"] >= 0.5, "exciter below 0.5 loses the golden sheen"
