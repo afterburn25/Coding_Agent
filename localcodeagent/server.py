@@ -806,6 +806,12 @@ class AppState:
             }
         self.tool_downloads = ToolDownloadManager(self.jobs, install_root=runtime_root)
         self.tool_downloads.on_done = lambda _tool: self.tools.refresh_install_status()
+        # User-facing durable downloads — 'download <url>' from chat.
+        from .tools.downloads import (
+            UserDownloadManager, register_download_tools)
+        self.user_downloads = UserDownloadManager(
+            self.jobs, Path.home() / "Downloads")
+        register_download_tools(self.tools, self.user_downloads)
         # tool_downloads/jobs exist now — safe to re-enter a setup that was
         # mid-flight when the app last exited.
         self.images.resume_setup()

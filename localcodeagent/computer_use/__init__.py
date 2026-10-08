@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -365,6 +366,19 @@ class ComputerUse:
         from . import apps
         name_or_path = str(name_or_path or "").strip()
         record = self._record("app_launch", name_or_path[:120])
+        # URI schemes — https:, ms-settings:, mailto: — open via shell
+        # association. No child pid exists; the open request itself is
+        # the evidence (os.startfile raises on failure).
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", name_or_path) and \
+                not re.match(r"^[a-zA-Z]:[\\/]", name_or_path):
+            try:
+                os.startfile(name_or_path)  # type: ignore[attr-defined]
+            except OSError as exc:
+                return self._fail(record, f"shell open failed: {exc}")
+            return self._finish(record, {
+                "ok": True, "shell": True, "path": name_or_path,
+                "verified": False,
+                "note": "opened via shell association"})
         resolved = apps.resolve_app(name_or_path)
         if not resolved.get("ok"):
             candidates = resolved.get("candidates") or []

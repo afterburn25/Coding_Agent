@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import tarfile
 import threading
@@ -98,6 +99,280 @@ def _sevenzip_progress(on_file: Callable[[str, int], None]):
             pass
 
     return _Progress()
+
+
+_WIN_RESERVED = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def _filename_from_url(url: str) -> str:
+    name = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+    name = name.strip() or "download.bin"
+    # Strip characters Windows forbids; guard reserved device names.
+    name = "".join(c for c in name if c not in '<>:"|?*')[:120]
+    stem = name.split(".")[0].lower()
+    if stem in _WIN_RESERVED:
+        name = name + "_"
+    return name or "download.bin"
+
+
+class UserDownloadManager:
+    """Durable user-facing downloads — 'download <url>'.
+
+    Streams to ``<dest>.part`` so interrupted downloads resume via HTTP
+    Range; verifies size/SHA-256 before renaming into place; never
+    overwrites an unrelated existing file; reports byte-level progress
+    through the JobManager so the Tasks panel stays live.
+    """
+
+    def __init__(self, jobs: JobManager, download_dir: Path) -> None:
+        self.jobs = jobs
+        self.download_dir = Path(download_dir)
+        self._cancel_flags: dict[str, threading.Event] = {}
+
+    # -- API -----------------------------------------------------------------
+
+    def start(self, url: str, dest: str = "", *,
+              sha256: str = "", expected_size: int = 0) -> dict[str, Any]:
+        try:
+            url = _safe_url(url)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            target = self._resolve_dest(str(dest or ""), url)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        # Dedupe: a verified matching artifact is the download already done.
+        if target.is_file():
+            if sha256 and self._hash_path(target) == sha256.lower():
+                return {"ok": True, "deduplicated": True, "verified": True,
+                        "path": str(target),
+                        "size": target.stat().st_size,
+                        "sha256": sha256.lower()}
+            if not sha256 and expected_size and \
+                    target.stat().st_size == expected_size:
+                return {"ok": True, "deduplicated": True, "verified": True,
+                        "path": str(target), "size": expected_size}
+            target = self._unique(target)
+
+        record = self.jobs.submit(
+            "user_download", f"Download {target.name}",
+            metadata={"url": url, "dest": str(target), "phase": "queued"})
+        flag = threading.Event()
+        self._cancel_flags[record.id] = flag
+        threading.Thread(
+            target=self._run,
+            args=(record.id, url, target, sha256.lower(),
+                  int(expected_size or 0), flag),
+            daemon=True).start()
+        return {"ok": True, "job_id": record.id, "path": str(target),
+                "url": url, "verified": False, "started": True}
+
+    def status(self, job_id: str) -> dict[str, Any]:
+        try:
+            job = self.jobs.get(job_id)
+        except KeyError:
+            return {"ok": False, "error": f"no download job {job_id}"}
+        meta = dict(job.metadata or {})
+        return {"ok": True, "job_id": job.id, "state": job.state,
+                "progress": job.progress, "status": job.status,
+                "error": job.error, "url": meta.get("url", ""),
+                "path": meta.get("dest", ""),
+                "bytes_done": meta.get("bytes_done", 0),
+                "bytes_total": meta.get("bytes_total", 0),
+                "sha256": meta.get("sha256", ""),
+                "verified": meta.get("verified", False)}
+
+    def active(self) -> list[dict[str, Any]]:
+        rows = []
+        try:
+            for job in self.jobs.list_jobs():
+                if job.get("kind") == "user_download" and \
+                        job.get("state") not in {"completed", "failed",
+                                                 "cancelled"}:
+                    rows.append({"job_id": job.get("id"),
+                                 "state": job.get("state"),
+                                 "status": job.get("status"),
+                                 "dest": (job.get("metadata") or {})
+                                 .get("dest", "")})
+        except Exception:
+            pass
+        return rows
+
+    def cancel(self, job_id: str = "") -> dict[str, Any]:
+        """Cancel a specific job, or the most recent active download."""
+        if not job_id:
+            active = self.active()
+            if not active:
+                return {"ok": False, "error": "no download is running"}
+            job_id = active[-1]["job_id"]
+        flag = self._cancel_flags.get(job_id)
+        if flag is not None:
+            flag.set()
+        try:
+            self.jobs.cancel(job_id)
+            return {"ok": True, "job_id": job_id, "cancelled": True}
+        except KeyError:
+            return {"ok": False, "error": f"no download job {job_id}"}
+
+    # -- internals ------------------------------------------------------------
+
+    def _resolve_dest(self, dest: str, url: str) -> Path:
+        name = _filename_from_url(url)
+        if not dest:
+            return (self.download_dir / name).resolve()
+        p = Path(dest)
+        if not p.is_absolute() and not re.match(r"^[a-zA-Z]:[\\/]", dest):
+            p = self.download_dir / p
+        p = p.resolve()
+        if str(dest).endswith(("/", "\\")) or p.is_dir():
+            p = p / name
+        # Never let a download target system roots.
+        lowered = str(p).lower()
+        for bad in (os.environ.get("SystemRoot", r"C:\Windows").lower(),
+                    r"c:\program files"):
+            if lowered.startswith(bad):
+                raise ValueError(
+                    f"refusing to download into a system directory: {p}")
+        return p
+
+    @staticmethod
+    def _unique(dest: Path) -> Path:
+        i = 1
+        while True:
+            cand = dest.with_name(f"{dest.stem} ({i}){dest.suffix}")
+            if not cand.exists():
+                return cand
+            i += 1
+            if i > 999:
+                raise ValueError("could not find a unique file name")
+
+    @staticmethod
+    def _hash_path(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(8 * _CHUNK), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _progress(self, job_id: str, **meta: Any) -> None:
+        try:
+            self.jobs.update(
+                job_id, state="running", status="downloading",
+                metadata=self.jobs.get(job_id).metadata | meta)
+        except KeyError:
+            pass
+
+    def _run(self, job_id: str, url: str, dest: Path, sha256: str,
+             expected_size: int, flag: threading.Event) -> None:
+        part = dest.with_name(dest.name + ".part")
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            self._fetch(job_id, url, part, expected_size, flag)
+            if flag.is_set():
+                raise _Cancelled()
+            size = part.stat().st_size
+            if expected_size and size != expected_size:
+                raise ValueError(
+                    f"size mismatch: got {size}, expected {expected_size}")
+            self._progress(job_id, phase="verifying",
+                           bytes_done=size, bytes_total=size)
+            digest = self._hash_path(part)
+            if sha256 and digest != sha256:
+                raise ValueError(f"SHA-256 mismatch for {dest.name}")
+            part.replace(dest)
+            self.jobs.update(
+                job_id, state="completed", status="finished",
+                progress=1.0, detail=str(dest),
+                metadata=self.jobs.get(job_id).metadata | {
+                    "phase": "finished", "verified": True,
+                    "size": size, "sha256": digest,
+                    "dest": str(dest)})
+        except _Cancelled:
+            try:
+                self.jobs.update(job_id, state="cancelled",
+                                 status="cancelled",
+                                 error="Download cancelled — partial "
+                                       "file kept for resume")
+            except KeyError:
+                pass
+        except Exception as exc:
+            try:
+                self.jobs.update(job_id, state="failed", status="failed",
+                                 error=str(exc)[:300])
+            except KeyError:
+                pass
+        finally:
+            self._cancel_flags.pop(job_id, None)
+
+    def _fetch(self, job_id: str, url: str, part: Path,
+               expected_size: int, flag: threading.Event) -> None:
+        have = part.stat().st_size if part.is_file() else 0
+        if expected_size and have >= expected_size:
+            return  # a previous attempt already fetched everything
+        headers = {"User-Agent": "chat-nexus-download"}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            if flag.is_set():
+                raise _Cancelled()
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                resp = urllib.request.urlopen(req, timeout=60)
+                break
+            except urllib.error.HTTPError as exc:
+                # 416: stale .part bigger than the resource — restart clean.
+                if exc.code == 416 and have:
+                    part.unlink(missing_ok=True)
+                    have = 0
+                    headers.pop("Range", None)
+                    continue
+                last_exc = exc
+                exc.close()
+                if 400 <= exc.code < 500:
+                    raise
+            except Exception as exc:
+                last_exc = exc
+            time.sleep(min(2 ** attempt, 4))
+        else:
+            raise last_exc or ValueError("download failed")
+
+        with resp:
+            resumed = have > 0 and resp.status == 206
+            done = have if resumed else 0
+            remaining = int(resp.headers.get("Content-Length") or 0)
+            total = expected_size or (done + remaining)
+            last_emit = 0.0
+            last_bytes, last_time = done, time.monotonic()
+            mode = "ab" if resumed else "wb"
+            with part.open(mode) as out:
+                while True:
+                    if flag.is_set():
+                        raise _Cancelled()
+                    read1 = getattr(resp, "read1", None)
+                    chunk = read1(_CHUNK) if read1 else resp.read(_CHUNK)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    now = time.monotonic()
+                    if now - last_emit > 0.4:
+                        rate = (done - last_bytes) / max(
+                            now - last_time, 1e-6)
+                        last_emit, last_bytes, last_time = now, done, now
+                        frac = done / total if total else 0.0
+                        self.jobs.update(
+                            job_id, state="running",
+                            status="downloading", progress=frac,
+                            metadata=self.jobs.get(job_id).metadata | {
+                                "phase": "downloading",
+                                "bytes_done": done, "bytes_total": total,
+                                "bytes_per_sec": int(rate)})
 
 
 class ToolDownloadManager:
@@ -614,3 +889,52 @@ class ToolDownloadManager:
 
 class _Cancelled(Exception):
     pass
+
+
+def register_download_tools(registry, downloads: "UserDownloadManager") -> None:
+    """User-facing durable downloads — url -> file with progress,
+    resume, hash verification, and cancel. All HTTP(S)-only."""
+    import json as _json
+    from .base import ToolSpec
+
+    def _cap(fn):
+        def inner(args):
+            return _json.dumps(fn(args), ensure_ascii=False)
+        return inner
+
+    registry.register(ToolSpec(
+        "download_file",
+        "Download a file from an HTTP(S) URL to the Downloads folder or a named path. Resumable, hash-verified, progress in Tasks. Never claims completion before the bytes land.",
+        {"type": "object", "properties": {
+            "url": {"type": "string"},
+            "dest": {"type": "string",
+                     "description": "Destination file path or directory (default: Downloads)"},
+            "sha256": {"type": "string"},
+            "expected_size": {"type": "integer"}},
+         "required": ["url"]},
+        "network.read",
+        _cap(lambda a: downloads.start(
+            str(a.get("url") or ""), str(a.get("dest") or ""),
+            sha256=str(a.get("sha256") or ""),
+            expected_size=int(a.get("expected_size") or 0))),
+        category="utilities", capabilities=["download", "network"]))
+
+    registry.register(ToolSpec(
+        "download_status",
+        "Check the state/progress of a download job by id.",
+        {"type": "object", "properties": {"job_id": {"type": "string"}},
+         "required": ["job_id"]},
+        "network.read",
+        _cap(lambda a: downloads.status(str(a.get("job_id") or ""))),
+        category="utilities", capabilities=["download"]))
+
+    registry.register(ToolSpec(
+        "download_cancel",
+        "Cancel a running download (partial file is kept for resume).",
+        {"type": "object", "properties": {
+            "job_id": {"type": "string",
+                       "description": "omit to cancel the most recent download"}},
+        },
+        "network.read",
+        _cap(lambda a: downloads.cancel(str(a.get("job_id") or ""))),
+        category="utilities", capabilities=["download"]))

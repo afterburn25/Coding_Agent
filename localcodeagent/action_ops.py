@@ -141,6 +141,16 @@ _APP_CLAUSE_HEAD_RE = re.compile(
 _APP_FS_HEAD_RE = re.compile(
     r"^(?:folder|directory|dir|file|note|document)\b", re.I)
 
+# Downloads — 'download https://… [to <path>]' is deterministic; a bare
+# 'download Python' has no URL and falls to the model lane to research.
+_DOWNLOAD_RE = re.compile(r"^\s*download\s+(.+?)\s*$", re.I | re.S)
+_CANCEL_DL_RE = re.compile(
+    r"^\s*cancel\s+(?:the\s+|my\s+|that\s+)?(?:file\s+)?download\b",
+    re.I)
+_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
+_DL_DEST_RE = re.compile(
+    r"^(.*?)\s+(?:to|into|in|inside|under)\s+(.+?)\s*$", re.I | re.S)
+
 
 def _app_plan(kind: str, name_raw: str, *, state: str = "",
               workspace: Path | None = None
@@ -360,6 +370,56 @@ def parse_local_action(text: str, *, workspace: Path | str,
         plan = _app_plan("launch", m.group(1), workspace=ws)
         if plan:
             return plan
+
+    # Downloads — explicit URLs only; bare product names need research
+    # and fall to the model lane.
+    if _CANCEL_DL_RE.match(t):
+        return ActionPlan(
+            kind="download_cancel", tool="download_cancel",
+            permission="network.read", params={},
+            action_text="cancel the download", display="download")
+    m = _DOWNLOAD_RE.match(t)
+    if m:
+        tail = m.group(1)
+        um = _URL_RE.search(tail)
+        if not um:
+            return None
+        url = um.group(0)
+        rest = (tail[:um.start()] + tail[um.end():]).strip()
+        # Leading filler/connectors: 'the file to X' / 'to X' / 'into X'.
+        rest = re.sub(
+            r"^(?:(?:the|a|an|my|this)\s+)?(?:file|archive|installer|"
+            r"package|artifact)s?\s+", "", rest, flags=re.I).strip()
+        dest_raw = ""
+        dm = _DL_DEST_RE.match(rest) if rest else None
+        if dm:
+            a, b = dm.group(1).strip(), dm.group(2).strip()
+            dest_raw = b or a
+        elif rest:
+            rest = re.sub(
+                r"^(?:from|to|into|in|inside|under|at|as)\s+", "",
+                rest, flags=re.I).strip()
+            # 'download <url> mydir' — accept only a clean path token;
+            # clause-y leftovers ('the file from') are not destinations.
+            if re.fullmatch(r"[~\w.\-\\/:]+", rest):
+                dest_raw = rest
+        dest_raw = _TRAILING_WS_RE.sub("", dest_raw.strip("\"'"))
+        params: dict[str, str] = {"url": url}
+        resolved: dict[str, tuple[Path, bool]] = {}
+        outside = False
+        if dest_raw:
+            dest = _resolve(dest_raw, ws, extra_roots)
+            resolved["dest"] = dest
+            outside = not dest[1]
+            params["dest"] = str(dest[0])
+        return ActionPlan(
+            kind="download", tool="download_file",
+            permission="network.read", params=params,
+            resolved={k: str(v) for k, (v, _i) in resolved.items()},
+            outside_root=outside,
+            action_text=f"download {url}"
+                        + (f" to {dest_raw}" if dest_raw else ""),
+            display=Path(url.split("?")[0].rstrip("/")).name or url)
 
     # write/save with quoted content — 'write "hello" to note.txt'.
     m = _WRITE_TO_RE.search(t)
@@ -644,8 +704,12 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
         verified = bool(data.get("verified", ok)) or \
             bool(data.get("shell"))  # shell-opened: OS accepted, no pid
         error = str(data.get("error") or "")
-        summary = _app_verify_summary(data)
-        if ok and (verified or plan.kind in ("close", "status")):
+        summary = _app_verify_summary(data) or \
+            (f"job {data['job_id']}" if data.get("job_id") else "")
+        # Async kinds verify the ACTION, not the payload: a started
+        # download job / a no-op close is a real, evidenced outcome.
+        if ok and (verified or plan.kind in
+                   ("close", "status", "download", "download_cancel")):
             return _close(
                 "verified", _app_success_text(plan, data),
                 permission="approved" if approved else "policy",
@@ -674,8 +738,11 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
         verification=result[:160], verified=False, tool_result=result)
 
 
-_APP_KINDS = {"launch", "close", "restart", "status", "window"}
-_CAPABILITY = {k: "application" for k in _APP_KINDS}
+_APP_KINDS = {"launch", "close", "restart", "status", "window",
+              "download", "download_cancel"}
+_CAPABILITY = {k: "application" for k in
+               ("launch", "close", "restart", "status", "window")}
+_CAPABILITY.update({"download": "network", "download_cancel": "network"})
 _CAPABILITY.update({k: "filesystem" for k in
                     ("mkdir", "write", "delete", "move", "rename",
                      "copy")})
@@ -702,6 +769,18 @@ def _app_success_text(plan: ActionPlan, data: dict) -> str:
                 else f"{name} isn't running.")
     if plan.kind == "window":
         return f"{name} {plan.params.get('state', '')}d."
+    if plan.kind == "download":
+        if data.get("deduplicated"):
+            return (f"Already downloaded — the existing file "
+                    f"verified: {data.get('path', name)}.")
+        dest = data.get("path") or "your Downloads folder"
+        return (f"Downloading {name} to {dest} — job "
+                f"{data.get('job_id', '')}. It resumes automatically "
+                "if interrupted; watch Tasks for progress.")
+    if plan.kind == "download_cancel":
+        return ("Download cancelled — the partial file is kept for "
+                "resume." if data.get("cancelled")
+                else "No download is running.")
     return "Done."
 
 
