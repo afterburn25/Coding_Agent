@@ -2,6 +2,37 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.31.7–v0.31.9 — stochastic-draw gate + vocalization/gesture repair
+
+User report "responses still sound like in a barrel" → measured the
+**actual cached chat renders** (not fresh test clips): short replies
+landed dark + reverberant draws (0.86 s @ 2690 Hz / echo 0.68 vs golden
+4391 / 0.30) while long renders stayed clean — a Chatterbox sampling
+lottery (temperature 0.72), worst on short text.
+
+- **v0.31.7** — `_synthesize` scores every Chatterbox draw post-DSP
+  (`dsp.spectral_centroid_hz` + `dsp.echo_lag_corr`, same math as the
+  eval script), rejects draws <3.4 kHz centroid or >0.55 echo, redraws
+  up to `voice_chatterbox_quality_retries` (default 2, 0 disables),
+  keeps best-of. Rejects publish `quality_redraw`. Param grid showed
+  no exaggeration/temperature fix — gating was the right lever.
+- **v0.31.8** — "skips over oh" root-caused: the keep-policy DELETED
+  dropped word tokens from speech text while they stayed in display.
+  Word tokens now keep surface text; stage wrappers still strip.
+  Spaced laughs ("ha ha"/"hee hee") detected → `[laugh]`/`[chuckle]`;
+  cry/sob + `*coughs*` detection; `*sobs*` overlap-corruption fix;
+  tag map grew `whisper`→`[whispering]`, `cry`→`[crying]` (runtime-
+  verified supported). Gate skips tag-carrying segments (a real
+  `[laugh]` legitimately measures 1591 Hz / echo 0.91).
+- **v0.31.9** — the real production gap: the speech filter unwrapped
+  `*stage*` italics BEFORE detection, so `*laughs*`→"laughs"→spoken
+  literally. `_sanitize_prose` keeps the wrapper for known `_STAGE`
+  phrases; ordinary italics still unwrap.
+- Live-verified on deployed 0.31.9 (:53109): `[laugh]`/`[whispering]`/
+  `[crying]` produce real sounds e2e; speech cache purged of pre-gate
+  sub-band clips (centroid<3.4 kHz or echo>0.55).
+- Checkpoint 2660. CI on `7b6d9a7f`/`9f268048`/`a7b5bd5` in flight.
+
 ## Desktop host re-deployed at 0.31.6 (was 0.31.1)
 
 The deployed `NexusCore.exe` reported FileVersion **0.31.1** (built from
