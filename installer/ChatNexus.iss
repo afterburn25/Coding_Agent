@@ -1,9 +1,9 @@
 #ifndef AppVersion
-  #define AppVersion "0.34.0"
+  #define AppVersion "0.34.1"
 #endif
 
 #ifndef AppNumericVersion
-  #define AppNumericVersion "0.34.0.0"
+  #define AppNumericVersion "0.34.1.0"
 #endif
 
 #define AppName "Nexus Core"

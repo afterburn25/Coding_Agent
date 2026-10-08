@@ -251,26 +251,64 @@ internal sealed class StartupNarrator
     private string? _engineSig;
     private bool _engineSigRead;
 
-    /// <summary>Engine signature written by the backend
-    /// (data/voice/startup/engine.json) — salts every cache filename so
-    /// a voice-engine or preset switch can never replay a clip rendered
-    /// by a different voice. Empty when the backend hasn't published one
-    /// yet (first boot), which maps to the original unsalted filenames.</summary>
+    /// <summary>Cache salt derived from the user's own config + preset
+    /// files — engine id, preset id, and the preset's full DSP content.
+    /// Computed locally so a stale clip of a different voice can never
+    /// replay: the backend's engine.json is written during backend boot,
+    /// ~1 s AFTER the narrator's first speak — trusting it re-served
+    /// previous-engine clips on every engine/preset switch.</summary>
     private string EngineSig()
     {
         if (_engineSigRead) return _engineSig ?? "";
         _engineSigRead = true;
         try
         {
-            var p = Path.Combine(_cacheDir, "engine.json");
-            if (File.Exists(p))
+            var cfg = LoadConfig();
+            var engine = "";
+            var preset = "";
+            if (cfg.ValueKind == JsonValueKind.Object)
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(p));
-                _engineSig = doc.RootElement.TryGetProperty("sig", out var s)
-                    ? s.GetString() ?? "" : "";
+                if (cfg.TryGetProperty("voice_engine", out var ve))
+                    engine = ve.GetString() ?? "";
+                if (cfg.TryGetProperty("voice_preset_id", out var vp))
+                    preset = vp.GetString() ?? "";
             }
+            var presetBlob = "";
+            if (preset.Length > 0)
+                foreach (var dir in new[]
+                {
+                    Path.Combine(_appDir, "data", "voice", "presets"),
+                    Path.Combine(_appDir, "backend", "_internal",
+                        "localcodeagent", "voice", "official"),
+                })
+                {
+                    var f = Path.Combine(dir, preset + ".official.json");
+                    if (!File.Exists(f))
+                        f = Path.Combine(dir, preset + ".json");
+                    if (File.Exists(f)) { presetBlob = File.ReadAllText(f); break; }
+                }
+            var raw = engine + "|" + preset + "|" + presetBlob;
+            if (raw != "||")
+                _engineSig = Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(
+                        System.Text.Encoding.UTF8.GetBytes(raw)))
+                    .ToLowerInvariant()[..12];
         }
         catch { }
+        if (string.IsNullOrEmpty(_engineSig))
+        {
+            try
+            {
+                var p = Path.Combine(_cacheDir, "engine.json");
+                if (File.Exists(p))
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(p));
+                    _engineSig = doc.RootElement.TryGetProperty("sig", out var s)
+                        ? s.GetString() ?? "" : "";
+                }
+            }
+            catch { }
+        }
         return _engineSig ?? "";
     }
 

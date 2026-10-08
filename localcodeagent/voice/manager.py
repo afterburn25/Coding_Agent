@@ -810,8 +810,15 @@ class VoiceManager:
         # being a bad draw. Skip gating when tags are present.
         gate = (retries > 0 and preset.engine == "chatterbox"
                 and "[" not in text)
+        # Hallucination guard: stochastic draws occasionally drift off the
+        # text entirely — spoken word salad passes every spectral gate but
+        # runs far longer (rambling) or shorter (mumbled collapse) than the
+        # sentence warrants. ~15 chars/sec is Chatterbox's observed cadence
+        # at speed 1.0; ±loose bounds catch only true drift, never phrasing.
+        expected_s = max(0.4, len(text) / 15.0) / max(0.5, speed)
         best: tuple[float, Any, int, Any] | None = None
         tries = 0
+        drift_fails = 0
         try:
             for _ in range(1 + (retries if gate else 0)):
                 audio, sr = engine.synthesize(
@@ -821,6 +828,14 @@ class VoiceManager:
                 if not gate or audio.size < sr // 2:
                     best = (0.0, audio, sr, None)
                     break
+                dur = audio.size / sr
+                if dur > expected_s * 2.2 or dur < expected_s * 0.45:
+                    drift_fails += 1
+                    log.info("chatterbox draw %d rejected "
+                             "(duration %.1fs vs expected ~%.1fs — "
+                             "text drift) — redrawing",
+                             tries, dur, expected_s)
+                    continue
                 trial = dsp.process(audio, sr, preset)
                 mono = trial.mean(axis=1)
                 centroid = dsp.spectral_centroid_hz(mono, sr)
@@ -869,6 +884,31 @@ class VoiceManager:
                 lang=_lang_tag(preset.language))
             fallback = True
             best = None
+        # Every draw drifted off-text — speaking it would be confident
+        # gibberish. Degrade this utterance to the deterministic engine
+        # instead of publishing a hallucination.
+        if (best is None and not fallback and drift_fails >= tries
+                and preset.engine != "kokoro"):
+            log.warning("all %d chatterbox draws drifted off-text — "
+                        "falling back to kokoro for this utterance",
+                        drift_fails)
+            self._publish("voice", {
+                "event": "engine_fallback", "engine": preset.engine,
+                "fallback": "kokoro", "reason": "text_drift"})
+            kok = self.engine("kokoro")
+            fb_voice = preset.base_voice
+            try:
+                kok_ids = {str(v.get("id")) for v in kok.voices()}
+                if fb_voice not in kok_ids:
+                    fb_voice = ("bf_isabella" if "bf_isabella" in kok_ids
+                                else next(iter(sorted(kok_ids)),
+                                          fb_voice))
+            except Exception:
+                pass
+            audio, sr = kok.synthesize(
+                text, voice=fb_voice, speed=speed,
+                lang=_lang_tag(preset.language))
+            fallback = True
         if tries > 1:
             self._publish("voice", {
                 "event": "quality_redraw", "attempts": tries,

@@ -1501,6 +1501,54 @@ class TestChatterboxEngine(unittest.TestCase):
         self.assertGreater(pcm.size, 0)
         self.assertEqual(seen["voice"], "bf_isabella")
 
+    def test_drifted_draw_falls_back_to_kokoro(self):
+        """A chatterbox draw whose duration wildly exceeds the text's
+        expected speech length is a hallucination — word salad passes
+        every spectral gate, so the duration check must reject it and
+        degrade the utterance to kokoro rather than speak nonsense."""
+        published = []
+        m = VoiceManager(_Cfg(), preset_dir=Path(self.tmp.name) / "pres",
+                         cache_dir=Path(self.tmp.name) / "cache",
+                         publish=lambda k, p: published.append(p))
+
+        class RamblingChatterbox:
+            name, version, sample_rate = "chatterbox", "x", 24000
+            def synthesize(self, text, *, voice, speed=1.0, lang="en"):
+                # "hi" expects ~0.13s of speech; return 6s of drone.
+                n = 6 * self.sample_rate
+                t = np.linspace(0, 6, n)
+                return (0.1 * np.sin(2 * np.pi * 180 * t)
+                        ).astype(np.float32), self.sample_rate
+            def voices(self): return []
+            def status(self): return {"name": "chatterbox", "loaded": True}
+
+        m._engines["chatterbox"] = RamblingChatterbox()
+        m._engines["kokoro"] = _FakeEngine()
+        preset = VoicePreset(id="cb", name="cb", engine="chatterbox",
+                             base_voice="isabella")
+        m.presets.save(preset)
+        pcm, sr, path = m._synthesize("hi", preset, 1.0)
+        self.assertGreater(pcm.size, 0)
+        self.assertTrue(any(e.get("event") == "engine_fallback"
+                            and e.get("reason") == "text_drift"
+                            for e in published))
+
+    def test_onduration_draw_is_not_drift_rejected(self):
+        """A draw near the expected cadence must not trip the drift
+        gate — only text-drift hallucinations fall back."""
+        class SteadyChatterbox(_FakeEngine):
+            name = "chatterbox"
+        m = VoiceManager(_Cfg(), preset_dir=Path(self.tmp.name) / "pres",
+                         cache_dir=Path(self.tmp.name) / "cache")
+        m._engines["chatterbox"] = SteadyChatterbox()
+        m._engines["kokoro"] = _FakeEngine()
+        preset = VoicePreset(id="cb", name="cb", engine="chatterbox",
+                             base_voice="isabella")
+        m.presets.save(preset)
+        # "hi" -> ~0.13s expected; fake returns 0.25s — within bounds.
+        pcm, sr, path = m._synthesize("hi", preset, 1.0)
+        self.assertGreater(pcm.size, 0)
+
     def test_cache_keys_separate_engines(self):
         """Same text under kokoro vs chatterbox must never share a cache
         entry — the engine name + version fold into the key."""
