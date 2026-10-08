@@ -94,6 +94,8 @@ class ComputerUse:
         # primitive returns so timeline rows never stay permanently running.
         self._audit_done = audit_done
         self.actions: list[dict[str, Any]] = []
+        from .uia import LoopGuard
+        self._loop_guard = LoopGuard()
 
     def _record(self, action: str, detail: str = "") -> dict[str, Any]:
         row = {"ts": time.time(), "action": action,
@@ -519,6 +521,121 @@ class ComputerUse:
         result = apps.set_window_state(target, state)
         if not result.get("ok"):
             return self._fail(record, str(result.get("error")))
+        return self._finish(record, result)
+
+    # -- UI automation (observe -> act -> re-observe -> verify) -----------
+
+    def ui_observe(self, *, hwnd: int = 0, title_substr: str = "",
+                   max_items: int = 400) -> dict[str, Any]:
+        """Enumerate a window's interactive elements via UIA — the
+        observe step. Elements carry name/type/id/rect/enabled."""
+        from . import uia
+        record = self._record("ui_observe",
+                              title_substr or str(hwnd))
+        result = uia.ui_elements(hwnd=int(hwnd or 0),
+                                 title_substr=str(title_substr or ""),
+                                 max_items=int(max_items or 400))
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error")))
+        return self._finish(record, result)
+
+    def ui_click(self, name: str, *, hwnd: int = 0,
+                 title_substr: str = "",
+                 control_type: str = "") -> dict[str, Any]:
+        """Click a named UI element. UIA-first: Invoke/Toggle/Select
+        patterns before pixels; when no pattern exists the element's
+        rect center is clicked via the mouse. Re-observes afterward and
+        reports whether the screen fingerprint actually changed —
+        'clicked' without a state change is evidence, not success."""
+        from . import uia
+        name = str(name or "").strip()
+        record = self._record("ui_click", name[:160])
+        if not name:
+            return self._fail(record, "element name required")
+        before = uia.screen_hash(hwnd=int(hwnd or 0),
+                                 title_substr=str(title_substr or ""))
+        loop_err = self._loop_guard.check("click", name, before)
+        if loop_err:
+            return self._fail(record, loop_err)
+        result = uia.ui_act(name, hwnd=int(hwnd or 0),
+                            title_substr=str(title_substr or ""),
+                            action="invoke",
+                            control_type=str(control_type or ""))
+        used = str(result.get("pattern") or "")
+        if not result.get("ok"):
+            rect = result.get("rect") or result.get("rect_hint")
+            center = uia.element_center(rect or {})
+            if center is None:
+                return self._fail(record, str(result.get("error") or
+                                              "element not found"))
+            err = self._point_error(*center)
+            if err:
+                return self._fail(record, err)
+            click_result = self.click(center[0], center[1])
+            if not click_result.get("ok"):
+                return self._fail(record, str(click_result.get("error")))
+            result = {"ok": True, "action": "invoke",
+                      "element": result.get("element") or
+                                 {"name": name},
+                      "pattern": "mouse-fallback",
+                      "rect": rect}
+        time.sleep(0.4)  # let the UI settle before re-observing
+        after = uia.screen_hash(hwnd=int(hwnd or 0),
+                                title_substr=str(title_substr or ""))
+        result["state_changed"] = bool(before and after
+                                       and before != after)
+        result["element_name"] = name
+        result["pattern_used"] = used or result.get("pattern", "")
+        return self._finish(record, result)
+
+    def ui_set_text(self, name: str, value: str, *, hwnd: int = 0,
+                    title_substr: str = "") -> dict[str, Any]:
+        """Set a text field's value via ValuePattern and verify by
+        reading it back — never assumes SetValue landed."""
+        from . import uia
+        name = str(name or "").strip()
+        record = self._record("ui_set_text", name[:160])
+        if not name:
+            return self._fail(record, "element name required")
+        result = uia.ui_act(name, hwnd=int(hwnd or 0),
+                            title_substr=str(title_substr or ""),
+                            action="setvalue", value=str(value or ""))
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error") or
+                                          "no ValuePattern on element"))
+        readback = str(result.get("readback", ""))
+        result["verified"] = readback == str(value or "")
+        if not result["verified"]:
+            result["ok"] = False
+            result["error"] = (f"setvalue readback mismatch: got "
+                               f"'{readback[:60]}'")
+            return self._fail(record, result["error"])
+        return self._finish(record, result)
+
+    def ui_find(self, name: str, *, hwnd: int = 0, title_substr: str = "",
+                control_type: str = "") -> dict[str, Any]:
+        """Locate one element by name/AutomationId — observation only."""
+        from . import uia
+        record = self._record("ui_find", name[:160])
+        result = uia.ui_find(name, hwnd=int(hwnd or 0),
+                             title_substr=str(title_substr or ""),
+                             control_type=str(control_type or ""))
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error")))
+        return self._finish(record, result)
+
+    def ui_wait(self, name: str, *, hwnd: int = 0, title_substr: str = "",
+                timeout_s: float = 8.0) -> dict[str, Any]:
+        """Re-observe until an element appears (post-action check)."""
+        from . import uia
+        record = self._record("ui_wait", name[:160])
+        result = uia.wait_for_element(
+            name, hwnd=int(hwnd or 0),
+            title_substr=str(title_substr or ""),
+            timeout_s=float(timeout_s or 8.0))
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error") or
+                                          "element never appeared"))
         return self._finish(record, result)
 
     # -- input ------------------------------------------------------------

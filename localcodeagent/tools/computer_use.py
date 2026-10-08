@@ -205,6 +205,76 @@ def register_computer_use_tools(registry: ToolRegistry, workspace: Path,
         category="utilities", capabilities=["application_launch"]))
 
     registry.register(ToolSpec(
+        "computer_ui_observe",
+        "Enumerate a window's interactive UI elements via UI Automation — name, control type, AutomationId, bounding rect, enabled state. Observe before clicking; prefer named-element actions over raw coordinates.",
+        {"type": "object", "properties": {
+            "hwnd": {"type": "integer"}, "title": {"type": "string"},
+            "max_items": {"type": "integer", "default": 400}}},
+        "desktop.view",
+        _cap(lambda a: cu.ui_observe(
+            hwnd=int(a.get("hwnd") or 0),
+            title_substr=str(a.get("title") or ""),
+            max_items=int(a.get("max_items") or 400))),
+        category="utilities", capabilities=["application_focus"]))
+
+    registry.register(ToolSpec(
+        "computer_ui_find",
+        "Find a single named UI element in a window (button, field, menu item) by name or AutomationId.",
+        {"type": "object", "properties": {
+            "name": {"type": "string"}, "hwnd": {"type": "integer"},
+            "title": {"type": "string"}, "control_type": {"type": "string"}},
+         "required": ["name"]},
+        "desktop.view",
+        _cap(lambda a: cu.ui_find(
+            str(a.get("name") or ""), hwnd=int(a.get("hwnd") or 0),
+            title_substr=str(a.get("title") or ""),
+            control_type=str(a.get("control_type") or ""))),
+        category="utilities", capabilities=["application_focus"]))
+
+    registry.register(ToolSpec(
+        "computer_ui_click",
+        "Click a named UI element — Invoke/Toggle pattern first, bounding-rect mouse click only as fallback. Re-observes after the click and reports whether the UI state changed. Loop-guarded: repeated no-effect clicks fail.",
+        {"type": "object", "properties": {
+            "name": {"type": "string"}, "hwnd": {"type": "integer"},
+            "title": {"type": "string"}, "control_type": {"type": "string"}},
+         "required": ["name"]},
+        "desktop.control",
+        _cap(lambda a: cu.ui_click(
+            str(a.get("name") or ""), hwnd=int(a.get("hwnd") or 0),
+            title_substr=str(a.get("title") or ""),
+            control_type=str(a.get("control_type") or ""))),
+        category="utilities", capabilities=["application_focus", "mouse_control"]))
+
+    registry.register(ToolSpec(
+        "computer_ui_set_text",
+        "Set a text field's value via UIA ValuePattern and verify by readback. For fields not exposing ValuePattern, use computer_ui_click to focus then computer_type.",
+        {"type": "object", "properties": {
+            "name": {"type": "string"}, "value": {"type": "string"},
+            "hwnd": {"type": "integer"}, "title": {"type": "string"}},
+         "required": ["name", "value"]},
+        "keyboard.control",
+        _cap(lambda a: cu.ui_set_text(
+            str(a.get("name") or ""), str(a.get("value") or ""),
+            hwnd=int(a.get("hwnd") or 0),
+            title_substr=str(a.get("title") or ""))),
+        category="utilities", capabilities=["application_focus", "typing"]))
+
+    registry.register(ToolSpec(
+        "computer_ui_wait",
+        "Wait until a named UI element appears in a window (bounded re-observation after an action).",
+        {"type": "object", "properties": {
+            "name": {"type": "string"}, "hwnd": {"type": "integer"},
+            "title": {"type": "string"},
+            "timeout_s": {"type": "number", "default": 8}},
+         "required": ["name"]},
+        "desktop.view",
+        _cap(lambda a: cu.ui_wait(
+            str(a.get("name") or ""), hwnd=int(a.get("hwnd") or 0),
+            title_substr=str(a.get("title") or ""),
+            timeout_s=float(a.get("timeout_s", 8)))),
+        category="utilities", capabilities=["application_focus"]))
+
+    registry.register(ToolSpec(
         "computer_click",
         "Move the mouse to x,y and click (left/right). Coordinates are absolute screen pixels and are checked against the virtual desktop.",
         {"type": "object", "properties": {
