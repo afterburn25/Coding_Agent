@@ -127,6 +127,13 @@ flourish beyond BRIEF budgets, attributes user facts as its own on
 recall, and invents weather instead of declining — the scope
 directive helps but a small model's discipline is soft.
 
+**DEPLOYED** — v0.32.0 is live on the workstation install
+(`D:\Nexus_Core`, swap following the `backend-pre-*` convention;
+pre-swap state preserved at `backend-pre-0.32.0`). Verified live:
+`how old are you` → *"8 days old — still brand new."* (bare, exact),
+birthday/derivation rungs, scope inspector reporting
+`exact, requested=(age), supporting=(birthday), bare=true`.
+
 Since then: scope inspector endpoint (`GET /api/conversations/scope`)
 with a populated slot model, topic-shift advisories + referent decay,
 and a deterministic single-fact recall lane — `whats my favorite
