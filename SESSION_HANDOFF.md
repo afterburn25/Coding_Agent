@@ -2,6 +2,43 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.31.5–v0.31.6 — barrel report root-caused: stale narrator cache + tonal (not reverberant) gap
+
+**User report "still sounds like a barrel"** split into two independent
+carriers, both fixed and verified live:
+
+1. **StartupNarrator salt omitted preset content** (`9c07b4a0`,
+   v0.31.5). Sig was `engine|version|DSP_VERSION|preset.id` — the id is
+   stable across retunes, so pre-V7 clips (Oct 6 renders: corr 0.985,
+   −17 LUFS, stereo-width decorrelation = the barrel recipe) replayed
+   indefinitely under the same salt. Sig now embeds
+   `AudioCache.preset_hash(preset.to_json())`; any preset retune
+   re-salts automatically (verified: sig changed f45572b614b3 →
+   a26cff3b2d54 → 049d58ea89aa across retunes). Regression test added.
+
+2. **Tonal gap, not echo** (v0.31.6, `e09d9754`). Isolation ladder
+   proved the hollowness is upstream of DSP: raw Chatterbox generation
+   already measures echo proxy 0.47 (V7 DSP *reduces* it to 0.28;
+   removing every layer delay changes nothing). The actual divergence
+   from the approved golden is spectral: golden centroid 4391 Hz /
+   air 0.129 vs shipped preset 3340 / 0.031. Retune exciter 0.44→0.55,
+   7.2 kHz +3.2→+5.0, +9.5 kHz air band +5.0 q0.8. Live verification
+   on the deployed install: **centroid 4398 Hz (+7 vs golden)**,
+   air 0.125, echo 0.16, −13.0 LUFS, −1.0 dBFS, corr 1.000.
+
+- All 10 narrator lines (welcome/initializing/online/shutdown/fault/
+  recovery-v2/iris/power/online/failed) re-rendered through live V7 and
+  written under the new salted names AND legacy emergency-fallback
+  names (fault/recovery lines keep working backend-down).
+- A/B audition ladder preserved at `%TEMP%\isabella-ab\` (raw, V7,
+  delay-removals, brightness variants b1–b5, excited-line variants) —
+  b3 ≈ shipped retune, b5 is the over-bright reference point.
+- Caveat: Chatterbox dry-ref generation is intrinsically warm/reverberant
+  (raw echo 0.47, centroid ~2430). If listening still flags residual
+  hollowness, next lever is conditioning-side (reference segment
+  selection) — flagged, not applied: the dry `reference-source.mp3`
+  stays the locked conditioning input.
+
 ## v0.31.4 — Isabella V7 live-verified on the deployed install
 
 `v0.31.4` tagged `33e84162`, backend rebuilt from repo root and deployed
