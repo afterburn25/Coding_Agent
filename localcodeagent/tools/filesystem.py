@@ -270,6 +270,99 @@ def register_filesystem_tools(
         track_mutation(dst)
         return f"COPY_OK {display_path(src)} -> {display_path(dst)} — {detail}"
 
+    def fs_stat(args: dict) -> str:
+        import json as _json
+        path = safe(args["path"])
+        if not path.exists():
+            return _json.dumps({"exists": False, "path": display_path(path)})
+        st = path.stat()
+        info: dict[str, Any] = {
+            "exists": True,
+            "path": display_path(path),
+            "type": "dir" if path.is_dir() else ("file" if path.is_file() else "other"),
+            "size": st.st_size,
+            "mtime": st.st_mtime,
+            "readonly": not os.access(path, os.W_OK),
+            "symlink": path.is_symlink(),
+        }
+        if path.is_dir():
+            try:
+                info["children"] = sum(1 for _ in path.iterdir())
+            except OSError:
+                info["children"] = None
+        want_hash = args.get("hash")
+        if want_hash and path.is_file():
+            if st.st_size > 512 * 1024 * 1024:
+                info["sha256"] = "skipped: file exceeds 512MB hash limit"
+            else:
+                import hashlib
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                info["sha256"] = h.hexdigest()
+        return _json.dumps(info, ensure_ascii=False)
+
+    def _iter_source_files(src: Path) -> list[Path]:
+        if src.is_file():
+            return [src]
+        return [p for p in sorted(src.rglob("*")) if p.is_file() and not p.is_symlink()]
+
+    def fs_archive(args: dict) -> str:
+        import zipfile
+        src = safe(args["src"])
+        dst = safe(args["dst"])
+        if not src.exists():
+            raise ValueError(f"archive source does not exist: {display_path(src)}")
+        if dst.suffix.lower() != ".zip":
+            dst = dst.with_suffix(dst.suffix + ".zip") if dst.suffix else dst.with_suffix(".zip")
+        if dst.exists():
+            raise ValueError(f"archive already exists: {display_path(dst)}")
+        if src.is_dir() and (dst == src or dst in src.parents or src in dst.parents):
+            # archive inside its own source tree would swallow itself
+            raise ValueError("archive destination cannot be inside the source directory")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        members = _iter_source_files(src)
+        base = src.parent if src.is_file() else src
+        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+            for member in members:
+                zf.write(member, member.relative_to(base).as_posix())
+        track_mutation(dst)
+        # verify: archive exists, is readable, member count matches
+        with zipfile.ZipFile(dst) as zf:
+            bad = zf.testzip()
+            if bad:
+                raise RuntimeError(f"verification failed: corrupt member {bad}")
+            count = len(zf.namelist())
+        if count != len(members):
+            raise RuntimeError(
+                f"verification failed: archive has {count} members, expected {len(members)}")
+        return f"ARCHIVE_OK {display_path(dst)} — {count} files, {dst.stat().st_size} bytes"
+
+    def fs_extract(args: dict) -> str:
+        import zipfile
+        src = safe(args["src"])
+        dst = safe(args["dst"])
+        if not src.is_file():
+            raise ValueError(f"archive does not exist: {display_path(src)}")
+        dst.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(src) as zf:
+            names = zf.namelist()
+            for name in names:
+                target = (dst / name).resolve()
+                if not (target == dst or dst in target.parents):
+                    raise ValueError(f"archive member escapes destination: {name}")
+            zf.extractall(dst)
+        track_mutation(dst)
+        # verify: every member landed on disk
+        missing = [n for n in names
+                   if not n.endswith("/") and not (dst / n).is_file()]
+        if missing:
+            raise RuntimeError(
+                f"verification failed: {len(missing)} member(s) missing after extract")
+        count = sum(1 for n in names if not n.endswith("/"))
+        return f"EXTRACT_OK {display_path(dst)} — {count} files"
+
     registry.register(ToolSpec("list_files", "List files and directories in the current workspace.", {
         "type": "object", "properties": {"path": {"type": "string"}, "depth": {"type": "integer"}}
     }, "filesystem.read", list_files))
@@ -324,3 +417,12 @@ def register_filesystem_tools(
     registry.register(ToolSpec("fs_copy", "Copy a file or directory inside the workspace. Verifies the destination exists and matches the source size.", {
         "type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]
     }, "filesystem.write", fs_copy))
+    registry.register(ToolSpec("fs_stat", "Inspect a file or directory inside the workspace: type, size, modified time, child count, optional sha256 (hash=true).", {
+        "type": "object", "properties": {"path": {"type": "string"}, "hash": {"type": "boolean"}}, "required": ["path"]
+    }, "filesystem.read", fs_stat))
+    registry.register(ToolSpec("fs_archive", "Create a .zip archive of a workspace file or directory. Verified readable with matching member count before reporting success.", {
+        "type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]
+    }, "filesystem.write", fs_archive))
+    registry.register(ToolSpec("fs_extract", "Extract a .zip archive into a directory inside the workspace. Members are checked for path escape; extraction is verified on disk.", {
+        "type": "object", "properties": {"src": {"type": "string"}, "dst": {"type": "string"}}, "required": ["src", "dst"]
+    }, "filesystem.write", fs_extract))

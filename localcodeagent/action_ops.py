@@ -151,6 +151,40 @@ _URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
 _DL_DEST_RE = re.compile(
     r"^(.*?)\s+(?:to|into|in|inside|under)\s+(.+?)\s*$", re.I | re.S)
 
+# File discovery / inspection / archive — read intents are
+# filesystem.read (no approval in routine profiles); archive/extract
+# mutate, so they carry filesystem.write.
+_FIND_CONTAINING_RE = re.compile(
+    r"^\s*(?:find|locate|show)\s+(?:all\s+|any\s+)?(?:the\s+)?files?\s+"
+    r"(?:containing|with|that\s+contain(?:s)?)\s+(.+?)\s*$", re.I | re.S)
+_SEARCH_TEXT_RE = re.compile(
+    r"^\s*(?:search|grep)\s+(?:the\s+|inside\s+|within\s+)?"
+    r"(?:files?|workspace|code|codebase|project)\s+for\s+(.+?)\s*$",
+    re.I | re.S)
+_FIND_FILE_RE = re.compile(
+    r"^\s*(?:find|locate|search\s+for|look\s+for)\s+(?:all\s+|any\s+)?"
+    r"(?:the\s+)?(?:file|files|folder|folders|directories|dir|dirs)"
+    r"\b\s*(.*?)\s*$", re.I | re.S)
+_FIND_BARE_RE = re.compile(r"^\s*(?:find|locate)\s+(.+?)\s*$", re.I | re.S)
+_INSPECT_RE = re.compile(
+    r"^\s*(?:inspect|stat|info\s+on|file\s+info(?:rmation)?\s+(?:for|on|"
+    r"of)|details?\s+(?:for|on|of))\s+(?:the\s+)?"
+    r"(?:file|folder|directory|dir)?\s*(.+?)\s*$", re.I | re.S)
+_CHECKSUM_RE = re.compile(
+    r"^\s*(?:checksum|check\s*sum|sha\s*-?\s*256|hash)\s+"
+    r"(?:of\s+|for\s+)?(?:the\s+)?(?:file\s+)?(.+?)\s*$", re.I | re.S)
+_ARCHIVE_RE = re.compile(
+    r"^\s*(?:zip|archive|compress)\s+(?:up\s+)?(?:the\s+)?"
+    r"(?:file|folder|directory|dir|files)?\s*(.*?)\s*$", re.I | re.S)
+_EXTRACT_RE = re.compile(
+    r"^\s*(?:unzip|extract|unarchive|decompress|expand)\s+(?:the\s+)?"
+    r"(?:archive|zip|file|contents\s+of)?\s*(.*?)\s*$", re.I | re.S)
+_TO_TAIL_RE = re.compile(
+    r"^(.*?)\s+(?:to|into|as|called|named)\s+(.+?)\s*$", re.I | re.S)
+# 'find <glob>' claims only pattern-shaped tails — 'find my keys' is
+# not a filesystem search.
+_GLOBISH_RE = re.compile(r"[~\w.\-\\/*?]+")
+
 
 def _app_plan(kind: str, name_raw: str, *, state: str = "",
               workspace: Path | None = None
@@ -420,6 +454,138 @@ def parse_local_action(text: str, *, workspace: Path | str,
             action_text=f"download {url}"
                         + (f" to {dest_raw}" if dest_raw else ""),
             display=Path(url.split("?")[0].rstrip("/")).name or url)
+
+    # File discovery — content search ('find files containing X',
+    # 'search files for X') then filename search ('find files named
+    # *.log', 'find notes.txt').
+    m = _FIND_CONTAINING_RE.match(t) or _SEARCH_TEXT_RE.match(t)
+    if m:
+        query = _TRAILING_WS_RE.sub("", m.group(1).strip().strip("\"'"))
+        if not query:
+            return ActionPlan(
+                kind="search_text", tool="search_text",
+                permission="filesystem.read",
+                clarify="What text should I search for?",
+                action_text="search files")
+        return ActionPlan(
+            kind="search_text", tool="search_text",
+            permission="filesystem.read", params={"query": query},
+            action_text=f"search files for '{query}'", display=query)
+    m = _FIND_FILE_RE.match(t)
+    if m:
+        tail = re.sub(
+            r"^(?:named|called|matching|like|with\s+names?\s+like)\s+",
+            "", m.group(1), flags=re.I).strip()
+        tail = _TRAILING_WS_RE.sub("", tail.strip("\"'"))
+        if not tail or _PRONOUN_ONLY_RE.match(tail):
+            return ActionPlan(
+                kind="search", tool="search_filename",
+                permission="filesystem.read",
+                clarify="What filename or pattern should I look for?",
+                action_text="find files")
+        return ActionPlan(
+            kind="search", tool="search_filename",
+            permission="filesystem.read", params={"pattern": tail},
+            action_text=f"find files '{tail}'", display=tail)
+    m = _FIND_BARE_RE.match(t)
+    if m:
+        tail = _TRAILING_WS_RE.sub("", m.group(1).strip().strip("\"'"))
+        looks_file = bool(_GLOBISH_RE.fullmatch(tail)) and any(
+            c in tail for c in "*?.\\/:") or tail.startswith("~")
+        if looks_file:
+            return ActionPlan(
+                kind="search", tool="search_filename",
+                permission="filesystem.read", params={"pattern": tail},
+                action_text=f"find files '{tail}'", display=tail)
+        # 'find my keys' — not a filesystem target, fall through.
+
+    # Inspect / checksum — 'inspect report.txt', 'hash installer.exe'.
+    m = _CHECKSUM_RE.match(t)
+    if m:
+        body = (m.group(1) or "").strip()
+        if _WORKSPACE_WORD_RE.match(body) or \
+                re.search(r"\band\b", body, re.I):
+            return None
+        raw = _path_tail(body)
+        if not raw:
+            return ActionPlan(
+                kind="inspect", tool="fs_stat",
+                permission="filesystem.read",
+                clarify="Which file should I hash?",
+                action_text="checksum")
+        path = _resolve(raw, ws, extra_roots)
+        return _mk("inspect", "fs_stat", "filesystem.read",
+                   f"checksum {raw}", {"path": path}, {"hash": "true"})
+    m = _INSPECT_RE.match(t)
+    if m:
+        body = (m.group(1) or "").strip()
+        # 'inspect the workspace' / 'inspect it and fix…' are broad or
+        # compound model tasks, not single-path stat ops.
+        if _WORKSPACE_WORD_RE.match(body) or \
+                re.search(r"\band\b", body, re.I):
+            return None
+        raw = _path_tail(body)
+        if not raw:
+            if _PRONOUN_ONLY_RE.match(body):
+                return None
+            return ActionPlan(
+                kind="inspect", tool="fs_stat",
+                permission="filesystem.read",
+                clarify="What should I inspect?", action_text="inspect")
+        path = _resolve(raw, ws, extra_roots)
+        return _mk("inspect", "fs_stat", "filesystem.read",
+                   f"inspect {raw}", {"path": path}, {})
+
+    # Archive / extract — 'zip reports to out.zip', 'extract x.zip'.
+    m = _ARCHIVE_RE.match(t)
+    if m:
+        body = (m.group(1) or "").strip()
+        dm = _TO_TAIL_RE.match(body)
+        if dm:
+            src_raw, dst_raw = _path_tail(dm.group(1)), _path_tail(dm.group(2))
+        else:
+            src_raw, dst_raw = _path_tail(body), ""
+        if not src_raw:
+            if _PRONOUN_ONLY_RE.match(body) or \
+                    _APP_CLAUSE_HEAD_RE.match(body):
+                return None
+            return ActionPlan(
+                kind="archive", tool="fs_archive",
+                permission="filesystem.write",
+                clarify="What should I archive?", action_text="archive")
+        src = _resolve(src_raw, ws, extra_roots)
+        if dst_raw:
+            dst = _resolve(dst_raw, ws, extra_roots)
+        else:
+            default_dst = src[0].parent / (src[0].name + ".zip")
+            dst = _resolve(str(default_dst), ws, extra_roots)
+        return _mk("archive", "fs_archive", "filesystem.write",
+                   f"archive {src_raw}", {"src": src, "dst": dst}, {})
+    m = _EXTRACT_RE.match(t)
+    if m:
+        body = (m.group(1) or "").strip()
+        dm = _TO_TAIL_RE.match(body)
+        if dm:
+            src_raw, dst_raw = _path_tail(dm.group(1)), _path_tail(dm.group(2))
+        else:
+            src_raw, dst_raw = _path_tail(body), ""
+        if not src_raw:
+            if _PRONOUN_ONLY_RE.match(body) or \
+                    _APP_CLAUSE_HEAD_RE.match(body):
+                return None
+            return ActionPlan(
+                kind="extract", tool="fs_extract",
+                permission="filesystem.write",
+                clarify="What archive should I extract?",
+                action_text="extract")
+        src = _resolve(src_raw, ws, extra_roots)
+        if dst_raw:
+            dst = _resolve(dst_raw, ws, extra_roots)
+        else:
+            dst = _resolve(str(src[0].parent / src[0].stem),
+                           ws, extra_roots)
+        return _mk("extract", "fs_extract", "filesystem.write",
+                   f"extract {src_raw}", {"src": src, "dst": dst}, {})
 
     # write/save with quoted content — 'write "hello" to note.txt'.
     m = _WRITE_TO_RE.search(t)
@@ -723,6 +889,14 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
             permission="approved" if approved else "policy",
             verification=summary, verified=False,
             failure=error or result[:160], tool_result=result)
+    if plan.kind in _READ_KINDS:
+        # Read intents are their own evidence — the tool result IS the
+        # verified answer (stat output, match list).
+        return _close(
+            "verified", _read_text(plan, result),
+            permission="approved" if approved else "policy",
+            verification=result[:160], verified=True,
+            artifact=plan.display, tool_result=result)
     # The tool handlers verify on disk before returning *_OK; the marker
     # is the evidence, not the prose around it.
     if "_OK" in result:
@@ -740,12 +914,14 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
 
 _APP_KINDS = {"launch", "close", "restart", "status", "window",
               "download", "download_cancel"}
+_READ_KINDS = {"search", "search_text", "inspect"}
 _CAPABILITY = {k: "application" for k in
                ("launch", "close", "restart", "status", "window")}
 _CAPABILITY.update({"download": "network", "download_cancel": "network"})
 _CAPABILITY.update({k: "filesystem" for k in
                     ("mkdir", "write", "delete", "move", "rename",
-                     "copy")})
+                     "copy", "archive", "extract")})
+_CAPABILITY.update({k: "filesystem" for k in _READ_KINDS})
 
 
 def _app_success_text(plan: ActionPlan, data: dict) -> str:
@@ -797,6 +973,57 @@ def _app_verify_summary(data: dict) -> str:
     return "; ".join(bits)[:200]
 
 
+def _read_text(plan: ActionPlan, result: str) -> str:
+    """Truthful answer text for read intents — the payload is the
+    evidence, so format it instead of claiming success around it."""
+    if plan.kind == "search":
+        try:
+            data = json.loads(result)
+        except (ValueError, TypeError):
+            data = {}
+        files = list(data.get("files") or [])
+        count = int(data.get("count") or len(files))
+        if not count:
+            return f"No files matched '{plan.display}'."
+        shown = ", ".join(str(f) for f in files[:10])
+        more = f" (+{count - 10} more)" if count > 10 else ""
+        noun = "file" if count == 1 else "files"
+        return f"Found {count} {noun} matching '{plan.display}': {shown}{more}"
+    if plan.kind == "search_text":
+        lines = [ln for ln in result.splitlines() if ln.strip()]
+        if not lines or lines[0].strip() == "NO_MATCHES":
+            return f"No matches for '{plan.display}'."
+        head = "; ".join(ln.strip()[:80] for ln in lines[:5])
+        more = f" (+{len(lines) - 5} more)" if len(lines) > 5 else ""
+        return (f"{len(lines)} match(es) for '{plan.display}': "
+                f"{head}{more}")
+    if plan.kind == "inspect":
+        try:
+            data = json.loads(result)
+        except (ValueError, TypeError):
+            data = {}
+        if not data.get("exists"):
+            return f"{plan.display} doesn't exist."
+        bits = [str(data.get("type", "item")),
+                f"{data.get('size', 0)} bytes"]
+        if data.get("children") is not None:
+            bits.append(f"{data['children']} items")
+        mt = data.get("mtime")
+        if mt:
+            import datetime
+            bits.append("modified " + datetime.datetime.fromtimestamp(
+                float(mt)).strftime("%Y-%m-%d %H:%M"))
+        if data.get("symlink"):
+            bits.append("symlink")
+        if data.get("readonly"):
+            bits.append("read-only")
+        sha = data.get("sha256")
+        if sha and isinstance(sha, str) and len(sha) >= 16:
+            bits.append(f"sha256 {sha[:16]}…")
+        return f"{plan.display} — {', '.join(bits)}."
+    return result[:400]
+
+
 def _success_text(plan: ActionPlan) -> str:
     d = plan.display
     return {
@@ -806,4 +1033,6 @@ def _success_text(plan: ActionPlan) -> str:
         "move": f"Moved to {d}.",
         "rename": f"Renamed to {d}.",
         "copy": f"Copied to {d}.",
+        "archive": f"Archived to {d}.",
+        "extract": f"Extracted to {d}.",
     }.get(plan.kind, f"Done — {d}.")
