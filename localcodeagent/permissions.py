@@ -52,6 +52,7 @@ _RISK_DEFAULTS = {
     "clipboard.read": "ask",
     "clipboard.write": "ask",
     "application.launch": "ask",
+    "application.manage": "ask",
 }
 
 # Granular permissions inherit the older broad Computer Use keys when the new
@@ -65,6 +66,7 @@ _PERMISSION_ALIASES = {
     "clipboard.read": ("computer.observe",),
     "clipboard.write": ("computer.control",),
     "application.launch": ("computer.control",),
+    "application.manage": ("computer.control",),
 }
 
 PROFILES: dict[str, dict[str, str]] = {
@@ -209,6 +211,7 @@ AUTONOMY_NEVER_AUTO = frozenset({
     "clipboard.read",
     "clipboard.write",
     "application.launch",
+    "application.manage",
 })
 
 # Audit log bound (entries). Older entries are dropped once exceeded; the log
@@ -286,7 +289,9 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
     "clipboard.write":   {"label": "Write clipboard", "category": "Desktop", "scope": "Local clipboard", "risk": "medium",
                           "blurb": "Replace clipboard text. Audit records only the character count.", "tools": ["computer_clipboard_set"]},
     "application.launch": {"label": "Launch applications", "category": "Desktop", "scope": "Local machine", "risk": "high",
-                           "blurb": "Start a local executable directly, without invoking a shell.", "tools": ["computer_launch"]},
+                           "blurb": "Start a local executable directly, without invoking a shell.", "tools": ["computer_launch", "computer_app_launch"]},
+    "application.manage": {"label": "Manage running applications", "category": "Desktop", "scope": "Local machine", "risk": "high",
+                           "blurb": "Close or restart running applications. A close request can discard unsaved work in the target app.", "tools": ["computer_app_close", "computer_app_restart"]},
     "tasks.queue":       {"label": "Queue background tasks", "category": "Automation", "scope": "Job manager", "risk": "medium",
                           "blurb": "Queue multi-step background work (installs, research, workflows).", "tools": ["task_queue"]},
     "runtime.manage":    {"label": "Manage runtimes & services", "category": "Automation", "scope": "Local runtimes", "risk": "high",

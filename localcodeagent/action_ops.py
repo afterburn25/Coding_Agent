@@ -16,6 +16,7 @@ is never a "routine" operation).
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,89 @@ _RECURSIVE_RE = re.compile(
 _FALSE_POSITIVE_RE = re.compile(
     r"\b(?:how do|how to|what is|what's|why|explain|show me|tell me|"
     r"should i|would it|does it|did you|have you)\b", re.I)
+
+# Application lifecycle — resolve at plan time so the approval card and
+# ledger carry the real executable, not just the user's words.
+_APP_OPEN_RE = re.compile(
+    r"^\s*(?:open|launch|start|bring\s+up)\s+(?:up\s+)?"
+    r"(?:the\s+)?(.+?)\s*$", re.I | re.S)
+_APP_CLOSE_RE = re.compile(
+    r"^\s*(?:close|quit|exit|stop)\s+(?:the\s+)?(.+?)\s*$", re.I | re.S)
+_APP_RESTART_RE = re.compile(
+    r"^\s*(?:restart|relaunch|reopen|reboot)\s+(?:the\s+)?(.+?)\s*$",
+    re.I | re.S)
+_APP_STATUS_RE = re.compile(
+    r"^\s*(?:is|check\s+(?:if|whether)|see\s+if)\s+(.+?)\s+"
+    r"(?:is\s+)?(?:running|open|up)\s*[?!.]*$", re.I | re.S)
+_APP_WINDOW_RE = re.compile(
+    r"^\s*(minimize|maximize|minimise|maximise|restore)\s+"
+    r"(?:the\s+)?(?:window\s+(?:of|for)\s+)?(.+?)\s*$", re.I | re.S)
+# Tails that are conversation, not an app name — 'close the deal',
+# 'start over', 'open up about…'.
+# Bare idioms — the whole tail is a conversational target.
+_APP_NON_TARGET_RE = re.compile(
+    r"^(?:it|that|this|them|over|up|down|deal|shop|distance|gap|"
+    r"mind|eyes|mouth|a\s+conversation|my\s+heart|yourself|myself)"
+    r"\.?$", re.I)
+# A tail that opens with a preposition/possessive is a clause, not an
+# app name — 'about your feelings', 'with care', 'my day'.
+_APP_CLAUSE_HEAD_RE = re.compile(
+    r"^(?:about|with|on|upon|for|of|my|your|his|her|our|their|me|you|"
+    r"us|the\s+way|how)\b", re.I)
+# 'open the folder X' / 'open the file X' are filesystem targets handled
+# by the file ops below — don't swallow them as app names.
+_APP_FS_HEAD_RE = re.compile(
+    r"^(?:folder|directory|dir|file|note|document)\b", re.I)
+
+
+def _app_plan(kind: str, name_raw: str, *, state: str = "",
+              workspace: Path | None = None
+              ) -> ActionPlan | None:
+    """Build an app-control plan. Returns None when the tail cannot
+    possibly be an application target (conversation/file ops)."""
+    name = _TRAILING_WS_RE.sub("", (name_raw or "").strip().strip("\"'"))
+    if not name or _APP_NON_TARGET_RE.match(name) or \
+            _APP_CLAUSE_HEAD_RE.match(name) or _embedded_op(name):
+        return None
+    if len(name) > 200:
+        return None
+    # 'open notes.txt' / 'open D:\doc.pdf' — an existing file opens with
+    # its default handler through the shell (launch_verified handles
+    # non-.exe targets via os.startfile).
+    if kind == "launch" and workspace is not None:
+        cand, _in = _resolve(name, workspace, None)
+        if cand.is_file() and cand.suffix.lower() != ".exe":
+            return ActionPlan(
+                kind="launch", tool="computer_app_launch",
+                permission="application.launch",
+                params={"app": str(cand)},
+                resolved={}, action_text=f"open {name}",
+                display=cand.name)
+    tool = {"launch": "computer_app_launch",
+            "close": "computer_app_close",
+            "restart": "computer_app_restart",
+            "status": "computer_app_status",
+            "window": "computer_app_window"}[kind]
+    perm = ("application.launch" if kind == "launch"
+            else "application.manage" if kind in ("close", "restart")
+            else "desktop.view" if kind == "status"
+            else "desktop.control")
+    from .computer_use import apps
+    resolved = apps.resolve_app(name)
+    display = resolved["name"] if resolved.get("ok") else name
+    verb = {"launch": "open", "close": "close", "restart": "restart",
+            "status": "check whether", "window": ""}[kind]
+    if kind == "window":
+        action = f"{state or 'manage'} window for {name}"
+    else:
+        action = f"{verb} {name}" if verb else f"manage {name}"
+    params: dict[str, str] = {"app": name}
+    if state:
+        params["state"] = state
+    return ActionPlan(kind=kind, tool=tool, permission=perm,
+                      params=params, resolved={},
+                      action_text=action, display=display,
+                      clarify="")
 
 
 def _strip_prefix(text: str) -> str:
@@ -244,6 +328,38 @@ def parse_local_action(text: str, *, workspace: Path | str,
             kind=kind, tool=tool, permission=perm, params=p,
             resolved=res_str, outside_root=outside,
             action_text=action_text, display=str(display))
+
+    # Application lifecycle intents — checked before filesystem ops so
+    # 'open Notepad' claims the app lane. Non-app tails ('close the
+    # deal', 'open the folder x') are rejected by _app_plan and the
+    # 'open folder/file …' head guard.
+    m = _APP_STATUS_RE.match(t)
+    if m:
+        plan = _app_plan("status", m.group(1))
+        if plan:
+            return plan
+    m = _APP_WINDOW_RE.match(t)
+    if m:
+        state = {"minimise": "minimize", "maximise": "maximize"}.get(
+            m.group(1).lower(), m.group(1).lower())
+        plan = _app_plan("window", m.group(2), state=state)
+        if plan:
+            return plan
+    m = _APP_RESTART_RE.match(t)
+    if m:
+        plan = _app_plan("restart", m.group(1))
+        if plan:
+            return plan
+    m = _APP_CLOSE_RE.match(t)
+    if m:
+        plan = _app_plan("close", m.group(1))
+        if plan:
+            return plan
+    m = _APP_OPEN_RE.match(t)
+    if m and not _APP_FS_HEAD_RE.match(m.group(1).strip()):
+        plan = _app_plan("launch", m.group(1), workspace=ws)
+        if plan:
+            return plan
 
     # write/save with quoted content — 'write "hello" to note.txt'.
     m = _WRITE_TO_RE.search(t)
@@ -405,7 +521,8 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
     """
     entry = ledger.begin(
         kind=plan.kind, action=plan.action_text,
-        capability="filesystem", tool=plan.tool, params=plan.params,
+        capability=_CAPABILITY.get(plan.kind, "filesystem"),
+        tool=plan.tool, params=plan.params,
         task_id=task_id, mission_id=mission_id) if ledger else None
 
     def _close(status: str, text: str, *, permission: str = "",
@@ -516,6 +633,32 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
             f"I tried to {plan.action_text}, but it failed: "
             f"{result}. Nothing was changed.",
             failure=result, tool_result=result)
+    if plan.kind in _APP_KINDS:
+        # App tools return a JSON evidence dict — the post-condition
+        # probe (pid alive / window / exit state) rides inside it.
+        try:
+            data = json.loads(result)
+        except (ValueError, TypeError):
+            data = {}
+        ok = bool(data.get("ok"))
+        verified = bool(data.get("verified", ok)) or \
+            bool(data.get("shell"))  # shell-opened: OS accepted, no pid
+        error = str(data.get("error") or "")
+        summary = _app_verify_summary(data)
+        if ok and (verified or plan.kind in ("close", "status")):
+            return _close(
+                "verified", _app_success_text(plan, data),
+                permission="approved" if approved else "policy",
+                verification=summary or result[:160], verified=True,
+                artifact=str(data.get("path") or plan.display),
+                tool_result=result)
+        return _close(
+            "failed",
+            f"I tried to {plan.action_text}, but it failed: "
+            f"{error or result[:160]}",
+            permission="approved" if approved else "policy",
+            verification=summary, verified=False,
+            failure=error or result[:160], tool_result=result)
     # The tool handlers verify on disk before returning *_OK; the marker
     # is the evidence, not the prose around it.
     if "_OK" in result:
@@ -529,6 +672,50 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
         f"The {plan.action_text} operation ran, but the result was "
         f"inconclusive: {result[:160]}. Treating it as unverified.",
         verification=result[:160], verified=False, tool_result=result)
+
+
+_APP_KINDS = {"launch", "close", "restart", "status", "window"}
+_CAPABILITY = {k: "application" for k in _APP_KINDS}
+_CAPABILITY.update({k: "filesystem" for k in
+                    ("mkdir", "write", "delete", "move", "rename",
+                     "copy")})
+
+
+def _app_success_text(plan: ActionPlan, data: dict) -> str:
+    name = plan.display or plan.params.get("app", "the app")
+    if plan.kind == "launch":
+        if data.get("already_running"):
+            return f"{name} is already running — brought it to the front."
+        if data.get("shell"):
+            return f"Opened {name}."
+        return f"{name} is open."
+    if plan.kind == "close":
+        if data.get("already") or data.get("count") == 0:
+            return f"{name} wasn't running."
+        n = int(data.get("count") or 1)
+        return (f"{name} closed." if n <= 1
+                else f"Closed {n} {name} windows.")
+    if plan.kind == "restart":
+        return f"{name} restarted."
+    if plan.kind == "status":
+        return (f"{name} is running." if data.get("running")
+                else f"{name} isn't running.")
+    if plan.kind == "window":
+        return f"{name} {plan.params.get('state', '')}d."
+    return "Done."
+
+
+def _app_verify_summary(data: dict) -> str:
+    bits = []
+    if data.get("pid"):
+        bits.append(f"pid {data['pid']}")
+    if data.get("path"):
+        bits.append(str(data["path"]))
+    win = data.get("window")
+    if isinstance(win, dict) and win.get("hwnd"):
+        bits.append(f"window '{win.get('title', '')}' (hwnd "
+                    f"{win['hwnd']})")
+    return "; ".join(bits)[:200]
 
 
 def _success_text(plan: ActionPlan) -> str:

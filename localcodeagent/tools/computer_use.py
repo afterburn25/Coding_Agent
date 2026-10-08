@@ -60,6 +60,25 @@ def register_computer_use_tools(registry: ToolRegistry, workspace: Path,
         stamp = time.strftime("%Y%m%d-%H%M%S")
         return shot_dir / f"shot-{stamp}-{uuid.uuid4().hex[:10]}.png"
 
+    def _window_by_app_or_handle(args: dict[str, Any]) -> dict[str, Any]:
+        app = str(args.get("app") or "").strip()
+        if app:
+            from ..computer_use import apps as _apps
+            resolved = _apps.resolve_app(app)
+            image = resolved["path"] if resolved.get("ok") else app
+            procs = _apps.find_processes(image)
+            for proc in procs:
+                if _apps.windows_for_pid(proc["pid"]):
+                    return cu.app_window_state(
+                        str(args.get("state") or ""), pid=proc["pid"])
+            return {"ok": False,
+                    "error": f"no window found for '{app}'"}
+        return cu.app_window_state(
+            str(args.get("state") or ""),
+            hwnd=int(args.get("hwnd") or 0),
+            pid=int(args.get("pid") or 0),
+            title_substr=str(args.get("title") or ""))
+
     registry.register(ToolSpec(
         "computer_screenshot",
         "Capture the virtual screen to a PNG under data/screenshots and return its path/size. Use to understand the current desktop state.",
@@ -106,6 +125,69 @@ def register_computer_use_tools(registry: ToolRegistry, workspace: Path,
         _cap(lambda a: cu.launch_app(str(a.get("path") or ""),
                                      [str(x) for x in a.get("args") or []])),
         category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_resolve",
+        "Resolve an application name (e.g. 'notepad', 'Visual Studio') to its executable via path, PATH, App Paths registry, or Start Menu shortcuts.",
+        {"type": "object", "properties": {"app": {"type": "string"}},
+         "required": ["app"]},
+        "desktop.view",
+        _cap(lambda a: cu.app_resolve(str(a.get("app") or ""))),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_status",
+        "Check whether an application is running. Returns matching pids and their visible windows as evidence.",
+        {"type": "object", "properties": {"app": {"type": "string"}},
+         "required": ["app"]},
+        "desktop.view",
+        _cap(lambda a: cu.app_status(str(a.get("app") or ""))),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_launch",
+        "Launch an application by name or path and verify it: resolves the executable, waits for the process to stay alive, and detects its window. Returns pid/path/window evidence.",
+        {"type": "object", "properties": {
+            "app": {"type": "string"},
+            "args": {"type": "array", "items": {"type": "string"},
+                     "default": []}},
+         "required": ["app"]},
+        "application.launch",
+        _cap(lambda a: cu.app_launch(str(a.get("app") or ""),
+                                     [str(x) for x in a.get("args") or []])),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_close",
+        "Gracefully close all running instances of an application by name or path (posts WM_CLOSE, waits for exit). Never force-kills.",
+        {"type": "object", "properties": {"app": {"type": "string"}},
+         "required": ["app"]},
+        "application.manage",
+        _cap(lambda a: cu.app_close(str(a.get("app") or ""))),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_restart",
+        "Restart an application by name or path: gracefully close all instances, then relaunch and verify the process and window.",
+        {"type": "object", "properties": {"app": {"type": "string"}},
+         "required": ["app"]},
+        "application.manage",
+        _cap(lambda a: cu.app_restart(str(a.get("app") or ""))),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
+        "computer_app_window",
+        "Minimize, maximize, or restore a window identified by app name, hwnd, pid, or title substring.",
+        {"type": "object", "properties": {
+            "state": {"type": "string",
+                      "enum": ["minimize", "maximize", "restore"]},
+            "app": {"type": "string"},
+            "hwnd": {"type": "integer"}, "pid": {"type": "integer"},
+            "title": {"type": "string"}},
+         "required": ["state"]},
+        "desktop.control",
+        _cap(lambda a: _window_by_app_or_handle(a)),
+        category="utilities", capabilities=["application_focus"]))
 
     registry.register(ToolSpec(
         "computer_click",

@@ -92,7 +92,6 @@ class TestParse(unittest.TestCase):
                      "how do I create a folder",
                      "can you explain recursion",
                      "write a python script that sorts a list",
-                     "can you open notepad",
                      "tell me about directories",
                      "why did the build fail"):
             self.assertIsNone(

@@ -333,6 +333,164 @@ class ComputerUse:
             return self._fail(record, f"launch failed: {exc}")
         return self._finish(record, {"ok": True, "pid": int(proc.pid), "path": path})
 
+    # -- verified application lifecycle (apps.py primitives) ---------------
+
+    def app_resolve(self, name: str) -> dict[str, Any]:
+        """Resolve a friendly app name/path to an executable."""
+        from . import apps
+        record = self._record("app_resolve", str(name)[:120])
+        return self._finish(record, apps.resolve_app(name))
+
+    def app_status(self, name_or_path: str) -> dict[str, Any]:
+        """Is the app running? Evidence: matching pids + their windows."""
+        from . import apps
+        name_or_path = str(name_or_path or "").strip()
+        record = self._record("app_status", name_or_path[:120])
+        resolved = apps.resolve_app(name_or_path)
+        image = resolved["path"] if resolved.get("ok") else name_or_path
+        procs = apps.find_processes(image)
+        rows = []
+        for proc in procs:
+            rows.append({"pid": proc["pid"], "image": proc["image"],
+                         "windows": apps.windows_for_pid(proc["pid"])})
+        return self._finish(record, {
+            "ok": True, "running": bool(procs),
+            "path": resolved.get("path", ""), "processes": rows,
+            "count": len(rows)})
+
+    def app_launch(self, name_or_path: str,
+                   args: list[str] | None = None,
+                   wait_s: float = 10.0) -> dict[str, Any]:
+        """Resolve + launch + verify (pid alive, window awaited)."""
+        from . import apps
+        name_or_path = str(name_or_path or "").strip()
+        record = self._record("app_launch", name_or_path[:120])
+        resolved = apps.resolve_app(name_or_path)
+        if not resolved.get("ok"):
+            candidates = resolved.get("candidates") or []
+            hint = (f" Did you mean: {', '.join(candidates[:3])}?"
+                    if candidates else "")
+            return self._fail(
+                record,
+                f"could not find an application for "
+                f"'{name_or_path}'{hint}")
+        if args is not None and not isinstance(args, list):
+            return self._fail(record, "launch arguments must be a list")
+        clean_args = [str(a)[:300] for a in (args or [])][:20]
+        # Already running with a window? Bring it forward instead of
+        # spawning a duplicate instance.
+        if not clean_args:
+            for proc in apps.find_processes(resolved["path"]):
+                wins = apps.windows_for_pid(proc["pid"])
+                if wins:
+                    hwnd = int(wins[0]["hwnd"])
+                    user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                    user32.SetForegroundWindow(hwnd)
+                    return self._finish(record, {
+                        "ok": True, "pid": proc["pid"],
+                        "path": resolved["path"], "verified": True,
+                        "already_running": True, "focused": True,
+                        "window": wins[0], "app": resolved["name"],
+                        "resolved_via": resolved["source"]})
+        result = apps.launch_verified(resolved["path"], clean_args,
+                                      proc_wait_s=wait_s)
+        result["app"] = resolved["name"]
+        result["resolved_via"] = resolved["source"]
+        if not result.get("ok"):
+            return self._fail(
+                record, str(result.get("error") or
+                            f"process exited with code "
+                            f"{result.get('exit_code')}"))
+        return self._finish(record, result)
+
+    def app_close(self, name_or_path: str,
+                  timeout_s: float = 10.0) -> dict[str, Any]:
+        """Gracefully close every instance matching the app — WM_CLOSE to
+        owned windows, then wait for exit. Never force-kills."""
+        from . import apps
+        name_or_path = str(name_or_path or "").strip()
+        record = self._record("app_close", name_or_path[:120])
+        resolved = apps.resolve_app(name_or_path)
+        image = resolved["path"] if resolved.get("ok") else name_or_path
+        procs = apps.find_processes(image)
+        if not procs:
+            return self._finish(record, {"ok": True, "closed": True,
+                                         "already": True, "count": 0,
+                                         "path": resolved.get("path", "")})
+        results, failed = [], []
+        for proc in procs:
+            r = apps.close_windows(proc["pid"], timeout_s=timeout_s)
+            results.append(r)
+            if not r.get("closed"):
+                failed.append(proc["pid"])
+        ok = not failed
+        payload = {"ok": ok, "closed": ok, "count": len(procs),
+                   "results": results,
+                   "path": resolved.get("path", "")}
+        if not ok:
+            payload["error"] = (
+                f"{len(failed)} instance(s) did not close "
+                "(unsaved work or a hung window); not force-killed")
+            return self._fail(record, payload["error"])
+        return self._finish(record, payload)
+
+    def app_restart(self, name_or_path: str,
+                    timeout_s: float = 10.0) -> dict[str, Any]:
+        """Close all matching instances, then relaunch verified."""
+        from . import apps
+        name_or_path = str(name_or_path or "").strip()
+        record = self._record("app_restart", name_or_path[:120])
+        resolved = apps.resolve_app(name_or_path)
+        if not resolved.get("ok"):
+            return self._fail(
+                record, f"could not find an application for "
+                f"'{name_or_path}'")
+        procs = apps.find_processes(resolved["path"])
+        for proc in procs:
+            r = apps.close_windows(proc["pid"], timeout_s=timeout_s)
+            if not r.get("closed"):
+                return self._fail(
+                    record, f"pid {proc['pid']} did not close; "
+                            "restart aborted (not force-killed)")
+        result = apps.launch_verified(resolved["path"], [])
+        result["app"] = resolved["name"]
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error") or
+                                          "relaunch failed"))
+        return self._finish(record, result)
+
+    def app_window_state(self, state: str, *, hwnd: int = 0,
+                         pid: int = 0,
+                         title_substr: str = "") -> dict[str, Any]:
+        """Minimize/maximize/restore a window by hwnd, pid, or title."""
+        from . import apps
+        record = self._record("app_window_state",
+                              f"{state} {title_substr or hwnd or pid}")
+        if user32 is None:
+            return self._fail(record, "unsupported platform")
+        target = 0
+        try:
+            if hwnd:
+                target = int(hwnd)
+            elif pid:
+                wins = apps.windows_for_pid(int(pid))
+                if wins:
+                    target = int(wins[0]["hwnd"])
+            elif title_substr:
+                needle = str(title_substr)[:200].lower()
+                for w in self._visible_windows():
+                    if needle in w["title"].lower():
+                        target = int(w["hwnd"])
+                        break
+        except (TypeError, ValueError):
+            return self._fail(record, "invalid window identifier")
+        if not target:
+            return self._fail(record, "no matching window")
+        result = apps.set_window_state(target, state)
+        if not result.get("ok"):
+            return self._fail(record, str(result.get("error")))
+        return self._finish(record, result)
+
     # -- input ------------------------------------------------------------
 
     def mouse_move(self, x: int, y: int) -> dict:
