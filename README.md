@@ -10,7 +10,7 @@ Future development sessions should begin with `DEVIN_START_HERE.md`, then `READM
 
 ## Current development version
 
-`0.33.1`
+`0.33.2`
 
 Canonical version lives in `VERSION`; `scripts/sync_version.py` derives
 every downstream artifact (pyproject, installer defaults, .NET project,
@@ -474,7 +474,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **2756 tests passing** (2 environment-dependent skips).
+Current expected result: **2761 tests passing** (2 environment-dependent skips).
 
 ## API highlights
 

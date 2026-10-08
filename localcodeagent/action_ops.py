@@ -177,6 +177,42 @@ def _resolve(raw: str, workspace: Path,
     return cand, _path_base(workspace, cand, extra_roots) is not None
 
 
+_LOC_TAIL_RE = re.compile(
+    r"^(.*?)\s+(?:in|inside|under|within|at)\s+(.+?)\s*$", re.I | re.S)
+_WORKSPACE_WORD_RE = re.compile(
+    r"^(?:the\s+)?(?:my\s+|this\s+|current\s+)?"
+    r"(?:workspace|work\s*space|project|repo|repository|"
+    r"(?:workspace|project|repo)\s+(?:root|folder|directory)|"
+    r"folder|directory|dir)\.?\s*$", re.I)
+
+
+def _split_location(name_raw: str, workspace: Path,
+                    extra_roots: Callable | None
+                    ) -> tuple[str, Path] | None:
+    """Split 'name in <place>' into (name, parent_dir). Returns None when
+    the tail is not a resolvable place — a folder legitimately named
+    'work in progress' must not be split apart."""
+    m = _LOC_TAIL_RE.match(name_raw or "")
+    if not m:
+        return None
+    name = m.group(1).strip().strip("\"'")
+    if not name or Path(name).is_absolute() or _WIN_ABS_RE.match(name):
+        return None
+    # Light clean only — the location is a place clause ('the workspace
+    # root'), not a path; _path_tail would reject it outright.
+    loc_raw = _TRAILING_WS_RE.sub("", m.group(2).strip().strip("\"'"))
+    if not name or not loc_raw or _embedded_op(loc_raw):
+        return None
+    if _WORKSPACE_WORD_RE.fullmatch(loc_raw):
+        return name, Path(workspace).resolve()
+    parent, _inside = _resolve(loc_raw, workspace, extra_roots)
+    # Outside-root parents are allowed — the plan's outside_root flag
+    # still routes them through the explicit approval gate.
+    if parent.is_dir():
+        return name, parent
+    return None
+
+
 def parse_local_action(text: str, *, workspace: Path | str,
                        extra_roots: Callable | None = None
                        ) -> ActionPlan | None:
@@ -313,7 +349,14 @@ def parse_local_action(text: str, *, workspace: Path | str,
                 permission="filesystem.write",
                 clarify="Where should I create the folder?",
                 action_text="create folder")
-        path = _resolve(raw, ws, extra_roots)
+        # 'folder named X in <place>' — the location clause is a parent
+        # directory, not part of the name (observed: "…in the workspace
+        # root" was being folded into the folder's literal name). Split
+        # the raw capture: _path_tail would collapse 'X in D:\dir' to
+        # just the absolute path and lose the folder name entirely.
+        split = _split_location(m.group(1), ws, extra_roots)
+        target = str(split[1] / split[0]) if split else raw
+        path = _resolve(target, ws, extra_roots)
         return _mk("mkdir", "fs_mkdir", "filesystem.write",
                    f"create folder {raw}", {"path": path}, {})
 
@@ -334,7 +377,9 @@ def parse_local_action(text: str, *, workspace: Path | str,
                 permission="filesystem.write",
                 clarify="What file should I create?",
                 action_text="create file")
-        path = _resolve(raw, ws, extra_roots)
+        split = _split_location(body, ws, extra_roots)
+        target = str(split[1] / split[0]) if split else raw
+        path = _resolve(target, ws, extra_roots)
         params = {"content": content,
                   "expected_size": len(content.encode("utf-8"))}
         return _mk("write", "write_file", "filesystem.write",

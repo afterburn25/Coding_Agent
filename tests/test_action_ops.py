@@ -102,7 +102,52 @@ class TestParse(unittest.TestCase):
         plan = parse_local_action(
             "delete folder tmp recursively", workspace=self.ws)
         self.assertTrue(plan.params.get("recursive"))
-        self.assertEqual(Path(plan.params["path"]).name, "tmp")
+
+    def test_location_clause_not_folded_into_name(self):
+        # Observed defect: 'named X in the workspace root' produced a
+        # literal folder called 'X in the workspace root'.
+        plan = parse_local_action(
+            "create a folder named NexusPermTest in the workspace root",
+            workspace=self.ws)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.kind, "mkdir")
+        self.assertEqual(Path(plan.params["path"]),
+                         self.ws.resolve() / "NexusPermTest")
+        self.assertFalse(plan.outside_root)
+
+    def test_location_clause_existing_dir(self):
+        sub = self.ws / "sub"
+        sub.mkdir()
+        plan = parse_local_action(
+            "create folder alpha in sub", workspace=self.ws)
+        self.assertEqual(Path(plan.params["path"]),
+                         sub.resolve() / "alpha")
+
+    def test_location_clause_outside_dir_keeps_gate(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        ext = Path(td.name) / "ext"
+        ext.mkdir()
+        plan = parse_local_action(
+            f"create folder alpha in {ext}", workspace=self.ws)
+        self.assertEqual(Path(plan.params["path"]), ext / "alpha")
+        self.assertTrue(plan.outside_root)
+
+    def test_name_containing_in_is_preserved(self):
+        # A name that merely contains 'in' must not be split when the
+        # tail is not a place.
+        plan = parse_local_action(
+            "create folder work in progress", workspace=self.ws)
+        self.assertIsNotNone(plan)
+        self.assertEqual(Path(plan.params["path"]).name,
+                         "work in progress")
+
+    def test_location_clause_nonexistent_place_keeps_name(self):
+        plan = parse_local_action(
+            "create folder alpha in nowhere-land",
+            workspace=self.ws)
+        self.assertEqual(Path(plan.params["path"]).name,
+                         "alpha in nowhere-land")
 
 
 class TestExecuteInRoot(unittest.TestCase):

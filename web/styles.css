@@ -3381,13 +3381,13 @@ select option {
 }
 
 /* --- Inline permission cards ------------------------------------------------- */
-.approval-msg{grid-column:2;max-width:560px}
-.perm-card{border:1px solid #6b512a;background:#21190d;border-radius:11px;padding:12px 14px;margin:8px 0}
+.approval-msg{display:block;max-width:min(680px,100%)}
+.perm-card{grid-column:1/-1;border:1px solid #6b512a;background:#21190d;border-radius:11px;padding:12px 14px;margin:8px 0;min-width:0}
 .approval-msg.resolved .perm-card{opacity:.85;border-color:var(--line);background:var(--panel2)}
 .perm-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .perm-head strong{font-size:12px;letter-spacing:.4px;text-transform:uppercase;color:#dfcc9f}
 .perm-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#6b512a;color:#f5e6c4;font-size:11px;font-weight:700}
-.perm-action{font-size:13px;color:var(--text);margin-bottom:6px}
+.perm-action{font-size:13px;color:var(--text);margin-bottom:6px;overflow-wrap:anywhere;word-break:break-word}
 .perm-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .perm-title{font-size:11px;font-weight:600;color:#dfcc9f;background:rgba(223,204,159,.08);border:1px solid rgba(223,204,159,.25);border-radius:7px;padding:2px 8px}
 .perm-scope{font-size:11px;color:var(--text-dim);border:1px solid var(--line);border-radius:7px;padding:2px 8px}
@@ -3395,7 +3395,7 @@ select option {
 .perm-adv summary{font-size:11px;color:var(--text-dim);cursor:pointer}
 .perm-adv pre{font-size:10px;color:var(--text-dim);background:rgba(0,0,0,.25);border-radius:7px;padding:7px 9px;margin-top:6px;white-space:pre-wrap;word-break:break-word}
 .perm-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
-.perm-select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;min-width:200px;cursor:pointer}
+.perm-select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;width:100%;max-width:320px;cursor:pointer;text-overflow:ellipsis}
 .perm-select:hover{border-color:#8a6c3d}
 .perm-select:focus{outline:none;border-color:#dfcc9f}
 .perm-resolved{font-size:12px;color:#9fd8a8;padding:7px 10px;background:rgba(90,170,110,.1);border:1px solid rgba(90,170,110,.3);border-radius:8px;margin-top:8px}
