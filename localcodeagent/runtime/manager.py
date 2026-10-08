@@ -716,6 +716,34 @@ class RuntimeManager:
             return True
         return False
 
+    def _listening_pids(self, port: int) -> set[int]:
+        """PIDs holding a TCP LISTEN on ``port`` — best-effort, empty on
+        failure so callers never block a launch on a probe hiccup."""
+        pids: set[int] = set()
+        try:
+            if os.name == "nt":
+                out = subprocess.run(
+                    ["netstat", "-ano", "-p", "tcp"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+                for line in out.splitlines():
+                    parts = line.split()
+                    if (len(parts) >= 5 and parts[0].upper() == "TCP"
+                            and parts[3].upper() == "LISTENING"
+                            and parts[1].rsplit(":", 1)[-1] == str(port)):
+                        pids.add(int(parts[-1]))
+            else:
+                out = subprocess.run(
+                    ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout
+                for line in out.splitlines():
+                    if line.strip().isdigit():
+                        pids.add(int(line.strip()))
+        except Exception:
+            pass
+        return pids
+
     def _runtime_exe_candidates(self) -> set[str]:
         """Resolved paths of llama executables this manager could have
         spawned — the orphan sweep only touches processes whose image is
