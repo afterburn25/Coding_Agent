@@ -717,6 +717,12 @@ class AutonomousSupervisor:
         # autonomy is stopped and dispatch the moment it resumes.
         self._retire_orphaned_repairs()
 
+        # 3e. stale blocked missions — 'blocked' is non-terminal, so a
+        # mission nobody unblocks accumulates forever in the shared
+        # store (23+ observed on the live install). 'failed' is the
+        # honest terminal record and stays resumable via failed→ready.
+        self._retire_stale_blocked()
+
         # 4. drive live missions
         if self.policy.is_stopped() or self.policy.is_paused():
             return
@@ -808,6 +814,25 @@ class AutonomousSupervisor:
                 self.missions.transition(
                     m["id"], "cancelled",
                     detail="repair incident already terminal or gone")
+
+    # A mission blocked this long is waiting on human intervention that
+    # never came — 'failed' records that honestly (terminal, auditable,
+    # and still resumable via failed→ready if someone does return).
+    STALE_BLOCKED_S = 3 * 86400.0
+
+    def _retire_stale_blocked(self) -> None:
+        """Housekeeping sweep: blocked missions untouched longer than
+        STALE_BLOCKED_S transition to 'failed'. Runs pre-gate like the
+        orphan sweep so stopped autonomy can't strand them forever."""
+        cutoff = time.time() - self.STALE_BLOCKED_S
+        for m in self.missions.list():
+            if (str(m.get("status")) == "blocked"
+                    and float(m.get("updated_at") or 0) < cutoff):
+                self.missions.transition(
+                    m["id"], "failed",
+                    detail="blocked >3d with no intervention — "
+                           "auto-retired (resume via failed→ready)")
+                self._audit("mission_blocked_retired", mission=m["id"])
 
     def _step_mission(self, mission_id: str) -> None:
         m = self.missions.get(mission_id)

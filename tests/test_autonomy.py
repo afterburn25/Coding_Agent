@@ -699,6 +699,47 @@ class JobNodeTests(unittest.TestCase):
                 sup2.missions.get(m2["id"])["status"], "cancelled")
             sup.stop()
 
+    def test_stale_blocked_mission_retires_to_failed(self):
+        # 'blocked' is non-terminal: a mission nobody unblocks would
+        # accumulate forever (23+ observed on the live install). After
+        # STALE_BLOCKED_S it becomes 'failed' — terminal, auditable,
+        # resumable via failed→ready — even while autonomy is stopped.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            mission = sup.missions.create(
+                objective="x", title="m", scope="one_shot", workspace=td,
+                source="test")
+            for st in ("ready", "active", "executing", "blocked"):
+                sup.missions.transition(mission["id"], st)
+            old = time.time() - sup.STALE_BLOCKED_S - 60
+            # mutate() re-stamps updated_at — backdate the row directly.
+            sup.missions._get_mut(mission["id"])["updated_at"] = old
+            sup.policy.set_stopped(True)   # sweep is pre-gate
+            sup._retire_stale_blocked()
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "failed")
+            # A freshly blocked mission is untouched.
+            m2 = sup.missions.create(
+                objective="x", title="fresh", scope="one_shot",
+                workspace=td, source="test")
+            for st in ("ready", "active", "executing", "blocked"):
+                sup.missions.transition(m2["id"], st)
+            sup._retire_stale_blocked()
+            self.assertEqual(
+                sup.missions.get(m2["id"])["status"], "blocked")
+            # An old user-paused mission is never swept — paused is
+            # explicit user intent, not a dead end.
+            m3 = sup.missions.create(
+                objective="x", title="paused", scope="one_shot",
+                workspace=td, source="test")
+            for st in ("ready", "active", "executing", "paused"):
+                sup.missions.transition(m3["id"], st)
+            sup.missions._get_mut(m3["id"])["updated_at"] = old
+            sup._retire_stale_blocked()
+            self.assertEqual(
+                sup.missions.get(m3["id"])["status"], "paused")
+            sup.stop()
+
     def test_hooked_recovery_steps_run_instead_of_blocking(self):
         # Playbook actions like restart_model/fallback_model reach
         # _apply_recovery_step only through runtime_hooks — an unwired
