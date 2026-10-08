@@ -563,6 +563,34 @@ def process(x: np.ndarray, sr: int, preset: VoicePreset,
     return stereo.astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# quality metrics — used by the stochastic-draw gate in VoiceManager and
+# mirrored by scripts/eval_isabella_v7.py (keep the math in sync).
+
+def spectral_centroid_hz(x: np.ndarray, sr: int) -> float:
+    x = np.asarray(x, dtype=np.float32)
+    if x.size < 32:
+        return 0.0
+    spec = np.abs(np.fft.rfft(x))
+    freqs = np.fft.rfftfreq(x.size, 1.0 / sr)
+    return float((spec * freqs).sum() / max(spec.sum(), 1e-12))
+
+
+def echo_lag_corr(x: np.ndarray, sr: int,
+                  lo_ms: float = 4.0, hi_ms: float = 80.0) -> float:
+    """Peak normalized autocorrelation at echo-lag delays — room/comb
+    energy shows up as a strong second peak well after lag 0."""
+    x = np.asarray(x, dtype=np.float32) - np.mean(x)
+    n = min(x.size, int(sr * 4))
+    x = x[:n]
+    if n < int(sr * hi_ms / 1000):
+        return 0.0
+    ac = np.correlate(x, x, mode="full")[n - 1:]
+    ac /= max(ac[0], 1e-12)
+    lo, hi = int(sr * lo_ms / 1000), int(sr * hi_ms / 1000)
+    return float(ac[lo:hi].max()) if hi < ac.size else 0.0
+
+
 def wav_bytes(pcm: np.ndarray, sr: int) -> bytes:
     """float PCM → 16-bit PCM WAV bytes (stdlib, no dependency)."""
     import io

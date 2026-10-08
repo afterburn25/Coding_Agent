@@ -362,6 +362,10 @@ class AgentConfig:
     # vocoder fidelity. fp32/fp16 selectable for tuning.
     voice_chatterbox_dtype: str = "bf16"
     voice_chatterbox_synth_timeout_s: float = 240.0
+    # Stochastic-draw quality gate: Chatterbox sampling can land dark /
+    # reverberant renders (audible "barrel"), most often on short text.
+    # Failed draws are re-generated up to this many times; 0 disables.
+    voice_chatterbox_quality_retries: int = 2
     # Output loudness management — applied in the DSP chain before the
     # peak limiter so normalized speech never clips.
     voice_normalize_loudness: bool = True
@@ -812,6 +816,9 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.voice_chatterbox_synth_timeout_s = max(30.0, float(raw.get(
         "voice_chatterbox_synth_timeout_s",
         cfg.voice_chatterbox_synth_timeout_s)))
+    cfg.voice_chatterbox_quality_retries = max(0, min(4, int(raw.get(
+        "voice_chatterbox_quality_retries",
+        cfg.voice_chatterbox_quality_retries))))
     cfg.voice_normalize_loudness = bool(raw.get(
         "voice_normalize_loudness", cfg.voice_normalize_loudness))
     cfg.voice_target_lufs = max(-40.0, min(-6.0, float(raw.get(

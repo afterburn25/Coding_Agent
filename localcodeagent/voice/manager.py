@@ -773,10 +773,53 @@ class VoiceManager:
             pcm = Path(hit).read_bytes()  # placeholder shape for caller
             return _CachedAudio(frames), sr, hit
         fallback = False
+        # Global loudness settings apply as preset overrides — the preset
+        # stays the single source of truth for the DSP chain and
+        # dsp.process keeps its stable signature. Applied before the
+        # quality gate so scored trials equal the cached audio.
+        import dataclasses as _dc
+        overrides: dict[str, Any] = {}
+        if not getattr(self.config, "voice_normalize_loudness", True):
+            overrides["normalize_loudness"] = False
+        _tgt = float(getattr(self.config, "voice_target_lufs", -14.0))
+        if abs(_tgt + 14.0) > 0.01:
+            overrides["loudness_target_lufs"] = _tgt
+        if not getattr(self.config, "voice_limiter_enabled", True):
+            overrides["limiter_enabled"] = False
+        if overrides:
+            preset = _dc.replace(preset, **overrides)
+        # Stochastic-draw quality gate: Chatterbox sampling (temperature
+        # 0.72) can land dark/reverberant renders — the audible "barrel" —
+        # most often on short text. Each draw is scored post-DSP against
+        # the measured golden-band (good live draws sit ≥ ~3.4 kHz
+        # centroid, ≤0.55 echo-lag corr); rejected draws re-generate up to
+        # `voice_chatterbox_quality_retries` times and the best draw wins.
+        retries = max(0, int(getattr(
+            self.config, "voice_chatterbox_quality_retries", 2)))
+        gate = retries > 0 and preset.engine == "chatterbox"
+        best: tuple[float, Any, int, Any] | None = None
+        tries = 0
         try:
-            audio, sr = engine.synthesize(
-                text, voice=preset.base_voice, speed=speed,
-                lang=_lang_tag(preset.language))
+            for _ in range(1 + (retries if gate else 0)):
+                audio, sr = engine.synthesize(
+                    text, voice=preset.base_voice, speed=speed,
+                    lang=_lang_tag(preset.language))
+                tries += 1
+                if not gate or audio.size < sr // 2:
+                    best = (0.0, audio, sr, None)
+                    break
+                trial = dsp.process(audio, sr, preset)
+                mono = trial.mean(axis=1)
+                centroid = dsp.spectral_centroid_hz(mono, sr)
+                echo = dsp.echo_lag_corr(mono, sr)
+                score = centroid / 4400.0 - echo
+                if best is None or score > best[0]:
+                    best = (score, audio, sr, trial)
+                if centroid >= 3400.0 and echo <= 0.55:
+                    break
+                log.info("chatterbox draw %d rejected "
+                         "(centroid %.0f Hz, echo %.2f) — redrawing",
+                         tries, centroid, echo)
         except VoiceEngineError:
             # Chatterbox unavailable (runtime/model missing, worker
             # dead, VRAM floor not met) — degrade to the legacy engine
@@ -806,21 +849,15 @@ class VoiceManager:
                 text, voice=fb_voice, speed=speed,
                 lang=_lang_tag(preset.language))
             fallback = True
-        # Global loudness settings apply as preset overrides — the preset
-        # stays the single source of truth for the DSP chain and
-        # dsp.process keeps its stable signature.
-        import dataclasses as _dc
-        overrides: dict[str, Any] = {}
-        if not getattr(self.config, "voice_normalize_loudness", True):
-            overrides["normalize_loudness"] = False
-        _tgt = float(getattr(self.config, "voice_target_lufs", -14.0))
-        if abs(_tgt + 14.0) > 0.01:
-            overrides["loudness_target_lufs"] = _tgt
-        if not getattr(self.config, "voice_limiter_enabled", True):
-            overrides["limiter_enabled"] = False
-        if overrides:
-            preset = _dc.replace(preset, **overrides)
-        stereo = dsp.process(audio, sr, preset)
+            best = None
+        if tries > 1:
+            self._publish("voice", {
+                "event": "quality_redraw", "attempts": tries,
+                "engine": preset.engine})
+        if best is not None:
+            audio, sr = best[1], best[2]
+        stereo = (best[3] if best is not None and best[3] is not None
+                  else dsp.process(audio, sr, preset))
         wav = dsp.wav_bytes(stereo, sr)
         # Fallback audio is cached under the *kokoro* engine key — a
         # degraded render must never masquerade as chatterbox output,

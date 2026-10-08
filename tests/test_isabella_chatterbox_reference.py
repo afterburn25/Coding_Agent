@@ -213,6 +213,7 @@ def test_synthesize_applies_dsp_exactly_once() -> None:
         voice_preset_id="", voice_mode="responses", voice_speed=1.0,
         voice_volume=1.0, voice_normalize_loudness=True,
         voice_target_lufs=-14.0, voice_limiter_enabled=True,
+        voice_chatterbox_quality_retries=0,
         save=lambda: None),
         preset_dir=Path(tempfile.mkdtemp()) / "p",
         cache_dir=Path(tempfile.mkdtemp()) / "c")
@@ -372,3 +373,81 @@ def test_v7_preset_keeps_air_band_for_anti_barrel_tone() -> None:
            if b["freq_hz"] >= 9000 and b["gain_db"] >= 4.0]
     assert air, "V7 preset must keep a >=9 kHz air band (golden-matched)"
     assert p["exciter"] >= 0.5, "exciter below 0.5 loses the golden sheen"
+
+
+# ---------------------------------------------------------------------------
+# stochastic-draw quality gate — live-measured bad draws (short replies
+# rendering dark + reverberant, e.g. 0.86 s @ 2690 Hz / echo 0.68 vs
+# golden 4391 Hz / 0.30) must be re-generated, not cached.
+
+def _gate_manager(retries):
+    cfg = types.SimpleNamespace(
+        voice_enabled=True, voice_muted=False, voice_engine="chatterbox",
+        voice_preset_id="", voice_mode="responses", voice_speed=1.0,
+        voice_volume=1.0, voice_normalize_loudness=True,
+        voice_target_lufs=-14.0, voice_limiter_enabled=True,
+        voice_chatterbox_quality_retries=retries,
+        save=lambda: None)
+    m = VoiceManager(cfg, preset_dir=Path(tempfile.mkdtemp()) / "p",
+                     cache_dir=Path(tempfile.mkdtemp()) / "c",
+                     publish=lambda k, p: _gate_manager.events.append((k, p)))
+    return m
+
+
+_gate_manager.events = []
+
+
+class _DrawChatterbox:
+    """Serves queued wavs then repeats the last — a stochastic engine."""
+    name, version, sample_rate = "chatterbox", "x", 24000
+    def __init__(self, wavs):
+        self.wavs, self.calls = list(wavs), 0
+    def synthesize(self, text, *, voice=None, speed=1.0, lang="en"):
+        self.calls += 1
+        w = self.wavs.pop(0) if len(self.wavs) > 1 else self.wavs[0]
+        return w, 24000
+    def voices(self): return []
+    def status(self): return {"name": "chatterbox"}
+
+
+def _dark_draw(n=24000):
+    # 200 Hz pure tone → centroid ~200 Hz, pitch autocorr inside the
+    # 4–80 ms echo window → both gate metrics fail.
+    t = np.linspace(0, 1.0, n, dtype=np.float32)
+    return 0.1 * np.sin(2 * np.pi * 200 * t)
+
+
+def _clean_draw(n=24000):
+    # Broadband noise → high centroid, no echo peak → gate passes.
+    rng = np.random.default_rng(7)
+    return (0.05 * rng.standard_normal(n)).astype(np.float32)
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_quality_gate_redraws_bad_draws() -> None:
+    _gate_manager.events.clear()
+    m = _gate_manager(retries=2)
+    eng = _DrawChatterbox([_dark_draw(), _clean_draw()])
+    m._engines["chatterbox"] = eng
+    m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
+    assert eng.calls == 2, "a dark/reverberant draw must trigger a redraw"
+    assert any(p.get("event") == "quality_redraw"
+               for _, p in _gate_manager.events)
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_quality_gate_accepts_good_draw_first_try() -> None:
+    m = _gate_manager(retries=2)
+    eng = _DrawChatterbox([_clean_draw()])
+    m._engines["chatterbox"] = eng
+    m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
+    assert eng.calls == 1, "a passing draw must not waste a retry"
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_quality_gate_zero_retries_disables() -> None:
+    m = _gate_manager(retries=0)
+    eng = _DrawChatterbox([_dark_draw()])
+    m._engines["chatterbox"] = eng
+    m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
+    assert eng.calls == 1

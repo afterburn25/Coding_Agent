@@ -378,8 +378,10 @@ mutations honor permission levels; official presets are protected.
 Chatterbox (v0.26.x): `voice_chatterbox_runtime_dir`
 (`runtime/voice/chatterbox`), `voice_chatterbox_device` (auto|cpu|cuda),
 `voice_chatterbox_min_free_vram_mb` (3200),
-`voice_chatterbox_synth_timeout_s` (240). Loudness:
-`voice_normalize_loudness`, `voice_target_lufs` (−17),
+`voice_chatterbox_synth_timeout_s` (240),
+`voice_chatterbox_quality_retries` (2 — re-draws dark/reverberant
+stochastic renders that fail the post-DSP centroid/echo gate; 0 disables).
+Loudness: `voice_normalize_loudness`, `voice_target_lufs` (−17),
 `voice_limiter_enabled`.
 
 ## Installer / upgrades
