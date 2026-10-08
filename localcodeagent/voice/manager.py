@@ -789,11 +789,13 @@ class VoiceManager:
         if overrides:
             preset = _dc.replace(preset, **overrides)
         # Stochastic-draw quality gate: Chatterbox sampling (temperature
-        # 0.72) can land dark/reverberant renders — the audible "barrel" —
-        # most often on short text. Each draw is scored post-DSP against
-        # the measured golden-band (good live draws sit ≥ ~3.4 kHz
-        # centroid, ≤0.55 echo-lag corr); rejected draws re-generate up to
-        # `voice_chatterbox_quality_retries` times and the best draw wins.
+        # 0.72) can land dark/reverberant/boomy renders — the audible
+        # "barrel" — most often on short text. Each draw is scored
+        # post-DSP against the measured golden-band (good live draws sit
+        # ≥ ~3.4 kHz centroid, ≤0.55 echo-lag corr, ≤−16 dB 100–200 Hz
+        # share — the golden measures ≈−21 dB there); rejected draws
+        # re-generate up to `voice_chatterbox_quality_retries` times and
+        # the best draw wins.
         retries = max(0, int(getattr(
             self.config, "voice_chatterbox_quality_retries", 2)))
         # Paralinguistic-tag segments legitimately fail the speech band —
@@ -816,14 +818,17 @@ class VoiceManager:
                 mono = trial.mean(axis=1)
                 centroid = dsp.spectral_centroid_hz(mono, sr)
                 echo = dsp.echo_lag_corr(mono, sr)
+                boom = dsp.band_share_db(mono, sr, 100.0, 200.0)
                 score = centroid / 4400.0 - echo
                 if best is None or score > best[0]:
                     best = (score, audio, sr, trial)
-                if centroid >= 3400.0 and echo <= 0.55:
+                if (centroid >= 3400.0 and echo <= 0.55
+                        and boom <= -16.0):
                     break
                 log.info("chatterbox draw %d rejected "
-                         "(centroid %.0f Hz, echo %.2f) — redrawing",
-                         tries, centroid, echo)
+                         "(centroid %.0f Hz, echo %.2f, "
+                         "low-band %.1f dB) — redrawing",
+                         tries, centroid, echo, boom)
         except VoiceEngineError:
             # Chatterbox unavailable (runtime/model missing, worker
             # dead, VRAM floor not met) — degrade to the legacy engine

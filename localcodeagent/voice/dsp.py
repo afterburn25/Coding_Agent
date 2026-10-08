@@ -576,6 +576,20 @@ def spectral_centroid_hz(x: np.ndarray, sr: int) -> float:
     return float((spec * freqs).sum() / max(spec.sum(), 1e-12))
 
 
+def band_share_db(x: np.ndarray, sr: int,
+                  lo_hz: float, hi_hz: float) -> float:
+    """Energy share of a band relative to the whole spectrum, in dB.
+    Used by the draw gate to reject boomy renders — the golden's
+    100–200 Hz share is ≈ −21 dB; bad draws sit ~6–14 dB higher."""
+    x = np.asarray(x, dtype=np.float32)
+    if x.size < 32:
+        return -120.0
+    spec = np.abs(np.fft.rfft(x)) ** 2
+    freqs = np.fft.rfftfreq(x.size, 1.0 / sr)
+    band = spec[(freqs >= lo_hz) & (freqs < hi_hz)].sum()
+    return float(10.0 * np.log10(band / max(spec.sum(), 1e-12) + 1e-12))
+
+
 def echo_lag_corr(x: np.ndarray, sr: int,
                   lo_ms: float = 4.0, hi_ms: float = 80.0) -> float:
     """Peak normalized autocorrelation at echo-lag delays — room/comb

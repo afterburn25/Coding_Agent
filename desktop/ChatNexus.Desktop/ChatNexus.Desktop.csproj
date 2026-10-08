@@ -9,9 +9,9 @@
     <AssemblyName>NexusCore</AssemblyName>
     <RootNamespace>ChatNexus.Desktop</RootNamespace>
     <ApplicationIcon>nexus-core.ico</ApplicationIcon>
-    <Version>0.31.9</Version>
-    <FileVersion>0.31.9.0</FileVersion>
-    <AssemblyVersion>0.31.9.0</AssemblyVersion>
+    <Version>0.31.10</Version>
+    <FileVersion>0.31.10.0</FileVersion>
+    <AssemblyVersion>0.31.10.0</AssemblyVersion>
     <Authors>Afterburn25</Authors>
     <Company>Afterburn25</Company>
     <Copyright>Nexus Core</Copyright>

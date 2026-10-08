@@ -79,6 +79,20 @@ def test_isabella_v7_preserves_approved_tonal_shape() -> None:
     assert low_cut and presence and air
 
 
+def test_isabella_v7_carves_low_mid_boom() -> None:
+    """Live renders measured +6.7 dB median at 100-200 Hz vs the golden
+    across 29 clips — the residual "barrel". The preset must keep a
+    dedicated cut in that band plus a raised high-pass; otherwise the
+    boomy signature regresses."""
+    p = _load(PRESET_PATH)
+    boom_cut = [b for b in p["eq"]
+                if 100 <= float(b["freq_hz"]) <= 200
+                and float(b["gain_db"]) <= -5.0]
+    assert boom_cut, "V7 preset must carve 100-200 Hz boom (golden-matched)"
+    assert float(p["highpass_hz"]) >= 80.0, \
+        "high-pass must sit above the boom band's lower edge"
+
+
 def test_isabella_chatterbox_is_intentionally_louder_but_limited() -> None:
     p = _load(PRESET_PATH)
     assert p["normalize_loudness"] is True
@@ -442,6 +456,32 @@ def test_quality_gate_accepts_good_draw_first_try() -> None:
     m._engines["chatterbox"] = eng
     m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
     assert eng.calls == 1, "a passing draw must not waste a retry"
+
+
+def _boomy_draw(n=24000):
+    # Broadband noise (bright centroid, aperiodic → low echo) with the
+    # 100–200 Hz band heavily boosted — the "boomy" defect class that is
+    # neither dark nor echoey, so only the low-band check catches it.
+    # Strong enough to still fail after the preset's low-mid carve.
+    rng = np.random.default_rng(11)
+    x = rng.standard_normal(n)
+    X = np.fft.rfft(x)
+    fr = np.fft.rfftfreq(n, 1.0 / 24000)
+    X *= np.where((fr >= 100) & (fr < 200), 40.0, 1.0)
+    y = np.fft.irfft(X, n=n).astype(np.float32)
+    return 0.05 * y / max(float(np.abs(y).max()), 1e-6)
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_quality_gate_redraws_boomy_draws() -> None:
+    """A draw can be bright (good centroid) and dry (low echo) yet still
+    boomy — live clips measured up to +14 dB over the golden's 100–200
+    Hz share. The gate must redraw those too."""
+    m = _gate_manager(retries=2)
+    eng = _DrawChatterbox([_boomy_draw(), _clean_draw()])
+    m._engines["chatterbox"] = eng
+    m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
+    assert eng.calls == 2, "a boomy draw must trigger a redraw"
 
 
 @unittest.skipUnless(HAS_NUMPY, "numpy required")

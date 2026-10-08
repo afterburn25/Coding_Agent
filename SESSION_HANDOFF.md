@@ -2,6 +2,18 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.31.10 — low-mid "barrel" carve + boom-aware gate
+
+User still heard barrel after the tonal retune → fine-band diff of 29
+cached live clips vs the golden showed a systematic **+6.7 dB median at
+100–200 Hz** (+2.3 at 450–650) — low-mid boom the brightness retune
+never carved. Preset now has `150 Hz @ −7 dB q1.2`, `520 Hz @ −2.5 dB
+q1.2`, `highpass_hz 60 → 95` (verified live A/B same-text: +9.5 → +2.0
+dB median at 100–200; fundamental region preserved). Gate extended:
+`dsp.band_share_db` scores 100–200 Hz share per draw, rejects >−16 dB
+(golden ≈ −21) so bright-but-boomy draws redraw too. Deploy pending;
+live preset already patched via user-data shadow.
+
 ## v0.31.7–v0.31.9 — stochastic-draw gate + vocalization/gesture repair
 
 User report "responses still sound like in a barrel" → measured the
@@ -32,6 +44,7 @@ lottery (temperature 0.72), worst on short text.
   `[crying]` produce real sounds e2e; speech cache purged of pre-gate
   sub-band clips (centroid<3.4 kHz or echo>0.55).
 - Checkpoint 2660. CI on `7b6d9a7f`/`9f268048`/`a7b5bd5` in flight.
+  (superseded by v0.31.10 → checkpoint 2662)
 
 ## Desktop host re-deployed at 0.31.6 (was 0.31.1)
 
@@ -2788,7 +2801,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2650 tests` passing (2 environment skips).
+Expected at this checkpoint: `2662 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
