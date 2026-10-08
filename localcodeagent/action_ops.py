@@ -1238,7 +1238,7 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
             if data.get("ok") and data.get("status") == "uploading":
                 rel = data.get("release") or {}
                 return _close(
-                    "running",
+                    "started",
                     f"Uploading {data.get('asset_name') or plan.display} "
                     f"({int(data.get('size') or 0):,} bytes) to "
                     f"{data.get('repository')} release "

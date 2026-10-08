@@ -1012,6 +1012,15 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
                 raise RuntimeError(
                     f"artifact integrity check failed: "
                     f"{chk.get('reason', 'unknown')} — refusing upload")
+        elif artifacts is not None:
+            # Path-sourced upload: register now so the reply carries a
+            # card immediately — remote provenance attaches when the
+            # job verifies.
+            try:
+                row = artifacts.register(
+                    path, tool="github_upload_release_asset")
+            except Exception:
+                row = None
         size = path.stat().st_size
         existing = client.request(
             "GET", f"/repos/{oq}/{nq}/releases/{rel['id']}/assets",
@@ -1045,6 +1054,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         ctype = _mt.guess_type(asset_name)[0] or "application/octet-stream"
 
         def _do_upload(progress=None, should_cancel=None) -> dict:
+            nonlocal row
             resp = client.upload_file(
                 up_url, path, content_type=ctype,
                 progress=progress, should_cancel=should_cancel)
@@ -1081,6 +1091,15 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
                 "uploaded_at": check.get("updated_at")
                 or check.get("created_at"),
             }
+            if row is None and artifacts is not None:
+                # Path-sourced upload — the published file still becomes
+                # a tracked artifact so the user gets a card and the
+                # remote provenance is recorded.
+                try:
+                    row = artifacts.register(
+                        path, tool="github_upload_release_asset")
+                except Exception:
+                    row = None
             if row is not None:
                 try:
                     artifacts.attach_remote(str(row["id"]), remote)

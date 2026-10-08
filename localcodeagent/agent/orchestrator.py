@@ -2091,7 +2091,8 @@ class AgentOrchestrator:
         done = self.tasks.update(
             task_id,
             status="completed"
-            if status in ("verified", "clarify", "denied")
+            if status in ("verified", "clarify", "denied", "started",
+                          "cancelled")
             else "failed",
             phase="done",
             model_id="builtin-local",
@@ -2099,7 +2100,8 @@ class AgentOrchestrator:
             summary=text,
             final_content=text,
             steps=0,
-            error="" if status in ("verified", "clarify", "denied")
+            error="" if status in ("verified", "clarify", "denied",
+                                   "started", "cancelled")
             else text,
         )
         self._safe_emit(
