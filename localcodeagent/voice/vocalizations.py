@@ -111,9 +111,10 @@ _TOKENS: list[tuple[str, str, float, str, bool]] = [
     # -- disappointment / sympathy / sadness
     ("aww",        "sympathy",     0.5, r"aww+|aw\b", False),
     ("sniff",      "sadness",      0.5, r"sniff(?:le)?s?", False),
+    ("cry",        "sadness",      0.55, r"sobs?", False),
     # -- amusement
-    ("haha",       "amusement",    0.5, r"(?:ha){2,}h?|(?:bah){2,}|ahahaha", False),
-    ("hehe",       "playfulness",  0.45, r"(?:he){2,}h?\b|tee[-\s]?hee", False),
+    ("haha",       "amusement",    0.5, r"(?:ha){2,}h?|(?:bah){2,}|ahahaha|ha(?:\s+ha)+h?", False),
+    ("hehe",       "playfulness",  0.45, r"(?:he){2,}h?\b|tee[-\s]?hee|hee(?:[-\s]hee)+", False),
     ("heh",        "amusement",    0.3, r"heh\b", False),
     ("hihi",       "playfulness",  0.4, r"(?:hi){2,}h?\b", False),
     # -- cute / playful accidents
@@ -191,6 +192,12 @@ _STAGE: dict[str, tuple[str, str, float]] = {
     "sniff": ("sniff", "sadness", 0.5),
     "sniffs": ("sniff", "sadness", 0.5),
     "sniffles": ("sniff", "sadness", 0.55),
+    "cries": ("cry", "sadness", 0.55),
+    "cries softly": ("cry", "sadness", 0.45),
+    "sobs": ("cry", "sadness", 0.6),
+    "sobs softly": ("cry", "sadness", 0.5),
+    "coughs": ("cough", "discomfort", 0.45),
+    "coughs softly": ("cough", "discomfort", 0.35),
     "clears throat": ("throat_clear", "attention", 0.45),
     "clears her throat": ("throat_clear", "attention", 0.45),
     "clears his throat": ("throat_clear", "attention", 0.45),
@@ -381,6 +388,8 @@ _KOKORO_FORMS: dict[str, tuple[str, str | None]] = {
     "ow": ("ow!", None),
     "ngh": ("ungh.", None),
     "hup": ("hup!", None),
+    "cry": ("ohh…", None),
+    "cough": ("ahem.", None),
     "tsk": ("tsk tsk.", "tch…"),
     "scoff": ("humph.", "hh, please."),
     "pfft": ("pft.", None),
@@ -504,13 +513,14 @@ _CHATTERBOX_TAG_MAP: dict[str, str] = {
     "cough": "[cough]", "throat_clear": "[clear throat]",
     "ahem": "[clear throat]", "groan": "[groan]",
     "sniff": "[sniff]", "shush": "[shush]", "psst": "[shush]",
+    "whisper": "[whispering]", "cry": "[crying]",
 }
 
 # Verified upstream turbo tokenizer tags — a shipped-runtime probe can
 # further restrict this via ``supported``.
 _CHATTERBOX_ALL_TAGS = frozenset({
     "laugh", "chuckle", "sigh", "gasp", "cough", "groan",
-    "sniff", "shush", "clear throat",
+    "sniff", "shush", "clear throat", "crying", "whispering",
 })
 
 
@@ -561,6 +571,7 @@ class ChatterboxVocalizationAdapter(VocalizationAdapter):
             "eye_roll": "huh.", "stretch": "mmh…",
             "soft_moan": "hmm-mm…", "mwah": "mwah.",
             "sniff": "sniff.", "gasp": "ah!", "sharp_inhale": "ah!",
+            "cry": "ohh…",
             "throat_clear": "ahem.", "ahem": "ahem.", "cough": "ahem.",
             "groan": "ughhh.", "shush": "shh.", "psst": "psst.",
             "laugh": "ha ha!", "chuckle": "heh heh.",
@@ -919,6 +930,10 @@ class VocalizationEngine:
             if not spec:
                 continue
             st, cat, inten, adult = spec
+            # A token inside a stage wrapper ("*sobs*" contains "sobs")
+            # would splice overlapping spans — stage hit already owns it.
+            if any(s <= m.start(1) < e for s, e, _ in out):
+                continue
             # "a sigh of relief" is prose — only standalone placements
             # (line start / after sentence punctuation) count.
             if st in _STANDALONE_WORDS:
@@ -990,10 +1005,13 @@ class VocalizationEngine:
                 self._emit_gesture(voc, res, budget, c)
                 self._emit_telemetry(task_id, c, decision, kept=True)
             else:
-                # Dropped vocalizations leave the surrounding prose
-                # readable — strip the token plus a stranded stage
-                # wrapper, then tidy doubled punctuation/space.
-                out = out[:start] + " " + out[end:]
+                # Dropped STAGE wrappers strip — speaking "*sighs*" as
+                # words is worse than silence. A dropped plain-word token
+                # keeps its surface text: the clone voices "oh"/"hmm"
+                # naturally, and deleting a word the user sees in the
+                # reply reads as the sentence skipping.
+                if voc.token.lstrip()[:1] in "*([": 
+                    out = out[:start] + " " + out[end:]
                 decision["tts_form"] = None
                 res.decisions.append(decision)
                 self._emit_telemetry(task_id, c, decision, kept=False)

@@ -451,3 +451,16 @@ def test_quality_gate_zero_retries_disables() -> None:
     m._engines["chatterbox"] = eng
     m._synthesize("short reply", _preset(), 1.0, apply_personality=False)
     assert eng.calls == 1
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_quality_gate_skips_tag_segments() -> None:
+    """Paralinguistic-tag text renders non-speech sounds that legitimately
+    fail the speech band (a live [laugh] measured 1591 Hz / echo 0.91) —
+    gating them would burn retries on good audio."""
+    m = _gate_manager(retries=2)
+    eng = _DrawChatterbox([_dark_draw()])
+    m._engines["chatterbox"] = eng
+    m._synthesize("[laugh] that was funny", _preset(), 1.0,
+                apply_personality=False)
+    assert eng.calls == 1

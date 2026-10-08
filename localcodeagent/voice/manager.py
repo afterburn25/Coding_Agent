@@ -796,7 +796,11 @@ class VoiceManager:
         # `voice_chatterbox_quality_retries` times and the best draw wins.
         retries = max(0, int(getattr(
             self.config, "voice_chatterbox_quality_retries", 2)))
-        gate = retries > 0 and preset.engine == "chatterbox"
+        # Paralinguistic-tag segments legitimately fail the speech band —
+        # a laugh measures "dark + echoey" (1591 Hz / 0.91 live) without
+        # being a bad draw. Skip gating when tags are present.
+        gate = (retries > 0 and preset.engine == "chatterbox"
+                and "[" not in text)
         best: tuple[float, Any, int, Any] | None = None
         tries = 0
         try:

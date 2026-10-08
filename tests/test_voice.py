@@ -1182,6 +1182,53 @@ class TestChatterboxAdapter(unittest.TestCase):
         self.assertIsInstance(adapter_for("unknown-engine"),
                               KokoroVocalizationAdapter)
 
+    def test_whisper_and_cry_render_native_tags(self):
+        # Runtime-supported tags added 2026-10-07: [whispering] replaces
+        # the old "hmm…" stand-in; *cries*/*sobs* render [crying].
+        for style, tag in (("whisper", "[whispering]"),
+                           ("cry", "[crying]")):
+            voc = self.V(category="warmth", style=style,
+                         intensity=0.4, token=style)
+            self.assertEqual(self.adapter.render(voc), tag, style)
+
+    def _resolve(self, text):
+        from localcodeagent.voice.vocalizations import (
+            VocalizationEngine, adapter_for)
+        import random
+        eng = VocalizationEngine(adapter_for("chatterbox"),
+                                 rng=random.Random(0))
+        return eng.resolve(
+            text, ctx={"style": "default", "strength": 100, "mood": "",
+                       "is_adult": False, "level": "expressive",
+                       "profile_id": "p1", "nonverbal_rate": 0.5})
+
+    def test_spaced_laugh_resolves_to_tag(self):
+        out = self._resolve("Ha ha, that worked!").speech_text
+        self.assertIn("[laugh]", out)
+
+    def test_stage_sob_no_span_corruption(self):
+        # "sobs" as a word token inside the *sobs* stage wrapper used to
+        # double-splice into 'ng]*' — overlapping hits must dedupe.
+        out = self._resolve("*sobs* It broke.").speech_text
+        self.assertIn("[crying]", out)
+        self.assertTrue(out.startswith("[crying]"))
+
+    def test_dropped_word_token_keeps_surface_text(self):
+        # A word the user sees in the reply must not silently delete from
+        # speech when the keep-policy drops it — that was the audible
+        # "skips over oh" defect. Stage wrappers still strip.
+        from localcodeagent.voice.vocalizations import (
+            VocalizationEngine, adapter_for)
+        eng = VocalizationEngine(adapter_for("chatterbox"))
+        eng._keep_prob = lambda *a, **k: 0.0
+        ctx = {"style": "default", "strength": 50, "mood": "",
+               "is_adult": False, "level": "natural", "profile_id": "p1",
+               "nonverbal_rate": 0.0}
+        out = eng.resolve("Oh, I see.", ctx=ctx).speech_text
+        self.assertIn("Oh", out)
+        out2 = eng.resolve("*sighs* Fine.", ctx=ctx).speech_text
+        self.assertEqual(out2, "Fine.")
+
 
 # --------------------------------------------------------------------------
 # chatterbox engine (worker mocked / paths only — no torch in tests)

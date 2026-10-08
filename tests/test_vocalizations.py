@@ -147,7 +147,14 @@ class Policy(unittest.TestCase):
         self.assertIn("that's nice", out)
 
     def test_level_off_no_letters(self):
-        self.assertEqual(self._speech("MMM", level="off"), "")
+        # Off means no EMPHASIS — the literal word still speaks (it's in
+        # the displayed reply; deleting it made sentences audibly skip).
+        self.assertEqual(self._speech("MMM", level="off"), "MMM")
+
+    def test_level_off_strips_stage_wrapper(self):
+        # Stage directions still strip — you don't read asterisks aloud.
+        self.assertEqual(self._speech("*sighs* Fine.", level="off"),
+                         "Fine.")
 
     def test_minimal_drops_intense(self):
         # gasp (0.6) exceeds the minimal intensity ceiling; hmm passes.
@@ -203,7 +210,7 @@ class Policy(unittest.TestCase):
             eng._tasks[tid].sentences_since = 9
             eng._tasks[tid].used = 0
             r = eng.resolve("Heh, again.", task_id=tid, ctx=_ctx())
-            if "heh" not in r.speech_text.lower():
+            if any(d.get("tts_form") is None for d in r.decisions):
                 drops += 1
         self.assertGreater(drops, 0)
 
@@ -212,11 +219,13 @@ class Policy(unittest.TestCase):
         tid = "t-pro"
         eng.begin_task(tid)
         kept = sum(
-            "heh" in eng.resolve(s, task_id=tid,
-                                 ctx=_ctx(style="professional",
-                                          strength=50)).speech_text.lower()
-            for s in ("Heh.", "Heh.", "Heh.", "Heh.", "Heh.", "Heh."))
-        # professional allow-list excludes amusement entirely
+            sum(1 for d in r.decisions if d.get("tts_form"))
+            for r in (eng.resolve(s, task_id=tid,
+                                  ctx=_ctx(style="professional",
+                                           strength=50))
+                      for s in ("Heh.",) * 6))
+        # professional allow-list excludes amusement entirely — no
+        # forms applied (the word itself still reads plainly)
         self.assertEqual(kept, 0)
 
     def test_professional_keeps_thinking(self):
@@ -279,11 +288,13 @@ class Policy(unittest.TestCase):
 
     def test_nonverbal_rate_zero_voices_nothing(self):
         eng = _engine()
+        # Zero rate applies no vocalization forms — but plain word tokens
+        # stay in the sentence (dropping them made replies skip words).
         kept = sum(
-            "heh" in eng.resolve(s, task_id="t-nv",
-                                 ctx=_ctx(nonverbal_rate=0.0))
-            .speech_text.lower()
-            for s in ("Heh.", "Heh.", "Heh.", "Heh.", "Heh.", "Heh."))
+            sum(1 for d in r.decisions if d.get("tts_form"))
+            for r in (eng.resolve(s, task_id="t-nv",
+                                  ctx=_ctx(nonverbal_rate=0.0))
+                      for s in ("Heh.",) * 6))
         self.assertEqual(kept, 0)
 
 
