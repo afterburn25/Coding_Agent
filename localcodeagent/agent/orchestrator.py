@@ -2067,6 +2067,7 @@ class AgentOrchestrator:
                 },
             }
             stamp_pending(task_id, pending)
+            self._audit_approval_request(pending)
             parked = self.tasks.update(
                 task_id, status="waiting_approval",
                 phase="waiting_approval", pending_approval=pending)
@@ -4080,6 +4081,19 @@ class AgentOrchestrator:
         except Exception:
             return {}
 
+    def _audit_approval_request(self, pending: dict[str, Any]) -> None:
+        """approval_requested audit entry for parks that bypass the
+        tool-exec recorder (local action / verification / image lanes)."""
+        try:
+            mgr = getattr(self.tools, "permission_manager", None)
+            if mgr is not None:
+                mgr.record_event(
+                    "approval_requested",
+                    str(pending.get("permission") or ""),
+                    str(pending.get("name") or ""))
+        except Exception:
+            pass
+
     def _emit_approval_resolution(
         self,
         task_id: str,
@@ -4092,6 +4106,15 @@ class AgentOrchestrator:
         aid = str(pending.get("id") or "")
         if not aid:
             return
+        try:
+            mgr = getattr(self.tools, "permission_manager", None)
+            if mgr is not None:
+                mgr.record_event(
+                    f"approval_{decision}",
+                    str(pending.get("permission") or ""),
+                    str(pending.get("name") or ""))
+        except Exception:
+            pass
         try:
             rows = list(getattr(self.tasks.get(task_id),
                                 "approval_resolutions", None) or [])
@@ -4140,6 +4163,7 @@ class AgentOrchestrator:
             "detail": detail,
         }
         stamp_pending(session.task_id, pending)
+        self._audit_approval_request(pending)
         session.pending_approval = pending
         task = self.tasks.update(session.task_id, status="waiting_approval", phase="waiting_approval", pending_approval=pending)
         self._emit(session, "approval", approval=pending,
@@ -5596,6 +5620,7 @@ class AgentOrchestrator:
                 "detail": user_text,
             }
             stamp_pending(task_id, pending)
+            self._audit_approval_request(pending)
             waiting = self.tasks.update(
                 task_id,
                 status="waiting_approval",

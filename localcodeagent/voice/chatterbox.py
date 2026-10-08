@@ -46,6 +46,10 @@ DEFAULT_MIN_FREE_VRAM_MB = 3200
 # Cold load ~16 s; steady-state synthesis is sub-realtime on CUDA but
 # slow on CPU — bound a single utterance request.
 SYNTH_TIMEOUT_S = 240.0
+# When the worker landed on CPU because VRAM was below min_free_vram_mb,
+# a 240 s budget just delays the sanctioned kokoro fallback — CPU synth
+# under contention stalls for minutes. Give CPU a real but short window.
+CPU_SYNTH_TIMEOUT_S = 60.0
 LOAD_TIMEOUT_S = 180.0
 
 
@@ -468,13 +472,19 @@ class ChatterboxEngine(TTSEngine):
         meta = self._prepare(voice_id)
         out = (self._tmp_dir or Path(tempfile.gettempdir())) / \
             f"cb-{uuid.uuid4().hex[:12]}.wav"
+        # CPU fallback is the VRAM-starved path — cap its window so the
+        # manager's engine fallback speaks within a minute instead of
+        # burning the full GPU-sized timeout on a synth that can't keep up.
+        timeout = self.synth_timeout_s
+        if self._device == "cpu":
+            timeout = min(timeout, CPU_SYNTH_TIMEOUT_S)
         resp = self._request({
             "cmd": "synthesize", "text": text, "voice_id": voice_id,
             "temperature": float(meta.get("temperature", 0.72)),
             "top_p": float(meta.get("top_p", 0.95)),
             "top_k": int(meta.get("top_k", 1000)),
             "repetition_penalty": float(meta.get("repetition_penalty", 1.2)),
-            "out": str(out)}, timeout=self.synth_timeout_s, touch=True)
+            "out": str(out)}, timeout=timeout, touch=True)
         pcm, sr = _read_wav_mono(out)
         try:
             out.unlink(missing_ok=True)

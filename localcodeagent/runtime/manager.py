@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -715,7 +716,196 @@ class RuntimeManager:
             return True
         return False
 
-    def _listening_pids(self, port: int) -> set[int]:
+    def _runtime_exe_candidates(self) -> set[str]:
+        """Resolved paths of llama executables this manager could have
+        spawned — the orphan sweep only touches processes whose image is
+        one of these, so a foreign llama-server install is never killed."""
+        cands: set[str] = set()
+        try:
+            found = self.discover_llama_server()
+            if found:
+                cands.add(self._norm_exe(found))
+        except Exception:
+            pass
+        try:
+            raw = self.config.llama_cpp_executable
+            if raw:
+                cands.add(self._norm_exe(str(self._resolve(raw))))
+        except Exception:
+            pass
+        for model in getattr(self.config, "models", []) or []:
+            try:
+                exe = getattr(model, "executable", "") or ""
+                if exe:
+                    cands.add(self._norm_exe(str(self._resolve(exe))))
+            except Exception:
+                continue
+        bundled = self.base_dir / "runtime" / "llama"
+        for name in ("llama-server.exe", "llama.exe",
+                     "llama-server", "llama"):
+            p = bundled / name
+            if p.is_file():
+                cands.add(self._norm_exe(str(p)))
+        return cands
+
+    @staticmethod
+    def _norm_exe(path: str) -> str:
+        try:
+            return os.path.normcase(str(Path(path).expanduser().resolve()))
+        except Exception:
+            return os.path.normcase(path)
+
+    def _exe_is_ours(self, exe: str, cmdline: str) -> bool:
+        """True only when the process image is one of this install's own
+        llama executables — either a discovered/configured path or any
+        binary under ``<base_dir>/runtime``. A foreign llama-server on the
+        machine is never treated as ours."""
+        if not exe:
+            return False
+        normed = self._norm_exe(exe)
+        if normed in self._runtime_exe_candidates():
+            return True
+        runtime_root = self._norm_exe(str(self.base_dir / "runtime"))
+        return normed.startswith(runtime_root + os.sep)
+
+    def _our_runtime_processes(self) -> list[dict]:
+        """Enumerate running llama processes whose image is our managed
+        runtime — {pid, exe, cmdline}. Best-effort; empty on any probe
+        failure so boot never blocks on process enumeration."""
+        out: list[dict] = []
+        try:
+            if os.name == "nt":
+                ps = subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive",
+                     "-Command",
+                     "Get-CimInstance Win32_Process -Filter "
+                     "\"Name like 'llama%'\" | Select-Object ProcessId,"
+                     "ExecutablePath,CommandLine | ConvertTo-Json -Compress"],
+                    capture_output=True, text=True, timeout=30,
+                    creationflags=no_window_flags())
+                rows = json.loads(ps.stdout.strip() or "[]")
+                if isinstance(rows, dict):
+                    rows = [rows]
+                for row in rows or []:
+                    pid = int(row.get("ProcessId") or 0)
+                    exe = str(row.get("ExecutablePath") or "")
+                    cmd = str(row.get("CommandLine") or "")
+                    if pid and exe and self._exe_is_ours(exe, cmd):
+                        out.append({"pid": pid, "exe": exe,
+                                    "cmdline": cmd})
+            else:
+                for ent in Path("/proc").iterdir():
+                    if not ent.name.isdigit():
+                        continue
+                    try:
+                        exe = os.readlink(ent / "exe")
+                        if "llama" not in Path(exe).name.lower():
+                            continue
+                        cmd = (ent / "cmdline").read_bytes() \
+                            .replace(b"\x00", b" ") \
+                            .decode("utf-8", "replace").strip()
+                        if self._exe_is_ours(exe, cmd):
+                            out.append({"pid": int(ent.name), "exe": exe,
+                                        "cmdline": cmd})
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return out
+
+    @staticmethod
+    def _orphan_cmdline_model_port(cmdline: str) -> tuple[str, int | None]:
+        """Parse --model / --port out of a llama-server command line."""
+        model, port = "", None
+        m = re.search(r"--model\s+(\"([^\"]+)\"|(\S+))", cmdline)
+        if m:
+            model = m.group(2) or m.group(3) or ""
+        m = re.search(r"--port\s+(\d+)", cmdline)
+        if m:
+            try:
+                port = int(m.group(1))
+            except ValueError:
+                port = None
+        return model, port
+
+    def _orphan_profile(self, model_path: str) -> ModelProfile | None:
+        """The configured managed profile whose model file the orphan
+        serves — adoption must never bind an orphan to the wrong
+        checkpoint."""
+        want = ""
+        try:
+            want = self._norm_exe(model_path)
+            want_name = Path(model_path).name.lower()
+        except Exception:
+            want_name = Path(model_path).name.lower() if model_path else ""
+        for profile in getattr(self.config, "models", []) or []:
+            if getattr(profile, "runtime", "") == "external":
+                continue
+            ppath = getattr(profile, "model_path", "") or ""
+            if not ppath:
+                continue
+            try:
+                resolved = self._norm_exe(str(self._resolve(ppath)))
+                if want and resolved == want:
+                    return profile
+            except Exception:
+                pass
+            if want_name and Path(ppath).name.lower() == want_name:
+                return profile
+        return None
+
+    def sweep_orphan_runtimes(self) -> dict[str, list[str]]:
+        """Reclaim llama-server processes a previous Nexus backend left
+        running. Launch ports are chosen at random, so an orphan on a
+        random port is invisible to the per-spawn port-collision adoption
+        path — it pins VRAM and RAM forever, invisible to every capacity
+        probe (observed: four orphaned 8B servers left <2 GB free VRAM,
+        pushing the Chatterbox voice worker to CPU where synthesis timed
+        out for four minutes before kokoro fallback).
+
+        Runs at backend boot: a healthy orphan serving a configured
+        profile's checkpoint is adopted (no multi-GB reload); anything
+        else carrying our runtime image is killed. Only processes whose
+        executable resolves to our managed runtime are touched — foreign
+        llama-server installs are left alone.
+        """
+        adopted: list[str] = []
+        killed: list[str] = []
+        with self._lock:
+            managed_pids = {getattr(item.process, "pid", None)
+                            for item in self._managed.values()} - {None}
+        for proc in self._our_runtime_processes():
+            pid = int(proc.get("pid") or 0)
+            if not pid or pid in managed_pids or pid == os.getpid():
+                continue
+            model_path, port = self._orphan_cmdline_model_port(
+                str(proc.get("cmdline") or ""))
+            profile = self._orphan_profile(model_path) if model_path else None
+            adopted_profile = False
+            if profile is not None and port:
+                with self._lock:
+                    already = profile.id in self._managed
+                if not already:
+                    endpoint = self._profile_endpoint(profile, port)
+                    try:
+                        adopted_profile = self._adopt_healthy_orphan(
+                            profile, port, endpoint, None)
+                    except Exception:
+                        adopted_profile = False
+            if adopted_profile and profile is not None:
+                adopted.append(profile.id)
+                with self._lock:
+                    managed_pids.add(pid)
+            else:
+                self._kill_pid(pid)
+                killed.append(str(pid))
+        if adopted or killed:
+            self._emit_residency(
+                "orphan_sweep", "",
+                f"adopted={','.join(adopted) or 'none'} "
+                f"killed={','.join(killed) or 'none'}")
+        return {"adopted": adopted, "killed": killed}
+
         """PIDs holding a TCP LISTEN on ``port`` — best-effort, empty on
         failure so callers never block a launch on a probe hiccup."""
         pids: set[int] = set()

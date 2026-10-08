@@ -1386,5 +1386,118 @@ class LiveRuntimeReconfigurationTests(unittest.TestCase):
             self.assertEqual(statuses[0]["endpoint"], "http://127.0.0.1:8082/v1")
 
 
+class OrphanSweepTests(unittest.TestCase):
+    """Boot-time reclaim of llama-server processes a previous backend
+    left running on random ports — invisible to the per-spawn
+    port-collision adoption path, they pin VRAM/RAM indefinitely."""
+
+    def _manager(self, root: Path, **profile_overrides):
+        models = root / "models"
+        models.mkdir(parents=True, exist_ok=True)
+        (models / "coder.gguf").write_bytes(b"GGUF")
+        values = dict(
+            id="coder",
+            endpoint="http://127.0.0.1:8080/v1",
+            model="coder",
+            roles=["primary_coder"],
+            runtime="llama_cpp",
+            model_path="models/coder.gguf",
+        )
+        values.update(profile_overrides)
+        cfg = AgentConfig(models=[ModelProfile(**values)])
+        return RuntimeManager(cfg, base_dir=root)
+
+    def test_cmdline_parsing(self):
+        cmd = ('"D:\\Nexus_Core\\runtime\\llama\\llama-server.exe" '
+               '--model "D:\\Nexus_Models\\Qwen3-8B.gguf" --port 60426 '
+               '--ctx-size 12288')
+        model, port = RuntimeManager._orphan_cmdline_model_port(cmd)
+        self.assertEqual(model, "D:\\Nexus_Models\\Qwen3-8B.gguf")
+        self.assertEqual(port, 60426)
+        model, port = RuntimeManager._orphan_cmdline_model_port(
+            "llama-server --model /m/x.gguf")
+        self.assertEqual(model, "/m/x.gguf")
+        self.assertIsNone(port)
+
+    def test_foreign_exe_is_not_ours(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            foreign = str(Path(td) / "elsewhere" / "llama-server.exe")
+            self.assertFalse(manager._exe_is_ours(foreign, ""))
+            ours = str(Path(td) / "runtime" / "llama" /
+                       "llama-server.exe")
+            self.assertTrue(manager._exe_is_ours(ours, ""))
+
+    def test_healthy_matching_orphan_is_adopted_not_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            model_path = str(manager.models_dir / "coder.gguf")
+            cmd = f"llama-server --model {model_path} --port 51234"
+            orphan = {"pid": 4242, "exe": "llama-server", "cmdline": cmd}
+            killed = []
+            with patch.object(manager, "_our_runtime_processes",
+                              return_value=[orphan]), \
+                 patch.object(manager, "_adopt_healthy_orphan",
+                              return_value=True) as adopt, \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(result["adopted"], ["coder"])
+            self.assertEqual(killed, [])
+            self.assertEqual(adopt.call_args[0][1], 51234)
+
+    def test_unmatched_orphan_is_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            orphan = {"pid": 7777, "exe": "llama-server",
+                      "cmdline": "llama-server --model /other/x.gguf "
+                                 "--port 51111"}
+            killed = []
+            with patch.object(manager, "_our_runtime_processes",
+                              return_value=[orphan]), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [7777])
+            self.assertEqual(result["adopted"], [])
+
+    def test_duplicate_orphan_for_managed_profile_is_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            profile = manager.config.models[0]
+            _attach_fake_managed(manager, profile)
+            # A managed sibling already owns the profile — a second
+            # server of the same checkpoint is a double-load leak.
+            model_path = str(manager.models_dir / "coder.gguf")
+            orphan = {"pid": 8888, "exe": "llama-server",
+                      "cmdline": f"llama-server --model {model_path} "
+                                 "--port 51235"}
+            killed = []
+            with patch.object(manager, "_our_runtime_processes",
+                              return_value=[orphan]), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [8888])
+            self.assertEqual(result["adopted"], [])
+
+    def test_managed_pids_are_never_touched(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            profile = manager.config.models[0]
+            fake = _attach_fake_managed(manager, profile)
+            fake_pid = 9999
+            fake.pid = fake_pid  # stand-in pid for the managed entry
+            orphan = {"pid": fake_pid, "exe": "llama-server",
+                      "cmdline": "llama-server --port 51236"}
+            killed = []
+            with patch.object(manager, "_our_runtime_processes",
+                              return_value=[orphan]), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+
+
 if __name__ == "__main__":
     unittest.main()

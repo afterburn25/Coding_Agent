@@ -56,6 +56,33 @@ park→decide→resume matrix was dogfooded on the sandboxed source build.
 
 Checkpoint: **2749 tests** passing (2 environment skips).
 
+## v0.33.1 — Startup voice latency fix + audit completion
+
+Report: *"the after load voice took a really long time to play after
+startup."* Root cause found in `data/logs/backend-host.log`: four
+**orphaned `llama-server.exe` processes** from pre-boot sessions were
+pinning ~10 GB of the 12 GB GPU. The Chatterbox worker's
+`min_free_vram_mb` gate (3200) saw <2 GB free → loaded on CPU → the
+first post-load TTS stalled past the 240 s timeout → fell back to
+kokoro → voice played ~4.5 min late **in the wrong voice**.
+
+Fixes:
+
+- `RuntimeManager.sweep_orphan_runtimes()` — boot-time reclaim (async
+  thread, spawned from `AppState.__init__`). Enumerates llama processes
+  whose executable resolves to this install's managed runtime; healthy
+  orphans serving a configured profile's checkpoint are adopted via the
+  existing `_adopt_healthy_orphan` path, all others killed. Foreign
+  llama installs untouched.
+- `voice/chatterbox.py` — CPU-device synthesis capped at 60 s
+  (`CPU_SYNTH_TIMEOUT_S`) so the kokoro fallback isn't held for the full
+  GPU-sized timeout when VRAM-starved.
+- Approval audit taxonomy completed: `persistent_grant`,
+  `approval_once`, `approval_expired`, `approval_cancelled`, and
+  `approval_requested` at non-tool park sites.
+
+Checkpoint: **2756 tests** passing (2 environment skips).
+
 ## v0.32.0 — Conversation Intelligence phase 1: response scope
 
 New milestone (relevance/scope/concision/multi-turn). Observed defect:
@@ -198,7 +225,7 @@ term cover so general-knowledge questions can't hijack a stored fact.
 QA corpus grew to cover facts-recall, restatements, topic shifts,
 person-directed wheres, and recall discipline.
 
-Checkpoint: **2749 tests** passing (2 environment skips).
+Checkpoint: **2756 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
 acceptance matrix, real-model benchmark numbers on the deployed
@@ -3003,7 +3030,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2749 tests` passing (2 environment skips).
+Expected at this checkpoint: `2756 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

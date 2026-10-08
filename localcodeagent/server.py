@@ -152,6 +152,20 @@ class AppState:
         # always targets models that are actually installed.
         if self._autodetect_model_files(config):
             self.runtime.reconfigure_models(config)
+        # Reclaim llama-server orphans from a previous backend —
+        # unmanaged servers pin VRAM/RAM invisibly (observed: four
+        # orphaned 8B instances left <2 GB free VRAM, so the voice worker
+        # loaded on CPU and post-startup speech stalled ~4 min before the
+        # kokoro fallback). Async: process enumeration spawns a shell on
+        # Windows and must not gate backend bind.
+        def _sweep_orphans() -> None:
+            try:
+                self.runtime.sweep_orphan_runtimes()
+            except Exception:
+                pass
+        threading.Thread(target=_sweep_orphans,
+                         name="nexus-runtime-orphan-sweep",
+                         daemon=True).start()
         hw = self.runtime.hardware
         gpu_label = ", ".join(g.name for g in getattr(hw, "gpus", []) or []) or "CPU only"
         self._boot(
@@ -5163,6 +5177,9 @@ class AppState:
                 self.permission_manager.grant_session(key)
             elif decision == approvals_mod.DECISION_ALWAYS:
                 self.permission_manager.set_level(key, "allow")
+                self.permission_manager.record_event(
+                    "persistent_grant", key,
+                    str(pending.get("name") or ""))
                 self._update_config_file({
                     "permissions": dict(self.permission_manager.permissions),
                     "permission_profile": self.permission_manager.profile,
@@ -5170,6 +5187,9 @@ class AppState:
             elif decision == approvals_mod.DECISION_DENY:
                 self.permission_manager.record_event(
                     "approval_denied", key, str(pending.get("name") or ""))
+            elif decision == approvals_mod.DECISION_ONCE:
+                self.permission_manager.record_event(
+                    "approval_once", key, str(pending.get("name") or ""))
 
             resolutions.append(approvals_mod.resolution_row(
                 card, decision, status="resolved"))
@@ -6154,6 +6174,10 @@ class AppState:
                 _pending = item.get("pending_approval") or {}
                 _res = list(item.get("approval_resolutions") or [])
                 if _pending.get("id"):
+                    self.permission_manager.record_event(
+                        "approval_expired",
+                        str(_pending.get("permission") or ""),
+                        str(_pending.get("name") or ""))
                     _res.append({
                         "id": str(_pending["id"]),
                         "task_id": str(item["id"]),
@@ -12159,6 +12183,10 @@ class Handler(BaseHTTPRequestHandler):
                         # A pending authorization died with the task —
                         # resolve the card so a stale click can't resume.
                         try:
+                            self.state.permission_manager.record_event(
+                                "approval_cancelled",
+                                str(_pending.get("permission") or ""),
+                                str(_pending.get("name") or ""))
                             _res = list(getattr(task, "approval_resolutions",
                                                 None) or [])
                             _res.append({

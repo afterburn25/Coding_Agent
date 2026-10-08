@@ -1350,6 +1350,33 @@ class TestChatterboxEngine(unittest.TestCase):
         self.assertIn(("status", False), calls)
         self.assertEqual(eng._last_used, 1000.0)
 
+    def test_cpu_synth_uses_capped_timeout(self):
+        """VRAM-starved CPU synthesis must not hold the GPU-sized 240 s
+        budget — the kokoro fallback should land within a minute."""
+        import localcodeagent.voice.chatterbox as cb
+        eng = self.eng
+        eng._loaded = True
+        eng._prepared.add("isabella")
+        timeouts = []
+
+        def rec(payload, timeout, **kw):
+            timeouts.append(timeout)
+            if payload.get("cmd") == "synthesize":
+                src = self._wav(0.5)
+                Path(payload["out"]).write_bytes(src.read_bytes())
+            return {"ok": True}
+        eng._request = rec
+
+        eng._device = "cpu"
+        eng.synthesize("hello", voice="isabella")
+        self.assertEqual(timeouts, [min(eng.synth_timeout_s,
+                                      cb.CPU_SYNTH_TIMEOUT_S)])
+
+        timeouts.clear()
+        eng._device = "cuda"
+        eng.synthesize("hello", voice="isabella")
+        self.assertEqual(timeouts, [eng.synth_timeout_s])
+
     def test_manager_falls_back_to_kokoro(self):
         """A chatterbox preset whose engine fails must still speak —
         the kokoro engine renders it and the event is published."""
