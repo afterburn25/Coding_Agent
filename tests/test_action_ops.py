@@ -148,6 +148,38 @@ class TestParse(unittest.TestCase):
         self.assertEqual(Path(plan.params["path"]).name,
                          "alpha in nowhere-land")
 
+    def test_run_artifact_download_preserves_repo_clause(self):
+        # Observed defect: a trailing 'in repo owner/name' prevented the
+        # run-artifact pattern from matching at all.
+        plan = parse_local_action(
+            "download the artifact from the latest build "
+            "in repo afterburn25/nexus-dogfood",
+            workspace=self.ws)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "github_download_run_artifact")
+        self.assertEqual(plan.params["repo"], "afterburn25/nexus-dogfood")
+
+    def test_run_artifact_name_ending_in_artifact_kept(self):
+        # 'dogfood-artifact' must not be truncated to 'dogfood-' — the
+        # suffix strip only removes a standalone 'artifact' word.
+        plan = parse_local_action(
+            "get dogfood-artifact from the latest successful run "
+            "on repo afterburn25/nexus-dogfood",
+            workspace=self.ws)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "github_download_run_artifact")
+        self.assertEqual(plan.params["name"], "dogfood-artifact")
+        self.assertEqual(plan.params["repo"], "afterburn25/nexus-dogfood")
+
+    def test_run_artifact_bare_request_stays_unnamed(self):
+        plan = parse_local_action(
+            "download the artifact from the latest build",
+            workspace=self.ws)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "github_download_run_artifact")
+        self.assertEqual(plan.params["name"], "")
+        self.assertNotIn("repo", plan.params)
+
 
 class TestExecuteInRoot(unittest.TestCase):
     def setUp(self):

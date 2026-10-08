@@ -136,7 +136,9 @@ _GH_RUN_ART_RE = re.compile(
     r"^\s*(?:download|get|fetch|grab)\s+(?:the\s+)?(.+?)\s+"
     r"(?:artifact\s+)?from\s+(?:the\s+)?(?:latest\s+|last\s+)?"
     r"(?:successful\s+)?(?:build|ci|workflow(?:\s+run)?|"
-    r"actions(?:\s+run)?|run)s?\s*$", re.I | re.S)
+    r"actions(?:\s+run)?|run)s?"
+    r"(?:\s+(?:in|on|of)\s+(?:the\s+)?repo(?:sitory)?\s+"
+    r"([\w.-]+/[\w.-]+))?\s*$", re.I | re.S)
 _GH_REPO_FILE_RE = re.compile(
     r"^\s*(?:get|fetch|download|retrieve)\s+(?:the\s+)?"
     r"([\w.\-/\\]+\.[\w.]+)\s+from\s+(?:the\s+)?"
@@ -584,12 +586,15 @@ def parse_local_action(text: str, *, workspace: Path | str,
     if m:
         tail = _TRAILING_WS_RE.sub("", (m.group(1) or "").strip())
         name = "" if _ARTIFACT_PRONOUN_RE.match(tail) else \
-            re.sub(r"^(?:the|a|an|my)\s+|artifact\s*$", "",
+            re.sub(r"^(?:the|a|an|my)\s+|(?:^|\s)artifact\s*$", "",
                    tail, flags=re.I)
+        params = {"name": name}
+        if m.group(2):
+            params["repo"] = m.group(2)
         return ActionPlan(
             kind="github_download", tool="github_download_run_artifact",
             permission="github.read",
-            params={"name": name},
+            params=params,
             action_text=f"download the {name or 'build'} artifact "
                         "from the latest successful run",
             display=name or "build artifact")
