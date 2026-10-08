@@ -440,8 +440,11 @@ Negative feedback is retained as a negative signal and must not be exported as a
 ## Key source files for Nexus Brain work
 
 - `localcodeagent/workflow/nexus_brain.py` — protected Brain, signing, export/import/update, knowledge/skills/self-model/emotions
-- `localcodeagent/workflow/conversation_memory.py` — staging facts/rules/corrections
+- `localcodeagent/workflow/conversation_memory.py` — staging facts/rules/corrections/supersession
 - `localcodeagent/workflow/conversation_manager.py` — durable sessions/personality/timing/feedback
+- `localcodeagent/context/scope.py` — response-scope classifier + per-turn answer directive (0.32.0)
+- `localcodeagent/context/intent.py` — turn envelope; unresolved-anaphora ambiguity flags
+- `localcodeagent/qa/conversation.py` — deterministic multi-turn QA runner, scope/memory asserts, metrics
 - `localcodeagent/workflow/knowledge_memory.py` — sourced/freshness-aware staging knowledge
 - `localcodeagent/training/model_growth.py` — candidates/datasets/training-job metadata
 - `localcodeagent/agent/orchestrator.py` — context injection, routing, Brain subroutine enforcement

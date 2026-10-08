@@ -92,6 +92,57 @@ class QaRunResult:
         return not any(t.failures for t in self.turns)
 
 
+def aggregate_metrics(runs: list[QaRunResult]) -> dict[str, Any]:
+    """Cross-run conversation-quality report — the measurable
+    dimensions the response-scope milestone tracks.
+
+    Component rates stay separate so a regression names its own cause:
+    a rising ``filler_rate`` and a rising ``over_budget_rate`` are
+    different defects even when both hurt the aggregate.
+    """
+    turns = [tr for run in runs for tr in run.turns]
+    answered = [t for t in turns if t.response]
+    if not turns:
+        return {"turns": 0}
+    lat = sorted(t.elapsed_ms for t in turns)
+
+    def _rate(pred) -> float:
+        return round(100.0 * len([t for t in answered if pred(t)])
+                     / max(1, len(answered)), 2)
+
+    return {
+        "turns": len(turns),
+        "answered": len(answered),
+        "model_calls": len([t for t in turns if t.all_content]),
+        "builtin_answers": len([
+            t for t in turns
+            if not t.all_content and t.response]),
+        "median_latency_ms": round(lat[len(lat) // 2], 1) if lat else 0.0,
+        "p90_latency_ms": round(lat[int(len(lat) * 0.9)], 1)
+        if lat else 0.0,
+        "median_chars": round(
+            sorted(len(t.response) for t in answered)[
+                len(answered) // 2], 1) if answered else 0.0,
+        "median_sentences": round(
+            sorted(int(t.metrics.get("sentences") or 0)
+                   for t in answered)[len(answered) // 2], 1)
+            if answered else 0.0,
+        "filler_rate": _rate(lambda t: t.metrics.get("leading_filler")),
+        "reasoning_narration_rate": _rate(
+            lambda t: t.metrics.get("reasoning_narration")),
+        "trailing_question_rate": _rate(
+            lambda t: t.metrics.get("trailing_question")),
+        "over_budget_rate": _rate(
+            lambda t: t.metrics.get("over_budget")),
+        "depth_histogram": {
+            d: len([t for t in turns
+                    if t.metrics.get("depth") == d])
+            for d in ("exact", "brief", "explanatory", "detailed",
+                      "open_ended")
+        },
+    }
+
+
 class ScriptedProvider:
     """Model provider that replays scripted answers and records calls.
 

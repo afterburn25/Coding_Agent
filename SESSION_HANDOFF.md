@@ -37,10 +37,65 @@ fixed as general architecture:
 - Regression fixed en route: hesitation-gated `thinking` vocalizations
   strip again (v0.31.8 word-keep side-effect).
 
-Remaining milestone work (next increments): broader scenario corpus
-(200+), 50+ turn dogfood, before/after benchmark, topic-shift decay
-tuning, ambiguity→clarify calibration, richer slot model on the model
-lane, inspector UI surface.
+Increments 2–3 (same milestone, found by extending the QA corpus —
+every fix below is a defect the new scenarios actually caught):
+
+- `identity.py` existence lane — `do you have a father/mother/family`
+  answers yes/no only; the name stays on the next disclosure rung.
+  `_SUBJECT` resolves informal `u`/`ya` so `when were u born` hits the
+  deterministic lane.
+- Compound self-corrections — `i like red. actually no, blue. never
+  mind, make it green` decomposes into clauses; only the settled value
+  stays active (was: whole chain stored verbatim). Stacked markers
+  (`wait, actually make that monday`) chain through the reset path.
+- Retarget referent discipline — scans for the newest predicate-
+  bearing fact (entity facts like `i have an rtx 3080` can't absorb
+  corrections), retires slotless referents directly, and value classes
+  (colors) pick the same-class preference fact — `actually i prefer
+  green now` retargets favorite color, never favorite food.
+- Bare-value corrections — `actually no, blue` / `actually i prefer
+  green now` retarget via marker+value; `_BARE_CORRECTION_STOPWORDS`
+  keeps `actually, sure` from rewriting facts; ambiguous restatements
+  bank `i prefer black` rather than corrupting an unrelated fact.
+- Modifier guard — `make that bigger` is referent-relative, not a
+  value; `_RESET_MODIFIERS` blocks comparatives from landing in value
+  slots (was rewriting `color is green` → `color is bigger` and
+  swallowing the command via the training ack).
+- `never mind X` no longer banks as a `Never mind…` rule; `use the
+  dark theme` (non-literal value) can't retarget facts; weekday/month
+  and settings (`light`/`dark`/`metric`) single-word values satisfy
+  the `is`-fact guard.
+- Unbound anaphora → `env.ambiguity` — `make that bigger`,
+  `what's his name`, `change it` with no referent surface the
+  unresolved-referent advisory + scoped clarify rule (previously
+  write-only metadata; content-bearing `it works`/`that's fine`
+  stays unflagged). Resolved pronouns suppress the flag.
+- `intent_context` added to the utility lane's `optional_blocks` —
+  envelope advisories + scope directives previously never reached
+  lightweight turns, where most ordinary questions land
+  (pre-existing gap found via the QA coverage).
+- Training ack echoes the landed value — `Got it — port is 8090.`
+  instead of narrating storage internals.
+- QA: `memory_contains`/`memory_not_contains` asserts evaluate the
+  durable store's injected block for the query (transcript-clean);
+  `aggregate_metrics()` reports filler/narration/trailing-question/
+  over-budget rates, depth histogram, builtin-vs-model ratio,
+  median/p90 latency — the harness-side benchmark surface.
+- Corpus: ambiguity-fresh, pronoun-followup, correction-chain,
+  stacked-marker, cross-form, repeat-question, informal exact-facts,
+  and a deterministic ~64-turn long-conversation scenario (teach →
+  24 distractors → mid-session corrections → settled-value recall →
+  24 more distractors → cross-act callback).
+- tests: `TestUnresolvedAnaphora` (envelope + clarify rule),
+  `TestCorrectionChains` (9 adversarial memory cases),
+  `test_scope_metrics_aggregate` (rate ceilings as regression gate).
+
+Checkpoint: **2705 tests** passing (2 environment skips).
+
+Remaining milestone work (next increments): broader corpus toward the
+acceptance matrix, live-backend dogfood + real-model benchmark,
+topic-shift decay tuning, richer slot model on the model lane,
+inspector UI surface, then release/docs/deploy.
 
 ## v0.31.10 — low-mid "barrel" carve + boom-aware gate
 
@@ -2841,7 +2896,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2690 tests` passing (2 environment skips).
+Expected at this checkpoint: `2705 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

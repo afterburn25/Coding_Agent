@@ -380,6 +380,26 @@ class SeededGenerationTests(unittest.TestCase):
                                     for f in run.failures)
             self.assertEqual(failures, [])
 
+    def test_scope_metrics_aggregate(self):
+        """The aggregate report is the milestone's measurable contract:
+        filler/narration/trailing-question rates stay at zero on the
+        scripted corpus, deterministic lanes answer a meaningful share
+        of turns without a model call, and answers stay short."""
+        from localcodeagent.qa import generate_scope_scenarios
+        from localcodeagent.qa.conversation import aggregate_metrics
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            runner = ConversationQaRunner(agent, provider,
+                                          conversation_manager=convos)
+            runs = [runner.run(s) for s in generate_scope_scenarios()]
+            m = aggregate_metrics(runs)
+            self.assertEqual(m["filler_rate"], 0.0, m)
+            self.assertEqual(m["reasoning_narration_rate"], 0.0, m)
+            self.assertEqual(m["trailing_question_rate"], 0.0, m)
+            self.assertLessEqual(m["over_budget_rate"], 5.0, m)
+            self.assertGreaterEqual(m["builtin_answers"], 10, m)
+            self.assertGreater(m["turns"], 50, m)
+
 
 class FailureCorpusTests(unittest.TestCase):
     def test_failures_recorded_and_closeable(self):
