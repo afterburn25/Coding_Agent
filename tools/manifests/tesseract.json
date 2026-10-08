@@ -23,6 +23,12 @@
     "method": "winget",
     "package": "UB-Mannheim.TesseractOCR"
   },
+  "detect": {
+    "executable_dirs": [
+      "%ProgramFiles%/Tesseract-OCR",
+      "%LocalAppData%/Programs/Tesseract-OCR"
+    ]
+  },
   "health_check": {
     "command": [
       "tesseract",

@@ -18,7 +18,7 @@ from localcodeagent.tools.search import find_ripgrep, register_search_tools
 from localcodeagent.tools.terminal import TerminalTracker, register_terminal_tools, resolve_shell
 from localcodeagent.tool_router import ToolRouter
 from localcodeagent.mcp import MCPManager, MCPServerConfig, load_mcp_configs
-from localcodeagent.tools.plugins import install_command
+from localcodeagent.tools.plugins import install_command, resolve_executable
 from localcodeagent.secrets import SecretVault
 from localcodeagent.tools.api import register_api_tools
 from localcodeagent.tools.codeintel import extract_symbols, register_codeintel_tools
@@ -340,6 +340,58 @@ class PluginManifestTests(unittest.TestCase):
     def test_missing_directory_is_clean(self):
         result = load_plugin_manifests(Path("does/not/exist"), _registry())
         self.assertEqual(result, {"loaded": [], "errors": []})
+
+    def test_executable_dirs_detect_off_path_install(self):
+        """A manifest's detect.executable_dirs finds binaries installed
+        off PATH (e.g. winget -> Program Files) for detection, health
+        checks, and invocation."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td)
+            bindir = root / "offpath" / "bin"
+            bindir.mkdir(parents=True)
+            exe = bindir / "faketool_xyz.exe"
+            exe.write_bytes(b"MZ")
+            manifest = PluginManifest.from_dict({
+                "id": "faketool", "name": "Fake Tool",
+                "executables": ["faketool_xyz"],
+                "detect": {"executable_dirs": [str(bindir)]},
+            })
+            self.assertTrue(manifest.is_installed(install_root=root))
+            found, missing = manifest.executables_found(root)
+            self.assertEqual(found, ["faketool_xyz"])
+            self.assertEqual(missing, [])
+            self.assertEqual(
+                resolve_executable("faketool_xyz", root, "faketool",
+                                   extra_dirs=manifest.extra_executable_dirs(root)),
+                str(exe))
+
+    def test_executable_dirs_expand_install_root_and_env(self):
+        manifest = PluginManifest.from_dict({
+            "id": "x", "name": "X",
+            "detect": {"executable_dirs": ["{install_root}/tools/Scripts"]},
+        })
+        dirs = [Path(d) for d in manifest.extra_executable_dirs(Path("/app"))]
+        self.assertIn(Path("/app").resolve() / "tools" / "Scripts", dirs)
+
+    def test_pip_install_probes_managed_python_scripts(self):
+        """pip-method installs probe the managed interpreter's Scripts/bin
+        dir — that's where console scripts land."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td)
+            fakepy = root / "runtime" / "python.exe"
+            fakepy.parent.mkdir(parents=True)
+            fakepy.write_bytes(b"MZ")
+            manifest = PluginManifest.from_dict({
+                "id": "piper", "name": "Piper",
+                "executables": ["piper"],
+                "install": {"method": "pip", "package": "piper-tts"},
+            })
+            with patch(
+                    "localcodeagent.tools.plugins.managed_python",
+                    return_value=str(fakepy)):
+                dirs = manifest.extra_executable_dirs(root)
+            scripts = "Scripts" if sys.platform.startswith("win") else "bin"
+            self.assertIn(str(fakepy.parent / scripts), dirs)
 
 
 class ProcessManagerTests(unittest.TestCase):

@@ -745,6 +745,63 @@ class TestVoiceManager(unittest.TestCase):
         segs = [p for p in published if p.get("event") == "segment"]
         self.assertEqual(len(segs), 1, segs)
 
+    def test_finish_publishes_sealed_total(self):
+        """The client holds the reply's text reveal in sync with playback;
+        'sealed' reports the task's total segment count so it can release
+        once every segment reaches a terminal state."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        raw = "First sentence spoken. Second sentence spoken."
+        self.m.begin_task("t-seal")
+        self.m.feed_token("t-seal", raw)
+        self.m.finish_task("t-seal", raw)
+        seals = [p for p in published if p.get("event") == "sealed"]
+        self.assertEqual(len(seals), 1)
+        self.assertEqual(seals[0]["task_id"], "t-seal")
+        n_segments = int(seals[0]["total"])
+        self.assertGreaterEqual(n_segments, 1)
+        # Every sealed segment must produce a terminal event — segment,
+        # error, or skipped — so client accounting can reach `total`.
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            term = [p for p in published
+                    if p.get("event") in ("segment", "error", "skipped")
+                    and p.get("task_id") == "t-seal"]
+            if len(term) >= n_segments:
+                break
+            time.sleep(0.05)
+        self.assertEqual(len(term), n_segments,
+                         f"only {len(term)}/{n_segments} terminal events")
+
+    def test_finish_publishes_sealed_zero_for_unspoken(self):
+        """A reply with nothing speakable still seals (total 0) so the
+        client releases immediately instead of waiting on the watchdog."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        self.m.begin_task("t-mute-all")
+        self.m.finish_task("t-mute-all", "")
+        seals = [p for p in published if p.get("event") == "sealed"]
+        self.assertEqual(len(seals), 1)
+        self.assertEqual(seals[0]["total"], 0)
+
+    def test_cancelled_job_publishes_skipped(self):
+        """A cancelled queued job must emit 'skipped' — a silent drop would
+        leave the client's terminal count short of sealed.total forever."""
+        published = []
+        self.m._publish = lambda kind, payload: published.append(payload)
+        job = self.m.enqueue("t-skip", "This will never play.")
+        self.assertIsNotNone(job)
+        job.cancelled = True
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if any(p.get("event") == "skipped" for p in published):
+                break
+            time.sleep(0.05)
+        skipped = [p for p in published if p.get("event") == "skipped"]
+        self.assertTrue(skipped, published)
+        self.assertEqual(skipped[0]["task_id"], "t-skip")
+        self.assertFalse([p for p in published if p.get("event") == "segment"])
+
     # -- speech-genome delivery plan -----------------------------------------
 
     def test_delivery_plan_maps_energy_warmth_emphasis(self):

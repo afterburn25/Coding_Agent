@@ -633,12 +633,31 @@ function scheduleStreamFlush(state){
   raf(()=>flushStreamText(state));
 }
 let voiceGatedState=null;
+function touchVoiceHold(state){
+  // Stall watchdog — voice activity keeps the hold alive; 12s of
+  // silence releases the text so a hung synthesizer can't hide a reply.
+  if(!state.awaitingVoice)return;
+  if(state.voiceHoldTimer)clearTimeout(state.voiceHoldTimer);
+  state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),12000);
+}
+function maybeReleaseVoice(state){
+  // Terminal accounting: release once the sealed segment total has all
+  // reached a terminal state (played / errored / skipped).
+  if(!state||!state.awaitingVoice||state.voiceSealed==null)return;
+  if((state.voiceDone||0)>=state.voiceSealed)releaseVoiceHold(state);
+}
 function releaseVoiceHold(state){
   if(state.voiceHoldTimer){clearTimeout(state.voiceHoldTimer);state.voiceHoldTimer=null;}
   if(!state.awaitingVoice)return;
   state.awaitingVoice=false;
   state.voiceReveal=Infinity;
   if(voiceGatedState===state)voiceGatedState=null;
+  if(state.result&&state.bubble){
+    // Result already landed — swap in the full content (removes the
+    // thinking HUD) so the post-release state matches the non-voice path.
+    state.bubble.textContent=String(state.result.content||'');
+    state.pendingText='';
+  }
   scheduleStreamFlush(state);
 }
 function wireVoicePlayback(){
@@ -652,9 +671,12 @@ function wireVoicePlayback(){
     const e=evt||{},st=voiceGatedState;
     if(!st||!st.awaitingVoice)return;
     if(e.event==='play'&&e.meta&&e.meta.task_id===st.voiceTaskId){
+      st.voiceDone=(st.voiceDone||0)+1;
       const re=Number(e.meta.raw_end||0);
       st.voiceReveal=re>0?re:Infinity;
+      touchVoiceHold(st);
       scheduleStreamFlush(st);
+      maybeReleaseVoice(st);
     }
   });
 }
@@ -669,9 +691,11 @@ function armVoiceHold(state){
   state.awaitingVoice=true;
   state.voiceReveal=0;
   state.voiceTaskId='';
+  state.voiceSealed=null;
+  state.voiceDone=0;
   voiceGatedState=state;
   wireVoicePlayback();
-  state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),12000);
+  touchVoiceHold(state);
 }
 /* ---------- live research card ---------- */
 // Structured research lifecycle events render an inline card inside the
@@ -743,8 +767,27 @@ function handleAgentStreamEvent(name,data,state){
     try{window.NexusVoice?.onEvent(data);}catch{}
     // A segment event means audio is READY — text releases when playback
     // starts (the NexusVoice 'play' event), not on synthesis completion.
-    if(data&&data.event==='segment'&&!state.voiceTaskId&&String(data.task_id||'').startsWith('chat-'))state.voiceTaskId=String(data.task_id);
-    if(data&&(data.event==='stop'||data.event==='muted'||data.event==='error'))releaseVoiceHold(state);
+    const tid=String(data&&data.task_id||'');
+    if(!state.voiceTaskId&&tid.startsWith('chat-')&&
+       (data.event==='segment'||data.event==='queued'||data.event==='sealed'))
+      state.voiceTaskId=tid;
+    const mine=state.voiceTaskId&&tid===state.voiceTaskId;
+    if(data&&data.event==='sealed'&&mine){
+      state.voiceSealed=Number(data.total||0);
+      touchVoiceHold(state);maybeReleaseVoice(state);
+    }else if(data&&(data.event==='skipped')&&mine){
+      state.voiceDone=(state.voiceDone||0)+1;maybeReleaseVoice(state);
+    }else if(data&&data.event==='error'&&(mine||!tid)){
+      // A segment that errored will never play — count it terminal so the
+      // hold can't outlive the utterance; an engine-wide failure still
+      // escapes via the stall timer.
+      state.voiceDone=(state.voiceDone||0)+1;
+      touchVoiceHold(state);maybeReleaseVoice(state);
+    }else if(data&&data.event==='segment'&&mine){
+      touchVoiceHold(state);
+    }else if(data&&(data.event==='stop'||data.event==='muted')){
+      releaseVoiceHold(state);
+    }
     return;
   }
   if(name==='ready'){nexusThinkingStep(state,'Command channel open','Agent stream synchronized','ready');return;}
@@ -779,7 +822,18 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='perf'){const p=data||{};const bits=[p.predicted_per_second?p.predicted_per_second+' tok/s':'',p.prompt_per_second?'prompt '+p.prompt_per_second+' tok/s':'',p.time_to_first_token_ms!=null?'TTFT '+Math.round(p.time_to_first_token_ms)+'ms':'',p.prompt_cache==='hit'?'cache hit':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${p.model_id||'model'} ${bits}`);if(state.telemetry&&p.predicted_per_second)state.telemetry.textContent=p.predicted_per_second+' tok/s';return;}
   if(name==='image_job'&&data.job){renderImageJobs([data.job]);imageJobActivityRow(data.job);nexusThinkingStep(state,'Image synthesis',String(data.job.stage||data.job.state||'generation'),'image');if(!state.receivedToken&&state.summary)state.summary.textContent='Image synthesis in progress';if(data.job.error_code==='backend_not_installed')renderInstallOffer({offer_id:'imgjob:'+String(data.job.id||''),ts:data.job.finished_at||data.job.created_at||0,tools:[{tool:'comfyui',name:'ComfyUI Portable',endpoint:'/api/image/setup'}]},state);scrollChat();return;}
   if(name==='install_offer'){renderInstallOffer(data,state);return;}
-  if(name==='result'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.result=data;state.bubble.textContent=String(data.content||'');state.wrap.classList.remove('streaming');if(data.voice_task_id)state.wrap.dataset.voiceTaskId=data.voice_task_id;if(data.ui)renderChatUI(data.ui,state.wrap);if(data.artifacts)renderArtifactCards(data.artifacts,state.wrap);if(data.ambiguity)renderAmbiguity(data.ambiguity,state.wrap);if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
+  if(name==='result'){agentStreamActive=false;state.result=data;
+    if(state.awaitingVoice){
+      // Hold the full text in step with playback: the buffer becomes the
+      // canonical result content; segments reveal their own span as they
+      // audibly start. Release fires on sealed+all-played, stop/mute, or
+      // the 12s stall watchdog.
+      state.pendingText=String(data.content||'');
+      scheduleStreamFlush(state);maybeReleaseVoice(state);
+    }else{
+      state.pendingText='';state.bubble.textContent=String(data.content||'');
+    }
+    state.wrap.classList.remove('streaming');if(data.voice_task_id)state.wrap.dataset.voiceTaskId=data.voice_task_id;if(data.ui)renderChatUI(data.ui,state.wrap);if(data.artifacts)renderArtifactCards(data.artifacts,state.wrap);if(data.ambiguity)renderAmbiguity(data.ambiguity,state.wrap);if(data.queued&&data.queue_item&&data.queue_item.id){queuedStreams[String(data.queue_item.id)]={wrap:state.wrap,bubble:state.bubble};state.wrap.dataset.queueItem=String(data.queue_item.id);}if(data.response_source==='answer_memory'&&!state.wrap.querySelector('.memory-badge'))state.wrap.insertAdjacentHTML('beforeend',`<div class="memory-badge" title="Trusted learned answer · ${esc(String(data.memory?.memory_match_type||''))} match · model inference skipped">◈ Answered from memory${data.memory&&data.memory.latency_ms!=null?` · ${Math.round(data.memory.latency_ms)} ms`:''}</div>`);if(!state.wrap.querySelector('.message-feedback'))state.wrap.insertAdjacentHTML('beforeend',feedbackControls());scrollChat();return;}
   if(name==='error'){agentStreamActive=false;releaseVoiceHold(state);state.pendingText='';state.error=String(data.error||'Agent stream failed');const prior=state.bubble.textContent||'';state.bubble.textContent=prior.trim()?prior+'\n\n— '+state.error:state.error;state.wrap.classList.remove('streaming');const dg=data.diagnostic;const tech=String(data.technical||'');if(dg||tech){const b=dg?.backend||{};const rows=[['Subsystem',dg?.subsystem],['Failure',dg?.kind],['Endpoint',dg?.url],['Phase',dg?.phase],['Model',dg?.model_id],['Streamed chunks',dg?.chunks_received],['Elapsed',dg?.elapsed_s!=null?dg.elapsed_s+'s':''],['Attempts',dg?.attempt],['Backend state',b.state],['PID',b.pid],['Exit code',b.exit_code],['Crash',b.crash_reason],['VRAM free',b.free_vram_gb!=null?b.free_vram_gb+' GB':''],['RAM free',b.available_ram_gb!=null?b.available_ram_gb+' GB':''],['Error',tech]].filter(r=>r[1]!==undefined&&r[1]!==null&&r[1]!=='').map(r=>`${r[0]}: ${r[1]}`);if(b.log_tail)rows.push('Backend log tail:\n'+b.log_tail);if(rows.length){const det=document.createElement('details');det.className='error-diagnostic';det.innerHTML='<summary>Diagnostics</summary><pre>'+esc(rows.join('\n'))+'</pre>';state.bubble.appendChild(det);}}attachRetry(state);scrollChat();return;}
 }
 function attachRetry(state){

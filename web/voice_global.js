@@ -161,7 +161,7 @@
       // the previous session's shutdown would otherwise silence whatever
       // is speaking seconds after page load.
       if (e.ts && Date.now() / 1000 - Number(e.ts) > 15) return;
-      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; NV._lastEnd = Date.now(); } } NV.refresh(); }
+      if (e.event === 'stop') { NV.queue.length = 0; if (NV.current) { try { NV.current.pause(); } catch (_) {} NV.current = null; NV._lastEnd = 0; } } NV.refresh(); }
     else NV._emit(e);
   };
 

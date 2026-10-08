@@ -83,24 +83,34 @@ def _scan_for_executable(base: str, root: str, names_key: str) -> str:
 
 
 def resolve_executable(exe: str, install_root: Path | None,
-                       tool_id: str = "") -> str:
+                       tool_id: str = "",
+                       extra_dirs: list[str] | None = None) -> str:
     """Resolve an executable name to a runnable path.
 
-    Order: absolute path → PATH → ``<install_root>/<tool_id>`` scan →
-    bounded scan of ``<install_root>`` (depth ≤4, pruned). Lets
-    archive-installed binaries (e.g. .agent/tools/whisper/Release/
-    whisper-cli.exe) run without PATH changes.
+    Order: absolute path → PATH → manifest ``extra_dirs`` (off-PATH
+    install locations like ``Program Files``) → ``<install_root>/
+    <tool_id>`` scan → bounded scan of ``<install_root>`` (depth ≤4,
+    pruned). Lets archive-installed binaries (e.g. .agent/tools/whisper/
+    Release/whisper-cli.exe) and package-manager installs that don't
+    update the service's PATH run without changes.
     """
     p = Path(str(exe)).expanduser()
     if p.is_absolute() and p.is_file():
         return str(p)
     if shutil.which(str(exe)):
         return str(exe)
+    name = str(exe)
+    names = [name] if name.lower().endswith((".exe", ".bat", ".cmd")) else [name, f"{name}.exe"]
+    if extra_dirs:
+        for d in extra_dirs:
+            direct = Path(os.path.expandvars(str(d))).expanduser()
+            for cand in names:
+                hit = direct / cand
+                if hit.is_file():
+                    return str(hit)
     root = Path(install_root).resolve() if install_root else None
     if root is None:
         return str(exe)
-    name = str(exe)
-    names = [name] if name.lower().endswith((".exe", ".bat", ".cmd")) else [name, f"{name}.exe"]
     bases = [root / tool_id] if tool_id else []
     bases.append(root)
     for base in bases:
@@ -145,6 +155,9 @@ class PluginManifest:
     # (e.g. Scripts/foo.exe on Windows vs bin/foo on POSIX) where requiring
     # every listed path would make detection impossible on one OS.
     detect_files_any: list[str] = field(default_factory=list)
+    # Off-PATH directories probed for the declared executables (env vars
+    # expanded) — e.g. winget installs that don't reach the service's PATH.
+    executable_dirs: list[str] = field(default_factory=list)
     health_check: dict[str, Any] = field(default_factory=dict)
     invoke: dict[str, Any] | None = None
     config: dict[str, Any] = field(default_factory=dict)
@@ -182,6 +195,9 @@ class PluginManifest:
             detect_files_any=[
                 str(x) for x in (raw.get("detect") or {}).get("files_any") or []
             ],
+            executable_dirs=[
+                str(x) for x in (raw.get("detect") or {}).get("executable_dirs") or []
+            ],
             health_check=dict(raw.get("health_check") or {}),
             invoke=raw.get("invoke") if isinstance(raw.get("invoke"), dict) else None,
             config=dict(raw.get("config") or {}),
@@ -189,6 +205,30 @@ class PluginManifest:
             dependencies=[str(x) for x in raw.get("dependencies") or []],
             source_path=source_path,
         )
+
+    def extra_executable_dirs(self, install_root: Path | None) -> list[str]:
+        """Off-PATH dirs probed for declared executables.
+
+        Manifest-declared ``detect.executable_dirs`` (env vars expanded;
+        ``{install_root}`` substitutes the app root) plus, for pip-method
+        installs, the Scripts/bin dir of the managed interpreter that ran
+        the install — ``pip install piper-tts`` lands ``piper.exe`` there,
+        which PATH and the root scan (``tools/`` is skip-listed) miss.
+        """
+        root = Path(install_root).resolve() if install_root else None
+        dirs = []
+        for d in self.executable_dirs:
+            expanded = os.path.expandvars(str(d))
+            if root is not None:
+                expanded = expanded.replace("{install_root}", str(root))
+            dirs.append(expanded)
+        if str((self.install or {}).get("method") or "").lower() == "pip":
+            py = managed_python(install_root)
+            if py:
+                sibling = Path(py).parent / (
+                    "Scripts" if sys.platform.startswith("win") else "bin")
+                dirs.append(str(sibling))
+        return dirs
 
     @property
     def os_supported(self) -> bool:
@@ -205,7 +245,8 @@ class PluginManifest:
         """
         found, missing = [], []
         for exe in self.executables:
-            resolved = resolve_executable(exe, install_root, self.id)
+            resolved = resolve_executable(exe, install_root, self.id,
+                                          extra_dirs=self.extra_executable_dirs(install_root))
             if resolved != exe or shutil.which(exe) or (Path(exe).expanduser().is_absolute() and Path(exe).expanduser().is_file()):
                 found.append(exe)
             else:
@@ -358,7 +399,8 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
     def handler(arguments: dict[str, Any]) -> str:
         cmd = _substitute(template, arguments)
         if cmd:
-            cmd[0] = resolve_executable(cmd[0], install_root, manifest.id)
+            cmd[0] = resolve_executable(cmd[0], install_root, manifest.id,
+                                        extra_dirs=manifest.extra_executable_dirs(install_root))
         stdin_data = str(arguments.get(stdin_key, "")) if stdin_key else None
         started = time.time()
         try:
@@ -398,7 +440,8 @@ def _make_health_check(manifest: PluginManifest, *, install_root: Path | None = 
         if command:
             try:
                 run_cmd = list(command)
-                run_cmd[0] = resolve_executable(run_cmd[0], install_root, manifest.id)
+                run_cmd[0] = resolve_executable(run_cmd[0], install_root, manifest.id,
+                                                extra_dirs=manifest.extra_executable_dirs(install_root))
                 proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15, creationflags=no_window_flags())
             except FileNotFoundError:
                 return {"ok": False, "status": "missing", "detail": f"health command not found: {command[0]}"}

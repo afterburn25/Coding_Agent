@@ -424,6 +424,17 @@ class VoiceManager:
                 self.vocal.end_task(task_id)
             except Exception:
                 pass
+            try:
+                with self._lock:
+                    total = int(self._spoken_tasks.get(task_id, 0))
+                # Terminal marker for text/voice sync: the client releases
+                # the held reply once `total` segments have reached a
+                # terminal state (played / errored / skipped).
+                self._publish("voice", {"event": "sealed",
+                                        "task_id": task_id,
+                                        "total": total})
+            except Exception:
+                pass
 
     # -- queue --------------------------------------------------------------
     def enqueue(self, task_id: str, text: str, *,
@@ -590,6 +601,9 @@ class VoiceManager:
                         return
                 continue
             if job.cancelled or self.muted():
+                self._publish("voice", {"event": "skipped",
+                                        "task_id": job.task_id,
+                                        "seq": job.seq})
                 continue
             # HARD RULE: while a greeting is speaking — plus a settle gap
             # after it ends — every other utterance waits its turn.
@@ -599,6 +613,9 @@ class VoiceManager:
                 if delay > 0:
                     time.sleep(min(delay, 30.0))
                     if job.cancelled or self.muted():
+                        self._publish("voice", {"event": "skipped",
+                                                "task_id": job.task_id,
+                                                "seq": job.seq})
                         continue
             preset = self.presets.get(job.preset_id) or self.current_preset()
             if preset is None:
@@ -615,6 +632,9 @@ class VoiceManager:
                                         "seq": job.seq, "error": f"{exc}"[:200]})
                 continue
             if job.cancelled or self.muted():
+                self._publish("voice", {"event": "skipped",
+                                        "task_id": job.task_id,
+                                        "seq": job.seq})
                 continue
             seg_id = self._register_segment(seg_path, job.task_id)
             payload = {

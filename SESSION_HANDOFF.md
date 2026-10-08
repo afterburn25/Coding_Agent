@@ -2,6 +2,40 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.35.2 — Voice/text sync + off-PATH tool detection
+
+- **Voice-gated text reveal** — the chat `result` event no longer dumps
+  the full reply while voice segments still synthesize/play. With voice
+  on (`responses`/`responses_activity`), the held buffer becomes the
+  canonical result text and reveals per segment on the NexusVoice `play`
+  event. `finish_task` now publishes `{"event":"sealed","task_id",
+  "total":N}` (N = all enqueued jobs for the task); cancelled/muted queue
+  drops publish `skipped`; per-segment `error` also counts terminal.
+  Client release: `played+skipped+errored >= sealed total`, `stop`/
+  `muted`, or a 12s activity-stall watchdog (reset by every voice event).
+  `releaseVoiceHold` posts `result.content` on release so the end state
+  matches the non-voice path (HUD removed).
+- **Dead-air fix** — `voice_global.js` `stop` bus handling now resets
+  `_lastEnd` to 0: a force-stopped predecessor no longer imposes the 2s
+  inter-activity gap on the next response's first segment.
+- **Off-PATH detection** — manifests support `detect.executable_dirs`
+  (env-var expanded, `{install_root}` placeholder). `resolve_executable`
+  probes them after PATH, before the install_root scan — so winget
+  installs like `Program Files\Tesseract-OCR` detect *and* invoke.
+  pip-method installs additionally probe the managed interpreter's
+  `Scripts`/`bin` dir (`extra_executable_dirs` on PluginManifest) —
+  `piper.exe` inside ComfyUI's embedded Python is found. Live-verified:
+  tesseract resolves to `C:\Program Files\Tesseract-OCR\tesseract.exe`,
+  piper to the embedded Scripts dir.
+- Tests: `test_executable_dirs_detect_off_path_install`,
+  `test_executable_dirs_expand_install_root_and_env`,
+  `test_pip_install_probes_managed_python_scripts`,
+  `test_finish_publishes_sealed_total`,
+  `test_finish_publishes_sealed_zero_for_unspoken`,
+  `test_cancelled_job_publishes_skipped`.
+
+Checkpoint: **2917 tests** (2917 passed + 3 env skips).
+
 ## v0.35.1 — Artifact actions, artifacts panel, cancellable uploads
 
 Commits `6f8a4d7e` + `448e6327`; deployed `D:\Nexus_Core` at 0.35.1.
@@ -3134,7 +3168,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2911 tests` passing (3 environment skips).
+Expected at this checkpoint: `2917 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
