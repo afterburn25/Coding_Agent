@@ -239,7 +239,7 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
     "github.write":      {"label": "GitHub write", "category": "Git / GitHub", "scope": "Configured repos", "risk": "high",
                           "blurb": "Create/edit issues, pull requests, and comments on GitHub.", "tools": ["github"]},
     "packages.install":  {"label": "Install tools & packages", "category": "Tool Installation", "scope": "App tool directories", "risk": "high",
-                          "blurb": "Download, install, update, or remove tools and packages (ComfyUI, Blender, pip packages).", "tools": ["tool_installer", "package_installer"]},
+                          "blurb": "Download, install, update, or remove tools and packages (ComfyUI, Blender, pip packages).", "tools": ["tool_installer", "package_installer", "computer_install"]},
     "skills.manage":     {"label": "Manage skills & plugins", "category": "Tool Installation", "scope": "App skill directories", "risk": "high",
                           "blurb": "Install, update, enable, disable, roll back, or remove reusable skill/plugin packages.", "tools": ["skill_registry"]},
     "repair.manage":     {"label": "Manage self-repair", "category": "Automation", "scope": "Stable source tree", "risk": "high",

@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import ctypes
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -367,3 +368,270 @@ def set_window_state(hwnd: int, state: str) -> dict[str, Any]:
         return {"ok": False, "error": "window no longer exists"}
     user32.ShowWindow(handle, flag)
     return {"ok": True, "hwnd": handle, "state": str(state).lower()}
+
+
+# ---------------------------------------------------------------------------
+# Installer lifecycle — identify -> run (UAC goes to the user, never
+# bypassed) -> monitor -> verify via the uninstall registry diff.
+# ---------------------------------------------------------------------------
+
+INSTALLER_EXTS = {".msi", ".msix", ".exe"}
+_UNINSTALL_KEYS = (
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+    r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+)
+# Filename tokens that never describe the product being installed.
+_INSTALLER_NOISE_TOKENS = {
+    "x64", "x86", "win64", "win32", "amd64", "arm64", "setup", "install",
+    "installer", "latest", "stable", "release", "en", "us", "enu",
+}
+
+
+def identify_installer(path: str | Path) -> dict[str, Any]:
+    """Classify a file as an installer artifact."""
+    p = Path(str(path or "").strip().strip('"'))
+    if not p.is_file():
+        return {"ok": False, "path": str(p),
+                "error": f"no file at {p}"}
+    ext = p.suffix.lower()
+    if ext not in INSTALLER_EXTS:
+        return {"ok": False, "path": str(p),
+                "error": f"{p.suffix or 'file'} is not an installer type "
+                         "(.msi, .msix, .exe)"}
+    return {"ok": True, "path": str(p), "kind": ext.lstrip("."),
+            "size": p.stat().st_size, "name": p.stem}
+
+
+def _hint_tokens(text: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", str(text or "").lower())
+            if t and t not in _INSTALLER_NOISE_TOKENS and len(t) > 1]
+
+
+def _stem_tokens(stem: str) -> list[str]:
+    """Filename-side tokens — also split letter↔digit boundaries so
+    '7z2409-x64' yields ['7','z','2409'] and 'python-3.12' yields
+    ['python','3','12']."""
+    return [t for t in re.findall(r"[a-z]+|[0-9]+",
+                                  str(stem or "").lower())
+            if t not in _INSTALLER_NOISE_TOKENS]
+
+
+def _token_matches(token: str, stem_tokens: list[str], norm: str) -> bool:
+    if token in norm:
+        return True
+    for st in stem_tokens:
+        if st == token or (st in token) or \
+                (token.startswith(st) or st.startswith(token)):
+            return True
+    return False
+
+
+def find_installer(name: str, search_dirs: list[Path] | None = None
+                   ) -> dict[str, Any]:
+    """Locate an installer artifact for ``name`` — the newest file in
+    Downloads whose stem covers every meaningful token of the name.
+    Filename stems abbreviate ('7z2409-x64' for 7-Zip), so tokens also
+    match on prefix abbreviation and on the concatenated stem."""
+    dirs = [Path.home() / "Downloads"] if search_dirs is None \
+        else [Path(d) for d in search_dirs]
+    tokens = _hint_tokens(name)
+    if not tokens:
+        return {"ok": False, "path": "", "candidates": [],
+                "error": "no product name to match"}
+    candidates: list[Path] = []
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        try:
+            for f in d.iterdir():
+                if not f.is_file() or f.suffix.lower() not in INSTALLER_EXTS:
+                    continue
+                norm = re.sub(r"[^a-z0-9]+", "", f.stem.lower())
+                stem_tokens = _stem_tokens(f.stem)
+                if all(_token_matches(t, stem_tokens, norm)
+                       for t in tokens):
+                    candidates.append(f)
+        except OSError:
+            continue
+    if not candidates:
+        return {"ok": False, "path": "", "candidates": [],
+                "error": f"no installer matching '{name}' found in "
+                         "Downloads"}
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    best = candidates[0]
+    return {"ok": True, "path": str(best), "name": best.stem,
+            "candidates": [c.name for c in candidates[:5]]}
+
+
+def latest_installer(search_dirs: list[Path] | None = None
+                     ) -> dict[str, Any]:
+    """'run the installer I downloaded' — newest installer artifact."""
+    dirs = [Path.home() / "Downloads"] if search_dirs is None \
+        else [Path(d) for d in search_dirs]
+    found: list[Path] = []
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        try:
+            found.extend(f for f in d.iterdir()
+                         if f.is_file()
+                         and f.suffix.lower() in INSTALLER_EXTS)
+        except OSError:
+            continue
+    if not found:
+        return {"ok": False, "path": "", "candidates": [],
+                "error": "no installer files found in Downloads"}
+    found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return {"ok": True, "path": str(found[0]), "name": found[0].stem,
+            "candidates": [f.name for f in found[:5]]}
+
+
+def installed_products(hint: str = "") -> list[dict[str, Any]]:
+    """Uninstall-registry entries (DisplayName/Version/Publisher),
+    filtered to entries matching every token of ``hint`` when given."""
+    if winreg is None:
+        return []
+    tokens = _hint_tokens(hint)
+    out: list[dict[str, Any]] = []
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for sub in _UNINSTALL_KEYS:
+            try:
+                with winreg.OpenKey(hive, sub, 0, winreg.KEY_READ) as h:
+                    count = winreg.QueryInfoKey(h)[0]
+                    for i in range(count):
+                        try:
+                            kname = winreg.EnumKey(h, i)
+                            with winreg.OpenKey(
+                                    h, kname, 0, winreg.KEY_READ) as k:
+                                vals = {}
+                                for field in ("DisplayName",
+                                              "DisplayVersion",
+                                              "Publisher"):
+                                    try:
+                                        vals[field] = str(
+                                            winreg.QueryValueEx(
+                                                k, field)[0])
+                                    except OSError:
+                                        pass
+                                name = vals.get("DisplayName", "")
+                                if not name:
+                                    continue
+                                norm = name.lower()
+                                if tokens and not all(
+                                        t in re.sub(r"[^a-z0-9]+", "",
+                                                    norm) or
+                                        t in norm.split()
+                                        for t in tokens):
+                                    continue
+                                out.append({
+                                    "name": name,
+                                    "version":
+                                        vals.get("DisplayVersion", ""),
+                                    "publisher":
+                                        vals.get("Publisher", ""),
+                                    "key": f"{sub}\\{kname}"})
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    return out
+
+
+def run_installer(path: str | Path, *, name_hint: str = "",
+                  timeout_s: float = 600.0, settle_s: float = 10.0
+                  ) -> dict[str, Any]:
+    """Launch an installer, watch it finish, then verify what landed.
+
+    Elevation is never bypassed — ShellExecute raises the normal UAC
+    prompt for requireAdministrator binaries, and msiexec elevates
+    through the installer service. Monitoring is image-name based for
+    shell launches (no pid) and pid+image for direct spawns; completion
+    needs a full ``settle_s`` quiet window so installers that hand off
+    to child processes aren't declared done early. Post-condition proof
+    is the uninstall-registry diff, not the process exit alone.
+    """
+    if os.name != "nt":
+        return {"ok": False, "error": "unsupported platform"}
+    ident = identify_installer(path)
+    if not ident.get("ok"):
+        return ident
+    p = Path(ident["path"])
+    before = {e["key"] for e in installed_products()}
+    hint = name_hint or p.stem
+    t0 = time.monotonic()
+    pid = 0
+    shell_mode = False
+    if ident["kind"] == "msi":
+        try:
+            proc = subprocess.Popen(
+                ["msiexec", "/i", str(p)], close_fds=True)
+            pid = int(proc.pid)
+        except OSError as exc:
+            return {"ok": False, "error": f"msiexec launch failed: {exc}"}
+    else:
+        try:
+            proc = subprocess.Popen([str(p)], close_fds=True)
+            pid = int(proc.pid)
+        except OSError as exc:
+            if getattr(exc, "winerror", 0) != 740:
+                return {"ok": False,
+                        "error": f"installer launch failed: {exc}"}
+            # Elevation required — hand it to the shell so Windows can
+            # show the user the UAC prompt. No pid; monitor by image.
+            try:
+                os.startfile(str(p))  # type: ignore[attr-defined]
+            except OSError as exc2:
+                return {"ok": False,
+                        "error": f"installer launch failed: {exc2}"}
+            shell_mode = True
+
+    image = p.name if ident["kind"] != "msi" else "msiexec.exe"
+    deadline = t0 + timeout_s
+    seen_running = False
+    quiet_since = 0.0
+    timed_out = True
+    while time.monotonic() < deadline:
+        busy = (pid_alive(pid) if pid else False) or \
+            bool(find_processes(image))
+        # msiexec hands work to the service — for .msi require a quiet
+        # window where NEITHER the client pid nor any msiexec is busy.
+        if busy:
+            seen_running = True
+            quiet_since = 0.0
+        elif seen_running or not pid:
+            if not quiet_since:
+                quiet_since = time.monotonic()
+            if time.monotonic() - quiet_since >= settle_s:
+                timed_out = False
+                break
+        else:
+            # direct spawn exited before we saw it — still count it
+            quiet_since = quiet_since or time.monotonic()
+            if time.monotonic() - quiet_since >= settle_s:
+                timed_out = False
+                break
+        time.sleep(1.5)
+    after = installed_products()
+    new_entries = [e for e in after if e["key"] not in before]
+    resolved = resolve_app(hint) if hint else {"ok": False}
+    duration = round(time.monotonic() - t0, 1)
+    result: dict[str, Any] = {
+        "ok": not timed_out, "path": str(p), "kind": ident["kind"],
+        "duration_s": duration, "timed_out": timed_out,
+        "pid": pid, "shell": shell_mode, "name_hint": hint,
+        "installed": new_entries,
+        "app_resolved": resolved.get("path", "")
+        if resolved.get("ok") else "",
+    }
+    if timed_out:
+        result["error"] = (f"installer still running after "
+                           f"{int(timeout_s)}s — monitor timed out")
+        result["verified"] = bool(new_entries)
+        return result
+    result["finished"] = True
+    result["verified"] = bool(new_entries or result["app_resolved"])
+    if not result["verified"]:
+        result["note"] = ("installer exited but no new product was "
+                          "found in the registry and the name did not "
+                          "resolve — treating as unverified")
+    return result

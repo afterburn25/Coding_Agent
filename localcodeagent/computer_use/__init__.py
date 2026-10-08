@@ -473,6 +473,22 @@ class ComputerUse:
                                           "relaunch failed"))
         return self._finish(record, result)
 
+    def app_install(self, path: str, *, name_hint: str = "",
+                    timeout_s: float = 600.0) -> dict[str, Any]:
+        """Run an installer and verify what it installed. Elevation
+        prompts are shown to the user — never bypassed."""
+        from . import apps
+        path = str(path or "").strip()
+        record = self._record("app_install", path[:160])
+        if not path:
+            return self._fail(record, "installer path is required")
+        result = apps.run_installer(
+            path, name_hint=name_hint, timeout_s=timeout_s)
+        if not result.get("ok"):
+            return self._fail(
+                record, str(result.get("error") or "install failed"))
+        return self._finish(record, result)
+
     def app_window_state(self, state: str, *, hwnd: int = 0,
                          pid: int = 0,
                          title_substr: str = "") -> dict[str, Any]:

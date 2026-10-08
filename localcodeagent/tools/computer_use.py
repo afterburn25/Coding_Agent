@@ -190,6 +190,21 @@ def register_computer_use_tools(registry: ToolRegistry, workspace: Path,
         category="utilities", capabilities=["application_focus"]))
 
     registry.register(ToolSpec(
+        "computer_install",
+        "Run an installer (.msi/.msix/.exe) and verify what it installed: monitors the process to completion, then diffs the uninstall registry. UAC prompts go to the user — never bypassed.",
+        {"type": "object", "properties": {
+            "path": {"type": "string"},
+            "name_hint": {"type": "string"},
+            "timeout_s": {"type": "number", "default": 600}},
+         "required": ["path"]},
+        "packages.install",
+        _cap(lambda a: cu.app_install(
+            str(a.get("path") or ""),
+            name_hint=str(a.get("name_hint") or ""),
+            timeout_s=float(a.get("timeout_s", 600)))),
+        category="utilities", capabilities=["application_launch"]))
+
+    registry.register(ToolSpec(
         "computer_click",
         "Move the mouse to x,y and click (left/right). Coordinates are absolute screen pixels and are checked against the virtual desktop.",
         {"type": "object", "properties": {

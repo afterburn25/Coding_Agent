@@ -17,6 +17,7 @@ is never a "routine" operation).
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,10 +137,24 @@ _APP_NON_TARGET_RE = re.compile(
 _APP_CLAUSE_HEAD_RE = re.compile(
     r"^(?:about|with|on|upon|for|of|my|your|his|her|our|their|me|you|"
     r"us|the\s+way|how)\b", re.I)
-# 'open the folder X' / 'open the file X' are filesystem targets handled
-# by the file ops below — don't swallow them as app names.
+# 'open the folder X' / 'open the file X' / 'open the installer' are
+# filesystem/installer targets handled below — don't swallow them as
+# app names.
 _APP_FS_HEAD_RE = re.compile(
-    r"^(?:folder|directory|dir|file|note|document)\b", re.I)
+    r"^(?:folder|directory|dir|file|note|document|installer)\b", re.I)
+
+# Installers — 'install <path>' or 'install <product>' (artifact must
+# already exist in Downloads; we never guess a URL). 'run the installer
+# [I downloaded]' picks the newest Downloads artifact.
+_INSTALL_RE = re.compile(
+    r"^\s*(?:install|reinstall|upgrade|update|set\s*up|setup)\s+"
+    r"(?:the\s+|this\s+|that\s+)?(.+?)\s*$", re.I | re.S)
+_RUN_INSTALLER_RE = re.compile(
+    r"^\s*(?:run|open|start|execute|launch)\s+(?:the\s+|my\s+|that\s+|"
+    r"this\s+)?installer\b(.*)$", re.I | re.S)
+_DOWNLOADED_TAIL_RE = re.compile(
+    r"^\s*(?:(?:i|we)\s+(?:just\s+)?downloaded|from\s+downloads?|"
+    r"in\s+(?:my\s+)?downloads?(?:\s+folder)?)\b(.*)$", re.I | re.S)
 
 # Downloads — 'download https://… [to <path>]' is deterministic; a bare
 # 'download Python' has no URL and falls to the model lane to research.
@@ -234,6 +249,64 @@ def _app_plan(kind: str, name_raw: str, *, state: str = "",
                       params=params, resolved={},
                       action_text=action, display=display,
                       clarify="")
+
+
+def _install_plan(target_raw: str, workspace: Path,
+                  extra_roots: Callable | None,
+                  *, from_downloads: bool = False) -> ActionPlan:
+    """Resolve 'install X' to an existing installer artifact.
+
+    Order: explicit existing file → Downloads match by product tokens →
+    newest Downloads artifact when no name was given → clarify. The
+    plan never fabricates a path — no artifact, no plan to execute.
+    """
+    from .computer_use import apps
+    target = (target_raw or "").strip().strip("\"'")
+    target = _TRAILING_WS_RE.sub("", target)
+    path = ""
+    hint = ""
+    if target:
+        cand, _inside = _resolve(target, workspace, extra_roots)
+        if cand.is_file():
+            path = str(cand)
+            hint = cand.stem
+        elif _WIN_ABS_RE.match(target) or cand.is_absolute() and \
+                (os.sep in target or "/" in target):
+            # Named an explicit path that doesn't exist — let the tool
+            # report the truth rather than guessing another file.
+            path = str(cand)
+            hint = cand.stem
+        else:
+            found = apps.find_installer(target)
+            if found.get("ok"):
+                path = found["path"]
+                hint = target
+            else:
+                return ActionPlan(
+                    kind="install", tool="computer_install",
+                    permission="packages.install",
+                    clarify=(f"I don't see a '{target}' installer in "
+                             "your Downloads folder — download it first "
+                             "or give me the file path."),
+                    action_text=f"install {target}", display=target)
+    else:
+        found = apps.latest_installer()
+        if not found.get("ok"):
+            return ActionPlan(
+                kind="install", tool="computer_install",
+                permission="packages.install",
+                clarify=("I couldn't find an installer in your Downloads "
+                         "folder — which file should I run?"),
+                action_text="run the installer")
+        path = found["path"]
+        hint = found.get("name", "")
+    name = Path(path).name if path else target
+    return ActionPlan(
+        kind="install", tool="computer_install",
+        permission="packages.install",
+        params={"path": path, "name_hint": hint},
+        resolved={"path": path},
+        action_text=f"install {name}", display=name)
 
 
 def _strip_prefix(text: str) -> str:
@@ -404,6 +477,36 @@ def parse_local_action(text: str, *, workspace: Path | str,
         plan = _app_plan("launch", m.group(1), workspace=ws)
         if plan:
             return plan
+
+    # Installers — 'install <path|product>', 'run the installer [I
+    # downloaded]'. The artifact must already exist on disk; a bare
+    # product name resolves only against Downloads, never a URL guess.
+    m = _RUN_INSTALLER_RE.match(t)
+    if m:
+        tail = _DOWNLOADED_TAIL_RE.sub("", m.group(1) or "").strip()
+        tail = re.sub(
+            r"^(?:for|of|at)\s+", "", tail, flags=re.I).strip()
+        return _install_plan(_path_tail(tail) or tail, ws, extra_roots)
+    m = _INSTALL_RE.match(t)
+    if m:
+        tail = m.group(1)
+        if _PRONOUN_ONLY_RE.match(tail) or \
+                _APP_CLAUSE_HEAD_RE.match(tail):
+            return None
+        tail = re.sub(r"^(?:(?:the|a|an)\s+)?program\s+", "", tail,
+                      flags=re.I).strip()
+        if not tail or tail.lower() in (
+                "program", "app", "application", "software",
+                "installer", "package", "it", "this", "that"):
+            return ActionPlan(
+                kind="install", tool="computer_install",
+                permission="packages.install",
+                clarify="What should I install?", action_text="install")
+        path_guess = _path_tail(tail)
+        if not path_guess and re.match(r"(?:a|an)\b", tail, re.I):
+            # 'set up a meeting' — conversation, not software.
+            return None
+        return _install_plan(path_guess or tail, ws, extra_roots)
 
     # Downloads — explicit URLs only; bare product names need research
     # and fall to the model lane.
@@ -872,6 +975,17 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
         error = str(data.get("error") or "")
         summary = _app_verify_summary(data) or \
             (f"job {data['job_id']}" if data.get("job_id") else "")
+        # Installer finished but nothing new registered — honest
+        # "ran but unconfirmed", not success and not failure.
+        if plan.kind == "install" and ok and data.get("finished") \
+                and not verified:
+            return _close(
+                "unverified", _app_success_text(plan, data),
+                permission="approved" if approved else "policy",
+                verification=summary or data.get("note", "")[:160],
+                verified=False,
+                artifact=str(data.get("path") or plan.display),
+                tool_result=result)
         # Async kinds verify the ACTION, not the payload: a started
         # download job / a no-op close is a real, evidenced outcome.
         if ok and (verified or plan.kind in
@@ -913,11 +1027,12 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
 
 
 _APP_KINDS = {"launch", "close", "restart", "status", "window",
-              "download", "download_cancel"}
+              "download", "download_cancel", "install"}
 _READ_KINDS = {"search", "search_text", "inspect"}
 _CAPABILITY = {k: "application" for k in
                ("launch", "close", "restart", "status", "window")}
-_CAPABILITY.update({"download": "network", "download_cancel": "network"})
+_CAPABILITY.update({"download": "network", "download_cancel": "network",
+                    "install": "application"})
 _CAPABILITY.update({k: "filesystem" for k in
                     ("mkdir", "write", "delete", "move", "rename",
                      "copy", "archive", "extract")})
@@ -957,6 +1072,23 @@ def _app_success_text(plan: ActionPlan, data: dict) -> str:
         return ("Download cancelled — the partial file is kept for "
                 "resume." if data.get("cancelled")
                 else "No download is running.")
+    if plan.kind == "install":
+        installed = data.get("installed") or []
+        if installed:
+            names = ", ".join(str(e.get("name", "?"))
+                              for e in installed[:3])
+            return (f"Installed — {names} registered. "
+                    f"(finished in {data.get('duration_s', '?')}s)")
+        if data.get("app_resolved"):
+            return (f"The installer finished — {data['app_resolved']} "
+                    "is on the system.")
+        if data.get("timed_out"):
+            return (f"The installer is still running after "
+                    f"{int(data.get('duration_s', 0))}s — it may be "
+                    "waiting on a prompt or still copying files.")
+        return ("The installer ran and exited, but I couldn't confirm "
+                "what it installed — no new product registered. If it "
+                "finished silently, check the app's Start Menu entry.")
     return "Done."
 
 
@@ -970,6 +1102,10 @@ def _app_verify_summary(data: dict) -> str:
     if isinstance(win, dict) and win.get("hwnd"):
         bits.append(f"window '{win.get('title', '')}' (hwnd "
                     f"{win['hwnd']})")
+    installed = data.get("installed")
+    if installed:
+        bits.append("installed: " + ", ".join(
+            str(e.get("name", "?")) for e in installed[:3]))
     return "; ".join(bits)[:200]
 
 
