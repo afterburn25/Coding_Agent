@@ -127,6 +127,14 @@ silently stranded all models (missing since 0.31.1) — the soak's
 - **Soak posture** — `mission_soak.py` exits safe mode and starts
   autonomy after every backend (re)start; persisted control flags can
   no longer silently park all missions (`4f980702`).
+- **Model recovery hooks** — the model-crash playbook's
+  `restart_model`/`fallback_model` steps had no runtime hook and
+  blocked missions with "no handler" (0311d soak finding).
+  `restart_model` → `RuntimeManager.restart_unhealthy_managed()`
+  (stops dead/unhealthy managed servers; they re-serve on demand);
+  `fallback_model` is a truthful marker — per-request model selection
+  already excludes the failed candidate. Hook-less actions still
+  block honestly (`776b076f`).
 
 Rules for the next session:
 
