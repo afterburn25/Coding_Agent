@@ -333,3 +333,29 @@ def test_warm_engine_targets_active_preset_engine() -> None:
     m._engines["kokoro"] = _SpyKokoro()
     m._warm_engine()
     assert loaded == ["chatterbox"]
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy required")
+def test_startup_sig_changes_with_preset_content() -> None:
+    """StartupNarrator salts its per-line wav cache with _startup_sig_raw.
+    Preset ids are stable across tuning changes — the sig must embed the
+    preset content hash or a clip rendered under an old recipe replays
+    forever (the pre-V7 'online' clip kept matching the post-V7 sig)."""
+    cfg = types.SimpleNamespace(
+        voice_enabled=True, voice_muted=False, voice_engine="chatterbox",
+        voice_preset_id="cb-v7", voice_mode="responses", voice_speed=1.0,
+        voice_volume=1.0, save=lambda: None)
+    m = VoiceManager(cfg, preset_dir=Path(tempfile.mkdtemp()) / "p",
+                     cache_dir=Path(tempfile.mkdtemp()) / "c")
+    m.presets.save(VoicePreset(id="cb-v7", name="cb", engine="chatterbox",
+                               base_voice="isabella", stereo_width=1.5,
+                               loudness_target_lufs=-14.0))
+    eng = types.SimpleNamespace(name="chatterbox", version="v1")
+    sig_old = m._startup_sig_raw(eng)
+    m.presets.save(VoicePreset(id="cb-v7", name="cb", engine="chatterbox",
+                               base_voice="isabella", stereo_width=0.0,
+                               loudness_target_lufs=-12.5))
+    sig_new = m._startup_sig_raw(eng)
+    assert sig_old != sig_new, "same-id preset retune must re-salt narrator cache"
+    # id/identity fields stay in the sig for readability of engine.json
+    assert "cb-v7" in sig_new and "chatterbox" in sig_new

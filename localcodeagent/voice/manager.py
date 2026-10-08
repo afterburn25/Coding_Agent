@@ -159,9 +159,16 @@ class VoiceManager:
 
     def _startup_sig_raw(self, eng) -> str:
         preset = self.current_preset()
+        # Preset CONTENT must salt the narrator cache: preset ids are
+        # stable across tuning changes, so without the content hash a
+        # clip rendered under an older recipe replays forever under the
+        # same id (observed: pre-V7 nexus-isabella-chatterbox wavs kept
+        # matching the post-V7 sig).
+        phash = (AudioCache.preset_hash(preset.to_json())
+                 if preset is not None else "")
         return "|".join([
             getattr(eng, "name", ""), getattr(eng, "version", ""),
-            dsp.DSP_VERSION, preset.id if preset else ""])
+            dsp.DSP_VERSION, preset.id if preset else "", phash])
 
     def _write_startup_sig(self, eng) -> None:
         """Publish the active engine signature for StartupNarrator.cs —
