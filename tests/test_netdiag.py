@@ -842,9 +842,17 @@ class PortCollisionTests(unittest.TestCase):
                 create_server(self._cfg(), ws, "127.0.0.1", held_port,
                               ws / "web", ws / ".runtime")
             # The orphaned AppState must have been shut down — no leaked
-            # worker threads from the failed attempt.
-            time.sleep(0.5)
-            self.assertLessEqual(threading.active_count(), threads_before + 1)
+            # worker threads from the failed attempt. Daemon stragglers
+            # can take a beat to observe _shutdown, so settle briefly and
+            # name whatever is still alive for the failure message.
+            for _ in range(40):
+                if threading.active_count() <= threads_before + 1:
+                    break
+                time.sleep(0.1)
+            self.assertLessEqual(
+                threading.active_count(), threads_before + 1,
+                "leaked threads: " + ", ".join(
+                    t.name for t in threading.enumerate()))
         sock.close()
 
     def test_serve_recovers_on_held_port(self):

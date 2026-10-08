@@ -436,7 +436,9 @@ def _resolve(raw: str, workspace: Path,
         elif _WIN_ABS_RE.match(raw):
             cand = p  # verbatim — cannot be inside this workspace
         else:
-            cand = (Path(workspace) / p).resolve()
+            # Users type Windows-style separators on any host —
+            # 'docs\inner.zip' is nested, not a literal backslash name.
+            cand = (Path(workspace) / raw.replace("\\", "/")).resolve()
     return cand, _path_base(workspace, cand, extra_roots) is not None
 
 

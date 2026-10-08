@@ -5110,10 +5110,16 @@ class AppState:
             return
 
         def _run() -> None:
+            stop = getattr(self, "_shutdown", None)
             try:
-                time.sleep(8)  # let the orphan sweep + autodetect settle
+                # let the orphan sweep + autodetect settle — and bail
+                # instantly if the process is shutting down mid-wait
+                if stop is not None and stop.wait(8):
+                    return
                 deadline = time.time() + 180
                 while time.time() < deadline:
+                    if stop is not None and stop.is_set():
+                        return
                     try:
                         preset = voice.current_preset()
                         eng = voice.engine(
@@ -5135,7 +5141,11 @@ class AppState:
                             return
                     except Exception:
                         return
-                    time.sleep(5)
+                    if stop is not None:
+                        if stop.wait(5):
+                            return
+                    else:
+                        time.sleep(5)
             except Exception:
                 pass
 
@@ -5727,11 +5737,11 @@ class AppState:
         try:
             while True:
                 try:
-                    ev = q.get(timeout=30)
+                    ev = q.get(timeout=2)
                 except queue.Empty:
                     ev = None
-                    if self._shutdown.is_set():
-                        return
+                if self._shutdown.is_set():
+                    return
                 try:
                     now = time.time()
                     if pending is not None:

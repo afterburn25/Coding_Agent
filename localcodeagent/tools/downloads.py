@@ -276,11 +276,15 @@ class UserDownloadManager:
         p = p.resolve()
         if str(dest).endswith(("/", "\\")) or p.is_dir():
             p = p / name
-        # Never let a download target system roots.
+        # Never let a download target system roots. Check the raw
+        # Windows-style spelling too — on non-Windows hosts Path.resolve
+        # re-roots 'C:\Windows\x' under cwd and the resolved check would
+        # sail past.
         lowered = str(p).lower()
+        raw_low = str(dest).lower().replace("/", "\\")
         for bad in (os.environ.get("SystemRoot", r"C:\Windows").lower(),
                     r"c:\program files"):
-            if lowered.startswith(bad):
+            if lowered.startswith(bad) or raw_low.startswith(bad):
                 raise ValueError(
                     f"refusing to download into a system directory: {p}")
         return p
