@@ -3417,3 +3417,5 @@ select option {
 .artifact-details pre{font-size:10px;color:var(--text-dim);background:rgba(0,0,0,.25);border-radius:7px;padding:6px 8px;margin-top:5px;white-space:pre-wrap;word-break:break-all}
 .artifact-actions{display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
 .artifact-actions .mini-button{text-decoration:none}
+.artifact-panel{display:flex;flex-direction:column;gap:6px;overflow-y:auto;padding:2px}
+.artifact-panel .artifact-cards{margin:0;max-width:none}

@@ -7,7 +7,20 @@ function chatPinned(){return chat.scrollHeight-chat.scrollTop-chat.clientHeight<
 function scrollChat(force){if(force||chatPinned())chat.scrollTop=chat.scrollHeight;}
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const welcomeHtml=()=>`<div class="welcome"><img src="/assets/nexus-core-logo.png" alt="Nexus Core" class="welcome-logo" /><p>Your local AI coding partner.</p><span>Write. Refactor. Debug. Build. All on your machine.</span><div class="quick-actions"><button type="button" data-prompt="Explain the current code and architecture."><b>&lt;/&gt;</b>Explain this code</button><button type="button" data-prompt="Refactor the current code to be cleaner and easier to maintain."><b>✦</b>Refactor to be cleaner</button><button type="button" data-prompt="Add useful tests for the current code and run them."><b>▤</b>Add tests for this file</button><button type="button" data-prompt="Help me build a new feature in this project. Inspect the repository first and make a plan."><b>↗</b>Help me build a feature</button></div></div>`;
-function setUtilityPanel(name){document.querySelectorAll('.utility-tab').forEach(x=>x.classList.toggle('active',x.dataset.panel===name));document.querySelectorAll('[data-utility-panel]').forEach(x=>x.classList.toggle('active',x.dataset.utilityPanel===name));}
+function setUtilityPanel(name){document.querySelectorAll('.utility-tab').forEach(x=>x.classList.toggle('active',x.dataset.panel===name));document.querySelectorAll('[data-utility-panel]').forEach(x=>x.classList.toggle('active',x.dataset.utilityPanel===name));if(name==='artifacts')refreshArtifactsPanel();}
+async function refreshArtifactsPanel(){
+  const host=document.getElementById('artifactPanel');if(!host)return;
+  try{
+    const r=await fetch('/api/artifacts');const out=await r.json();
+    const arts=out.artifacts||[];
+    host.textContent='';
+    host.classList.toggle('muted',!arts.length);
+    if(!arts.length){host.textContent='No artifacts yet.';return;}
+    // Newest first; renderArtifactCards dedupes per-host.
+    renderArtifactCards(arts.slice().reverse(),host);
+  }catch{host.textContent='Artifact list unavailable.';host.classList.add('muted');}
+}
+setInterval(()=>{const p=document.querySelector('[data-utility-panel="artifacts"]');if(p&&p.classList.contains('active'))refreshArtifactsPanel();},15000);
 function feedbackControls(messageId=''){return '<div class="message-feedback"><button type="button" data-speak="1" title="Read aloud / replay">🔊</button><button type="button" data-feedback="up" data-message-id="'+esc(messageId)+'" title="Helpful">👍</button><button type="button" data-feedback="down" data-message-id="'+esc(messageId)+'" title="Needs improvement / mark incorrect">👎</button><button type="button" data-learn="1" data-message-id="'+esc(messageId)+'" title="Learn this answer (Answer Memory)">🧠</button></div>';}
 function memoryBadge(src){if(src!=='answer_memory')return '';return '<div class="memory-badge" title="Answered from learned Answer Memory — no model inference ran">◈ Answered from memory</div>';}
 function attachmentUrl(a){if(!a)return'';if(a.data_url)return a.data_url;const p=String(a.path||'');if(!p)return'';return'/api/attachment/'+encodeURIComponent(p.split(/[\\/]/).pop());}
@@ -283,10 +296,33 @@ function renderArtifactCards(cards,host){
     const ghDl=_safeLink(remote.download_url||'');
     let actions='';
     if(a.available!==false&&dl)actions+=`<a class="mini-button artifact-dl" href="${esc(dl)}" download="${esc(a.filename||'')}">Download</a>`;
+    if(a.available!==false){
+      // Open/reveal are POST side-effects resolved server-side by
+      // artifact id — the client never supplies a filesystem path.
+      actions+=`<button type="button" class="mini-button" data-artact="open">Open</button>`;
+      actions+=`<button type="button" class="mini-button" data-artact="reveal">Show in folder</button>`;
+      actions+=`<button type="button" class="mini-button" data-artact="copy">Copy link</button>`;
+    }
     if(ghView)actions+=`<a class="mini-button" href="${esc(ghView)}" target="_blank" rel="noopener noreferrer">View on GitHub</a>`;
     if(ghDl&&ghDl!==ghView)actions+=`<a class="mini-button" href="${esc(ghDl)}" target="_blank" rel="noopener noreferrer" download>From GitHub</a>`;
     const det=[a.id,a.sha256?`sha256 ${a.sha256}`:'',a.mime,a.created_at?`created ${new Date(a.created_at*1000).toLocaleString()}`:'',a.task_id?`task ${a.task_id}`:'',remote.repository?`github: ${remote.repository}${remote.tag?'@'+remote.tag:''}`:''].filter(Boolean).join('\n');
     card.innerHTML=`<span class="artifact-icon">${icon}</span><div class="artifact-body"><div class="artifact-name">${esc(a.filename||a.id)}</div><div class="artifact-meta">${esc([size+ver,status].filter(Boolean).join(' · '))}</div><details class="artifact-details"><summary>Details</summary><pre>${esc(det)}</pre></details></div><div class="artifact-actions">${actions}</div>`;
+    card.querySelectorAll('[data-artact]').forEach(b=>{b.onclick=async()=>{
+      const act=b.dataset.artact;
+      if(act==='copy'){
+        const u=_safeLink(a.download_url||`/api/artifacts/${encodeURIComponent(a.id)}/download`);
+        try{await navigator.clipboard.writeText(location.origin+u);b.textContent='Copied';}
+        catch{b.textContent=u;}
+        setTimeout(()=>{b.textContent='Copy link';},1500);return;
+      }
+      b.disabled=true;const label=b.textContent;
+      try{
+        const r=await fetch(`/api/artifacts/${encodeURIComponent(a.id)}/${act}`,{method:'POST'});
+        const out=await r.json().catch(()=>({}));
+        b.textContent=r.ok&&out.ok?'✓':(out.error||'Failed');
+      }catch{b.textContent='Failed';}
+      setTimeout(()=>{b.textContent=label;b.disabled=false;},1500);
+    };});
     wrap.appendChild(card);
   }
   if(wrap.childNodes.length)host.appendChild(wrap);

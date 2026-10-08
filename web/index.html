@@ -118,6 +118,7 @@
         <button class="utility-tab active" data-panel="diff" type="button">Code Diff</button>
         <button class="utility-tab" data-panel="tasks" type="button">Tasks</button>
         <button class="utility-tab" data-panel="terminal" type="button">Terminal</button>
+        <button class="utility-tab" data-panel="artifacts" type="button">Artifacts</button>
         <button class="utility-tab" data-panel="system" type="button">System</button>
       </div>
 
@@ -150,6 +151,11 @@
           <button class="tl-chip" data-tl="error" type="button">Errors</button>
         </div>
         <section id="activity" class="activity"><span class="muted">Tool calls, model switches, and command output will appear here.</span></section>
+      </section>
+
+      <section class="utility-panel" data-utility-panel="artifacts">
+        <div class="taskbar-title">Artifacts</div>
+        <div id="artifactPanel" class="artifact-panel muted">No artifacts yet.</div>
       </section>
 
       <section class="utility-panel" data-utility-panel="system" id="systemBlock">

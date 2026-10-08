@@ -122,6 +122,9 @@ _ARTIFACT_ASK_RE = re.compile(
 _GH_UPLOAD_RE = re.compile(
     r"^\s*(?:upload|publish|share)\s+(.+?)\s+(?:to|onto)\s+"
     r"(?:the\s+)?github\b\s*(.*)$", re.I | re.S)
+_GH_CANCEL_UPLOAD_RE = re.compile(
+    r"^\s*(?:cancel|stop|abort)\s+(?:the\s+|my\s+)?"
+    r"(?:github\s+|asset\s+|release\s+)*upload\b", re.I)
 _GH_PUT_RELEASE_RE = re.compile(
     r"^\s*put\s+(.+?)\s+on\s+(?:the\s+)?(?:github\s+)?release\b\s*(.*)$",
     re.I | re.S)
@@ -531,6 +534,14 @@ def parse_local_action(text: str, *, workspace: Path | str,
         plan = _app_plan("restart", m.group(1))
         if plan:
             return plan
+    # 'cancel/stop the upload' must claim before the app-close lane
+    # ('stop the github upload' is not 'close the app').
+    m = _GH_CANCEL_UPLOAD_RE.match(t)
+    if m:
+        return ActionPlan(
+            kind="github_upload_cancel", tool="github_cancel_upload",
+            permission="github.read", params={},
+            action_text="cancel the GitHub upload", display="upload")
     m = _APP_CLOSE_RE.match(t)
     if m:
         plan = _app_plan("close", m.group(1))
@@ -1224,6 +1235,22 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
                     "artifact — nothing has been produced yet."),
                 verification=result[:160], tool_result=result)
         if plan.kind == "github_upload":
+            if data.get("ok") and data.get("status") == "uploading":
+                rel = data.get("release") or {}
+                return _close(
+                    "running",
+                    f"Uploading {data.get('asset_name') or plan.display} "
+                    f"({int(data.get('size') or 0):,} bytes) to "
+                    f"{data.get('repository')} release "
+                    f"{rel.get('tag', '')} — job {data.get('job_id', '')}. "
+                    "Watch Tasks for progress; the artifact card gains "
+                    "GitHub links once the upload verifies. Say 'cancel "
+                    "the upload' to abort.",
+                    permission="approved" if approved else "policy",
+                    verification="upload job started — read-back "
+                                 "verification runs on completion",
+                    artifact=str(data.get("asset_name") or ""),
+                    tool_result=result)
             if data.get("ok"):
                 asset = data.get("asset") or {}
                 rel = data.get("release") or {}
@@ -1247,6 +1274,16 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
                 verification=result[:160], verified=False,
                 failure=str(data.get("error") or result[:160]),
                 tool_result=result)
+        if plan.kind == "github_upload_cancel":
+            if data.get("ok"):
+                return _close(
+                    "cancelled",
+                    "Upload cancelled — nothing was published to GitHub.",
+                    verified=True, tool_result=result)
+            return _close(
+                "failed",
+                str(data.get("error") or "No upload is running."),
+                verified=False, tool_result=result)
         if plan.kind in ("github_download", "github_file"):
             if data.get("ok"):
                 dest = data.get("path") or "your Downloads folder"
@@ -1299,7 +1336,8 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
 _APP_KINDS = {"launch", "close", "restart", "status", "window",
               "download", "download_cancel", "install"}
 _READ_KINDS = {"search", "search_text", "inspect"}
-_GH_KINDS = {"github_upload", "github_download", "github_file"}
+_GH_KINDS = {"github_upload", "github_download", "github_file",
+             "github_upload_cancel"}
 _ART_ID_RE = re.compile(r"art-[0-9a-f]{12}")
 
 

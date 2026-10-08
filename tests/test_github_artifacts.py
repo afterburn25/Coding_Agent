@@ -10,6 +10,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 from localcodeagent.artifacts import ArtifactManager
 from localcodeagent.jobs import JobManager
@@ -36,6 +37,7 @@ class FakeClient:
         self.token_env = "T"
         self.base_url = base_url
         self.uploads = []
+        self.upload_slow = False
 
     @property
     def authenticated(self):
@@ -62,10 +64,23 @@ class FakeClient:
     def api_url(self, path):
         return self.base_url + path
 
-    def upload_file(self, url, path, *, content_type, progress=None):
+    def upload_file(self, url, path, *, content_type, progress=None,
+                    should_cancel=None):
         self.uploads.append({"url": url, "path": str(path)})
         # The real client streams; the fake verifies size like the API.
         size = Path(path).stat().st_size
+        # Emulate a slow stream: report progress and honor cancellation
+        # the way _ProgressReader does between blocks.
+        block = max(1, size // 10)
+        sent = 0
+        while sent < size:
+            if should_cancel is not None and should_cancel():
+                raise gh._UploadCancelled("upload cancelled")
+            sent = min(size, sent + block)
+            if progress:
+                progress(sent, size)
+            if self.upload_slow:
+                time.sleep(0.05)
         route = self.routes.get(("UPLOAD", url))
         if route is None:
             return {"id": 501, "name": url.split("name=")[-1],
@@ -230,6 +245,76 @@ class ReleaseToolTests(unittest.TestCase):
                 {"repo": "o/r", "tag": "v0.34.0",
                  "artifact_id": rec["id"]})
         self.assertEqual(client.uploads, [])
+
+    def _wait_job(self, jobs, job_id, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            state = jobs.get(job_id).state
+            if state in {"completed", "failed", "cancelled"}:
+                return state
+            time.sleep(0.05)
+        return jobs.get(job_id).state
+
+    def test_upload_job_completes_and_links_provenance(self):
+        f = self.ws / "Setup.exe"
+        f.write_bytes(ASSET_BYTES)
+        rec = self.artifacts.register(f, kind="installer")
+        client = FakeClient({
+            ("GET", "/repos/o/r/releases/tags/v0.34.0"): (RELEASE, {}),
+            ("GET", "/repos/o/r/releases/42/assets"): ([], {}),
+            ("GET", "/repos/o/r/releases/assets/501"): (
+                {"id": 501, "name": "Setup.exe",
+                 "size": len(ASSET_BYTES), "state": "uploaded",
+                 "browser_download_url": "https://github.com/dl/Setup.exe",
+                 "created_at": "2025-01-01T00:00:00Z"}, {}),
+        })
+        jobs = JobManager()
+        reg = _reg(self.ws, client, artifacts=self.artifacts,
+                   downloads=SimpleNamespace(jobs=jobs))
+        out = _exec(reg, "github_upload_release_asset",
+                    {"repo": "o/r", "tag": "v0.34.0",
+                     "artifact_id": rec["id"]})
+        self.assertEqual(out["status"], "uploading")
+        job_id = out["job_id"]
+        self.assertEqual(self._wait_job(jobs, job_id), "completed")
+        # Verified + provenance attached, same as the sync path.
+        remote = self.artifacts.get(rec["id"])["remote"]
+        self.assertEqual(remote["asset_id"], 501)
+
+    def test_upload_job_cancels_midflight(self):
+        f = self.ws / "Big.bin"
+        f.write_bytes(ASSET_BYTES)
+        rec = self.artifacts.register(f)
+        client = FakeClient({
+            ("GET", "/repos/o/r/releases/tags/v0.34.0"): (RELEASE, {}),
+            ("GET", "/repos/o/r/releases/42/assets"): ([], {}),
+        })
+        client.upload_slow = True
+        jobs = JobManager()
+        reg = _reg(self.ws, client, artifacts=self.artifacts,
+                   downloads=SimpleNamespace(jobs=jobs))
+        out = _exec(reg, "github_upload_release_asset",
+                    {"repo": "o/r", "tag": "v0.34.0",
+                     "artifact_id": rec["id"]})
+        self.assertEqual(out["status"], "uploading")
+        job_id = out["job_id"]
+        # Wait until the stream is actually running, then abort.
+        deadline = time.time() + 3
+        while time.time() < deadline and not client.uploads:
+            time.sleep(0.02)
+        cancel = _exec(reg, "github_cancel_upload", {})
+        self.assertTrue(cancel["ok"])
+        self.assertEqual(cancel["cancelled"], job_id)
+        self.assertEqual(self._wait_job(jobs, job_id), "cancelled")
+        # An aborted upload attaches no remote provenance.
+        self.assertFalse(self.artifacts.get(rec["id"]).get("remote"))
+
+    def test_cancel_upload_without_job(self):
+        jobs = JobManager()
+        reg = _reg(self.ws, FakeClient(),
+                   downloads=SimpleNamespace(jobs=jobs))
+        out = _exec(reg, "github_cancel_upload", {})
+        self.assertFalse(out["ok"])
 
     def test_delete_asset_requires_confirm(self):
         client = FakeClient({

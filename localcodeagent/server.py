@@ -7158,10 +7158,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.state.twin.status())
             return True
         if path == "/api/artifacts":
-            self._json({"artifacts": self.state.artifacts.list(
+            rows = self.state.artifacts.list(
                 kind=(q.get("kind") or [""])[0],
                 mission_id=(q.get("mission") or [""])[0],
-                task_id=(q.get("task") or [""])[0])})
+                task_id=(q.get("task") or [""])[0])
+            self._json({"artifacts": [
+                v for v in (self.state.artifacts.client_view(r)
+                            for r in rows) if v]})
             return True
         if path.startswith("/api/artifacts/versions/"):
             name = unquote(path[len("/api/artifacts/versions/"):]).strip("/")
@@ -7194,7 +7197,9 @@ class Handler(BaseHTTPRequestHandler):
                             "remote": dict(rec.get("remote") or {})},
                            404)
                 return True
-            chk = self.state.artifacts.verify(aid)
+            # Fresh rehash on every download — this is the trust anchor,
+            # never the (mtime,size)-keyed list cache.
+            chk = self.state.artifacts.verify(aid, fresh=True)
             if not chk.get("ok"):
                 self._json({"error": "integrity check failed — "
                             "registered file no longer matches its "
@@ -10127,6 +10132,54 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/github/test":
                 self._json(self.state.github_account.test())
                 return
+            if path.startswith("/api/artifacts/"):
+                # Artifact-addressed open/reveal — the id, never a client
+                # path, identifies the file (no traversal surface).
+                rest = unquote(path[len("/api/artifacts/"):]).strip("/")
+                open_it = rest.endswith("/open")
+                reveal = rest.endswith("/reveal")
+                aid = rest.rsplit("/", 1)[0].strip("/") \
+                    if (open_it or reveal) else ""
+                if not (open_it or reveal) or \
+                        not re.fullmatch(r"art-[0-9a-f]{12}", aid):
+                    self._json({"error": "unknown artifact route"}, 404)
+                    return
+                rec = self.state.artifacts.get(aid)
+                target = Path(str((rec or {}).get("path") or ""))
+                if rec is None or not target.is_file():
+                    self._json({"error": "local copy unavailable"}, 404)
+                    return
+                if open_it:
+                    # Before handing the file to a shell/app association,
+                    # prove it is still the registered bytes — a tampered
+                    # binary must never be executed via this route.
+                    chk = self.state.artifacts.verify(aid, fresh=True)
+                    if not chk.get("ok"):
+                        self._json(
+                            {"error": "integrity check failed — refusing "
+                             "to open a modified artifact"}, 409)
+                        return
+                import subprocess as _sp
+                try:
+                    if open_it:
+                        if sys.platform.startswith("win"):
+                            os.startfile(str(target))  # noqa: S606
+                        elif sys.platform == "darwin":
+                            _sp.Popen(["open", str(target)])
+                        else:
+                            _sp.Popen(["xdg-open", str(target)])
+                    elif sys.platform.startswith("win"):
+                        _sp.Popen(["explorer", "/select,", str(target)]
+                                  if target.is_file() else
+                                  ["explorer", str(target)])
+                    elif sys.platform == "darwin":
+                        _sp.Popen(["open", "-R", str(target)])
+                    else:
+                        _sp.Popen(["xdg-open", str(target.parent)])
+                    self._json({"ok": True})
+                except Exception as exc:
+                    self._json({"error": str(exc)}, 400)
+                return
             if path == "/api/actions/execute":
                 # Chat action cards and inline controls land here — the
                 # action id is validated against the registry, risk-class
@@ -12538,6 +12591,15 @@ class Handler(BaseHTTPRequestHandler):
                 if job.kind == "tool_install":
                     self.state.tool_downloads.cancel(job_id)
                     job = self.state.jobs.get(job_id)
+                elif job.kind == "github_upload":
+                    # Aborts the streaming POST between blocks — the
+                    # ledger row alone would leave bytes in flight.
+                    from .tools.github import cancel_upload_job
+                    if cancel_upload_job(job.id) is None:
+                        self._json({"error": "upload is no longer "
+                                    "running"}, 404)
+                        return
+                    job = self.state.jobs.cancel(job.id)
                 else:
                     job = self.state.jobs.cancel(job_id)
                 # A cancelled background terminal job must actually kill the

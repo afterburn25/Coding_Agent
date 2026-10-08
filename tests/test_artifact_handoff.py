@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 from localcodeagent.action_ops import (
     ActionPlan, execute_plan, parse_local_action)
@@ -59,6 +61,20 @@ class IntentParseTests(unittest.TestCase):
             "release v0.0.1")
         self.assertEqual(plan.params["repo"], "afterburn25/nexus-dogfood")
         self.assertEqual(plan.params["tag"], "v0.0.1")
+
+    def test_cancel_the_upload(self):
+        for text in ("cancel the upload", "stop the github upload",
+                     "abort the upload"):
+            plan = self._parse(text)
+            self.assertIsNotNone(plan, text)
+            self.assertEqual(plan.kind, "github_upload_cancel", text)
+            self.assertEqual(plan.tool, "github_cancel_upload", text)
+            # Aborting a side-effect must never pause for write approval.
+            self.assertEqual(plan.permission, "github.read", text)
+        # Unrelated cancels stay out of this lane.
+        self.assertNotEqual(
+            (self._parse("cancel the download") or
+             type("_", (), {"kind": ""})).kind, "github_upload_cancel")
 
     def test_download_from_github(self):
         plan = self._parse(
@@ -335,6 +351,77 @@ class ServerRouteTests(unittest.TestCase):
         meta = json.loads(self._get(
             f"/api/artifacts/{rec['id']}").read())
         self.assertFalse(meta["available"])
+
+    def _post(self, path: str, body: dict | None = None):
+        req = urllib.request.Request(
+            self.base + path, method="POST",
+            data=json.dumps(body or {}).encode(),
+            headers={"Content-Type": "application/json"})
+        return urllib.request.urlopen(req, timeout=10)
+
+    def test_reveal_resolves_by_id_never_client_path(self):
+        f = _make_file(Path(self._td.name), "show-me.txt", b"hi")
+        rec = self.state.artifacts.register(f)
+        with mock.patch("subprocess.Popen") as pop:
+            out = json.loads(self._post(
+                f"/api/artifacts/{rec['id']}/reveal",
+                {"path": "C:\\Windows\\System32"}).read())
+        self.assertTrue(out["ok"])
+        self.assertTrue(pop.called)
+        # The launched path is the registered file, never the body's path.
+        argv = pop.call_args[0][0]
+        self.assertIn(str(f), [str(x) for x in argv])
+
+    def test_open_verifies_before_launch(self):
+        f = _make_file(Path(self._td.name), "tool.exe", b"MZ-original")
+        rec = self.state.artifacts.register(f)
+        f.write_bytes(b"tampered-binary")
+        with mock.patch("subprocess.Popen") as pop, \
+                mock.patch.object(os, "startfile", create=True) as sf:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._post(f"/api/artifacts/{rec['id']}/open")
+            self.assertEqual(ctx.exception.code, 409)
+        self.assertFalse(pop.called)
+        self.assertFalse(sf.called)
+
+    def test_list_never_leaks_paths(self):
+        f = _make_file(Path(self._td.name), "listed.txt", b"x")
+        rec = self.state.artifacts.register(f)
+        out = json.loads(self._get("/api/artifacts").read())
+        hit = [a for a in out["artifacts"] if a["id"] == rec["id"]]
+        self.assertEqual(len(hit), 1)
+        self.assertNotIn(str(f), json.dumps(out))
+        self.assertNotIn("path", hit[0])
+        self.assertEqual(hit[0]["download_url"],
+                         f"/api/artifacts/{rec['id']}/download")
+
+    def test_verify_cache_bypassed_by_fresh(self):
+        f = _make_file(Path(self._td.name), "cache.bin", b"round-one")
+        rec = self.state.artifacts.register(f)
+        mgr = self.state.artifacts
+        self.assertTrue(mgr.verify(rec["id"]).get("ok"))
+        st = f.stat()
+        # Rewrite with identical size, then restore the recorded mtime —
+        # the (mtime, size) signature is unchanged, so the cached view
+        # still reads clean while a fresh check sees the tampering.
+        f.write_bytes(b"round-two")
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertTrue(mgr.verify(rec["id"]).get("ok"))
+        self.assertFalse(mgr.verify(rec["id"], fresh=True).get("ok"))
+
+    def test_open_reveal_unknown_and_bogus_routes(self):
+        f = _make_file(Path(self._td.name), "ok.txt", b"x")
+        rec = self.state.artifacts.register(f)
+        f.unlink()
+        for path in (f"/api/artifacts/art-000000000000/open",
+                     f"/api/artifacts/art-000000000000/reveal",
+                     f"/api/artifacts/{rec['id']}/open",
+                     f"/api/artifacts/{rec['id']}/reveal",
+                     f"/api/artifacts/{rec['id']}/bogus",
+                     "/api/artifacts/%2e%2e/open"):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._post(path)
+            self.assertEqual(ctx.exception.code, 404, path)
 
 
 class ArtifactPersistenceTests(unittest.TestCase):

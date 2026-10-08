@@ -1,10 +1,10 @@
 {
   "name": "Nexus Core",
-  "version": "0.35.0",
+  "version": "0.35.1",
   "default_model_mode": "auto",
   "architecture": "Native .NET 8 WinForms/WebView2 UI host -> hidden loopback Python Agent Core -> Research/Image/Tool Modules -> Model Orchestrator -> bundled llama.cpp/local providers",
   "source_of_truth": "afterburn25/Coding_Agent",
-  "test_checkpoint": 2904,
+  "test_checkpoint": 2911,
   "next_milestone": "Roadmap closure \u2014 remaining: dogfood gates (fault-injection matrix, recovery actions, clean-install run, multi-hour mixed soak); CI green on current commit. All feature workstreams in docs/ROADMAP_CLOSURE.md are landed.",
   "ui_direction": "Chat-first center workspace; left nav; right Code Diff/Tasks/Terminal rail; official Nexus Core shield icon + wordmark logo + startup splash artwork",
   "delivery_target": "Small compressed update-aware Windows bootstrap installer EXE; portable ZIP secondary",

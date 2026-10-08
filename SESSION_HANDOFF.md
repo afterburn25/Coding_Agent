@@ -3095,7 +3095,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2904 tests` passing (3 environment skips).
+Expected at this checkpoint: `2911 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
@@ -3736,7 +3736,7 @@ prewarms once VRAM headroom is confirmed (post orphan-sweep), and the
 GPU idle leash default rose 120s -> 600s so replies after short pauses
 don't re-pay the ~9s spawn. VRAM-pressure unload still wins.
 
-Checkpoint: **2904 tests** (2901 passed + 3 env skips).
+Checkpoint: **2911 tests** (2911 passed + 3 env skips).
 
 ## 2026-10-05 — GitHub account API + voice-drain close + windowing (LIVE dogfooded)
 

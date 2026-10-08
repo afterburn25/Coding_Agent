@@ -5,6 +5,8 @@ import json
 import os
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -16,24 +18,55 @@ from ..procutil import no_window_flags
 from .base import ToolRegistry, ToolSpec
 
 
+class _UploadCancelled(RuntimeError):
+    """Raised inside the streaming reader when the job's cancel flag
+    flips — aborts the POST between blocks; GitHub creates no asset on
+    an aborted body, so nothing partial is left server-side."""
+
+
+_UPLOAD_LOCK = threading.Lock()
+_UPLOAD_FLAGS: dict[str, threading.Event] = {}
+_UPLOAD_LATEST: list[str] = []
+
+
+def cancel_upload_job(job_id: str = "") -> str | None:
+    """Abort an in-flight asset upload by job id (or the most recent).
+    Returns the cancelled job id, or None when nothing is running.
+    Shared by the ``github_cancel_upload`` tool and the generic
+    ``/api/jobs/cancel`` route."""
+    with _UPLOAD_LOCK:
+        jid = job_id or (_UPLOAD_LATEST[-1] if _UPLOAD_LATEST else "")
+        flag = _UPLOAD_FLAGS.get(jid)
+    if flag is None:
+        return None
+    flag.set()
+    return jid
+
+
 class _ProgressReader:
     """File-object wrapper that reports bytes-sent to a callback —
     http.client streams request bodies via read(blocksize), so this
-    gives live upload progress without buffering the file."""
+    gives live upload progress without buffering the file. When a
+    ``cancel`` callable is supplied it is polled per block so an
+    in-flight upload can be aborted."""
 
-    def __init__(self, fh, total: int, callback) -> None:
+    def __init__(self, fh, total: int, callback=None, cancel=None) -> None:
         self._fh = fh
         self._total = total
         self._done = 0
         self._cb = callback
+        self._cancel = cancel
 
     def read(self, size: int = -1) -> bytes:
+        if self._cancel is not None and self._cancel():
+            raise _UploadCancelled("upload cancelled")
         chunk = self._fh.read(size)
         self._done += len(chunk)
-        try:
-            self._cb(self._done, self._total)
-        except Exception:
-            pass
+        if self._cb is not None:
+            try:
+                self._cb(self._done, self._total)
+            except Exception:
+                pass
         return chunk
 
     def close(self) -> None:
@@ -195,10 +228,12 @@ class GitHubCodingClient:
         return self.base_url + path
 
     def upload_file(self, url: str, path, *, content_type: str,
-                    progress=None) -> dict:
+                    progress=None, should_cancel=None) -> dict:
         """POST a file body to an absolute upload URL (the release
         ``upload_url`` host — uploads.github.com). Streams from disk in
-        blocks; ``progress(done, total)`` fires per block for job UI."""
+        blocks; ``progress(done, total)`` fires per block for job UI and
+        ``should_cancel()`` aborts mid-flight (raises
+        :class:`_UploadCancelled`)."""
         if not self.authenticated:
             raise RuntimeError(
                 f"GitHub upload requires a token in environment variable "
@@ -210,7 +245,8 @@ class GitHubCodingClient:
         headers["Content-Length"] = str(size)
         fh = file_path.open("rb")
         try:
-            body = _ProgressReader(fh, size, progress) if progress else fh
+            body = (_ProgressReader(fh, size, progress, should_cancel)
+                    if (progress or should_cancel) else fh)
             request = Request(url, data=body, headers=headers,
                               method="POST")
             try:
@@ -221,6 +257,8 @@ class GitHubCodingClient:
                 with response as handle:
                     raw = handle.read()
                     return json.loads(raw.decode("utf-8")) if raw else {}
+            except _UploadCancelled:
+                raise
             except HTTPError as exc:
                 try:
                     try:
@@ -1005,56 +1043,162 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         up_url = template + "?" + urlencode({"name": asset_name})
         import mimetypes as _mt
         ctype = _mt.guess_type(asset_name)[0] or "application/octet-stream"
-        resp = client.upload_file(up_url, path, content_type=ctype)
-        # Verify the remote accepted the bytes — never claim success on
-        # the HTTP status alone.
-        asset_id = resp.get("id")
-        ok = bool(asset_id) and resp.get("state") == "uploaded" and \
-            int(resp.get("size") or -1) == size and \
-            str(resp.get("name")) == asset_name
-        if not ok:
-            raise RuntimeError(
-                "upload response failed verification "
-                f"(state={resp.get('state')}, size={resp.get('size')}, "
-                f"expected={size})")
-        # Second read-back: the asset must actually exist on the release.
-        check = client.request(
-            "GET",
-            f"/repos/{oq}/{nq}/releases/assets/{asset_id}",
-            require_auth=True) or {}
-        if check.get("id") != asset_id or \
-                int(check.get("size") or -1) != size:
-            raise RuntimeError(
-                "uploaded asset failed read-back verification")
-        remote = {
-            "provider": "github", "repository": slug,
-            "kind": "release_asset",
-            "release_id": rel.get("id"),
-            "release_url": rel.get("html_url"),
-            "asset_id": asset_id, "tag": rel.get("tag_name"),
-            "name": asset_name, "size": size,
-            "web_url": check.get("browser_download_url"),
-            "download_url": check.get("browser_download_url"),
-            "uploaded_at": check.get("updated_at")
-            or check.get("created_at"),
-        }
-        if row is not None:
+
+        def _do_upload(progress=None, should_cancel=None) -> dict:
+            resp = client.upload_file(
+                up_url, path, content_type=ctype,
+                progress=progress, should_cancel=should_cancel)
+            # Verify the remote accepted the bytes — never claim
+            # success on the HTTP status alone.
+            asset_id = resp.get("id")
+            ok = bool(asset_id) and resp.get("state") == "uploaded" and \
+                int(resp.get("size") or -1) == size and \
+                str(resp.get("name")) == asset_name
+            if not ok:
+                raise RuntimeError(
+                    "upload response failed verification "
+                    f"(state={resp.get('state')}, "
+                    f"size={resp.get('size')}, expected={size})")
+            # Second read-back: the asset must actually exist on the
+            # release.
+            check = client.request(
+                "GET",
+                f"/repos/{oq}/{nq}/releases/assets/{asset_id}",
+                require_auth=True) or {}
+            if check.get("id") != asset_id or \
+                    int(check.get("size") or -1) != size:
+                raise RuntimeError(
+                    "uploaded asset failed read-back verification")
+            remote = {
+                "provider": "github", "repository": slug,
+                "kind": "release_asset",
+                "release_id": rel.get("id"),
+                "release_url": rel.get("html_url"),
+                "asset_id": asset_id, "tag": rel.get("tag_name"),
+                "name": asset_name, "size": size,
+                "web_url": check.get("browser_download_url"),
+                "download_url": check.get("browser_download_url"),
+                "uploaded_at": check.get("updated_at")
+                or check.get("created_at"),
+            }
+            if row is not None:
+                try:
+                    artifacts.attach_remote(str(row["id"]), remote)
+                except Exception:
+                    pass
+            _journal(
+                "github_upload",
+                f"asset '{asset_name}' → {slug}@{rel.get('tag_name')}",
+                after={"asset_id": asset_id, "size": size},
+                reversible=False,
+                irreversible_reason="remote asset can't be un-published "
+                                    "by undo",
+                risk="medium",
+                description=f"Uploaded {asset_name} ({size} bytes)")
+            return {
+                "ok": True, "verified": True, "repository": slug,
+                "artifact_id": str((row or {}).get("id") or ""),
+                "asset": _asset_view(check),
+                "release": {"id": rel.get("id"),
+                            "tag": rel.get("tag_name"),
+                            "url": rel.get("html_url")}}
+
+        jobs = getattr(downloads, "jobs", None)
+        if jobs is not None:
+            # Async like downloads: the plan lane returns immediately so
+            # 'cancel the upload' can reach us mid-flight; progress and
+            # the verified result land on the job record.
+            flag = threading.Event()
+            record = jobs.submit(
+                "github_upload",
+                f"Upload {asset_name} → {slug}@{rel.get('tag_name')}",
+                metadata={"repository": slug,
+                          "tag": rel.get("tag_name"),
+                          "asset": asset_name, "size": size,
+                          "artifact_id": str((row or {}).get("id") or "")})
+            jobs.update(record.id, state="running", status="uploading",
+                        cancellable=True)
+            with _UPLOAD_LOCK:
+                _UPLOAD_FLAGS[record.id] = flag
+                _UPLOAD_LATEST.append(record.id)
+                del _UPLOAD_LATEST[:-8]
+
+            def _prog(done: int, total: int) -> None:
+                try:
+                    jobs.update(record.id, state="running",
+                                status="uploading",
+                                progress=done / max(total, 1),
+                                detail=f"{done:,} / {total:,} bytes")
+                except Exception:
+                    pass
+
+            def _run() -> None:
+                try:
+                    out = _do_upload(progress=_prog,
+                                     should_cancel=flag.is_set)
+                    url = (out.get("release") or {}).get("url") or ""
+                    jobs.update(record.id, state="completed",
+                                status="finished", progress=1.0,
+                                detail=url)
+                    _emit({"type": "notification", "notification": {
+                        "id": f"gh-upload-{record.id}",
+                        "title": "GitHub upload verified",
+                        "message": f"{asset_name} → {slug}@"
+                                   f"{rel.get('tag_name')}"
+                                   + (f" — {url}" if url else ""),
+                        "level": "info",
+                        "created_at": time.time(), "read": False}})
+                except _UploadCancelled:
+                    try:
+                        jobs.update(
+                            record.id, state="cancelled",
+                            detail="cancelled — nothing published")
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    try:
+                        jobs.update(record.id, state="failed",
+                                    error=str(exc)[:300])
+                    except Exception:
+                        pass
+                    _emit({"type": "notification", "notification": {
+                        "id": f"gh-upload-{record.id}",
+                        "title": "GitHub upload failed",
+                        "message": f"{asset_name}: {exc}",
+                        "level": "warning",
+                        "created_at": time.time(), "read": False}})
+                finally:
+                    with _UPLOAD_LOCK:
+                        _UPLOAD_FLAGS.pop(record.id, None)
+
+            threading.Thread(
+                target=_run, daemon=True,
+                name=f"nexus-gh-upload-{record.id[-6:]}").start()
+            return json.dumps({
+                "ok": True, "status": "uploading", "job_id": record.id,
+                "repository": slug, "asset_name": asset_name,
+                "size": size,
+                "artifact_id": str((row or {}).get("id") or ""),
+                "release": {"id": rel.get("id"),
+                            "tag": rel.get("tag_name"),
+                            "url": rel.get("html_url")}}, indent=2)
+        return json.dumps(_do_upload(), indent=2)
+
+    def github_cancel_upload(args: dict) -> str:
+        """Abort an in-flight asset upload — aborts between blocks; an
+        aborted POST leaves no asset on GitHub."""
+        want = str(args.get("job_id") or "").strip()
+        hit = cancel_upload_job(want)
+        if hit is None:
+            return json.dumps({"ok": False,
+                               "error": "no upload is running"})
+        jobs = getattr(downloads, "jobs", None)
+        if jobs is not None:
             try:
-                artifacts.attach_remote(str(row["id"]), remote)
+                jobs.cancel(hit)
             except Exception:
                 pass
-        _journal("github_upload", f"asset '{asset_name}' → {slug}@{rel.get('tag_name')}",
-                 after={"asset_id": asset_id, "size": size},
-                 reversible=False,
-                 irreversible_reason="remote asset can't be un-published by undo",
-                 risk="medium",
-                 description=f"Uploaded {asset_name} ({size} bytes)")
-        return json.dumps({
-            "ok": True, "verified": True, "repository": slug,
-            "artifact_id": str((row or {}).get("id") or ""),
-            "asset": _asset_view(check),
-            "release": {"id": rel.get("id"), "tag": rel.get("tag_name"),
-                        "url": rel.get("html_url")}}, indent=2)
+        return json.dumps({"ok": True, "cancelled": hit}, indent=2)
 
     def github_download_release_asset(args: dict) -> str:
         _ensure_token()
@@ -1520,6 +1664,14 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             "replace": {"type": "boolean"},
         },
     }, "github.write", github_upload_release_asset, category="github",
+        capabilities=["github_release", "upload_asset"]))
+
+    registry.register(ToolSpec("github_cancel_upload", "Abort an in-flight GitHub asset upload. Aborts between stream blocks; nothing is published. Pass job_id or omit to cancel the most recent upload.", {
+        "type": "object",
+        "properties": {
+            "job_id": {"type": "string"},
+        },
+    }, "github.read", github_cancel_upload, category="github",
         capabilities=["github_release", "upload_asset"]))
 
     registry.register(ToolSpec("github_download_release_asset", "Download a GitHub release asset through the durable download manager (resume, size verify, progress). Registers the result as an artifact.", {

@@ -48,6 +48,7 @@ class ArtifactManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self.files_dir.mkdir(exist_ok=True)
         self._lock = threading.RLock()
+        self._vcache: dict[str, tuple[int, int]] = {}
         self._rows: list[dict[str, Any]] = []
         # Optional LineageStore — set by AppState after construction.
         self.lineage = None
@@ -181,16 +182,26 @@ class ArtifactManager:
                     return dict(r)
         return None
 
-    def verify(self, artifact_id: str) -> dict[str, Any]:
-        """Confirm the artifact still exists and its hash matches."""
+    def verify(self, artifact_id: str, *, fresh: bool = False) -> dict:
+        """Confirm the artifact still exists and its hash matches.
+
+        A clean result is cached keyed on (mtime_ns, size) — list views
+        stay cheap; ``fresh=True`` bypasses the cache for sensitive
+        paths like the download route."""
         row = self.get(artifact_id)
         if row is None:
             return {"ok": False, "reason": "unknown artifact"}
         p = Path(row["path"])
         if not p.is_file():
+            self._vcache.pop(artifact_id, None)
             return {"ok": False, "reason": "file missing"}
+        sig = (p.stat().st_mtime_ns, p.stat().st_size)
+        if not fresh and self._vcache.get(artifact_id) == sig:
+            return {"ok": True}
         if row.get("sha256") and self._sha256(p) != row["sha256"]:
+            self._vcache.pop(artifact_id, None)
             return {"ok": False, "reason": "hash mismatch (modified)"}
+        self._vcache[artifact_id] = sig
         return {"ok": True}
 
     _REMOTE_KEYS = (
