@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -368,9 +369,13 @@ class ServerRouteTests(unittest.TestCase):
                 {"path": "C:\\Windows\\System32"}).read())
         self.assertTrue(out["ok"])
         self.assertTrue(pop.called)
-        # The launched path is the registered file, never the body's path.
-        argv = pop.call_args[0][0]
-        self.assertIn(str(f), [str(x) for x in argv])
+        # The launched path resolves server-side from the artifact id —
+        # Windows selects the file; POSIX opens its parent folder.
+        # The body's "C:\Windows\System32" must never appear.
+        argv = [str(x) for x in pop.call_args[0][0]]
+        want = str(f) if sys.platform.startswith("win") else str(f.parent)
+        self.assertIn(want, argv)
+        self.assertNotIn("C:\\Windows\\System32", argv)
 
     def test_open_verifies_before_launch(self):
         f = _make_file(Path(self._td.name), "tool.exe", b"MZ-original")
