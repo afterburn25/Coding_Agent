@@ -1,0 +1,39 @@
+{
+  "id": "isabella-v7-approved-golden",
+  "title": "Isabella V7 Approved Golden Reference",
+  "purpose": "Golden A/B target for matching live Chatterbox Isabella output. This is NOT conditioning/reference audio for Chatterbox.",
+  "approved_by_user": true,
+  "target_signature": "approved-v7-v6-character-louder",
+  "audio_path": "docs/reference/audio/isabella-v7-approved-golden-2s.mp3",
+  "excerpt": {
+    "source": "Isabella_V7_V6_Based_Target.mp3",
+    "source_start_seconds": 8,
+    "duration_seconds": 2,
+    "channels": 1,
+    "sample_rate_hz": 48000,
+    "bitrate_kbps": 48,
+    "sha256": "3477dd97a6ade6777d89e00f77e892239f7fdd7f35d871f36aafd090fea93706"
+  },
+  "full_approved_audition": {
+    "local_name": "Isabella_V7_V6_Based_Target.mp3",
+    "duration_seconds": 21.024,
+    "sha256": "b6ef99f12acd9eec286366c528cdacc6887efd50b919af200f04c42f550b301d"
+  },
+  "conditioning_reference": {
+    "path": "localcodeagent/voice/chatterbox_voices/isabella/reference-source.mp3",
+    "must_remain_dry": true,
+    "description": "Dry public Kokoro bf_isabella. Never replace this with the synthetic golden target."
+  },
+  "preset": {
+    "path": "localcodeagent/voice/official/nexus-isabella-chatterbox.json",
+    "target_signature": "approved-v7-v6-character-louder"
+  },
+  "approved_target_character": [
+    "Pre-Chatterbox V6 Isabella synthetic character",
+    "Applied exactly once after dry Chatterbox generation",
+    "Centered output; no stereo-width post layer",
+    "Target loudness about -12.5 LUFS",
+    "Limiter about -1 dBFS",
+    "No DSP baked into Chatterbox conditioning reference"
+  ]
+}
