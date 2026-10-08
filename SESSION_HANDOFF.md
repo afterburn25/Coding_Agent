@@ -127,12 +127,21 @@ flourish beyond BRIEF budgets, attributes user facts as its own on
 recall, and invents weather instead of declining — the scope
 directive helps but a small model's discipline is soft.
 
-Checkpoint: **2718 tests** passing (2 environment skips).
+Since then: scope inspector endpoint (`GET /api/conversations/scope`)
+with a populated slot model, topic-shift advisories + referent decay,
+and a deterministic single-fact recall lane — `whats my favorite
+color` / `what port are we using` answer straight from memory with
+correct second-person attribution, no model call. Pronoun-anchored
+queries match leniently; bare "the X" questions require full content-
+term cover so general-knowledge questions can't hijack a stored fact.
+QA corpus grew to cover facts-recall, restatements, topic shifts,
+person-directed wheres, and recall discipline.
+
+Checkpoint: **2722 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
 acceptance matrix, real-model benchmark numbers on the deployed
-build, topic-shift decay tuning, richer slot model on the model lane,
-inspector UI surface, then release/docs/deploy.
+build, inspector UI surface, then release/docs/deploy.
 
 ## v0.31.10 — low-mid "barrel" carve + boom-aware gate
 
@@ -2933,7 +2942,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2718 tests` passing (2 environment skips).
+Expected at this checkpoint: `2722 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

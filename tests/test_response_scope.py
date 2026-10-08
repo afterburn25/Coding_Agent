@@ -528,5 +528,63 @@ class TestFactsRecallLane(unittest.TestCase):
         self.assertNotIn("my favorite color is blue", facts)
 
 
+class TestSingleFactRecall(unittest.TestCase):
+    """'whats my favorite color' answers deterministically from stored
+    memory — correct second-person attribution, superseded values
+    hidden, no model call. General-knowledge questions that share a
+    term with a stored fact must NOT hijack the lane."""
+
+    def _mem(self):
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        return ConversationMemory(
+            Path(self._td.name) / "cm.json")
+
+    def test_recall_facts_matches_distinguishing_terms(self):
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        cm.learn_from_user("my favorite food is steak")
+        cm.learn_from_user("use port 8080")
+        rows = cm.recall_facts("whats my favorite color")
+        self.assertEqual([r["text"] for r in rows],
+                         ["my favorite color is blue"])
+        # 'favorite' is a generic relation term — the food fact must
+        # not ride a color question.
+        self.assertNotIn("my favorite food is steak",
+                         [r["text"] for r in rows])
+        rows = cm.recall_facts("what port are we using")
+        self.assertEqual([r["text"] for r in rows], ["port is 8080"])
+
+    def test_recall_facts_superseded_hidden(self):
+        cm = self._mem()
+        cm.learn_from_user("use port 8080")
+        cm.learn_from_user("actually use port 9000")
+        rows = cm.recall_facts("what port are we using")
+        self.assertEqual([r["text"] for r in rows], ["port is 9000"])
+
+    def test_recall_facts_no_match_returns_empty(self):
+        cm = self._mem()
+        cm.learn_from_user("my favorite color is blue")
+        self.assertEqual(cm.recall_facts("whats the weather"), [])
+        self.assertEqual(cm.recall_facts("how are you"), [])
+
+    def test_fact_sentence_perspective(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        sent = AgentOrchestrator._recalled_fact_sentence
+        self.assertEqual(
+            sent({"text": "my favorite color is blue",
+                  "slot": "my:favorite color"}),
+            "your favorite color is blue")
+        self.assertEqual(sent({"text": "port is 8080", "slot": "port:is"}),
+                         "The port is 8080")
+        self.assertEqual(
+            sent({"text": "Orion uses PostgreSQL", "slot": "orion:uses"}),
+            "Orion uses PostgreSQL")
+
+
 if __name__ == "__main__":
     unittest.main()

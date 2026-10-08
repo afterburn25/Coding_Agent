@@ -1858,6 +1858,87 @@ class AgentOrchestrator:
         t = re.sub(r"\bmy\b", "your", t, flags=re.IGNORECASE)
         return t
 
+    _FACT_RECALL_RE = re.compile(
+        r"^\s*(?:remind me\s+(?:of|about)\s+|what(?:'s|\s+s)?\s+|"
+        r"whats\s+|which\s+|whichever\s+|do you remember\s+)",
+        re.IGNORECASE)
+    _FACT_RECALL_SKIP_RE = re.compile(
+        r"^\s*what\s+(?:do you|should|would|could|can|did|does|will|"
+        r"happens|happened|time|day|else|if)\b|\byou know\b|"
+        r"\babout me\b",
+        re.IGNORECASE)
+
+    @staticmethod
+    def _recalled_fact_sentence(row: dict) -> str:
+        """One stored fact as a sentence. 'my:'-slot facts are the
+        user's own facts — second person; project/plain facts restate
+        verbatim with a definite article when the stored text dropped
+        it."""
+        text = str(row.get("text", "")).strip().rstrip(".")
+        if str(row.get("slot") or "").startswith("my:"):
+            return AgentOrchestrator._second_person_fact(text)
+        if not text[:1].isupper() and not re.match(
+                r"^(?:the|a|an|my|your|our)\b", text, re.IGNORECASE):
+            text = "the " + text
+        return text[:1].upper() + text[1:]
+
+    def _single_fact_recall_reply(self, user_text: str,
+                                  conversation_id: str, project_id: str):
+        """'whats my favorite color' / 'what port are we using' —
+        single-fact recall answered deterministically from stored
+        memory. Correct attribution ('your X', never 'my X') and no
+        model call; questions the store can't answer fall through."""
+        text = str(user_text or "")
+        if (self.conversation_memory is None
+                or not self._FACT_RECALL_RE.match(text)
+                or self._FACT_RECALL_SKIP_RE.search(text)):
+            return None
+        rows = self.conversation_memory.recall_facts(
+            text, project_id=project_id, conversation_id=conversation_id)
+        if not rows:
+            return None
+        # Precision gate: pronoun/context-anchored queries ("my X",
+        # "are we using", "remind me") are clearly memory lookups, so
+        # any distinguishing-term overlap qualifies. Bare "the X"
+        # questions could be general knowledge ("what color is the
+        # sky") — those must match on ALL of the question's content
+        # terms, not a shared incidental one.
+        if not re.search(
+                r"\b(?:my|your|our|we|i|us|remind)\b", text,
+                re.IGNORECASE):
+            body = self._FACT_RECALL_RE.sub("", text)
+            q_terms = self.conversation_memory._content_terms(body)
+            rows = [
+                r for r in rows
+                if q_terms <= self.conversation_memory._fact_query_terms(
+                    str(r.get("text", "")), str(r.get("slot") or ""))
+            ]
+            if not rows:
+                return None
+        items = [self._recalled_fact_sentence(r) for r in rows[:4]]
+        my_rows = [r for r in rows[:4]
+                   if str(r.get("slot") or "").startswith("my:")]
+        if len(items) == 1:
+            canonical = (f"You told me that — {items[0]}."
+                         if my_rows else f"{items[0]}.")
+        else:
+            canonical = (f"You told me that — {items[0]}"
+                         if my_rows else items[0])
+            canonical += (", " + ", ".join(items[1:-1]) + ", "
+                          if len(items) > 2 else " ")
+            canonical += f"and {items[-1]}."
+        from ..context.realize import RenderedReply, SemanticResponse
+        sem = SemanticResponse(
+            facts=[canonical], semantic_id="memory:fact_recall",
+            speech_act="answer", bare=True)
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="memory_fact_recall",
+            canonical=canonical)
+
     def _facts_recall_reply(self, user_text: str, conversation_id: str,
                             project_id: str):
         """'What do you know/remember about me' — explicit memory
@@ -6101,6 +6182,21 @@ class AgentOrchestrator:
             self._facts_recall_reply(user_text, conversation_id,
                                      project_id)
             if mode == "auto" else None)
+        # Single-fact recall ("whats my favorite color") answers from
+        # stored memory directly — right attribution, no model call.
+        # Identity questions ("what's YOUR name") keep precedence even
+        # when a stored fact happens to overlap the phrasing.
+        from .. import identity as _identity_guard
+        recall_reply = (
+            self._single_fact_recall_reply(user_text, conversation_id,
+                                           project_id)
+            if (mode == "auto" and facts_reply is None
+                and sk_reply is None
+                and _identity_guard.response_for(
+                    user_text,
+                    asker_is_creator=self._resolve_asker_is_creator())
+                is None)
+            else None)
         # Deterministic local-action lane — bounded computer tasks
         # ("create a folder D:\Nexus") that must EXECUTE, not narrate.
         # Runs intent -> permission -> execute -> verify -> evidence ->
@@ -6131,7 +6227,7 @@ class AgentOrchestrator:
                 user_text,
                 asker_is_creator=self._resolve_asker_is_creator())
             is not None)
-        builtin_reply = github_reply or sk_reply or facts_reply or (
+        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -6143,6 +6239,7 @@ class AgentOrchestrator:
             and github_reply is None
             and sk_reply is None
             and facts_reply is None
+            and recall_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):

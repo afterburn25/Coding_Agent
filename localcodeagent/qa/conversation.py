@@ -721,8 +721,12 @@ def generate_scope_scenarios(
         QaTurn("i have an rtx 3080", conversation_id="scope-m3"),
         QaTurn("what's my favorite color?", conversation_id="scope-m4",
                expect={
-                   "context_contains": "blue",
-                   "context_not_contains": ["steak", "rtx 3080"],
+                   # Deterministic recall lane owns the turn — assert
+                   # the answer and the memory block it used.
+                   "response_contains": "blue",
+                   "response_not_contains": ["steak", "rtx 3080"],
+                   "memory_contains": "blue",
+                   "memory_not_contains": ["steak", "rtx 3080"],
                    "no_trailing_question": True,
                }),
     ]))
@@ -735,8 +739,10 @@ def generate_scope_scenarios(
         QaTurn("actually make that 8090", conversation_id="scope-c1"),
         QaTurn("what port are we using?", conversation_id="scope-c2",
                expect={
-                   "context_contains": "8090",
-                   "context_not_contains": "8080",
+                   "response_contains": "8090",
+                   "response_not_contains": "8080",
+                   "memory_contains": "8090",
+                   "memory_not_contains": "8080",
                }),
     ]))
 
@@ -886,6 +892,35 @@ def generate_scope_scenarios(
                }),
     ]))
 
+    # Single-fact recall is deterministic — the stored fact answers
+    # directly in the correct person, superseded values stay hidden,
+    # and general-knowledge questions sharing a term never hijack.
+    out.append(QaScenario(f"{scenario_prefix}-fact-recall", [
+        QaTurn("my favorite color is blue", conversation_id="scope-fc"),
+        QaTurn("use port 8080", conversation_id="scope-fc"),
+        QaTurn("actually use port 9000", conversation_id="scope-fc"),
+        QaTurn("whats my favorite color?", conversation_id="scope-fc",
+               expect={
+                   "response_contains": "your favorite color is blue",
+                   "response_not_contains": ["my favorite color",
+                                             "don't know",
+                                             "haven't told"],
+                   "no_leading_filler": True,
+                   "no_reasoning_narration": True,
+               }),
+        QaTurn("what port are we using?", conversation_id="scope-fc",
+               expect={
+                   "response_contains": "9000",
+                   "response_not_contains": "8080",
+               }),
+        QaTurn("what color is the sky?", conversation_id="scope-fc",
+               expect={
+                   # General knowledge — the color fact must not answer.
+                   "response_not_contains": ["your favorite",
+                                             "favorite color"],
+               }),
+    ]))
+
     # Re-teaching an already-active fact must still ack — the first
     # dogfood run answered a restatement with a model essay.
     out.append(QaScenario(f"{scenario_prefix}-restatement", [
@@ -896,7 +931,7 @@ def generate_scope_scenarios(
                    "no_leading_filler": True,
                }),
         QaTurn("what's my favorite color?", conversation_id="scope-rs",
-               expect={"context_contains": "blue"}),
+               expect={"response_contains": "blue"}),
     ]))
 
     # Topic-shift advisories reach the model — a forward shift tells it
@@ -976,13 +1011,17 @@ def _long_conversation_scenario(scenario_id: str) -> QaScenario:
     # Act 4 — recall: settled values only, never the superseded ones.
     turns.append(QaTurn("what port are we using?", conversation_id=cid,
                         expect={
-                            "context_contains": "9000",
-                            "context_not_contains": "8080",
+                            "response_contains": "9000",
+                            "response_not_contains": "8080",
+                            "memory_contains": "9000",
+                            "memory_not_contains": "8080",
                         }))
     turns.append(QaTurn("what's my favorite color?", conversation_id=cid,
                         expect={
-                            "context_contains": "green",
-                            "context_not_contains": "steak",
+                            "response_contains": "green",
+                            "response_not_contains": ["steak", "blue"],
+                            "memory_contains": "green",
+                            "memory_not_contains": "steak",
                         }))
     turns.append(QaTurn("what database does Orion use?",
                         conversation_id=cid,

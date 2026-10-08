@@ -1370,6 +1370,50 @@ class ConversationMemory:
             lines.extend(f"- {item}" for item in rules)
         return "\n".join(lines)
 
+    def recall_facts(
+        self,
+        query: str,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Active fact rows whose distinguishing terms overlap the
+        query — same relevance gate prompt_context uses, but returns
+        rows (with slots) for deterministic single-fact recall.
+        Latest-stored row wins per slot."""
+        if not self.enabled:
+            return []
+        q_terms = self._content_terms(query)
+        if not q_terms:
+            return []
+
+        def applies(row: dict[str, Any]) -> bool:
+            if not row.get("active", True):
+                return False
+            scope = str(row.get("scope") or "global")
+            scope_id = str(row.get("scope_id") or "")
+            if scope == "global":
+                return True
+            if scope == "project":
+                return bool(project_id) and scope_id == project_id
+            if scope == "conversation":
+                return bool(conversation_id) and scope_id == conversation_id
+            return False
+
+        with self._lock:
+            matched = [
+                dict(row)
+                for row in self._data.get("facts", [])
+                if isinstance(row, dict) and applies(row)
+                and self._fact_query_terms(str(row.get("text", "")),
+                                           str(row.get("slot") or ""))
+                & q_terms
+            ]
+        by_slot: dict[str, dict[str, Any]] = {}
+        for row in matched:
+            by_slot[str(row.get("slot") or row.get("text", ""))] = row
+        return list(by_slot.values())
+
     def active_facts(
         self,
         *,

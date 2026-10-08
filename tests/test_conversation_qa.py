@@ -146,7 +146,10 @@ class HandAuthoredScenarioTests(unittest.TestCase):
                        expect={"task_status": "completed"}),
                 QaTurn("what database did I say Orion uses?",
                        conversation_id="chat-b",
-                       expect={"system_contains": "PostgreSQL"}),
+                       # Deterministic recall lane now owns "what did
+                       # I say about X" — assert the answer, not the
+                       # (absent) model prompt.
+                       expect={"response_contains": "PostgreSQL"}),
                 QaTurn("We switched Orion to SQLite.",
                        conversation_id="chat-c",
                        expect={"task_status": "completed"}),
@@ -243,11 +246,13 @@ class HandAuthoredScenarioTests(unittest.TestCase):
                 QaTurn("stop answering in bullet points"),
                 QaTurn("the staging port is 8443"),
                 QaTurn("what port is staging on",
-                       expect={"system_contains": "8443"}),
+                       # Recall lane answers deterministically — the
+                       # assert moves from prompt to response.
+                       expect={"response_contains": "8443"}),
                 QaTurn("correction: the staging port is 9443"),
                 QaTurn("what port is staging on",
-                       expect={"system_contains": "9443",
-                               "system_not_contains": "8443"}),
+                       expect={"response_contains": "9443",
+                               "response_not_contains": "8443"}),
                 QaTurn("forget about the staging port"),
                 QaTurn("what port is staging on",
                        expect={"system_not_contains": "9443"}),
