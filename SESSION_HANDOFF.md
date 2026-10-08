@@ -147,9 +147,10 @@ silently stranded all models (missing since 0.31.1) — the soak's
 both fixes above. Backend rebuilt via PyInstaller → swapped into
 `D:\Nexus_Core` (old backend at `backend-pre-0.31.3`). Live verified:
 `/api/status` → 0.31.3 + `safe_mode` field, autonomy running, dynamic
-port 57063. Soak 0311d in final cycle at deploy time: 5 clean
-completions + earlier resumed artifacts (8 verified files), 4 clean
-kill→restart recoveries; timeouts were 900s budget + 4B-model
+port 57063. Soak 0311d final report (12 cycles): 4 kills → 5 clean
+recoveries, 5 completions, 0 failed, 0 blocked, 10 verified artifacts
+(soak_1,3–11.txt); the 7 timeouts all wrote their target file but hit
+the 900s budget in approval/verify churn on a 4B utility model —
 serialization, not stalls.
 
 Rules for the next session:
