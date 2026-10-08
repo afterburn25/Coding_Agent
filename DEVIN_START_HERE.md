@@ -500,6 +500,18 @@ Windows desktop package:
 ./packaging/build_windows.ps1
 ```
 
+Deploy to the local workstation (`D:\Nexus_Core`):
+
+```powershell
+./scripts/deploy_local.ps1
+```
+
+Do NOT hand-roll `robocopy /MIR` deploys: absolute-path `/XD` entries do
+NOT protect subtrees from purge (observed: `runtime\voice\chatterbox` and
+`tools\` deleted mid-deploy). `deploy_local.ps1` uses bare-name `/XD`
+exclusions (`data output runtime models tools .git` + `config.json`),
+stops the running app first, and relaunches it.
+
 Optional private signed Brain seed:
 
 ```powershell

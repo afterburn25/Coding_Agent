@@ -395,8 +395,11 @@ class FrontendBufferTests(unittest.TestCase):
         self.assertNotIn("state.text.textContent+=", token_block)
 
     def test_result_clears_pending_buffer(self):
-        result_block = self.src.split("if(name==='result')", 1)[1][:400]
+        # Non-voice path clears the buffer; the voice-gated path keeps it
+        # as the reveal source until the hold releases.
+        result_block = self.src.split("if(name==='result')", 1)[1][:1200]
         self.assertIn("pendingText=''", result_block)
+        self.assertIn("awaitingVoice", result_block)
 
     def test_refusal_retry_clears_pending_buffer(self):
         retry_block = self.src.split("generic_refusal_retry", 1)[1][:400]
