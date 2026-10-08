@@ -2,6 +2,45 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.35.1 — Artifact actions, artifacts panel, cancellable uploads
+
+Commits `6f8a4d7e` + `448e6327`; deployed `D:\Nexus_Core` at 0.35.1.
+
+- **Card actions** — `Open` / `Show in folder` / `Copy link` on local
+  artifact cards. `POST /api/artifacts/<id>/{open,reveal}` resolve by id
+  only; `open` re-verifies SHA-256 (fresh) before shell-associating so a
+  tampered binary never executes via the route.
+- **`GET /api/artifacts` fix** — was returning raw rows with absolute
+  `path`; now projects `client_view`. `verify()` gained a
+  `(mtime_ns, size)`-keyed cache for cheap list views; `/download` and
+  `/open` pass `fresh=True` so trust-critical paths always rehash.
+- **Artifacts tab** — new utility panel lists the registry newest-first
+  via the same card renderer; refreshes on open + 15s while visible.
+- **Uploads as jobs** — `github_upload_release_asset` is async when a
+  JobManager is wired: `status:"uploading"` + `job_id`, byte progress in
+  the activity timeline, completion/failure `notification` events, remote
+  provenance + `retention: release` on success. Cancel via
+  `github_cancel_upload` tool, "cancel the upload" intent (needs only
+  `github.read` — aborting a side-effect never pauses for write), or the
+  generic `/api/jobs/cancel` route (`kind=="github_upload"` aborts the
+  stream between blocks via module-level `_UPLOAD_FLAGS`).
+- Path-sourced uploads register the file upfront so the reply carries a
+  card immediately; remote links attach on verified completion.
+- Lane status mapping: `started`/`cancelled` are success statuses —
+  in-flight upload responses must not mark the task failed.
+- LIVE DOGFOOD (deployed 0.35.1): chat → `github.write` approval →
+  job card; 128MB upload cancelled mid-flight via `/api/jobs/cancel`
+  (8.9% progress, GitHub confirmed zero partial asset); 3MB upload
+  completed → job `completed/finished` + release URL, artifact card
+  verified with remote `download_url` and `retention: release`.
+- DEPLOY GOTCHA: `robocopy /MIR` deleted `runtime/voice/chatterbox` +
+  `models/voice/chatterbox` (not bundled in dist) — re-provisioned via
+  `chatterbox_runtime.ensure_runtime` / `chatterbox_assets.ensure_model`
+  into the deploy dirs. Consider excluding `runtime`/`models` from
+  future /MIR deploys (or `/XD` them alongside `data`/`output`).
+
+Checkpoint: **2911 tests** (2911 passed + 3 env skips).
+
 ## v0.35.0 — Artifact Handoff & GitHub File Delivery
 
 Nexus hands produced files to the user directly in chat as verified
