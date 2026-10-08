@@ -641,10 +641,13 @@ function touchVoiceHold(state){
   state.voiceHoldTimer=setTimeout(()=>releaseVoiceHold(state),12000);
 }
 function maybeReleaseVoice(state){
-  // Terminal accounting: release once the sealed segment total has all
-  // reached a terminal state (played / errored / skipped).
+  // Terminal accounting: release once every sealed segment has reached a
+  // terminal state (played / errored / skipped). Seq-keyed set — voice
+  // events arrive via the agent stream AND the shared bus, so counting
+  // must be idempotent.
   if(!state||!state.awaitingVoice||state.voiceSealed==null)return;
-  if((state.voiceDone||0)>=state.voiceSealed)releaseVoiceHold(state);
+  if((state.voiceTerminals?state.voiceTerminals.size:0)>=state.voiceSealed)
+    releaseVoiceHold(state);
 }
 function releaseVoiceHold(state){
   if(state.voiceHoldTimer){clearTimeout(state.voiceHoldTimer);state.voiceHoldTimer=null;}
@@ -670,12 +673,23 @@ function wireVoicePlayback(){
   nv.on(function(evt){
     const e=evt||{},st=voiceGatedState;
     if(!st||!st.awaitingVoice)return;
-    if(e.event==='play'&&e.meta&&e.meta.task_id===st.voiceTaskId){
-      st.voiceDone=(st.voiceDone||0)+1;
-      const re=Number(e.meta.raw_end||0);
+    // 'play' wraps the segment payload in meta; bus events are the payload.
+    const meta=e.meta||e,tid=String(meta.task_id||'');
+    if(!st.voiceTaskId&&tid.startsWith('chat-'))st.voiceTaskId=tid;
+    if(!tid||tid!==st.voiceTaskId)return;
+    if(!st.voiceTerminals)st.voiceTerminals=new Set();
+    if(e.event==='play'){
+      st.voiceTerminals.add(meta.seq);
+      const re=Number(meta.raw_end||0);
       st.voiceReveal=re>0?re:Infinity;
       touchVoiceHold(st);
       scheduleStreamFlush(st);
+      maybeReleaseVoice(st);
+    }else if(e.event==='sealed'){
+      st.voiceSealed=Number(meta.total||0);
+      touchVoiceHold(st);maybeReleaseVoice(st);
+    }else if(e.event==='skipped'||e.event==='error'){
+      st.voiceTerminals.add(meta.seq);
       maybeReleaseVoice(st);
     }
   });
@@ -692,7 +706,7 @@ function armVoiceHold(state){
   state.voiceReveal=0;
   state.voiceTaskId='';
   state.voiceSealed=null;
-  state.voiceDone=0;
+  state.voiceTerminals=new Set();
   voiceGatedState=state;
   wireVoicePlayback();
   touchVoiceHold(state);
@@ -772,17 +786,14 @@ function handleAgentStreamEvent(name,data,state){
        (data.event==='segment'||data.event==='queued'||data.event==='sealed'))
       state.voiceTaskId=tid;
     const mine=state.voiceTaskId&&tid===state.voiceTaskId;
+    if(!state.voiceTerminals)state.voiceTerminals=new Set();
     if(data&&data.event==='sealed'&&mine){
       state.voiceSealed=Number(data.total||0);
       touchVoiceHold(state);maybeReleaseVoice(state);
-    }else if(data&&(data.event==='skipped')&&mine){
-      state.voiceDone=(state.voiceDone||0)+1;maybeReleaseVoice(state);
-    }else if(data&&data.event==='error'&&(mine||!tid)){
-      // A segment that errored will never play — count it terminal so the
-      // hold can't outlive the utterance; an engine-wide failure still
-      // escapes via the stall timer.
-      state.voiceDone=(state.voiceDone||0)+1;
-      touchVoiceHold(state);maybeReleaseVoice(state);
+    }else if(data&&(data.event==='skipped'||data.event==='error')&&mine){
+      // Terminal for this task's segment — Set-keyed so the same event
+      // relayed on both channels can't double-count.
+      state.voiceTerminals.add(data.seq);maybeReleaseVoice(state);
     }else if(data&&data.event==='segment'&&mine){
       touchVoiceHold(state);
     }else if(data&&(data.event==='stop'||data.event==='muted')){
