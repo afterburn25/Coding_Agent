@@ -135,6 +135,22 @@ silently stranded all models (missing since 0.31.1) — the soak's
   `fallback_model` is a truthful marker — per-request model selection
   already excludes the failed candidate. Hook-less actions still
   block honestly (`776b076f`).
+- **Stale blocked-mission retirement** — `blocked` is non-terminal so
+  missions nobody unblocks accumulated forever (23 observed on the
+  live install, most ~2.4d old, parked on failed dependencies). A
+  pre-gate sweep (`_retire_stale_blocked`, runs even while autonomy
+  is stopped) transitions blocked missions untouched >3d to `failed`
+  — terminal, auditable, resumable via failed→ready. User-paused
+  missions are never swept (`ec452458`).
+
+**v0.31.3 shipped + deployed 2026-10-07** (`d5e2ab91`, tag pushed):
+both fixes above. Backend rebuilt via PyInstaller → swapped into
+`D:\Nexus_Core` (old backend at `backend-pre-0.31.3`). Live verified:
+`/api/status` → 0.31.3 + `safe_mode` field, autonomy running, dynamic
+port 57063. Soak 0311d in final cycle at deploy time: 5 clean
+completions + earlier resumed artifacts (8 verified files), 4 clean
+kill→restart recoveries; timeouts were 900s budget + 4B-model
+serialization, not stalls.
 
 Rules for the next session:
 
