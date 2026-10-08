@@ -1293,6 +1293,19 @@ def execute_plan(plan: ActionPlan, *, tools, ledger=None,
             if data.get("ok"):
                 dest = data.get("path") or "your Downloads folder"
                 if data.get("deduplicated"):
+                    # The file verified on disk — its registry record
+                    # already exists from the original download, so the
+                    # reply carries the card again.
+                    if artifacts is not None and data.get("path"):
+                        try:
+                            rec = artifacts.latest(
+                                Path(str(data["path"])).name)
+                            view = artifacts.client_view(rec) if rec \
+                                else None
+                            if view:
+                                holder["cards"] = [view]
+                        except Exception:
+                            pass
                     return _close(
                         "verified",
                         f"Already downloaded — the existing file "

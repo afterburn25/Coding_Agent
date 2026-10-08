@@ -180,6 +180,43 @@ class TestParse(unittest.TestCase):
         self.assertEqual(plan.params["name"], "")
         self.assertNotIn("repo", plan.params)
 
+    def test_deduped_download_reattaches_artifact_card(self):
+        # A dedupe hit verifies the existing file — the registry record
+        # from the original download should re-surface as a chat card.
+        import json
+        from localcodeagent.artifacts import ArtifactManager
+        from localcodeagent.tools.base import ToolSpec
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        art_dir = Path(td.name) / "arts"
+        arts = ArtifactManager(art_dir)
+        ledger = ActionLedger(Path(td.name) / "ledger.json")
+        blob = Path(td.name) / "build.zip"
+        blob.write_bytes(b"payload")
+        arts.register(blob)
+        reg = ToolRegistry({"github.read": "allow"})
+
+        def _stub(args):
+            return json.dumps({"ok": True, "deduplicated": True,
+                               "verified": True, "path": str(blob),
+                               "size": 7})
+
+        reg.register(ToolSpec(
+            "github_download_run_artifact", "stub",
+            {"type": "object", "properties": {}},
+            "github.read", _stub))
+        plan = parse_local_action(
+            "download build.zip from the latest build "
+            "in repo o/r", workspace=self.ws)
+        self.assertIsNotNone(plan)
+        out = execute_plan(plan, tools=reg, ledger=ledger,
+                           artifacts=arts)
+        self.assertEqual(out["status"], "verified")
+        self.assertIn("Already downloaded", out["text"])
+        cards = out.get("artifacts") or []
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["filename"], "build.zip")
+
 
 class TestExecuteInRoot(unittest.TestCase):
     def setUp(self):

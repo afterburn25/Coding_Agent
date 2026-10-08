@@ -34,7 +34,7 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2920 tests** (2917 passed + 3 env skips).
+Checkpoint: **2921 tests** (2917 passed + 3 env skips).
 
 ## v0.35.1 — Artifact actions, artifacts panel, cancellable uploads
 
@@ -3168,7 +3168,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2920 tests` passing (3 environment skips).
+Expected at this checkpoint: `2921 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 
