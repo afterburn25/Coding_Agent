@@ -1610,35 +1610,8 @@ class AutonomousSupervisor:
             return
         step = self.recovery.next_step(m, failure)
         if step is None or step.get("action") == "escalate":
-            self.missions.transition(mission_id, "blocked",
-                                     detail=f"recovery playbook exhausted ({failure.get('class')})")
-            self.notifications.notify(
-                f"Mission '{m.get('title')}' needs help — recovery exhausted for "
-                f"{failure.get('class')}. Last error: {str(failure.get('error'))[:200]}",
-                level="failure",
-                policy=m.get("notification_policy", "important"),
-                mission_id=mission_id, title="Mission blocked — needs user",
-                actions=["replan", "cancel"])
-            self._audit("recovery_exhausted", mission=mission_id,
-                        failure_class=failure.get("class"))
-            # Hand the failure to self-repair: deterministic playbooks are
-            # exhausted, so the incident pipeline localizes, repairs, and
-            # — on success — resumes this mission instead of leaving it
-            # permanently blocked.
-            if self.repair is not None:
-                try:
-                    inc, _disp = self.repair.report_failure(
-                        source="mission", subsystem="mission",
-                        exc_type=str(failure.get("class") or ""),
-                        error_message=str(failure.get("error") or
-                                          f"{failure.get('class')} in mission"),
-                        mission_id=mission_id)
-                    if inc is not None:
-                        inc["interrupted_operation"] = {
-                            "kind": "mission", "mission_id": mission_id}
-                        self.repair._save()
-                except Exception:
-                    pass  # repair intake must never break recovery
+            self._escalate(m, node_id, failure,
+                           f"recovery playbook exhausted ({failure.get('class')})")
             return
         action = step.get("action")
         self._audit("recovery_step", mission=mission_id, node=node_id,
@@ -1648,6 +1621,41 @@ class AutonomousSupervisor:
                                 "action": action})
         self._apply_recovery_step(m, node_id, step, failure)
         self.missions.update(mission_id)  # persist playbook cursor
+
+    def _escalate(self, m: dict, node_id: str, failure: dict,
+                    detail: str) -> None:
+        """Terminal recovery path: blocked + user notification + self-repair
+        handoff so the incident pipeline can localize, repair, and — on
+        success — resume the mission instead of leaving it stranded."""
+        mission_id = m["id"]
+        self.missions.transition(mission_id, "blocked", detail=detail)
+        self.notifications.notify(
+            f"Mission '{m.get('title')}' needs help — {detail}. "
+            f"Last error: {str(failure.get('error'))[:200]}",
+            level="failure",
+            policy=m.get("notification_policy", "important"),
+            mission_id=mission_id, title="Mission blocked — needs user",
+            actions=["replan", "cancel"])
+        self._audit("recovery_exhausted", mission=mission_id,
+                    failure_class=failure.get("class"), detail=detail[:200])
+        # Hand the failure to self-repair: deterministic options are
+        # exhausted, so the incident pipeline localizes, repairs, and —
+        # on success — resumes this mission instead of leaving it
+        # permanently blocked.
+        if self.repair is not None:
+            try:
+                inc, _disp = self.repair.report_failure(
+                    source="mission", subsystem="mission",
+                    exc_type=str(failure.get("class") or ""),
+                    error_message=str(failure.get("error") or
+                                      f"{failure.get('class')} in mission"),
+                    mission_id=mission_id)
+                if inc is not None:
+                    inc["interrupted_operation"] = {
+                        "kind": "mission", "mission_id": mission_id}
+                    self.repair._save()
+            except Exception:
+                pass  # repair intake must never break recovery
 
     def _apply_recovery_step(self, m: dict, node_id: str,
                              step: dict, failure: dict) -> None:
@@ -1711,10 +1719,12 @@ class AutonomousSupervisor:
                     row, f"{action} for {failure.get('class')}",
                     failed_node=TaskGraph(row).get(node_id)))
         else:
-            # Unknown/hook-less step (redownload, …) —
-            # treat as escalate to stay bounded.
-            self.missions.transition(mission_id, "blocked",
-                                     detail=f"no handler for recovery step '{action}'")
+            # Unknown/hook-less step (redownload, repair_model, …) — a
+            # bare 'blocked' would strand the mission silently; route it
+            # through the full escalation path so the user is notified
+            # and self-repair gets a shot at the underlying failure.
+            self._escalate(m, node_id, failure,
+                           f"no handler for recovery step '{action}'")
 
     def _route_finding(self, finding: dict) -> str:
         """Send a routable detector finding to its sink; returns the

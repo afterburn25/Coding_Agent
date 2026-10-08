@@ -2910,6 +2910,20 @@ class AppState:
             """Interactive chat/queued work outranks background missions."""
             return not self._agent_lane_active(include_waiting_approval=True)
 
+        def _restore_latest_backup() -> dict:
+            """DATABASE_CORRUPT remedy: restore the newest backup whose
+            manifest hashes verify. BackupService stashes current files
+            under pre-restore-* first, so a bad restore never destroys
+            working state."""
+            candidates = [b for b in self.backups.list()
+                          if not b.get("corrupt")]
+            if not candidates:
+                return {"ok": False, "error": "no verified backups"}
+            latest = max(candidates,
+                         key=lambda b: float(b.get("created_at") or 0))
+            return {"backup": latest["name"],
+                    **self.backups.restore(latest["name"])}
+
         hooks = {
             "evict_idle_models": lambda: self.runtime.evict_idle(),
             "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
@@ -2926,6 +2940,10 @@ class AppState:
             "restart_service": lambda: True,   # process watchdog owns restarts
             "health_probe": lambda: bool(self.runtime.summary()),
             "reduce_context": lambda: True,     # marker: retry runs leaner
+            "restore_backup": _restore_latest_backup,
+            # redownload/repair_model have no in-app LLM download path —
+            # hook-less so they take the full escalation route (notify +
+            # self-repair handoff) rather than faking remediation.
             "refresh_workspace": lambda: self.repository_index.rebuild()
                 if hasattr(self.repository_index, "rebuild") else True,
         }

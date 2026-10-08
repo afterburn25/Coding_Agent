@@ -772,12 +772,47 @@ class JobNodeTests(unittest.TestCase):
             self.assertEqual(called, ["restart_model", "fallback_model"])
             self.assertEqual(
                 sup.missions.get(mission["id"])["status"], "executing")
-            # An action with no hook still blocks honestly.
+            # An action with no hook takes the full escalation path:
+            # blocked + self-repair handoff, not a silent strand.
             sup._apply_recovery_step(
                 sup.missions.get(mission["id"]), node["id"],
                 {"action": "redownload"}, failure)
             self.assertEqual(
                 sup.missions.get(mission["id"])["status"], "blocked")
+            sup.stop()
+
+    def test_unhandled_recovery_action_escalates_to_self_repair(self):
+        # redownload/repair_model have no runtime handler — the hook-less
+        # branch must behave like playbook exhaustion: blocked, notified,
+        # and handed to self-repair (which can resume on success).
+        class _RepairStub:
+            def __init__(self): self.calls = []
+            def report_failure(self, **kw):
+                self.calls.append(kw)
+                return {"id": "ri-1"}, None
+
+        with tempfile.TemporaryDirectory() as td:
+            repair = _RepairStub()
+            sup = make_sup(td, repair=repair)
+            mission = sup.missions.create(
+                objective="x", title="m", scope="one_shot", workspace=td,
+                source="test")
+            node = new_task("t1", "work", kind="agent")
+            sup.missions.mutate(
+                mission["id"], lambda m: m["graph"].update(nodes=[node]))
+            for st in ("ready", "active", "executing"):
+                sup.missions.transition(mission["id"], st)
+            failure = {"class": "MODEL_CORRUPT", "error": "bad hash"}
+            sup._apply_recovery_step(
+                sup.missions.get(mission["id"]), node["id"],
+                {"action": "repair_model"}, failure)
+            self.assertEqual(
+                sup.missions.get(mission["id"])["status"], "blocked")
+            self.assertEqual(len(repair.calls), 1)
+            self.assertEqual(
+                repair.calls[0]["exc_type"], "MODEL_CORRUPT")
+            self.assertEqual(
+                repair.calls[0]["mission_id"], mission["id"])
             sup.stop()
 
     def test_non_executor_nodes_write_ledger_evidence(self):
