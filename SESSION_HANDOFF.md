@@ -2,6 +2,23 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## Desktop host re-deployed at 0.31.6 (was 0.31.1)
+
+The deployed `NexusCore.exe` reported FileVersion **0.31.1** (built from
+`50e45d29`) — it predated `fc041550` ("Splash WebView2 profile must not
+live under the state junction"), so the live binary could still show the
+static dead-splash instead of the animated fault surface + recovery
+options when the backend failed.
+
+- Rebuilt via `dotnet publish` (same flags as `packaging/build_windows.ps1`),
+  deployed `NexusCore.exe` (0.31.6+666e5c24) + refreshed `splash/` assets.
+- Verified live: `webview2-splash` profile now created under
+  `%LOCALAPPDATA%\NexusCore\` (not through the appDir data junction).
+- Post-swap backend on :51171 — version 0.31.6, Chatterbox CUDA warm,
+  startup welcome already rendered through V7 (rtf 0.309).
+- No functional `.cs` changes in v0.31.5/0.31.6 — the narrator-salt fix
+  is backend-side; only csproj version stamps were behind.
+
 ## v0.31.5–v0.31.6 — barrel report root-caused: stale narrator cache + tonal (not reverberant) gap
 
 **User report "still sounds like a barrel"** split into two independent
