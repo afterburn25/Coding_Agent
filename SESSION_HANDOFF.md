@@ -3315,3 +3315,10 @@ build contained the break and has been replaced.
 - BUILD GOTCHA: PyInstaller must run with repo root as cwd —
   pathex=[] in the spec relies on it; building from build/ produced an
   exe missing localcodeagent entirely (ModuleNotFoundError on boot).
+
+## 2026-10-07 — Chatterbox Isabella dry-reference reset
+
+- Isabella Chatterbox conditioning now uses the dry public Kokoro `bf_isabella` sample directly from `reference-source.mp3`; the prior processed `reference.wav` is deliberately removed so it cannot silently reintroduce the old V6 DSP coloration.
+- `nexus-isabella-chatterbox.json` is now a clean post-generation chain: no neural delay, no micro delay, no glass echo, no ambience, no stereo widening; low-mid cut + presence/air + a very light high-band synthetic sheen.
+- Loudness target is -12.5 LUFS with 0.891 peak limiter ceiling.
+- If tuning further, add synthetic texture one layer at a time. Do **not** bake DSP back into the conditioning reference.

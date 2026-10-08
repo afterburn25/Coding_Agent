@@ -4,11 +4,10 @@
   "engine": "chatterbox",
   "language": "en-GB",
   "gender": "female",
-  "description": "Default Nexus Core voice — approved V6 synthetic Isabella (Kokoro bf_isabella + Nexus DSP texture), cloned via Chatterbox Turbo reference conditioning.",
-  "reference": "reference.wav",
+  "description": "Default Nexus Core voice — dry Kokoro bf_isabella conditioned through Chatterbox Turbo. Nexus synthetic character is applied only after generation so the clone does not learn the old DSP coloration.",
+  "reference": "reference-source.mp3",
   "reference_source": "reference-source.mp3",
-  "reference_sha256": "7a7091628979e437422c07b99e120b981183d97301642d587f82d1e78261e6ab",
-  "provenance": "isabella-nexus-v6-enhanced-synthetic.mp3 excerpt 0.30s-16.25s",
+  "provenance": "Unprocessed public Kokoro bf_isabella sample used directly as the Chatterbox Turbo conditioning reference; no Nexus DSP baked into the reference.",
   "exaggeration": 0.5,
   "temperature": 0.72,
   "top_p": 0.95,
@@ -17,7 +16,10 @@
   "normalization": true,
   "cadence": "measured",
   "energy": "calm, subtly expressive",
-  "warmth": "warm",
+  "warmth": "natural",
   "formality": "conversational-professional",
-  "emotion_range": "steady, subtly expressive"
+  "emotion_range": "steady, naturally expressive",
+  "reference_source_repo": "hangry-labs/kokoroTTS",
+  "reference_source_path": "examples/kokorotts-bf_isabella.mp3",
+  "reference_source_git_blob_sha": "eb7166201161cd39d8a760eed2021fb3263a9773"
 }

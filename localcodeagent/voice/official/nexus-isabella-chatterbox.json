@@ -1,71 +1,88 @@
 {
   "id": "nexus-isabella-chatterbox",
   "name": "Nexus Isabella — Chatterbox Turbo",
-  "description": "Official Nexus Core voice on Chatterbox Turbo: the approved V6 synthetic Isabella cloned from the post-DSP reference, with a light texture top-up and loudness normalization.",
+  "description": "Official Nexus Core Chatterbox Isabella: dry bf_isabella conditioning with a clean, louder post-generation Nexus treatment. Short-delay comb-filter layers are disabled; synthetic character is a light high-frequency sheen only.",
   "engine": "chatterbox",
   "base_voice": "isabella",
   "language": "en-GB",
   "schema_version": 1,
   "official": true,
-  "pitch_semitones": 0.0,
-  "tempo": 1.0,
-  "formant_preserve": 0.0,
+  "pitch_semitones": 0.85,
+  "tempo": 1,
+  "formant_preserve": 0.75,
   "eq": [
-    {"freq_hz": 220, "gain_db": -1.5, "q": 1.1},
-    {"freq_hz": 3400, "gain_db": 2.8, "q": 1.4},
-    {"freq_hz": 7200, "gain_db": 1.6, "q": 1.0}
+    {
+      "freq_hz": 320,
+      "gain_db": -3.8,
+      "q": 1.05
+    },
+    {
+      "freq_hz": 900,
+      "gain_db": -0.8,
+      "q": 1.25
+    },
+    {
+      "freq_hz": 3600,
+      "gain_db": 2.6,
+      "q": 1.25
+    },
+    {
+      "freq_hz": 8500,
+      "gain_db": 1.6,
+      "q": 0.9
+    }
   ],
-  "exciter": 0.2,
+  "exciter": 0.18,
   "compression": {
-    "threshold_db": -18.0,
-    "ratio": 2.0,
-    "attack_ms": 5.0,
-    "release_ms": 80.0,
-    "makeup_db": 1.0
+    "threshold_db": -20,
+    "ratio": 2.8,
+    "attack_ms": 4,
+    "release_ms": 75,
+    "makeup_db": 2.2
   },
   "neural": {
-    "enabled": true,
+    "enabled": false,
     "hpf_hz": 700,
     "lpf_hz": 6900,
-    "bit_depth": 9,
-    "wet": 0.4,
-    "anti_alias": 0.58,
-    "sample_reduction": 1.55,
-    "delay_ms": 1.8,
-    "decay": 0.28,
-    "mod_rate_hz": 0.48,
-    "am_rate_hz": 38,
-    "am_depth": 0.16,
-    "mix": 0.12
+    "bit_depth": 12,
+    "wet": 0,
+    "anti_alias": 0.6,
+    "sample_reduction": 1,
+    "delay_ms": 0,
+    "decay": 0,
+    "mod_rate_hz": 0,
+    "am_rate_hz": 0,
+    "am_depth": 0,
+    "mix": 0
   },
   "glass": {
     "enabled": true,
-    "pitch_factor": 1.245,
-    "formant_preserve": 0.8,
-    "hpf_hz": 1900,
-    "lpf_hz": 9200,
-    "delay_ms": 8,
-    "echo": 0.10,
-    "mix": 0.04
+    "pitch_factor": 1.18,
+    "formant_preserve": 0.9,
+    "hpf_hz": 2600,
+    "lpf_hz": 9800,
+    "delay_ms": 0,
+    "echo": 0,
+    "mix": 0.025
   },
   "micro": {
-    "enabled": true,
-    "pitch_factor": 0.965,
-    "formant_preserve": 0.8,
+    "enabled": false,
+    "pitch_factor": 1,
+    "formant_preserve": 1,
     "hpf_hz": 900,
     "lpf_hz": 4800,
-    "bit_depth": 12,
-    "wet": 0.15,
-    "delay_ms": 15,
-    "mix": 0.03
+    "bit_depth": 16,
+    "wet": 0,
+    "delay_ms": 0,
+    "mix": 0
   },
-  "stereo_width": 1.5,
-  "synthetic": 0.45,
+  "stereo_width": 0,
+  "synthetic": 0.35,
   "normalize_loudness": true,
-  "loudness_target_lufs": -14.0,
+  "loudness_target_lufs": -12.5,
   "limiter_enabled": true,
-  "provenance": "chatterbox-turbo clone of isabella-nexus-v6 (Kokoro bf_isabella + Nexus DSP), light texture top-up",
-  "version": "1.0",
+  "provenance": "Chatterbox Turbo clone conditioned from dry Kokoro bf_isabella; clean EQ/compression + restrained high-band synthetic sheen applied only after generation.",
+  "version": "1.1",
   "cadence": "measured",
   "energy": "calm, quietly confident",
   "warmth": "warm with a cool technical edge",
@@ -75,9 +92,9 @@
     "UI": "you eye",
     "Devin": "dev in"
   },
-  "limiter_ceiling": 0.89,
-  "output_gain_db": 0.0,
-  "ambience_ms": 0.0,
-  "highpass_hz": 60.0,
-  "lowpass_hz": 0.0
+  "limiter_ceiling": 0.891,
+  "output_gain_db": 0,
+  "ambience_ms": 0,
+  "highpass_hz": 85,
+  "lowpass_hz": 0
 }
