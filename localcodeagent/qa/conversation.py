@@ -870,6 +870,62 @@ def generate_scope_scenarios(
         }),
     ]))
 
+    # Memory inspection — "what do you know about me" lists active
+    # user-taught facts in second person via the deterministic lane;
+    # superseded values never appear (live dogfood found the model
+    # improvising persona lore here instead).
+    out.append(QaScenario(f"{scenario_prefix}-facts-recall", [
+        QaTurn("my favorite color is blue", conversation_id="scope-fr"),
+        QaTurn("the deadline is friday", conversation_id="scope-fr"),
+        QaTurn("what do you know about me?", conversation_id="scope-fr",
+               expect={
+                   "response_contains": ["your favorite color is blue",
+                                         "deadline is friday"],
+                   "no_leading_filler": True,
+                   "no_reasoning_narration": True,
+               }),
+    ]))
+
+    # Re-teaching an already-active fact must still ack — the first
+    # dogfood run answered a restatement with a model essay.
+    out.append(QaScenario(f"{scenario_prefix}-restatement", [
+        QaTurn("my favorite color is blue", conversation_id="scope-rs"),
+        QaTurn("my favorite color is blue", conversation_id="scope-rs",
+               expect={
+                   "response_contains": "already noted",
+                   "no_leading_filler": True,
+               }),
+        QaTurn("what's my favorite color?", conversation_id="scope-rs",
+               expect={"context_contains": "blue"}),
+    ]))
+
+    # Topic-shift advisories reach the model — a forward shift tells it
+    # to answer the new turn on its own; a return tells it to resume.
+    out.append(QaScenario(f"{scenario_prefix}-topic-shift", [
+        QaTurn("new topic — what's the capital of france?",
+               conversation_id="scope-ts",
+               expect={"context_contains": "Topic shift"}),
+        # A return with no retained referent surfaces the ambiguity
+        # notice instead of guessing one.
+        QaTurn("back to that earlier thing",
+               conversation_id="scope-ts",
+               expect={"context_contains": "Ambiguity notice"}),
+    ]))
+
+    # Person-directed wheres are not UI navigation — "where are you"
+    # asks about the assistant; it must never resolve a page.
+    out.append(QaScenario(f"{scenario_prefix}-where-person", [
+        QaTurn("where are you?", conversation_id="scope-wp", expect={
+            "response_not_contains": ["Speech Lab", "under Chat",
+                                      "Personality Studio"],
+        }),
+        QaTurn("what's the weather like where you are?",
+               conversation_id="scope-wp", expect={
+            "response_not_contains": ["Speech Lab", "under Chat",
+                                      "Personality Studio"],
+        }),
+    ]))
+
     # Long conversation — 60+ turns mixing exact questions, topic
     # switches, corrections, and callbacks in one chat. Per-turn
     # invariants hold the WHOLE session: exact facts stay bare,
