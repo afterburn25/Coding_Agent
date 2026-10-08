@@ -127,7 +127,7 @@ flourish beyond BRIEF budgets, attributes user facts as its own on
 recall, and invents weather instead of declining — the scope
 directive helps but a small model's discipline is soft.
 
-Checkpoint: **2715 tests** passing (2 environment skips).
+Checkpoint: **2718 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
 acceptance matrix, real-model benchmark numbers on the deployed
@@ -1758,7 +1758,7 @@ workspace UI → `f33b173` paste-attachments):
 ### P1 progress — dev-server, pipeline, interactive priority
 
 **Last verified: `a45c24c` — GitHub Actions `Nexus Core Tests` green
-on main.** Commits `b2d2ea8` → `5c2715b` → `a45c24c`:
+on main.** Commits `b2d2ea8` → `5c2718b` → `a45c24c`:
 
 - **Dev-server manager** — `localcodeagent/devserver.py` +
   `tools/devserver.py`: workspace-bound start/list/wait/stop, URL
@@ -2933,7 +2933,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2715 tests` passing (2 environment skips).
+Expected at this checkpoint: `2718 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -149,6 +149,69 @@ def classify_scope(text: str, env=None) -> ResponseScope:
     t = re.sub(r"\s+", " ", str(text or "").strip().lower())
     if not t:
         return ResponseScope()
+    scope = _classify_depth(t, env)
+    req, sup = _slots_for(t)
+    scope.requested_slots = req
+    scope.supporting_slots = sup
+    if env is not None and getattr(env, "ambiguity", None):
+        scope.needs_clarification = True
+    return scope
+
+
+# ---------------------------------------------------------------------------
+# Slot extraction — what the question asked for vs. the facts used only to
+# derive it. The inspector/debug trace reads these; deterministic lanes key
+# their reveal discipline off the same pair.
+# ---------------------------------------------------------------------------
+
+_KNOWN_SLOTS: tuple = (
+    # (pattern, requested, supporting)
+    (re.compile(r"\bhow did you (?:calculate|figure|work out|get)\b"),
+     ("age", "derivation"), ("birthday",)),
+    (re.compile(r"\bhow old\b"), ("age",), ("birthday",)),
+    (re.compile(r"\bbirthday\b|\bborn\b"), ("birthday",), ("age",)),
+    (re.compile(r"\bwho (?:made|created|built) (?:you|u)\b|\bwho(?:'s| "
+                r"is| was)?\s+your (?:father|dad|creator|maker)\b"),
+     ("creator name",), ("biography",)),
+    (re.compile(r"\bdo you have a (?:father|dad|mother|mom|parent)\b"),
+     ("parentage existence",), ("creator name", "biography")),
+)
+
+_WH_OBJECT_RE = re.compile(
+    r"^(?:what|which)(?:'s|s| is| are| was| were| did| do| does)?\s+"
+    r"(.+?)[?!.]?\s*$", re.I)
+_WHO_OBJECT_RE = re.compile(
+    r"^who(?:'s|s| is| are| was| were)?\s+(.+?)[?!.]?\s*$", re.I)
+_SLOT_VERBS = frozenset({
+    "are", "is", "was", "were", "did", "do", "does", "should", "would",
+    "can", "could", "shall", "will", "am", "have", "has",
+})
+_SLOT_LEADINS = re.compile(
+    r"^(?:(?:my|your|the|our|a|an|his|her|its|their|this|that)\s+)+")
+
+
+def _slots_for(t: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(requested, supporting) slot pair for the question — known
+    identity pairs first, then a generic wh-object noun phrase."""
+    for pat, req, sup in _KNOWN_SLOTS:
+        if pat.search(t):
+            return req, sup
+    for rx in (_WH_OBJECT_RE, _WHO_OBJECT_RE):
+        m = rx.match(t)
+        if m:
+            obj = m.group(1).strip()
+            obj = re.split(
+                r"\b(?:are|is|was|were|did|do|does|should|would|can|"
+                r"could|shall|will|am|have|has)\b", obj)[0]
+            obj = _SLOT_LEADINS.sub("", obj.strip()).strip(" ,.?!")
+            if obj and obj.split()[0] not in _SLOT_VERBS:
+                return (obj,), ()
+    return (), ()
+
+
+def _classify_depth(t: str, env=None) -> ResponseScope:
+    """Depth-only classification — slot extraction lives in the
+    public wrapper so every branch shares it."""
     # Strip trailing punctuation once for anchored tests.
     bare_t = t.rstrip("!?. ")
 

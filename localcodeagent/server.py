@@ -8936,6 +8936,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json({"events": brain.trace(limit=limit)})
             return
+        if path == "/api/conversations/scope":
+            # Inspector surface — the classified response-scope plan for
+            # the last turn in a conversation (depth, slots, budget).
+            q = parse_qs(urlparse(self.path).query)
+            conv_id = str(q.get("conversation_id", [""])[0])
+            fn = getattr(self.state.agent, "turn_scope", None)
+            self._json(fn(conv_id) if callable(fn) else {})
+            return
         if path == "/api/events":
             # Long-lived SSE stream of job/tool events for live UI updates.
             self._sse_begin()

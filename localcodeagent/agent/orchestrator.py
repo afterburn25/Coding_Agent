@@ -5847,6 +5847,20 @@ class AgentOrchestrator:
             env.subject = env.subject or env.followup_prompt
             env.requested_action = "create"
             env.confidence = 0.9
+        # Response scope is classified once per turn — the model prompt
+        # injects its directive, deterministic lanes use it for bare
+        # marking, and the inspector endpoint reads the last turn's
+        # plan. Record it here so builtin-answered turns (which never
+        # reach prompt assembly) still expose their scope.
+        turn_scope = None
+        try:
+            from ..context.scope import classify_scope
+            turn_scope = classify_scope(user_text, env)
+            if turn_scope is not None:
+                self._turn_scope[str(conversation_id or "")] = \
+                    turn_scope.to_dict()
+        except Exception:
+            pass
         for term, resolved in resolve_references(user_text, active_ctx).items():
             env.references.setdefault(term, resolved)
         self._safe_emit(event_callback, {
@@ -6658,25 +6672,16 @@ class AgentOrchestrator:
         if advisories:
             intent_context += "\n\n" + "\n".join(advisories)
         # Response scope — the per-turn answer-size budget and reveal
-        # rule (context/scope.py). Deterministic, injected beside the
+        # rule (context/scope.py), classified up front in run() and
+        # already recorded for the inspector. Injected beside the
         # intent advisory so every model turn carries the contract:
         # answer the question asked, not the context retrieved.
-        try:
-            from ..context.scope import classify_scope, scope_directive
-            turn_scope = classify_scope(user_text, env)
-            if turn_scope is not None:
+        if turn_scope is not None:
+            try:
+                from ..context.scope import scope_directive
                 scope_text = scope_directive(turn_scope, env)
                 if scope_text:
                     intent_context += "\n\n" + scope_text
-        except Exception:
-            turn_scope = None
-        # Debug surface — the classified scope for this turn is recorded
-        # per conversation so the inspector/API can show WHY a turn got
-        # the answer budget it did (never user-visible).
-        if turn_scope is not None:
-            try:
-                self._turn_scope[str(conversation_id or "")] = \
-                    turn_scope.to_dict()
             except Exception:
                 pass
         knowledge_parts: list[str] = []

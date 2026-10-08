@@ -259,6 +259,44 @@ class TestScopeDirective(unittest.TestCase):
         self.assertIn("derivation", d)
 
 
+class TestSlotModel(unittest.TestCase):
+    """Requested-vs-supporting slots — the pair that keeps supporting
+    facts (birthday behind an age question) out of the answer."""
+
+    def test_identity_pairs(self):
+        from localcodeagent.context import scope as scope_mod
+        cases = {
+            "how old are you": (("age",), ("birthday",)),
+            "when is your birthday": (("birthday",), ("age",)),
+            "who is your father": (("creator name",), ("biography",)),
+            "do you have a father": (("parentage existence",),
+                                     ("creator name", "biography")),
+        }
+        for q, (req, sup) in cases.items():
+            sc = scope_mod.classify_scope(q)
+            self.assertEqual(sc.requested_slots, req, q)
+            self.assertEqual(sc.supporting_slots, sup, q)
+
+    def test_generic_wh_object(self):
+        from localcodeagent.context import scope as scope_mod
+        self.assertEqual(
+            scope_mod.classify_scope("whats my favorite color")
+            .requested_slots, ("favorite color",))
+        self.assertEqual(
+            scope_mod.classify_scope("what port are we using")
+            .requested_slots, ("port",))
+        self.assertEqual(
+            scope_mod.classify_scope("what was my deadline")
+            .requested_slots, ("deadline",))
+
+    def test_clarification_flag_from_env(self):
+        from localcodeagent.context.intent import understand_turn
+        from localcodeagent.context import scope as scope_mod
+        env = understand_turn("make that bigger")
+        sc = scope_mod.classify_scope("make that bigger", env)
+        self.assertTrue(sc.needs_clarification)
+
+
 class TestScopeMetrics(unittest.TestCase):
     """Response-side measurement primitives used by QA asserts."""
 
