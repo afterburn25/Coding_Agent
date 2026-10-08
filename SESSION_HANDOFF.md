@@ -3323,3 +3323,11 @@ build contained the break and has been replaced.
 - `nexus-isabella-chatterbox.json` is now a clean post-generation chain: no neural delay, no micro delay, no glass echo, no ambience, no stereo widening; low-mid cut + presence/air + a very light high-band synthetic sheen.
 - Loudness target is -12.5 LUFS with 0.891 peak limiter ceiling.
 - If tuning further, add synthetic texture one layer at a time. Do **not** bake DSP back into the conditioning reference.
+
+## 2026-10-07 — Isabella V7 target approved
+
+- User approved the V7 audition derived from the original pre-Chatterbox `isabella-nexus-v6-enhanced-synthetic` sound.
+- Keep Chatterbox conditioning **dry** (`bf_isabella` source). Do not revert to the processed V6 reference.
+- Restore the V6 synthetic character only as a **single post-generation DSP pass**: neural/glass/micro layers + original tonal lift. This is intentional; the prior barrel defect was double-processing (processed reference + another pass), not the V6 character itself.
+- Center output (`stereo_width=0`) and keep ambience off. Loudness target: -12.5 LUFS, limiter ceiling ~-1 dBFS.
+- Preset signature: `approved-v7-v6-character-louder`.

@@ -1,88 +1,83 @@
 {
   "id": "nexus-isabella-chatterbox",
   "name": "Nexus Isabella — Chatterbox Turbo",
-  "description": "Official Nexus Core Chatterbox Isabella: dry bf_isabella conditioning with a clean, louder post-generation Nexus treatment. Short-delay comb-filter layers are disabled; synthetic character is a light high-frequency sheen only.",
+  "description": "Official Nexus Core Chatterbox Isabella — approved V7 target: dry bf_isabella conditioning, then the original V6-style Nexus synthetic character applied once after generation, with louder V7 output and centered mono-safe imaging.",
   "engine": "chatterbox",
   "base_voice": "isabella",
   "language": "en-GB",
   "schema_version": 1,
   "official": true,
-  "pitch_semitones": 0.85,
-  "tempo": 1,
-  "formant_preserve": 0.75,
+  "pitch_semitones": 1.25,
+  "tempo": 0.98,
+  "formant_preserve": 0.35,
   "eq": [
     {
-      "freq_hz": 320,
-      "gain_db": -3.8,
-      "q": 1.05
+      "freq_hz": 220,
+      "gain_db": -3,
+      "q": 1.1
     },
     {
-      "freq_hz": 900,
-      "gain_db": -0.8,
-      "q": 1.25
+      "freq_hz": 3400,
+      "gain_db": 5.8,
+      "q": 1.4
     },
     {
-      "freq_hz": 3600,
-      "gain_db": 2.6,
-      "q": 1.25
-    },
-    {
-      "freq_hz": 8500,
-      "gain_db": 1.6,
-      "q": 0.9
+      "freq_hz": 7200,
+      "gain_db": 3.2,
+      "q": 1
     }
   ],
-  "exciter": 0.18,
+  "exciter": 0.44,
   "compression": {
-    "threshold_db": -20,
-    "ratio": 2.8,
+    "threshold_db": -18,
+    "ratio": 3,
     "attack_ms": 4,
-    "release_ms": 75,
-    "makeup_db": 2.2
+    "release_ms": 70,
+    "makeup_db": 1.5
   },
   "neural": {
-    "enabled": false,
+    "enabled": true,
     "hpf_hz": 700,
     "lpf_hz": 6900,
-    "bit_depth": 12,
-    "wet": 0,
-    "anti_alias": 0.6,
-    "sample_reduction": 1,
-    "delay_ms": 0,
-    "decay": 0,
-    "mod_rate_hz": 0,
-    "am_rate_hz": 0,
-    "am_depth": 0,
-    "mix": 0
+    "bit_depth": 9,
+    "wet": 0.78,
+    "anti_alias": 0.58,
+    "sample_reduction": 1.55,
+    "delay_ms": 1.8,
+    "decay": 0.28,
+    "mod_rate_hz": 0.48,
+    "am_rate_hz": 38,
+    "am_depth": 0.16,
+    "mix": 0.24
   },
   "glass": {
     "enabled": true,
-    "pitch_factor": 1.18,
-    "formant_preserve": 0.9,
-    "hpf_hz": 2600,
-    "lpf_hz": 9800,
-    "delay_ms": 0,
-    "echo": 0,
-    "mix": 0.025
+    "pitch_factor": 1.245,
+    "formant_preserve": 0.8,
+    "hpf_hz": 1900,
+    "lpf_hz": 9200,
+    "delay_ms": 8,
+    "echo": 0.1,
+    "mix": 0.085
   },
   "micro": {
-    "enabled": false,
-    "pitch_factor": 1,
-    "formant_preserve": 1,
+    "enabled": true,
+    "pitch_factor": 0.965,
+    "formant_preserve": 0.8,
     "hpf_hz": 900,
     "lpf_hz": 4800,
-    "bit_depth": 16,
-    "wet": 0,
-    "delay_ms": 0,
-    "mix": 0
+    "bit_depth": 12,
+    "wet": 0.3,
+    "delay_ms": 15,
+    "mix": 0.06
   },
   "stereo_width": 0,
-  "synthetic": 0.35,
+  "synthetic": 0.8,
   "normalize_loudness": true,
   "loudness_target_lufs": -12.5,
   "limiter_enabled": true,
-  "provenance": "Chatterbox Turbo clone conditioned from dry Kokoro bf_isabella; clean EQ/compression + restrained high-band synthetic sheen applied only after generation.",
-  "version": "1.1",
+  "provenance": "Approved Isabella V7 target: Chatterbox Turbo conditioned from dry Kokoro bf_isabella, then one V6-style neural/glass/micro Nexus DSP pass; no DSP baked into the conditioning reference; centered output; V7 loudness target.",
+  "version": "1.2",
   "cadence": "measured",
   "energy": "calm, quietly confident",
   "warmth": "warm with a cool technical edge",
@@ -95,6 +90,7 @@
   "limiter_ceiling": 0.891,
   "output_gain_db": 0,
   "ambience_ms": 0,
-  "highpass_hz": 85,
-  "lowpass_hz": 0
+  "highpass_hz": 60,
+  "lowpass_hz": 0,
+  "target_signature": "approved-v7-v6-character-louder"
 }
