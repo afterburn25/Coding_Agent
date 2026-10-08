@@ -27,6 +27,7 @@ class TaskRecord:
     verification: list[dict[str, Any]] = field(default_factory=list)
     review: str = ""
     pending_approval: dict[str, Any] | None = None
+    approval_resolutions: list[dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     final_content: str = ""
     error: str = ""

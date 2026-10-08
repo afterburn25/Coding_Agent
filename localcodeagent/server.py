@@ -35,6 +35,13 @@ from .runtime.manager import RuntimeManager
 from .runtime.setup import apply_detected_models, suggest_model_profiles, write_suggested_models
 from .research import ResearchCoordinator
 from .permissions import PermissionManager
+from . import approvals as approvals_mod
+
+# Serializes approval-decision validation + resolution stamping so one
+# pending approval can only ever be claimed once (double click, two
+# windows, replayed request, backend restart + card replay).
+_APPROVAL_LOCK = threading.Lock()
+from .approvals import ApprovalError
 from .jobs import JobManager
 from .processes import ManagedService, ProcessManager
 from .tools.base import TOOL_CATEGORIES, ToolRegistry, ToolSpec
@@ -5065,6 +5072,119 @@ class AppState:
                 "path": str(self.workspace),
             }})
 
+    def approval_card_for(self, pending: dict | None,
+                          task_id: str = "") -> dict:
+        """Backend-authoritative permission card for a parked approval."""
+        if not pending:
+            return {}
+        try:
+            return approvals_mod.approval_card(
+                pending, task_id, self.permission_manager)
+        except Exception:
+            return {}
+
+    def _emit_approval_notice(self, pending: dict) -> None:
+        """One short spoken notice per approval park — never the whole
+        card aloud, never a repeat loop."""
+        try:
+            aid = str(pending.get("id") or "")
+            if not aid or aid in getattr(self, "_approval_noticed", set()):
+                return
+            if not hasattr(self, "_approval_noticed"):
+                self._approval_noticed = set()
+            self._approval_noticed.add(aid)
+            if len(self._approval_noticed) > 200:
+                self._approval_noticed = set(
+                    list(self._approval_noticed)[-100:])
+            sup = getattr(self, "autonomy", None)
+            if sup is not None and hasattr(sup, "notifications"):
+                sup.notifications.notify(
+                    "I need your permission to continue.",
+                    level="approval", title="Authorization required",
+                    detail=str(pending.get("detail")
+                               or pending.get("name") or "")[:160])
+        except Exception:
+            pass
+
+    def resolve_chat_approval(self, task_id: str, approval_id: str,
+                              decision: str) -> dict:
+        """Decision boundary for in-chat authorization. Validates the
+        pending record against the current task state (stale/double
+        decisions reject), applies session/persistent grants through
+        PermissionManager, stamps the resolution on the task row, and
+        publishes approval_resolved so every surface syncs. Returns the
+        card view; the caller performs the resume."""
+        # One decision per approval, ever. Validation, grant application,
+        # and the durable resolution stamp happen under one lock so a
+        # double click / two windows / replayed request can never both
+        # reach the resume path — the loser sees STALE and executes
+        # nothing. Previously recorded resolutions for the same approval
+        # id also reject, which covers restart + replay.
+        with _APPROVAL_LOCK:
+            try:
+                task = self.tasks.get(task_id)
+            except KeyError:
+                task = None
+            pending = getattr(task, "pending_approval", None) if task else None
+            if (task is None
+                    or str(getattr(task, "status", "") or "") != "waiting_approval"
+                    or not pending):
+                raise ApprovalError(approvals_mod.STALE_MESSAGE, stale=True)
+            aid = str(pending.get("id") or "")
+            if approval_id and aid != approval_id:
+                raise ApprovalError(approvals_mod.STALE_MESSAGE, stale=True)
+            resolutions = list(
+                getattr(task, "approval_resolutions", None) or [])
+            if aid and any(str(r.get("id") or "") == aid
+                           for r in resolutions):
+                raise ApprovalError(approvals_mod.STALE_MESSAGE, stale=True)
+            card = self.approval_card_for(pending, task_id)
+            key = card.get("permission") or str(
+                pending.get("permission") or "")
+            if not card.get("decisions"):
+                raise ApprovalError(
+                    card.get("disabled_reason")
+                    or approvals_mod.DISABLED_MESSAGE,
+                    status=403)
+            if decision not in approvals_mod.DECISIONS:
+                raise ApprovalError(
+                    f"unknown decision '{decision}'", status=400)
+            if decision not in card["decisions"] \
+                    and decision != approvals_mod.DECISION_ONCE:
+                raise ApprovalError(
+                    f"decision '{decision}' is not allowed for this "
+                    f"permission",
+                    status=403)
+
+            # Apply the grant semantics BEFORE resuming so the resumed
+            # action's own permission check sees the grant (and so the
+            # audit order reads grant -> approval -> execution).
+            if decision == approvals_mod.DECISION_SESSION:
+                self.permission_manager.grant_session(key)
+            elif decision == approvals_mod.DECISION_ALWAYS:
+                self.permission_manager.set_level(key, "allow")
+                self._update_config_file({
+                    "permissions": dict(self.permission_manager.permissions),
+                    "permission_profile": self.permission_manager.profile,
+                })
+            elif decision == approvals_mod.DECISION_DENY:
+                self.permission_manager.record_event(
+                    "approval_denied", key, str(pending.get("name") or ""))
+
+            resolutions.append(approvals_mod.resolution_row(
+                card, decision, status="resolved"))
+            self.tasks.update(task_id, approval_resolutions=resolutions)
+        self.events.publish("approval_resolved", {
+            "approval_id": aid,
+            "task_id": task_id,
+            "decision": decision,
+            "decision_label": approvals_mod.DECISION_LABELS.get(
+                decision, decision),
+            "permission": key,
+            "status": "resolved",
+        })
+        return card
+
     def _bus_emit(self, event: dict) -> None:
         """Publish an agent event to the shared bus.
 
@@ -5077,6 +5197,19 @@ class AppState:
             return
         payload = dict(event)
         payload.pop("type", None)
+        if etype == "approval":
+            # Enrich with the backend-authoritative card so chat renders
+            # exactly the legal decisions; one spoken notice per park.
+            pending = event.get("approval") or {}
+            try:
+                task_id = str((event.get("task") or {}).get("id")
+                              or pending.get("task_id") or "")
+                card = self.approval_card_for(pending, task_id)
+                if card:
+                    payload["card"] = card
+            except Exception:
+                pass
+            self._emit_approval_notice(pending)
         try:
             # Prefer the id carried by the event itself (e.g. an approval
             # timeout on an older task) over the newest ledger record.
@@ -6018,17 +6151,37 @@ class AppState:
             for item in self.tasks.by_status("waiting_approval"):
                 if now - float(item.get("updated_at") or now) < timeout:
                     continue
+                _pending = item.get("pending_approval") or {}
+                _res = list(item.get("approval_resolutions") or [])
+                if _pending.get("id"):
+                    _res.append({
+                        "id": str(_pending["id"]),
+                        "task_id": str(item["id"]),
+                        "permission": str(_pending.get("permission") or ""),
+                        "decision": "expired",
+                        "decision_label": "Expired",
+                        "status": "expired",
+                        "resolved_at": time.time()})
                 task = self.tasks.update(
                     item["id"],
                     status="error",
                     phase="done",
                     pending_approval=None,
+                    approval_resolutions=_res,
                     error=(
                         f"Approval timed out after {int(timeout)}s in autonomous mode; "
                         f"the {item.get('pending_approval', {}).get('name', 'action')} action was not approved."
                     ),
                 )
                 self.events.publish("task", {"task": task.as_dict(), "event": "approval_timeout"})
+                if _pending.get("id"):
+                    self.events.publish("approval_resolved", {
+                        "approval_id": str(_pending["id"]),
+                        "task_id": str(item["id"]),
+                        "decision": "expired",
+                        "decision_label": "Expired",
+                        "permission": str(_pending.get("permission") or ""),
+                        "status": "expired"})
                 try:
                     self.tasks.append_log(item["id"], f"## task error/done\n## error: {task.error}\n")
                     self.tasks.flush_log(item["id"])
@@ -6596,8 +6749,15 @@ class AppState:
                     }
                 slimmed.append(t)
             recent = slimmed
+        current_dict = current.as_dict() if current else None
+        if current_dict and current_dict.get("pending_approval"):
+            card = self.approval_card_for(
+                current_dict["pending_approval"],
+                str(current_dict.get("id") or ""))
+            if card:
+                current_dict["approval_card"] = card
         return {
-            "current": current.as_dict() if current else None,
+            "current": current_dict,
             "recent": recent,
             "queue": self.queue.list(),
         }
@@ -9186,6 +9346,30 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tasks":
             self._json(self.state.task_payload())
             return
+        if path == "/api/approvals":
+            # Chat permission cards — pending approvals render as live
+            # controls; recently resolved ones render their historical
+            # state. Survives reload and backend restart off the durable
+            # task rows, no model turn needed.
+            pending_cards = []
+            resolved_cards = []
+            try:
+                for row in self.state.tasks.by_status("waiting_approval"):
+                    pending = row.get("pending_approval")
+                    if isinstance(pending, dict):
+                        card = self.state.approval_card_for(
+                            pending, str(row.get("id") or ""))
+                        if card:
+                            pending_cards.append(card)
+                for row in self.state.tasks.recent(40):
+                    for res in row.get("approval_resolutions") or []:
+                        if isinstance(res, dict):
+                            resolved_cards.append(res)
+            except Exception:
+                pass
+            self._json({"pending": pending_cards,
+                        "resolved": resolved_cards[-12:]})
+            return
         if path == "/api/task-log":
             task_id = parse_qs(urlparse(self.path).query).get("task_id", [""])[0]
             self._json({"task_id": task_id, "log": self.state.tasks.read_log(task_id) if task_id else ""})
@@ -9558,6 +9742,9 @@ class Handler(BaseHTTPRequestHandler):
             "steps": result.steps,
             "task": result.task,
             "pending_approval": result.pending_approval,
+            "approval_card": self.state.approval_card_for(
+                result.pending_approval,
+                str((result.task or {}).get("id") or "")),
             "verification": result.verification,
             "review": result.review,
             "research": result.research,
@@ -11552,12 +11739,73 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": removed})
                 return
 
+            if path == "/api/tasks/decide":
+                # Interactive chat permission decisions. The decision enum
+                # (session/deny/always/once) replaces raw approved:true —
+                # grants apply through PermissionManager so Settings stays
+                # the single source of truth, then the exact parked step
+                # resumes once.
+                task_id = str(body.get("task_id", "")).strip()
+                approval_id = str(body.get("approval_id", "")).strip()
+                decision = str(body.get("decision", "")).strip().lower()
+                if not task_id:
+                    self._json({"error": "task_id is required"}, 400)
+                    return
+                if not decision:
+                    self._json({"error": "decision is required"}, 400)
+                    return
+                try:
+                    self.state.resolve_chat_approval(
+                        task_id, approval_id, decision)
+                except ApprovalError as exc:
+                    self._json({"error": str(exc), "stale": exc.stale},
+                               exc.status)
+                    return
+                approved = decision != approvals_mod.DECISION_DENY
+                voice_rid = self.state._voice_begin()
+                try:
+                    result = self.state.agent.resume(
+                        task_id, approved=approved,
+                        event_callback=self.state._voice_tee(
+                            voice_rid, self.state._bus_emit))
+                    self.state._voice_finish(
+                        voice_rid, result.content,
+                        delivery=getattr(result, "delivery", None))
+                except KeyError:
+                    self.state._voice_finish(voice_rid)
+                    # Someone else claimed it between validate and resume —
+                    # the single-resolve guarantee holds.
+                    self._json({"error": approvals_mod.STALE_MESSAGE,
+                                "stale": True}, 409)
+                    return
+                except Exception:
+                    self.state._voice_finish(voice_rid)
+                    raise
+                finally:
+                    try:
+                        self.state._dequeue_next()
+                    except Exception:
+                        pass
+                if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
+                    self.state.history.append({"role": "assistant", "content": result.content})
+                self._agent_response(result, voice_task_id=voice_rid)
+                return
+
             if path == "/api/tasks/resume":
                 task_id = str(body.get("task_id", "")).strip()
                 approved = bool(body.get("approved", False))
                 if not task_id:
                     self._json({"error": "task_id is required"}, 400)
                     return
+                # Record the decision + notify subscribers so an inline card
+                # rendered in chat resolves when the Tasks panel acts.
+                _approval_id = ""
+                try:
+                    _t = self.state.tasks.get(task_id)
+                    _p = getattr(_t, "pending_approval", None) or {}
+                    _approval_id = str(_p.get("id") or "")
+                except Exception:
+                    pass
                 voice_rid = self.state._voice_begin()
                 try:
                     result = self.state.agent.resume(task_id, approved=approved,
@@ -11572,6 +11820,24 @@ class Handler(BaseHTTPRequestHandler):
                         self.state._dequeue_next()
                     except Exception:
                         pass
+                try:
+                    _d = "once" if approved else "deny"
+                    _res = list(getattr(result_task := self.state.tasks.get(task_id), "approval_resolutions", None) or [])
+                    if not any(str(r.get("id") or "") == _approval_id
+                               for r in _res):
+                        _res.append({"id": _approval_id, "task_id": task_id,
+                                     "decision": _d,
+                                     "decision_label": approvals_mod.DECISION_LABELS.get(_d, _d),
+                                     "status": "resolved",
+                                     "resolved_at": time.time()})
+                        self.state.tasks.update(task_id, approval_resolutions=_res)
+                    self.state.events.publish("approval_resolved", {
+                        "approval_id": _approval_id, "task_id": task_id,
+                        "decision": _d,
+                        "decision_label": approvals_mod.DECISION_LABELS.get(_d, _d),
+                        "status": "resolved"})
+                except Exception:
+                    pass
                 if result.task.get("status") not in {"waiting_approval", "running", "verifying", "reviewing"}:
                     self.state.history.append({"role": "assistant", "content": result.content})
                 self._agent_response(result, voice_task_id=voice_rid)
@@ -11879,6 +12145,8 @@ class Handler(BaseHTTPRequestHandler):
                 if job_id.startswith("task-"):
                     task_id = job_id[len("task-"):]
                     try:
+                        _t = self.state.tasks.get(task_id)
+                        _pending = getattr(_t, "pending_approval", None)
                         task = self.state.tasks.update(
                             task_id, status="cancelled", phase="done",
                             summary="Cancelled by user.",
@@ -11887,6 +12155,34 @@ class Handler(BaseHTTPRequestHandler):
                     except KeyError:
                         self._json({"error": "agent task not found"}, 404)
                         return
+                    if isinstance(_pending, dict) and _pending.get("id"):
+                        # A pending authorization died with the task —
+                        # resolve the card so a stale click can't resume.
+                        try:
+                            _res = list(getattr(task, "approval_resolutions",
+                                                None) or [])
+                            _res.append({
+                                "id": str(_pending["id"]),
+                                "task_id": task_id,
+                                "permission": str(
+                                    _pending.get("permission") or ""),
+                                "decision": "cancelled",
+                                "decision_label": "Cancelled",
+                                "status": "cancelled",
+                                "resolved_at": time.time()})
+                            self.state.tasks.update(
+                                task_id, approval_resolutions=_res)
+                            self.state.events.publish(
+                                "approval_resolved", {
+                                    "approval_id": str(_pending["id"]),
+                                    "task_id": task_id,
+                                    "decision": "cancelled",
+                                    "decision_label": "Cancelled",
+                                    "permission": str(
+                                        _pending.get("permission") or ""),
+                                    "status": "cancelled"})
+                        except Exception:
+                            pass
                     # A parked task has no live drive to notice the cancel —
                     # drop its session so it can't hold memory or be resumed.
                     try:

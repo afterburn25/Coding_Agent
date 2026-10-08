@@ -27,6 +27,7 @@ from ..commands import (
 from ..research import ResearchCoordinator
 from ..version import version as _app_version
 from ..tools.base import ToolRegistry
+from ..approvals import approval_card, stamp_pending
 from .. import netdiag
 from ..workflow.checkpoint import CheckpointManager
 from ..workflow.memory import ProjectMemory
@@ -1032,12 +1033,17 @@ class AgentOrchestrator:
 
     def _command_stop(self, exclude_task_id: str = "") -> Any:
         try:
-            for t in self.tasks.by_status("running", "queued"):
+            for t in self.tasks.by_status(
+                    "running", "queued", "waiting_approval"):
                 if str(t.get("id") or "") == str(exclude_task_id):
                     continue
+                pending = t.get("pending_approval") or {}
                 self.tasks.update(
                     t["id"], status="cancelled", phase="done",
                     summary="Cancelled by user.", pending_approval=None)
+                if pending.get("id"):
+                    self._emit_approval_resolution(
+                        t["id"], pending, "cancelled")
                 return f"Stopped {str(t.get('title') or t.get('id'))[:70]}"
         except Exception:
             pass
@@ -2060,12 +2066,14 @@ class AgentOrchestrator:
                     "display": plan.display,
                 },
             }
+            stamp_pending(task_id, pending)
             parked = self.tasks.update(
                 task_id, status="waiting_approval",
                 phase="waiting_approval", pending_approval=pending)
             cb = self._logging_callback(task_id, event_callback)
             self._safe_emit(cb, {
                 "type": "approval", "approval": pending,
+                "card": self._approval_card(task_id, pending),
                 "task": parked.as_dict()})
             return AgentResult(
                 content=text,
@@ -2203,12 +2211,14 @@ class AgentOrchestrator:
                     } for p in tail_plans],
                 },
             }
+            stamp_pending(task_id, pending)
             parked = self.tasks.update(
                 task_id, status="waiting_approval",
                 phase="waiting_approval", pending_approval=pending)
             cb = self._logging_callback(task_id, event_callback)
             self._safe_emit(cb, {
                 "type": "approval", "approval": pending,
+                "card": self._approval_card(task_id, pending),
                 "task": parked.as_dict()})
             return AgentResult(
                 content=text,
@@ -4060,6 +4070,56 @@ class AgentOrchestrator:
             research=dict(task.research),
         )
 
+    def _approval_card(self, task_id: str,
+                       pending: dict[str, Any]) -> dict[str, Any]:
+        """Backend-authoritative card view for a parked approval — the
+        browser renders exactly these decisions, nothing more."""
+        try:
+            mgr = getattr(self.tools, "permission_manager", None)
+            return approval_card(pending, task_id, mgr)
+        except Exception:
+            return {}
+
+    def _emit_approval_resolution(
+        self,
+        task_id: str,
+        pending: dict[str, Any],
+        decision: str,
+    ) -> None:
+        """Stamp a durable resolution row + emit approval_resolved so an
+        inline permission card resolves even when the decision came from
+        a path without its own callback (e.g. an in-chat 'stop')."""
+        aid = str(pending.get("id") or "")
+        if not aid:
+            return
+        try:
+            rows = list(getattr(self.tasks.get(task_id),
+                                "approval_resolutions", None) or [])
+            if not any(str(r.get("id") or "") == aid for r in rows):
+                rows.append({
+                    "id": aid,
+                    "task_id": str(task_id),
+                    "permission": str(pending.get("permission") or ""),
+                    "decision": decision,
+                    "decision_label": {"cancelled": "Cancelled"}.get(
+                        decision, decision.title()),
+                    "status": "cancelled" if decision == "cancelled"
+                    else "resolved",
+                    "resolved_at": time.time()})
+                self.tasks.update(task_id, approval_resolutions=rows)
+        except Exception:
+            pass
+        self._safe_emit(getattr(self, "_last_callback", None), {
+            "type": "approval_resolved",
+            "approval_id": aid,
+            "task_id": str(task_id),
+            "decision": decision,
+            "decision_label": {"cancelled": "Cancelled"}.get(
+                decision, decision.title()),
+            "permission": str(pending.get("permission") or ""),
+            "status": "cancelled" if decision == "cancelled"
+            else "resolved"})
+
     def _pause_for_approval(
         self,
         session: _AgentSession,
@@ -4079,9 +4139,12 @@ class AgentOrchestrator:
             "call_id": call_id,
             "detail": detail,
         }
+        stamp_pending(session.task_id, pending)
         session.pending_approval = pending
         task = self.tasks.update(session.task_id, status="waiting_approval", phase="waiting_approval", pending_approval=pending)
-        self._emit(session, "approval", approval=pending, task=task.as_dict())
+        self._emit(session, "approval", approval=pending,
+                   card=self._approval_card(session.task_id, pending),
+                   task=task.as_dict())
         act = self._act(
             session.task_id, "approval", "Waiting for Approval",
             f"{name} requires {permission} authorization",
@@ -5532,6 +5595,7 @@ class AgentOrchestrator:
                 "arguments": arguments,
                 "detail": user_text,
             }
+            stamp_pending(task_id, pending)
             waiting = self.tasks.update(
                 task_id,
                 status="waiting_approval",
@@ -5543,7 +5607,7 @@ class AgentOrchestrator:
             )
             self._safe_emit(event_callback, {"type": "model", "event": model_event})
             self._safe_emit(event_callback, {"type": "task", "task": waiting.as_dict()})
-            self._safe_emit(event_callback, {"type": "approval", "task": waiting.as_dict(), "approval": pending})
+            self._safe_emit(event_callback, {"type": "approval", "task": waiting.as_dict(), "approval": pending, "card": self._approval_card(task_id, pending)})
             return AgentResult(
                 content="",
                 routing=decision,
@@ -5827,6 +5891,7 @@ class AgentOrchestrator:
             # restart (mission parks are mission work, never foreground).
             self.tasks.update(task.id, mission_id=mission_id)
         event_callback = self._logging_callback(task.id, event_callback)
+        self._last_callback = event_callback
         self._task_context(task.id)
         self.tasks.update(task.id, phase="planning")
         plan_act = self._act(
@@ -7284,6 +7349,7 @@ class AgentOrchestrator:
         approved: bool,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentResult:
+        self._last_callback = event_callback
         session = self._sessions.get(task_id)
         if session is None:
             return self._resume_persisted_approval(

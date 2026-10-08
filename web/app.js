@@ -13,7 +13,7 @@ function memoryBadge(src){if(src!=='answer_memory')return '';return '<div class=
 function attachmentUrl(a){if(!a)return'';if(a.data_url)return a.data_url;const p=String(a.path||'');if(!p)return'';return'/api/attachment/'+encodeURIComponent(p.split(/[\\/]/).pop());}
 function attachHtml(atts){if(!atts||!atts.length)return'';const items=atts.map(a=>{const url=attachmentUrl(a);return a&&a.kind==='image'&&url?`<img class="msg-attach-img" src="${esc(url)}" alt="${esc(a.name||'attachment')}" loading="lazy">`:`<span class="msg-attach-file">📎 ${esc(a&&a.name||'file')}</span>`;}).join('');return`<div class="msg-attach">${items}</div>`;}
 function addMessage(role,text,messageId='',responseSource='',attachments,voiceTaskId=''){const welcome=chat.querySelector('.welcome');if(welcome)welcome.remove();const el=document.createElement('div');el.className=`message ${role}`;if(messageId)el.dataset.messageId=messageId;if(voiceTaskId)el.dataset.voiceTaskId=voiceTaskId;const _uav=(window.NexusProfile&&window.NexusProfile.userAvatar&&role==='user'?window.NexusProfile.userAvatar():role==='assistant'?'/api/nexus/avatar?size=64':'');const atts=attachHtml(attachments);const bubble=text||atts?`<div class="bubble">${atts}${esc(text)}</div>`:'';el.innerHTML=(_uav?`<div class="role has-avatar" style="background-image:url('${esc(_uav)}')"></div>`:`<div class="role">${esc(role)}</div>`)+`${bubble}${memoryBadge(responseSource)}${role==='assistant'?feedbackControls(messageId):''}`;chat.appendChild(el);scrollChat(true);}
-async function renderConversationHistory(history=[]){chat.innerHTML='';imageJobEls.clear();if(!history.length){chat.innerHTML=welcomeHtml();return;}await Promise.all(history.map(async m=>{if(!['user','assistant'].includes(m.role))return;addMessage(m.role,m.content||'',m.id||'',m.response_source||'',m.attachments);const msgEl=chat.lastElementChild;await Promise.all((m.image_job_ids||[]).map(async jobId=>{try{const res=await fetch(`/api/image/job/${encodeURIComponent(jobId)}`);const data=await res.json();if(res.ok&&data.job)renderImageJobs([data.job],msgEl);}catch{}}));}));}
+async function renderConversationHistory(history=[]){chat.innerHTML='';imageJobEls.clear();approvalCards.forEach(r=>r.el.remove());approvalCards.clear();if(!history.length){chat.innerHTML=welcomeHtml();restoreApprovalCards();return;}await Promise.all(history.map(async m=>{if(!['user','assistant'].includes(m.role))return;addMessage(m.role,m.content||'',m.id||'',m.response_source||'',m.attachments);const msgEl=chat.lastElementChild;await Promise.all((m.image_job_ids||[]).map(async jobId=>{try{const res=await fetch(`/api/image/job/${encodeURIComponent(jobId)}`);const data=await res.json();if(res.ok&&data.job)renderImageJobs([data.job],msgEl);}catch{}}));}));restoreApprovalCards();}
 function renderConversationList(rows=[]){const box=$('#conversationList');if(!box)return;box.innerHTML=rows.length?rows.map(row=>`<button class="conversation-row ${row.active?'active':''}" data-conversation="${esc(row.id)}" type="button"><strong>${esc(row.title||'New chat')}</strong><small>${esc(row.message_count||0)} messages${row.summary?' · '+esc(String(row.summary).slice(0,60)):''}</small></button>`).join(''):'<span class="muted">No conversations yet.</span>';}
 async function loadConversations(query=''){try{const url='/api/conversations'+(query?'?q='+encodeURIComponent(query):'');const res=await fetch(url);const data=await res.json();if(!res.ok)throw new Error(data.error||'Conversation lookup failed');if(query){renderConversationList((data.results||[]).map(x=>({...x,message_count:'',active:false})));return data;}renderConversationList(data.conversations||[]);return data;}catch(e){const box=$('#conversationList');if(box)box.textContent='Conversation history unavailable';return null;}}
 async function selectConversation(id){const res=await fetch('/api/conversations/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:id})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Could not open conversation');renderConversationHistory(data.history||[]);await loadConversations();input.focus();}
@@ -680,7 +680,7 @@ function handleAgentStreamEvent(name,data,state){
   if(name==='activity'){upsertActivityRow(data.activity||data);return;}
   if(name==='heartbeat'){if(!state.error)nexusThinkingPhase(state,String(data.phase||'working'),String(data.model_id||''),Number(data.elapsed_seconds||0));scrollChat();return;}
   if(name==='task'&&data.task){state.lastTask=data.task;renderTask(data.task);if(data.event==='queued'||data.event==='dequeued'||data.event==='queue_item_cancelled')refreshQueue();nexusThinkingPhase(state,String(data.task.phase||'working'),String(data.task.model_id||''),Math.round(Date.now()/1000-state.startedAt));return;}
-  if(name==='approval'){if(data.task)renderTask(data.task);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
+  if(name==='approval'){if(data.task)renderTask(data.task);const card=data.card||data.task?.approval_card;if(card)renderApprovalCard(card);nexusThinkingStep(state,'Authorization hold','Waiting for your approval','approval');setUtilityPanel('tasks');return;}
   if(name==='model'){
     const e=data.event||{};
     if(e.type==='generic_refusal_retry'){state.receivedToken=false;state.pendingText='';state.voiceReveal=0;if(state.text)state.text.textContent='';state.hud?.classList.remove('compact');nexusThinkingStep(state,'Policy re-alignment','Retrying under permissive conversation policy','policy-retry');}
@@ -789,7 +789,7 @@ function connectAgentEvents(){
     on('tool_start',d=>{if(d.tool)toolStartBlock(d.tool);});
     on('tool_output',d=>{const name=String(d.tool||'');let entry=[...liveToolBlocks].reverse().find(b=>b.name===name)||liveToolBlocks[liveToolBlocks.length-1];if(!entry&&name){toolStartBlock({name});entry=liveToolBlocks[liveToolBlocks.length-1];}if(entry){const out=entry.el.querySelector('.term-out');if(out){out.textContent=(out.textContent+String(d.chunk||'')).slice(-6000);activity.scrollTop=activity.scrollHeight;}}});
     on('tool',d=>{if(d.tool&&typeof d.tool==='object')toolCompleteBlock(d.tool);});
-    on('task',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);}if(d.event==='auto_retry'||d.event==='auto_retry_failed'||d.event==='approval_timeout'||d.event==='queue_item_failed'||d.event==='reverted'||d.event==='cancelled')appendLiveActivity(`TASK · ${d.event.replace(/_/g,' ')}${d.task_id?' · '+d.task_id.slice(0,8):''}${d.error?' · '+String(d.error).slice(0,120):''}`);if(d.event==='queued'||d.event==='dequeued'||d.event==='queue_item_cancelled')appendLiveActivity(`QUEUE · ${d.event.replace(/_/g,' ')}${d.queue_item?.prompt?' · '+String(d.queue_item.prompt).slice(0,80):''}`);if(d.event==='queued'||d.event==='dequeued'||d.event==='queue_item_cancelled'||d.event==='queue_item_failed')refreshQueue();});
+    on('task',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);}if(d.task_id&&(d.event==='cancelled'||d.event==='approval_timeout'))approvalCards.forEach((rec,id)=>{const c=rec.card;if(c&&c.status==='pending'&&c.task_id===d.task_id)resolveApprovalCard(id,{status:d.event==='approval_timeout'?'expired':'cancelled'});});if(d.event==='auto_retry'||d.event==='auto_retry_failed'||d.event==='approval_timeout'||d.event==='queue_item_failed'||d.event==='reverted'||d.event==='cancelled')appendLiveActivity(`TASK · ${d.event.replace(/_/g,' ')}${d.task_id?' · '+d.task_id.slice(0,8):''}${d.error?' · '+String(d.error).slice(0,120):''}`);if(d.event==='queued'||d.event==='dequeued'||d.event==='queue_item_cancelled')appendLiveActivity(`QUEUE · ${d.event.replace(/_/g,' ')}${d.queue_item?.prompt?' · '+String(d.queue_item.prompt).slice(0,80):''}`);if(d.event==='queued'||d.event==='dequeued'||d.event==='queue_item_cancelled'||d.event==='queue_item_failed')refreshQueue();});
     on('model',d=>{const e2=d.event||{};appendLiveActivity(`MODEL · ${e2.type||'event'} · ${e2.model_id||e2.to||''} ${e2.role||''}`.trim());});
     on('perf',d=>{const bits=[d.predicted_per_second?d.predicted_per_second+' tok/s':'',d.completion_tokens?d.completion_tokens+' tok':'',d.time_to_first_token_ms!=null?'TTFT '+Math.round(d.time_to_first_token_ms)+'ms':''].filter(Boolean).join(' · ');appendLiveActivity(`PERF · ${d.model_id||'model'} ${bits}`);});
     on('research',d=>{const p=d.research?.plan||d.research||{};appendLiveActivity(`RESEARCH · ${p.mode||'preflight'}`);});
@@ -815,7 +815,8 @@ function connectAgentEvents(){
         details:{bytes_done:j.bytes_done,bytes_total:j.bytes_total,error:j.error||''},
         started_at:Number(j.started_at||Date.now()/1000),elapsed:null});
     });
-    on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}});
+    on('approval',d=>{if(d.task){lastTask=d.task;renderTask(d.task);renderDiff(d.task);setUtilityPanel('tasks');}const card=d.card||(d.task?.pending_approval?.id&&d.task.approval_card)||d.task?.approval_card;if(card)renderApprovalCard(card);});
+    on('approval_resolved',d=>{if(d&&d.approval_id)resolveApprovalCard(d.approval_id,{status:d.status==='resolved'?'resolved':d.status||'resolved',decision:d.decision,decision_label:d.decision_label});});
     on('image_job',d=>{if(d.job){renderImageJobs([d.job]);imageJobActivityRow(d.job);}});
     on('notification',d=>{const n=d.notification||{};if(n.level==='muted')return;
       // The supervisor also mirrors notifications into the ActivityStore, so a
@@ -824,6 +825,90 @@ function connectAgentEvents(){
     on('error',d=>{if(d.error){appendLiveActivity(`ERROR · ${String(d.error).slice(0,140)}`);loadStatus(false);}});
   }catch(e){}
 }
+// --- Inline permission cards -------------------------------------------------
+// Backend-authoritative: the card renders exactly the decisions the
+// server says are legal for this permission right now. The browser
+// never derives policy — it only renders and dispatches.
+const approvalCards=new Map();
+
+function paintApprovalCard(el,card){
+  const pending=card.status==='pending';
+  const bits=[];
+  if(card.permission)bits.push(`Permission: ${card.permission}`);
+  if(card.tool)bits.push(`Tool: ${card.tool}`);
+  if(card.scope)bits.push(`Scope: ${card.scope}`);
+  for(const[k,v]of Object.entries(card.arguments||{}))bits.push(`${k}: ${v}`);
+  const adv=bits.length?`<details class="perm-adv"><summary>Advanced details</summary><pre>${esc(bits.join('\n'))}</pre></details>`:'';
+  let body='';
+  if(!pending){
+    const label=card.decision_label||({session:'Allowed for this session',always:'Always allowed',deny:'Denied',once:'Approved'}[card.decision]||'No longer active');
+    const note=card.decision==='deny'?' — nothing was changed':(card.status==='expired'?' — the request expired':card.status==='cancelled'?' — the request is no longer active':'');
+    body=`<div class="perm-resolved${card.decision==='deny'||card.status!=='resolved'?' negative':''}">${esc(label)}${esc(note)}</div>`;
+  }else if(card.disabled||!(card.decisions||[]).length){
+    body=`<div class="perm-disabled">${esc(card.disabled_reason||'This permission is disabled in Settings.')}</div><div class="perm-actions"><a class="mini-button" href="${esc(card.settings_link||'/settings.html#permissions')}">Open Permissions</a></div>`;
+  }else{
+    const opts=(card.decisions||[]).map(d=>`<option value="${esc(d)}">${esc((card.decision_labels||{})[d]||d)}</option>`).join('');
+    body=`<div class="perm-actions"><select class="perm-select" data-approval="${esc(card.id)}" aria-label="Permission decision"><option value="" disabled selected>Choose…</option>${opts}</select></div>`;
+  }
+  el.className='message approval-msg'+(pending?'':' resolved');
+  el.innerHTML=`<div class="perm-card">
+    <div class="perm-head"><span class="perm-icon">!</span><strong>Authorization required</strong></div>
+    <div class="perm-action">${esc(card.action||card.label||'Run an action')}</div>
+    <div class="perm-meta"><span class="perm-title">${esc(card.title||card.permission||'')}</span>${card.scope?`<span class="perm-scope">${esc(card.scope)}</span>`:''}${card.creator_required?'<span class="perm-scope">creator session required</span>':''}</div>
+    ${adv}${body}</div>`;
+  el.dataset.approvalId=card.id;
+}
+
+function renderApprovalCard(card){
+  if(!card||!card.id)return null;
+  let rec=approvalCards.get(card.id);
+  if(!rec){
+    const el=document.createElement('div');
+    chat.appendChild(el);
+    rec={el,card:null};approvalCards.set(card.id,rec);
+  }
+  rec.card={...rec.card,...card};
+  paintApprovalCard(rec.el,rec.card);
+  scrollChat(true);
+  return rec.el;
+}
+
+function resolveApprovalCard(id,next){
+  const rec=approvalCards.get(id);if(!rec)return;
+  rec.card={...rec.card,...next,decisions:[]};paintApprovalCard(rec.el,rec.card);
+}
+
+async function restoreApprovalCards(){
+  try{
+    const res=await fetch('/api/approvals');const data=await res.json();
+    approvalCards.forEach(rec=>rec.el.remove());approvalCards.clear();
+    // Resolved rows render their historical state (no live control);
+    // pending rows restore as live decision cards.
+    for(const c of (data.resolved||[]))renderApprovalCard({...c,decisions:[]});
+    for(const c of (data.pending||[]))renderApprovalCard(c);
+  }catch{/* older backend — cards just don't restore */}
+}
+
+chat.addEventListener('change',async e=>{
+  const s=e.target.closest('.perm-select');if(!s||s.disabled)return;
+  const rec=approvalCards.get(s.dataset.approval);
+  const card=rec?.card;if(!card)return;
+  s.disabled=true;
+  try{
+    const res=await fetch('/api/tasks/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:card.task_id,approval_id:card.id,decision:s.value})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      resolveApprovalCard(card.id,{status:'cancelled'});
+      addMessage('assistant',data.error||'This authorization request is no longer active.');
+      return;
+    }
+    resolveApprovalCard(card.id,{status:'resolved',decision:s.value});
+    if(data.result)renderAgentResult(data);
+  }catch(err){
+    s.disabled=false;
+    addMessage('assistant',`Approval request failed: ${err.message||err}`);
+  }
+});
 // ---- chat attachments ----
 const attachBtn=$('#attachBtn'),attachInput=$('#attachInput'),attachMenu=$('#attachMenu'),attachChips=$('#attachChips');
 let pendingAttachments=[];

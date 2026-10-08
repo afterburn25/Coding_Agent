@@ -2,6 +2,49 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## v0.33.0 — Interactive Chat Permissions
+
+Permission requests render inline in chat as a backend-authoritative
+decision card — no Tasks-panel detour, no typing `yes`/`continue`:
+
+- `localcodeagent/approvals.py` (new) — decision enum
+  (`session`/`deny`/`always`/`once`), `stamp_pending` (durable approval
+  ids), `approval_card` (friendly title, action summary, sanitized args,
+  legal decisions, settings link), `decision_options` (hard gates: policy
+  `deny` → no options, `AUTONOMY_NEVER_AUTO`/creator-gated → never
+  `always`, locked creator session → card renders disabled).
+- Inline card (`web/app.js` + `web/styles.css`) — `Authorization
+  required` with action text, `Filesystem · Write files`-style friendly
+  title, Advanced Details disclosure (raw key/tool/args/scope), decision
+  dropdown that resolves on selection. `approval_resolved` /
+  `approval_timeout` / task-cancel bus events repaint cards in place;
+  `GET /api/approvals` restores pending (live) + resolved (historical)
+  cards on reload — no model turn.
+- `POST /api/tasks/decide` — validates pending state under
+  `_APPROVAL_LOCK` (one resolution per approval id, ever: double clicks,
+  two windows, replays, restart+replay → `409 stale`), applies grants via
+  `PermissionManager` (session → in-memory only; always → `set_level` +
+  `_update_config_file`, identical to `/api/permissions/level`), stamps
+  `approval_resolutions[]` on the durable task row, publishes
+  `approval_resolved`, then `agent.resume` continues the exact suspended
+  step. Deny → no execution, truthful `Nothing was changed.`
+- `PermissionManager.effective()` honors `_session_grants` for
+  `ask`-level permissions (chat grant suppresses reprompt); autonomous
+  auto-grants now tracked in `_auto_grants` so toggling autonomy off
+  revokes only what it granted. Session grants never reach config.
+- All four park sites (local action, tool, verification, direct image)
+  stamp + emit `card`; `_bus_emit` enriches bus payloads and fires one
+  voice notice (`I need your permission to continue.`) per approval.
+  Cancel/stop paths stamp `cancelled` resolutions; autonomous timeout
+  stamps `expired`. Legacy `/api/tasks/resume` stamps the same resolution
+  rows → Tasks panel and chat cards stay in lockstep.
+- Tests: `tests/test_approvals.py` — 27 tests covering the decision
+  matrix, card payloads, persistence, stale/dup rejection, cancellation,
+  and e2e park→decide→exact-once resume. Live Windows dogfood on a
+  sandboxed backend verified the full loop including restart restore.
+
+Checkpoint: **2749 tests** passing (2 environment skips).
+
 ## v0.32.0 — Conversation Intelligence phase 1: response scope
 
 New milestone (relevance/scope/concision/multi-turn). Observed defect:
@@ -144,7 +187,7 @@ term cover so general-knowledge questions can't hijack a stored fact.
 QA corpus grew to cover facts-recall, restatements, topic shifts,
 person-directed wheres, and recall discipline.
 
-Checkpoint: **2722 tests** passing (2 environment skips).
+Checkpoint: **2749 tests** passing (2 environment skips).
 
 Remaining milestone work (next increments): broader corpus toward the
 acceptance matrix, real-model benchmark numbers on the deployed
@@ -2949,7 +2992,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2722 tests` passing (2 environment skips).
+Expected at this checkpoint: `2749 tests` passing (2 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

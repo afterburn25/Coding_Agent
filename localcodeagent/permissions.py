@@ -355,6 +355,10 @@ class PermissionManager:
         self.profile = profile if profile in PROFILES or profile == "custom" else "custom"
         self._autonomous = bool(autonomous)
         self._session_grants: set[str] = set()
+        # Subset of _session_grants created by autonomous mode itself —
+        # tracked separately so toggling autonomy off revokes only the
+        # grants it made and leaves the user's own session grants alive.
+        self._auto_grants: set[str] = set()
         self._lock = threading.RLock()
         # Optional callable returning True when the Nexus Brain creator session
         # is unlocked. Wired by AppState; fail-closed without it.
@@ -512,11 +516,17 @@ class PermissionManager:
                 first = permission not in self._session_grants
                 with self._lock:
                     self._session_grants.add(permission)
+                    self._auto_grants.add(permission)
                 if first:
                     self.record_event("auto_granted", permission, "autonomous mode")
                 return "allow"
         if mode == "session":
             return "allow" if permission in self._session_grants else "ask"
+        if mode == "ask" and permission in self._session_grants:
+            # "Allow this session" — the chat-time grant suppresses
+            # reprompting for the process lifetime. It lives only in
+            # _session_grants; nothing durable learns it.
+            return "allow"
         return mode
 
     @property
@@ -527,6 +537,10 @@ class PermissionManager:
         enabled = bool(enabled)
         if enabled != self._autonomous:
             self._autonomous = enabled
+            if not enabled:
+                with self._lock:
+                    self._session_grants -= self._auto_grants
+                    self._auto_grants.clear()
             self.record_event("autonomous_on" if enabled else "autonomous_off")
         else:
             self._autonomous = enabled
@@ -539,6 +553,7 @@ class PermissionManager:
     def clear_session(self) -> None:
         with self._lock:
             self._session_grants.clear()
+            self._auto_grants.clear()
 
     def set_level(self, permission: str, level: str) -> str:
         level = str(level or "").strip().lower()
