@@ -2,6 +2,47 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.42.0 — Adaptive Intelligence Phase A
+
+Umbrella milestone "Adaptive Intelligence + Persistent Nexus Identity",
+staged per its release strategy. Phase A shipped:
+
+- **`localcodeagent/identity_mgr.py`** — `IdentityManager`: durable
+  `data/identity.json` (canonical name, primary email + backing account,
+  recovery_owner=`user`, per-service account records, audit trail).
+  `credential_ref` is a vault key *name*; secret values stay in
+  `secrets.vault`. Live probes (`GitHubAccountService.status()`,
+  connector `account()`/`auth_state()`) merge over durable rows.
+- **Creation workflow** — `begin_account_creation` → `creating` →
+  `awaiting_verification`/`awaiting_human` (CAPTCHA/phone/ToS/security
+  challenges park, never bypassed) → `verifying_login` → `active` only
+  via `verify_login(probe)`. Gated by `identity.account_create`.
+- **`identity.*` permission keys** — 6 keys with PERMISSION_INFO;
+  mutations in `AUTONOMY_NEVER_AUTO` + offline-profile denies.
+- **`capabilities.py`** — truth graph: `depends_on` edges on specs,
+  `blockers()` dependency-chain explanation, new states
+  (`permission_required`, `disconnected`, `temporarily_unavailable`,
+  `policy_denied`, `unsupported`), `engine`/`checked_at`/`verified_at`
+  on reports, rate-limited `run_selftest()`, `graph()` export.
+- **`nexus_state.build_situation`/`situation_text`** — the Situation
+  Model: conversation topic/goal (state graph), missions+workstreams,
+  jobs/installs/downloads, resident models, approvals, services,
+  waiting consults, failures, project. "what's going on?" answers in
+  `_mission_command`.
+- **Endpoints/UI** — `GET /api/situation`, `GET /api/identity`,
+  `GET /api/identity/audit`, `GET /api/capabilities/graph`, POSTs for
+  account lifecycle + `/api/capabilities/selftest`; `web/intel.html`
+  Intelligence Center (Situation/Capabilities/Identity), nav-wired
+  into all pages.
+- **Deferred within Phase A scope:** automated Gmail signup (browser
+  flow + OAuth connect) — the workflow/state machine + verification
+  contract are in place; real signup automation lands with the
+  browser-drive work in a later phase.
+
+**Verify:** `pytest tests/test_identity_situation.py` (19 tests);
+adjacent `test_capabilities.py` + `test_permissions_ui.py` +
+`test_conversation_state.py` green.
+
 ## 0.41.0 — RealVisXL V5.0 first-class image model
 
 The `realvisxl-v5` fleet spec becomes a normal member of the image-model

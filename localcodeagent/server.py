@@ -692,6 +692,18 @@ class AppState:
             self.social.attach(self.connectors, self._moltbook_connector)
         except Exception:
             self._moltbook_connector = None
+        # Identity Manager — the authoritative registry of Nexus's
+        # persistent online identity: service accounts, handles,
+        # verification state, credential *references* (vault key names
+        # only). Live rows merge GitHubAccountService + connector account
+        # state so answers reflect reality, not stale records.
+        from .identity_mgr import IdentityManager
+        self.identity = IdentityManager(
+            runtime_root / "data", vault=self.secrets,
+            connectors=self.connectors,
+            github_account=self.github_account,
+            permission_check=lambda p: self.permission_manager.effective(p),
+            emit=lambda e, d: self.events.publish(e, d))
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         # L13: learned procedures promote to real skills only through
@@ -1871,6 +1883,22 @@ class AppState:
                 states.append(st)
             return next((s for s in states if s), "")
 
+        def _image_engine() -> str:
+            """Which backend the image subsystem would use right now —
+            the graph's 'engine' field, not just a state word."""
+            images = getattr(self, "images", None)
+            if images is None:
+                return ""
+            inv = getattr(images, "invokeai_runtime", None)
+            if inv is not None and getattr(getattr(inv, "status", None),
+                                           "healthy", False):
+                return "invokeai"
+            comfy = getattr(images, "backend_runtime", None)
+            if comfy is not None and getattr(getattr(comfy, "status", None),
+                                             "healthy", False):
+                return "comfyui"
+            return ""
+
         def _stt_state() -> str:
             if getattr(self, "_stt_engine", None) is not None:
                 return "ready"
@@ -1904,6 +1932,8 @@ class AppState:
             "image_enabled":
                 lambda: bool(getattr(config, "image_enabled", False)),
             "image_backend_state": _image_state,
+            "image_backend_engine": _image_engine,
+            "browser_engine": lambda: "playwright",
             "stt_enabled":
                 lambda: str(getattr(config, "stt_backend", "off"))
                 .lower() != "off",
@@ -4537,6 +4567,21 @@ class AppState:
             sup.resume_autonomy()
             return {"content": "Autonomy resumed — paused missions can continue."}
 
+        # Situation query — "what's going on?" answers from the live
+        # Situation Model: conversation focus, missions, jobs, models,
+        # approvals, services, consults, failures. Compact and honest —
+        # never a JSON dump.
+        if any(p in low for p in ("what's going on", "what is going on",
+                                  "whats going on", "what's happening",
+                                  "what is happening", "status report",
+                                  "system status", "give me a status",
+                                  "what's the situation",
+                                  "what are you up to")):
+            sit = self.situation()
+            return {"content": str(sit.get("text")
+                                 or "Nothing is running right now."),
+                    "situation": sit}
+
         if any(p in low for p in ("cancel the mission", "stop the mission",
                                   "stop working on that mission",
                                   "cancel that mission", "stop that mission")):
@@ -6364,6 +6409,101 @@ class AppState:
             resources=res, last_interaction_at=self._last_interaction_at,
             profile=prof)
 
+    def situation(self) -> dict:
+        """The Situation Model — one coherent, live view of everything
+        Nexus is doing: conversation focus, missions + workstreams,
+        jobs/installs/downloads, model residency, pending approvals,
+        connected services, waiting peer consults, recent failures.
+        Answers 'what's going on?' from measured state, never JSON dumps."""
+        from .nexus_state import build_situation, situation_text
+        sup = getattr(self, "autonomy", None)
+        base = self.operational_state()
+
+        def _conversation() -> dict:
+            """The active chat's state-graph focus — topic and goal."""
+            try:
+                conv = self.conversation_manager.active()
+                if not conv:
+                    return {"active": False}
+                ctx = self.conversation_manager.active_context(
+                    conv.get("id"))
+                cdict = ctx.to_dict() if hasattr(ctx, "to_dict") \
+                    else (ctx if isinstance(ctx, dict) else {})
+                return {"active": True,
+                        "topic": str(cdict.get("active_topic")
+                                     or conv.get("title") or "")[:140],
+                        "goal": str(cdict.get("current_goal") or "")[:200]}
+            except Exception:
+                return {"active": True}
+
+        def _models() -> dict:
+            try:
+                ids = self.runtime.resident_model_ids() or []
+                return {"resident": ", ".join(ids[:2]),
+                        "count": len(ids)}
+            except Exception:
+                return {}
+
+        def _approvals() -> list:
+            out: list[str] = []
+            try:
+                n = getattr(sup, "notifications", None) if sup else None
+                for row in (n.list(unread_only=True, limit=50)
+                            if n is not None else []):
+                    if str(row.get("level")) in ("approval",
+                                                 "approval_required"):
+                        out.append(str(row.get("title") or ""))
+            except Exception:
+                pass
+            return out
+
+        def _consults() -> list:
+            try:
+                social = getattr(self, "social", None)
+                if social is None:
+                    return []
+                return [c for c in (social.consults_list(limit=50) or [])
+                        if str(c.get("state")) in
+                        ("awaiting_reply", "open", "sent")]
+            except Exception:
+                return []
+
+        def _failures() -> list:
+            out: list[str] = []
+            try:
+                for j in (self.jobs.list_jobs() or [])[:60]:
+                    if str(j.get("state")) == "failed":
+                        out.append(str(j.get("title") or j.get("id") or ""))
+            except Exception:
+                pass
+            try:
+                w = self.workers.status() if getattr(self, "workers", None) \
+                    is not None else {}
+                for h in (w.get("recent") or [])[-8:]:
+                    if str(h.get("outcome")) == "failed":
+                        out.append(str(h.get("title") or h.get("id") or ""))
+            except Exception:
+                pass
+            return out
+
+        env = {
+            "conversation": _conversation,
+            "missions": getattr(sup, "missions", None) if sup else None,
+            "jobs": getattr(self, "jobs", None),
+            "models_resident": _models,
+            "pending_approvals": _approvals,
+            "connectors": getattr(self, "connectors", None),
+            "waiting_consults": _consults,
+            "recent_failures": _failures,
+            "current_project":
+                lambda: str(getattr(self, "active_project_name", "")
+                            or ""),
+            "artifacts_awaiting": lambda: 0,
+        }
+        sit = build_situation(env=env, base=base)
+        sit["text"] = situation_text(sit)
+        return sit
+
     def return_briefing(self) -> dict:
         """"While you were away" — deduped, evidence-only digest since the
         last user interaction. Empty result means nothing to report."""
@@ -7587,6 +7727,34 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/twin":
             self._json(self.state.twin.status())
             return True
+        if path == "/api/situation":
+            # The Situation Model — one live view of conversation focus,
+            # missions, workstreams, jobs, models, approvals, services,
+            # consults, failures. Feeds the Intelligence Center and the
+            # "what's going on?" lane.
+            self._json(self.state.situation())
+            return True
+        if path == "/api/identity":
+            # Identity Manager — persistent account/identity registry.
+            # Credential refs are vault key names; values never leave.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.status())
+            return True
+        if path == "/api/identity/audit":
+            identity = getattr(self.state, "identity", None)
+            self._json({"audit": identity.audit() if identity else []})
+            return True
+        if path == "/api/capabilities/graph":
+            reg = getattr(self.state, "capability_registry", None)
+            if reg is None:
+                self._json({"error": "capability registry unavailable"},
+                           503)
+                return True
+            self._json(reg.graph(force=(q.get("refresh") == ["1"])))
+            return True
         if path == "/api/artifacts":
             rows = self.state.artifacts.list(
                 kind=(q.get("kind") or [""])[0],
@@ -7958,6 +8126,101 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "social service unavailable"}, 503)
                 return True
             self._json(social.check_verification())
+            return True
+        if path == "/api/identity/account/create":
+            # Begin a tracked third-party signup — gated by
+            # identity.account_create, never implied by social.post or
+            # browser.control.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.begin_account_creation(
+                str(body.get("service") or ""),
+                handle=str(body.get("handle") or ""),
+                provenance=str(body.get("provenance") or "api")))
+            return True
+        if path == "/api/identity/account/human-gate":
+            # A CAPTCHA/phone/ToS/security challenge appeared — park the
+            # workflow; Nexus never bypasses human-only controls.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.pause_for_human(
+                str(body.get("service") or ""),
+                str(body.get("challenge") or ""),
+                detail=str(body.get("detail") or "")))
+            return True
+        if path == "/api/identity/account/resume":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.resume_creation(
+                str(body.get("service") or ""),
+                step=str(body.get("step") or "") or None))
+            return True
+        if path == "/api/identity/account/verify":
+            # Prove the account by a real authenticated check — service-
+            # specific probes are resolved live; without one the account
+            # stays honestly unverified.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            service = str(body.get("service") or "")
+            probe = None
+            if service == "github" and getattr(self.state,
+                                               "github_account", None):
+                ga = self.state.github_account
+                probe = lambda: (ga.status(refresh=True).get("state")
+                                 == "connected")
+            elif service:
+                rec = (getattr(self.state.connectors, "connectors", {})
+                       or {}).get(service)
+                if rec is not None and hasattr(rec.get("conn"), "health"):
+                    conn = rec["conn"]
+                    probe = lambda: bool(conn.health().get("ok"))
+            self._json(identity.verify_login(service, probe))
+            return True
+        if path == "/api/identity/account/remove":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            verdict = self.state.permission_manager.effective(
+                "identity.account_delete")
+            if verdict != "allow":
+                self._json({"ok": False,
+                            "permission": "identity.account_delete",
+                            "verdict": verdict,
+                            "needs_approval": verdict == "ask",
+                            "error": "permission denied: "
+                                     "identity.account_delete"})
+                return True
+            self._json(identity.remove_account(
+                str(body.get("service") or ""),
+                delete_credential=bool(body.get("delete_credential"))))
+            return True
+        if path == "/api/identity/primary-email":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.set_primary_email(
+                str(body.get("service") or ""),
+                str(body.get("address") or "")))
+            return True
+        if path == "/api/capabilities/selftest":
+            reg = getattr(self.state, "capability_registry", None)
+            if reg is None:
+                self._json({"error": "capability registry unavailable"},
+                           503)
+                return True
+            self._json(reg.run_selftest(
+                str(body.get("capability") or ""),
+                force=bool(body.get("force"))))
             return True
         if path == "/api/social/backlog/resolve":
             social = getattr(self.state, "social", None)

@@ -4,18 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
-  <title>Nexus Core · Learning</title>
+  <title>Nexus Core · Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/missions.css" />
   <link rel="stylesheet" href="/profile.css" />
   <link rel="stylesheet" href="/learning.css" />
+  <link rel="stylesheet" href="/intel.css" />
 </head>
 <body>
 <div class="missions-shell">
       <aside class="sidebar">
       <div class="brand-lockup">
         <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
-        <div class="brand-wordmark">Nexus <strong>Core</strong><small>LEARNING</small></div>
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>INTELLIGENCE</small></div>
       </div>
       <nav class="primary-nav" aria-label="Primary">
         <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
@@ -31,9 +32,9 @@
         <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
         <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
         <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
-        <a class="nav-item active" href="/learning.html"><span class="nav-icon">✧</span><span>Learning</span></a>
+        <a class="nav-item" href="/learning.html"><span class="nav-icon">✧</span><span>Learning</span></a>
         <a class="nav-item" href="/social.html"><span class="nav-icon">◍</span><span>Social</span></a>
-        <a class="nav-item" href="/intel.html"><span class="nav-icon">◉</span><span>Intel</span></a>
+        <a class="nav-item active" href="/intel.html"><span class="nav-icon">◉</span><span>Intel</span></a>
         <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
         <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
         <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
@@ -41,73 +42,64 @@
       <div class="sidebar-spacer"></div>
       <div class="local-card">
         <span class="local-dot"></span>
-        <div><strong>Local mode</strong><small>Learning from verified outcomes only.</small></div>
+        <div><strong>Live, not remembered</strong><small>Every answer here is probed state — never stale self-description.</small></div>
       </div>
     </aside>
 
   <main class="missions-main">
     <header class="missions-header">
       <div>
-        <h1>Continual Learning</h1>
-        <p class="missions-sub">What Nexus has learned from verified outcomes — never from
-        self-assessment. Every number here is backed by recorded evidence.</p>
+        <h1>Intelligence Center</h1>
+        <p class="missions-sub">What Nexus is doing, what it can actually
+        do, and the identity it holds online — measured live, with
+        evidence, not recalled from memory.</p>
       </div>
       <button id="refreshBtn" class="btn secondary" type="button">Refresh</button>
     </header>
 
-    <section class="learning-cards" id="overviewCards"></section>
+    <div class="intel-tabs" role="tablist">
+      <button class="intel-tab active" data-tab="situation" type="button">Situation</button>
+      <button class="intel-tab" data-tab="capabilities" type="button">Capabilities</button>
+      <button class="intel-tab" data-tab="identity" type="button">Identity</button>
+    </div>
 
-    <section class="panel">
-      <h2>Highest-value weaknesses</h2>
-      <p class="panel-sub">Evidence-backed competencies ranked by learning value.
-      Confidence stays low until there are enough evaluated attempts.</p>
-      <div class="table-wrap">
-        <table class="learning-table" id="weaknessTable">
-          <thead><tr>
-            <th>Competency</th><th>Status</th><th>Success</th>
-            <th>Attempts</th><th>Confidence</th><th>Trend</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="empty-note" id="weaknessEmpty" hidden>No tracked weaknesses yet.</p>
+    <section class="intel-pane" id="pane-situation">
+      <section class="panel">
+        <h2>Right now</h2>
+        <p class="panel-sub">One coherent view — conversation focus,
+        missions, jobs, models, approvals, services.</p>
+        <div id="situationText" class="situation-text"></div>
+        <div id="situationGrid" class="situation-grid"></div>
+      </section>
     </section>
 
-    <div class="learning-grid">
+    <section class="intel-pane hidden" id="pane-capabilities">
       <section class="panel">
-        <h2>Study priorities</h2>
-        <p class="panel-sub">What the planner thinks is worth studying next
-        (weakness × value × frequency ÷ cost).</p>
-        <ul class="learning-list" id="priorityList"></ul>
-        <p class="empty-note" id="priorityEmpty" hidden>Nothing worth studying right now.</p>
+        <h2>Capability Truth Graph</h2>
+        <p class="panel-sub">Probed state per capability with dependency
+        edges — a capability degrades honestly when something it needs
+        is down. "verified" means observed working.</p>
+        <div id="capGrid" class="cap-grid"></div>
       </section>
+    </section>
 
+    <section class="intel-pane hidden" id="pane-identity">
+      <section class="learning-cards" id="identityCards"></section>
       <section class="panel">
-        <h2>Study sessions</h2>
-        <p class="panel-sub">Bounded research-backed sessions against a curriculum —
-        never open-ended crawling.</p>
-        <div id="studyDetail"></div>
+        <h2>Accounts</h2>
+        <p class="panel-sub">Nexus's service accounts — credential values
+        never leave the vault; this view shows references and live
+        verification state only.</p>
+        <div id="accountList"></div>
       </section>
-    </div>
-
-    <div class="learning-grid">
       <section class="panel">
-        <h2>Mastery &amp; retention</h2>
-        <p class="panel-sub">Closed-book evaluations and spaced retention checks.
-        One good eval is never mastery.</p>
-        <div id="masteryDetail"></div>
+        <h2>Identity audit</h2>
+        <div id="identityAudit"></div>
       </section>
-
-      <section class="panel">
-        <h2>Skill proposals</h2>
-        <p class="panel-sub">Verified lesson patterns promoted toward installable
-        skills — promotion needs explicit approval.</p>
-        <ul class="learning-list" id="proposalList"></ul>
-        <p class="empty-note" id="proposalEmpty" hidden>No pending proposals.</p>
-      </section>
-    </div>
+    </section>
   </main>
 </div>
-<script src="/learning.js"></script>
+<script src="/voice_global.js"></script>
+<script src="/intel.js"></script>
 </body>
 </html>

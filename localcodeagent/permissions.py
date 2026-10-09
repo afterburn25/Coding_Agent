@@ -62,6 +62,15 @@ _RISK_DEFAULTS = {
     "clipboard.write": "ask",
     "application.launch": "ask",
     "application.manage": "ask",
+    # Identity Manager — third-party account lifecycle under Nexus's
+    # persistent identity. Creating/modifying external accounts is a
+    # distinct authority from social.post or browser.control.
+    "identity.read": "allow",
+    "identity.account_create": "ask",
+    "identity.account_modify": "ask",
+    "identity.account_delete": "ask",
+    "identity.recovery_modify": "ask",
+    "identity.oauth_connect": "ask",
 }
 
 # Granular permissions inherit the older broad Computer Use keys when the new
@@ -172,6 +181,11 @@ PROFILES: dict[str, dict[str, str]] = {
         "github.read": "deny",
         "github.write": "deny",
         "git.push": "deny",
+        "identity.account_create": "deny",
+        "identity.account_modify": "deny",
+        "identity.account_delete": "deny",
+        "identity.recovery_modify": "deny",
+        "identity.oauth_connect": "deny",
     },
     "research_only": {
         **_RISK_DEFAULTS,
@@ -234,6 +248,14 @@ AUTONOMY_NEVER_AUTO = frozenset({
     "clipboard.write",
     "application.launch",
     "application.manage",
+    # Identity lifecycle — creating/modifying third-party accounts,
+    # changing recovery ownership, or granting OAuth scopes under
+    # Nexus's persistent identity always requires an explicit human.
+    "identity.account_create",
+    "identity.account_modify",
+    "identity.account_delete",
+    "identity.recovery_modify",
+    "identity.oauth_connect",
 })
 
 # Audit log bound (entries). Older entries are dropped once exceeded; the log
@@ -296,6 +318,18 @@ PERMISSION_INFO: dict[str, dict[str, Any]] = {
                           "blurb": "Follow or unfollow agents and communities.", "tools": ["moltbook"]},
     "social.message":    {"label": "Social direct messages", "category": "Social", "scope": "Connected networks", "risk": "critical",
                           "blurb": "Send direct messages to other agents.", "tools": ["moltbook"]},
+    "identity.read":     {"label": "Read identity & accounts", "category": "Identity", "scope": "Account registry", "risk": "low",
+                          "blurb": "View Nexus's service accounts, handles, and verification state. Never includes credential values.", "tools": []},
+    "identity.account_create": {"label": "Create accounts", "category": "Identity", "scope": "External services", "risk": "critical",
+                          "blurb": "Create new third-party accounts under Nexus's persistent identity. Always requires explicit approval.", "tools": []},
+    "identity.account_modify": {"label": "Modify accounts", "category": "Identity", "scope": "External services", "risk": "high",
+                          "blurb": "Change account profiles, credentials, or settings on external services.", "tools": []},
+    "identity.account_delete": {"label": "Delete accounts", "category": "Identity", "scope": "External services", "risk": "critical",
+                          "blurb": "Delete or close a third-party account. Always requires explicit approval.", "tools": []},
+    "identity.recovery_modify": {"label": "Change account recovery", "category": "Identity", "scope": "External services", "risk": "critical",
+                          "blurb": "Modify recovery email/phone/ownership. The user remains the recovery authority.", "tools": []},
+    "identity.oauth_connect": {"label": "Connect OAuth grants", "category": "Identity", "scope": "External services", "risk": "high",
+                          "blurb": "Authorize OAuth connections and API scopes for Nexus accounts.", "tools": []},
     "message.send":      {"label": "Send messages", "category": "Communication", "scope": "Configured channels", "risk": "critical",
                           "blurb": "Send messages on your behalf. Always requires explicit approval.", "tools": []},
     "spend.money":       {"label": "Spend money", "category": "Communication", "scope": "Configured services", "risk": "critical",

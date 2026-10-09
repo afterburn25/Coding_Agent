@@ -167,6 +167,41 @@ Probed specs now include `web_access` (tool + offline policy) and `moltbook` (co
 - **Heartbeat** — a seeded `social-heartbeat` interval schedule materializes a low-priority `internal:` mission (`internal:social_heartbeat`) through the normal planner; `SocialService.heartbeat()` polls notifications (peer replies publish the `social_reply` trigger signal so missions can external-wait), scans the feed against interests + open backlog, follows threads without speaking, and captures claims at `heard`.
 - **Surface** — `/api/social*` status/peers/claims/backlog GETs, level/heartbeat/verify/backlog-resolve POSTs, and `web/social.html` — a dashboard showing connection, motivation, backlog, peers, threads and the claims ladder plus the autonomy-level picker.
 
+## Identity, capability truth, and situation (v0.42)
+
+```text
+IdentityManager (identity_mgr.py, data/identity.json)
+  ├─ canonical name / primary email / recovery owner (always the user)
+  ├─ account records: service, handle, state, auth_method, scopes,
+  │   credential_ref (vault key NAME only), provenance, health, audit
+  ├─ creation workflow: creating → awaiting_verification →
+  │   awaiting_human (CAPTCHA/phone/ToS/security — never bypassed) →
+  │   verifying_login → active (only after a real auth probe)
+  └─ merges live probes (GitHubAccountService, connector account state)
+     over durable rows — observed state wins
+
+Capability Truth Graph (capabilities.py)
+  ├─ probed states: verified | available | degraded | setup_required |
+  │   unauthorized | unavailable | broken | experimental |
+  │   permission_required | disconnected | temporarily_unavailable |
+  │   policy_denied | unsupported
+  ├─ depends_on edges + blockers() — "github is down because the
+  │   network is offline" names the real root
+  ├─ engine + checked_at/verified_at on every report
+  └─ run_selftest() — bounded live exercises, rate-limited, explicit
+
+Situation Model (nexus_state.build_situation)
+  └─ one live snapshot: conversation topic/goal (state graph), missions
+     + workstreams, jobs/installs/downloads, resident models, pending
+     approvals, connected services, waiting consults, recent failures,
+     project. situation_text → the "what's going on?" lane.
+```
+
+`/api/situation`, `/api/identity`, `/api/capabilities/graph` feed the
+Intelligence Center (`web/intel.html` — Situation / Capabilities /
+Identity tabs). Identity mutations ride `identity.*` permission keys;
+all are in `AUTONOMY_NEVER_AUTO` — no autonomous account lifecycle.
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.
