@@ -118,6 +118,21 @@ def _repo_slug(workspace: Path, remote: str = "origin") -> str:
     return _repo_slug_from_remote(url)
 
 
+def _repo_from_args(args: dict, workspace: Path, remote: str) -> str:
+    """Repo slug for read tools: an explicit ``repo`` argument
+    (owner/name or a github.com URL) wins; otherwise fall back to the
+    workspace's configured git remote."""
+    slug = str((args or {}).get("repo") or "").strip().rstrip("/")
+    if slug.endswith(".git"):
+        slug = slug[:-4]
+    if "github.com" in slug:
+        slug = slug.split("github.com/", 1)[-1] \
+            .split("github.com:", 1)[-1].lstrip("/")
+    if slug and "/" in slug and not slug.startswith("http"):
+        return slug
+    return _repo_slug(workspace, remote)
+
+
 def _safe_git_paths(paths: list[Any]) -> list[str]:
     cleaned: list[str] = []
     for raw in paths:
@@ -452,7 +467,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
     def github_repository(args: dict) -> str:
         _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
-        repo = _repo_slug(workspace, remote)
+        repo = _repo_from_args(args, workspace, remote)
         owner, name = repo.split("/", 1)
         data = client.request("GET", f"/repos/{quote(owner, safe='')}/{quote(name, safe='')}")
         return json.dumps({
@@ -463,10 +478,58 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             "authenticated": client.authenticated,
         }, indent=2)
 
+    def github_repo_activity(args: dict) -> str:
+        """Read-only repository brief: metadata, recent commits on the
+        default branch, and a README excerpt. Repo may be explicit
+        (owner/name or URL) — untrusted remote content, never executed."""
+        _ensure_token()
+        remote = str(args.get("remote") or remote_default).strip()
+        repo = _repo_from_args(args, workspace, remote)
+        owner, name = repo.split("/", 1)
+        limit = max(1, min(20, int(args.get("limit") or 8)))
+        oq, nq = quote(owner, safe=''), quote(name, safe='')
+        data = client.request("GET", f"/repos/{oq}/{nq}") or {}
+        branch = data.get("default_branch") or "main"
+        commits_raw = client.request(
+            "GET", f"/repos/{oq}/{nq}/commits",
+            params={"sha": branch, "per_page": limit}) or []
+        commits = [{
+            "sha": (c.get("sha") or "")[:10],
+            "message": str(
+                (c.get("commit") or {}).get("message") or ""
+            ).splitlines()[0][:120],
+            "author": (((c.get("commit") or {}).get("author") or {})
+                       .get("name")),
+            "date": (((c.get("commit") or {}).get("author") or {})
+                     .get("date")),
+        } for c in commits_raw[:limit]]
+        readme = ""
+        try:
+            meta = client.request("GET", f"/repos/{oq}/{nq}/readme") or {}
+            if meta.get("encoding") == "base64" and meta.get("content"):
+                readme = base64.b64decode(
+                    str(meta["content"]).encode(), validate=False
+                ).decode("utf-8", errors="replace")[:1500]
+        except Exception:
+            pass
+        return json.dumps({
+            "repository": repo,
+            "description": data.get("description") or "",
+            "default_branch": branch,
+            "visibility": data.get("visibility")
+                or ("private" if data.get("private") else "public"),
+            "language": data.get("language") or "",
+            "open_issues_count": data.get("open_issues_count"),
+            "pushed_at": data.get("pushed_at"),
+            "html_url": data.get("html_url"),
+            "commits": commits,
+            "readme_excerpt": readme,
+        }, indent=2)
+
     def github_list_issues(args: dict) -> str:
         _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
-        repo = _repo_slug(workspace, remote)
+        repo = _repo_from_args(args, workspace, remote)
         owner, name = repo.split("/", 1)
         state = str(args.get("state") or "open")
         if state not in {"open", "closed", "all"}:
@@ -1474,14 +1537,28 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         },
     }, "git.push", git_push))
 
-    registry.register(ToolSpec("github_repository", "Read metadata for the GitHub repository configured as a local Git remote.", {
-        "type": "object", "properties": {"remote": {"type": "string"}}
-    }, "github.read", github_repository))
-
-    registry.register(ToolSpec("github_list_issues", "List GitHub issues and pull requests for the current repository.", {
+    registry.register(ToolSpec("github_repository", "Read metadata for a GitHub repository — the local Git remote's repo, or an explicit owner/name.", {
         "type": "object",
         "properties": {
             "remote": {"type": "string"},
+            "repo": {"type": "string"},
+        },
+    }, "github.read", github_repository))
+
+    registry.register(ToolSpec("github_repo_activity", "Read a GitHub repository's latest work: metadata, recent commits on the default branch, and a README excerpt. Accepts an explicit repo (owner/name or URL) or uses the local remote.", {
+        "type": "object",
+        "properties": {
+            "repo": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            "remote": {"type": "string"},
+        },
+    }, "github.read", github_repo_activity, category="github"))
+
+    registry.register(ToolSpec("github_list_issues", "List GitHub issues and pull requests for a repository.", {
+        "type": "object",
+        "properties": {
+            "remote": {"type": "string"},
+            "repo": {"type": "string"},
             "state": {"type": "string", "enum": ["open", "closed", "all"]},
             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
         },

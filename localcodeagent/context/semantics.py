@@ -140,8 +140,8 @@ class SemanticFrame:
 
         Lane names: capability_inventory, self_learning, identity,
         control, local_action, navigation, github_status, git_state,
-        memory_recall, feature_status, feature_explain, diagnostics,
-        image_action, offer_response, conversation.
+        github_read, memory_recall, feature_status, feature_explain,
+        diagnostics, image_action, offer_response, conversation.
         """
         if lane in ("conversation", "model"):
             return True
@@ -178,7 +178,11 @@ class SemanticFrame:
         if lane in ("control", "local_action", "image_action",
                     "git_action", "tool_action"):
             return act in (COMMAND, REQUEST) and not self.prohibition
-        if lane in ("github_status", "git_state", "memory_recall"):
+        if lane in ("github_status", "git_state", "memory_recall",
+                    "github_read"):
+            # github_read carries no topic vocabulary on purpose —
+            # follow-ups like "read it" name no repo; the lane resolves
+            # the referent from conversation context.
             return act in (QUESTION, COMMAND, REQUEST)
         if lane in ("feature_status", "feature_explain", "diagnostics"):
             # Complaints are bug reports — they route to investigation,

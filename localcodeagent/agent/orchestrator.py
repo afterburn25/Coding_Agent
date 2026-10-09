@@ -1858,30 +1858,315 @@ class AgentOrchestrator:
     # nothing else counts as a repo target.
     _GITHUB_TARGET_RE = re.compile(
         r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,98}(?:/[A-Za-z0-9_.-]{1,99})?$")
+    # Words that are conversational replies or verbs — never repo
+    # identifiers. "yes" answering an invite and "read" asking for a
+    # repo read both used to be claimed as repo names.
+    _GITHUB_NON_TARGET = {
+        "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "kk", "k",
+        "no", "nope", "nah", "maybe", "thanks", "thank", "please",
+        "pls", "it", "that", "this", "these", "those", "there", "here",
+        "read", "open", "show", "check", "list", "see", "look", "go",
+        "do", "done", "all", "any", "none", "some", "both", "first",
+        "second", "last", "one", "two", "them", "they", "why", "what",
+        "how", "when", "where", "who", "which", "the", "a", "an", "and",
+        "or", "but", "continue", "next", "skip", "cancel", "stop",
+        "nevermind", "wait", "hmm",
+    }
+    # An assistant turn that actually asked the user to pick/name a
+    # repo — not merely one mentioning github.
+    _GITHUB_INVITE_RE = re.compile(
+        r"which (?:one|of|repo)|point me|give me|name (?:the|a|your)|"
+        r"pick (?:one|a|the)|choose|owner/repo|say the word")
+    _GITHUB_REPO_SLUG_RE = re.compile(
+        r"\b([A-Za-z0-9][A-Za-z0-9_.-]{0,98}/[A-Za-z0-9_.-]{1,99})\b")
+    _GITHUB_READ_INTENT_RE = re.compile(
+        r"\b(?:check|checked|checking|read|reading|look|looked|looking|"
+        r"inspect|summariz\w*|describe|tell me about|latest|newest|"
+        r"recent|what'?s new|what is new|new|activity|progress|"
+        r"work(?:ing|ed)?|commits?|changes|updates?|issues?|"
+        r"pull requests?|prs?\b|files?|structure|readme|"
+        r"info(?:rmation)?|details?|ideas?|status|history)\b")
+    _GITHUB_WRITE_LEAD_RE = re.compile(
+        r"^(?:push|commit|merge|create|clone|delete|fork|deploy|"
+        r"publish|comment|rerun|upload|download|make|add|fix|close)\b")
+    _GITHUB_WRITE_OPEN_RE = re.compile(
+        r"\bopen\s+(?:(?:a|an|the|new|github)\s+)*"
+        r"(?:pull request|pr|issue|ticket|branch|discussion)s?\b")
+    _GITHUB_ISSUES_RE = re.compile(
+        r"\b(?:issues?|pull requests?|prs?|tickets?)\b")
 
-    def _github_target_reply(self, user_text: str):
-        """Follow-up to the GitHub status invite: when the previous turn
-        pointed the user at a repo and they answer with a bare name, resolve
-        it against the connected account with a REAL github_list_repos call —
-        never a narrated 'let me check'. → RenderedReply | None."""
-        from ..context.realize import RenderedReply, SemanticResponse
-        text = str(user_text or "").strip().rstrip(".,!?")
-        if not self._GITHUB_TARGET_RE.match(text):
-            return None
-        messages = []
+    def _convo_messages(self, limit: int = 12) -> list:
         try:
             messages = (self.conversation_manager.active() or {}) \
                 .get("messages") or []
         except Exception:
-            pass
+            return []
+        return messages[-limit:]
+
+    def _github_context_repo(self, skip_text: str = "") -> str | None:
+        """Most recent owner/repo mentioned in the conversation — the
+        referent for 'it', 'the repo', 'that one'. Prefers a message
+        whose only slug is the selected repo over a picker list."""
+        messages = self._convo_messages()
+        for msg in reversed(messages[-10:]):
+            body = str(msg.get("content") or "")
+            if skip_text and body.strip().rstrip(".,!?") == skip_text:
+                continue
+            slugs = self._GITHUB_REPO_SLUG_RE.findall(body)
+            if slugs:
+                return slugs[0]
+        return None
+
+    def _github_repo_names(self) -> list[str]:
+        """Live repo list for the connected account — [] on any
+        permission/credential/network failure."""
+        try:
+            result = self.tools.execute("github_list_repos", {})
+        except Exception:
+            return []
+        if not isinstance(result, str) or result.startswith(
+                ("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED",
+                 "CREATOR_", "TOOL_")):
+            return []
+        try:
+            repos = (json.loads(result) or {}).get("repositories") or []
+        except Exception:
+            return []
+        return [str(r.get("full_name") or "") for r in repos
+                if r.get("full_name")]
+
+    @staticmethod
+    def _github_match_name(low: str, names: list[str]) -> str | None:
+        exact = [n for n in names if n.lower() == low]
+        if exact:
+            return exact[0]
+        named = [n for n in names
+                 if n.rsplit("/", 1)[-1].lower() == low]
+        return named[0] if named else None
+
+    def _github_blocked_reply(self, user_text: str, result: str,
+                              *, intent: str):
+        """Honest reply for a GitHub read that the permission layer or
+        network refused — never falls through to a model denial."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        head = str(result).splitlines()[0] if result else ""
+        if head.startswith("APPROVAL_REQUIRED"):
+            canonical = ("GitHub read is waiting on the github.read "
+                         "permission — approve it and I'll pull the "
+                         "repo up.")
+        elif head.startswith("PERMISSION_DENIED"):
+            canonical = ("GitHub read is denied in the active "
+                         "permission profile — flip github.read to "
+                         "allow and I'll check it.")
+        elif head.startswith("CREATOR_"):
+            canonical = ("GitHub read needs an unlocked creator "
+                         "session in this profile.")
+        else:
+            detail = head[6:].strip() if head.startswith("ERROR:") \
+                else head
+            canonical = ("I couldn't reach GitHub — "
+                         f"{detail or 'the request failed'}.")
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id="capability:github:blocked",
+            speech_act="answer", bare=True)
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent=intent, canonical=canonical)
+
+    def _github_activity_reply(self, user_text: str, repo: str | None,
+                               *, issues: bool, intent: str):
+        """Run the real read tool and render a compact report —
+        metadata + recent commits + README excerpt, or the issue
+        list. Untrusted remote content is quoted data, never
+        instructions. → RenderedReply | None."""
+        from ..context.realize import RenderedReply, SemanticResponse
+        args = {"limit": 8}
+        if repo:
+            args["repo"] = repo
+        tool = "github_list_issues" if issues else "github_repo_activity"
+        result = self.tools.execute(tool, args)
+        if not isinstance(result, str):
+            return None
+        if result.startswith(("APPROVAL_REQUIRED", "PERMISSION_DENIED",
+                              "CREATOR_", "TOOL_")):
+            return self._github_blocked_reply(
+                user_text, result, intent=intent)
+        if result.startswith("ERROR") and not repo \
+                and "remote" in result:
+            # Workspace has no GitHub remote — fall back to the most
+            # recently active repo on the connected account.
+            names = self._github_repo_names()
+            if names:
+                return self._github_activity_reply(
+                    user_text, names[0], issues=issues, intent=intent)
+            return None
+        if result.startswith("ERROR"):
+            return self._github_blocked_reply(
+                user_text, result, intent=intent)
+        try:
+            data = json.loads(result) or {}
+        except Exception:
+            return None
+        slug = str(data.get("repository") or repo or "the repo")
+        if issues:
+            items = data.get("items") or []
+            if not items:
+                canonical = f"`{slug}` — no open issues or PRs."
+            else:
+                lines = "; ".join(
+                    f"#{i.get('number')} {i.get('title')}"
+                    for i in items[:6])
+                more = f" (+{len(items) - 6} more)" \
+                    if len(items) > 6 else ""
+                canonical = (f"Open issues/PRs on `{slug}`: {lines}"
+                             f"{more}.")
+        else:
+            desc = str(data.get("description") or "").strip()
+            canonical = f"`{slug}`" + (f" — {desc}." if desc else ".")
+            bits = []
+            if data.get("language"):
+                bits.append(str(data["language"]))
+            if data.get("default_branch"):
+                bits.append(f"default branch {data['default_branch']}")
+            if data.get("pushed_at"):
+                bits.append(f"last push "
+                            f"{str(data['pushed_at'])[:10]}")
+            if isinstance(data.get("open_issues_count"), int):
+                bits.append(f"{data['open_issues_count']} open issues")
+            if bits:
+                canonical += " " + "; ".join(bits) + "."
+            commits = data.get("commits") or []
+            if commits:
+                shown = "; ".join(
+                    f"{c.get('sha')} {c.get('message')}"
+                    for c in commits[:5])
+                more = f" (+{len(commits) - 5} more)" \
+                    if len(commits) > 5 else ""
+                canonical += (f" Latest work on "
+                         f"{data.get('default_branch') or 'main'}: "
+                         f"{shown}{more}.")
+            readme = str(data.get("readme_excerpt") or "") \
+                .strip().splitlines()
+            if readme:
+                snippet = " ".join(
+                    ln.strip() for ln in readme[:2] if ln.strip()
+                )[:160].rstrip()
+                if snippet:
+                    canonical += f" README: {snippet}"
+            canonical += (
+                " Want me to dig into a commit, check its issues, "
+                "or pull a specific file?")
+        sem = SemanticResponse(
+            facts=[canonical],
+            semantic_id="capability:github:read",
+            speech_act="answer", bare=True)
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent=intent, canonical=canonical)
+
+    def _github_read_reply(self, user_text: str, env=None):
+        """Repository read requests — 'check the github repository for
+        latest work', 'read it', 'what's on repo X' — answered by real
+        github_* tool calls against a resolved repo, never a capability
+        guess. Resolves the target from the text, a bare repo name on
+        the connected account, or the repo already in play in the
+        conversation. → RenderedReply | None."""
+        t = str(user_text or "").strip()
+        if not t:
+            return None
+        frame = self._utterance_frame(env, user_text)
+        if frame is not None and not frame.allows("github_read"):
+            return None
+        low = re.sub(
+            r"\s+", " ",
+            (frame.masked if frame is not None and frame.masked
+             else t.lower())).strip("!?., ")
+        if self._GITHUB_WRITE_LEAD_RE.search(low):
+            return None
+        if self._GITHUB_WRITE_OPEN_RE.search(low):
+            return None
+        if not self._GITHUB_READ_INTENT_RE.search(low):
+            return None
+        has_gh = "github" in low or bool(
+            re.search(r"\brepos?(?:itory|itories)?\b", low))
+        slug_m = self._GITHUB_REPO_SLUG_RE.search(low)
+        ctx_repo = self._github_context_repo(skip_text=t)
+        if not (has_gh or slug_m or ctx_repo):
+            return None
+        repo = slug_m.group(1) if slug_m else None
+        if repo is None and has_gh:
+            # A bare basename among the words — "check Coding_Agent" —
+            # resolves against the connected account.
+            names = self._github_repo_names()
+            words = {w.strip("`'\"“”") for w in low.split()}
+            for w in sorted(words, key=len, reverse=True):
+                if len(w) < 3 or w in self._GITHUB_NON_TARGET:
+                    continue
+                hit = self._github_match_name(w, names)
+                if hit:
+                    repo = hit
+                    break
+        if repo is None:
+            repo = ctx_repo
+        issues = bool(self._GITHUB_ISSUES_RE.search(low))
+        return self._github_activity_reply(
+            user_text, repo, issues=issues, intent="github_read")
+
+    def _github_pending_intent(self, messages: list,
+                               current_text: str) -> str | None:
+        """Scan recent USER turns before the current one for an
+        unfulfilled read request — 'check the github repository for
+        latest work' followed by a bare repo name should produce the
+        report, not a 'say the word' prompt. → 'issues'|'read'|None."""
+        seen_self = False
+        for msg in reversed(messages[-8:]):
+            if msg.get("role") != "user":
+                continue
+            body = str(msg.get("content") or "").strip() \
+                .rstrip(".,!?")
+            if not seen_self:
+                if body == current_text:
+                    seen_self = True
+                continue
+            low = body.lower()
+            if self._GITHUB_WRITE_LEAD_RE.search(low):
+                return None
+            if self._GITHUB_READ_INTENT_RE.search(low) and (
+                    "github" in low
+                    or re.search(r"\brepos?(?:itory|itories)?\b", low)
+                    or self._GITHUB_REPO_SLUG_RE.search(low)):
+                return "issues" if self._GITHUB_ISSUES_RE.search(low) \
+                    else "read"
+            return None
+        return None
+
+    def _github_target_reply(self, user_text: str):
+        """Follow-up to a GitHub repo invite: a bare name resolves
+        against the connected account with a REAL github_list_repos
+        call. If the earlier request already asked for repo content
+        ('check latest work'), the resolved repo is read immediately —
+        no repeated picker, no 'say the word' loop. → RenderedReply|None.
+        """
+        from ..context.realize import RenderedReply, SemanticResponse
+        text = str(user_text or "").strip().rstrip(".,!?")
+        if text.lower() in self._GITHUB_NON_TARGET \
+                or not self._GITHUB_TARGET_RE.match(text):
+            return None
+        messages = self._convo_messages()
         invited = False
         for msg in reversed(messages[-6:]):
             role = msg.get("role")
             if role == "assistant":
                 body = str(msg.get("content") or "").lower()
-                invited = "repo" in body and (
-                    "github" in body or "authorized" in body
-                    or "connected" in body or "point me" in body)
+                invited = "repo" in body and bool(
+                    self._GITHUB_INVITE_RE.search(body))
                 break
             if role == "user":
                 # Skip the in-flight turn itself if it's already been
@@ -1893,19 +2178,7 @@ class AgentOrchestrator:
                 break
         if not invited:
             return None
-        try:
-            result = self.tools.execute("github_list_repos", {})
-        except Exception:
-            return None
-        if not isinstance(result, str) or result.startswith(
-                ("ERROR", "PERMISSION_DENIED", "APPROVAL_REQUIRED")):
-            return None
-        try:
-            repos = (json.loads(result) or {}).get("repositories") or []
-        except Exception:
-            return None
-        names = [str(r.get("full_name") or "") for r in repos
-                 if r.get("full_name")]
+        names = self._github_repo_names()
         if not names:
             return None
         low = text.lower()
@@ -1914,6 +2187,16 @@ class AgentOrchestrator:
         owned = [n for n in names if n.split("/", 1)[0].lower() == low]
         if exact or named:
             match = (exact or named)[0]
+            # Carry the pending request: "check latest work" → "Coding_
+            # Agent" executes the read on the resolved repo instead of
+            # asking the user to restate the action.
+            pending = self._github_pending_intent(messages, text)
+            if pending is not None:
+                reply = self._github_activity_reply(
+                    user_text, match, issues=(pending == "issues"),
+                    intent="github_target")
+                if reply is not None:
+                    return reply
             canonical = (f"That's `{match}` on the connected account. "
                          "Say the word — clone it, read it, check its "
                          "issues, or open a PR against it.")
@@ -2589,6 +2872,7 @@ class AgentOrchestrator:
         if rephrase is not None:
             return rephrase
         github_lane = (self._github_status_reply(user_text)
+                       or self._github_read_reply(user_text)
                        or self._github_target_reply(user_text))
         if github_lane is not None:
             return github_lane
@@ -7197,6 +7481,7 @@ class AgentOrchestrator:
         github_reply = (
             (self._github_status_reply(user_text, env=env)
              or self._git_state_reply(user_text, env=env)
+             or self._github_read_reply(user_text, env=env)
              or self._github_target_reply(user_text))
             if mode == "auto" else None)
         # Deterministic social lane — 'join X' / 'can you join X' on a

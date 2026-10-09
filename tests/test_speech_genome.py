@@ -569,6 +569,143 @@ class TestBuiltinIntegration(unittest.TestCase):
         agent = self._github_target_agent(tool_error=True)
         self.assertIsNone(agent._github_target_reply("afterburn25"))
 
+    # -- dogfood regression: "check the github repository for latest
+    # work" denied access while connected, "yes"/"read it" were claimed
+    # as repo names, and the picker list repeated every turn.
+
+    _GH_REPOS = [{"full_name": "afterburn25/Coding_Agent"},
+                 {"full_name": "afterburn25/nexus-dogfood"},
+                 {"full_name": "afterburn25/Notes"}]
+    _GH_ACTIVITY = {
+        "repository": "afterburn25/Coding_Agent",
+        "description": "Nexus Core workstation",
+        "default_branch": "main",
+        "language": "Python",
+        "open_issues_count": 3,
+        "pushed_at": "2026-02-20T10:00:00Z",
+        "commits": [
+            {"sha": "8ada602d", "message": "peer intelligence network",
+             "author": "dev", "date": "2026-02-20T09:00:00Z"},
+            {"sha": "e49aa5c1", "message": "approval fix",
+             "author": "dev", "date": "2026-02-19T09:00:00Z"}],
+        "readme_excerpt": "Nexus Core — the workstation.",
+    }
+
+    def _github_read_agent(self, messages, execute=None):
+        import json as _json
+        from types import SimpleNamespace
+        agent = self._agent()
+        agent.conversation_manager = SimpleNamespace(
+            active=lambda: {"messages": messages})
+        calls = []
+        def _exec(name, args):
+            calls.append(name)
+            if execute is not None:
+                return execute(name, args)
+            if name == "github_list_repos":
+                return _json.dumps({"repositories": self._GH_REPOS})
+            if name == "github_repo_activity":
+                return _json.dumps(self._GH_ACTIVITY)
+            if name == "github_list_issues":
+                return _json.dumps({
+                    "repository": args.get("repo"),
+                    "items": [{"number": 7, "title": "flaky test",
+                               "state": "open"}]})
+            return "ERROR: unknown tool"
+        agent.tools = SimpleNamespace(execute=_exec)
+        return agent, calls
+
+    def test_github_read_lane_latest_work(self):
+        # "check the github repository for latest work" must run the
+        # real read tool — never a capability denial.
+        agent, calls = self._github_read_agent(messages=[
+            {"role": "user",
+             "content": "check the github repository for latest work"}])
+        out = agent._github_read_reply(
+            "check the github repository for latest work")
+        self.assertIsNotNone(out)
+        self.assertIn("github_repo_activity", calls)
+        self.assertIn("8ada602d", out.text)
+        self.assertIn("peer intelligence", out.text)
+        self.assertNotIn("can't check github", out.text.lower())
+        self.assertNotIn("Which of these", out.text)
+
+    def test_github_read_lane_read_it_resolves_context_repo(self):
+        # After "That's `afterburn25/Coding_Agent`…", "read it" reads
+        # THAT repo — it is not a repo name and never re-lists.
+        agent, calls = self._github_read_agent(messages=[
+            {"role": "user", "content": "afterburn25/Coding_Agent"},
+            {"role": "assistant",
+             "content": "That's `afterburn25/Coding_Agent` on the "
+                        "connected account. Say the word — clone it, "
+                        "read it, check its issues, or open a PR."},
+            {"role": "user", "content": "read it"}])
+        out = agent._github_read_reply("read it")
+        self.assertIsNotNone(out)
+        self.assertIn("github_repo_activity", calls)
+        self.assertIn("Coding_Agent", out.text)
+        self.assertNotIn("I don't see", out.text)
+        self.assertNotIn("Which of these", out.text)
+
+    def test_github_read_lane_explicit_slug_and_issues(self):
+        agent, calls = self._github_read_agent(messages=[])
+        out = agent._github_read_reply(
+            "check the issues on afterburn25/Coding_Agent")
+        self.assertIsNotNone(out)
+        self.assertIn("github_list_issues", calls)
+        self.assertIn("#7 flaky test", out.text)
+
+    def test_github_target_lane_yes_is_not_a_repo(self):
+        # "yes" answering the invite must NOT be claimed as a repo
+        # name — it falls through to the conversational lanes.
+        agent = self._github_target_agent(current="yes")
+        self.assertIsNone(agent._github_target_reply("yes"))
+        self.assertIsNone(agent._github_target_reply("read"))
+        self.assertIsNone(agent._github_target_reply("it"))
+
+    def test_github_target_lane_carries_pending_read(self):
+        # "check latest work" → picker → repo name: the resolved repo
+        # is read immediately, no second invite.
+        agent, calls = self._github_read_agent(messages=[
+            {"role": "user",
+             "content": "check the github repository for latest work"},
+            {"role": "assistant",
+             "content": "Which of these — or give me owner/repo."},
+            {"role": "user", "content": "afterburn25/Coding_Agent"}])
+        out = agent._github_target_reply("afterburn25/Coding_Agent")
+        self.assertIsNotNone(out)
+        self.assertIn("github_repo_activity", calls)
+        self.assertIn("8ada602d", out.text)
+        self.assertNotIn("Say the word", out.text)
+
+    def test_github_read_lane_permission_denied_is_honest(self):
+        agent, _ = self._github_read_agent(
+            messages=[{"role": "user", "content": "read it"}],
+            execute=lambda name, args:
+                "PERMISSION_DENIED: github.read is disabled")
+        # No repo slug in context and no github/repo noun → unclaimed.
+        self.assertIsNone(agent._github_read_reply("read it"))
+        out = agent._github_read_reply("read the repo")
+        self.assertIsNotNone(out)
+        self.assertIn("github.read", out.text)
+        self.assertNotIn("can't", out.text.lower())
+
+    def test_github_read_lane_ignores_writes(self):
+        agent, _ = self._github_read_agent(messages=[])
+        self.assertIsNone(
+            agent._github_read_reply("push my changes to github"))
+        self.assertIsNone(
+            agent._github_read_reply("open a github issue for this"))
+        self.assertIsNone(agent._github_read_reply("commit this"))
+
+    def test_github_read_lane_requires_context(self):
+        # Bare "read it" with nothing github-shaped in play belongs to
+        # other lanes (files, attachments).
+        agent, _ = self._github_read_agent(messages=[
+            {"role": "assistant", "content": "Here's the file."},
+            {"role": "user", "content": "read it"}])
+        self.assertIsNone(agent._github_read_reply("read it"))
+
     def test_identity_lane_phrasings(self):
         agent = self._agent()
         for q in (

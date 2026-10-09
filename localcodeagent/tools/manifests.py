@@ -73,6 +73,7 @@ BUILTIN_MANIFESTS: dict[str, dict[str, Any]] = {
     "git_worktree_list": {"category": "git", "capabilities": ["git_worktree", "list_worktrees"]},
     "git_worktree_remove": {"category": "git", "capabilities": ["git_worktree", "remove_worktree"]},
     "github_repository": {"category": "git", "capabilities": ["github_repository", "github"], "requires_network": True, "provider": "github"},
+    "github_repo_activity": {"category": "git", "capabilities": ["github_repo_activity", "read_repository", "github"], "requires_network": True, "provider": "github"},
     "github_list_issues": {"category": "git", "capabilities": ["github_issues", "github"], "requires_network": True, "provider": "github"},
     "github_create_issue": {"category": "git", "capabilities": ["github_issues", "github"], "requires_network": True, "provider": "github"},
     "github_create_pull_request": {"category": "git", "capabilities": ["github_pull_requests", "github"], "requires_network": True, "provider": "github"},
