@@ -151,6 +151,16 @@ def classify_scope(text: str, env=None) -> ResponseScope:
         return ResponseScope()
     scope = _classify_depth(t, env)
     req, sup = _slots_for(t)
+    # The whole-utterance frame's adjudicated slot sharpens the lexical
+    # extraction — an offer containing the word 'capabilities' scopes to
+    # the preference, never to the capability list.
+    sem_slot = getattr(env, "requested_slot", "") if env is not None else ""
+    if sem_slot:
+        tagged = f"semantic:{sem_slot}"
+        req = req + (tagged,) if req else (tagged,)
+        frame = getattr(env, "semantic", None)
+        if frame is not None and frame.supporting and not sup:
+            sup = tuple(c[:40] for c in frame.supporting[:3])
     scope.requested_slots = req
     scope.supporting_slots = sup
     if env is not None and getattr(env, "ambiguity", None):

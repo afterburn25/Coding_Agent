@@ -2,6 +2,56 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.36.0 — Whole-utterance semantic adjudication
+
+The observed failure — "would you like the capabilities to join an ai
+community?" answered by the capability inventory — was the symptom of a
+general routing flaw: bare keywords could claim deterministic lanes
+regardless of what the sentence meant. Fixed architecturally, per the
+explicit instruction not to special-case the word `capabilities`.
+
+- **`localcodeagent/context/semantics.py` (new)** — deterministic
+  `SemanticFrame` built inside `understand_turn` for every turn: quote
+  masking → clause segmentation → main-clause selection → speech act →
+  roles → requested slot → modality/negation/conditional/hypothetical
+  flags → candidate nomination + adjudication → per-lane
+  `allows()`/`lane_vetoed()` with a structured rejection trace. Cached
+  per normalized utterance (context-free only). No model call.
+- **Lane gating** — `self_knowledge/service.py` `respond()` takes the
+  frame and gates every probe (`_allows`); `agent/orchestrator.py`
+  `builtin_semantic` gates identity/capability/github/git/memory/local
+  lanes and adds the deterministic `offer_response` lane; `web/app.js`
+  applies a parallel whole-utterance guard so frontend builtin replies
+  can't hijack negated/hypothetical turns. All lane regexes run on
+  masked text so quoted commands ("she said 'push to origin'") cannot
+  nominate.
+- **Intent integration** (`context/intent.py`) — the envelope carries
+  `.semantic`; `env.to_trace()` exposes a structured `semantic` block
+  (speech_act, requested_slot, candidates, rejected-with-reasons —
+  evidence, never CoT). A post-classification veto strips true
+  execution intents when the speech act repudiates acting; advisory
+  labels (`github_status`, `research`) stay advisory and the lanes
+  self-gate.
+- **Response scope** (`context/scope.py`) consumes the semantic
+  requested slot — an offer asks only for the preference, not an
+  inventory dump.
+- **Regressions** (`tests/test_semantic_frame.py`) — 300+-case
+  generative collision corpus (16 keyword domains × speech-act
+  templates), minimal pairs ("what are your capabilities" vs "would
+  you like new capabilities"), negation/quoted/hypothetical/multi-
+  sentence/compound suites, adversarial keyword density, dogfood
+  utterances from live probing, and a `hijack_rate == 0` assertion.
+- **Dogfood fixes folded in** — `_followup` KeyError on action-less
+  `proposed` context; "remember/recall" turns no longer claimed by
+  feature status; `if`-as-`whether` complements aren't hypotheticals;
+  wrapped action requests ("i want you to research X") get
+  `slot=action` and veto feature-status claims; informal offers
+  (`wanna`, `would you even want`, `interested?`) recognized.
+- **Invariant in `ARCHITECTURE.md`** — lexical triggers nominate;
+  whole-utterance semantics decides; no normal-language fast lane may
+  claim on one keyword (slash commands remain the explicit-syntax
+  exception).
+
 ## Follow-up — Canon family, verified family profiles, voice hard sync
 
 - **Family canon** (`identity.py`) — locked family tree: mother Lydia

@@ -101,16 +101,35 @@ class SelfKnowledgeService:
     # Interpretation
     # ------------------------------------------------------------------
 
-    def respond(self, text: str, execute: bool = True
-                ) -> Resolution | None:
+    def respond(self, text: str, execute: bool = True,
+                frame=None) -> Resolution | None:
         """Resolve a user message, or return None when it isn't a
         self-knowledge/control request. ``execute=False`` is a dry run —
         the resolution describes what would happen without mutating
         (the no-model gate uses this so 'turn voice off' doesn't toggle
-        twice)."""
+        twice).
+
+        ``frame`` is the turn's SemanticFrame (context/semantics.py) —
+        computed here when the caller doesn't pass the envelope's. Two
+        whole-utterance rules it enforces on every probe: quoted spans
+        are removed from matching (quoted words are discussed, never
+        instructed), and a probe's keyword nomination may only claim
+        the turn when the speech act agrees — offers, prohibitions,
+        hypotheticals and comparisons veto every deterministic lane.
+        """
         self._execute = execute
         try:
-            t = " ".join(_WORD.findall(str(text or "").lower()))
+            if frame is None:
+                try:
+                    from ..context.semantics import analyze
+                    frame = analyze(text)
+                except Exception:
+                    frame = None
+            self._frame = frame
+            src = (getattr(frame, "masked", "") or ""
+                   ) if frame is not None else ""
+            t = " ".join(_WORD.findall(
+                (src or str(text or "")).lower()))
             if not t:
                 return None
             for probe in (self._followup, self._diagnostics,
@@ -122,6 +141,14 @@ class SelfKnowledgeService:
             return None
         finally:
             self._execute = True
+            self._frame = None
+
+    def _allows(self, lane: str) -> bool:
+        """Whole-utterance gate — a keyword match may claim the turn only
+        when the SemanticFrame's speech act agrees. Without a frame the
+        legacy lexical behavior stands."""
+        frame = getattr(self, "_frame", None)
+        return frame.allows(lane) if frame is not None else True
 
     def would_answer(self, text: str) -> bool:
         """Gate probe — would this turn resolve? Never mutates."""
@@ -146,7 +173,7 @@ class SelfKnowledgeService:
                 return self._apply_setting(
                     spec_s, proposed["params"].get("value"),
                     confirmed=True)
-            spec = self.actions.get(proposed["action"])
+            spec = self.actions.get(proposed.get("action", ""))
             if spec is None:
                 return None
             return self._run(spec, dict(proposed.get("params") or {}),
@@ -231,7 +258,7 @@ class SelfKnowledgeService:
                      r"(broken|wrong|not working|degraded|failing)\b|"
                      r"\bwhat (isn't|isnt|aren't|arent) working\b|"
                      r"\bwhat's broken\b|\bany problems\b|"
-                     r"\bself diagnos", t):
+                     r"\bself diagnos", t) and self._allows("diagnostics"):
             rows = self._health_rows()
             broken = [r for r in rows
                       if r["state"] in ("broken", "unavailable", "degraded")]
@@ -254,7 +281,8 @@ class SelfKnowledgeService:
                 truth={"kind": "health"})
         if re.search(r"\bwhat needs setup\b|\bwhat isn't installed\b|"
                      r"\bwhat isnt installed\b|\bmissing\b.*\binstall|"
-                     r"\bneeds (to be )?set up\b|\bsetup required\b", t):
+                     r"\bneeds (to be )?set up\b|\bsetup required\b", t) \
+                and self._allows("diagnostics"):
             rows = self._state_rows()
             pending = [r for r in rows
                        if r["state"] in ("setup_required",
@@ -271,10 +299,22 @@ class SelfKnowledgeService:
                           "kind": "execute"} for r in pending
                          for a in r.get("actions", [])[:1]][:4],
                 truth={"kind": "setup"})
-        if re.search(r"\bwhat can (you|u) do\b|\bwhat are your "
-                     r"(capabilities|features)\b|\bcapabilities\b|"
-                     r"\bwhat do you do\b|\bhow can (you|u) help\b|"
-                     r"\bhelp\b$", t):
+        # The lexical net nominates; the frame's speech act + requested
+        # slot decide. 'capabilities' inside an offer, bug report,
+        # negation, quote, or hypothetical cannot claim this lane — the
+        # slot must be the capability list itself.
+        if re.search(r"\bwhat (?:all )?(?:can|could) (?:you|u) (?:do|"
+                     r"help)\b|\bwhat are your \w* ?"
+                     r"(capabilities|features|abilities|tools|skills)\b|"
+                     r"\bcapabilit|\bwhat do you do\b|"
+                     r"\bhow can (you|u) help\b|\bhelp\b$|"
+                     r"\beverything you can do\b|\bwhat(?:'s| is| are)"
+                     r".{0,15}\bable to do\b|\bwhat you can do\b|"
+                     r"\b(?:you|u|nexus)\s+(?:able|capable)\s+(?:to|of)\b|"
+                     r"\b(?:feature|tool|capability)\s*list\b|"
+                     r"\bgimme\b|\bgive me\b.{0,30}\b(features|tools|"
+                     r"capabilities)\b", t) \
+                and self._allows("capability_inventory"):
             # A *technical* capability ask still gets the full catalog;
             # a plain "what can you do" gets outcomes, not subsystems.
             technical = bool(re.search(
@@ -284,7 +324,8 @@ class SelfKnowledgeService:
             return self._what_can_you_do(technical=technical)
         if re.search(r"\bwhat can'?t you do\b|\bwhat can you not do\b|"
                      r"\blimitations\b|\bnot implemented\b|"
-                     r"\bunfinished\b|\bplanned\b", t):
+                     r"\bunfinished\b|\bplanned\b", t) \
+                and self._allows("diagnostics"):
             missing = [f for f in self.catalog.all()
                        if f.development_status in
                        ("planned", "not_implemented", "partial",
@@ -303,7 +344,8 @@ class SelfKnowledgeService:
                      r"break)\b|\bwhat have you (changed|done|modified|"
                      r"touched)\b|\bwhat('ve| has) changed\b|"
                      r"\brecent (changes|activity)\b|\bwhat was (the )?"
-                     r"last (change|thing)\b", t):
+                     r"last (change|thing)\b", t) \
+                and self._allows("diagnostics"):
             cj = self._journal()
             rows = cj.recent(6) if cj is not None else []
             if not rows:
@@ -322,7 +364,8 @@ class SelfKnowledgeService:
                 text="Recent changes: " + "; ".join(parts) + ".",
                 truth={"kind": "changes"})
         if re.search(r"\bversion\b|\bwhat changed\b|\bchangelog\b|"
-                     r"\bwhat's new\b|\bwhats new\b", t):
+                     r"\bwhat's new\b|\bwhats new\b", t) \
+                and self._allows("diagnostics"):
             # Self-check only fires when the version/changelog question is
             # actually about Nexus Core — "version of python", "react
             # version", "what's new in node" are external-subject
@@ -452,6 +495,11 @@ class SelfKnowledgeService:
     def _control(self, t: str) -> Resolution | None:
         """Direct mutation requests — 'turn voice off', 'use Isabella',
         'set workers to four'."""
+        # Whole-utterance gate: a mute/setting keyword inside a
+        # prohibition ('don't mute yourself'), question about how a
+        # setting works, quote, or hypothetical must never mutate.
+        if not self._allows("control"):
+            return None
         # "set workers to 4" / "use four workers" / "workers to 4"
         m = re.search(
             r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
@@ -674,6 +722,19 @@ class SelfKnowledgeService:
 
     def _status_or_explain(self, t: str) -> Resolution | None:
         """'Can you X', 'what is X', 'why can't you X', 'how do I X'."""
+        # Feature/setting vocabulary may nominate, but offers,
+        # hypotheticals, prohibitions and comparisons veto the lane.
+        if not (self._allows("feature_status")
+                or self._allows("feature_explain")
+                or self._allows("diagnostics")):
+            return None
+        # Recall verbs point at the memory lane, not feature status —
+        # "do you remember our last conversation" must not resolve a
+        # catalog alias into a readiness answer.
+        if re.search(r"\b(?:remember|recall|remind me|memorized|"
+                     r"what did i (?:tell|say|mention)|"
+                     r"did i (?:tell|say|mention))\b", t):
+            return None
         feature = self.catalog.find(t)
         st = self.settings.find(t)
         if feature is not None or st is not None:
@@ -1014,6 +1075,8 @@ class SelfKnowledgeService:
     # -- where / navigate ---------------------------------------------------
 
     def _where(self, t: str) -> Resolution | None:
+        if not self._allows("navigation"):
+            return None
         nav = re.search(r"\b(open|show|take me to|go to|navigate to|"
                         r"bring up)\b", t)
         where = re.search(r"\bwhere\b.{0,20}\b(is|are|do i|can i|would "

@@ -1233,6 +1233,12 @@ function builtinClientReply(message){
   // Write-intent statements ("learn:", "remember that…", "forget …") must
   // reach the backend so locked-fact refusals and memory commands work.
   if(/^(learn|remember|memorize|forget|unlearn|update|change|set|correct|teach|replace|no[,.! ]|actually[,.! ])/.test(normalized))return '';
+  // Whole-utterance guard — mirrors context/semantics.py. Offers,
+  // preference questions, prohibitions, meta-negation and hypotheticals
+  // must reach the backend frame; no canned reply can answer what the
+  // sentence actually means, so a matched keyword below is evidence
+  // only, never the decision.
+  if(/\bwould you (?:like|want|prefer|enjoy|be interested)\b|\bdo you (?:want|wanna|like|fancy)\b|\bwould you be interested\b|\bshould i\b|\bshall i\b|\bi (?:can|could|'ll|will|might|may)\s+(?:probably\s+|maybe\s+)?(?:give|get|add|set up|provide|let|grant|offer|hook|enable|install|build|make|connect|teach)\b|^(?:please\s+)?(?:don'?t|do not|never|stop)\s|\bi(?:'m| am) not (?:asking|telling|saying|talking)\b|\bi (?:don'?t|do not) (?:want|need|ask) (?:you|u) to\b|\bif (?:you|u|nexus) (?:had|could|were|got|'d)\b|\bif i (?:gave|give|let|added|allowed|enabled|granted|installed|built|made)\b|\bsuppos(?:e|ing)\b|\bwhat if\b|\bhypothetically\b/.test(normalized))return '';
   // Explicit action/visual requests must reach the backend envelope — a
   // canned identity/small-talk reply can never answer "a picture of your
   // creator" or "show me the logs" client-side.

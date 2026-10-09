@@ -131,6 +131,11 @@ _SCHEMA_MINIMAL_TOOLS = frozenset({
     "run_shell", "search_text", "search_repo_index",
     "git_status", "git_diff", "find_tools",
 })
+# Tool-category keywords EXPAND the schema advertisement set AFTER the
+# semantic intent is fixed — a safety net so a relevant tool is never
+# hidden from the model. Invariant (context/semantics.py): lexical
+# triggers nominate tools, never intent. This table must not feed back
+# into intent selection.
 _TOOL_CATEGORY_KEYWORDS: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"images"}),
      r"\b(image|images|picture|photo|paint|draw|logo|wallpaper|icon|screenshot|inpaint|upscale)\b"),
@@ -1364,10 +1369,15 @@ class AgentOrchestrator:
 
     def turn_scope(self, conversation_id: str = "") -> dict:
         """Debug inspector — the response-scope plan for the latest turn
-        in a conversation (depth, slots, budgets). {} when unclassified."""
+        in a conversation (depth, slots, budgets), plus the semantic-
+        adjudication counters (lane vetoes = prevented keyword hijacks).
+        {} when unclassified."""
         try:
-            return dict(self._turn_scope.get(str(conversation_id or ""))
-                        or {})
+            d = dict(self._turn_scope.get(str(conversation_id or ""))
+                     or {})
+            from ..context.semantics import metrics_snapshot
+            d["semantic_metrics"] = metrics_snapshot()
+            return d
         except Exception:
             return {}
 
@@ -1398,13 +1408,35 @@ class AgentOrchestrator:
     @classmethod
     def builtin_semantic(cls, user_text: str,
                          asker_is_creator: bool | None = None,
-                         asker_family: str | None = None):
+                         asker_family: str | None = None,
+                         frame=None):
         """Deterministic local lanes expressed as WHAT-to-say —
         ``(SemanticResponse, canonical_text) | None``. The persona
         genome layer renders the surface; callers without one use the
-        canonical text directly."""
+        canonical text directly.
+
+        ``frame`` is the turn's SemanticFrame (computed here when not
+        supplied). Lexical probes below may NOMINATE a lane — the
+        frame's whole-utterance speech act decides whether the lane may
+        claim it. Offers, prohibitions, hypotheticals, comparisons and
+        quoted content veto deterministic claims."""
         from ..context.realize import SemanticResponse
-        normalized = re.sub(r"\s+", " ", user_text.strip().lower()).strip("!?., ")
+        if frame is None:
+            try:
+                from ..context.semantics import analyze
+                frame = analyze(user_text)
+            except Exception:
+                frame = None
+        # Match on the quote-masked text — 'the error said "who made
+        # you"' discusses identity words; it does not ask them.
+        normalized = re.sub(
+            r"\s+", " ",
+            (frame.masked if frame is not None and frame.masked
+             else user_text.strip().lower())).strip("!?., ")
+
+        def _ok(lane: str) -> bool:
+            return frame is None or frame.allows(lane)
+
         clock = cls.current_time_snapshot()
 
         def _sem(sid: str, act: str, text: str,
@@ -1462,7 +1494,7 @@ class AgentOrchestrator:
         identity_answer = identity.response_for(
             normalized, asker_is_creator=asker_is_creator,
             asker_family=asker_family)
-        if identity_answer is not None:
+        if identity_answer is not None and _ok("identity"):
             return _sem(f"identity:{normalized[:40]}", "answer",
                         identity_answer, bare=True)
 
@@ -1482,7 +1514,8 @@ class AgentOrchestrator:
             "what do you do",
             "how can you help",
         )
-        if any(phrase in normalized for phrase in capability_phrases):
+        if any(phrase in normalized for phrase in capability_phrases) \
+                and _ok("capability_inventory"):
             from ..context import realize as _rz
             return _sem("capability", "answer", cls._builtin_render(
                 "capability", _rz.CAPABILITY_VARIANTS,
@@ -1493,17 +1526,99 @@ class AgentOrchestrator:
             "can you learn and adapt", "can you adapt and learn", "are you self learning",
             "are you self-learning", "can you learn general knowledge", "can you learn conversational skills",
         )
-        if any(phrase in normalized for phrase in self_learning_phrases):
+        if any(phrase in normalized for phrase in self_learning_phrases) \
+                and _ok("self_learning"):
             from ..context import realize as _rz
             return _sem("self_learning", "answer", cls._builtin_render(
                 "self_learning", _rz.SELF_LEARNING_VARIANTS,
                 intent="self_learning"),
                 frame=_rz.self_learning_frame())
 
-        if cls._is_identity_question(normalized):
+        if cls._is_identity_question(normalized) and _ok("identity"):
             from ..context import realize as _rz
             return _sem("identity", "answer", cls._builtin_render(
                 "identity", _rz.IDENTITY_VARIANTS, intent="identity"))
+
+        # Whole-utterance offers / preference questions — "would you
+        # like X", "I can give you X, want that?". The requested output
+        # is Nexus's preference about the offered proposition, never an
+        # explanation of the topic words inside it. Only claimed when
+        # the proposition is a thing being offered (noun phrase or
+        # infinitive opportunity), not a verb-phrase ask for Nexus to
+        # act, and never a destructive offer.
+        if frame is not None and frame.speech_act in (
+                "offer", "preference_question") and _ok("offer_response"):
+            # A preference claim needs the utterance to actually BE an
+            # offer — either a declarative offer, or a clause that leads
+            # with the preference interrogative. Trailing "should i"
+            # after reported content ("the doc says 'run this' should
+            # i") asks for user advice, not Nexus's preference.
+            led = re.match(
+                r"^(?:should|shall|can|could|would|do|does|did|are|is|"
+                r"want|wanna|how\s+about|interested)\b",
+                frame.main_clause.strip().lower())
+            if frame.speech_act != "offer" and not led:
+                return None
+            prop = re.sub(r"\s+", " ",
+                          (frame.proposition or "").strip(" ,."))[:90]
+            head = prop.split(" ", 1)[0].lower() if prop else ""
+            demonstrative = prop.lower() in (
+                "that", "this", "it", "those", "these", "one",
+                "that capability", "this capability")
+            destructive = bool(re.search(
+                r"\b(?:delete|destroy|erase|wipe|remove|drop|kill|"
+                r"shut\s*down|format|uninstall|break)\b", prop))
+            action_verbs = {
+                "run", "execute", "push", "commit", "deploy", "install",
+                "download", "upload", "open", "close", "move", "copy",
+                "rename", "write", "edit", "fix", "build", "rebuild",
+                "search", "research", "find", "check", "test", "send",
+                "post", "publish", "merge", "schedule", "reset", "redo",
+                "undo"}
+            giving_verbs = {
+                "add", "give", "get", "set", "setup", "provide", "let",
+                "grant", "offer", "hook", "enable", "install", "build",
+                "make", "connect", "teach", "show", "allow", "buy",
+                "upgrade", "configure"}
+            inner = prop.lower()
+            if inner.startswith("me to "):
+                inner = inner[6:].strip()
+                head = inner.split(" ", 1)[0] if inner else ""
+            action_ask = head in action_verbs
+            if inner and inner != prop.lower():
+                prop = inner
+            if action_ask:
+                # "should i run this" / "want me to push it" — asking
+                # for advice or permission, not a preference answer.
+                return None
+            if head in giving_verbs:
+                # "want me to add X" — the user offering to do work
+                # FOR Nexus is still a preference question; answer the
+                # want, not the imperative.
+                prop = re.sub(r"^(?:add|give|get|set|setup|provide|let|"
+                              r"grant|offer|hook|enable|install|build|"
+                              r"make|connect|teach|show|allow|buy|"
+                              r"upgrade|configure)\s+"
+                              r"(?:(?:you|u|nexus|it|to)\s+)?", "", prop)
+                prop = prop.strip() or prop
+                head = prop.split(" ", 1)[0].lower()
+                action_ask = head in action_verbs
+                if action_ask:
+                    return None
+            if demonstrative or not prop:
+                text = ("Yes — I'd want that. If it helps me interact, "
+                        "learn, and do more for you, I'm for it.")
+            elif prop and not destructive:
+                clause = prop[:1].upper() + prop[1:]
+                text = (f"Yes — I'd want that. {clause} sounds like it "
+                        "would help me learn and do more for you.")
+            elif prop and destructive:
+                text = ("No — I wouldn't want that. If it protects "
+                        "your work or this setup, tell me why first.")
+            else:
+                text = ("Yes — I'd be interested. Tell me more about "
+                        "what you have in mind.")
+            return _sem("offer_response", "answer", text, bare=True)
         return None
 
     @staticmethod
@@ -1571,14 +1686,19 @@ class AgentOrchestrator:
             return None
         return RenderedReply(text=text, speech_act="answer")
 
-    def _github_status_reply(self, user_text: str):
+    def _github_status_reply(self, user_text: str, env=None):
         """GitHub connection/status questions answered from the live
         capability probe — never a guess about whether the credential is
         wired. Action requests (push/PR/create…) are left for the tools
         lane. → RenderedReply | None."""
         from ..context.realize import RenderedReply, SemanticResponse
+        frame = self._utterance_frame(env, user_text)
+        if frame is not None and not frame.allows("github_status"):
+            return None
         normalized = re.sub(
-            r"\s+", " ", str(user_text).strip().lower()).strip("!?., ")
+            r"\s+", " ",
+            (frame.masked if frame is not None and frame.masked
+             else str(user_text).strip().lower())).strip("!?., ")
         if "github" not in normalized:
             return None
         if re.search(
@@ -1637,13 +1757,19 @@ class AgentOrchestrator:
         r"\b(?:create|delete|push|pull|merge|checkout|switch|commit|"
         r"rebase|rename|clone|fetch|reset|revert|tag|init)\b", re.I)
 
-    def _git_state_reply(self, user_text: str):
+    def _git_state_reply(self, user_text: str, env=None):
         """Git repo-state QUESTIONS answered from real `git` output —
         remotes, branches, current branch. Question phrasings only;
         any git verb routes to the tools lane instead."""
         from ..context.realize import RenderedReply, SemanticResponse
         t = str(user_text or "").strip()
-        low = re.sub(r"\s+", " ", t.lower()).strip("!?., ")
+        frame = self._utterance_frame(env, user_text)
+        if frame is not None and not frame.allows("git_state"):
+            return None
+        low = re.sub(
+            r"\s+", " ",
+            (frame.masked if frame is not None and frame.masked
+             else t.lower())).strip("!?., ")
         if not self._GIT_STATE_Q_RE.search(low):
             return None
         if not re.match(
@@ -1835,7 +1961,19 @@ class AgentOrchestrator:
         except Exception:
             return False
 
-    def _self_knowledge_reply(self, user_text: str):
+    def _utterance_frame(self, env=None, user_text: str = ""):
+        """Resolve the turn's SemanticFrame — reuse the envelope's when
+        present (one analysis per turn), compute on demand otherwise."""
+        frame = getattr(env, "semantic", None) if env is not None else None
+        if frame is None and user_text:
+            try:
+                from ..context.semantics import analyze
+                frame = analyze(user_text)
+            except Exception:
+                frame = None
+        return frame
+
+    def _self_knowledge_reply(self, user_text: str, env=None):
         """The conversational control plane — 'turn voice off', 'what
         can you do', 'where is the speech lab', 'do it'. Resolves
         against the live registries; the reply text is a factual draft
@@ -1847,7 +1985,8 @@ class AgentOrchestrator:
         if svc is None:
             return None
         try:
-            res = svc.respond(user_text)
+            res = svc.respond(
+                user_text, frame=self._utterance_frame(env, user_text))
         except Exception:
             return None
         if res is None or not res.text:
@@ -1918,18 +2057,26 @@ class AgentOrchestrator:
         return text[:1].upper() + text[1:]
 
     def _single_fact_recall_reply(self, user_text: str,
-                                  conversation_id: str, project_id: str):
+                                  conversation_id: str, project_id: str,
+                                  env=None):
         """'whats my favorite color' / 'what port are we using' —
         single-fact recall answered deterministically from stored
         memory. Correct attribution ('your X', never 'my X') and no
         model call; questions the store can't answer fall through."""
         text = str(user_text or "")
+        frame = self._utterance_frame(env, text)
+        if frame is not None and not frame.allows("memory_recall"):
+            return None
+        match_text = (frame.masked_case
+                      if frame is not None and frame.masked_case
+                      else text)
         if (self.conversation_memory is None
-                or not self._FACT_RECALL_RE.match(text)
-                or self._FACT_RECALL_SKIP_RE.search(text)):
+                or not self._FACT_RECALL_RE.match(match_text)
+                or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None
         rows = self.conversation_memory.recall_facts(
-            text, project_id=project_id, conversation_id=conversation_id)
+            match_text, project_id=project_id,
+            conversation_id=conversation_id)
         if not rows:
             return None
         # Precision gate: pronoun/context-anchored queries ("my X",
@@ -1939,9 +2086,9 @@ class AgentOrchestrator:
         # sky") — those must match on ALL of the question's content
         # terms, not a shared incidental one.
         if not re.search(
-                r"\b(?:my|your|our|we|i|us|remind)\b", text,
+                r"\b(?:my|your|our|we|i|us|remind)\b", match_text,
                 re.IGNORECASE):
-            body = self._FACT_RECALL_RE.sub("", text)
+            body = self._FACT_RECALL_RE.sub("", match_text)
             q_terms = self.conversation_memory._content_terms(body)
             rows = [
                 r for r in rows
@@ -1975,11 +2122,17 @@ class AgentOrchestrator:
             canonical=canonical)
 
     def _facts_recall_reply(self, user_text: str, conversation_id: str,
-                            project_id: str):
+                            project_id: str, env=None):
         """'What do you know/remember about me' — explicit memory
         inspection. Lists active user-taught facts in second person;
         never narrates storage internals. → RenderedReply | None."""
-        if not self._FACTS_RECALL_RE.search(user_text or ""):
+        frame = self._utterance_frame(env, user_text)
+        if frame is not None and not frame.allows("memory_recall"):
+            return None
+        if not self._FACTS_RECALL_RE.search(
+                (frame.masked_case
+                 if frame is not None and frame.masked_case
+                 else user_text) or ""):
             return None
         if self.conversation_memory is None:
             return None
@@ -2019,6 +2172,18 @@ class AgentOrchestrator:
         lane. Success language comes only from verified tool output —
         never from the phrasing of the request."""
         from ..action_ops import execute_plan, parse_local_action
+        # Whole-utterance gate — 'delete D:\Nexus' parses, but "don't
+        # delete it" / 'she said "delete it"' / 'if you deleted it'
+        # must never reach the planner.
+        frame = getattr(env, "semantic", None)
+        if frame is not None and not frame.allows("local_action"):
+            return None
+        # Parse the quote-masked, case-preserved text — 'the note says
+        # "delete d:\logs"' discusses a path; it must never become the
+        # plan's target.
+        plan_text = (frame.masked_case
+                     if frame is not None and frame.masked_case
+                     else user_text)
         # Compound local actions — "create folder x, then delete y.txt".
         # Every clause must parse: one unparseable clause hands the WHOLE
         # turn to the model lane (never partially executed on a guess).
@@ -2044,7 +2209,7 @@ class AgentOrchestrator:
                 plans, task_id, event_callback=event_callback)
         try:
             plan = parse_local_action(
-                user_text,
+                plan_text,
                 workspace=self.checkpoints.workspace,
                 extra_roots=self.tools.context.get("extra_roots"))
         except Exception:
@@ -6135,8 +6300,11 @@ class AgentOrchestrator:
             from ..context.scope import classify_scope
             turn_scope = classify_scope(user_text, env)
             if turn_scope is not None:
-                self._turn_scope[str(conversation_id or "")] = \
-                    turn_scope.to_dict()
+                scope_dict = turn_scope.to_dict()
+                frame = getattr(env, "semantic", None)
+                if frame is not None:
+                    scope_dict["semantic"] = frame.to_trace()
+                self._turn_scope[str(conversation_id or "")] = scope_dict
         except Exception:
             pass
         for term, resolved in resolve_references(user_text, active_ctx).items():
@@ -6290,6 +6458,8 @@ class AgentOrchestrator:
             mode == "auto"
             and env.direct_image()
             and self._brain_subroutine_enabled("image_generation", True)
+            and (env.semantic is None
+                 or env.semantic.allows("image_action"))
         ):
             return self._direct_image_result(
                 task_id=task.id,
@@ -6307,6 +6477,12 @@ class AgentOrchestrator:
             and env.primary_intent in {"conversation", "image_followup",
                                        "correction"}
             and self._brain_subroutine_enabled("image_generation", True)
+            # Follow-ups are context-bound — "do it" against an active
+            # image job IS the command. Only a repudiating act
+            # (prohibition/offer/hypothetical) blocks the probe.
+            and (env.semantic is None
+                 or not (env.semantic.vetoes_canned()
+                         or env.semantic.prohibition))
         ):
             # Envelope follow-up ("make her blonde" against the active
             # image task) merges the preserved subject with the fragment;
@@ -6361,8 +6537,8 @@ class AgentOrchestrator:
         # but pure connection questions are answered from the live
         # capability probe — the lane self-filters real action requests.
         github_reply = (
-            (self._github_status_reply(user_text)
-             or self._git_state_reply(user_text)
+            (self._github_status_reply(user_text, env=env)
+             or self._git_state_reply(user_text, env=env)
              or self._github_target_reply(user_text))
             if mode == "auto" else None)
         # Self-knowledge lane — 'turn voice off', 'what can you do',
@@ -6371,13 +6547,13 @@ class AgentOrchestrator:
         # ACTION_INTENT-shaped but resolved locally against the live
         # registries. Only claimed when the resolver recognizes the turn.
         sk_reply = (
-            self._self_knowledge_reply(user_text)
+            self._self_knowledge_reply(user_text, env=env)
             if mode == "auto" else None)
         # 'What do you know about me' — explicit memory inspection is a
         # deterministic list of user-taught facts, not a model answer.
         facts_reply = (
             self._facts_recall_reply(user_text, conversation_id,
-                                     project_id)
+                                     project_id, env=env)
             if mode == "auto" else None)
         # Single-fact recall ("whats my favorite color") answers from
         # stored memory directly — right attribution, no model call.
@@ -6386,7 +6562,7 @@ class AgentOrchestrator:
         from .. import identity as _identity_guard
         recall_reply = (
             self._single_fact_recall_reply(user_text, conversation_id,
-                                           project_id)
+                                           project_id, env=env)
             if (mode == "auto" and facts_reply is None
                 and sk_reply is None
                 and _identity_guard.response_for(

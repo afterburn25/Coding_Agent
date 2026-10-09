@@ -123,6 +123,16 @@ Conversation-policy posture is prompt-layer configuration (`permissive`, `balanc
 
 Text-to-image generation is a deterministic intent route in Auto mode: recognized generation requests bypass the chat model and execute the registered `generate_image` tool directly. This keeps the image subsystem's router, permissions, queue/history, and `ImageSafetyPolicy` authoritative. Edit/inpaint/outpaint/background-removal operations route to Qwen workflows; explicit and post-generation upscaling routes to the dedicated verified Real-ESRGAN adapter.
 
+## Whole-utterance semantic routing
+
+Every natural-language turn is understood before a lane may claim it. `understand_turn` attaches a `SemanticFrame` (`localcodeagent/context/semantics.py`) to the `IntentEnvelope`: quote masking, clause segmentation, main-clause selection, speech act, semantic roles, modality, negation/prohibition, conditionals, hypotheticals, the requested slot, and a candidate/adjudicated intent with a rejection record.
+
+**Invariant:** lexical triggers may nominate candidate meanings or tools, but the final interpretation is determined from whole-utterance semantics. No normal natural-language fast lane may claim a turn solely because one keyword appears — speech act outranks topic words, and quoted spans are discussed content, never instructions. Slash commands remain an intentional exception because they are explicit command syntax, not natural language.
+
+Lane contract: deterministic lanes (`capability_inventory`, `control`, `local_action`, `image_action`, `git_state`/`github_status`, `memory_recall`, `feature_status`/`feature_explain`, `diagnostics`, `navigation`, `identity`, `offer_response`, `self_learning`) consult `frame.allows(lane)` before claiming. Offers, preference questions, prohibitions, hypotheticals, comparisons, greetings and refusals veto every lane except `offer_response`; complaints route to investigation rather than canned status dumps. Prohibitions and veto acts also downgrade execution intents at the envelope level — "don't create an image" can never reach the image planner. Tool-category keywords only *expand* the advertised schema set after intent is fixed; they never define it.
+
+Debugging: `to_trace()` on the frame (surfaced through `/api/conversations/scope` under `semantic`) exposes structured classifier evidence — speech act, target, slot, rejected nominations with reasons — without chain-of-thought. `metrics_snapshot()` counts lane vetoes; `veto.<lane>` counters measure prevented keyword hijacks. The permanent collision corpus lives in `tests/test_semantic_frame.py`.
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.

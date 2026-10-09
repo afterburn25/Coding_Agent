@@ -89,6 +89,14 @@ class IntentEnvelope:
     alternatives: list[str] = field(default_factory=list)
     ambiguity: list[str] = field(default_factory=list)
     implicit: bool = False
+    # Whole-utterance semantic frame (context/semantics.py) — speech
+    # act, grammatical roles, negation/quotation/hypothetical flags,
+    # requested slot, and the adjudicated semantic intent. Keywords
+    # nominate lanes; the frame decides which may claim the turn.
+    speech_act: str = ""
+    requested_slot: str = ""
+    semantic_intent: str = ""
+    semantic: Any = None
 
     def direct_image(self) -> bool:
         """HIGH-confidence direct image intent — authoritative for routing."""
@@ -124,6 +132,11 @@ class IntentEnvelope:
             "conditionals": self.conditionals[:4],
             "ambiguity": self.ambiguity[:4],
             "temporal": self.temporal_context[:80],
+            "speech_act": self.speech_act,
+            "requested_slot": self.requested_slot,
+            "semantic_intent": self.semantic_intent,
+            "semantic": (self.semantic.to_trace()
+                         if self.semantic is not None else {}),
             "evidence": self.evidence[:8],
         }
 
@@ -778,7 +791,78 @@ def understand_turn(text: str, *, active: Any = None,
         note = f"unresolved referent {term!r}: no candidate in context"
         if note not in env.ambiguity:
             env.ambiguity.append(note)
+    _semantic_gate(env, text)
     return env
+
+
+# --------------------------------------------------------------------------
+# Whole-utterance semantic adjudication
+# --------------------------------------------------------------------------
+#
+# Lexical lanes above nominate the intent; the SemanticFrame decides whether
+# the nomination survives the turn's actual communicative purpose. "Don't
+# create an image" carries an image keyword but is a prohibition; "would
+# you like the capabilities…" carries a capability keyword but is an
+# offer. Lanes that execute or answer deterministically must consult
+# ``frame.allows(lane)``.
+
+# Envelope intents that lead to execution or a deterministic claim —
+# each maps to a frame lane contract. Conversational intents (question,
+# coding, research, writing) reach the model anyway; they keep their
+# label so the model lane still sees the work shape.
+_SEMANTIC_INTENT_LANES = {
+    IMAGE_GENERATION: "image_action",
+    IMAGE_EDIT: "image_action",
+    IMAGE_FOLLOWUP: "image_action",
+    TOOL_ACTION: "local_action",
+    FILE_EDIT: "local_action",
+    GIT_ACTION: "git_action",
+    RESEARCH: "local_action",   # a web-research pass is still an action
+    # Content lanes — vetoed under offers/prohibitions/hypotheticals
+    # ("i'm not asking you to fix the code"), kept under real questions
+    # and commands so the model lane still gets its tool context.
+    CODING: "coding_lane",
+    WRITING: "writing_lane",
+    QUESTION: "question_lane",
+    # GITHUB_STATUS is absent on purpose: the label only advertises
+    # context — the deterministic reply lane (_github_status_reply)
+    # gates on the frame itself and requires 'github' outside quotes.
+}
+
+
+def _semantic_gate(env: IntentEnvelope, text: str) -> None:
+    """Attach the SemanticFrame and veto any action intent the whole
+    utterance doesn't support. A veto downgrades to CONVERSATION — the
+    model still answers the actual words, the deterministic lane just
+    can't fire."""
+    try:
+        from .semantics import analyze
+    except Exception:
+        return
+    try:
+        frame = analyze(text)
+    except Exception:
+        return
+    env.semantic = frame
+    env.speech_act = frame.speech_act
+    env.requested_slot = frame.requested_slot
+    env.semantic_intent = frame.semantic_intent
+    lane = _SEMANTIC_INTENT_LANES.get(env.primary_intent)
+    # Veto only when the speech act REPUDIATES the action — a
+    # prohibition, offer, hypothetical, comparison, greeting — or an
+    # embedded negation anywhere in the turn. A bare assertion or
+    # context-derived label ("no, red hair" against an active image)
+    # keeps its intent: the claim lanes still self-gate on the frame.
+    repudiates = frame.vetoes_canned() or frame.prohibition
+    if lane and repudiates and not frame.allows(lane):
+        env.evidence.append(
+            f"{env.primary_intent} vetoed by whole-utterance frame "
+            f"({frame.speech_act}"
+            + (f"/{frame.requested_slot}" if frame.requested_slot else "")
+            + ")")
+        env.primary_intent = CONVERSATION
+        env.requested_action = ""
+        env.confidence = min(env.confidence, 0.6)
 
 
 def _classify_turn(text: str, *, active: Any = None,
