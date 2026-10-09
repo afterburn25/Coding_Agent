@@ -333,6 +333,19 @@ There are now two model-routing planes:
 1. `ModelRouter` chooses the conversational/coding/reasoning model.
 2. `ImageRouter` chooses the image model/workflow for an image tool call.
 
+Within the image plane, `image/fleet.py` declares the managed photoreal
+checkpoint fleet (Juggernaut XL, CyberRealistic XL, RealVisXL V5.0).
+`ImageManager.fleet_status()` merges fleet specs, backend registrations,
+and install jobs into one inventory so the Image Model Manager lists
+fleet models before they are installed; installs dedup against
+checkpoints already on disk (`find_fleet_checkpoint` → in-place
+registration) instead of re-downloading ~7 GB. `image_adult_default_model`
+(config default `realvisxl-v5`, `auto` = pure trait scoring) is the
+deterministic preferred model for adult-classified, policy-approved,
+fleet-capable requests — applied after `ImageSafetyPolicy`, the
+creator-locked adult gate, and manual overrides. See
+`docs/IMAGE_SYSTEM.md` for the full fleet/routing contract.
+
 This prevents the chat LLM from needing to know low-level image runtime details. A small/fast chat model can still call `generate_image`, while the image router independently chooses a large quality model.
 
 ### GPU arbitration

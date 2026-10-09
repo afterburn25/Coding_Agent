@@ -108,15 +108,45 @@ Manual override accepts either the `invokeai:<key>` id or the fleet id
 (e.g. `realvisxl-v5`); a fleet model pinned against the wrong backend
 errors honestly.
 
+**Adult-content default**: `image_adult_default_model` (default
+`realvisxl-v5`, or `auto` for pure trait scoring) is the single
+authoritative preference for requests the classifier flags `adult` —
+*after* `ImageSafetyPolicy` and the creator-locked adult-content gate
+approve the request, and only when no manual override is set and the
+operation is fleet-capable (text-to-image / edit / inpaint / variation).
+The pick is deterministic: an installed, resource-fit configured default
+wins outright with the reason `adult-content preference: <model>`, so
+RealVisXL can never lose an adult request to keyword noise. A missing or
+unfit default degrades to normal trait scoring with the reason recorded
+(`adult default … not installed` / `… skipped — <resource reason>`).
+Setting it is exposed in the Image page ("Adult default" dropdown), the
+self-knowledge settings registry, and `POST /api/image/adult-default`.
+
 **Learning**: `SamplingAdvisor` keys stats per backend **and** per
 `model_scope` (fleet id), so thumbs feedback on Juggernaut never drifts
 CyberRealistic. Model-declared sampling defaults sit below learned
 outcomes and explicit request values.
 
 **Installs**: the provisioning manager drives `/api/v2/models/install`
-with each spec's `invokeai_source` (`repo::file`), polls the install job
-for byte-level progress, and verifies by re-enumerating models — never by
-download completion alone.
+with each spec's `invokeai_source`, polls the install job for byte-level
+progress, and verifies by re-enumerating models — never by download
+completion alone. Before downloading, both the provisioning path and the
+Image Model Manager's Install action dedup: a fleet row already in
+InvokeAI's registry short-circuits to verified, and a checkpoint file
+already on disk (InvokeAI store or `models/image`) registers in place —
+a second ~7 GB copy is never fetched for the same logical model.
+
+**Fleet inventory**: `fleet_status()` in the image manager merges every
+spec into one row — spec metadata (name, tags, size, license, source,
+`adult_capable`, supported ops), live state
+(`installed`/`missing`/`downloading`/`verifying`/`failed`), the matching
+backend registration row, and install progress — so the Image Model
+Manager shows the whole fleet, including models not yet installed. The
+same surface backs `POST /api/image/fleet/install|verify|remove`
+(lifecycle through InvokeAI's own model manager; removal deletes only
+that model's tracked weights) and `describe_fleet_defaults()`, which
+feeds the capability brief so "which model do you use for adult
+content?" answers from live state instead of lore.
 
 ## Safety
 

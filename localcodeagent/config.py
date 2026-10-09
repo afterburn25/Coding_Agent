@@ -295,6 +295,12 @@ class AgentConfig:
     # Image backend preference — "auto" lets the router pick the best
     # engine per request; "invokeai"/"comfyui" pin every job to one engine.
     image_backend: str = "auto"
+    # Preferred fleet model for permitted adult-content photoreal
+    # requests — a fleet id (e.g. "realvisxl-v5") or "auto"/"" to let
+    # pure trait scoring decide. Routing metadata only: the image safety
+    # policy and the creator-locked adult-content gate still decide
+    # whether an explicit request may run at all.
+    image_adult_default_model: str = "realvisxl-v5"
     invokeai_endpoint: str = "http://127.0.0.1:9090"
     invokeai_auto_start: bool = False
     invokeai_start_on_image_request: bool = True
@@ -799,6 +805,10 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.comfyui_logs_dir = str(raw.get("comfyui_logs_dir", cfg.comfyui_logs_dir))
     cfg.comfyui_startup_timeout = max(10, int(raw.get("comfyui_startup_timeout", cfg.comfyui_startup_timeout)))
     cfg.comfyui_idle_unload_seconds = max(0.0, float(raw.get("comfyui_idle_unload_seconds", cfg.comfyui_idle_unload_seconds)))
+    cfg.image_backend = str(raw.get("image_backend", cfg.image_backend)).lower()
+    cfg.image_adult_default_model = str(
+        raw.get("image_adult_default_model",
+                cfg.image_adult_default_model) or "")
     cfg.image_resource_mode = str(raw.get("image_resource_mode", cfg.image_resource_mode))
     cfg.worker_ceiling = max(1, int(raw.get("worker_ceiling", cfg.worker_ceiling) or cfg.worker_ceiling))
     if isinstance(raw.get("worker_model_slots"), dict):

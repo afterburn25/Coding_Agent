@@ -1919,7 +1919,18 @@ class AppState:
                 lambda: bool(self.policies.is_offline()),
             "connector_state": self._connector_capability_state,
         }
-        return CapabilityRegistry(env)
+
+        def _image_model_state() -> str:
+            images = getattr(self, "images", None)
+            if images is None:
+                return ""
+            try:
+                return str(images.describe_fleet_defaults() or "")
+            except Exception:
+                return ""
+
+        return CapabilityRegistry(
+            env, extra_lines=[_image_model_state])
 
     def _connector_capability_state(self, name: str) -> dict:
         """Live connector state for capability probes — enabled, auth,
@@ -11297,6 +11308,67 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 removed = self.state.images.remove_model(model_id)
                 self._json({"ok": True, "removed": removed})
+                return
+
+            if path == "/api/image/fleet/install":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    job = self.state.images.start_fleet_install(
+                        fleet_id, repair=bool(body.get("repair", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": True, "install": job})
+                return
+
+            if path == "/api/image/fleet/verify":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    result = self.state.images.verify_fleet_model(
+                        fleet_id, deep_hash=bool(body.get("deep_hash", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": True, "verify": result})
+                return
+
+            if path == "/api/image/fleet/remove":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    result = self.state.images.remove_fleet_model(fleet_id)
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                except Exception as exc:
+                    self._json({"ok": False,
+                                "error": f"{type(exc).__name__}: {exc}"},
+                               500)
+                    return
+                self._json(result)
+                return
+
+            if path == "/api/image/adult-default":
+                value = str(body.get("model", "") or "").strip().lower()
+                from .image.fleet import FLEET_BY_ID
+                if value and value != "auto" and value not in FLEET_BY_ID:
+                    self._json({"error": "adult default must be 'auto' or a "
+                                f"known fleet id ({', '.join(FLEET_BY_ID)})"},
+                               400)
+                    return
+                self.state._update_config_file(
+                    {"image_adult_default_model": value})
+                self.state.config.image_adult_default_model = value
+                self._json({"ok": True,
+                            "image_adult_default_model": value})
                 return
 
             if path == "/api/image/loras/metadata":

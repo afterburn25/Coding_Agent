@@ -196,14 +196,21 @@ class InvokeAIBackend(ImageBackend):
 
     # -- model installs -------------------------------------------------
 
-    def install_model(self, source: str) -> dict[str, Any]:
+    def install_model(self, source: str, *, inplace: bool = False) -> dict[str, Any]:
         """Queue a model install in InvokeAI's own model manager.
 
         ``source`` accepts a local path, a remote URL, or a HF repo id —
         including the pinned-file form ``owner/repo::path/to/file.st``.
+        ``inplace`` registers a local file where it sits instead of
+        copying it into the models dir — the dedup path that reuses an
+        already-downloaded checkpoint instead of storing it twice.
         Returns the ModelInstallJob row (numeric ``id``, ``status`` of
         waiting/downloading/running/paused/completed/error/cancelled)."""
-        query = urllib.parse.urlencode({"source": str(source or "")})
+        params = {"source": str(source or "")}
+        if inplace:
+            params["inplace"] = "true"
+        query = urllib.parse.urlencode(params)
+        first_error: Exception | None = None
         for base in ("/api/v2/models/install", "/api/v1/models/install"):
             try:
                 return self._json(f"{base}?{query}", method="POST",
@@ -212,9 +219,16 @@ class InvokeAIBackend(ImageBackend):
                 try:
                     if exc.code == 404 and base.startswith("/api/v2"):
                         continue
+                    if inplace and exc.code in {400, 422}:
+                        # Older servers reject the inplace flag — retry
+                        # without it before failing outright.
+                        first_error = exc
+                        break
                     raise
                 finally:
                     exc.close()
+        if first_error is not None:
+            return self.install_model(source, inplace=False)
         raise BackendConnectionError(f"{self.endpoint}: no model install endpoint")
 
     def model_install_jobs(self) -> list[dict[str, Any]]:
@@ -254,6 +268,30 @@ class InvokeAIBackend(ImageBackend):
         for base in ("/api/v2/models/install", "/api/v1/models/install"):
             try:
                 self._json(f"{base}/{job_id}", method="DELETE")
+                return True
+            except urllib.error.HTTPError as exc:
+                try:
+                    if exc.code == 404 and base.startswith("/api/v2"):
+                        continue
+                    return False
+                finally:
+                    exc.close()
+            except Exception:
+                return False
+        return False
+
+    def delete_model(self, key: str) -> bool:
+        """Remove a registered model (record + managed weights) by key.
+
+        InvokeAI only deletes the files it tracks for this model — shared
+        or out-of-store assets are untouched. Returns False when the row
+        is unknown or the endpoint refuses."""
+        key = urllib.parse.quote(str(key or "").strip(), safe="")
+        if not key:
+            return False
+        for base in ("/api/v2/models/", "/api/v1/models/"):
+            try:
+                self._json(f"{base}{key}", method="DELETE")
                 return True
             except urllib.error.HTTPError as exc:
                 try:

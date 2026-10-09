@@ -2,6 +2,56 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.41.0 — RealVisXL V5.0 first-class image model
+
+The `realvisxl-v5` fleet spec becomes a normal member of the image-model
+family — visible in the Image Model Manager before install, installed by
+the recommended provisioning plan, deduplicated against checkpoints
+already on disk, and selectable as the deterministic default for
+permitted adult-content requests.
+
+- **`manager.py`** — `fleet_status()` merges every fleet spec into one
+  inventory row (display/tags/~size/license/`adult_capable`/ops, live
+  `installed`/`missing`/`downloading`/`verifying`/`failed` state,
+  matched backend registration, byte progress). `start_fleet_install`,
+  `verify_fleet_model` (registration + size + optional deep SHA),
+  `remove_fleet_model` (InvokeAI registry delete — only that model's
+  tracked weights), `describe_fleet_defaults`.
+- **`fleet.py`** — `fleet_tags()` + `find_fleet_checkpoint()` dedup
+  helper (finds a size-verified checkpoint in the InvokeAI store or
+  `models/image` → registers in place, no duplicate ~6.9 GB download).
+- **`router.py`** — `adult_default` hook: on adult-classified,
+  fleet-capable requests with no manual override, an installed +
+  resource-fit configured default wins outright (reason
+  `adult-content preference: <model>`); missing/unfit → recorded
+  fallback to trait scoring. Non-adult and specialized ops untouched.
+- **`config.py`** — `image_adult_default_model` (default
+  `realvisxl-v5`; `auto` = pure trait scoring) merges into existing
+  configs on upgrade; `image_backend` is now actually loaded (previously
+  persisted but never read back — silently reset to `auto` on restart).
+- **`provisioning.py`** — disk dedup before InvokeAI download
+  (`inplace`); `model-realvisxl-v5` remains in the recommended plan.
+- **`server.py`** — `/api/image/fleet/install|verify|remove` +
+  `/api/image/adult-default` endpoints; capability brief gains an
+  `image_model_state` line (`describe_fleet_defaults`) so "which model
+  do you use for adult content?" answers honestly, including
+  "configured but not installed".
+- **`self_knowledge`** — `image_adult_default_model` SettingSpec
+  (choice `auto|fleet id`, aliases) under the image feature.
+- **`web/image.*`** — merged fleet cards (state chips, tags, progress,
+  lifecycle buttons), deduplicated against registry rows; Adult default
+  dropdown in the topbar.
+- **Safety** — `ImageSafetyPolicy` + creator-locked adult gate still
+  run before selection; `adult_capable` remains routing metadata.
+
+**Verify:** `pytest tests/test_image_fleet.py` (22 tests) +
+`tests/test_provisioning.py` + `tests/test_image.py` — 147 + 36 green.
+Live dogfood (install via provisioning → registry check → adult +
+non-adult routing) still pending on the workstation.
+
+Also this session: splash `mediaDuck` strict-mode ReferenceError fix
+(commit `efda36e8`) — fault/retry animations play again.
+
 ## 2026-10-09 post-deploy incident — live state wipe (P0)
 
 After the v0.40.0 rebuild+deploy+relaunch, the entire per-user state

@@ -478,11 +478,16 @@ class CapabilityRegistry:
 
     def __init__(self, env: dict[str, Callable] | None = None,
                  specs: list[CapabilitySpec] | None = None,
-                 ttl_s: float = CACHE_TTL_S) -> None:
+                 ttl_s: float = CACHE_TTL_S,
+                 extra_lines: list | None = None) -> None:
         self._env = dict(env or {})
         self._specs = list(specs or _default_specs())
         self._ttl = max(1.0, float(ttl_s))
         self._reports: dict[str, tuple[float, CapabilityReport]] = {}
+        # Live-state callables appended to capability_brief — fine-grained
+        # facts (e.g. which image model is the configured default) that
+        # self-knowledge answers must quote accurately.
+        self._extra_lines = list(extra_lines or [])
 
     # -- evaluation --------------------------------------------------------
 
@@ -604,10 +609,23 @@ class CapabilityRegistry:
         come from probed state rather than remembered lore."""
         ups = [r.name for r in self.evaluate().values()
                if r.state in ("verified", "available", "degraded")]
-        if not ups:
+        extras: list[str] = []
+        for fn in self._extra_lines:
+            try:
+                line = str(fn() or "").strip()
+            except Exception:
+                line = ""
+            if line:
+                extras.append(line)
+        if not ups and not extras:
             return ""
-        return ("Live capability check — currently available: "
+        parts: list[str] = []
+        if ups:
+            parts.append(
+                "Live capability check — currently available: "
                 + "; ".join(ups[:14])
                 + ". Answer ability questions from this list and the "
                   "unavailable list, never from memory.")
+        parts.extend(extras)
+        return " ".join(parts)
 

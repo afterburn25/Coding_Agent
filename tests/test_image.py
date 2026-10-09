@@ -1368,7 +1368,10 @@ class ImageSetupTests(unittest.TestCase):
             self.assertEqual(self._wait_state(mgr), "failed")
             self.assertIn("no installer", mgr.setup_state()["error"])
 
-    def test_library_init_cleans_orphaned_download_partials(self):
+    def test_library_init_preserves_download_partials_for_resume(self):
+        """`.part` files survive restarts so the next install can resume
+        via Range instead of re-fetching from zero; the download path
+        revalidates size/hash before promoting them."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             orphan = root / "models" / "image" / "flux" / "model.safetensors.part"
@@ -1376,7 +1379,7 @@ class ImageSetupTests(unittest.TestCase):
             orphan.write_bytes(b"partial")
             ImageAssetLibrary(base_dir=root, models_dir=root / "models/image",
                               workflows_dir=root / "workflows/image")
-            self.assertFalse(orphan.exists())
+            self.assertTrue(orphan.exists())
 
     def test_model_install_dedupes_live_job(self):
         with tempfile.TemporaryDirectory() as td:
