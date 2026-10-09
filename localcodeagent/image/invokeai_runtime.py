@@ -256,12 +256,35 @@ class InvokeAIRuntime:
                 if not ln.strip().startswith(("host:", "port:"))
             ) + "\n"
             body = body.split("# Nexus-managed settings")[0]
+        if not any(ln.strip().startswith("schema_version:")
+                   for ln in body.splitlines()):
+            # InvokeAI's load_and_migrate_config KeyErrors on a missing
+            # schema_version — a managed-only yaml (fresh root, or state
+            # rebuilt after data loss) must seed one or the server never
+            # starts. Prefer the version the installed InvokeAI stamped
+            # into its example file; fall back to the oldest version so
+            # InvokeAI's own migration upgrades it.
+            body = (f"schema_version: {self._invokeai_schema_version(data_root)}\n"
+                    + body)
         config_file.write_text(body.rstrip() + "\n" + managed, encoding="utf-8")
         self._apply_spandrel_guard(root)
+        self._apply_load_file_guard(root)
         cmd = prefix + ["--root", str(data_root)]
         extra = list(getattr(self.config, "invokeai_extra_args", []) or [])
         cmd.extend(str(x) for x in extra)
         return cmd, root
+
+    @staticmethod
+    def _invokeai_schema_version(data_root: Path) -> str:
+        try:
+            for ln in (data_root / "invokeai.example.yaml").read_text(
+                    encoding="utf-8", errors="ignore").splitlines():
+                ln = ln.strip()
+                if ln.startswith("schema_version:"):
+                    return ln.split(":", 1)[1].strip() or "4.0.0"
+        except OSError:
+            pass
+        return "4.0.0"
 
     @staticmethod
     def _apply_spandrel_guard(root: Path) -> None:
@@ -307,6 +330,60 @@ class InvokeAIRuntime:
         try:
             spandrel.write_text(src.replace(anchor, guard, 1), encoding="utf-8")
             for pyc in (spandrel.parent / "__pycache__").glob("spandrel.*.pyc"):
+                pyc.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _apply_load_file_guard(root: Path) -> None:
+        """Work around a safetensors segfault on multi-GB checkpoint loads.
+
+        ``ModelOnDisk.load_state_dict`` is the funnel every install-time
+        classifier (and any other state-dict consumer) uses. Its fast
+        path — ``safetensors.torch.load_file`` — segfaults (exit 139, no
+        traceback) on multi-GB .safetensors on this platform, killing
+        invokeai-web mid-install after the hash step (verified live on
+        6.14.2 / torch 2.14.1 — Juggernaut/RealVis-class checkpoints
+        every time; a 2.8 GB single-tensor file loads fine). Per-tensor
+        ``safe_open`` reads on the same file succeed for all 2526
+        tensors, so above 2 GiB we read tensors one at a time — same
+        result dict, slightly slower, and no monolithic mmap copy.
+        Idempotent; lives in the installed venv like the spandrel guard.
+        """
+        rel = Path("invokeai/backend/model_manager/model_on_disk.py")
+        mod_file = root / "Lib" / "site-packages" / rel
+        if not mod_file.is_file():
+            for cand in sorted((root / "lib").glob("python*/site-packages/" + str(rel).replace("\\", "/"))):
+                mod_file = cand
+                break
+        if not mod_file.is_file():
+            return
+        try:
+            src = mod_file.read_text(encoding="utf-8")
+        except OSError:
+            return
+        anchor = ("            elif path.suffix.endswith(\".safetensors\"):\n"
+                  "                if _is_sdnq_safetensors(path):\n"
+                  "                    checkpoint = sdnq_sd_loader(path, compute_dtype=torch.float32)\n"
+                  "                else:\n"
+                  "                    checkpoint = safetensors.torch.load_file(path)")
+        if "NEXUS PATCH" in src or anchor not in src:
+            return
+        guard = ("            elif path.suffix.endswith(\".safetensors\"):\n"
+                 "                if _is_sdnq_safetensors(path):\n"
+                 "                    checkpoint = sdnq_sd_loader(path, compute_dtype=torch.float32)\n"
+                 "                elif path.stat().st_size > 2 * 1024**3:\n"
+                 "                    # NEXUS PATCH: safetensors.torch.load_file segfaults on\n"
+                 "                    # multi-GB checkpoint files on this platform (access\n"
+                 "                    # violation, no traceback — verified on 6.14.2); per-tensor\n"
+                 "                    # safe_open reads verified working for the same files.\n"
+                 "                    with safe_open(str(path), framework=\"pt\", device=\"cpu\") as _nx_f:\n"
+                 "                        checkpoint = {k: _nx_f.get_tensor(k) for k in _nx_f.keys()}\n"
+                 "                else:\n"
+                 "                    checkpoint = safetensors.torch.load_file(path)")
+        try:
+            mod_file.write_text(src.replace(anchor, guard, 1), encoding="utf-8")
+            for pyc in (mod_file.parent / "__pycache__").glob("model_on_disk.*.pyc"):
                 pyc.unlink(missing_ok=True)
         except OSError:
             pass

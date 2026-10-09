@@ -221,7 +221,22 @@
     try {
       const data = await api("/api/image");
       imageEnabled = !!data.enabled;
-      imageStatus = data.model_status || [];
+      // Configured/local packs plus the managed photoreal fleet — fleet
+      // rows carry their own live state + progress (InvokeAI-registered
+      // models install through /api/image/fleet/install, not the
+      // profile installer).
+      const fleet = (data.fleet || []).map((f) => ({
+        id: f.id,
+        name: f.display_name,
+        description: `${(f.tags || []).join(" · ")}${f.license ? ` · ${f.license}` : ""}`,
+        size_bytes: f.size_bytes,
+        installed: f.state === "installed" || !!f.installed,
+        _fleet: true,
+        _state: f.state || "missing",
+        _progress: f.progress || {},
+        _error: f.error || "",
+      }));
+      imageStatus = (data.model_status || []).concat(fleet);
     } catch (e) {
       imageStatus = [];
       host.textContent = `Image workspace unavailable: ${e.message}`;
@@ -603,22 +618,32 @@
     if (!imageEnabled) { host.textContent = "Image generation is disabled in config.json."; return; }
     if (!imageStatus.length) { host.textContent = "No image model packs configured."; return; }
     $("imageSummary").textContent = `${imageStatus.filter((s) => s.installed).length}/${imageStatus.length} installed`;
+    const FLEET_STATES = { installed: "Installed", missing: "Missing", downloading: "Downloading", verifying: "Verifying", failed: "Failed" };
     host.innerHTML = imageStatus.map((p) => {
       const job = jobs.find((j) => j.kind === "image_install" && ACTIVE_STATES.has(j.state)
         && ((j.metadata || {}).model_id === p.id || (j.title || "").includes(p.name || p.id)));
       const pct = job ? Math.round((job.progress || 0) * 100) : 0;
       const sizeTxt = fmtBytes(p.size_bytes);
+      const st = p._fleet ? (p._state || "missing") : (p.installed ? "installed" : "missing");
+      const fp = p._progress || {};
+      const fPct = fp.bytes_total ? Math.round(100 * (fp.bytes_done || 0) / fp.bytes_total) : 0;
+      const fleetProg = p._fleet && (st === "downloading" || st === "verifying") && !job
+        ? `<div class="tool-progress"><div class="install-bar"><div class="install-fill" style="width:${st === "verifying" ? 98 : fPct}%"></div></div>
+           <div class="install-meta"><span>${st === "verifying" ? "verifying registration" : `${esc(fp.file || p.name || p.id)} — ${fmtBytes(fp.bytes_done)} / ${fmtBytes(fp.bytes_total)}`}</span><span>${st === "verifying" ? "" : `${fPct}%`}</span></div></div>` : "";
+      const fleetErr = p._fleet && st === "failed" && p._error ? `<div class="muted">${esc(p._error)}</div>` : "";
       return `<div class="tcard">
         <div class="tcard-top">
           <div class="tcard-icon">◧</div>
           <div><div class="tcard-name">${esc(p.name || p.id)}</div>
           <div class="tcard-sub">${esc(p.id)}${sizeTxt ? ` · ${sizeTxt}` : ""}</div></div>
-          <span class="status-dot ${p.installed ? "installed" : "missing"}">${p.installed ? "Installed" : "Missing"}</span>
+          <span class="status-dot ${st === "installed" ? "installed" : "missing"}">${esc(FLEET_STATES[st] || st)}</span>
         </div>
         <div class="tcard-desc">${esc(p.description || "")}</div>
-        ${job ? progressHtml(job) : ""}
+        ${job ? progressHtml(job) : fleetProg}
+        ${fleetErr}
         <div class="tcard-actions">
-          ${!p.installed && !job ? `<button class="primary" data-pack-install="${esc(p.id)}">Install</button>` : ""}
+          ${p._fleet && !p.installed && !job && st !== "downloading" && st !== "verifying" ? `<button class="primary" data-fleet-install="${esc(p.id)}">${st === "failed" ? "Retry" : "Install"}</button>` : ""}
+          ${!p._fleet && !p.installed && !job ? `<button class="primary" data-pack-install="${esc(p.id)}">Install</button>` : ""}
           ${job && job.cancellable ? `<button data-cancel-job="${esc(job.id)}">Cancel</button>` : ""}
         </div>
       </div>`;
@@ -628,6 +653,13 @@
       b.disabled = true;
       try {
         await post("/api/image/models/install", { model_id: b.dataset.packInstall });
+        setTimeout(() => { loadJobs(); loadImagePacks(); }, 800);
+      } catch (e) { alert(e.message); b.disabled = false; }
+    }));
+    host.querySelectorAll("[data-fleet-install]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await post("/api/image/fleet/install", { fleet_id: b.dataset.fleetInstall });
         setTimeout(() => { loadJobs(); loadImagePacks(); }, 800);
       } catch (e) { alert(e.message); b.disabled = false; }
     }));

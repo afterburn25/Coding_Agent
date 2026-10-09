@@ -447,6 +447,64 @@ class ResumeDownloadTests(unittest.TestCase):
             self.assertIsNone(seen["range"])
 
 
+class InvokeAIRuntimeGuardTests(unittest.TestCase):
+    """Venv patches the runtime applies on every managed start — a guard
+    that silently no-ops (moved anchor) must fail loudly in tests."""
+
+    def _venv(self, td: str) -> Path:
+        root = Path(td)
+        sp = root / "Lib" / "site-packages" / "invokeai" / "backend" / "model_manager"
+        sp.mkdir(parents=True)
+        return root
+
+    def test_load_file_guard_patches_and_is_idempotent(self):
+        from localcodeagent.image.invokeai_runtime import InvokeAIRuntime
+        with tempfile.TemporaryDirectory() as td:
+            root = self._venv(td)
+            mod = (root / "Lib/site-packages/invokeai/backend/model_manager/"
+                   "model_on_disk.py")
+            mod.write_text(
+                '            elif path.suffix.endswith(".safetensors"):\n'
+                '                if _is_sdnq_safetensors(path):\n'
+                '                    checkpoint = sdnq_sd_loader(path, compute_dtype=torch.float32)\n'
+                '                else:\n'
+                '                    checkpoint = safetensors.torch.load_file(path)\n',
+                encoding="utf-8")
+            InvokeAIRuntime._apply_load_file_guard(root)
+            out = mod.read_text(encoding="utf-8")
+            self.assertIn("NEXUS PATCH", out)
+            self.assertIn("safe_open", out)
+            self.assertIn("2 * 1024**3", out)
+            InvokeAIRuntime._apply_load_file_guard(root)  # idempotent
+            self.assertEqual(mod.read_text(encoding="utf-8"), out)
+
+    def test_load_file_guard_noop_on_missing_anchor(self):
+        from localcodeagent.image.invokeai_runtime import InvokeAIRuntime
+        with tempfile.TemporaryDirectory() as td:
+            root = self._venv(td)
+            mod = (root / "Lib/site-packages/invokeai/backend/model_manager/"
+                   "model_on_disk.py")
+            mod.write_text("# unrelated future layout\n", encoding="utf-8")
+            InvokeAIRuntime._apply_load_file_guard(root)
+            self.assertEqual(mod.read_text(encoding="utf-8"),
+                             "# unrelated future layout\n")
+
+    def test_schema_version_seeded_for_managed_only_yaml(self):
+        """A yaml missing schema_version crashes InvokeAI's loader —
+        the managed-block writer must seed it (live-verified: fresh
+        invokeai.yaml → KeyError: 'schema_version')."""
+        from localcodeagent.image.invokeai_runtime import InvokeAIRuntime
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "invokeai.example.yaml").write_text(
+                "schema_version: 4.0.3\n", encoding="utf-8")
+            self.assertEqual(
+                InvokeAIRuntime._invokeai_schema_version(root), "4.0.3")
+            (root / "invokeai.example.yaml").unlink()
+            self.assertEqual(
+                InvokeAIRuntime._invokeai_schema_version(root), "4.0.0")
+
+
 class SafetyGateTests(unittest.TestCase):
     def test_adult_default_cannot_bypass_creator_gate(self):
         """The configured adult default is routing metadata only — the
