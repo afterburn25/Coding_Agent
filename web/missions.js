@@ -176,7 +176,10 @@ async function loadMissionWorkstreams(mid){
           `<div class="meta">${w.tasks_done||0}/${w.tasks||0} tasks · `+
           `${Math.round((w.progress||0)*100)}%`+
           (w.blocker?` — ${esc(w.blocker)}`:'')+
-          (w.role?` · ${esc(w.role)}`:'')+`</div>`+
+          (w.role?` · ${esc(w.role)}`:'')+
+          ((w.worktree&&w.worktree.branch)?
+            ` · ${esc(w.worktree.branch)}${w.worktree.state==='conflict'?' (merge conflict)':w.worktree.state==='abandoned_dirty'?' (kept — uncommitted work)':''}`:'')+
+          `</div>`+
           ((w.acceptance||[]).length?`<div class="meta" style="color:#4d5f7c">${w.acceptance.map(a=>'· '+esc(a)).join('<br>')}</div>`:'')+
           `<div class="side-actions">`+
           (live?`<button class="mini-button" data-wsact="${w.id}:pause">Pause</button>`:'')+

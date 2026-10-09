@@ -2990,6 +2990,56 @@ class EngineeringMissionTests(unittest.TestCase):
             drive(sup, m["id"], ticks=20)
             sup.stop()
 
+    def test_workstream_worktree_lifecycle(self):
+        """§13-14 — parallel lanes get isolated checkouts; lane work
+        lands on the lane branch and merges back at the integrate
+        step; integrated worktrees tear down (clean only)."""
+        import subprocess as _sp
+        with tempfile.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q"], cwd=td, check=True)
+            _sp.run(["git", "config", "user.email", "t@t"], cwd=td)
+            _sp.run(["git", "config", "user.name", "t"], cwd=td)
+            Path(td, "a.txt").write_text("one")
+            _sp.run(["git", "add", "-A"], cwd=td, check=True)
+            _sp.run(["git", "commit", "-qm", "init"], cwd=td, check=True)
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            # Tick until both lanes have dispatched at least once —
+            # provisioning happens on first agent dispatch.
+            for _ in range(10):
+                sup.tick()
+                time.sleep(0.12)
+                m = sup.missions.get(m["id"])
+                if any((w.get("worktree") or {}).get("path")
+                       for w in m.get("workstreams") or []):
+                    break
+            ws_wt = [w for w in m["workstreams"]
+                     if (w.get("worktree") or {}).get("path")]
+            self.assertTrue(ws_wt, "no lane worktree provisioned")
+            wt = ws_wt[0]["worktree"]
+            self.assertTrue(Path(wt["path"]).is_dir())
+            self.assertTrue(wt["branch"].startswith("nexus/"))
+            # Simulate lane work on the isolated checkout — it lands on
+            # the lane branch, not the main tree.
+            Path(wt["path"], "lane.txt").write_text("lane work")
+            _sp.run(["git", "add", "-A"], cwd=wt["path"], check=True)
+            _sp.run(["git", "commit", "-qm", "lane"], cwd=wt["path"],
+                    check=True)
+            m = drive(sup, m["id"], ticks=80)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            # The integrate step merged the lane branch into the repo.
+            self.assertTrue(Path(td, "lane.txt").exists(),
+                            "lane work never merged back")
+            # And the integrated lane's checkout was torn down.
+            rec = next(w for w in sup.missions.get(m["id"])
+                       ["workstreams"] if w["id"] == ws_wt[0]["id"])
+            self.assertEqual((rec.get("worktree") or {}).get("state"),
+                             "closed")
+            self.assertFalse(Path(wt["path"]).exists())
+            sup.stop()
+
     def test_git_checkpoints_recorded(self):
         import subprocess as _sp
         with tempfile.TemporaryDirectory() as td:

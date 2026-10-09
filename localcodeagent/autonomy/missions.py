@@ -963,6 +963,18 @@ class MissionStore:
         if scope:
             lines.append("Your scope: "
                          + ", ".join(str(s)[:80] for s in scope[:8]))
+        # §13 — a lane running in an isolated checkout must write there,
+        # not the main workspace, or the integrate step has nothing to
+        # merge. Absolute paths under the repo are allowed by the file
+        # tools, and git tools take this path explicitly.
+        wt_path = str(meta.get("worktree_path") or "")
+        if wt_path:
+            lines.append(
+                "Isolated checkout: " + wt_path[:200] +
+                " — make ALL file edits under this directory "
+                "(branch " +
+                str(meta.get("worktree_branch") or "")[:80] + "). "
+                "Pass it as the 'path' arg to git tools.")
         ws_failures: list[str] = []
         for n in (mission.get("graph") or {}).get("nodes") or []:
             if ws_id and (n.get("metadata") or {}).get(
@@ -1008,6 +1020,11 @@ class MissionStore:
                     f"- {str(w.get('title') or '')[:60]}: "
                     f"{w.get('status')} "
                     f"({w.get('tasks_done', 0)}/{w.get('tasks', 0)})"
+                    + (f" · branch {str((w.get('worktree') or {}).get('branch'))[:60]}"
+                       + (f" — MERGE CONFLICT: {str((w.get('worktree') or {}).get('merge_error'))[:120]}"
+                          if (w.get('worktree') or {}).get('state') == 'conflict'
+                          else "")
+                       if (w.get('worktree') or {}).get('branch') else "")
                     for w in roll[:8]]
         if nexus_md:
             lines.append("Repository guide (NEXUS.md, excerpt):")

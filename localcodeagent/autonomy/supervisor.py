@@ -1002,6 +1002,17 @@ class AutonomousSupervisor:
                     f"expired leases released: {', '.join(released[:6])}")
         except Exception:
             pass
+        # §14 — abandoned workstreams release their checkouts. A dirty
+        # worktree is preserved (uncommitted work is never deleted).
+        try:
+            for w in (m.get("workstreams") or []):
+                wt = w.get("worktree") or {}
+                if str(w.get("status")) == "abandoned" and str(
+                        wt.get("state")) in {"active", "ready",
+                                             "conflict", "merged"}:
+                    self._teardown_ws_worktree(m, w)
+        except Exception:
+            pass
         # §4/§5 — the capsule is the compact context workers read.
         # Refresh when missing or stale; compact extracts durable facts
         # when the raw record grows (history itself is never deleted).
@@ -1226,6 +1237,29 @@ class AutonomousSupervisor:
             node.pop("queue_reason", None)
             node.pop("queue_detail", None)
             meta["worker_id"] = worker.id
+            # §13-14 — workstream isolation: a genuinely parallel
+            # mission (2+ live lanes) gives each lane its own git
+            # worktree so workers never touch the same checkout. The
+            # worker is pointed at the isolated path through its
+            # context package; integration merges the lane branch.
+            if kind == "agent" and ws_id:
+                wt = self._ensure_ws_worktree(m, ws_id)
+                if wt:
+                    meta["worktree_path"] = wt["path"]
+                    meta["worktree_branch"] = wt["branch"]
+                    try:
+                        self.workers.set_worktree(
+                            worker.id, wt["path"], wt["branch"])
+                    except Exception:
+                        pass
+            elif kind == "integrate":
+                # Mechanical first pass — merge each lane's branch in
+                # order, aborting cleanly on conflicts; the integrate
+                # worker then only handles what actually conflicts.
+                try:
+                    self._integrate_worktrees(m)
+                except Exception:
+                    pass
             node["metadata"] = meta
             if not graph.claim(node["id"], owner=f"supervisor"):
                 if node.get("lock") or kind in {"agent", "integrate", "review"}:
@@ -1819,6 +1853,11 @@ class AutonomousSupervisor:
             self.missions.release_paths(mission_id, owner=node_id)
         except Exception:
             pass
+        if ok:
+            try:
+                self._commit_ws_worktree(m, node)
+            except Exception:
+                pass
         self._sync_workstreams(mission_id, node_id, ok)
         self._receipt(mission_id, node_id, "task_finished", result)
 
@@ -1836,6 +1875,152 @@ class AutonomousSupervisor:
             # Node exhausted its retries — run the recovery playbook.
             self._recover_node(mission_id, node_id)
         self.wake()
+
+    # -- §13/§14 workstream worktrees -------------------------------------
+
+    def _ws_row(self, m: dict, ws_id: str) -> dict | None:
+        return next((w for w in (m.get("workstreams") or [])
+                     if w.get("id") == ws_id), None)
+
+    def _ws_worktree_needed(self, m: dict, ws_id: str) -> bool:
+        """Provision a worktree only for genuinely parallel lanes —
+        a single-lane mission gains nothing and pays the checkout
+        cost (§13: no worktrees for trivial sequential work)."""
+        live = [w for w in (m.get("workstreams") or [])
+                if str(w.get("status")) not in
+                {"abandoned", "failed", "integrated"}]
+        return any(w.get("id") == ws_id for w in live) and len(live) >= 2
+
+    def _ensure_ws_worktree(self, m: dict, ws_id: str) -> dict | None:
+        """Provision (or reuse) the lane's isolated checkout. Returns the
+        durable worktree record stored on the workstream row."""
+        ws = self._ws_row(m, ws_id)
+        if ws is None or not self._ws_worktree_needed(m, ws_id):
+            return None
+        wt = ws.get("worktree") or {}
+        if wt.get("path") and str(wt.get("state")) in \
+                {"ready", "active", "merged"}:
+            return wt
+        from ..multiagent import is_repo
+        repo = Path(str(m.get("workspace") or self.workspace))
+        if not is_repo(repo):
+            return None
+        from ..workers.worktree import WorkerWorkspace
+        wsw = WorkerWorkspace(repo, str(ws_id),
+                              str(ws.get("title") or "lane"),
+                              scope=list(ws.get("scope") or []))
+        out = wsw.provision()
+        if not out.get("ok"):
+            self.missions.update_workstream(
+                m["id"], ws_id,
+                worktree={"state": "failed",
+                          "error": str(out.get("error") or "")[:200]})
+            self.missions.append_history(
+                m["id"], "worktree",
+                f"worktree for '{ws.get('title')}' failed — lane runs "
+                "in the main checkout (serial agent lane still guards)")
+            return None
+        rec = {"path": str(out.get("path") or ""),
+               "branch": str(out.get("branch") or ""),
+               "repo": str(repo), "state": "active",
+               "provisioned_at": time.time()}
+        self.missions.update_workstream(m["id"], ws_id, worktree=rec)
+        self.missions.append_history(
+            m["id"], "worktree",
+            f"lane '{ws.get('title')}' isolated on {rec['branch']}")
+        return rec
+
+    def _ws_agent(self, m: dict, wt: dict):
+        """Rebind a WorktreeAgent handle to a persisted worktree record."""
+        from ..multiagent import WorktreeAgent
+        a = WorktreeAgent(Path(str(wt.get("repo")
+                                     or m.get("workspace")
+                                     or self.workspace)),
+                          role="worker")
+        a.path = Path(str(wt.get("path") or ""))
+        a.branch = str(wt.get("branch") or "")
+        a.wt_root = a.path.parent
+        a.state = "ready"
+        return a
+
+    def _commit_ws_worktree(self, m: dict, node: dict) -> None:
+        """After a worktree-scoped node finishes, commit its diff on the
+        lane branch so the integrate step merges commits, not prose."""
+        meta = node.get("metadata") or {}
+        if not meta.get("worktree_path"):
+            return
+        ws = self._ws_row(m, str(meta.get("workstream") or "")) or {}
+        wt = ws.get("worktree") or {}
+        if str(wt.get("state")) not in {"active", "ready"}:
+            return
+        try:
+            out = self._ws_agent(m, wt).commit_work(
+                f"[{str(ws.get('title') or 'lane')[:40]}] "
+                f"{str(node.get('title') or '')[:80]}")
+            if out.get("committed"):
+                self.missions.update_workstream(
+                    m["id"], ws["id"],
+                    worktree={**wt, "state": "active",
+                              "last_commit_at": time.time()})
+        except Exception:
+            pass
+
+    def _integrate_worktrees(self, m: dict) -> None:
+        """§24 — merge each lane branch back into the mission checkout,
+        in workstream order. merge_back aborts cleanly on conflicts;
+        conflicted lanes are marked and surfaced to the integrate
+        worker via the context package."""
+        for ws in (m.get("workstreams") or []):
+            wt = ws.get("worktree") or {}
+            if str(wt.get("state")) != "active" \
+                    or not wt.get("branch"):
+                continue
+            try:
+                a = self._ws_agent(m, wt)
+                a.commit_work(
+                    f"[{str(ws.get('title') or 'lane')[:40]}] "
+                    "pre-integration flush")
+                out = a.merge_back()
+                rec = dict(wt)
+                if out.get("ok"):
+                    rec["state"] = "merged"
+                    rec["merged_at"] = time.time()
+                else:
+                    rec["state"] = "conflict"
+                    rec["merge_error"] = str(out.get("error") or "")[:300]
+                self.missions.update_workstream(
+                    m["id"], ws["id"], worktree=rec)
+            except Exception as e:
+                self.missions.update_workstream(
+                    m["id"], ws["id"],
+                    worktree={**wt, "state": "conflict",
+                              "merge_error": str(e)[:200]})
+
+    def _teardown_ws_worktree(self, m: dict, ws: dict) -> None:
+        """§14 — clean up a lane checkout. A dirty worktree is NEVER
+        force-removed: uncommitted work survives under .nexus/worktrees
+        for manual inspection."""
+        wt = ws.get("worktree") or {}
+        if not wt.get("path"):
+            return
+        try:
+            a = self._ws_agent(m, wt)
+            st = a.status()
+            if st.get("dirty"):
+                self.missions.update_workstream(
+                    m["id"], ws["id"],
+                    worktree={**wt, "state": "abandoned_dirty"})
+                self.missions.append_history(
+                    m["id"], "worktree",
+                    f"lane '{ws.get('title')}' kept — uncommitted work "
+                    "survives in the worktree")
+                return
+            a.teardown(delete_branch=not str(
+                wt.get("state")).startswith("merged"))
+            self.missions.update_workstream(
+                m["id"], ws["id"], worktree={**wt, "state": "closed"})
+        except Exception:
+            pass
 
     def _sync_workstreams(self, mission_id: str, node_id: str,
                           ok: bool) -> None:
@@ -1888,6 +2073,7 @@ class AutonomousSupervisor:
                     self.missions.workstream_status(
                         mission_id, w["id"], "integrated",
                         detail="independent review passed")
+                    self._teardown_ws_worktree(m, w)
 
     def _git_checkpoint(self, mission: dict, label: str) -> None:
         """§25 — a rollback ref at each safe stage. Non-destructive:
