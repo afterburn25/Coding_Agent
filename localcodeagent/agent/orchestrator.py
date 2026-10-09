@@ -9124,6 +9124,13 @@ class AgentOrchestrator:
                          "fields. If a required action is impossible, "
                          "report the concrete failure plainly.")},
             {"role": "system",
+             "content": ("Land artifacts early, then refine. Produce a "
+                         "first working version of the required change "
+                         "within the first third of your step budget — a "
+                         "stub beats a perfect plan that never writes. "
+                         "Read only what the change requires; do not "
+                         "explore the repository.")},
+            {"role": "system",
              "content": ("Keep each write_file/edit tool call small. "
                          "Prefer several small writes or scoped edits over "
                          "one very large argument — oversized tool-call "

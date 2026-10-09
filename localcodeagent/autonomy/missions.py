@@ -975,6 +975,14 @@ class MissionStore:
                 "(branch " +
                 str(meta.get("worktree_branch") or "")[:80] + "). "
                 "Pass it as the 'path' arg to git tools.")
+        prior_artifacts = list(
+            (node.get("result") or {}).get("artifacts") or [])
+        if prior_artifacts:
+            lines.append(
+                "A previous attempt already changed: "
+                + ", ".join(str(a)[:60] for a in prior_artifacts[:10])
+                + " — that work is in your checkout; continue from it "
+                  "rather than starting over.")
         ws_failures: list[str] = []
         for n in (mission.get("graph") or {}).get("nodes") or []:
             if ws_id and (n.get("metadata") or {}).get(
