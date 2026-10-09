@@ -65,10 +65,15 @@ have re-run the whole node.
   `test_still_pending_task_gate_stays_parked`,
   `test_missing_task_row_replans_parked_mission`.
 - `scripts/deploy_local.ps1` — added `.agent` to the bare-name `/XD`
-  set. The deployed task ledger lives under `Source\.agent`, and `/MIR`
-  was purging it on every deploy, stranding in-flight tasks and parked
-  missions (observed live: the dogfood mission's task row vanished on
-  the `fdf699af` deploy).
+  set (the deployed task ledger lives under `Source\.agent`, and `/MIR`
+  was purging it every deploy), plus a pre-mirror snapshot/restore of
+  uncommitted `Source` files (`git ls-files -mo`) — mission
+  deliverables written to the workspace were being wiped too
+  (`mission-dogfood-note.txt` vanished on the `fdf699af` deploy).
+- **Live verification** — mission `m-ee6cd283ca4a`, parked since the
+  dogfood, self-healed on the `035a9a4e` deploy: reconcile denied the
+  stale gate (task row gone) → diagnose node completed → recover node
+  re-wrote the deliverable through the normal approval path.
 
 Checkpoint: **2927 tests** (2927 passed + 3 env skips).
 
