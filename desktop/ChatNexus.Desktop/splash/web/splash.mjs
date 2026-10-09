@@ -607,7 +607,7 @@ function handleHost(msg) {
         break;
       }
       case 'play-voice': void playVoice(msg.id, msg.b64); break;
-      case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); mediaDuck = 1; applyMediaAudio(); break;
+      case 'stop-voice': voice.stop(typeof msg.fade === 'number' ? msg.fade : .18); applyMediaAudio(); break;
       case 'dispose': clock.pause(); cancelAnimationFrame(raf); clearTimeout(failCaptionTimer); bootclips.forEach(v => v.pause()); errvid?.pause(); recvid?.pause(); failvid?.pause(); void audio.dispose(); void voice.dispose(); break;
     }
   } catch (error) { fail(error); }
