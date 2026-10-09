@@ -1732,7 +1732,16 @@ class AutonomousSupervisor:
                   .get("metadata", {}).get("worker_id") or "")
         fin_node = TaskGraph(m).get(node_id) or {}
         if fin_node.get("kind") == "agent":
-            self._hot_model_role = str(fin_node.get("model_role") or "")
+            role = str(fin_node.get("model_role") or "")
+            # §31/§44 — model residency telemetry: a tier change is a
+            # model swap (VRAM churn); a repeat is free residency.
+            if role and self._hot_model_role and \
+                    role != self._hot_model_role:
+                try:
+                    self.missions.bump_metric(mission_id, "model_swaps")
+                except Exception:
+                    pass
+            self._hot_model_role = role
         if wid:
             obs = (result or {}).get("observed") or {}
             self.workers.release(
@@ -1835,6 +1844,9 @@ class AutonomousSupervisor:
                         "ts": time.time(), "ok": False,
                         "task": node.get("title"),
                         "output": str(result.get("output") or "")[:800]})
+            # §44 — worker-call accounting for mission metrics.
+            met = row.setdefault("metrics", {})
+            met["worker_calls"] = int(met.get("worker_calls") or 0) + 1
             # Checkpoint — a bounded progress trail so a restart mid-mission
             # leaves forensic state: which node finished, when, and how.
             cps = row.setdefault("checkpoints", [])

@@ -204,7 +204,8 @@ async function loadMissionWorkstreams(mid){
           cap.blockers.slice(0,4).map(b=>esc(b)).join(' · ')+`</div>`);
       const met=r.metrics||{};
       const mbits=['compactions','repair_cycles','escalations',
-        'ownership_conflicts','checkpoints'].filter(k=>met[k])
+        'ownership_conflicts','worker_calls','model_swaps',
+        'checkpoints'].filter(k=>met[k])
         .map(k=>`${k.replace('_',' ')} ${met[k]}`);
       if(mbits.length)
         rows.push(`<div class="hist-row"><b>metrics</b> ${esc(mbits.join(' · '))}</div>`);
